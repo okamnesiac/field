@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { parseChannels, parseDurationSeconds, parseSeed } from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
+import { resolvePlayables } from './commands/play.js';
 import { check } from './commands/check.js';
 import { runScProgram } from './rules/sc-render.js';
 import { createSong, createTrack } from './commands/create.js';
@@ -130,6 +132,30 @@ program
         const status = o.cached ? 'cached' : 'built';
         const where = o.outputPath ? ` → ${o.outputPath}` : '';
         process.stdout.write(`${status}  ${o.label}${where}\n`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('play <patterns...>')
+  .description('build targets if needed, then audition them in order (afplay; ctrl-c stops)')
+  .action(async (patterns: string[]) => {
+    try {
+      const items = await resolvePlayables(requireRoot(), patterns);
+      for (const item of items) {
+        process.stdout.write(`playing ${item.label}\n`);
+        const interrupted = await new Promise<boolean>((done, reject) => {
+          const child = spawn('afplay', [item.path], { stdio: 'inherit' });
+          child.on('error', (err) => reject(new Error(`afplay failed: ${err.message}`)));
+          child.on('exit', (code, signal) => {
+            if (signal !== null) return done(true); // ctrl-c: stop the queue
+            if (code !== 0) return reject(new Error(`afplay exited ${code} for ${item.path}`));
+            done(false);
+          });
+        });
+        if (interrupted) break;
       }
     } catch (err) {
       fail(err);

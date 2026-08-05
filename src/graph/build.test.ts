@@ -6,6 +6,7 @@ import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { buildTargets, explainTarget, queryDeps } from '../commands/build.js';
+import { resolvePlayables } from '../commands/play.js';
 import { runScProgram } from '../rules/sc-render.js';
 import type { RuleRunner } from './build.js';
 
@@ -353,6 +354,24 @@ score.recordNRT(
     const rebuilt = await buildTargets(root, [label]);
     expect(rebuilt[0]!.cached).toBe(false);
     expect(rebuilt[0]!.sha256).toBe(first[0]!.sha256);
+  });
+});
+
+describe('play resolution', () => {
+  it('resolves assets to files and rule targets to built outputs, deduped', async () => {
+    const { state, runner } = countingRunner();
+    const items = await resolvePlayables(
+      root,
+      ['//songs/creek/assets:pad', '//songs/creek/targets:pad-normalized', '//songs/creek/assets:pad'],
+      runner,
+    );
+    expect(items.map((i) => i.label)).toEqual([
+      '//songs/creek/assets:pad',
+      '//songs/creek/targets:pad-normalized',
+    ]);
+    expect(items[0]!.path).toBe(join(root, 'songs/creek/audio/pad.wav'));
+    expect(existsSync(items[1]!.path)).toBe(true);
+    expect(state.runs).toBe(1); // the rule target was built
   });
 });
 

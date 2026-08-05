@@ -6,7 +6,7 @@ import { formatLabel } from '../labels.js';
 
 // Building trusts only a valid project: schema or reference errors fail
 // fast rather than producing artifacts from a model check would reject.
-function loadValid(root: string): { project: LoadedProject; graph: Graph } {
+export function loadValid(root: string): { project: LoadedProject; graph: Graph } {
   const project = loadProject(root);
   if (project.diagnostics.length > 0) {
     const lines = project.diagnostics.map((d) => `${d.file}: ${d.message}`).join('\n');
