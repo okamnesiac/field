@@ -184,7 +184,8 @@ program
       process.stdout.write(`${e.label} (${e.kind})\n`);
       if (e.rule) process.stdout.write(`rule: ${e.rule} v${e.ruleVersion}\n`);
       for (const input of e.inputs) {
-        process.stdout.write(`input: ${input.label} ${input.sha256.slice(0, 12)}\n`);
+        const sha = input.sha256 ? input.sha256.slice(0, 12) : '(not built)';
+        process.stdout.write(`input: ${input.label} ${sha}\n`);
       }
       if (e.parameters && Object.keys(e.parameters).length > 0) {
         process.stdout.write(`parameters: ${JSON.stringify(e.parameters)}\n`);

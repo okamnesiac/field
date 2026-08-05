@@ -86,8 +86,8 @@ with no per-track stems (any clip edit re-renders the whole song).
 
 ## 5 Chunks
 
-1. **Track stems** — the `RuleImpl<T>` generic-registry refactor (the
-   third rule is the agreed trigger, moved here from
+1. **Track stems** (shipped, #9) — the `RuleImpl<T>` generic-registry
+   refactor (the third rule is the agreed trigger, moved here from
    [ace-generation.md](ace-generation.md) §1 since mix now precedes ACE)
    plus multi-input rule contract, WAV read/write in TS, placement math,
    the `track-render` rule, and track `gain_db`/`pan` schema fields.

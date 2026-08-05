@@ -1,3 +1,4 @@
+import { mixRule } from './mix.js';
 import { normalizeRule } from './normalize.js';
 import { scRenderRule } from './sc-render.js';
 import { trackRenderRule } from './track-render.js';
@@ -11,6 +12,7 @@ import type { RuleImpl, RuleSpec } from './types.js';
 // because RULES maps every discriminant to the impl typed for exactly that
 // spec.
 const RULES = {
+  mix: mixRule,
   normalize: normalizeRule,
   'sc-render': scRenderRule,
   'track-render': trackRenderRule,
