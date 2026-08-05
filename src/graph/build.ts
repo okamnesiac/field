@@ -1,23 +1,17 @@
-import { execFile } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
+import { getRule, type ExtraInput, type RunContext } from '../rules/index.js';
 import { deps, resolveLabel, type Graph, type GraphNode, type RuleNode } from './graph.js';
-
-const execFileAsync = promisify(execFile);
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
 // store under .bloom/cache/cas/<sha256>; the action index maps an action
 // key — the hash of canonical JSON of {rule, rule_version, input hashes,
 // parameters, project sample rate} — to its output hashes. Same key, no
-// work. Rules carry an explicit rule_version bumped to invalidate.
-
-const RULE_VERSIONS: Record<string, number> = {
-  normalize: 1,
-};
+// work. Rule behavior lives in src/rules/; this engine only knows that
+// rules exist.
 
 export interface ActionEntry {
   rule: string;
@@ -49,24 +43,11 @@ export type RuleRunner = (
   rule: RuleNode,
   inputPath: string,
   outputPath: string,
+  ctx: RunContext,
 ) => Promise<void>;
 
-export const defaultRunner: RuleRunner = async (node, inputPath, outputPath) => {
-  const t = node.target;
-  if (t.rule === 'normalize') {
-    // afconvert is macOS-built-in with excellent SRC (project-core.md §5).
-    await execFileAsync('afconvert', [
-      '-f',
-      'WAVE',
-      '-d',
-      `LEI${t.bit_depth}@${t.sample_rate}`,
-      inputPath,
-      outputPath,
-    ]);
-    return;
-  }
-  throw new Error(`unknown rule "${(t as { rule: string }).rule}"`);
-};
+export const defaultRunner: RuleRunner = (node, inputPath, outputPath, ctx) =>
+  getRule(node.target.rule).execute(node.target, inputPath, outputPath, ctx);
 
 function cacheDir(project: LoadedProject): string {
   return join(project.root, '.bloom', 'cache');
@@ -119,17 +100,18 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+// The knobs that shape the output: everything except identity (name, rule)
+// and the rule's declared wiring, which already contributes as input hashes.
 function ruleParameters(node: RuleNode): Record<string, unknown> {
-  // Everything except identity and wiring: the knobs that shape the output.
-  const { name: _name, rule: _rule, input: _input, ...params } = node.target;
-  return params;
+  const wiring = new Set(['name', 'rule', ...getRule(node.target.rule).wiringFields]);
+  return Object.fromEntries(Object.entries(node.target).filter(([k]) => !wiring.has(k)));
 }
 
 function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: number): string {
   return sha256Text(
     canonicalJson({
       rule: node.target.rule,
-      rule_version: RULE_VERSIONS[node.target.rule],
+      rule_version: getRule(node.target.rule).version,
       inputs: inputHashes,
       parameters: ruleParameters(node),
       project_sample_rate: projectSampleRate,
@@ -160,11 +142,16 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, sha256: node.asset.sha256 };
   }
 
+  const impl = getRule(node.target.rule);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
-  const inputHashes = inputNodes.map((d) => {
+  const declaredHashes = inputNodes.map((d) => {
     if (d.kind !== 'asset') throw new Error('only asset inputs supported');
     return d.asset.sha256;
   });
+  const extraInputs: ExtraInput[] = impl.extraInputs
+    ? await impl.extraInputs(project.root, node.target)
+    : [];
+  const inputHashes = [...declaredHashes, ...extraInputs.map((e) => e.sha256)];
   const sampleRate = project.manifest?.data.sample_rate ?? 48000;
   const key = actionKey(node, inputHashes, sampleRate);
 
@@ -181,11 +168,11 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, outputPath: materialize(sha256), sha256 };
   }
 
-  // The action key is the *declared* input hash, so before executing, the
-  // consumed bytes must match the declaration — otherwise a tampered file
-  // gets cached under the clean file's key and the poisoned entry outlives
-  // the tampering. Only executed actions pay this cost; cache hits don't
-  // read inputs at all.
+  // The action key uses the *declared* asset hashes, so before executing,
+  // the consumed bytes must match the declaration — otherwise a tampered
+  // file gets cached under the clean file's key and the poisoned entry
+  // outlives the tampering. Only executed actions pay this cost; cache hits
+  // don't read inputs at all.
   for (const input of inputNodes) {
     if (input.kind !== 'asset') continue;
     const path = assetFilePath(project, input);
@@ -205,13 +192,20 @@ async function buildNode(
     }
   }
 
-  const inputPath = assetFilePath(project, inputNodes[0]!);
+  const assetPaths = inputNodes.map((d) => assetFilePath(project, d));
+  const inputPath = impl.inputPath(project.root, node.target, assetPaths);
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
-  await runner(node, inputPath, tmpOut);
+  await runner(node, inputPath, tmpOut, { sampleRate });
   if (!existsSync(tmpOut)) {
     throw new Error(`rule "${node.target.rule}" produced no output for ${formatLabel(node.label)}`);
+  }
+
+  // Extra inputs were hashed for the key before the run; a rule may refuse
+  // to cache output that came from since-changed inputs.
+  if (impl.verifyAfterRun) {
+    await impl.verifyAfterRun(project.root, node.target, extraInputs);
   }
 
   const sha256 = await sha256File(tmpOut);
@@ -246,7 +240,11 @@ export async function build(
   return outcomes;
 }
 
-export function explain(project: LoadedProject, graph: Graph, node: GraphNode): Explanation {
+export async function explain(
+  project: LoadedProject,
+  graph: Graph,
+  node: GraphNode,
+): Promise<Explanation> {
   if (node.kind === 'asset') {
     return {
       label: formatLabel(node.label),
@@ -255,11 +253,15 @@ export function explain(project: LoadedProject, graph: Graph, node: GraphNode): 
       outputs: [{ sha256: node.asset.sha256, bytes: node.asset.bytes }],
     };
   }
+  const impl = getRule(node.target.rule);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
   const inputs = inputNodes.map((d) => ({
     label: formatLabel(d.label),
     sha256: d.kind === 'asset' ? d.asset.sha256 : '',
   }));
+  if (impl.extraInputs) {
+    inputs.push(...(await impl.extraInputs(project.root, node.target)));
+  }
   const sampleRate = project.manifest?.data.sample_rate ?? 48000;
   const key = actionKey(node, inputs.map((i) => i.sha256), sampleRate);
   const cached = readAction(project, key);
@@ -267,7 +269,7 @@ export function explain(project: LoadedProject, graph: Graph, node: GraphNode): 
     label: formatLabel(node.label),
     kind: 'rule',
     rule: node.target.rule,
-    ruleVersion: RULE_VERSIONS[node.target.rule]!,
+    ruleVersion: impl.version,
     inputs,
     parameters: ruleParameters(node),
     actionKey: key,

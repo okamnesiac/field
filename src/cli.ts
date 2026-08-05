@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
+import { parseChannels, parseDurationSeconds, parseSeed } from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
 import { check } from './commands/check.js';
+import { runScProgram } from './rules/sc-render.js';
 import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
 import { importAsset } from './commands/import.js';
@@ -38,6 +42,34 @@ program
     try {
       const root = init({ dir: process.cwd(), ...opts });
       process.stdout.write(`initialized Bloom project at ${root}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const sc = program.command('sc').description('SuperCollider');
+sc.command('render <program>')
+  .description('render an SC program directly (uncached, for iteration; commit it as a target for builds)')
+  .requiredOption('--seed <n>', 'random seed', parseSeed)
+  .requiredOption('--duration <seconds>', 'render length in seconds', parseDurationSeconds)
+  .option('--channels <n>', '1 or 2', parseChannels, 2)
+  .option('--output <path>', 'output WAV path (defaults to <program>.wav in the current directory)')
+  .action(async (programPath: string, opts: { seed: number; duration: number; channels: number; output?: string }) => {
+    try {
+      const root = findProjectRoot(process.cwd());
+      const project = root ? loadProject(root) : undefined;
+      const sampleRate = project?.manifest?.data.sample_rate ?? 48000;
+      const output = resolve(opts.output ?? `${basename(programPath, extname(programPath))}.wav`);
+      await runScProgram(resolve(programPath), output, {
+        seed: opts.seed,
+        duration: opts.duration,
+        channels: opts.channels,
+        sampleRate,
+      });
+      if (!existsSync(output)) {
+        throw new Error('sc program exited without writing BLOOM_OUTPUT');
+      }
+      process.stdout.write(`rendered ${output} (seed ${opts.seed}, ${opts.duration}s @ ${sampleRate} Hz)\n`);
     } catch (err) {
       fail(err);
     }
@@ -120,9 +152,9 @@ program
 program
   .command('explain <label>')
   .description('show a target\'s rule, inputs, action key, and cache status')
-  .action((label: string) => {
+  .action(async (label: string) => {
     try {
-      const e = explainTarget(requireRoot(), label);
+      const e = await explainTarget(requireRoot(), label);
       process.stdout.write(`${e.label} (${e.kind})\n`);
       if (e.rule) process.stdout.write(`rule: ${e.rule} v${e.ruleVersion}\n`);
       for (const input of e.inputs) {

@@ -1,5 +1,6 @@
 import { formatLabel, matchesPattern, type Label, type LabelPattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
+import { getRule } from '../rules/index.js';
 import type { Asset, Target } from '../schema/schemas.js';
 
 // The dependency graph, derived from the project model by convention
@@ -42,13 +43,18 @@ export function buildGraph(project: LoadedProject): Graph {
     if (song.targets) {
       for (const target of song.targets.data.targets) {
         const label: Label = { pkg: `${pkgBase}/targets`, name: target.name };
-        const dep: Label = { pkg: `${pkgBase}/assets`, name: target.input };
+        // Each rule declares which same-song assets it consumes; those are
+        // the graph edges. Other inputs (like sc programs) participate by
+        // content hash without being nodes.
+        const deps: Label[] = getRule(target.rule)
+          .assetDeps(target)
+          .map((name) => ({ pkg: `${pkgBase}/assets`, name }));
         nodes.set(formatLabel(label), {
           kind: 'rule',
           label,
           songDir: song.dir,
           target,
-          deps: [dep],
+          deps,
         });
       }
     }

@@ -54,6 +54,21 @@ declaring an audio return path ("this device's output returns on Apollo inputs
 other render — and flags it nondeterministic, because knobs on hardware are
 outside the hash.
 
+## Rules so far
+
+- **`normalize`** — sample-rate/bit-depth conversion via macOS `afconvert`.
+  Input: a declared asset (verified against its declaration before the rule
+  executes).
+- **`sc-render`** — a SuperCollider program renders an asset offline via
+  scsynth's NRT mode. The program is a plain `.scd` run through `sclang`
+  with `BLOOM_OUTPUT` / `BLOOM_SEED` / `BLOOM_DURATION` /
+  `BLOOM_SAMPLE_RATE` / `BLOOM_CHANNELS` in the environment; it writes
+  `BLOOM_OUTPUT` and exits. The program's *content hash* is a cache input,
+  so editing the code invalidates exactly its own renders; with a fixed
+  seed, renders are reproducible bit-for-bit. `bloom sc render` runs a
+  program directly (uncached) for iteration. Full contract:
+  [projects/all/sc-render.md](projects/all/sc-render.md) §2.
+
 ## Determinism policy
 
 **The contract is recipe-reproducibility, not bit-reproducibility.** Plugin

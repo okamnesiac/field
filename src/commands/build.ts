@@ -36,7 +36,7 @@ export function queryDeps(root: string, query: string): string[] {
   return expandPattern(graph, parsePattern(query.trim())).map((n) => formatLabel(n.label));
 }
 
-export function explainTarget(root: string, label: string): Explanation {
+export async function explainTarget(root: string, label: string): Promise<Explanation> {
   const { project, graph } = loadValid(root);
   return explain(project, graph, resolveLabel(graph, parseLabel(label)));
 }
