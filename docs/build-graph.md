@@ -70,7 +70,11 @@ outside the hash.
   [projects/all/sc-render.md](projects/all/sc-render.md) §2.
 - **`track-render`** — the first *implicit* rule: every audio track with
   clips is buildable as `//songs/<song>/tracks:<name>` without declaring
-  anything, because the track file **is** the declaration. It places the
+  anything, because the track file **is** the declaration. A clip sources
+  a committed asset *or a same-song target* — clipping an SC render pulls
+  the whole recipe into the stem's subgraph, so the arrangement can play
+  audio nothing ever committed, and editing the recipe rebuilds straight
+  through stem and mix. It places the
   track's clips through the tempo map (position, source offset, slip,
   clip gain, linear fades) and sums them into a pre-fader Float32 stereo
   stem, in TypeScript — offline mixing has no deadline

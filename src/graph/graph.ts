@@ -72,11 +72,16 @@ export function buildGraph(project: LoadedProject): Graph {
       for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
         // useful artifact — implicit targets exist where there is content.
-        addRule(
-          { pkg: `${pkgBase}/tracks`, name: track.name },
-          song.dir,
-          planTrack(track, tempoMap, sha256ByAsset),
-        );
+        const spec = planTrack(track, tempoMap, sha256ByAsset);
+        const label: Label = { pkg: `${pkgBase}/tracks`, name: track.name };
+        // Dep order mirrors the spec's input order: assets, then clip-source
+        // targets — a clip on an SC render pulls the whole recipe into the
+        // stem's subgraph (mix-assembly.md §5).
+        const deps: Label[] = [
+          ...spec.assets.map((name): Label => ({ pkg: `${pkgBase}/assets`, name })),
+          ...spec.targets.map((name): Label => ({ pkg: `${pkgBase}/targets`, name })),
+        ];
+        nodes.set(formatLabel(label), { kind: 'rule', label, songDir: song.dir, spec, deps });
       }
       if (song.mix) {
         for (const mix of song.mix.data.mixes) {

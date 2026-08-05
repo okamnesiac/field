@@ -195,25 +195,34 @@ export const mixFileOrder: KeyOrder = {
 };
 
 // A clip is a window (position, duration, in anchor units) on content
-// (asset, source_offset, slip, in samples). Effective read offset =
-// source_offset − slip (project-core.md §3.2).
-export const clipSchema = z.strictObject({
-  id: slug,
-  asset: slug, // references an asset name declared in the song's assets.yaml
-  anchor: z.enum(['musical', 'absolute']).default('musical'),
-  position: z.number().int().min(0), // ticks when musical, samples when absolute
-  duration: z.number().int().positive(), // same units as position
-  source_offset: samples.default(0),
-  slip: z.number().int().default(0),
-  gain_db: z.number().default(0),
-  fade_in: samples.default(0),
-  fade_out: samples.default(0),
-});
+// (source, source_offset, slip, in samples). Effective read offset =
+// source_offset − slip (project-core.md §3.2). The content is exactly one
+// of: a committed asset (assets.yaml) or a same-song rule target
+// (targets.yaml) — clipping a target means the arrangement plays a render
+// that is never committed, only its recipe (mix-assembly.md §5).
+export const clipSchema = z
+  .strictObject({
+    id: slug,
+    asset: slug.optional(), // an asset name declared in the song's assets.yaml
+    target: slug.optional(), // a target name declared in the song's targets.yaml
+    anchor: z.enum(['musical', 'absolute']).default('musical'),
+    position: z.number().int().min(0), // ticks when musical, samples when absolute
+    duration: z.number().int().positive(), // same units as position
+    source_offset: samples.default(0),
+    slip: z.number().int().default(0),
+    gain_db: z.number().default(0),
+    fade_in: samples.default(0),
+    fade_out: samples.default(0),
+  })
+  .refine((c) => (c.asset === undefined) !== (c.target === undefined), {
+    message: 'a clip sources exactly one of asset or target',
+  });
 export type Clip = z.infer<typeof clipSchema>;
 export const clipOrder: KeyOrder = {
   keys: [
     'id',
     'asset',
+    'target',
     'anchor',
     'position',
     'duration',

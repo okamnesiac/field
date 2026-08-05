@@ -91,10 +91,13 @@ with no per-track stems (any clip edit re-renders the whole song).
    [ace-generation.md](ace-generation.md) §1 since mix now precedes ACE)
    plus multi-input rule contract, WAV read/write in TS, placement math,
    the `track-render` rule, and track `gain_db`/`pan` schema fields.
-2. **The mix** — `mix.yaml`, the `mix` rule, rule→rule dependencies in the
-   engine, and field's songs mixed and playable.
+2. **The mix** (shipped, #10) — `mix.yaml`, the `mix` rule, rule→rule
+   dependencies in the engine, and field's songs mixed and playable.
 3. **Clips over rule outputs** — let a clip source a target's output
    (e.g. the SC pad render) instead of only a committed asset, completing
    recipes-over-samples: mix → stem → sc-render with no committed audio.
    This is also what makes "add a normalize target" a real fix for
-   rate-mismatched assets.
+   rate-mismatched assets. A clip declares exactly one of `asset` or
+   `target` (same-song); target wiring sorts by name, since a target's
+   content hash does not exist until it builds and a target rename is a
+   real relabel, unlike asset renames.
