@@ -118,14 +118,67 @@ export const assetsFileOrder: KeyOrder = {
 // the project model is the build file; these entries become
 // //songs/<song>/targets:<name>). Rule-specific fields are flat and
 // strict, discriminated by `rule`.
+// Single-input rules source exactly one of `asset` (assets.yaml) or
+// `target` (targets.yaml, same song) — the clip pattern. Enforced by each
+// rule's validate() rather than a schema refine, because refined objects
+// cannot join a discriminated union.
+const singleInput = {
+  asset: slug.optional(),
+  target: slug.optional(),
+};
+
 export const normalizeTargetSchema = z.strictObject({
   name: labelName,
   rule: z.literal('normalize'),
-  input: slug, // an asset name declared in this song's assets.yaml
+  ...singleInput,
   sample_rate: sampleRate,
   bit_depth: z.union([z.literal(16), z.literal(24), z.literal(32)]),
 });
 export type NormalizeTarget = z.infer<typeof normalizeTargetSchema>;
+
+// eq: RBJ biquads with Fyra's parameterization — bandwidth in octaves —
+// and Fyra's response-based auto-gain on by default (effects.md §2):
+// EQ moves change tone, not level.
+export const eqBandSchema = z.strictObject({
+  type: z.enum(['highpass', 'lowshelf', 'bell', 'highshelf', 'lowpass']),
+  frequency: z.number().min(10).max(24000),
+  gain_db: z.number().min(-24).max(24).default(0), // bell and shelves only
+  bandwidth: z.number().min(0.1).max(16).default(2), // octaves
+});
+export type EqBand = z.infer<typeof eqBandSchema>;
+
+export const eqTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('eq'),
+  ...singleInput,
+  bands: z.array(eqBandSchema).min(1).max(8),
+  normalize: z.boolean().default(true),
+});
+export type EqTarget = z.infer<typeof eqTargetSchema>;
+
+// limit: offline lookahead peak limiter (effects.md §2).
+export const limitTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('limit'),
+  ...singleInput,
+  ceiling_db: z.number().min(-24).max(0).default(-1),
+  lookahead_ms: z.number().min(0.1).max(50).default(5),
+  release_ms: z.number().min(1).max(2000).default(100),
+});
+export type LimitTarget = z.infer<typeof limitTargetSchema>;
+
+// reverb: Freeverb, deterministic; decay is T60 in seconds and the output
+// grows by the tail (effects.md §2).
+export const reverbTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('reverb'),
+  ...singleInput,
+  mix: z.number().min(0).max(1).default(0.3),
+  decay: z.number().min(0.05).max(30).default(2), // seconds to −60 dB
+  predelay_ms: z.number().min(0).max(500).default(0),
+  damping: z.number().min(0).max(1).default(0.5),
+});
+export type ReverbTarget = z.infer<typeof reverbTargetSchema>;
 
 // sc-render: a SuperCollider program renders an asset offline (NRT). The
 // program is run via sclang with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION /
@@ -145,6 +198,9 @@ export type ScRenderTarget = z.infer<typeof scRenderTargetSchema>;
 export const targetSchema = z.discriminatedUnion('rule', [
   normalizeTargetSchema,
   scRenderTargetSchema,
+  eqTargetSchema,
+  limitTargetSchema,
+  reverbTargetSchema,
 ]);
 export type Target = z.infer<typeof targetSchema>;
 
@@ -160,14 +216,27 @@ export const targetsFileOrder: KeyOrder = {
         keys: [
           'name',
           'rule',
-          'input',
+          'asset',
+          'target',
           'program',
           'seed',
           'duration',
           'channels',
           'sample_rate',
           'bit_depth',
+          'bands',
+          'normalize',
+          'ceiling_db',
+          'lookahead_ms',
+          'release_ms',
+          'mix',
+          'decay',
+          'predelay_ms',
+          'damping',
         ],
+        children: {
+          bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } },
+        },
       },
     },
   },

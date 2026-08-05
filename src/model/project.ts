@@ -306,20 +306,47 @@ function validate(project: LoadedProject): void {
     const targetNames = new Set<string>();
     if (song.targets) {
       const targetsPath = song.targets.path;
+      // Names first, in full: single-input rules may reference targets
+      // declared later in the file, and forward references are fine.
       for (const target of song.targets.data.targets) {
         if (targetNames.has(target.name)) {
           push(targetsPath, `duplicate target "${target.name}"`);
         }
         targetNames.add(target.name);
+      }
+      for (const target of song.targets.data.targets) {
         // Rule-specific semantics live with the rule (src/rules/).
         ruleImpl(target).validate(target, {
           root: project.root,
           songDir: song.dir,
           assetNames,
+          targetNames,
           push: (message) => push(targetsPath, `target "${target.name}" ${message}`),
           resolveFile: (baseDir, file) => resolveAssetFile(project.root, baseDir, file),
         });
       }
+      // Target→target references make cycles declarable (effects.md §3);
+      // check must name the cycle before the engine's ordering guard ever
+      // trips on it.
+      const byName = new Map(song.targets.data.targets.map((t) => [t.name, t]));
+      const state = new Map<string, 'visiting' | 'done'>();
+      const visit = (name: string, path: string[]): void => {
+        if (state.get(name) === 'done') return;
+        if (state.get(name) === 'visiting') {
+          const cycle = [...path.slice(path.indexOf(name)), name].join(' → ');
+          push(targetsPath, `target dependency cycle: ${cycle}`);
+          return;
+        }
+        state.set(name, 'visiting');
+        const target = byName.get(name);
+        if (target) {
+          for (const dep of ruleImpl(target).targetDeps?.(target) ?? []) {
+            if (byName.has(dep)) visit(dep, [...path, name]);
+          }
+        }
+        state.set(name, 'done');
+      };
+      for (const target of song.targets.data.targets) visit(target.name, []);
     }
 
     // Clips and takes reference assets by name (readable diffs); the

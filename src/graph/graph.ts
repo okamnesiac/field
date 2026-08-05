@@ -40,12 +40,17 @@ export function buildGraph(project: LoadedProject): Graph {
   const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const nodes = new Map<string, GraphNode>();
   const addRule = (label: Label, songDir: string, spec: RuleSpec) => {
-    // Each rule declares which same-song assets it consumes; those are the
-    // graph edges. Other inputs (like sc programs) participate by content
-    // hash without being nodes.
-    const deps: Label[] = ruleImpl(spec)
-      .assetDeps(spec)
-      .map((name) => ({ pkg: `${songDir}/assets`, name }));
+    // Each rule declares which same-song assets and targets it consumes;
+    // those are the graph edges, in that order — matching the input order
+    // every impl expects. Other inputs (like sc programs) participate by
+    // content hash without being nodes.
+    const impl = ruleImpl(spec);
+    const deps: Label[] = [
+      ...impl.assetDeps(spec).map((name): Label => ({ pkg: `${songDir}/assets`, name })),
+      ...(impl.targetDeps?.(spec) ?? []).map(
+        (name): Label => ({ pkg: `${songDir}/targets`, name }),
+      ),
+    ];
     nodes.set(formatLabel(label), { kind: 'rule', label, songDir, spec, deps });
   };
 
@@ -72,16 +77,11 @@ export function buildGraph(project: LoadedProject): Graph {
       for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
         // useful artifact — implicit targets exist where there is content.
-        const spec = planTrack(track, tempoMap, sha256ByAsset);
-        const label: Label = { pkg: `${pkgBase}/tracks`, name: track.name };
-        // Dep order mirrors the spec's input order: assets, then clip-source
-        // targets — a clip on an SC render pulls the whole recipe into the
-        // stem's subgraph (mix-assembly.md §5).
-        const deps: Label[] = [
-          ...spec.assets.map((name): Label => ({ pkg: `${pkgBase}/assets`, name })),
-          ...spec.targets.map((name): Label => ({ pkg: `${pkgBase}/targets`, name })),
-        ];
-        nodes.set(formatLabel(label), { kind: 'rule', label, songDir: song.dir, spec, deps });
+        addRule(
+          { pkg: `${pkgBase}/tracks`, name: track.name },
+          song.dir,
+          planTrack(track, tempoMap, sha256ByAsset),
+        );
       }
       if (song.mix) {
         for (const mix of song.mix.data.mixes) {

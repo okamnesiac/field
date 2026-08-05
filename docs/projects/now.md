@@ -8,5 +8,6 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, sc-render) stops surfacing surprises.
-- [Playback](all/playback.md) — the first native code: `bloom-audiod`,
-  the control socket, and auditioning mixes through Core Audio.
+- [Offline effects](all/effects.md) — eq (Fyra-style auto-normalizing),
+  limiter, reverb: chainable rules now, inserts and a master chain next;
+  deliberately ahead of ACE.

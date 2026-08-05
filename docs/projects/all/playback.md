@@ -1,6 +1,10 @@
 # Plan: Playback
 
-**Status:** In progress (started 2026-08-05). Follows
+**Status:** Shipped (#12–#13, merged 2026-08-05): the daemon, the socket,
+and blocking `bloom play` with `--from` and the `bloom transport` family —
+the definition of done below is met, verified on real hardware. afplay
+survives as a fallback for machines without the built binary; retire it
+once the daemon path has soaked. Followed
 [mix-assembly.md](mix-assembly.md) (shipped #9–#11); the first native code.
 An interim `bloom play <pattern>` shipped early (after #7): it builds
 targets and auditions the files through `afplay` — useful today, but it
@@ -82,7 +86,7 @@ will eventually use.
    playback with sample-accurate transport, a null-output mode so CI
    exercises the whole protocol without an audio device, idle exit, and
    the TS client (`bloom devices` as the first consumer).
-2. **The handoff** — `bloom play` goes through the daemon (blocking,
-   position-streaming, ctrl-c), `--from <position>`, the `bloom transport`
-   command family, and afplay demoted to a fallback for machines without
-   the built binary — then retired.
+2. **The handoff** (shipped, #13) — `bloom play` goes through the daemon
+   (blocking, position-streaming, ctrl-c), `--from <position>`, the
+   `bloom transport` command family, and afplay demoted to a fallback for
+   machines without the built binary — then retired.
