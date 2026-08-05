@@ -12,18 +12,20 @@ export const slug = z.string().regex(SLUG_PATTERN, 'must be a lowercase-slug');
 const ticks = z.number().int().min(0);
 const samples = z.number().int().min(0);
 
+export const sampleRate = z.union([
+  z.literal(44100),
+  z.literal(48000),
+  z.literal(88200),
+  z.literal(96000),
+  z.literal(176400),
+  z.literal(192000),
+]);
+
 // bloom.yaml — the project manifest.
 export const projectSchema = z.strictObject({
   bloom: z.literal(1), // format version
   name: slug,
-  sample_rate: z.union([
-    z.literal(44100),
-    z.literal(48000),
-    z.literal(88200),
-    z.literal(96000),
-    z.literal(176400),
-    z.literal(192000),
-  ]),
+  sample_rate: sampleRate,
 });
 export type Project = z.infer<typeof projectSchema>;
 export const projectOrder: KeyOrder = { keys: ['bloom', 'name', 'sample_rate'] };
@@ -103,6 +105,32 @@ export type AssetsFile = z.infer<typeof assetsFileSchema>;
 export const assetsFileOrder: KeyOrder = {
   keys: ['assets'],
   children: { assets: { items: { keys: ['name', 'file', 'sha256', 'bytes'] } } },
+};
+
+// songs/<song>/targets.yaml — declared build targets (project-core.md §3.4:
+// the project model is the build file; these entries become
+// //songs/<song>/targets:<name>). Rule-specific fields are flat and
+// strict, discriminated by `rule`.
+export const normalizeTargetSchema = z.strictObject({
+  name: slug,
+  rule: z.literal('normalize'),
+  input: slug, // an asset name declared in this song's assets.yaml
+  sample_rate: sampleRate,
+  bit_depth: z.union([z.literal(16), z.literal(24), z.literal(32)]),
+});
+
+export const targetSchema = z.discriminatedUnion('rule', [normalizeTargetSchema]);
+export type Target = z.infer<typeof targetSchema>;
+
+export const targetsFileSchema = z.strictObject({
+  targets: z.array(targetSchema).default([]),
+});
+export type TargetsFile = z.infer<typeof targetsFileSchema>;
+export const targetsFileOrder: KeyOrder = {
+  keys: ['targets'],
+  children: {
+    targets: { items: { keys: ['name', 'rule', 'input', 'sample_rate', 'bit_depth'] } },
+  },
 };
 
 // A clip is a window (position, duration, in anchor units) on content

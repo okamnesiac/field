@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
 import { check } from './commands/check.js';
 import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
@@ -82,6 +83,60 @@ program
       const result = await importAsset(requireRoot(), opts.song, file, opts.name);
       process.stdout.write(`imported ${result.name} (${result.file}, ${result.bytes} bytes)\n`);
       process.stdout.write(`sha256 ${result.sha256}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('build <patterns...>')
+  .description('build targets (//songs/creek/targets:pad-96k, //songs/..., :all)')
+  .action(async (patterns: string[]) => {
+    try {
+      const outcomes = await buildTargets(requireRoot(), patterns);
+      for (const o of outcomes) {
+        const status = o.cached ? 'cached' : 'built';
+        const where = o.outputPath ? ` → ${o.outputPath}` : '';
+        process.stdout.write(`${status}  ${o.label}${where}\n`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('query <expr>')
+  .description("query the graph: a pattern, or deps(//songs/creek/targets:pad-96k)")
+  .action((expr: string) => {
+    try {
+      for (const label of queryDeps(requireRoot(), expr)) {
+        process.stdout.write(`${label}\n`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('explain <label>')
+  .description('show a target\'s rule, inputs, action key, and cache status')
+  .action((label: string) => {
+    try {
+      const e = explainTarget(requireRoot(), label);
+      process.stdout.write(`${e.label} (${e.kind})\n`);
+      if (e.rule) process.stdout.write(`rule: ${e.rule} v${e.ruleVersion}\n`);
+      for (const input of e.inputs) {
+        process.stdout.write(`input: ${input.label} ${input.sha256.slice(0, 12)}\n`);
+      }
+      if (e.parameters && Object.keys(e.parameters).length > 0) {
+        process.stdout.write(`parameters: ${JSON.stringify(e.parameters)}\n`);
+      }
+      if (e.actionKey) {
+        process.stdout.write(`action: ${e.actionKey.slice(0, 12)} (${e.cached ? 'cached' : 'not cached'})\n`);
+      }
+      for (const out of e.outputs ?? []) {
+        process.stdout.write(`output: ${out.sha256.slice(0, 12)} (${out.bytes} bytes)\n`);
+      }
     } catch (err) {
       fail(err);
     }

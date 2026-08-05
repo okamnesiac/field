@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
@@ -17,6 +17,8 @@ import {
   songSchema,
   takeOrder,
   takeSchema,
+  targetsFileOrder,
+  targetsFileSchema,
   tempoFileOrder,
   tempoFileSchema,
   trackOrder,
@@ -26,6 +28,7 @@ import {
   type Project,
   type Song,
   type Take,
+  type TargetsFile,
   type TempoFile,
   type Track,
 } from '../schema/schemas.js';
@@ -51,6 +54,7 @@ export interface LoadedSong {
   tempo?: LoadedFile<TempoFile> | undefined;
   arrangement?: LoadedFile<Arrangement> | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
+  targets?: LoadedFile<TargetsFile> | undefined;
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
 }
@@ -175,6 +179,14 @@ export function loadProject(root: string): LoadedProject {
       });
     }
 
+    const targetsYaml = join(dir, 'targets.yaml');
+    if (existsSync(targetsYaml)) {
+      song.targets = loadFile(project, targetsYaml, {
+        schema: targetsFileSchema,
+        order: targetsFileOrder,
+      });
+    }
+
     for (const file of yamlFiles(join(dir, 'tracks'))) {
       const track = loadFile(project, file, { schema: trackSchema, order: trackOrder });
       if (track) song.tracks.push(track);
@@ -209,6 +221,7 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.tempo,
       s.arrangement,
       s.assets,
+      s.targets,
       ...s.tracks,
       ...s.takes,
     ]),
@@ -262,9 +275,31 @@ function validate(project: LoadedProject): void {
           push(song.assets.path, `duplicate asset "${asset.name}"`);
         }
         assetNames.add(asset.name);
+        // Normalized form required (§3.6 flavor, deferred from #5): with
+        // exactly one spelling per path, exact-string comparisons are sound
+        // everywhere.
+        if (asset.file !== posix.normalize(asset.file) || asset.file.includes('\\')) {
+          push(
+            song.assets.path,
+            `asset "${asset.name}" file path not in normalized form: ${asset.file}`,
+          );
+        }
         const resolved = resolveAssetFile(project.root, song.dir, asset.file);
         if (resolved.problem) {
           push(song.assets.path, `asset "${asset.name}" ${resolved.problem}`);
+        }
+      }
+    }
+
+    if (song.targets) {
+      const targetNames = new Set<string>();
+      for (const target of song.targets.data.targets) {
+        if (targetNames.has(target.name)) {
+          push(song.targets.path, `duplicate target "${target.name}"`);
+        }
+        targetNames.add(target.name);
+        if (!assetNames.has(target.input)) {
+          push(song.targets.path, `target "${target.name}" references unknown asset "${target.input}"`);
         }
       }
     }
