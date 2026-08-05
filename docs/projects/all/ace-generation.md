@@ -9,6 +9,13 @@ a Python worker, with full provenance.
 
 ## 1 Shape
 
+- ACE lands as `src/rules/ace-generate.ts` behind the `RuleImpl` interface —
+  a module, not engine code. First change of the phase, deferred from the
+  #7 review as agreed there: make the registry generic
+  (`RuleImpl<T extends Target>`) so the per-method `'wrong rule'` guards
+  become compiler-proven instead of runtime-checked; the third rule is the
+  agreed trigger.
+
 - The worker protocol comes first: a Python subprocess (`bloom-modeld`
   pattern) taking immutable inputs and a JSON job spec on stdio, emitting
   assets + structured metadata ([architecture.md](../../architecture.md)

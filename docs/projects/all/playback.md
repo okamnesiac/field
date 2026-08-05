@@ -1,7 +1,11 @@
 # Plan: Playback
 
 **Status:** Planned, not started. Follows [mix-assembly.md](mix-assembly.md);
-the first native code.
+the first native code. An interim `bloom play <pattern>` shipped early
+(after #7): it builds targets and auditions the files through `afplay` —
+useful today, but it plays *artifacts*, not the graph. This phase is still
+about the real engine: transport, the timeline, devices, and the control
+socket. The afplay path gets retired when the daemon can play.
 
 **Goal:** `bloom play` — audition built artifacts and timeline positions from
 the CLI through Core Audio, on the device Bloom selected (Apollo or
