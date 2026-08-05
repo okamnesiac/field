@@ -37,23 +37,64 @@ on.
 
 ## 3 Design questions this phase must settle
 
-These are the load-bearing schema decisions; each gets recorded here as
-`(DECIDED)` with alternatives as the work proceeds:
+The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
 
-1. **Tempo/timeline semantics** — bar.beat.tick ↔ samples mapping, which
-   representation is authoritative where, and the per-track policy for content
-   under tempo-map edits ([project-model.md](../../project-model.md)
-   "Timeline and tempo").
-2. **Clip offsets** — timeline position, source offset, slip as three
-   independent non-destructive fields.
-3. **ID scheme** — stable, explicit IDs for tracks/clips/takes that survive
-   merges.
-4. **Label grammar** — exact target syntax across songs and shared material.
-5. **Cache key definition** — what exactly hashes into a node's key, and how
-   nondeterministic nodes are marked
-   ([build-graph.md](../../build-graph.md)).
-6. **Deterministic YAML emission** — stable key order and formatting so
-   programmatic edits produce minimal diffs.
+1. **Tempo/timeline semantics (DECIDED).** Canonical musical time is integer
+   ticks from song start at fixed PPQ (960/quarter); `bar.beat.tick` is a
+   display projection through the meter map, never stored — storing bars would
+   make meter edits silently reinterpret every position. The tempo map
+   (constant segments + linear ramps, closed-form integration) maps ticks ↔
+   seconds; project sample rate maps seconds ↔ samples. Each clip declares an
+   `anchor`: `musical` (ticks stored, samples derived — moves with tempo
+   edits) or `absolute` (samples stored, ticks derived — stays put). Default
+   `musical`. Manifests may store both values but declare the anchor; the
+   derived one is verified by `bloom check`, so they can never disagree. A
+   musically-anchored clip *moves* under tempo edits but does not
+   *time-stretch* — stretching is a separate explicit operation, out of scope.
+   Loops (possibly with their own internal timeline, e.g. polyrhythmic loops
+   against a different meter) are explicitly deferred; nothing in the tick
+   scheme precludes a loop carrying a local timeline mapped at its
+   instantiation point.
+2. **Clip offsets (DECIDED).** A clip is a *window* (`position`, `duration`,
+   in anchor units) on *content* (`asset`, `source_offset` in samples, `slip`
+   in samples, default 0; effective read offset = `source_offset − slip`, so
+   positive slip moves content later against a fixed window). Folding slip
+   into `source_offset` was rejected: `source_offset` is set mechanically
+   (take placement, comping, latency correction) while slip is set musically
+   (a human nudge) — keeping them separate keeps the mechanical value
+   re-derivable and the intent a one-line diff. Fades and gain are clip
+   fields; fades in samples.
+3. **ID scheme (DECIDED).** No UUIDs; three tiers. Humans name it → natural
+   slug is the ID (tracks, songs, targets; filenames are keys). Content is
+   the identity → SHA-256 (assets, cached outputs). Machines mint it →
+   timestamp for takes (`take-20260804-202355`, sortable, merge-safe),
+   slug-plus-short-random for clips (`chorus-vox-x7f3q`, referenced stably
+   by automation). The full argument — the case against, and why it lost —
+   is recorded in §6 so it never has to be re-litigated.
+4. **Label grammar (DECIDED).** The project model *is* the build file — no
+   separate `BUILD` files, which would only re-declare structure the
+   manifests already express. Targets derive by convention:
+   `songs/opener/tracks/lead-vocal.yaml` is `//songs/opener/tracks:lead-vocal`;
+   mixes declared in a song's mix file become `//songs/opener/mix:main`.
+   Grammar: `//path:name`, wildcards `//songs/opener/...` and `:all`,
+   absolute-only in V1.
+5. **Cache key definition (DECIDED).** SHA-256 everywhere, chosen so asset
+   hash = Git LFS OID — store, pointer, and cache speak one identifier
+   (BLAKE3 is faster but buys a second identity scheme). Key = hash of
+   canonical JSON of `{rule name, rule_version, input hashes, parameters,
+   plugin id+version+state hash (later), sample rate, render-relevant
+   settings}`. Rules carry an explicit `rule_version` bumped to invalidate —
+   we do not hash our own source, which would invalidate the world on every
+   refactor. Layout: `.bloom/cache/cas/<hash>` plus an action index, shared
+   across songs. `deterministic: false` flows into take handling per
+   [build-graph.md](../../build-graph.md).
+6. **Deterministic YAML emission (DECIDED).** Schema-defined key order
+   (semantic, `id`/`name` first — not alphabetical), 2-space indent, block
+   style, no anchors/aliases, minimal quoting, stable numbers, trailing
+   newline. `bloom fmt` writes it; `bloom check` enforces it. **Comments must
+   survive programmatic edits** — the npm `yaml` package's document/CST API
+   (comment-preserving) is used from day one; a format-then-lose-annotations
+   tool is unacceptable for a Git-native system.
 
 ## 4 Definition of done
 
@@ -61,3 +102,72 @@ From an empty directory: `bloom init`, import an audio file into a song,
 define a normalize target, `bloom build` it, see a cache hit on rebuild and a
 rebuild on parameter change, and `bloom query`/`explain` answer honestly —
 with the whole project state readable as diffable YAML in Git.
+
+## 5 Stack (DECIDED)
+
+Node 24 LTS, pnpm, ESM-only, strict TypeScript, single package at repo root
+(`packages/` only when the daemon and workers exist). Zod v4 schemas as source
+of truth with JSON Schema generated from them — that is what keeps the
+canonical format honestly language-neutral for the future Swift widget and C++
+daemon. CLI: commander. Tests: vitest. Audio conversion for the normalize
+rule: macOS built-in `afconvert` (excellent SRC, zero dependencies, macOS-only
+by charter); ffmpeg only if a need appears that afconvert can't meet. Bun was
+considered and rejected: boring wins for a decade-scale tool. Work lands as
+squash-merged PRs (the ruleset requires it), roughly one per coherent chunk.
+
+## 6 Decision record: names are identity — no UUIDs
+
+Settled 2026-08-04, recorded in full so it is never re-litigated. The
+industry-standard alternative — stable machine ID plus display name, as in
+DAWproject and essentially every DAW format — was argued properly and
+rejected.
+
+### The case for opaque IDs
+
+1. **Rename becomes a refactor instead of a field edit.** With UUIDs,
+   renaming `lead-vocal` to `main-vox` changes one display-name line and no
+   reference moves. With slugs, a rename touches every referencing file —
+   clips, automation, routing, comps, take manifests. The nasty version is
+   cross-branch: branch A renames the track, branch B adds clips referencing
+   the old name, both merge cleanly (different files, no textual conflict),
+   and the dangling references surface only when validation runs.
+2. **Identity reuse across time.** Delete `verse-guitar`; months later create
+   an unrelated track with the same name. Under slug-identity the new track
+   inherits the old identity — historical references silently associate with
+   the wrong thing. UUIDs never collide across time; names do, because humans
+   reuse good names constantly.
+3. **Slugs invite hand-editing, and hand-edits typo.** Nobody types a UUID;
+   `chorus-vox` looks writable, and one typo creates a dangling reference
+   that looks plausible in review.
+
+### Why it lost
+
+In the same order:
+
+1. Rename-as-refactor is exactly how **code** works — renaming a function
+   touches every call site — and we accept it because the tool does it
+   atomically (`bloom track rename` rewrites all references in one commit)
+   and the result is greppable and reviewable, which UUID indirection never
+   is. The cross-branch hazard is real but **not solved by UUIDs**: branch B
+   referencing a UUID that branch A deleted merges just as cleanly and
+   dangles just as silently. The true defense is identical in both worlds —
+   referential validation in `bloom check`, run in CI.
+2. The layers where identity reuse would do real damage are already immune:
+   takes are timestamped, assets and cached artifacts are content-hashed. At
+   the track level, a human reusing a name usually *means* "the new verse
+   guitar" — continuity, not corruption.
+3. Typo risk is the price of readability, and `bloom check` catches it.
+
+The asymmetry that decides it: **UUID cost is paid on every diff read,
+forever** — diffs become join tables (`id: trk-7f3a2` where it should say
+`lead-vocal`), unreviewable without tooling, which attacks Bloom's central
+thesis. **Slug cost is paid rarely, at rename time, by a tool built for it.**
+
+### Operational commitments this decision creates
+
+- `bloom track rename` (and its siblings) exist from early on and rewrite all
+  references atomically.
+- `bloom check` validates referential integrity and runs in CI.
+- Merges may need a post-merge `bloom check` to catch cross-branch dangles —
+  accepted, because the UUID alternative has the same failure mode with less
+  readable evidence.

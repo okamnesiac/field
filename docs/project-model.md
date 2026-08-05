@@ -76,6 +76,30 @@ non-destructive offsets:
 
 Fades, gain, and edits are clip metadata too. Every edit is a diff.
 
+## Identity: names, not UUIDs
+
+Nothing in a Bloom project carries an opaque ID. Identity comes in three
+tiers, by how a thing gets it:
+
+- **Humans name it → the slug is the ID.** Tracks (`lead-vocal`), songs
+  (directory name), targets. Filenames are keys. Renaming is a repo-wide,
+  tool-assisted refactor (`bloom track rename` rewrites every reference
+  atomically), exactly as renaming a function is in code.
+- **Content is the identity → SHA-256.** Assets and cached outputs.
+- **Machines mint it → timestamp or slug-plus-short-random.** Takes are
+  timestamped (`take-20260804-202355`, sortable, merge-safe); clips — which
+  automation references stably — get a readable random suffix
+  (`chorus-vox-x7f3q`).
+
+The industry-standard alternative (opaque ID + display name, as in DAWproject
+and every DAW format) was deliberately rejected: it makes every diff a join
+table, which attacks Bloom's central thesis, while its supposed advantages
+mostly don't survive scrutiny. `bloom check` validates referential integrity
+(in CI, and after merges — cross-branch dangling references merge cleanly
+under *any* ID scheme). The full argument is preserved in
+[projects/all/project-core.md](projects/all/project-core.md) §6 — read it
+before reopening this.
+
 ## Takes
 
 A take is one performance of something, stored as a manifest referencing an
