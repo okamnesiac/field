@@ -65,8 +65,10 @@ explicitly-stored property, not an ambient behavior.
 
 ## Clips are metadata; audio is immutable
 
-Audio files are never edited in place. A clip carries three independent,
-non-destructive offsets:
+Audio files are never edited in place. A clip's content is exactly one of a
+committed asset or a same-song build target — clipping a target means the
+arrangement plays a render that is never committed, only its recipe. A clip
+carries three independent, non-destructive offsets:
 
 1. **Timeline position** — where the clip sits in the arrangement (musical
    position by default).

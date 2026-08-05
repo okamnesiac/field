@@ -143,6 +143,7 @@ describe('trackRenderRule.execute', () => {
         name: 'drums',
         rule: 'track-render',
         assets: inputPaths.map((_, i) => `a${i}`),
+        targets: [],
         clips: clips.map((c) => ({
           input: 0,
           start: 0,
@@ -398,5 +399,126 @@ describe('track stems in the build graph', () => {
     createTrack(root, 'creek', 'sketch', 'midi');
     createTrack(root, 'creek', 'spare', 'audio');
     expect(queryDeps(root, '//songs/creek/tracks:all')).toEqual(['//songs/creek/tracks:drums']);
+  });
+});
+
+describe('clips over rule outputs', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'bloom-clipsrc-'));
+    init({ dir: root, name: 'test-album' });
+    createSong(root, 'creek');
+    createTrack(root, 'creek', 'drums', 'audio');
+    const src = join(root, '..', `bloom-clipsrc-${Math.random()}.wav`);
+    writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
+    await importAsset(root, 'creek', src, 'kick');
+    rmSync(src);
+    writeFileSync(
+      join(root, 'songs/creek/targets.yaml'),
+      [
+        'targets:',
+        '  - name: kick-24',
+        '    rule: normalize',
+        '    input: kick',
+        '    sample_rate: 48000',
+        '    bit_depth: 24',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/creek/tracks/drums.yaml'),
+      [
+        'name: drums',
+        'type: audio',
+        'clips:',
+        '  - id: kick-1',
+        '    target: kick-24',
+        '    anchor: absolute',
+        '    position: 3',
+        '    duration: 4',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects clips with zero or two sources', () => {
+    const base = { id: 'c', position: 0, duration: 1 };
+    expect(() => trackSchema.parse({ name: 't', type: 'audio', clips: [base] })).toThrow(
+      'exactly one of asset or target',
+    );
+    expect(() =>
+      trackSchema.parse({ name: 't', type: 'audio', clips: [{ ...base, asset: 'a', target: 'b' }] }),
+    ).toThrow('exactly one of asset or target');
+  });
+
+  it('plans target sources after hash-sorted assets, name-sorted', () => {
+    const spec = planTrack(
+      track([
+        clip({ id: 'c1', asset: 'kick' }),
+        clip({ id: 'c2', asset: undefined, target: 'pad-sc', position: 0 }),
+        clip({ id: 'c3', asset: undefined, target: 'kit-sc', position: 0 }),
+      ]),
+      map120,
+      hashes,
+    );
+    expect(spec.assets).toEqual(['kick']);
+    expect(spec.targets).toEqual(['kit-sc', 'pad-sc']);
+    const byInput = [...spec.clips].sort((a, b) => a.input - b.input).map((c) => c.input);
+    expect(byInput).toEqual([0, 1, 2]); // kick, kit-sc, pad-sc
+  });
+
+  it('diagnoses a clip on an unknown target', () => {
+    writeFileSync(
+      join(root, 'songs/creek/tracks/drums.yaml'),
+      ['name: drums', 'type: audio', 'clips:', '  - id: c1', '    target: ghost', '    position: 0', '    duration: 4', ''].join('\n'),
+    );
+    expect(loadProject(root).diagnostics.map((d) => d.message).join('\n')).toContain(
+      'clip "c1" references unknown target "ghost"',
+    );
+  });
+
+  it('builds the whole recipe chain: asset → target → stem, with real rules', async () => {
+    expect(queryDeps(root, 'deps(//songs/creek/tracks:drums)')).toEqual([
+      '//songs/creek/assets:kick',
+      '//songs/creek/targets:kick-24',
+      '//songs/creek/tracks:drums',
+    ]);
+
+    // Real normalize (afconvert) feeding the real TS mixer: the stem plays
+    // a render nothing ever committed.
+    const outcomes = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const stem = outcomes.find((o) => o.label === '//songs/creek/tracks:drums')!;
+    const wav = readWav(stem.outputPath!);
+    expect(wav.channels[0]).toHaveLength(7);
+    expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
+    expect(wav.channels[0]![4]).toBeCloseTo(0.5, 4);
+
+    const again = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    expect(again.every((o) => o.cached)).toBe(true);
+  });
+
+  it('cascades a recipe edit through the stem', async () => {
+    // Content tracks the spec and the inputs, so an upstream parameter
+    // change flows through every downstream hash.
+    const runs: string[] = [];
+    const runner: RuleRunner = async (node, inputPaths, outputPath) => {
+      runs.push(node.label.name);
+      const inputs = inputPaths.map((p) => readFileSync(p).toString('base64').slice(0, 64));
+      writeFileSync(outputPath, JSON.stringify({ spec: node.spec, inputs }));
+    };
+
+    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    expect(runs).toEqual(['kick-24', 'drums']);
+
+    runs.length = 0;
+    const targetsPath = join(root, 'songs/creek/targets.yaml');
+    writeFileSync(targetsPath, readFileSync(targetsPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
+    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
   });
 });

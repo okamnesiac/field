@@ -303,9 +303,9 @@ function validate(project: LoadedProject): void {
       }
     }
 
+    const targetNames = new Set<string>();
     if (song.targets) {
       const targetsPath = song.targets.path;
-      const targetNames = new Set<string>();
       for (const target of song.targets.data.targets) {
         if (targetNames.has(target.name)) {
           push(targetsPath, `duplicate target "${target.name}"`);
@@ -342,7 +342,13 @@ function validate(project: LoadedProject): void {
       for (const clip of track.data.clips) {
         if (clipIds.has(clip.id)) push(track.path, `duplicate clip id "${clip.id}"`);
         clipIds.add(clip.id);
-        checkAssetRef(track.path, `clip "${clip.id}"`, clip.asset);
+        // Exactly one source per clip (schema-enforced): an asset, or a
+        // same-song target whose render the clip plays (mix-assembly.md §5).
+        if (clip.asset !== undefined) {
+          checkAssetRef(track.path, `clip "${clip.id}"`, clip.asset);
+        } else if (clip.target !== undefined && !targetNames.has(clip.target)) {
+          push(track.path, `clip "${clip.id}" references unknown target "${clip.target}"`);
+        }
         // Fades live inside the clip window; whether they fit is only known
         // in samples, so musical clips are checked through the tempo map.
         if (tempoMap) {

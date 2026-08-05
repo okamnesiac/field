@@ -28,7 +28,12 @@ export interface PlacedClip {
 export interface TrackRenderSpec {
   name: string;
   rule: 'track-render';
-  assets: string[]; // wiring: distinct asset names, sorted; clips index into it
+  // Wiring: clips index into the concatenation [assets..., targets...],
+  // matching the graph's dep order. Assets sort by content hash (renames
+  // cannot reach the key); targets sort by name — their content hashes
+  // don't exist until they build, and a target rename is a real relabel.
+  assets: string[];
+  targets: string[];
   clips: PlacedClip[];
 }
 
@@ -49,19 +54,26 @@ export function planTrack(
   tempoMap: TempoMap,
   sha256ByAsset: Map<string, string>,
 ): TrackRenderSpec {
-  // Wiring order is content-hash order (name tiebreak for determinism), so
-  // renaming an asset cannot permute the input list or the clip indices —
-  // names never reach the action key at all (#9 review).
-  const assets = [...new Set(track.clips.map((c) => c.asset))].sort((a, b) => {
-    const ha = sha256ByAsset.get(a) ?? '';
-    const hb = sha256ByAsset.get(b) ?? '';
-    return ha < hb ? -1 : ha > hb ? 1 : a < b ? -1 : 1;
-  });
-  const inputIndex = new Map(assets.map((name, i) => [name, i]));
+  // Asset wiring order is content-hash order (name tiebreak for
+  // determinism), so renaming an asset cannot permute the input list or
+  // the clip indices — names never reach the action key at all (#9 review).
+  const assets = [...new Set(track.clips.flatMap((c) => (c.asset ? [c.asset] : [])))].sort(
+    (a, b) => {
+      const ha = sha256ByAsset.get(a) ?? '';
+      const hb = sha256ByAsset.get(b) ?? '';
+      return ha < hb ? -1 : ha > hb ? 1 : a < b ? -1 : 1;
+    },
+  );
+  const targets = [...new Set(track.clips.flatMap((c) => (c.target ? [c.target] : [])))].sort();
+  const inputIndex = new Map<string, number>([
+    ...assets.map((name, i): [string, number] => [`asset:${name}`, i]),
+    ...targets.map((name, i): [string, number] => [`target:${name}`, assets.length + i]),
+  ]);
   const clips = track.clips.map((clip): PlacedClip => {
     const { start, duration } = placedWindow(clip, tempoMap);
+    const source = clip.asset ? `asset:${clip.asset}` : `target:${clip.target}`;
     return {
-      input: inputIndex.get(clip.asset)!,
+      input: inputIndex.get(source)!,
       start,
       duration,
       read_offset: clip.source_offset - clip.slip,
@@ -82,14 +94,16 @@ export function planTrack(
       a.fade_in - b.fade_in ||
       a.fade_out - b.fade_out,
   );
-  return { name: track.name, rule: 'track-render', assets, clips };
+  return { name: track.name, rule: 'track-render', assets, targets, clips };
 }
 
 export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
   version: 1,
-  wiringFields: ['assets'],
+  wiringFields: ['assets', 'targets'],
 
   assetDeps(spec) {
+    // Target deps are wired by the graph alongside these (graph.ts); they
+    // are edges into the targets package, not the assets package.
     return spec.assets;
   },
 
@@ -99,17 +113,17 @@ export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
   },
 
   async execute(spec, inputPaths, outputPath, ctx) {
-    const sources = spec.assets.map((name, i) => {
+    const sources = [...spec.assets, ...spec.targets].map((name, i) => {
       const wav = readWav(inputPaths[i]!);
       if (wav.sampleRate !== ctx.sampleRate) {
         throw new Error(
-          `asset "${name}" is ${wav.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
-            `Bloom never resamples implicitly; convert it (afconvert, or a normalize target) ` +
-            `and re-import`,
+          `input "${name}" is ${wav.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
+            `Bloom never resamples implicitly; render or convert it at the project rate ` +
+            `(a normalize target at ${ctx.sampleRate}, or afconvert and re-import)`,
         );
       }
       if (wav.channels.length > 2) {
-        throw new Error(`asset "${name}" has ${wav.channels.length} channels; mono or stereo only`);
+        throw new Error(`input "${name}" has ${wav.channels.length} channels; mono or stereo only`);
       }
       return wav;
     });
