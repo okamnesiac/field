@@ -8,6 +8,5 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, sc-render) stops surfacing surprises.
-- [Offline mix assembly](all/mix-assembly.md) — track stems, then the first
-  listenable `//mix:main`; the test that forces the timeline schemas to be
-  real.
+- [Playback](all/playback.md) — the first native code: `bloom-audiod`,
+  the control socket, and auditioning mixes through Core Audio.

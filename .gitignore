@@ -2,3 +2,4 @@
 .bloom/
 node_modules/
 dist/
+native/audiod/build/

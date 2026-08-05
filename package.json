@@ -15,7 +15,8 @@
     "prepare": "pnpm build",
     "bloom": "tsx src/cli.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build -j"
   },
   "dependencies": {
     "commander": "^14.0.0",

@@ -163,6 +163,27 @@ program
   });
 
 program
+  .command('devices')
+  .description('list output devices via bloom-audiod (spawns it if needed)')
+  .action(async () => {
+    try {
+      const { AudiodClient } = await import('./audiod/client.js');
+      const client = await AudiodClient.connect(requireRoot());
+      const result = await client.devices();
+      client.close();
+      if (result.null_output) {
+        process.stdout.write('daemon is in null-output mode (no devices)\n');
+        return;
+      }
+      for (const device of result.devices) {
+        process.stdout.write(`${device.default ? '* ' : '  '}${device.name}\n`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('query <expr>')
   .description("query the graph: a pattern, or deps(//songs/creek/targets:pad-96k)")
   .action((expr: string) => {

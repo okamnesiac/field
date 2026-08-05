@@ -1,0 +1,65 @@
+#pragma once
+
+#include <juce_core/juce_core.h>
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+class Player;
+
+// The versioned NDJSON control socket (playback.md §3.3): one JSON object
+// per line, request/response with client-chosen ids, plus broadcast events.
+// JUCE's StreamingSocket is TCP-only, so the AF_UNIX plumbing is POSIX by
+// hand; the socket path is bound relative to the daemon's working directory
+// (the project root) to stay inside sun_path's 104 bytes (§3.2).
+class Server
+{
+public:
+    Server (Player& player, juce::String relativeSocketPath);
+    ~Server();
+
+    // Empty string on success. Refuses to start if a live daemon already
+    // owns the socket; replaces a stale socket file.
+    juce::String start();
+
+    void broadcast (const juce::String& line);
+
+    // Joins and removes finished connections. Called from the heartbeat: a
+    // reader thread must never destroy its own Connection (a joinable
+    // std::thread destructor is std::terminate), so readers only mark
+    // themselves closed and the message thread reaps them.
+    void sweepClosedConnections();
+
+    int connectionCount();
+    juce::int64 lastActivityMs() const { return lastActivity.load(); }
+
+    // Set when a client sends {"op":"quit"}; main.cpp winds down the loop.
+    std::atomic<bool> quitRequested { false };
+
+private:
+    struct Connection
+    {
+        int fd = -1;
+        std::thread reader;
+        std::mutex writeMutex;
+        std::atomic<bool> open { true };
+    };
+
+    void acceptLoop();
+    void readLoop (std::shared_ptr<Connection> connection);
+    void handleLine (Connection& connection, const juce::String& line);
+    void send (Connection& connection, const juce::String& line);
+    juce::String dispatch (const juce::var& request); // returns response JSON line
+
+    Player& player;
+    const juce::String socketPath;
+    int listenFd = -1;
+    std::thread acceptThread;
+    std::atomic<bool> running { false };
+    std::mutex connectionsMutex;
+    std::vector<std::shared_ptr<Connection>> connections;
+    std::atomic<juce::int64> lastActivity { 0 };
+};
