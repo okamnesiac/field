@@ -44,8 +44,19 @@ export function placedWindow(clip: Clip, tempoMap: TempoMap): { start: number; d
   return { start, duration: tempoMap.ticksToSamples(clip.position + clip.duration) - start };
 }
 
-export function planTrack(track: Track, tempoMap: TempoMap): TrackRenderSpec {
-  const assets = [...new Set(track.clips.map((c) => c.asset))].sort();
+export function planTrack(
+  track: Track,
+  tempoMap: TempoMap,
+  sha256ByAsset: Map<string, string>,
+): TrackRenderSpec {
+  // Wiring order is content-hash order (name tiebreak for determinism), so
+  // renaming an asset cannot permute the input list or the clip indices —
+  // names never reach the action key at all (#9 review).
+  const assets = [...new Set(track.clips.map((c) => c.asset))].sort((a, b) => {
+    const ha = sha256ByAsset.get(a) ?? '';
+    const hb = sha256ByAsset.get(b) ?? '';
+    return ha < hb ? -1 : ha > hb ? 1 : a < b ? -1 : 1;
+  });
   const inputIndex = new Map(assets.map((name, i) => [name, i]));
   const clips = track.clips.map((clip): PlacedClip => {
     const { start, duration } = placedWindow(clip, tempoMap);

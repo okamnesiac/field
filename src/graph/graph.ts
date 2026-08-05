@@ -50,10 +50,12 @@ export function buildGraph(project: LoadedProject): Graph {
 
   for (const song of project.songs) {
     const pkgBase = song.dir;
+    const sha256ByAsset = new Map<string, string>();
     if (song.assets) {
       for (const asset of song.assets.data.assets) {
         const label: Label = { pkg: `${pkgBase}/assets`, name: asset.name };
         nodes.set(formatLabel(label), { kind: 'asset', label, songDir: song.dir, asset });
+        sha256ByAsset.set(asset.name, asset.sha256);
       }
     }
     if (song.targets) {
@@ -70,7 +72,7 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule(
           { pkg: `${pkgBase}/tracks`, name: track.data.name },
           song.dir,
-          planTrack(track.data, tempoMap),
+          planTrack(track.data, tempoMap, sha256ByAsset),
         );
       }
     }

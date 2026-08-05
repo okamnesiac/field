@@ -58,14 +58,20 @@ describe('placedWindow', () => {
   });
 });
 
+const hashes = new Map([
+  ['kick', '1111111111111111111111111111111111111111111111111111111111111111'],
+  ['snare', '2222222222222222222222222222222222222222222222222222222222222222'],
+]);
+
 describe('planTrack', () => {
-  it('resolves clips to samples and indexes sorted distinct assets', () => {
+  it('resolves clips to samples and indexes distinct assets in hash order', () => {
     const spec = planTrack(
       track([
         clip({ id: 'c1', asset: 'snare', position: 960, duration: 960 }),
         clip({ id: 'c2', asset: 'kick', position: 0, duration: 960, slip: 100 }),
       ]),
       map120,
+      hashes,
     );
     expect(spec.assets).toEqual(['kick', 'snare']);
     expect(spec.clips).toEqual([
@@ -93,7 +99,23 @@ describe('planTrack', () => {
   it('is invariant under YAML clip order (summing is commutative)', () => {
     const a = clip({ id: 'c1', asset: 'kick', position: 960 });
     const b = clip({ id: 'c2', asset: 'snare', position: 0 });
-    expect(planTrack(track([a, b]), map120)).toEqual(planTrack(track([b, a]), map120));
+    expect(planTrack(track([a, b]), map120, hashes)).toEqual(
+      planTrack(track([b, a]), map120, hashes),
+    );
+  });
+
+  it('wires assets by content hash, not name, so renames cannot permute inputs', () => {
+    const byHash = new Map([
+      ['apple', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'],
+      ['kick', '0000000000000000000000000000000000000000000000000000000000000000'],
+    ]);
+    const spec = planTrack(
+      track([clip({ id: 'c1', asset: 'apple' }), clip({ id: 'c2', asset: 'kick' })]),
+      map120,
+      byHash,
+    );
+    // Name order would be [apple, kick]; hash order wins.
+    expect(spec.assets).toEqual(['kick', 'apple']);
   });
 });
 
@@ -328,6 +350,37 @@ describe('track stems in the build graph', () => {
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml([...c2, ...c1]));
     await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(2); // …and the reordered file is a cache hit
+  });
+
+  it('survives an order-permuting asset rename as a cache hit (#9 review)', async () => {
+    // A second asset so a rename can permute name order: apple < kick < snare.
+    const src = join(root, '..', `bloom-track-src2-${Math.random()}.wav`);
+    writeWavFloat32(src, 48000, [Float32Array.from([0.5, 0.5])]);
+    await importAsset(root, 'creek', src, 'snare');
+    rmSync(src);
+    writeFileSync(
+      join(root, 'songs/creek/tracks/drums.yaml'),
+      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', asset: 'snare', position: 1920 })]),
+    );
+
+    const state = { runs: 0 };
+    const runner: RuleRunner = async (_node, _inputPaths, outputPath) => {
+      state.runs++;
+      writeFileSync(outputPath, 'stem');
+    };
+    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    expect(state.runs).toBe(1);
+
+    // snare → apple sorts before kick by name, but content hashes are the
+    // wiring order, so nothing in the action key moves.
+    const assetsPath = join(root, 'songs/creek/assets.yaml');
+    writeFileSync(assetsPath, readFileSync(assetsPath, 'utf8').replace('name: snare', 'name: apple'));
+    writeFileSync(
+      join(root, 'songs/creek/tracks/drums.yaml'),
+      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', asset: 'apple', position: 1920 })]),
+    );
+    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    expect(state.runs).toBe(1);
   });
 
   it('diagnoses fades that exceed the clip window', () => {

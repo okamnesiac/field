@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
@@ -152,7 +153,7 @@ async function buildNode(
     ? await impl.extraInputs(project.root, node.spec)
     : [];
   const inputHashes = [...declaredHashes, ...extraInputs.map((e) => e.sha256)];
-  const sampleRate = project.manifest?.data.sample_rate ?? 48000;
+  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const key = actionKey(node, inputHashes, sampleRate);
 
   const materialize = (sha256: string): string => {
@@ -261,7 +262,7 @@ export async function explain(
   if (impl.extraInputs) {
     inputs.push(...(await impl.extraInputs(project.root, node.spec)));
   }
-  const sampleRate = project.manifest?.data.sample_rate ?? 48000;
+  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const key = actionKey(node, inputs.map((i) => i.sha256), sampleRate);
   const cached = readAction(project, key);
   return {
