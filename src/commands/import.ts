@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
-import { parseDocument, Document } from 'yaml';
+import { parseDocument, Document, isSeq } from 'yaml';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { assetsFileOrder, assetsFileSchema } from '../schema/schemas.js';
@@ -43,11 +43,9 @@ export async function importAsset(
   }
 
   const ext = extname(sourcePath).toLowerCase();
-  const file = join('audio', `${assetName}${ext}`);
-  const destPath = join(songDir, file);
-  if (existsSync(destPath)) {
-    throw new Error(`${file} already exists in "${song}"`);
-  }
+  // Forward slashes always: the manifest format is platform-neutral.
+  const file = `audio/${assetName}${ext}`;
+  const destPath = join(songDir, 'audio', `${assetName}${ext}`);
 
   const assetsPath = join(songDir, 'assets.yaml');
   let doc: Document;
@@ -64,6 +62,9 @@ export async function importAsset(
   if (!existing.success) {
     throw new Error(`assets.yaml is invalid; fix it before importing (bloom check)`);
   }
+  // The declaration in assets.yaml is the existence marker, and it is
+  // written last. A file on disk without a declaration is the orphan of a
+  // failed import, so re-running overwrites it rather than wedging.
   if (existing.data.assets.some((a) => a.name === assetName)) {
     throw new Error(`asset "${assetName}" already declared in "${song}"`);
   }
@@ -73,6 +74,11 @@ export async function importAsset(
   const sha256 = await sha256File(destPath);
   const bytes = statSync(destPath).size;
 
+  if (!isSeq(doc.getIn(['assets']))) {
+    // `{}` or `assets:` (null) parse fine but have no sequence for addIn
+    // to extend; without this it would set a bare map and corrupt the file.
+    doc.setIn(['assets'], doc.createNode([]));
+  }
   doc.addIn(['assets'], doc.createNode({ name: assetName, file, sha256, bytes }));
   canonicalizeDocument(doc, assetsFileOrder);
   writeFileSync(assetsPath, stringifyDocument(doc));

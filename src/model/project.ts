@@ -255,8 +255,6 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Asset files stay inside the project: relative paths only, and never
-    // resolving above the project root.
     const assetNames = new Set<string>();
     if (song.assets) {
       for (const asset of song.assets.data.assets) {
@@ -264,17 +262,9 @@ function validate(project: LoadedProject): void {
           push(song.assets.path, `duplicate asset "${asset.name}"`);
         }
         assetNames.add(asset.name);
-        if (isAbsolute(asset.file)) {
-          push(song.assets.path, `asset "${asset.name}" file path must be relative: ${asset.file}`);
-          continue;
-        }
-        const resolved = resolve(project.root, song.dir, asset.file);
-        if (resolved !== project.root && !resolved.startsWith(project.root + sep)) {
-          push(song.assets.path, `asset "${asset.name}" file path escapes the project: ${asset.file}`);
-          continue;
-        }
-        if (!existsSync(resolved)) {
-          push(song.assets.path, `asset "${asset.name}" file not found: ${asset.file}`);
+        const resolved = resolveAssetFile(project.root, song.dir, asset.file);
+        if (resolved.problem) {
+          push(song.assets.path, `asset "${asset.name}" ${resolved.problem}`);
         }
       }
     }
@@ -346,6 +336,25 @@ function validate(project: LoadedProject): void {
   }
 }
 
+// Resolve an asset's file path safely, or say why it can't be used. The
+// single source of truth for asset-path rules — validate diagnoses with the
+// problem, and verifyAssetHashes reads only what this accepts, so the two
+// passes cannot drift apart.
+function resolveAssetFile(
+  root: string,
+  songDir: string,
+  file: string,
+): { path?: string; problem?: string } {
+  if (isAbsolute(file)) return { problem: `file path must be relative: ${file}` };
+  const path = resolve(root, songDir, file);
+  if (path !== root && !path.startsWith(root + sep)) {
+    return { problem: `file path escapes the project: ${file}` };
+  }
+  if (!existsSync(path)) return { problem: `file not found: ${file}` };
+  if (!statSync(path).isFile()) return { problem: `file is not a regular file: ${file}` };
+  return { path };
+}
+
 // Files whose formatting differs from canonical (project-core.md §3.6).
 export function unformattedFiles(project: LoadedProject): string[] {
   return allFiles(project)
@@ -353,16 +362,28 @@ export function unformattedFiles(project: LoadedProject): string[] {
     .map((file) => file.path);
 }
 
-// Content verification: every declared asset's bytes must hash to its
-// recorded sha256. Separate from loadProject because it reads full asset
-// files — check runs it; fmt and status don't need it.
+// Content verification: every declared asset's bytes must match its
+// recorded size and hash to its recorded sha256. Separate from loadProject
+// because it reads full asset files — check runs it; fmt and status don't
+// need it. Only paths resolveAssetFile accepts are read, so unusable paths
+// (already diagnosed by validate) are never opened.
 export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnostic[]> {
   const diagnostics: Diagnostic[] = [];
   for (const song of project.songs) {
     if (!song.assets) continue;
     for (const asset of song.assets.data.assets) {
-      const path = resolve(project.root, song.dir, asset.file);
-      if (isAbsolute(asset.file) || !existsSync(path)) continue; // already diagnosed
+      const { path } = resolveAssetFile(project.root, song.dir, asset.file);
+      if (!path) continue; // already diagnosed by validate
+      // Size first: cheaper than hashing, and truncation gets a clearer
+      // message than a bare hash mismatch.
+      const size = statSync(path).size;
+      if (size !== asset.bytes) {
+        diagnostics.push({
+          file: song.assets.path,
+          message: `asset "${asset.name}" is ${size} bytes on disk but ${asset.bytes} recorded`,
+        });
+        continue;
+      }
       const actual = await sha256File(path);
       if (actual !== asset.sha256) {
         diagnostics.push({

@@ -114,6 +114,35 @@ describe('import', () => {
     rmSync(src);
   });
 
+  it('recovers from a partial import (orphaned file, no declaration)', async () => {
+    createSong(root, 'opener');
+    const src = sourceFile('good bytes');
+    await importAsset(root, 'opener', src, 'good-take');
+    // Simulate a crash between copy and manifest write: file on disk,
+    // declaration gone.
+    writeFileSync(join(root, 'songs/opener/assets.yaml'), 'assets: []\n');
+    await expect(importAsset(root, 'opener', src, 'good-take')).resolves.toBeDefined();
+    expect((await check(root)).ok).toBe(true);
+    rmSync(src);
+  });
+
+  it('does not corrupt an assets.yaml that reads {}', async () => {
+    createSong(root, 'opener');
+    writeFileSync(join(root, 'songs/opener/assets.yaml'), '{}\n');
+    const src = sourceFile();
+    await importAsset(root, 'opener', src, 'first');
+    expect((await check(root)).ok).toBe(true);
+    rmSync(src);
+  });
+
+  it('records forward-slash file paths', async () => {
+    createSong(root, 'opener');
+    const src = sourceFile();
+    const result = await importAsset(root, 'opener', src, 'first');
+    expect(result.file).toBe('audio/first.wav');
+    rmSync(src);
+  });
+
   it('preserves comments in assets.yaml across imports', async () => {
     createSong(root, 'opener');
     const src = sourceFile();
@@ -189,10 +218,35 @@ describe('check', () => {
       'must be relative',
     );
 
-    writeFileSync(assetsPath, entry('../../../outside.wav'));
-    expect((await check(root)).diagnostics.map((d) => d.message).join()).toContain(
-      'escapes the project',
+    // An escaping path whose target exists: diagnosed once, never hashed.
+    const outside = sourceFile('outside bytes');
+    writeFileSync(assetsPath, entry(`../../../../${outside.split('/').pop()}`));
+    const escaped = await check(root);
+    const messages = escaped.diagnostics.map((d) => d.message);
+    expect(messages.join()).toContain('escapes the project');
+    expect(messages.join()).not.toContain('sha256');
+    rmSync(outside);
+  });
+
+  it('diagnoses a directory asset path instead of crashing (EISDIR)', async () => {
+    createSong(root, 'opener');
+    writeFileSync(
+      join(root, 'songs/opener/assets.yaml'),
+      ['assets:', '  - name: oops', '    file: audio', `    sha256: ${'a'.repeat(64)}`, '    bytes: 1', ''].join('\n'),
     );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('not a regular file');
+  });
+
+  it('flags a bytes field that disagrees with the file', async () => {
+    createSong(root, 'opener');
+    const src = sourceFile('twelve bytes');
+    await importAsset(root, 'opener', src, 'sized');
+    const assetsPath = join(root, 'songs/opener/assets.yaml');
+    writeFileSync(assetsPath, readFileSync(assetsPath, 'utf8').replace(/bytes: \d+/, 'bytes: 999999'));
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('999999 recorded');
+    rmSync(src);
   });
 
   it('flags meter changes off the bar boundary', async () => {

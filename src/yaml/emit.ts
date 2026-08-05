@@ -42,9 +42,21 @@ function orderNode(node: Node | null, order: KeyOrder | undefined): void {
   }
 }
 
+// Block style is canonical (project-core.md §3.6): clear flow flags on all
+// non-empty collections so `a: [1, 2]` formats as a block sequence. Empty
+// collections keep their inline `[]` / `{}` rendering.
+function clearFlow(doc: Document): void {
+  const block = (_key: unknown, node: { items: unknown[]; flow?: boolean }) => {
+    if (node.items.length > 0) node.flow = false;
+    return undefined;
+  };
+  visit(doc, { Map: block, Seq: block });
+}
+
 // Reorder a parsed document in place to canonical key order, keeping
 // comments attached to their pairs.
 export function canonicalizeDocument(doc: Document, order: KeyOrder): void {
+  clearFlow(doc);
   orderNode(doc.contents, order);
 }
 

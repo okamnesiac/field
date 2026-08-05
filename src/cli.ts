@@ -91,7 +91,12 @@ program
   .command('check')
   .description('validate schemas, references, asset content, and formatting')
   .action(async () => {
-    const result = await check(requireRoot());
+    let result;
+    try {
+      result = await check(requireRoot());
+    } catch (err) {
+      fail(err);
+    }
     for (const d of result.diagnostics) {
       process.stdout.write(`${d.file}: ${d.message}\n`);
     }
