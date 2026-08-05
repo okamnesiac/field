@@ -26,6 +26,7 @@ export interface ValidateContext {
   root: string; // absolute project root
   songDir: string; // project-relative song directory
   assetNames: Set<string>; // asset names declared in this song
+  targetNames: Set<string>; // target names declared in this song (all of them, forward refs included)
   push: (message: string) => void; // report a diagnostic
   // Resolve a file reference safely (relative, inside the project, exists,
   // regular file); baseDir is project-relative ('' = project root).
@@ -44,6 +45,10 @@ export interface RuleImpl<T extends RuleSpec = RuleSpec> {
   wiringFields: readonly string[];
   // Names of same-song assets this spec consumes (graph edges).
   assetDeps(spec: T): string[];
+  // Names of same-song targets this spec consumes — rule→rule edges
+  // (effects.md §3); these are what make cycles declarable, so bloom
+  // check runs a cycle detector over them.
+  targetDeps?(spec: T): string[];
   // Rule-specific semantic validation, run by bloom check.
   validate(spec: T, ctx: ValidateContext): void;
   // Inputs that participate in the action key by content hash without being

@@ -38,7 +38,7 @@ const targetsYaml = (rate: number) =>
     'targets:',
     '  - name: pad-normalized',
     '    rule: normalize',
-    '    input: pad',
+    '    asset: pad',
     `    sample_rate: ${rate}`,
     '    bit_depth: 16',
     '',
@@ -116,7 +116,7 @@ describe('build', () => {
   });
 
   it('refuses to build an invalid project', async () => {
-    writeFileSync(join(root, 'songs/creek/targets.yaml'), targetsYaml(96000).replace('input: pad', 'input: ghost'));
+    writeFileSync(join(root, 'songs/creek/targets.yaml'), targetsYaml(96000).replace('asset: pad', 'asset: ghost'));
     await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('unknown asset');
   });
 

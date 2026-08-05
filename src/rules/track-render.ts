@@ -102,9 +102,13 @@ export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
   wiringFields: ['assets', 'targets'],
 
   assetDeps(spec) {
-    // Target deps are wired by the graph alongside these (graph.ts); they
-    // are edges into the targets package, not the assets package.
     return spec.assets;
+  },
+
+  targetDeps(spec) {
+    // Clip-source targets: a clip on an SC render pulls the whole recipe
+    // into the stem's subgraph (mix-assembly.md §5).
+    return spec.targets;
   },
 
   validate() {

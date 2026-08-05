@@ -420,7 +420,7 @@ describe('clips over rule outputs', () => {
         'targets:',
         '  - name: kick-24',
         '    rule: normalize',
-        '    input: kick',
+        '    asset: kick',
         '    sample_rate: 48000',
         '    bit_depth: 24',
         '',
