@@ -1,24 +1,17 @@
-import { execFile } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
+import { getRule, type ExtraInput, type RunContext } from '../rules/index.js';
 import { deps, resolveLabel, type Graph, type GraphNode, type RuleNode } from './graph.js';
-
-const execFileAsync = promisify(execFile);
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
 // store under .bloom/cache/cas/<sha256>; the action index maps an action
 // key — the hash of canonical JSON of {rule, rule_version, input hashes,
 // parameters, project sample rate} — to its output hashes. Same key, no
-// work. Rules carry an explicit rule_version bumped to invalidate.
-
-const RULE_VERSIONS: Record<string, number> = {
-  normalize: 1,
-  'sc-render': 1,
-};
+// work. Rule behavior lives in src/rules/; this engine only knows that
+// rules exist.
 
 export interface ActionEntry {
   rule: string;
@@ -44,10 +37,6 @@ export interface Explanation {
   outputs?: { sha256: string; bytes: number }[];
 }
 
-export interface RunContext {
-  sampleRate: number; // project sample rate
-}
-
 // Executes a rule: reads input file, writes output file. Injectable so
 // tests can count executions or fake the tool.
 export type RuleRunner = (
@@ -57,116 +46,8 @@ export type RuleRunner = (
   ctx: RunContext,
 ) => Promise<void>;
 
-const SCLANG_APP_FALLBACK = '/Applications/SuperCollider.app/Contents/MacOS/sclang';
-
-type ExecError = Error & {
-  code?: string;
-  killed?: boolean;
-  stdout?: string;
-  stderr?: string;
-};
-
-// sclang reports compile and runtime errors on *stdout*; Node's exec error
-// message carries only stderr. Surface both, or the edit-retry loop this
-// exists for is flying blind.
-function formatScError(err: ExecError, programPath: string, timeoutMs: number): Error {
-  if (err.killed) {
-    return new Error(
-      `sclang timed out after ${Math.round(timeoutMs / 1000)}s for ${programPath} — ` +
-        `did the program call 0.exit?`,
-    );
-  }
-  const stdoutTail = (err.stdout ?? '')
-    .split('\n')
-    .filter((l) => l.trim() !== '')
-    .slice(-15)
-    .join('\n');
-  const detail = stdoutTail ? `\n${stdoutTail}` : '';
-  return new Error(`sclang failed for ${programPath}: ${err.message}${detail}`);
-}
-
-// Run an SC program under the sc-render contract: sclang gets the render
-// parameters in the environment, and must write BLOOM_OUTPUT and exit.
-export async function runScProgram(
-  programPath: string,
-  outputPath: string,
-  params: {
-    seed: number;
-    duration: number;
-    channels: number;
-    sampleRate: number;
-    timeoutMs?: number;
-  },
-): Promise<void> {
-  const env = {
-    ...process.env,
-    BLOOM_OUTPUT: outputPath,
-    BLOOM_SEED: String(params.seed),
-    BLOOM_DURATION: String(params.duration),
-    BLOOM_SAMPLE_RATE: String(params.sampleRate),
-    BLOOM_CHANNELS: String(params.channels),
-  };
-  // The ceiling scales with the render: NRT is usually faster than realtime,
-  // but the schema admits hour-long renders, and the ceiling exists to catch
-  // hangs, not to race legitimate work.
-  const timeout = params.timeoutMs ?? Math.max(180_000, 60_000 + params.duration * 10_000);
-  const options = { env, timeout };
-  const override = process.env['BLOOM_SCLANG'];
-  try {
-    await execFileAsync(override ?? 'sclang', [programPath], options);
-  } catch (err) {
-    const e = err as ExecError;
-    if (e.code === 'ENOENT') {
-      if (override) {
-        // The override is the determinism escape hatch (sc-render.md §2); a
-        // typo'd wrapper must never silently render through the app bundle.
-        throw new Error(`BLOOM_SCLANG points at a missing binary: ${override}`);
-      }
-      if (existsSync(SCLANG_APP_FALLBACK)) {
-        try {
-          await execFileAsync(SCLANG_APP_FALLBACK, [programPath], options);
-          return;
-        } catch (fallbackErr) {
-          throw formatScError(fallbackErr as ExecError, programPath, timeout);
-        }
-      }
-      throw new Error('sclang not found on PATH (install SuperCollider or set BLOOM_SCLANG)');
-    }
-    throw formatScError(e, programPath, timeout);
-  }
-}
-
-export const defaultRunner: RuleRunner = async (node, inputPath, outputPath, ctx) => {
-  const t = node.target;
-  if (t.rule === 'normalize') {
-    // afconvert is macOS-built-in with excellent SRC (project-core.md §5).
-    await execFileAsync('afconvert', [
-      '-f',
-      'WAVE',
-      '-d',
-      `LEI${t.bit_depth}@${t.sample_rate}`,
-      inputPath,
-      outputPath,
-    ]);
-    return;
-  }
-  if (t.rule === 'sc-render') {
-    await runScProgram(inputPath, outputPath, {
-      seed: t.seed,
-      duration: t.duration,
-      channels: t.channels,
-      sampleRate: ctx.sampleRate,
-    });
-    if (!existsSync(outputPath)) {
-      throw new Error(
-        `sc program ${t.program} exited without writing BLOOM_OUTPUT — ` +
-          `it must render to the path in BLOOM_OUTPUT and call 0.exit`,
-      );
-    }
-    return;
-  }
-  throw new Error(`unknown rule "${(t as { rule: string }).rule}"`);
-};
+export const defaultRunner: RuleRunner = (node, inputPath, outputPath, ctx) =>
+  getRule(node.target.rule).execute(node.target, inputPath, outputPath, ctx);
 
 function cacheDir(project: LoadedProject): string {
   return join(project.root, '.bloom', 'cache');
@@ -219,21 +100,18 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-// Wiring fields: identity plus what already contributes to the key as an
-// input hash. Everything else is a knob that shapes the output.
-const WIRING_FIELDS = new Set(['name', 'rule', 'input', 'program']);
-
+// The knobs that shape the output: everything except identity (name, rule)
+// and the rule's declared wiring, which already contributes as input hashes.
 function ruleParameters(node: RuleNode): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(node.target).filter(([k]) => !WIRING_FIELDS.has(k)),
-  );
+  const wiring = new Set(['name', 'rule', ...getRule(node.target.rule).wiringFields]);
+  return Object.fromEntries(Object.entries(node.target).filter(([k]) => !wiring.has(k)));
 }
 
 function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: number): string {
   return sha256Text(
     canonicalJson({
       rule: node.target.rule,
-      rule_version: RULE_VERSIONS[node.target.rule],
+      rule_version: getRule(node.target.rule).version,
       inputs: inputHashes,
       parameters: ruleParameters(node),
       project_sample_rate: projectSampleRate,
@@ -264,17 +142,16 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, sha256: node.asset.sha256 };
   }
 
+  const impl = getRule(node.target.rule);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
-  const inputHashes = inputNodes.map((d) => {
+  const declaredHashes = inputNodes.map((d) => {
     if (d.kind !== 'asset') throw new Error('only asset inputs supported');
     return d.asset.sha256;
   });
-  // An sc-render program is an input by content: hashing the actual bytes
-  // keys the action to the code as-is (no declaration to disagree with),
-  // so editing the program invalidates exactly its own renders.
-  if (node.target.rule === 'sc-render') {
-    inputHashes.push(await sha256File(join(project.root, node.target.program)));
-  }
+  const extraInputs: ExtraInput[] = impl.extraInputs
+    ? await impl.extraInputs(project.root, node.target)
+    : [];
+  const inputHashes = [...declaredHashes, ...extraInputs.map((e) => e.sha256)];
   const sampleRate = project.manifest?.data.sample_rate ?? 48000;
   const key = actionKey(node, inputHashes, sampleRate);
 
@@ -291,11 +168,11 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, outputPath: materialize(sha256), sha256 };
   }
 
-  // The action key is the *declared* input hash, so before executing, the
-  // consumed bytes must match the declaration — otherwise a tampered file
-  // gets cached under the clean file's key and the poisoned entry outlives
-  // the tampering. Only executed actions pay this cost; cache hits don't
-  // read inputs at all.
+  // The action key uses the *declared* asset hashes, so before executing,
+  // the consumed bytes must match the declaration — otherwise a tampered
+  // file gets cached under the clean file's key and the poisoned entry
+  // outlives the tampering. Only executed actions pay this cost; cache hits
+  // don't read inputs at all.
   for (const input of inputNodes) {
     if (input.kind !== 'asset') continue;
     const path = assetFilePath(project, input);
@@ -315,10 +192,8 @@ async function buildNode(
     }
   }
 
-  const inputPath =
-    node.target.rule === 'sc-render'
-      ? join(project.root, node.target.program)
-      : assetFilePath(project, inputNodes[0]!);
+  const assetPaths = inputNodes.map((d) => assetFilePath(project, d));
+  const inputPath = impl.inputPath(project.root, node.target, assetPaths);
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
@@ -327,17 +202,10 @@ async function buildNode(
     throw new Error(`rule "${node.target.rule}" produced no output for ${formatLabel(node.label)}`);
   }
 
-  // The program hash was read for the key before the render; if the file
-  // changed underneath the run, the output came from code the key doesn't
-  // describe — refuse to cache it.
-  if (node.target.rule === 'sc-render') {
-    const after = await sha256File(join(project.root, node.target.program));
-    if (after !== inputHashes[inputHashes.length - 1]) {
-      throw new Error(
-        `refusing to cache: ${node.target.program} changed during the render of ` +
-          `${formatLabel(node.label)} — re-run the build`,
-      );
-    }
+  // Extra inputs were hashed for the key before the run; a rule may refuse
+  // to cache output that came from since-changed inputs.
+  if (impl.verifyAfterRun) {
+    await impl.verifyAfterRun(project.root, node.target, extraInputs);
   }
 
   const sha256 = await sha256File(tmpOut);
@@ -385,18 +253,14 @@ export async function explain(
       outputs: [{ sha256: node.asset.sha256, bytes: node.asset.bytes }],
     };
   }
+  const impl = getRule(node.target.rule);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
   const inputs = inputNodes.map((d) => ({
     label: formatLabel(d.label),
     sha256: d.kind === 'asset' ? d.asset.sha256 : '',
   }));
-  if (node.target.rule === 'sc-render') {
-    // The program participates as an input by content hash; shown by path
-    // since it is a file, not a graph node.
-    inputs.push({
-      label: node.target.program,
-      sha256: await sha256File(join(project.root, node.target.program)),
-    });
+  if (impl.extraInputs) {
+    inputs.push(...(await impl.extraInputs(project.root, node.target)));
   }
   const sampleRate = project.manifest?.data.sample_rate ?? 48000;
   const key = actionKey(node, inputs.map((i) => i.sha256), sampleRate);
@@ -405,7 +269,7 @@ export async function explain(
     label: formatLabel(node.label),
     kind: 'rule',
     rule: node.target.rule,
-    ruleVersion: RULE_VERSIONS[node.target.rule]!,
+    ruleVersion: impl.version,
     inputs,
     parameters: ruleParameters(node),
     actionKey: key,

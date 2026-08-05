@@ -6,7 +6,8 @@ import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { buildTargets, explainTarget, queryDeps } from '../commands/build.js';
-import { runScProgram, type RuleRunner } from './build.js';
+import { runScProgram } from '../rules/sc-render.js';
+import type { RuleRunner } from './build.js';
 
 let root: string;
 

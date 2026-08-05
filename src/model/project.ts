@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
+import { getRule } from '../rules/index.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
@@ -292,26 +293,21 @@ function validate(project: LoadedProject): void {
     }
 
     if (song.targets) {
+      const targetsPath = song.targets.path;
       const targetNames = new Set<string>();
       for (const target of song.targets.data.targets) {
         if (targetNames.has(target.name)) {
-          push(song.targets.path, `duplicate target "${target.name}"`);
+          push(targetsPath, `duplicate target "${target.name}"`);
         }
         targetNames.add(target.name);
-        if (target.rule === 'normalize') {
-          if (!assetNames.has(target.input)) {
-            push(song.targets.path, `target "${target.name}" references unknown asset "${target.input}"`);
-          }
-        } else if (target.rule === 'sc-render') {
-          // Programs are project-relative (they usually live in shared/sc/).
-          if (target.program !== posix.normalize(target.program) || target.program.includes('\\')) {
-            push(song.targets.path, `target "${target.name}" program path not in normalized form: ${target.program}`);
-          }
-          const resolved = resolveAssetFile(project.root, '', target.program);
-          if (resolved.problem) {
-            push(song.targets.path, `target "${target.name}" program ${resolved.problem}`);
-          }
-        }
+        // Rule-specific semantics live with the rule (src/rules/).
+        getRule(target.rule).validate(target, {
+          root: project.root,
+          songDir: song.dir,
+          assetNames,
+          push: (message) => push(targetsPath, `target "${target.name}" ${message}`),
+          resolveFile: (baseDir, file) => resolveAssetFile(project.root, baseDir, file),
+        });
       }
     }
 

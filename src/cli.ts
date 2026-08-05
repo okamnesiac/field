@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import { parseChannels, parseDurationSeconds, parseSeed } from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
 import { check } from './commands/check.js';
-import { runScProgram } from './graph/build.js';
+import { runScProgram } from './rules/sc-render.js';
 import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
 import { importAsset } from './commands/import.js';
