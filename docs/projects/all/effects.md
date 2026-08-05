@@ -83,13 +83,15 @@ a one-line-diff-sized edit that rebuilds exactly its own chain.
 
 ## 5 Chunks
 
-1. **The rules** — DSP core (`src/audio/`: biquads + auto-gain, limiter,
-   freeverb), the three rules plus the normalize migration, target-dep
-   wiring, cycle validation, tests (including Fyra-derived auto-gain
-   properties: narrow bells cost almost nothing, wide shelves
-   proportionally more, boost/cut symmetry).
+1. **The rules** (shipped, #14) — DSP core (`src/audio/`: biquads +
+   auto-gain, limiter, freeverb), the three rules plus the normalize
+   migration, target-dep wiring, cycle validation, tests (including
+   Fyra-derived auto-gain properties: narrow bells cost almost nothing,
+   wide shelves proportionally more, boost/cut symmetry).
 2. **Inserts** — `inserts:` chains on tracks (applied post-clip-sum in
    the stem: inserts are content, so insert edits re-render the stem —
-   the accepted cost model) and a `master:` chain on mixes (applied
-   post-sum, pre-master-gain: the limiter's home). Same effect schemas in
-   all three positions. field demonstrates everything (§4).
+   the accepted cost model) and a `master:` chain on mixes, applied
+   **after** the sum and the master gain so a final limiter's ceiling
+   guards the true output (gain drives *into* the limiter; anything else
+   would defeat it). Same effect schemas in all three positions. field
+   demonstrates everything (§4).

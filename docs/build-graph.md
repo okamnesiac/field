@@ -85,6 +85,17 @@ outside the hash.
   are excluded entirely — they are mix-stage parameters, so a fader move
   never re-renders a stem. Assets must already be at the project sample
   rate: Bloom never resamples implicitly (mix-assembly.md §4).
+- **`eq` / `limit` / `reverb`** — the offline effects
+  ([projects/all/effects.md](projects/all/effects.md)): Fyra's
+  auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
+  compensation on by default — tone changes, level doesn't), an offline
+  lookahead limiter with a hard ceiling guarantee, and a deterministic
+  Freeverb whose output grows by its tail. Each sources exactly one of
+  `asset:`/`target:`, so chains are just targets referencing targets —
+  `sc-render → eq → reverb` — cached per link. The same parameters run as
+  track `inserts:` (baked into the stem) and in the mix `master:` chain
+  (post-gain, so the limiter guards the true output). Cycles became
+  declarable with target→target edges, so `bloom check` names them.
 - **`mix`** — declared in `songs/<song>/mix.yaml` (`//songs/<song>/mix:<name>`;
   `bloom song create` writes a default `main`). Sums track stems — the
   graph's first rule→rule edges — applying each track's `gain_db`/`pan`

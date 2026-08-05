@@ -1,5 +1,6 @@
+import { applyInsertChain } from '../audio/insert-chain.js';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import type { MixTarget, Track } from '../schema/schemas.js';
+import type { Insert, MixTarget, Track } from '../schema/schemas.js';
 import type { RuleImpl } from './types.js';
 
 // mix: sums track stems into the listenable artifact behind
@@ -19,7 +20,11 @@ export interface MixSpec {
   rule: 'mix';
   tracks: string[]; // wiring: track names, sorted; dep and fader order
   faders: Fader[]; // aligned with tracks
-  gain_db: number; // master
+  gain_db: number; // master, applied before the master chain
+  // Post-sum, post-gain (effects.md §5): a final limiter's ceiling guards
+  // the true output. Omitted when empty so chainless mixes keep their
+  // pre-inserts action keys.
+  master?: Insert[];
 }
 
 // Resolve a declared mix against the song's mixable tracks (audio, with
@@ -37,6 +42,7 @@ export function planMix(target: MixTarget, mixableTracks: Track[]): MixSpec {
       return { gain_db: track.gain_db, pan: track.pan };
     }),
     gain_db: target.gain_db,
+    ...(target.master.length > 0 ? { master: target.master } : {}),
   };
 }
 
@@ -100,6 +106,10 @@ export const mixRule: RuleImpl<MixSpec> = {
         right[at] = right[at]! * master;
       }
     }
-    writeWavFloat32(outputPath, ctx.sampleRate, [left, right]);
+    let channels: Float32Array[] = [left, right];
+    if (spec.master !== undefined) {
+      channels = applyInsertChain(channels, spec.master, ctx.sampleRate);
+    }
+    writeWavFloat32(outputPath, ctx.sampleRate, channels);
   },
 };

@@ -1,5 +1,6 @@
+import { applyInsertChain } from '../audio/insert-chain.js';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import type { Clip, Track } from '../schema/schemas.js';
+import type { Clip, Insert, Track } from '../schema/schemas.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { RuleImpl } from './types.js';
 
@@ -35,6 +36,10 @@ export interface TrackRenderSpec {
   assets: string[];
   targets: string[];
   clips: PlacedClip[];
+  // Inserts bake into the stem (effects.md §5): parameters here mean an
+  // insert edit re-renders it. Omitted entirely when the track has none,
+  // so insert-less stems keep their pre-inserts action keys.
+  inserts?: Insert[];
 }
 
 // A clip's window on the stem timeline, in samples. Musical clips project
@@ -94,7 +99,14 @@ export function planTrack(
       a.fade_in - b.fade_in ||
       a.fade_out - b.fade_out,
   );
-  return { name: track.name, rule: 'track-render', assets, targets, clips };
+  return {
+    name: track.name,
+    rule: 'track-render',
+    assets,
+    targets,
+    clips,
+    ...(track.inserts.length > 0 ? { inserts: track.inserts } : {}),
+  };
 }
 
 export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
@@ -152,6 +164,10 @@ export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
         right[at] = right[at]! + srcR[s]! * g;
       }
     }
-    writeWavFloat32(outputPath, ctx.sampleRate, [left, right]);
+    let channels: Float32Array[] = [left, right];
+    if (spec.inserts !== undefined) {
+      channels = applyInsertChain(channels, spec.inserts, ctx.sampleRate);
+    }
+    writeWavFloat32(outputPath, ctx.sampleRate, channels);
   },
 };
