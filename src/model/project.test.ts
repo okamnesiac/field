@@ -145,6 +145,28 @@ describe('import', () => {
     rmSync(other);
   });
 
+  it('blocks the overwrite even when the declared file is spelled oddly', async () => {
+    createSong(root, 'opener');
+    const src = sourceFile('kick bytes');
+    await importAsset(root, 'opener', src, 'kick');
+    const assetsPath = join(root, 'songs/opener/assets.yaml');
+    // "./audio/kick.wav" resolves identically and passes check; the guard
+    // must compare resolved paths, not strings.
+    writeFileSync(
+      assetsPath,
+      readFileSync(assetsPath, 'utf8')
+        .replace('name: kick', 'name: kick-alt')
+        .replace('file: audio/kick.wav', 'file: ./audio/kick.wav'),
+    );
+    const other = sourceFile('other bytes');
+    await expect(importAsset(root, 'opener', other, 'kick')).rejects.toThrow(
+      'already belongs to a declared asset',
+    );
+    expect(readFileSync(join(root, 'songs/opener/audio/kick.wav'), 'utf8')).toBe('kick bytes');
+    rmSync(src);
+    rmSync(other);
+  });
+
   it('does not corrupt an assets.yaml that reads {}', async () => {
     createSong(root, 'opener');
     writeFileSync(join(root, 'songs/opener/assets.yaml'), '{}\n');

@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, resolve } from 'node:path';
 import { parseDocument, Document, isSeq } from 'yaml';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
@@ -70,7 +70,10 @@ export async function importAsset(
   if (existing.data.assets.some((a) => a.name === assetName)) {
     throw new Error(`asset "${assetName}" already declared in "${song}"`);
   }
-  if (existing.data.assets.some((a) => a.file === file)) {
+  // Compare by resolved path, not string equality: check accepts any
+  // relative spelling that resolves inside the project ("./audio/x.wav"),
+  // so the guard must match by the same rules.
+  if (existing.data.assets.some((a) => resolve(songDir, a.file) === destPath)) {
     throw new Error(`${file} already belongs to a declared asset in "${song}"`);
   }
 
