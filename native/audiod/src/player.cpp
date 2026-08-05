@@ -1,5 +1,33 @@
 #include "player.h"
 
+#include <CoreAudio/CoreAudio.h>
+
+namespace
+{
+// Core Audio calls property listeners on its own thread; the handler
+// marshals onto the message thread, where all Player state lives. The
+// Player outlives the dispatch loop (main.cpp destroys it after the
+// drain), so a lambda landing during shutdown still finds it alive, and
+// listeners are removed in the destructor before that.
+OSStatus hardwareChanged (AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* clientData)
+{
+    auto* player = static_cast<Player*> (clientData);
+    juce::MessageManager::callAsync ([player] { player->refreshAudioDevice(); });
+    return noErr;
+}
+
+constexpr AudioObjectPropertyAddress kDefaultOutputAddress {
+    kAudioHardwarePropertyDefaultOutputDevice,
+    kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyElementMain,
+};
+constexpr AudioObjectPropertyAddress kDeviceListAddress {
+    kAudioHardwarePropertyDevices,
+    kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyElementMain,
+};
+} // namespace
+
 namespace
 {
 juce::DynamicObject::Ptr obj() { return new juce::DynamicObject(); }
@@ -15,11 +43,66 @@ Player::Player (bool useNullOutput) : nullMode (useNullOutput)
 
 Player::~Player()
 {
+    removeHardwareListeners();
     if (nullClockRunning.exchange (false) && nullClock.joinable())
         nullClock.join();
     if (! nullMode)
         deviceManager.removeAudioCallback (this);
     transport.setSource (nullptr);
+}
+
+void Player::registerHardwareListeners()
+{
+    if (nullMode || hardwareListenersRegistered)
+        return;
+    AudioObjectAddPropertyListener (kAudioObjectSystemObject, &kDefaultOutputAddress,
+                                    hardwareChanged, this);
+    AudioObjectAddPropertyListener (kAudioObjectSystemObject, &kDeviceListAddress,
+                                    hardwareChanged, this);
+    hardwareListenersRegistered = true;
+}
+
+void Player::removeHardwareListeners()
+{
+    if (! hardwareListenersRegistered)
+        return;
+    AudioObjectRemovePropertyListener (kAudioObjectSystemObject, &kDefaultOutputAddress,
+                                       hardwareChanged, this);
+    AudioObjectRemovePropertyListener (kAudioObjectSystemObject, &kDeviceListAddress,
+                                       hardwareChanged, this);
+    hardwareListenersRegistered = false;
+}
+
+void Player::refreshAudioDevice()
+{
+    if (nullMode)
+        return;
+    auto* type = deviceManager.getCurrentDeviceTypeObject();
+    if (type == nullptr)
+        return;
+    type->scanForDevices();
+    auto names = type->getDeviceNames (false);
+    if (names.isEmpty())
+        return;
+
+    auto* current = deviceManager.getCurrentAudioDevice();
+    const bool currentGone = current == nullptr || ! names.contains (current->getName());
+    // An explicit selection stands as long as its device exists.
+    if (explicitSelection && ! currentGone)
+        return;
+    if (currentGone)
+        explicitSelection = false;
+
+    auto defaultName = names[juce::jmax (0, type->getDefaultDeviceIndex (false))];
+    if (! currentGone && current->getName() == defaultName)
+        return;
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.outputDeviceName = defaultName;
+    deviceManager.setAudioDeviceSetup (setup, false);
+    // A loaded file still prefers a device rate that matches it (§3.5).
+    if (fileSampleRate > 0)
+        maybeMatchDeviceRate (fileSampleRate);
 }
 
 juce::String Player::initialise()
@@ -50,6 +133,7 @@ juce::String Player::initialise()
     if (error.isNotEmpty())
         return error;
     deviceManager.addAudioCallback (this);
+    registerHardwareListeners();
     return {};
 }
 
@@ -84,7 +168,11 @@ juce::String Player::selectDevice (const juce::String& name)
         return "no devices in null-output mode";
     auto setup = deviceManager.getAudioDeviceSetup();
     setup.outputDeviceName = name;
-    return deviceManager.setAudioDeviceSetup (setup, true);
+    auto error = deviceManager.setAudioDeviceSetup (setup, true);
+    // Only a successful selection pins the device against default-follow.
+    if (error.isEmpty())
+        explicitSelection = true;
+    return error;
 }
 
 void Player::maybeMatchDeviceRate (double fileRate)

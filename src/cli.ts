@@ -211,6 +211,11 @@ program
             onPositionLine = true;
           }
         },
+        onDevice: (name) => {
+          if (onPositionLine) process.stdout.write('\n');
+          onPositionLine = false;
+          process.stdout.write(`→ output moved to ${name}\n`);
+        },
         interrupted: () => interrupted,
       });
       if (onPositionLine) process.stdout.write('\n');

@@ -28,6 +28,14 @@ public:
     juce::var deviceList();
     juce::String selectDevice (const juce::String& name);
 
+    // Re-reads Core Audio's world after a hot-plug or default-output
+    // change (message thread; marshalled from the Core Audio listener).
+    // The daemon follows the system default live unless the user
+    // explicitly selected a device; a selection whose device vanishes
+    // resets to the default. This is what keeps a long-lived daemon's
+    // output honest against the `*` in `bloom devices` (#16).
+    void refreshAudioDevice();
+
     // Returns {error} or {samples, sample_rate, channels}.
     juce::var load (const juce::File& file);
 
@@ -60,7 +68,13 @@ private:
     juce::int64 positionSamples() const;
     void maybeMatchDeviceRate (double fileRate);
 
+    void registerHardwareListeners();
+    void removeHardwareListeners();
+
     const bool nullMode;
+    // True once device.select succeeds; cleared if that device vanishes.
+    bool explicitSelection = false;
+    bool hardwareListenersRegistered = false;
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
     juce::TimeSliceThread readThread { "audiod file reader" };

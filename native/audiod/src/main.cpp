@@ -32,6 +32,12 @@ public:
         : player (p), server (s), idleMs ((juce::int64) idleSeconds * 1000)
     {
         lastKnownState = player.transportState();
+        // Baseline the device too, or the first tick broadcasts the
+        // spawn-time output as a phantom "moved" event (#16 review).
+        lastKnownDevice = player.status()
+                              .getProperty ("device", juce::var())
+                              .getProperty ("name", juce::var())
+                              .toString();
         startTimer (250);
     }
 
@@ -44,6 +50,8 @@ public:
         if (player.streamFinished())
             player.stop();
 
+        auto status = player.status();
+
         auto state = player.transportState();
         if (state != lastKnownState)
         {
@@ -52,9 +60,24 @@ public:
                                          { o.setProperty ("state", state); }));
         }
 
+        // The output can move underneath a client (default-follow, device
+        // vanishing): say so on the socket.
+        auto device = status.getProperty ("device", juce::var());
+        auto deviceName = device.getProperty ("name", juce::var()).toString();
+        if (deviceName != lastKnownDevice)
+        {
+            lastKnownDevice = deviceName;
+            if (deviceName.isNotEmpty())
+                server.broadcast (jsonEvent ("device", [&] (juce::DynamicObject& o)
+                {
+                    o.setProperty ("name", deviceName);
+                    o.setProperty ("sample_rate", device.getProperty ("sample_rate", 0));
+                }));
+        }
+
         if (state == "playing")
         {
-            auto sample = (juce::int64) player.status().getProperty ("sample", 0);
+            auto sample = (juce::int64) status.getProperty ("sample", 0);
             server.broadcast (jsonEvent ("position", [&] (juce::DynamicObject& o)
                                          { o.setProperty ("sample", sample); }));
         }
@@ -70,6 +93,7 @@ private:
     Server& server;
     const juce::int64 idleMs;
     juce::String lastKnownState;
+    juce::String lastKnownDevice;
 };
 } // namespace
 

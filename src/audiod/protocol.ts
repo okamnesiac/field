@@ -55,5 +55,9 @@ export const errorResponseSchema = z.object({
 export const eventSchema = z.discriminatedUnion('event', [
   z.object({ event: z.literal('state'), state: transportState }),
   z.object({ event: z.literal('position'), sample: z.number().int() }),
+  // The output moved underneath the clients: default-follow tracked a
+  // system-default change, or the held device vanished and the daemon
+  // fell back (playback.md §5).
+  z.object({ event: z.literal('device'), name: z.string(), sample_rate: z.number() }),
 ]);
 export type AudiodEvent = z.infer<typeof eventSchema>;

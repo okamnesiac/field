@@ -210,7 +210,7 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "bloom-audiod");
-        ok->setProperty ("version", "0.1.0");
+        ok->setProperty ("version", "0.2.0");
     }
     else if (op == "devices")
     {
