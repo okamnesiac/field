@@ -1,10 +1,12 @@
 # Plan: Project core — format, CLI, build graph skeleton
 
-**Status:** In progress. Scaffold, schemas, tick/tempo math, deterministic
-YAML, and the first CLI commands shipped in #4. The asset store
-(`assets.yaml` name→hash binding, `bloom import`, content verification in
-`check`) is the second chunk; the build graph (labels, hashing, cache,
-`build`/`query`/`explain`) is the remaining one.
+**Status:** Scaffold, schemas, tick/tempo math, deterministic YAML, and the
+first CLI commands shipped in #4; the asset store in #5; the build graph
+(labels, action cache, `build`/`query`/`explain`, the normalize rule, and
+§7's normalized-path enforcement) is the third and final chunk. The §4
+definition-of-done flow has been run end to end. The phase finishes when
+the build-graph PR merges and real use (field, then sc-render) stops
+surfacing surprises.
 
 **Goal:** A `bloom` CLI that can initialize a multi-song project, validate its
 schemas, hash and store assets content-addressably, and build trivial targets

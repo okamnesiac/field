@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isSlug } from '../ids.js';
+import { RESERVED_TARGET_NAME } from '../labels.js';
 import {
   songOrder,
   songSchema,
@@ -41,6 +42,9 @@ export function createTrack(
   type: 'audio' | 'midi',
 ): string {
   if (!isSlug(name)) throw new Error(`track name "${name}" must be a lowercase-slug`);
+  if (name === RESERVED_TARGET_NAME) {
+    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar`);
+  }
   const songDir = join(root, 'songs', song);
   if (!existsSync(join(songDir, 'song.yaml'))) {
     throw new Error(`song "${song}" does not exist (bloom song create ${song})`);
