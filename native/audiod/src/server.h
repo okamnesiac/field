@@ -65,6 +65,7 @@ private:
 
     Player& player;
     const juce::String socketPath;
+    int lockFd = -1; // flock held for the daemon's life (single-owner guarantee)
     int listenFd = -1;
     std::thread acceptThread;
     std::atomic<bool> running { false };

@@ -153,6 +153,26 @@ describe.skipIf(!binary)('bloom-audiod protocol', () => {
     });
   });
 
+  it('survives a stampede of concurrent first connections (#12 review)', async () => {
+    // Several CLIs racing to spawn the daemon on a fresh project: the
+    // flock decides a single winner, losers exit, and every client ends
+    // up served by the survivor.
+    const fresh = mkdtempSync(join(tmpdir(), 'bloom-audiod-race-'));
+    try {
+      const clients = await Promise.all(
+        Array.from({ length: 6 }, () =>
+          AudiodClient.connect(fresh, { nullOutput: true, idleSeconds: 60 }),
+        ),
+      );
+      const statuses = await Promise.all(clients.map((c) => c.status()));
+      expect(statuses.every((s) => s.state === 'stopped')).toBe(true);
+      await clients[0]!.quit();
+      for (const c of clients) c.close();
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
+  });
+
   it('refuses to load garbage and reports unknown ops', async () => {
     await expect(client.load(join(root, 'missing.wav'))).rejects.toThrow('cannot read');
     await expect(

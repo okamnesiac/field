@@ -1,6 +1,8 @@
 #include "server.h"
 #include "player.h"
 
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -41,6 +43,8 @@ Server::~Server()
         ::close (listenFd);
         ::unlink (socketPath.toRawUTF8());
     }
+    if (lockFd >= 0)
+        ::close (lockFd); // releases the flock; the lock file itself stays
     if (acceptThread.joinable())
         acceptThread.join();
 
@@ -69,18 +73,19 @@ juce::String Server::start()
     addr.sun_family = AF_UNIX;
     std::snprintf (addr.sun_path, sizeof (addr.sun_path), "%s", socketPath.toRawUTF8());
 
-    // If a daemon already owns this socket, defer to it; a socket file
-    // nobody answers is a stale leftover from a crash and gets replaced.
-    int probe = ::socket (AF_UNIX, SOCK_STREAM, 0);
-    if (probe >= 0)
-    {
-        if (::connect (probe, (sockaddr*) &addr, sizeof (addr)) == 0)
-        {
-            ::close (probe);
-            return "another bloom-audiod already owns " + socketPath;
-        }
-        ::close (probe);
-    }
+    // Exactly one daemon per socket, decided by flock rather than a
+    // connect probe: two daemons spawned in the same instant could each
+    // fail the probe and unlink the other's freshly bound socket (#12
+    // review). The lock is held for the daemon's whole life and the OS
+    // releases it on any death, so it cannot go stale; with the lock won,
+    // any existing socket file is by definition a dead daemon's leftover.
+    // The lock file itself is never unlinked — removing it would reopen
+    // the race for the next pair of spawns.
+    lockFd = ::open ((socketPath + ".lock").toRawUTF8(), O_CREAT | O_RDWR, 0600);
+    if (lockFd < 0)
+        return "cannot open lock file: " + juce::String (strerror (errno));
+    if (::flock (lockFd, LOCK_EX | LOCK_NB) != 0)
+        return "another bloom-audiod already owns " + socketPath;
     ::unlink (socketPath.toRawUTF8());
 
     listenFd = ::socket (AF_UNIX, SOCK_STREAM, 0);
