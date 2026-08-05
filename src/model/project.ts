@@ -1,10 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
-import { canonicalText, type KeyOrder } from '../yaml/emit.js';
+import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import {
   arrangementOrder,
   arrangementSchema,
@@ -31,10 +31,13 @@ export interface Diagnostic {
   message: string;
 }
 
+// Every loaded file carries the KeyOrder it was validated under, so
+// formatting decisions never re-infer a file's role from its path.
 export interface LoadedFile<T> {
   path: string; // project-relative
   data: T;
   raw: string;
+  order: KeyOrder;
 }
 
 export interface LoadedSong {
@@ -87,6 +90,13 @@ function loadFile<T>(
     project.diagnostics.push({ file: path, message: `invalid YAML: ${doc.errors[0]!.message}` });
     return undefined;
   }
+  if (hasAnchorsOrAliases(doc)) {
+    project.diagnostics.push({
+      file: path,
+      message: 'anchors and aliases are not allowed in project files',
+    });
+    return undefined;
+  }
   const parsed = spec.schema.safeParse(doc.toJS());
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
@@ -95,7 +105,7 @@ function loadFile<T>(
     }
     return undefined;
   }
-  return { path, data: parsed.data, raw };
+  return { path, data: parsed.data, raw, order: spec.order };
 }
 
 function yamlFiles(dir: string): string[] {
@@ -176,6 +186,22 @@ export function loadProject(root: string): LoadedProject {
   return project;
 }
 
+// Every loaded file in declaration order, for generic passes like
+// formatting checks.
+export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
+  const files: (LoadedFile<unknown> | undefined)[] = [
+    project.manifest,
+    ...project.songs.flatMap((s): (LoadedFile<unknown> | undefined)[] => [
+      s.song,
+      s.tempo,
+      s.arrangement,
+      ...s.tracks,
+      ...s.takes,
+    ]),
+  ];
+  return files.filter((f) => f !== undefined);
+}
+
 // Semantic checks beyond per-file schemas: identity rules, tempo/meter
 // validity, referential integrity, and canonical formatting.
 function validate(project: LoadedProject): void {
@@ -186,9 +212,10 @@ function validate(project: LoadedProject): void {
       push(song.song.path, `name "${song.song.data.name}" must match directory "${song.name}"`);
     }
 
+    let tempoMap: TempoMap | undefined;
     if (song.tempo) {
       try {
-        new TempoMap(song.tempo.data.tempo, project.manifest?.data.sample_rate ?? 48000);
+        tempoMap = new TempoMap(song.tempo.data.tempo, project.manifest?.data.sample_rate ?? 48000);
       } catch (err) {
         push(song.tempo.path, (err as Error).message);
       }
@@ -214,6 +241,23 @@ function validate(project: LoadedProject): void {
       }
     }
 
+    // Asset references stay inside the project: relative paths only, and
+    // never resolving above the project root.
+    const checkAsset = (file: string, label: string, asset: string) => {
+      if (isAbsolute(asset)) {
+        push(file, `${label} asset path must be relative: ${asset}`);
+        return;
+      }
+      const resolved = resolve(project.root, song.dir, asset);
+      if (resolved !== project.root && !resolved.startsWith(project.root + sep)) {
+        push(file, `${label} asset path escapes the project: ${asset}`);
+        return;
+      }
+      if (!existsSync(resolved)) {
+        push(file, `${label} asset not found: ${asset}`);
+      }
+    };
+
     const trackNames = new Set<string>();
     for (const track of song.tracks) {
       const expected = basename(track.path, '.yaml');
@@ -226,20 +270,48 @@ function validate(project: LoadedProject): void {
       for (const clip of track.data.clips) {
         if (clipIds.has(clip.id)) push(track.path, `duplicate clip id "${clip.id}"`);
         clipIds.add(clip.id);
-        const assetPath = join(project.root, song.dir, clip.asset);
-        if (!existsSync(assetPath)) {
-          push(track.path, `clip "${clip.id}" asset not found: ${clip.asset}`);
-        }
+        checkAsset(track.path, `clip "${clip.id}"`, clip.asset);
       }
     }
 
     for (const take of song.takes) {
+      // Filenames are keys (project-core.md §6): takes/<track>/<take-id>.yaml.
+      const expectedId = basename(take.path, '.yaml');
+      if (take.data.id !== expectedId) {
+        push(take.path, `id "${take.data.id}" must match filename "${expectedId}"`);
+      }
+      const dirTrack = basename(dirname(take.path));
+      if (take.data.track !== dirTrack) {
+        push(take.path, `track "${take.data.track}" must match containing directory "${dirTrack}"`);
+      }
       if (!trackNames.has(take.data.track)) {
         push(take.path, `take references unknown track "${take.data.track}"`);
       }
-      const assetPath = join(project.root, song.dir, take.data.asset);
-      if (!existsSync(assetPath)) {
-        push(take.path, `asset not found: ${take.data.asset}`);
+      checkAsset(take.path, 'take', take.data.asset);
+
+      // Takes store both time representations under a declared anchor; the
+      // derived one must agree with the tempo map (project-core.md §3.1).
+      if (tempoMap) {
+        if (take.data.anchor === 'musical') {
+          const derived = tempoMap.ticksToSamples(take.data.position);
+          if (derived !== take.data.position_samples) {
+            push(
+              take.path,
+              `position_samples ${take.data.position_samples} disagrees with tempo map ` +
+                `(position ${take.data.position} ticks = ${derived} samples)`,
+            );
+          }
+        } else {
+          const derived = tempoMap.samplesToTicks(take.data.position_samples);
+          // ±1 tick tolerance: the authoritative samples value rounds to ticks.
+          if (Math.abs(derived - take.data.position) > 1) {
+            push(
+              take.path,
+              `position ${take.data.position} disagrees with tempo map ` +
+                `(position_samples ${take.data.position_samples} = ${Math.round(derived)} ticks)`,
+            );
+          }
+        }
       }
     }
   }
@@ -247,27 +319,7 @@ function validate(project: LoadedProject): void {
 
 // Files whose formatting differs from canonical (project-core.md §3.6).
 export function unformattedFiles(project: LoadedProject): string[] {
-  const out: string[] = [];
-  const consider = (file: LoadedFile<unknown> | undefined, order: KeyOrder) => {
-    if (!file) return;
-    if (canonicalText(file.raw, order) !== file.raw) out.push(file.path);
-  };
-  consider(project.manifest, projectOrder);
-  for (const song of project.songs) {
-    consider(song.song, songOrder);
-    consider(song.tempo, tempoFileOrder);
-    consider(song.arrangement, arrangementOrder);
-    for (const track of song.tracks) consider(track, trackOrder);
-    for (const take of song.takes) consider(take, takeOrder);
-  }
-  return out;
+  return allFiles(project)
+    .filter((file) => canonicalText(file.raw, file.order) !== file.raw)
+    .map((file) => file.path);
 }
-
-export const fileOrders = {
-  project: projectOrder,
-  song: songOrder,
-  tempo: tempoFileOrder,
-  arrangement: arrangementOrder,
-  track: trackOrder,
-  take: takeOrder,
-} as const;

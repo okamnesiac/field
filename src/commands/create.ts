@@ -20,12 +20,15 @@ export function createSong(root: string, name: string): string {
   mkdirSync(join(dir, 'tracks'), { recursive: true });
   mkdirSync(join(dir, 'audio'), { recursive: true });
 
-  writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
+  // song.yaml is the existence marker the guard above checks, so it is
+  // written last: a partial failure leaves a directory that createSong can
+  // still be re-run against.
   const tempo = tempoFileSchema.parse({
     tempo: [{ at: 0, bpm: 120 }],
     meter: [{ at: 0, numerator: 4, denominator: 4 }],
   });
   writeFileSync(join(dir, 'tempo.yaml'), stringifyCanonical(tempo, tempoFileOrder));
+  writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
   return dir;
 }
 

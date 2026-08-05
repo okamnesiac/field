@@ -1,4 +1,4 @@
-import { Document, parseDocument, isMap, isSeq, isScalar, type Node, type Pair } from 'yaml';
+import { Document, parseDocument, visit, isMap, isSeq, isScalar, type Node, type Pair } from 'yaml';
 
 // Deterministic YAML emission (project-core.md §3.6): schema-defined key
 // order, 2-space indent, block style, no anchors/aliases, minimal quoting,
@@ -57,6 +57,30 @@ export function stringifyCanonical(value: unknown, order?: KeyOrder): string {
   const doc = new Document(value);
   if (order) canonicalizeDocument(doc, order);
   return stringifyDocument(doc);
+}
+
+// Anchors and aliases are banned from checked-in files (project-core.md
+// §3.6): an alias makes one logical edit mean N textual things, which
+// breaks the diffable-YAML contract.
+export function hasAnchorsOrAliases(doc: Document): boolean {
+  let found = false;
+  const flagAnchor = (_key: unknown, node: { anchor?: string | undefined }) => {
+    if (node.anchor) {
+      found = true;
+      return visit.BREAK;
+    }
+    return undefined;
+  };
+  visit(doc, {
+    Alias: () => {
+      found = true;
+      return visit.BREAK;
+    },
+    Scalar: flagAnchor,
+    Map: flagAnchor,
+    Seq: flagAnchor,
+  });
+  return found;
 }
 
 // Canonical form of existing YAML text: parse, reorder, restringify.
