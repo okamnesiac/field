@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { closeSync, existsSync, openSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,6 +120,10 @@ export class AudiodClient extends EventEmitter {
       const args = ['--socket', SOCKET_RELATIVE];
       if (options.nullOutput) args.push('--null-output');
       if (options.idleSeconds !== undefined) args.push('--idle', String(options.idleSeconds));
+      // .bloom/ is otherwise created lazily by the build cache; a project
+      // that has never built must still be able to spawn the daemon
+      // (which also binds its socket in there).
+      mkdirSync(join(root, '.bloom'), { recursive: true });
       // A detached daemon's stderr would otherwise vanish; the log is the
       // only witness when startup fails.
       const log = openSync(join(root, '.bloom', 'audiod.log'), 'a');
@@ -156,7 +160,12 @@ export class AudiodClient extends EventEmitter {
       const line = this.buffer.slice(0, newline);
       this.buffer = this.buffer.slice(newline + 1);
       if (!line.trim()) continue;
-      const message = JSON.parse(line) as Record<string, unknown>;
+      let message: Record<string, unknown>;
+      try {
+        message = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue; // a malformed daemon line must not crash the CLI
+      }
       if (typeof message['id'] === 'number') {
         const entry = this.pending.get(message['id']);
         if (entry) {

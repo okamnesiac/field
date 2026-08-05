@@ -120,6 +120,10 @@ void Server::acceptLoop()
         }
         lastActivity = juce::Time::currentTimeMillis();
         connection->reader = std::thread ([this, connection] { readLoop (connection); });
+        // A connection accepted in the same instant as beginShutdown would
+        // miss its half-close and stall the drain loop; catch it here.
+        if (! running)
+            ::shutdown (fd, SHUT_RD);
     }
 }
 
@@ -280,6 +284,17 @@ void Server::send (Connection& connection, const juce::String& line)
         utf8 += n;
         remaining -= (size_t) n;
     }
+}
+
+void Server::beginShutdown()
+{
+    running = false;
+    if (listenFd >= 0)
+        ::shutdown (listenFd, SHUT_RDWR);
+    const std::lock_guard<std::mutex> lock (connectionsMutex);
+    for (auto& connection : connections)
+        if (connection->open)
+            ::shutdown (connection->fd, SHUT_RD); // write side stays up for in-flight responses
 }
 
 void Server::broadcast (const juce::String& line)

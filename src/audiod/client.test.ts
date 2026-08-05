@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -24,8 +24,9 @@ describe.skipIf(!binary)('bloom-audiod protocol', () => {
   let client: AudiodClient;
 
   beforeEach(async () => {
+    // No .bloom/ pre-created: a project that has never built must still
+    // spawn the daemon (#12 review P3) — the client owns the mkdir.
     root = mkdtempSync(join(tmpdir(), 'bloom-audiod-'));
-    mkdirSync(join(root, '.bloom'), { recursive: true });
     client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
   });
 
@@ -115,6 +116,41 @@ describe.skipIf(!binary)('bloom-audiod protocol', () => {
     await second.pause();
     expect((await client.status()).state).toBe('paused');
     second.close();
+  });
+
+  it('shuts down cleanly under concurrent requests (#12 review P2)', async () => {
+    // The reviewer's probe: one client hammers status while another sends
+    // quit. A request landing in the shutdown window must resolve or
+    // reject — never hang — and the daemon must actually exit.
+    const second = await AudiodClient.connect(root, { spawnIfNeeded: false });
+    const hammer = (async () => {
+      for (let i = 0; i < 500; i++) {
+        try {
+          await client.status();
+        } catch {
+          return; // connection closed by shutdown: fine
+        }
+      }
+    })();
+    await second.quit();
+    second.close();
+    await hammer; // a hang here fails the test by timeout
+
+    // The daemon is gone: nobody answers the socket anymore.
+    await new Promise<void>((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const poll = async () => {
+        try {
+          const probe = await AudiodClient.connect(root, { spawnIfNeeded: false });
+          probe.close();
+          if (Date.now() > deadline) reject(new Error('daemon still answering after quit'));
+          else setTimeout(poll, 100);
+        } catch {
+          resolve();
+        }
+      };
+      void poll();
+    });
   });
 
   it('refuses to load garbage and reports unknown ops', async () => {

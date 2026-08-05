@@ -25,6 +25,15 @@ public:
     // owns the socket; replaces a stale socket file.
     juce::String start();
 
+    // Phase one of shutdown, called while the message loop is still
+    // dispatching: stop accepting and half-close every connection's read
+    // side so readers drain out. A reader mid-request may be waiting on a
+    // MessageManagerLock, which only the still-running loop can grant —
+    // shutting down after leaving the loop deadlocks join() against that
+    // wait (#12 review). main.cpp keeps dispatching until
+    // connectionCount() reaches zero, then destruction joins nothing live.
+    void beginShutdown();
+
     void broadcast (const juce::String& line);
 
     // Joins and removes finished connections. Called from the heartbeat: a

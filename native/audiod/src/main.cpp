@@ -122,5 +122,18 @@ int main (int argc, char* argv[])
     // async callbacks in a plain console process.
     while (! heartbeat.wantExit)
         juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
+
+    // Drain before destruction, still dispatching: a reader parked on a
+    // MessageManagerLock is only released by this loop, so leaving it with
+    // live readers would deadlock ~Server's join (#12 review). Progress is
+    // guaranteed — each pass grants pending locks, finished readers mark
+    // themselves closed, the sweep reaps them.
+    server.beginShutdown();
+    while (server.connectionCount() > 0)
+    {
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        server.sweepClosedConnections();
+    }
+    server.sweepClosedConnections();
     return 0;
 }
