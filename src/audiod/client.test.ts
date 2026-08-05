@@ -19,6 +19,14 @@ const binary = (() => {
   }
 })();
 
+describe('event schema', () => {
+  it('parses device events (the hardware-follow path emits them)', async () => {
+    const { eventSchema } = await import('./protocol.js');
+    const parsed = eventSchema.parse({ event: 'device', name: 'Volt 176', sample_rate: 48000 });
+    expect(parsed).toEqual({ event: 'device', name: 'Volt 176', sample_rate: 48000 });
+  });
+});
+
 describe.skipIf(!binary)('bloom-audiod protocol', () => {
   let root: string;
   let client: AudiodClient;

@@ -62,6 +62,8 @@ export interface PlayOptions {
 export interface PlayHooks {
   onItem?: (label: string, note: string) => void;
   onPosition?: (line: string) => void;
+  // The output moved mid-play (default-follow or a vanished device).
+  onDevice?: (name: string) => void;
   // Wired to SIGINT by the CLI: stop the daemon and end the queue.
   interrupted?: () => boolean;
 }
@@ -110,8 +112,10 @@ export async function playThroughDaemon(
         await client.stop();
         break;
       }
-      await waitForStop(client, (sample) =>
-        hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
+      await waitForStop(
+        client,
+        (sample) => hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
+        (name) => hooks.onDevice?.(name),
       );
       if (hooks.interrupted?.()) break;
     }
@@ -120,7 +124,11 @@ export async function playThroughDaemon(
   }
 }
 
-function waitForStop(client: AudiodClient, onPosition: (sample: number) => void): Promise<void> {
+function waitForStop(
+  client: AudiodClient,
+  onPosition: (sample: number) => void,
+  onDevice?: (name: string) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const finish = (err?: Error) => {
       clearInterval(poll);
@@ -131,8 +139,9 @@ function waitForStop(client: AudiodClient, onPosition: (sample: number) => void)
       if (err) reject(err);
       else resolve();
     };
-    const onEvent = (e: { event: string; state?: string; sample?: number }) => {
+    const onEvent = (e: { event: string; state?: string; sample?: number; name?: string }) => {
       if (e.event === 'position' && e.sample !== undefined) onPosition(e.sample);
+      if (e.event === 'device' && e.name !== undefined) onDevice?.(e.name);
       if (e.event === 'state' && e.state === 'stopped') finish();
     };
     const onClose = () => finish(new Error('bloom-audiod connection closed'));

@@ -90,3 +90,17 @@ will eventually use.
    (blocking, position-streaming, ctrl-c), `--from <position>`, the
    `bloom transport` command family, and afplay demoted to a fallback for
    machines without the built binary — then retired.
+
+## 5 Follow-ups
+
+- **Live device tracking** — daemon-lite exposed a staleness family in
+  real use (a session hit both in ten minutes): the device *list* went
+  stale after a hot-plug, and the device *choice* went stale after the
+  system default changed, because the daemon snapshotted Core Audio at
+  spawn. The daemon now subscribes to Core Audio's device-list and
+  default-output notifications and **follows the system default live
+  unless a device was explicitly selected**; a selection whose device
+  vanishes resets to the default. A `device` event on the socket says so,
+  and a blocking `bloom play` prints it. The mental model this buys: the
+  `*` in `bloom devices` and the actual output can never disagree, and
+  `pkill bloom-audiod` stops being a tool users need to know about.
