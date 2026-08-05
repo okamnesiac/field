@@ -5,8 +5,6 @@ Coming up, not started, in rough order. One line each, linking a plan in
 begins, or down to [later](later.md) if it turns out bigger than expected. See
 [README](README.md) for how these lists work.
 
-- [Playback](all/playback.md) — the first native code: audition builds through
-  the Apollo from the CLI.
 - [ACE generation](all/ace-generation.md) — the Python worker protocol, with
   ACE-Step as its first client.
 - **MCP surface** — expose the CLI's verbs as MCP tools once project core
