@@ -77,11 +77,11 @@ will eventually use.
 
 ## 4 Chunks
 
-1. **The daemon** — `native/audiod/`: CMake + JUCE skeleton, the unix
-   socket NDJSON server, device enumeration/selection, file playback with
-   sample-accurate transport, a null-output mode so CI exercises the whole
-   protocol without an audio device, idle exit, and the TS client
-   (`bloom devices` as the first consumer).
+1. **The daemon** (shipped, #12) — `native/audiod/`: CMake + JUCE skeleton,
+   the unix socket NDJSON server, device enumeration/selection, file
+   playback with sample-accurate transport, a null-output mode so CI
+   exercises the whole protocol without an audio device, idle exit, and
+   the TS client (`bloom devices` as the first consumer).
 2. **The handoff** — `bloom play` goes through the daemon (blocking,
    position-streaming, ctrl-c), `--from <position>`, the `bloom transport`
    command family, and afplay demoted to a fallback for machines without

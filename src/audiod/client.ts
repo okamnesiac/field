@@ -118,7 +118,9 @@ export class AudiodClient extends EventEmitter {
         throw new Error('bloom-audiod is not built (pnpm build:native, or set BLOOM_AUDIOD)');
       }
       const args = ['--socket', SOCKET_RELATIVE];
-      if (options.nullOutput) args.push('--null-output');
+      // BLOOM_AUDIOD_NULL covers spawns the caller doesn't parameterize
+      // (bloom play in CI or on a deviceless machine).
+      if (options.nullOutput ?? process.env['BLOOM_AUDIOD_NULL'] === '1') args.push('--null-output');
       if (options.idleSeconds !== undefined) args.push('--idle', String(options.idleSeconds));
       // .bloom/ is otherwise created lazily by the build cache; a project
       // that has never built must still be able to spawn the daemon
