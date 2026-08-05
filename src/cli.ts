@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { check } from './commands/check.js';
 import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
+import { importAsset } from './commands/import.js';
 import { init } from './commands/init.js';
 import { findProjectRoot, loadProject } from './model/project.js';
 
@@ -72,10 +73,25 @@ track
   });
 
 program
+  .command('import <file>')
+  .description('copy an audio file into a song and record it in assets.yaml')
+  .requiredOption('--song <name>', 'song to import into')
+  .option('--name <slug>', 'asset name (defaults to the slugified filename)')
+  .action(async (file: string, opts: { song: string; name?: string }) => {
+    try {
+      const result = await importAsset(requireRoot(), opts.song, file, opts.name);
+      process.stdout.write(`imported ${result.name} (${result.file}, ${result.bytes} bytes)\n`);
+      process.stdout.write(`sha256 ${result.sha256}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('check')
-  .description('validate schemas, references, and formatting')
-  .action(() => {
-    const result = check(requireRoot());
+  .description('validate schemas, references, asset content, and formatting')
+  .action(async () => {
+    const result = await check(requireRoot());
     for (const d of result.diagnostics) {
       process.stdout.write(`${d.file}: ${d.message}\n`);
     }
@@ -120,4 +136,4 @@ program
     }
   });
 
-program.parse();
+await program.parseAsync();

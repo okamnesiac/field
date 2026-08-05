@@ -5,9 +5,12 @@ import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
+import { sha256File } from '../hash.js';
 import {
   arrangementOrder,
   arrangementSchema,
+  assetsFileOrder,
+  assetsFileSchema,
   projectOrder,
   projectSchema,
   songOrder,
@@ -19,6 +22,7 @@ import {
   trackOrder,
   trackSchema,
   type Arrangement,
+  type AssetsFile,
   type Project,
   type Song,
   type Take,
@@ -46,6 +50,7 @@ export interface LoadedSong {
   song?: LoadedFile<Song> | undefined;
   tempo?: LoadedFile<TempoFile> | undefined;
   arrangement?: LoadedFile<Arrangement> | undefined;
+  assets?: LoadedFile<AssetsFile> | undefined;
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
 }
@@ -162,6 +167,14 @@ export function loadProject(root: string): LoadedProject {
       });
     }
 
+    const assetsYaml = join(dir, 'assets.yaml');
+    if (existsSync(assetsYaml)) {
+      song.assets = loadFile(project, assetsYaml, {
+        schema: assetsFileSchema,
+        order: assetsFileOrder,
+      });
+    }
+
     for (const file of yamlFiles(join(dir, 'tracks'))) {
       const track = loadFile(project, file, { schema: trackSchema, order: trackOrder });
       if (track) song.tracks.push(track);
@@ -195,6 +208,7 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.song,
       s.tempo,
       s.arrangement,
+      s.assets,
       ...s.tracks,
       ...s.takes,
     ]),
@@ -241,20 +255,35 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Asset references stay inside the project: relative paths only, and
-    // never resolving above the project root.
-    const checkAsset = (file: string, label: string, asset: string) => {
-      if (isAbsolute(asset)) {
-        push(file, `${label} asset path must be relative: ${asset}`);
-        return;
+    // Asset files stay inside the project: relative paths only, and never
+    // resolving above the project root.
+    const assetNames = new Set<string>();
+    if (song.assets) {
+      for (const asset of song.assets.data.assets) {
+        if (assetNames.has(asset.name)) {
+          push(song.assets.path, `duplicate asset "${asset.name}"`);
+        }
+        assetNames.add(asset.name);
+        if (isAbsolute(asset.file)) {
+          push(song.assets.path, `asset "${asset.name}" file path must be relative: ${asset.file}`);
+          continue;
+        }
+        const resolved = resolve(project.root, song.dir, asset.file);
+        if (resolved !== project.root && !resolved.startsWith(project.root + sep)) {
+          push(song.assets.path, `asset "${asset.name}" file path escapes the project: ${asset.file}`);
+          continue;
+        }
+        if (!existsSync(resolved)) {
+          push(song.assets.path, `asset "${asset.name}" file not found: ${asset.file}`);
+        }
       }
-      const resolved = resolve(project.root, song.dir, asset);
-      if (resolved !== project.root && !resolved.startsWith(project.root + sep)) {
-        push(file, `${label} asset path escapes the project: ${asset}`);
-        return;
-      }
-      if (!existsSync(resolved)) {
-        push(file, `${label} asset not found: ${asset}`);
+    }
+
+    // Clips and takes reference assets by name (readable diffs); the
+    // assets.yaml entry carries the content hash.
+    const checkAssetRef = (file: string, label: string, name: string) => {
+      if (!assetNames.has(name)) {
+        push(file, `${label} references unknown asset "${name}"`);
       }
     };
 
@@ -270,7 +299,7 @@ function validate(project: LoadedProject): void {
       for (const clip of track.data.clips) {
         if (clipIds.has(clip.id)) push(track.path, `duplicate clip id "${clip.id}"`);
         clipIds.add(clip.id);
-        checkAsset(track.path, `clip "${clip.id}"`, clip.asset);
+        checkAssetRef(track.path, `clip "${clip.id}"`, clip.asset);
       }
     }
 
@@ -287,7 +316,7 @@ function validate(project: LoadedProject): void {
       if (!trackNames.has(take.data.track)) {
         push(take.path, `take references unknown track "${take.data.track}"`);
       }
-      checkAsset(take.path, 'take', take.data.asset);
+      checkAssetRef(take.path, 'take', take.data.asset);
 
       // Takes store both time representations under a declared anchor; the
       // derived one must agree with the tempo map (project-core.md §3.1).
@@ -322,4 +351,26 @@ export function unformattedFiles(project: LoadedProject): string[] {
   return allFiles(project)
     .filter((file) => canonicalText(file.raw, file.order) !== file.raw)
     .map((file) => file.path);
+}
+
+// Content verification: every declared asset's bytes must hash to its
+// recorded sha256. Separate from loadProject because it reads full asset
+// files — check runs it; fmt and status don't need it.
+export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnostic[]> {
+  const diagnostics: Diagnostic[] = [];
+  for (const song of project.songs) {
+    if (!song.assets) continue;
+    for (const asset of song.assets.data.assets) {
+      const path = resolve(project.root, song.dir, asset.file);
+      if (isAbsolute(asset.file) || !existsSync(path)) continue; // already diagnosed
+      const actual = await sha256File(path);
+      if (actual !== asset.sha256) {
+        diagnostics.push({
+          file: song.assets.path,
+          message: `asset "${asset.name}" content does not match its recorded sha256 (${asset.file} hashes to ${actual})`,
+        });
+      }
+    }
+  }
+  return diagnostics;
 }

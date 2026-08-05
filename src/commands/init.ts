@@ -39,6 +39,9 @@ export function init(options: InitOptions): string {
   mkdirSync(root, { recursive: true });
   for (const dir of ['songs', 'shared/instruments', 'shared/loops', 'shared/samples', 'shared/sc']) {
     mkdirSync(join(root, dir), { recursive: true });
+    // Git can't track an empty directory; .gitkeep makes the project's
+    // shape survive clone.
+    writeFileSync(join(root, dir, '.gitkeep'), '');
   }
   writeFileSync(manifestPath, stringifyCanonical(manifest, projectOrder));
 
