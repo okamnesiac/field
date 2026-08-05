@@ -8,5 +8,6 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, sc-render) stops surfacing surprises.
-- [SuperCollider offline rendering](all/sc-render.md) — the first real build
-  rule, and the first thing a DAW can't do.
+- [Offline mix assembly](all/mix-assembly.md) — track stems, then the first
+  listenable `//mix:main`; the test that forces the timeline schemas to be
+  real.

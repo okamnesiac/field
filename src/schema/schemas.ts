@@ -125,6 +125,7 @@ export const normalizeTargetSchema = z.strictObject({
   sample_rate: sampleRate,
   bit_depth: z.union([z.literal(16), z.literal(24), z.literal(32)]),
 });
+export type NormalizeTarget = z.infer<typeof normalizeTargetSchema>;
 
 // sc-render: a SuperCollider program renders an asset offline (NRT). The
 // program is run via sclang with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION /
@@ -139,6 +140,7 @@ export const scRenderTargetSchema = z.strictObject({
   duration: z.number().positive().max(3600), // seconds
   channels: z.union([z.literal(1), z.literal(2)]).default(2),
 });
+export type ScRenderTarget = z.infer<typeof scRenderTargetSchema>;
 
 export const targetSchema = z.discriminatedUnion('rule', [
   normalizeTargetSchema,
@@ -203,15 +205,19 @@ export const clipOrder: KeyOrder = {
 };
 
 // songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
-// is the identity (project-core.md §6).
+// is the identity (project-core.md §6). gain_db and pan are mix-stage
+// parameters: stems render pre-fader, the mix rule applies them while
+// summing (mix-assembly.md §3), so a fader nudge never rebuilds a stem.
 export const trackSchema = z.strictObject({
   name: labelName,
   type: z.enum(['audio', 'midi']),
+  gain_db: z.number().default(0),
+  pan: z.number().min(-1).max(1).default(0), // constant-power balance, -1 left … 1 right
   clips: z.array(clipSchema).default([]),
 });
 export type Track = z.infer<typeof trackSchema>;
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'type', 'clips'],
+  keys: ['name', 'type', 'gain_db', 'pan', 'clips'],
   children: { clips: { items: clipOrder } },
 };
 

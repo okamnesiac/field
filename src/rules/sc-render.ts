@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
+import type { ScRenderTarget } from '../schema/schemas.js';
 import type { RuleImpl } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -93,7 +94,7 @@ export async function runScProgram(
   }
 }
 
-export const scRenderRule: RuleImpl = {
+export const scRenderRule: RuleImpl<ScRenderTarget> = {
   version: 1,
   wiringFields: ['program'],
 
@@ -103,7 +104,6 @@ export const scRenderRule: RuleImpl = {
   },
 
   validate(target, ctx) {
-    if (target.rule !== 'sc-render') throw new Error('wrong rule');
     if (target.program !== posix.normalize(target.program) || target.program.includes('\\')) {
       ctx.push(`program path not in normalized form: ${target.program}`);
       return;
@@ -113,18 +113,11 @@ export const scRenderRule: RuleImpl = {
   },
 
   async extraInputs(root, target) {
-    if (target.rule !== 'sc-render') throw new Error('wrong rule');
     return [{ label: target.program, sha256: await sha256File(join(root, target.program)) }];
   },
 
-  inputPath(root, target) {
-    if (target.rule !== 'sc-render') throw new Error('wrong rule');
-    return join(root, target.program);
-  },
-
-  async execute(target, inputPath, outputPath, ctx) {
-    if (target.rule !== 'sc-render') throw new Error('wrong rule');
-    await runScProgram(inputPath, outputPath, {
+  async execute(target, _inputPaths, outputPath, ctx) {
+    await runScProgram(join(ctx.root, target.program), outputPath, {
       seed: target.seed,
       duration: target.duration,
       channels: target.channels,
@@ -139,7 +132,6 @@ export const scRenderRule: RuleImpl = {
   },
 
   async verifyAfterRun(root, target, extraInputs) {
-    if (target.rule !== 'sc-render') throw new Error('wrong rule');
     const after = await sha256File(join(root, target.program));
     if (after !== extraInputs[0]!.sha256) {
       throw new Error(

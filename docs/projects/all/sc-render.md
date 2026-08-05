@@ -1,10 +1,12 @@
 # Plan: SuperCollider offline rendering
 
-**Status:** Built; in PR. The `sc-render` rule and `bloom sc render` are
+**Status:** Shipped (#7, merged 2026-08-04); demonstrated publicly by
+field's committed pad recipe. The `sc-render` rule and `bloom sc render` are
 implemented, with a real-sclang integration test proving bit-for-bit
 reproducibility from the same seed (skipped where sclang is absent — CI
-doesn't have SuperCollider). Follows [project-core.md](project-core.md); the
-first real build rule, and it only had to add a rule.
+doesn't have SuperCollider), and reproducibility was verified across two
+machines. Followed [project-core.md](project-core.md); the first real build
+rule, and it only had to add a rule.
 
 **Goal:** `bloom sc render` and an `sc-render` build rule: a committed SC
 program plus an explicit seed renders an audio asset through scsynth's

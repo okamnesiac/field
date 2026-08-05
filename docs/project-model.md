@@ -76,6 +76,14 @@ non-destructive offsets:
 
 Fades, gain, and edits are clip metadata too. Every edit is a diff.
 
+Tracks carry the mix-stage controls — `gain_db` and `pan` (constant-power
+balance) — while clips carry their own gain and fades as part of the
+arrangement. The split matters to the build graph: every audio track with
+clips is implicitly buildable as `//songs/<song>/tracks:<name>`, a pre-fader
+stem whose cache key sees clip placement but not the track fader, so mixing
+decisions never invalidate rendered stems (see
+[build-graph.md](build-graph.md) "Rules so far").
+
 ## Identity: names, not UUIDs
 
 Nothing in a Bloom project carries an opaque ID. Identity comes in three

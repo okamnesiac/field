@@ -3,7 +3,8 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
-import { getRule } from '../rules/index.js';
+import { ruleImpl } from '../rules/index.js';
+import { placedWindow } from '../rules/track-render.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
@@ -301,7 +302,7 @@ function validate(project: LoadedProject): void {
         }
         targetNames.add(target.name);
         // Rule-specific semantics live with the rule (src/rules/).
-        getRule(target.rule).validate(target, {
+        ruleImpl(target).validate(target, {
           root: project.root,
           songDir: song.dir,
           assetNames,
@@ -332,6 +333,18 @@ function validate(project: LoadedProject): void {
         if (clipIds.has(clip.id)) push(track.path, `duplicate clip id "${clip.id}"`);
         clipIds.add(clip.id);
         checkAssetRef(track.path, `clip "${clip.id}"`, clip.asset);
+        // Fades live inside the clip window; whether they fit is only known
+        // in samples, so musical clips are checked through the tempo map.
+        if (tempoMap) {
+          const { duration } = placedWindow(clip, tempoMap);
+          if (clip.fade_in + clip.fade_out > duration) {
+            push(
+              track.path,
+              `clip "${clip.id}" fades (${clip.fade_in} + ${clip.fade_out} samples) ` +
+                `exceed its ${duration}-sample window`,
+            );
+          }
+        }
       }
     }
 
