@@ -1,6 +1,4 @@
-import { autoGainDB, design, processBiquad, type Band } from '../audio/biquad.js';
-import { limit } from '../audio/limiter.js';
-import { reverb } from '../audio/reverb.js';
+import { applyInsertChain } from '../audio/insert-chain.js';
 import type { EqTarget, LimitTarget, ReverbTarget } from '../schema/schemas.js';
 import {
   singleInputAssetDeps,
@@ -10,10 +8,11 @@ import {
 } from './single-input.js';
 import type { RuleImpl } from './types.js';
 
-// The three offline effects (effects.md §2). Deliberately thin: every
-// parameter is spec content (hashed), every algorithm lives in src/audio/
-// where the future live engine can treat it as the reference
-// implementation — the executor is the replaceable part.
+// The three offline effects as standalone rules (effects.md §2). Each is
+// a one-entry insert chain over its single input — the same DSP that runs
+// as track inserts and in the mix master chain lives in
+// src/audio/insert-chain.ts, where the future live engine can treat it as
+// the reference implementation. The executor is the replaceable part.
 
 export const eqRule: RuleImpl<EqTarget> = {
   version: 1,
@@ -23,20 +22,13 @@ export const eqRule: RuleImpl<EqTarget> = {
   validate: validateSingleInput,
 
   async execute(target, inputPaths, outputPath) {
-    transformAudio(inputPaths[0]!, outputPath, (wav) => {
-      const bands: Band[] = target.bands;
-      for (const band of bands) {
-        const biquad = design(band, wav.sampleRate);
-        for (const channel of wav.channels) processBiquad(channel, biquad);
-      }
-      if (target.normalize) {
-        const gain = Math.pow(10, autoGainDB(bands, wav.sampleRate) / 20);
-        for (const channel of wav.channels) {
-          for (let i = 0; i < channel.length; i++) channel[i] = channel[i]! * gain;
-        }
-      }
-      return wav.channels;
-    });
+    transformAudio(inputPaths[0]!, outputPath, (wav) =>
+      applyInsertChain(
+        wav.channels,
+        [{ effect: 'eq', bands: target.bands, normalize: target.normalize }],
+        wav.sampleRate,
+      ),
+    );
   },
 };
 
@@ -48,15 +40,20 @@ export const limitRule: RuleImpl<LimitTarget> = {
   validate: validateSingleInput,
 
   async execute(target, inputPaths, outputPath) {
-    transformAudio(inputPaths[0]!, outputPath, (wav) => {
-      limit(wav.channels, {
-        ceilingDb: target.ceiling_db,
-        lookaheadMs: target.lookahead_ms,
-        releaseMs: target.release_ms,
-        sampleRate: wav.sampleRate,
-      });
-      return wav.channels;
-    });
+    transformAudio(inputPaths[0]!, outputPath, (wav) =>
+      applyInsertChain(
+        wav.channels,
+        [
+          {
+            effect: 'limit',
+            ceiling_db: target.ceiling_db,
+            lookahead_ms: target.lookahead_ms,
+            release_ms: target.release_ms,
+          },
+        ],
+        wav.sampleRate,
+      ),
+    );
   },
 };
 
@@ -69,13 +66,19 @@ export const reverbRule: RuleImpl<ReverbTarget> = {
 
   async execute(target, inputPaths, outputPath) {
     transformAudio(inputPaths[0]!, outputPath, (wav) =>
-      reverb(wav.channels, {
-        mix: target.mix,
-        decaySeconds: target.decay,
-        predelayMs: target.predelay_ms,
-        damping: target.damping,
-        sampleRate: wav.sampleRate,
-      }),
+      applyInsertChain(
+        wav.channels,
+        [
+          {
+            effect: 'reverb',
+            mix: target.mix,
+            decay: target.decay,
+            predelay_ms: target.predelay_ms,
+            damping: target.damping,
+          },
+        ],
+        wav.sampleRate,
+      ),
     );
   },
 };

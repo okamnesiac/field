@@ -147,38 +147,79 @@ export const eqBandSchema = z.strictObject({
 });
 export type EqBand = z.infer<typeof eqBandSchema>;
 
-export const eqTargetSchema = z.strictObject({
-  name: labelName,
-  rule: z.literal('eq'),
-  ...singleInput,
+// Effect parameters are defined once and appear in three positions:
+// standalone targets, track inserts, and the mix master chain
+// (effects.md §5) — same fields, same semantics, everywhere.
+const eqParams = {
   bands: z.array(eqBandSchema).min(1).max(8),
   normalize: z.boolean().default(true),
-});
-export type EqTarget = z.infer<typeof eqTargetSchema>;
+};
 
 // limit: offline lookahead peak limiter (effects.md §2).
-export const limitTargetSchema = z.strictObject({
-  name: labelName,
-  rule: z.literal('limit'),
-  ...singleInput,
+const limitParams = {
   ceiling_db: z.number().min(-24).max(0).default(-1),
   lookahead_ms: z.number().min(0.1).max(50).default(5),
   release_ms: z.number().min(1).max(2000).default(100),
-});
-export type LimitTarget = z.infer<typeof limitTargetSchema>;
+};
 
 // reverb: Freeverb, deterministic; decay is T60 in seconds and the output
 // grows by the tail (effects.md §2).
-export const reverbTargetSchema = z.strictObject({
-  name: labelName,
-  rule: z.literal('reverb'),
-  ...singleInput,
+const reverbParams = {
   mix: z.number().min(0).max(1).default(0.3),
   decay: z.number().min(0.05).max(30).default(2), // seconds to −60 dB
   predelay_ms: z.number().min(0).max(500).default(0),
   damping: z.number().min(0).max(1).default(0.5),
+};
+
+export const eqTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('eq'),
+  ...singleInput,
+  ...eqParams,
+});
+export type EqTarget = z.infer<typeof eqTargetSchema>;
+
+export const limitTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('limit'),
+  ...singleInput,
+  ...limitParams,
+});
+export type LimitTarget = z.infer<typeof limitTargetSchema>;
+
+export const reverbTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('reverb'),
+  ...singleInput,
+  ...reverbParams,
 });
 export type ReverbTarget = z.infer<typeof reverbTargetSchema>;
+
+// Insert entries — discriminated on `effect:` so the AU-hosting era can
+// add an `au:` variant additively instead of reshaping track files (the
+// obligation recorded in effects.md §1).
+export const insertSchema = z.discriminatedUnion('effect', [
+  z.strictObject({ effect: z.literal('eq'), ...eqParams }),
+  z.strictObject({ effect: z.literal('limit'), ...limitParams }),
+  z.strictObject({ effect: z.literal('reverb'), ...reverbParams }),
+]);
+export type Insert = z.infer<typeof insertSchema>;
+
+export const insertOrder: KeyOrder = {
+  keys: [
+    'effect',
+    'bands',
+    'normalize',
+    'ceiling_db',
+    'lookahead_ms',
+    'release_ms',
+    'mix',
+    'decay',
+    'predelay_ms',
+    'damping',
+  ],
+  children: { bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } } },
+};
 
 // sc-render: a SuperCollider program renders an asset offline (NRT). The
 // program is run via sclang with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION /
@@ -250,7 +291,10 @@ export const mixTargetSchema = z.strictObject({
   name: labelName,
   rule: z.literal('mix').default('mix'),
   tracks: z.array(slug).optional(),
-  gain_db: z.number().default(0), // master gain
+  gain_db: z.number().default(0), // master gain, applied before the master chain
+  // Applied after the sum and the master gain, so a final limiter's
+  // ceiling guards the true output (effects.md §5).
+  master: z.array(insertSchema).default([]),
 });
 export type MixTarget = z.infer<typeof mixTargetSchema>;
 
@@ -260,7 +304,14 @@ export const mixFileSchema = z.strictObject({
 export type MixFile = z.infer<typeof mixFileSchema>;
 export const mixFileOrder: KeyOrder = {
   keys: ['mixes'],
-  children: { mixes: { items: { keys: ['name', 'rule', 'tracks', 'gain_db'] } } },
+  children: {
+    mixes: {
+      items: {
+        keys: ['name', 'rule', 'tracks', 'gain_db', 'master'],
+        children: { master: { items: insertOrder } },
+      },
+    },
+  },
 };
 
 // A clip is a window (position, duration, in anchor units) on content
@@ -312,12 +363,15 @@ export const trackSchema = z.strictObject({
   type: z.enum(['audio', 'midi']),
   gain_db: z.number().default(0),
   pan: z.number().min(-1).max(1).default(0), // constant-power balance, -1 left … 1 right
+  // Inserts are content, not mix parameters: they bake into the stem, so
+  // an insert edit re-renders it — the accepted cost model (effects.md §5).
+  inserts: z.array(insertSchema).default([]),
   clips: z.array(clipSchema).default([]),
 });
 export type Track = z.infer<typeof trackSchema>;
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'type', 'gain_db', 'pan', 'clips'],
-  children: { clips: { items: clipOrder } },
+  keys: ['name', 'type', 'gain_db', 'pan', 'inserts', 'clips'],
+  children: { inserts: { items: insertOrder }, clips: { items: clipOrder } },
 };
 
 // songs/<song>/takes/<track>/<take-id>.yaml — one performance, referencing

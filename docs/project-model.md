@@ -80,7 +80,10 @@ Fades, gain, and edits are clip metadata too. Every edit is a diff.
 
 Tracks carry the mix-stage controls — `gain_db` and `pan` (constant-power
 balance) — while clips carry their own gain and fades as part of the
-arrangement. The split matters to the build graph: every audio track with
+arrangement. Tracks also carry `inserts:` (EQ, limiter, reverb — entries
+discriminated on `effect:` so hosted plugins can join later): inserts are
+*content*, baked into the stem, so editing one re-renders the stem where a
+fader move never does. The split matters to the build graph: every audio track with
 clips is implicitly buildable as `//songs/<song>/tracks:<name>`, a pre-fader
 stem whose cache key sees clip placement but not the track fader, so mixing
 decisions never invalidate rendered stems (see
