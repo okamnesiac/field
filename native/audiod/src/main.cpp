@@ -32,6 +32,12 @@ public:
         : player (p), server (s), idleMs ((juce::int64) idleSeconds * 1000)
     {
         lastKnownState = player.transportState();
+        // Baseline the device too, or the first tick broadcasts the
+        // spawn-time output as a phantom "moved" event (#16 review).
+        lastKnownDevice = player.status()
+                              .getProperty ("device", juce::var())
+                              .getProperty ("name", juce::var())
+                              .toString();
         startTimer (250);
     }
 
