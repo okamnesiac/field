@@ -5,7 +5,12 @@ import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { parseChannels, parseDurationSeconds, parseSeed } from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
-import { resolvePlayables } from './commands/play.js';
+import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
+import {
+  transportCommand,
+  transportLocate,
+  transportStatusLines,
+} from './commands/transport.js';
 import { check } from './commands/check.js';
 import { runScProgram } from './rules/sc-render.js';
 import { createSong, createTrack } from './commands/create.js';
@@ -138,29 +143,121 @@ program
     }
   });
 
+// The retiring fallback for machines without the built daemon: playback
+// through afplay, no transport, no --from.
+async function playWithAfplay(items: Playable[]): Promise<void> {
+  for (const item of items) {
+    process.stdout.write(`playing ${item.label}\n`);
+    const interrupted = await new Promise<boolean>((done, reject) => {
+      const child = spawn('afplay', [item.path], { stdio: 'inherit' });
+      child.on('error', (err) => reject(new Error(`afplay failed: ${err.message}`)));
+      child.on('exit', (code, signal) => {
+        if (signal !== null) return done(true); // ctrl-c: stop the queue
+        if (code !== 0) return reject(new Error(`afplay exited ${code} for ${item.path}`));
+        done(false);
+      });
+    });
+    if (interrupted) break;
+  }
+}
+
 program
   .command('play <patterns...>')
-  .description('build targets if needed, then audition them in order (afplay; ctrl-c stops)')
-  .action(async (patterns: string[]) => {
+  .description('build targets if needed, then audition them in order (ctrl-c stops)')
+  .option('--from <position>', 'start at bar[.beat[.tick]] (single target only)')
+  .option('--device <name>', 'output device (bloom devices lists them)')
+  .action(async (patterns: string[], opts: { from?: string; device?: string }) => {
     try {
-      const items = await resolvePlayables(requireRoot(), patterns);
-      for (const item of items) {
-        process.stdout.write(`playing ${item.label}\n`);
-        const interrupted = await new Promise<boolean>((done, reject) => {
-          const child = spawn('afplay', [item.path], { stdio: 'inherit' });
-          child.on('error', (err) => reject(new Error(`afplay failed: ${err.message}`)));
-          child.on('exit', (code, signal) => {
-            if (signal !== null) return done(true); // ctrl-c: stop the queue
-            if (code !== 0) return reject(new Error(`afplay exited ${code} for ${item.path}`));
-            done(false);
-          });
-        });
-        if (interrupted) break;
+      const root = requireRoot();
+      const items = await resolvePlayables(root, patterns);
+      const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
+      if (!daemonBinary()) {
+        if (opts.from !== undefined || opts.device !== undefined) {
+          throw new Error('--from and --device need bloom-audiod (pnpm build:native)');
+        }
+        process.stderr.write('bloom-audiod is not built; using afplay (pnpm build:native)\n');
+        await playWithAfplay(items);
+        return;
+      }
+
+      let interrupted = false;
+      process.once('SIGINT', () => {
+        // Stop the daemon's transport from a second connection — the
+        // blocking play then sees 'stopped' and winds down the queue.
+        interrupted = true;
+        void (async () => {
+          try {
+            const c = await AudiodClient.connect(root, { spawnIfNeeded: false });
+            await c.stop();
+            c.close();
+          } catch {
+            // daemon already gone
+          }
+        })();
+      });
+
+      const project = loadProject(root);
+      const tty = process.stdout.isTTY === true;
+      let onPositionLine = false;
+      await playThroughDaemon(root, project, items, opts, {
+        onItem: (label, note) => {
+          if (onPositionLine) process.stdout.write('\n');
+          onPositionLine = false;
+          process.stdout.write(`playing ${label}${note}\n`);
+        },
+        onPosition: (line) => {
+          if (tty) {
+            process.stdout.write(`\r  ${line}   `);
+            onPositionLine = true;
+          }
+        },
+        interrupted: () => interrupted,
+      });
+      if (onPositionLine) process.stdout.write('\n');
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const transport = program
+  .command('transport')
+  .description('control the running daemon (bloom play starts it)');
+transport
+  .command('status')
+  .description('state, position, file, and device')
+  .action(async () => {
+    try {
+      const root = requireRoot();
+      for (const line of await transportStatusLines(root, loadProject(root))) {
+        process.stdout.write(`${line}\n`);
       }
     } catch (err) {
       fail(err);
     }
   });
+transport
+  .command('locate <position>')
+  .description('jump to bar[.beat[.tick]] in the loaded file')
+  .action(async (position: string) => {
+    try {
+      const root = requireRoot();
+      process.stdout.write(`${await transportLocate(root, loadProject(root), position)}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+for (const op of ['play', 'pause', 'stop'] as const) {
+  transport
+    .command(op)
+    .description(`${op} the transport`)
+    .action(async () => {
+      try {
+        await transportCommand(requireRoot(), op);
+      } catch (err) {
+        fail(err);
+      }
+    });
+}
 
 program
   .command('devices')
