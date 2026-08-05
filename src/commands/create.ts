@@ -19,6 +19,8 @@ export function createSong(root: string, name: string): string {
   }
   mkdirSync(join(dir, 'tracks'), { recursive: true });
   mkdirSync(join(dir, 'audio'), { recursive: true });
+  writeFileSync(join(dir, 'tracks', '.gitkeep'), '');
+  writeFileSync(join(dir, 'audio', '.gitkeep'), '');
 
   // song.yaml is the existence marker the guard above checks, so it is
   // written last: a partial failure leaves a directory that createSong can

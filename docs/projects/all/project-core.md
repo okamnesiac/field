@@ -1,9 +1,10 @@
 # Plan: Project core — format, CLI, build graph skeleton
 
 **Status:** In progress. Scaffold, schemas, tick/tempo math, deterministic
-YAML, and `init`/`song create`/`track create`/`check`/`fmt`/`status` in the
-first PR; the asset store and the build graph (§1's remaining items) are the
-next two chunks.
+YAML, and the first CLI commands shipped in #4. The asset store
+(`assets.yaml` name→hash binding, `bloom import`, content verification in
+`check`) is the second chunk; the build graph (labels, hashing, cache,
+`build`/`query`/`explain`) is the remaining one.
 
 **Goal:** A `bloom` CLI that can initialize a multi-song project, validate its
 schemas, hash and store assets content-addressably, and build trivial targets
@@ -173,3 +174,12 @@ thesis. **Slug cost is paid rarely, at rename time, by a tool built for it.**
 - Merges may need a post-merge `bloom check` to catch cross-branch dangles —
   accepted, because the UUID alternative has the same failure mode with less
   readable evidence.
+
+## 7 Deferred within this phase
+
+- **Normalized-form asset paths** (from #5 review): `check` accepts any
+  relative spelling that resolves inside the project (`./audio/x.wav`);
+  comparisons therefore resolve paths rather than comparing strings. The
+  §3.6-flavored tightening — `validate` requiring `file` in normalized form
+  so exact-string comparisons stay sound everywhere — lands with the
+  build-graph chunk, where path→label normalization must be settled anyway.

@@ -115,8 +115,13 @@ determinism policy.
 
 ## Assets
 
-All audio/MIDI assets are content-addressed: manifests reference bytes by
-hash, so where the bytes live is a pluggable detail. **Git LFS is backend #1**;
+All audio/MIDI assets are content-addressed: each song's `assets.yaml` binds a
+readable asset name to its file path, SHA-256, and size, and clips/takes
+reference assets **by name** — so human-edited files stay readable while the
+hash carries the content identity. The SHA-256 equals the Git LFS OID for the
+same file, so the manifest, the LFS pointer, and the build cache share one
+identifier. Where the bytes live is a pluggable detail. **Git LFS is backend
+#1**;
 a remote store (S3-backed) is a manifest-preserving migration later, when LFS
 storage/bandwidth costs hurt. Generated assets are committed with their recipe
 and provenance, never silently regenerated.

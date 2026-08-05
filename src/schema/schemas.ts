@@ -84,12 +84,33 @@ export const arrangementOrder: KeyOrder = {
   children: { sections: { items: { keys: ['name', 'at'] } } },
 };
 
+// songs/<song>/assets.yaml — binds a readable asset name to its file and
+// content hash. Clips and takes reference assets by name (readable diffs,
+// project-core.md §6); the sha256 is the content identity and equals the
+// Git LFS OID (§3.5).
+export const assetSchema = z.strictObject({
+  name: slug,
+  file: z.string().min(1), // path relative to the song directory
+  sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256'),
+  bytes: z.number().int().min(0),
+});
+export type Asset = z.infer<typeof assetSchema>;
+
+export const assetsFileSchema = z.strictObject({
+  assets: z.array(assetSchema).default([]),
+});
+export type AssetsFile = z.infer<typeof assetsFileSchema>;
+export const assetsFileOrder: KeyOrder = {
+  keys: ['assets'],
+  children: { assets: { items: { keys: ['name', 'file', 'sha256', 'bytes'] } } },
+};
+
 // A clip is a window (position, duration, in anchor units) on content
 // (asset, source_offset, slip, in samples). Effective read offset =
 // source_offset − slip (project-core.md §3.2).
 export const clipSchema = z.strictObject({
   id: slug,
-  asset: z.string().min(1), // path relative to the song directory (content hashes arrive with the asset store)
+  asset: slug, // references an asset name declared in the song's assets.yaml
   anchor: z.enum(['musical', 'absolute']).default('musical'),
   position: z.number().int().min(0), // ticks when musical, samples when absolute
   duration: z.number().int().positive(), // same units as position
@@ -134,7 +155,7 @@ export const trackOrder: KeyOrder = {
 export const takeSchema = z.strictObject({
   id: z.string().regex(/^take-\d{8}-\d{6}$/, 'take ids are take-YYYYMMDD-HHMMSS'),
   track: slug,
-  asset: z.string().min(1),
+  asset: slug, // references an asset name declared in the song's assets.yaml
   anchor: z.enum(['musical', 'absolute']).default('musical'),
   position: ticks, // ticks (authoritative when anchor is musical)
   position_samples: samples, // derived when anchor is musical, authoritative when absolute

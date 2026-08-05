@@ -43,4 +43,19 @@ describe('canonicalText', () => {
   it('rejects invalid YAML', () => {
     expect(() => canonicalText('a: [unclosed', order)).toThrow();
   });
+
+  it('converts flow style to block style (§3.6)', () => {
+    const out = canonicalText(
+      'name: t\ntype: audio\nclips: [{id: a-1, asset: x, position: 0}]\n',
+      order,
+    );
+    expect(out).toBe(
+      'name: t\ntype: audio\nclips:\n  - id: a-1\n    asset: x\n    position: 0\n',
+    );
+  });
+
+  it('keeps empty collections inline', () => {
+    const out = canonicalText('name: t\ntype: audio\nclips: []\n', order);
+    expect(out).toBe('name: t\ntype: audio\nclips: []\n');
+  });
 });
