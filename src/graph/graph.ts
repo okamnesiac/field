@@ -1,6 +1,7 @@
 import { formatLabel, matchesPattern, type Label, type LabelPattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { ruleImpl, type RuleSpec } from '../rules/index.js';
+import { planMix } from '../rules/mix.js';
 import { planTrack } from '../rules/track-render.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/schemas.js';
@@ -63,17 +64,31 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule({ pkg: `${pkgBase}/targets`, name: target.name }, song.dir, target);
       }
     }
+    const mixable = song.tracks
+      .filter((t) => t.data.type === 'audio' && t.data.clips.length > 0)
+      .map((t) => t.data);
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
-      for (const track of song.tracks) {
+      for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
         // useful artifact — implicit targets exist where there is content.
-        if (track.data.type !== 'audio' || track.data.clips.length === 0) continue;
         addRule(
-          { pkg: `${pkgBase}/tracks`, name: track.data.name },
+          { pkg: `${pkgBase}/tracks`, name: track.name },
           song.dir,
-          planTrack(track.data, tempoMap, sha256ByAsset),
+          planTrack(track, tempoMap, sha256ByAsset),
         );
+      }
+      if (song.mix) {
+        for (const mix of song.mix.data.mixes) {
+          const spec = planMix(mix, mixable);
+          if (spec.tracks.length === 0) continue; // nothing to mix yet
+          // Mix inputs are track stems — rule→rule edges, wired here where
+          // the spec is synthesized rather than through assetDeps (which is
+          // for asset-package edges).
+          const label: Label = { pkg: `${pkgBase}/mix`, name: mix.name };
+          const deps = spec.tracks.map((name): Label => ({ pkg: `${pkgBase}/tracks`, name }));
+          nodes.set(formatLabel(label), { kind: 'rule', label, songDir: song.dir, spec, deps });
+        }
       }
     }
   }

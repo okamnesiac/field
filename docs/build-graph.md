@@ -81,6 +81,15 @@ outside the hash.
   are excluded entirely — they are mix-stage parameters, so a fader move
   never re-renders a stem. Assets must already be at the project sample
   rate: Bloom never resamples implicitly (mix-assembly.md §4).
+- **`mix`** — declared in `songs/<song>/mix.yaml` (`//songs/<song>/mix:<name>`;
+  `bloom song create` writes a default `main`). Sums track stems — the
+  graph's first rule→rule edges — applying each track's `gain_db`/`pan`
+  (constant-power balance) and a master gain while summing. Because inputs
+  are the stems' *content hashes*, a fader move re-runs only the sum, and a
+  clip edit that leaves a stem byte-identical stops there: early cutoff
+  falls out of content addressing. `tracks:` omitted means every audio
+  track with clips; a mix with nothing to mix is legal and simply absent
+  from the graph until content exists.
 
 ## Determinism policy
 

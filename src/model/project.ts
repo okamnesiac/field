@@ -13,6 +13,8 @@ import {
   arrangementSchema,
   assetsFileOrder,
   assetsFileSchema,
+  mixFileOrder,
+  mixFileSchema,
   projectOrder,
   projectSchema,
   songOrder,
@@ -27,6 +29,7 @@ import {
   trackSchema,
   type Arrangement,
   type AssetsFile,
+  type MixFile,
   type Project,
   type Song,
   type Take,
@@ -57,6 +60,7 @@ export interface LoadedSong {
   arrangement?: LoadedFile<Arrangement> | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
   targets?: LoadedFile<TargetsFile> | undefined;
+  mix?: LoadedFile<MixFile> | undefined;
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
 }
@@ -189,6 +193,11 @@ export function loadProject(root: string): LoadedProject {
       });
     }
 
+    const mixYaml = join(dir, 'mix.yaml');
+    if (existsSync(mixYaml)) {
+      song.mix = loadFile(project, mixYaml, { schema: mixFileSchema, order: mixFileOrder });
+    }
+
     for (const file of yamlFiles(join(dir, 'tracks'))) {
       const track = loadFile(project, file, { schema: trackSchema, order: trackOrder });
       if (track) song.tracks.push(track);
@@ -224,6 +233,7 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.arrangement,
       s.assets,
       s.targets,
+      s.mix,
       ...s.tracks,
       ...s.takes,
     ]),
@@ -342,6 +352,39 @@ function validate(project: LoadedProject): void {
               track.path,
               `clip "${clip.id}" fades (${clip.fade_in} + ${clip.fade_out} samples) ` +
                 `exceed its ${duration}-sample window`,
+            );
+          }
+        }
+      }
+    }
+
+    // Mixes reference tracks that can actually produce stems: audio, with
+    // clips (mix-assembly.md §3). Omitted `tracks` means all of them, which
+    // may be none — an empty mix is legal (a fresh song), it just has no
+    // graph node yet.
+    if (song.mix) {
+      const mixable = new Set(
+        song.tracks
+          .filter((t) => t.data.type === 'audio' && t.data.clips.length > 0)
+          .map((t) => t.data.name),
+      );
+      const mixNames = new Set<string>();
+      for (const mix of song.mix.data.mixes) {
+        if (mixNames.has(mix.name)) push(song.mix.path, `duplicate mix "${mix.name}"`);
+        mixNames.add(mix.name);
+        if (!mix.tracks) continue;
+        const listed = new Set<string>();
+        for (const trackName of mix.tracks) {
+          if (listed.has(trackName)) {
+            push(song.mix.path, `mix "${mix.name}" lists track "${trackName}" twice`);
+          }
+          listed.add(trackName);
+          if (!trackNames.has(trackName)) {
+            push(song.mix.path, `mix "${mix.name}" references unknown track "${trackName}"`);
+          } else if (!mixable.has(trackName)) {
+            push(
+              song.mix.path,
+              `mix "${mix.name}" track "${trackName}" has no audio clips to mix`,
             );
           }
         }

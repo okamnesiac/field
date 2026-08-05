@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { isSlug } from '../ids.js';
 import { RESERVED_TARGET_NAME } from '../labels.js';
 import {
+  mixFileOrder,
+  mixFileSchema,
   songOrder,
   songSchema,
   tempoFileOrder,
@@ -31,6 +33,10 @@ export function createSong(root: string, name: string): string {
     meter: [{ at: 0, numerator: 4, denominator: 4 }],
   });
   writeFileSync(join(dir, 'tempo.yaml'), stringifyCanonical(tempo, tempoFileOrder));
+  // Every song is mixable from birth: main mixes all audio tracks with
+  // clips, so //songs/<name>/mix:main exists as soon as there is content.
+  const mix = mixFileSchema.parse({ mixes: [{ name: 'main' }] });
+  writeFileSync(join(dir, 'mix.yaml'), stringifyCanonical(mix, mixFileOrder));
   writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
   return dir;
 }

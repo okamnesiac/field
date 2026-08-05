@@ -173,6 +173,27 @@ export const targetsFileOrder: KeyOrder = {
   },
 };
 
+// songs/<song>/mix.yaml — declared mixes, addressed as
+// //songs/<song>/mix:<name> (mix-assembly.md §3). A mix sums track stems
+// with each track's gain_db/pan (constant-power balance) and a master
+// gain. `tracks` omitted means every audio track with clips.
+export const mixTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('mix').default('mix'),
+  tracks: z.array(slug).optional(),
+  gain_db: z.number().default(0), // master gain
+});
+export type MixTarget = z.infer<typeof mixTargetSchema>;
+
+export const mixFileSchema = z.strictObject({
+  mixes: z.array(mixTargetSchema).default([]),
+});
+export type MixFile = z.infer<typeof mixFileSchema>;
+export const mixFileOrder: KeyOrder = {
+  keys: ['mixes'],
+  children: { mixes: { items: { keys: ['name', 'rule', 'tracks', 'gain_db'] } } },
+};
+
 // A clip is a window (position, duration, in anchor units) on content
 // (asset, source_offset, slip, in samples). Effective read offset =
 // source_offset − slip (project-core.md §3.2).

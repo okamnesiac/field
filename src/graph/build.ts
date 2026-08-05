@@ -136,6 +136,7 @@ async function buildNode(
   graph: Graph,
   node: GraphNode,
   runner: RuleRunner,
+  built: Map<string, BuildOutcome>,
 ): Promise<BuildOutcome> {
   if (node.kind === 'asset') {
     // Source targets: the declared hash is the identity; check verifies
@@ -145,9 +146,16 @@ async function buildNode(
 
   const impl = ruleImpl(node.spec);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
+  // Asset inputs contribute their declared hash; rule inputs (mix ← stems)
+  // contribute the output hash of the already-built dependency — build()
+  // walks in dependency order, so it is always present.
   const declaredHashes = inputNodes.map((d) => {
-    if (d.kind !== 'asset') throw new Error('only asset inputs supported');
-    return d.asset.sha256;
+    if (d.kind === 'asset') return d.asset.sha256;
+    const dep = built.get(formatLabel(d.label));
+    if (!dep) {
+      throw new Error(`internal: ${formatLabel(d.label)} not built before ${formatLabel(node.label)}`);
+    }
+    return dep.sha256;
   });
   const extraInputs: ExtraInput[] = impl.extraInputs
     ? await impl.extraInputs(project.root, node.spec)
@@ -173,7 +181,9 @@ async function buildNode(
   // the consumed bytes must match the declaration — otherwise a tampered
   // file gets cached under the clean file's key and the poisoned entry
   // outlives the tampering. Only executed actions pay this cost; cache hits
-  // don't read inputs at all.
+  // don't read inputs at all. Rule inputs need no such check: they are
+  // materialized from the CAS this build just wrote — machine-managed
+  // state, unlike asset files a human can edit.
   for (const input of inputNodes) {
     if (input.kind !== 'asset') continue;
     const path = assetFilePath(project, input);
@@ -193,7 +203,11 @@ async function buildNode(
     }
   }
 
-  const inputPaths = inputNodes.map((d) => assetFilePath(project, d));
+  const inputPaths = inputNodes.map((d) =>
+    d.kind === 'asset'
+      ? assetFilePath(project, d)
+      : built.get(formatLabel(d.label))!.outputPath!,
+  );
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
@@ -228,13 +242,14 @@ export async function build(
   runner: RuleRunner = defaultRunner,
 ): Promise<BuildOutcome[]> {
   const outcomes: BuildOutcome[] = [];
-  const done = new Set<string>();
+  const built = new Map<string, BuildOutcome>();
   for (const start of nodes) {
     for (const node of deps(graph, start)) {
       const label = formatLabel(node.label);
-      if (done.has(label)) continue;
-      done.add(label);
-      outcomes.push(await buildNode(project, graph, node, runner));
+      if (built.has(label)) continue;
+      const outcome = await buildNode(project, graph, node, runner, built);
+      built.set(label, outcome);
+      outcomes.push(outcome);
     }
   }
   return outcomes;
@@ -244,36 +259,51 @@ export async function explain(
   project: LoadedProject,
   graph: Graph,
   node: GraphNode,
+  memo: Map<string, Explanation> = new Map(),
 ): Promise<Explanation> {
+  const label = formatLabel(node.label);
+  const seen = memo.get(label);
+  if (seen) return seen;
+
   if (node.kind === 'asset') {
-    return {
-      label: formatLabel(node.label),
+    const explanation: Explanation = {
+      label,
       kind: 'asset',
       inputs: [],
       outputs: [{ sha256: node.asset.sha256, bytes: node.asset.bytes }],
     };
+    memo.set(label, explanation);
+    return explanation;
   }
   const impl = ruleImpl(node.spec);
-  const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
-  const inputs = inputNodes.map((d) => ({
-    label: formatLabel(d.label),
-    sha256: d.kind === 'asset' ? d.asset.sha256 : '',
-  }));
+  // A rule input's hash is its dependency's cached output — explaining
+  // recursively without executing anything. An unbuilt dependency means
+  // this node's action key cannot be known yet.
+  const inputs: { label: string; sha256: string }[] = [];
+  let unknown = false;
+  for (const depLabel of node.deps) {
+    const dep = await explain(project, graph, resolveLabel(graph, depLabel), memo);
+    const sha256 = dep.cached !== false && dep.outputs ? dep.outputs[0]!.sha256 : '';
+    if (sha256 === '') unknown = true;
+    inputs.push({ label: dep.label, sha256 });
+  }
   if (impl.extraInputs) {
     inputs.push(...(await impl.extraInputs(project.root, node.spec)));
   }
   const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
-  const key = actionKey(node, inputs.map((i) => i.sha256), sampleRate);
-  const cached = readAction(project, key);
-  return {
-    label: formatLabel(node.label),
+  const key = unknown ? undefined : actionKey(node, inputs.map((i) => i.sha256), sampleRate);
+  const cached = key === undefined ? undefined : readAction(project, key);
+  const explanation: Explanation = {
+    label,
     kind: 'rule',
     rule: node.spec.rule,
     ruleVersion: impl.version,
     inputs,
     parameters: ruleParameters(node),
-    actionKey: key,
+    ...(key !== undefined ? { actionKey: key } : {}),
     cached: cached !== undefined,
     ...(cached ? { outputs: cached.outputs } : {}),
   };
+  memo.set(label, explanation);
+  return explanation;
 }

@@ -1,4 +1,5 @@
 import type { Target } from '../schema/schemas.js';
+import type { MixSpec } from './mix.js';
 import type { TrackRenderSpec } from './track-render.js';
 
 // A build rule is a pluggable module. The engine (graph/build.ts) knows
@@ -14,7 +15,7 @@ import type { TrackRenderSpec } from './track-render.js';
 // interface forced is now proven by the compiler (the #7 review's deferred
 // polish; the third rule was the agreed trigger).
 
-export type RuleSpec = Target | TrackRenderSpec;
+export type RuleSpec = Target | TrackRenderSpec | MixSpec;
 
 export interface RunContext {
   root: string; // absolute project root
