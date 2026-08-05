@@ -63,10 +63,15 @@ export async function importAsset(
     throw new Error(`assets.yaml is invalid; fix it before importing (bloom check)`);
   }
   // The declaration in assets.yaml is the existence marker, and it is
-  // written last. A file on disk without a declaration is the orphan of a
-  // failed import, so re-running overwrites it rather than wedging.
+  // written last. A file is an orphan of a failed import only if no
+  // declared entry references it — then re-running overwrites it rather
+  // than wedging. Both the name and the destination file must be free:
+  // a declared entry may reference the same file under a different name.
   if (existing.data.assets.some((a) => a.name === assetName)) {
     throw new Error(`asset "${assetName}" already declared in "${song}"`);
+  }
+  if (existing.data.assets.some((a) => a.file === file)) {
+    throw new Error(`${file} already belongs to a declared asset in "${song}"`);
   }
 
   mkdirSync(join(songDir, 'audio'), { recursive: true });

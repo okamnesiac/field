@@ -126,6 +126,25 @@ describe('import', () => {
     rmSync(src);
   });
 
+  it('refuses to overwrite a file belonging to a declared asset', async () => {
+    createSong(root, 'opener');
+    const src = sourceFile('kick bytes');
+    await importAsset(root, 'opener', src, 'kick');
+    // Hand-rename the entry's name; its file still references audio/kick.wav.
+    const assetsPath = join(root, 'songs/opener/assets.yaml');
+    writeFileSync(assetsPath, readFileSync(assetsPath, 'utf8').replace('name: kick', 'name: kick-alt'));
+    expect((await check(root)).ok).toBe(true);
+
+    const other = sourceFile('other bytes');
+    await expect(importAsset(root, 'opener', other, 'kick')).rejects.toThrow(
+      'already belongs to a declared asset',
+    );
+    expect(readFileSync(join(root, 'songs/opener/audio/kick.wav'), 'utf8')).toBe('kick bytes');
+    expect((await check(root)).ok).toBe(true);
+    rmSync(src);
+    rmSync(other);
+  });
+
   it('does not corrupt an assets.yaml that reads {}', async () => {
     createSong(root, 'opener');
     writeFileSync(join(root, 'songs/opener/assets.yaml'), '{}\n');
