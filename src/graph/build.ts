@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { sha256File, sha256Text } from '../hash.js';
@@ -83,10 +83,28 @@ function actionPath(project: LoadedProject, key: string): string {
 function readAction(project: LoadedProject, key: string): ActionEntry | undefined {
   const path = actionPath(project, key);
   if (!existsSync(path)) return undefined;
-  const entry = JSON.parse(readFileSync(path, 'utf8')) as ActionEntry;
+  let entry: ActionEntry;
+  try {
+    entry = JSON.parse(readFileSync(path, 'utf8')) as ActionEntry;
+  } catch {
+    // Truncated by a crash mid-write: a corrupt entry is a cache miss, not
+    // a wedged cache. Remove it so the rebuild can write a fresh one.
+    rmSync(path, { force: true });
+    return undefined;
+  }
   // A cache hit requires the outputs to still exist in the CAS.
   if (!entry.outputs.every((o) => existsSync(casPath(project, o.sha256)))) return undefined;
   return entry;
+}
+
+function writeAction(project: LoadedProject, key: string, entry: ActionEntry): void {
+  mkdirSync(join(cacheDir(project), 'actions'), { recursive: true });
+  const path = actionPath(project, key);
+  // tmp + rename so the entry appears atomically: a crash leaves either no
+  // entry (re-run) or a complete one, never a truncated file.
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(entry, null, 2) + '\n');
+  renameSync(tmp, path);
 }
 
 // Deterministic serialization for hashing: sorted keys, no whitespace.
@@ -163,6 +181,30 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, outputPath: materialize(sha256), sha256 };
   }
 
+  // The action key is the *declared* input hash, so before executing, the
+  // consumed bytes must match the declaration — otherwise a tampered file
+  // gets cached under the clean file's key and the poisoned entry outlives
+  // the tampering. Only executed actions pay this cost; cache hits don't
+  // read inputs at all.
+  for (const input of inputNodes) {
+    if (input.kind !== 'asset') continue;
+    const path = assetFilePath(project, input);
+    const size = statSync(path).size;
+    if (size !== input.asset.bytes) {
+      throw new Error(
+        `refusing to build: input ${formatLabel(input.label)} is ${size} bytes on disk but ` +
+          `${input.asset.bytes} declared (bloom check, then re-import or restore the file)`,
+      );
+    }
+    const actual = await sha256File(path);
+    if (actual !== input.asset.sha256) {
+      throw new Error(
+        `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
+          `declared sha256 (bloom check, then re-import or restore the file)`,
+      );
+    }
+  }
+
   const inputPath = assetFilePath(project, inputNodes[0]!);
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
@@ -179,9 +221,7 @@ async function buildNode(
 
   // The action entry is the cache marker, written last: a crash between
   // CAS write and here just re-runs the rule next time.
-  mkdirSync(join(cacheDir(project), 'actions'), { recursive: true });
-  const entry: ActionEntry = { rule: node.target.rule, outputs: [{ sha256, bytes }] };
-  writeFileSync(actionPath(project, key), JSON.stringify(entry, null, 2) + '\n');
+  writeAction(project, key, { rule: node.target.rule, outputs: [{ sha256, bytes }] });
 
   return { label: formatLabel(node.label), cached: false, outputPath: materialize(sha256), sha256 };
 }

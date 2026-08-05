@@ -18,7 +18,8 @@ describe('labels', () => {
   it('parses wildcards', () => {
     expect(parsePattern('//songs/creek:all')).toEqual({ kind: 'package-all', pkg: 'songs/creek' });
     expect(parsePattern('//songs/...')).toEqual({ kind: 'tree', pkg: 'songs' });
-    expect(parsePattern('///...')).toEqual({ kind: 'tree', pkg: '' });
+    expect(parsePattern('//...')).toEqual({ kind: 'tree', pkg: '' });
+    expect(() => parsePattern('///...')).toThrow('invalid package');
   });
 
   it('matches patterns', () => {

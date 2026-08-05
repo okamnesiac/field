@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -85,7 +85,7 @@ describe('build', () => {
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
-  it('expands wildcards', async () => {
+  it('expands wildcards, including the everything pattern', async () => {
     const { state, runner } = countingRunner();
     const outcomes = await buildTargets(root, ['//songs/...'], runner);
     expect(outcomes.map((o) => o.label).sort()).toEqual([
@@ -93,6 +93,21 @@ describe('build', () => {
       '//songs/creek/targets:pad-normalized',
     ]);
     expect(state.runs).toBe(1);
+    const everything = await buildTargets(root, ['//...'], runner);
+    expect(everything).toHaveLength(2);
+  });
+
+  it('reserves "all" as a name', async () => {
+    const src = join(root, '..', `bloom-build-all-${Math.random()}.wav`);
+    writeWav(src);
+    await expect(importAsset(root, 'creek', src, 'all')).rejects.toThrow('reserved');
+    rmSync(src);
+    // Hand-written YAML is caught by the schema.
+    writeFileSync(
+      join(root, 'songs/creek/targets.yaml'),
+      targetsYaml(96000).replace('name: pad-normalized', 'name: all'),
+    );
+    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('reserved');
   });
 
   it('refuses to build an invalid project', async () => {
@@ -103,6 +118,48 @@ describe('build', () => {
   it('errors on unmatched patterns and unknown labels', async () => {
     await expect(buildTargets(root, ['//nowhere/...'])).rejects.toThrow('matched no targets');
     expect(() => queryDeps(root, 'deps(//songs/creek/targets:ghost)')).toThrow('no such target');
+  });
+
+  it('refuses to build when input bytes disagree with the declaration', async () => {
+    const { state, runner } = countingRunner();
+    const assetPath = join(root, 'songs/creek/audio/pad.wav');
+    const original = readFileSync(assetPath);
+    writeFileSync(assetPath, Buffer.concat([original, Buffer.from([0, 0])]));
+    await expect(
+      buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner),
+    ).rejects.toThrow('refusing to build');
+    expect(state.runs).toBe(0); // nothing executed, nothing cached
+
+    // Same-size tamper is caught by the hash, not the size.
+    writeFileSync(assetPath, Buffer.from(original.map((b, i) => (i === 50 ? b ^ 0xff : b))));
+    await expect(
+      buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner),
+    ).rejects.toThrow('refusing to build');
+    expect(state.runs).toBe(0);
+
+    // Restore the declared bytes and the build proceeds.
+    writeFileSync(assetPath, original);
+    const outcomes = await buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner);
+    expect(state.runs).toBe(1);
+    expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
+  });
+
+  it('treats a corrupt action entry as a cache miss and repairs it', async () => {
+    const { state, runner } = countingRunner();
+    await buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner);
+    expect(state.runs).toBe(1);
+
+    const actionsDir = join(root, '.bloom/cache/actions');
+    const entry = readdirSync(actionsDir).find((f) => f.endsWith('.json'))!;
+    writeFileSync(join(actionsDir, entry), '{"rule": "norm'); // crash mid-write
+
+    const outcomes = await buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner);
+    expect(state.runs).toBe(2); // re-ran instead of crashing
+    expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
+
+    const again = await buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner);
+    expect(state.runs).toBe(2); // entry rewritten; cache healthy again
+    expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
   });
 
   it('normalizes real audio through afconvert', async () => {

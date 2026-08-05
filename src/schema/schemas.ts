@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SLUG_PATTERN } from '../ids.js';
+import { RESERVED_TARGET_NAME } from '../labels.js';
 import type { KeyOrder } from '../yaml/emit.js';
 
 // Zod schemas are the single source of truth for the canonical project
@@ -8,6 +9,12 @@ import type { KeyOrder } from '../yaml/emit.js';
 // used for deterministic emission (§3.6).
 
 export const slug = z.string().regex(SLUG_PATTERN, 'must be a lowercase-slug');
+
+// For anything addressable as //pkg:name — assets, targets, tracks — the
+// grammar's reserved word is not a legal name.
+export const labelName = slug.refine((n) => n !== RESERVED_TARGET_NAME, {
+  message: `"${RESERVED_TARGET_NAME}" is reserved by the label grammar`,
+});
 
 const ticks = z.number().int().min(0);
 const samples = z.number().int().min(0);
@@ -91,7 +98,7 @@ export const arrangementOrder: KeyOrder = {
 // project-core.md §6); the sha256 is the content identity and equals the
 // Git LFS OID (§3.5).
 export const assetSchema = z.strictObject({
-  name: slug,
+  name: labelName,
   file: z.string().min(1), // path relative to the song directory
   sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256'),
   bytes: z.number().int().min(0),
@@ -112,7 +119,7 @@ export const assetsFileOrder: KeyOrder = {
 // //songs/<song>/targets:<name>). Rule-specific fields are flat and
 // strict, discriminated by `rule`.
 export const normalizeTargetSchema = z.strictObject({
-  name: slug,
+  name: labelName,
   rule: z.literal('normalize'),
   input: slug, // an asset name declared in this song's assets.yaml
   sample_rate: sampleRate,
@@ -167,7 +174,7 @@ export const clipOrder: KeyOrder = {
 // songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
 // is the identity (project-core.md §6).
 export const trackSchema = z.strictObject({
-  name: slug,
+  name: labelName,
   type: z.enum(['audio', 'midi']),
   clips: z.array(clipSchema).default([]),
 });

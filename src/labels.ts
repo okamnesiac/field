@@ -19,6 +19,10 @@ export type LabelPattern =
 const PKG_PATTERN = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
+// Names the grammar claims for itself: `:all` is package expansion, so no
+// addressable thing may be named `all`.
+export const RESERVED_TARGET_NAME = 'all';
+
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
 }
@@ -37,9 +41,10 @@ export function parsePattern(text: string): LabelPattern {
   }
   const rest = text.slice(2);
 
+  if (rest === '...') return { kind: 'tree', pkg: '' }; // //... = everything
   if (rest.endsWith('/...')) {
     const pkg = rest.slice(0, -4);
-    if (pkg !== '' && !PKG_PATTERN.test(pkg)) throw new Error(`invalid package in "${text}"`);
+    if (!PKG_PATTERN.test(pkg)) throw new Error(`invalid package in "${text}"`);
     return { kind: 'tree', pkg };
   }
 
