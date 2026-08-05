@@ -1,0 +1,179 @@
+import { PPQ, WHOLE_NOTE_TICKS } from '../constants.js';
+
+// The tempo map is the single source of truth for ticks ↔ seconds; the
+// project sample rate maps seconds ↔ samples (project-core.md §3.1).
+
+export interface TempoEvent {
+  at: number; // ticks
+  bpm: number;
+  // 'linear': bpm ramps linearly in beats from this event's bpm to the next
+  // event's bpm across the span. The last event's ramp is meaningless.
+  ramp?: 'linear' | undefined;
+}
+
+export interface MeterEvent {
+  at: number; // ticks; must fall on a bar boundary of the preceding meter
+  numerator: number;
+  denominator: number;
+}
+
+export function beatTicks(denominator: number): number {
+  return WHOLE_NOTE_TICKS / denominator;
+}
+
+export function barTicks(meter: MeterEvent): number {
+  return meter.numerator * beatTicks(meter.denominator);
+}
+
+export class TempoMap {
+  constructor(
+    readonly events: TempoEvent[],
+    readonly sampleRate: number,
+  ) {
+    if (events.length === 0) throw new Error('tempo map needs at least one event');
+    if (events[0]!.at !== 0) throw new Error('first tempo event must be at tick 0');
+    for (let i = 1; i < events.length; i++) {
+      if (events[i]!.at <= events[i - 1]!.at) {
+        throw new Error('tempo events must be strictly ordered by tick');
+      }
+    }
+  }
+
+  // Seconds from song start at a tick position. Constant segments are
+  // trivial; linear ramps integrate 60/bpm(b) db in closed form.
+  ticksToSeconds(ticks: number): number {
+    if (ticks < 0) throw new Error('negative tick');
+    let seconds = 0;
+    for (let i = 0; i < this.events.length; i++) {
+      const e = this.events[i]!;
+      const next = this.events[i + 1];
+      const endTicks = next ? Math.min(next.at, ticks) : ticks;
+      if (endTicks > e.at) {
+        seconds += this.segmentSeconds(i, endTicks - e.at);
+      }
+      if (!next || ticks <= next.at) break;
+    }
+    return seconds;
+  }
+
+  secondsToTicks(seconds: number): number {
+    if (seconds < 0) throw new Error('negative seconds');
+    let remaining = seconds;
+    for (let i = 0; i < this.events.length; i++) {
+      const e = this.events[i]!;
+      const next = this.events[i + 1];
+      const spanTicks = next ? next.at - e.at : Infinity;
+      const spanSeconds = next ? this.segmentSeconds(i, spanTicks) : Infinity;
+      if (remaining <= spanSeconds || !next) {
+        return e.at + this.segmentTicksAt(i, remaining);
+      }
+      remaining -= spanSeconds;
+    }
+    throw new Error('unreachable');
+  }
+
+  ticksToSamples(ticks: number): number {
+    return Math.round(this.ticksToSeconds(ticks) * this.sampleRate);
+  }
+
+  samplesToTicks(samples: number): number {
+    return this.secondsToTicks(samples / this.sampleRate);
+  }
+
+  // Seconds spanned by the first `ticks` ticks of segment i.
+  private segmentSeconds(i: number, ticks: number): number {
+    const e = this.events[i]!;
+    const next = this.events[i + 1];
+    const beats = ticks / PPQ;
+    if (e.ramp !== 'linear' || !next || next.bpm === e.bpm) {
+      return (beats * 60) / e.bpm;
+    }
+    // bpm(b) = b0 + k·b over the full span of B beats, k = (b1 − b0) / B.
+    const spanBeats = (next.at - e.at) / PPQ;
+    const k = (next.bpm - e.bpm) / spanBeats;
+    return (60 / k) * Math.log((e.bpm + k * beats) / e.bpm);
+  }
+
+  // Inverse of segmentSeconds: ticks into segment i after `seconds`.
+  private segmentTicksAt(i: number, seconds: number): number {
+    const e = this.events[i]!;
+    const next = this.events[i + 1];
+    if (e.ramp !== 'linear' || !next || next.bpm === e.bpm) {
+      return (seconds * e.bpm * PPQ) / 60;
+    }
+    const spanBeats = (next.at - e.at) / PPQ;
+    const k = (next.bpm - e.bpm) / spanBeats;
+    const beats = (e.bpm / k) * (Math.exp((seconds * k) / 60) - 1);
+    return beats * PPQ;
+  }
+}
+
+// Projection between ticks and 1-based bar.beat.tick display positions
+// ("42.2.1" = bar 42, beat 2, first tick of that beat).
+export class MeterMap {
+  constructor(readonly events: MeterEvent[]) {
+    if (events.length === 0) throw new Error('meter map needs at least one event');
+    if (events[0]!.at !== 0) throw new Error('first meter event must be at tick 0');
+    for (let i = 1; i < events.length; i++) {
+      const prev = events[i - 1]!;
+      const e = events[i]!;
+      if (e.at <= prev.at) throw new Error('meter events must be strictly ordered by tick');
+      if ((e.at - prev.at) % barTicks(prev) !== 0) {
+        throw new Error(`meter change at tick ${e.at} is not on a bar boundary`);
+      }
+    }
+  }
+
+  // First bar number (1-based) of each meter segment.
+  private segmentStartBar(i: number): number {
+    let bar = 1;
+    for (let s = 1; s <= i; s++) {
+      const prev = this.events[s - 1]!;
+      bar += (this.events[s]!.at - prev.at) / barTicks(prev);
+    }
+    return bar;
+  }
+
+  private segmentFor(ticks: number): number {
+    let i = 0;
+    while (i + 1 < this.events.length && this.events[i + 1]!.at <= ticks) i++;
+    return i;
+  }
+
+  format(ticks: number): string {
+    if (ticks < 0 || !Number.isInteger(ticks)) throw new Error(`invalid tick ${ticks}`);
+    const i = this.segmentFor(ticks);
+    const meter = this.events[i]!;
+    const rel = ticks - meter.at;
+    const bar = this.segmentStartBar(i) + Math.floor(rel / barTicks(meter));
+    const inBar = rel % barTicks(meter);
+    const beat = Math.floor(inBar / beatTicks(meter.denominator)) + 1;
+    const tick = (inBar % beatTicks(meter.denominator)) + 1;
+    return `${bar}.${beat}.${tick}`;
+  }
+
+  parse(position: string): number {
+    const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(position.trim());
+    if (!m) throw new Error(`invalid position "${position}" (expected bar[.beat[.tick]])`);
+    const bar = Number(m[1]);
+    const beat = m[2] === undefined ? 1 : Number(m[2]);
+    const tick = m[3] === undefined ? 1 : Number(m[3]);
+    if (bar < 1) throw new Error(`bar must be >= 1 in "${position}"`);
+
+    let i = 0;
+    while (i + 1 < this.events.length && this.segmentStartBar(i + 1) <= bar) i++;
+    const meter = this.events[i]!;
+    if (beat < 1 || beat > meter.numerator) {
+      throw new Error(`beat ${beat} out of range for ${meter.numerator}/${meter.denominator} at bar ${bar}`);
+    }
+    if (tick < 1 || tick > beatTicks(meter.denominator)) {
+      throw new Error(`tick ${tick} out of range in "${position}"`);
+    }
+    return (
+      meter.at +
+      (bar - this.segmentStartBar(i)) * barTicks(meter) +
+      (beat - 1) * beatTicks(meter.denominator) +
+      (tick - 1)
+    );
+  }
+}

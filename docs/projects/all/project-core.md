@@ -1,7 +1,9 @@
 # Plan: Project core — format, CLI, build graph skeleton
 
-**Status:** Planned; design discussion complete, nothing built. The first
-phase of Bloom — pure TypeScript, no audio code.
+**Status:** In progress. Scaffold, schemas, tick/tempo math, deterministic
+YAML, and `init`/`song create`/`track create`/`check`/`fmt`/`status` in the
+first PR; the asset store and the build graph (§1's remaining items) are the
+next two chunks.
 
 **Goal:** A `bloom` CLI that can initialize a multi-song project, validate its
 schemas, hash and store assets content-addressably, and build trivial targets
