@@ -61,9 +61,12 @@ afterEach(() => {
 
 const countingRunner = () => {
   const state = { runs: 0 };
-  const runner: RuleRunner = async (_node, inputPath, outputPath) => {
+  const runner: RuleRunner = async (node, inputPaths, outputPath) => {
     state.runs++;
-    copyFileSync(inputPath, outputPath);
+    // Rules with asset inputs copy the first through; input-less rules
+    // (sc-render) get deterministic placeholder content.
+    if (inputPaths.length > 0) copyFileSync(inputPaths[0]!, outputPath);
+    else writeFileSync(outputPath, `out:${node.label.pkg}:${node.label.name}`);
   };
   return { state, runner };
 };

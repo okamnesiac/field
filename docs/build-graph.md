@@ -68,6 +68,19 @@ outside the hash.
   seed, renders are reproducible bit-for-bit. `bloom sc render` runs a
   program directly (uncached) for iteration. Full contract:
   [projects/all/sc-render.md](projects/all/sc-render.md) §2.
+- **`track-render`** — the first *implicit* rule: every audio track with
+  clips is buildable as `//songs/<song>/tracks:<name>` without declaring
+  anything, because the track file **is** the declaration. It places the
+  track's clips through the tempo map (position, source offset, slip,
+  clip gain, linear fades) and sums them into a pre-fader Float32 stereo
+  stem, in TypeScript — offline mixing has no deadline
+  ([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). The
+  action key hashes the *resolved placement plan* in samples, not the raw
+  YAML: a tempo edit rebuilds exactly the tracks whose musical clips moved,
+  reordering clips in the file changes nothing, and track `gain_db`/`pan`
+  are excluded entirely — they are mix-stage parameters, so a fader move
+  never re-renders a stem. Assets must already be at the project sample
+  rate: Bloom never resamples implicitly (mix-assembly.md §4).
 
 ## Determinism policy
 

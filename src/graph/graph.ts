@@ -1,11 +1,15 @@
 import { formatLabel, matchesPattern, type Label, type LabelPattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
-import { getRule } from '../rules/index.js';
-import type { Asset, Target } from '../schema/schemas.js';
+import { ruleImpl, type RuleSpec } from '../rules/index.js';
+import { planTrack } from '../rules/track-render.js';
+import { TempoMap } from '../time/tempo.js';
+import type { Asset } from '../schema/schemas.js';
+import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention
-// (project-core.md §3.4). Two node kinds so far: source assets and
-// declared rule targets.
+// (project-core.md §3.4). Node kinds so far: source assets, declared rule
+// targets (targets.yaml), and implicit track stems — every audio track with
+// clips is buildable as //songs/<song>/tracks:<name> (mix-assembly.md §3).
 
 export interface AssetNode {
   kind: 'asset';
@@ -18,7 +22,8 @@ export interface RuleNode {
   kind: 'rule';
   label: Label;
   songDir: string;
-  target: Target;
+  // A declared target, or a spec synthesized from the model (track-render).
+  spec: RuleSpec;
   deps: Label[];
 }
 
@@ -29,33 +34,46 @@ export interface Graph {
 }
 
 // Requires a project with no diagnostics: the graph trusts what validate
-// accepted (unique names, known references).
+// accepted (unique names, known references, valid tempo maps).
 export function buildGraph(project: LoadedProject): Graph {
+  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const nodes = new Map<string, GraphNode>();
+  const addRule = (label: Label, songDir: string, spec: RuleSpec) => {
+    // Each rule declares which same-song assets it consumes; those are the
+    // graph edges. Other inputs (like sc programs) participate by content
+    // hash without being nodes.
+    const deps: Label[] = ruleImpl(spec)
+      .assetDeps(spec)
+      .map((name) => ({ pkg: `${songDir}/assets`, name }));
+    nodes.set(formatLabel(label), { kind: 'rule', label, songDir, spec, deps });
+  };
+
   for (const song of project.songs) {
-    const pkgBase = song.dir.split('/').join('/');
+    const pkgBase = song.dir;
+    const sha256ByAsset = new Map<string, string>();
     if (song.assets) {
       for (const asset of song.assets.data.assets) {
         const label: Label = { pkg: `${pkgBase}/assets`, name: asset.name };
         nodes.set(formatLabel(label), { kind: 'asset', label, songDir: song.dir, asset });
+        sha256ByAsset.set(asset.name, asset.sha256);
       }
     }
     if (song.targets) {
       for (const target of song.targets.data.targets) {
-        const label: Label = { pkg: `${pkgBase}/targets`, name: target.name };
-        // Each rule declares which same-song assets it consumes; those are
-        // the graph edges. Other inputs (like sc programs) participate by
-        // content hash without being nodes.
-        const deps: Label[] = getRule(target.rule)
-          .assetDeps(target)
-          .map((name) => ({ pkg: `${pkgBase}/assets`, name }));
-        nodes.set(formatLabel(label), {
-          kind: 'rule',
-          label,
-          songDir: song.dir,
-          target,
-          deps,
-        });
+        addRule({ pkg: `${pkgBase}/targets`, name: target.name }, song.dir, target);
+      }
+    }
+    if (song.tempo) {
+      const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
+      for (const track of song.tracks) {
+        // MIDI tracks have no audio to render, and an empty stem is not a
+        // useful artifact — implicit targets exist where there is content.
+        if (track.data.type !== 'audio' || track.data.clips.length === 0) continue;
+        addRule(
+          { pkg: `${pkgBase}/tracks`, name: track.data.name },
+          song.dir,
+          planTrack(track.data, tempoMap, sha256ByAsset),
+        );
       }
     }
   }

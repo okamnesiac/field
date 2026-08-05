@@ -1,9 +1,10 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
-import { getRule, type ExtraInput, type RunContext } from '../rules/index.js';
+import { ruleImpl, type ExtraInput, type RunContext } from '../rules/index.js';
 import { deps, resolveLabel, type Graph, type GraphNode, type RuleNode } from './graph.js';
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
@@ -37,17 +38,17 @@ export interface Explanation {
   outputs?: { sha256: string; bytes: number }[];
 }
 
-// Executes a rule: reads input file, writes output file. Injectable so
+// Executes a rule: reads input files, writes the output file. Injectable so
 // tests can count executions or fake the tool.
 export type RuleRunner = (
   rule: RuleNode,
-  inputPath: string,
+  inputPaths: string[],
   outputPath: string,
   ctx: RunContext,
 ) => Promise<void>;
 
-export const defaultRunner: RuleRunner = (node, inputPath, outputPath, ctx) =>
-  getRule(node.target.rule).execute(node.target, inputPath, outputPath, ctx);
+export const defaultRunner: RuleRunner = (node, inputPaths, outputPath, ctx) =>
+  ruleImpl(node.spec).execute(node.spec, inputPaths, outputPath, ctx);
 
 function cacheDir(project: LoadedProject): string {
   return join(project.root, '.bloom', 'cache');
@@ -103,15 +104,15 @@ export function canonicalJson(value: unknown): string {
 // The knobs that shape the output: everything except identity (name, rule)
 // and the rule's declared wiring, which already contributes as input hashes.
 function ruleParameters(node: RuleNode): Record<string, unknown> {
-  const wiring = new Set(['name', 'rule', ...getRule(node.target.rule).wiringFields]);
-  return Object.fromEntries(Object.entries(node.target).filter(([k]) => !wiring.has(k)));
+  const wiring = new Set(['name', 'rule', ...ruleImpl(node.spec).wiringFields]);
+  return Object.fromEntries(Object.entries(node.spec).filter(([k]) => !wiring.has(k)));
 }
 
 function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: number): string {
   return sha256Text(
     canonicalJson({
-      rule: node.target.rule,
-      rule_version: getRule(node.target.rule).version,
+      rule: node.spec.rule,
+      rule_version: ruleImpl(node.spec).version,
       inputs: inputHashes,
       parameters: ruleParameters(node),
       project_sample_rate: projectSampleRate,
@@ -142,17 +143,17 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, sha256: node.asset.sha256 };
   }
 
-  const impl = getRule(node.target.rule);
+  const impl = ruleImpl(node.spec);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
   const declaredHashes = inputNodes.map((d) => {
     if (d.kind !== 'asset') throw new Error('only asset inputs supported');
     return d.asset.sha256;
   });
   const extraInputs: ExtraInput[] = impl.extraInputs
-    ? await impl.extraInputs(project.root, node.target)
+    ? await impl.extraInputs(project.root, node.spec)
     : [];
   const inputHashes = [...declaredHashes, ...extraInputs.map((e) => e.sha256)];
-  const sampleRate = project.manifest?.data.sample_rate ?? 48000;
+  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const key = actionKey(node, inputHashes, sampleRate);
 
   const materialize = (sha256: string): string => {
@@ -192,20 +193,19 @@ async function buildNode(
     }
   }
 
-  const assetPaths = inputNodes.map((d) => assetFilePath(project, d));
-  const inputPath = impl.inputPath(project.root, node.target, assetPaths);
+  const inputPaths = inputNodes.map((d) => assetFilePath(project, d));
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
-  await runner(node, inputPath, tmpOut, { sampleRate });
+  await runner(node, inputPaths, tmpOut, { root: project.root, sampleRate });
   if (!existsSync(tmpOut)) {
-    throw new Error(`rule "${node.target.rule}" produced no output for ${formatLabel(node.label)}`);
+    throw new Error(`rule "${node.spec.rule}" produced no output for ${formatLabel(node.label)}`);
   }
 
   // Extra inputs were hashed for the key before the run; a rule may refuse
   // to cache output that came from since-changed inputs.
   if (impl.verifyAfterRun) {
-    await impl.verifyAfterRun(project.root, node.target, extraInputs);
+    await impl.verifyAfterRun(project.root, node.spec, extraInputs);
   }
 
   const sha256 = await sha256File(tmpOut);
@@ -215,7 +215,7 @@ async function buildNode(
 
   // The action entry is the cache marker, written last: a crash between
   // CAS write and here just re-runs the rule next time.
-  writeAction(project, key, { rule: node.target.rule, outputs: [{ sha256, bytes }] });
+  writeAction(project, key, { rule: node.spec.rule, outputs: [{ sha256, bytes }] });
 
   return { label: formatLabel(node.label), cached: false, outputPath: materialize(sha256), sha256 };
 }
@@ -253,22 +253,22 @@ export async function explain(
       outputs: [{ sha256: node.asset.sha256, bytes: node.asset.bytes }],
     };
   }
-  const impl = getRule(node.target.rule);
+  const impl = ruleImpl(node.spec);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
   const inputs = inputNodes.map((d) => ({
     label: formatLabel(d.label),
     sha256: d.kind === 'asset' ? d.asset.sha256 : '',
   }));
   if (impl.extraInputs) {
-    inputs.push(...(await impl.extraInputs(project.root, node.target)));
+    inputs.push(...(await impl.extraInputs(project.root, node.spec)));
   }
-  const sampleRate = project.manifest?.data.sample_rate ?? 48000;
+  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const key = actionKey(node, inputs.map((i) => i.sha256), sampleRate);
   const cached = readAction(project, key);
   return {
     label: formatLabel(node.label),
     kind: 'rule',
-    rule: node.target.rule,
+    rule: node.spec.rule,
     ruleVersion: impl.version,
     inputs,
     parameters: ruleParameters(node),
