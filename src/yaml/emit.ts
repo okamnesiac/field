@@ -1,0 +1,71 @@
+import { Document, parseDocument, isMap, isSeq, isScalar, type Node, type Pair } from 'yaml';
+
+// Deterministic YAML emission (project-core.md §3.6): schema-defined key
+// order, 2-space indent, block style, no anchors/aliases, minimal quoting,
+// trailing newline. Comments must survive programmatic edits, which is why
+// canonicalization reorders an existing Document instead of rebuilding it.
+
+export interface KeyOrder {
+  keys?: string[];
+  children?: Record<string, KeyOrder>;
+  items?: KeyOrder; // applied to each element of a sequence
+}
+
+const STRINGIFY_OPTIONS = {
+  indent: 2,
+  lineWidth: 80,
+  aliasDuplicateObjects: false,
+} as const;
+
+function keyName(pair: Pair): string | undefined {
+  return isScalar(pair.key) && typeof pair.key.value === 'string' ? pair.key.value : undefined;
+}
+
+function orderNode(node: Node | null, order: KeyOrder | undefined): void {
+  if (!order || node == null) return;
+  if (isMap(node)) {
+    const keys = order.keys ?? [];
+    const rank = new Map(keys.map((k, i) => [k, i]));
+    const indexed = node.items.map((pair, i) => ({ pair, i }));
+    indexed.sort((a, b) => {
+      const ra = rank.get(keyName(a.pair) ?? '') ?? keys.length + a.i;
+      const rb = rank.get(keyName(b.pair) ?? '') ?? keys.length + b.i;
+      return ra - rb || a.i - b.i;
+    });
+    node.items = indexed.map((e) => e.pair);
+    for (const pair of node.items) {
+      const child = order.children?.[keyName(pair) ?? ''];
+      if (child) orderNode(pair.value as Node | null, child);
+    }
+  } else if (isSeq(node) && order.items) {
+    for (const item of node.items) orderNode(item as Node | null, order.items);
+  }
+}
+
+// Reorder a parsed document in place to canonical key order, keeping
+// comments attached to their pairs.
+export function canonicalizeDocument(doc: Document, order: KeyOrder): void {
+  orderNode(doc.contents, order);
+}
+
+export function stringifyDocument(doc: Document): string {
+  return doc.toString(STRINGIFY_OPTIONS);
+}
+
+// Canonical emission of a fresh value (no comments to preserve).
+export function stringifyCanonical(value: unknown, order?: KeyOrder): string {
+  const doc = new Document(value);
+  if (order) canonicalizeDocument(doc, order);
+  return stringifyDocument(doc);
+}
+
+// Canonical form of existing YAML text: parse, reorder, restringify.
+// Comments and blank-line structure survive; formatting becomes canonical.
+export function canonicalText(text: string, order: KeyOrder): string {
+  const doc = parseDocument(text);
+  if (doc.errors.length > 0) {
+    throw new Error(doc.errors[0]!.message);
+  }
+  canonicalizeDocument(doc, order);
+  return stringifyDocument(doc);
+}
