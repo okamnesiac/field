@@ -100,7 +100,16 @@ export async function playThroughDaemon(
         : '';
       hooks.onItem?.(item.label, note);
 
+      // Ctrl-c can land while load/status were in flight: the handler's
+      // stop() would hit a stopped transport and this play() would undo it
+      // — so check on both sides, and after play() stop it ourselves,
+      // since the handler's stop may have been processed first.
+      if (hooks.interrupted?.()) break;
       await client.play();
+      if (hooks.interrupted?.()) {
+        await client.stop();
+        break;
+      }
       await waitForStop(client, (sample) =>
         hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
       );

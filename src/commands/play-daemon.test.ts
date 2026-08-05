@@ -89,6 +89,31 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(Math.min(...samples)).toBeGreaterThanOrEqual(24000);
   });
 
+  it('an interrupt between load and play never starts the transport (#13 review)', async () => {
+    await importTone('blop', 480000); // long enough that a leak would be obvious
+    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+
+    // onItem fires after load, before play — exactly the window Bugbot
+    // flagged: a ctrl-c here must not let play() restart the transport.
+    let interrupted = false;
+    const played: string[] = [];
+    const positions: string[] = [];
+    await playThroughDaemon(root, project, items, {}, {
+      onItem: (label) => {
+        played.push(label);
+        interrupted = true;
+      },
+      onPosition: (line) => positions.push(line),
+      interrupted: () => interrupted,
+    });
+
+    expect(played).toHaveLength(1); // the queue ended at the interrupt
+    expect(positions).toHaveLength(0); // and playback never started
+    const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
+    expect((await client.status()).state).toBe('stopped');
+    client.close();
+  });
+
   it('rejects --from with more than one target', async () => {
     await importTone('blop', 12000);
     const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
