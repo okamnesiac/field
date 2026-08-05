@@ -17,6 +17,7 @@ const execFileAsync = promisify(execFile);
 
 const RULE_VERSIONS: Record<string, number> = {
   normalize: 1,
+  'sc-render': 1,
 };
 
 export interface ActionEntry {
@@ -43,15 +44,54 @@ export interface Explanation {
   outputs?: { sha256: string; bytes: number }[];
 }
 
+export interface RunContext {
+  sampleRate: number; // project sample rate
+}
+
 // Executes a rule: reads input file, writes output file. Injectable so
 // tests can count executions or fake the tool.
 export type RuleRunner = (
   rule: RuleNode,
   inputPath: string,
   outputPath: string,
+  ctx: RunContext,
 ) => Promise<void>;
 
-export const defaultRunner: RuleRunner = async (node, inputPath, outputPath) => {
+function sclangBinary(): string {
+  const override = process.env['BLOOM_SCLANG'];
+  return override ?? 'sclang'; // PATH; the app-bundle fallback is tried on ENOENT
+}
+
+const SCLANG_APP_FALLBACK = '/Applications/SuperCollider.app/Contents/MacOS/sclang';
+
+// Run an SC program under the sc-render contract: sclang gets the render
+// parameters in the environment, and must write BLOOM_OUTPUT and exit.
+export async function runScProgram(
+  programPath: string,
+  outputPath: string,
+  params: { seed: number; duration: number; channels: number; sampleRate: number },
+): Promise<void> {
+  const env = {
+    ...process.env,
+    BLOOM_OUTPUT: outputPath,
+    BLOOM_SEED: String(params.seed),
+    BLOOM_DURATION: String(params.duration),
+    BLOOM_SAMPLE_RATE: String(params.sampleRate),
+    BLOOM_CHANNELS: String(params.channels),
+  };
+  const options = { env, timeout: 180_000 };
+  try {
+    await execFileAsync(sclangBinary(), [programPath], options);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT' && existsSync(SCLANG_APP_FALLBACK)) {
+      await execFileAsync(SCLANG_APP_FALLBACK, [programPath], options);
+      return;
+    }
+    throw new Error(`sclang failed for ${programPath}: ${(err as Error).message}`);
+  }
+}
+
+export const defaultRunner: RuleRunner = async (node, inputPath, outputPath, ctx) => {
   const t = node.target;
   if (t.rule === 'normalize') {
     // afconvert is macOS-built-in with excellent SRC (project-core.md §5).
@@ -63,6 +103,21 @@ export const defaultRunner: RuleRunner = async (node, inputPath, outputPath) => 
       inputPath,
       outputPath,
     ]);
+    return;
+  }
+  if (t.rule === 'sc-render') {
+    await runScProgram(inputPath, outputPath, {
+      seed: t.seed,
+      duration: t.duration,
+      channels: t.channels,
+      sampleRate: ctx.sampleRate,
+    });
+    if (!existsSync(outputPath)) {
+      throw new Error(
+        `sc program ${t.program} exited without writing BLOOM_OUTPUT — ` +
+          `it must render to the path in BLOOM_OUTPUT and call 0.exit`,
+      );
+    }
     return;
   }
   throw new Error(`unknown rule "${(t as { rule: string }).rule}"`);
@@ -119,10 +174,14 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+// Wiring fields: identity plus what already contributes to the key as an
+// input hash. Everything else is a knob that shapes the output.
+const WIRING_FIELDS = new Set(['name', 'rule', 'input', 'program']);
+
 function ruleParameters(node: RuleNode): Record<string, unknown> {
-  // Everything except identity and wiring: the knobs that shape the output.
-  const { name: _name, rule: _rule, input: _input, ...params } = node.target;
-  return params;
+  return Object.fromEntries(
+    Object.entries(node.target).filter(([k]) => !WIRING_FIELDS.has(k)),
+  );
 }
 
 function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: number): string {
@@ -165,6 +224,12 @@ async function buildNode(
     if (d.kind !== 'asset') throw new Error('only asset inputs supported');
     return d.asset.sha256;
   });
+  // An sc-render program is an input by content: hashing the actual bytes
+  // keys the action to the code as-is (no declaration to disagree with),
+  // so editing the program invalidates exactly its own renders.
+  if (node.target.rule === 'sc-render') {
+    inputHashes.push(await sha256File(join(project.root, node.target.program)));
+  }
   const sampleRate = project.manifest?.data.sample_rate ?? 48000;
   const key = actionKey(node, inputHashes, sampleRate);
 
@@ -205,11 +270,14 @@ async function buildNode(
     }
   }
 
-  const inputPath = assetFilePath(project, inputNodes[0]!);
+  const inputPath =
+    node.target.rule === 'sc-render'
+      ? join(project.root, node.target.program)
+      : assetFilePath(project, inputNodes[0]!);
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
-  await runner(node, inputPath, tmpOut);
+  await runner(node, inputPath, tmpOut, { sampleRate });
   if (!existsSync(tmpOut)) {
     throw new Error(`rule "${node.target.rule}" produced no output for ${formatLabel(node.label)}`);
   }
@@ -246,7 +314,11 @@ export async function build(
   return outcomes;
 }
 
-export function explain(project: LoadedProject, graph: Graph, node: GraphNode): Explanation {
+export async function explain(
+  project: LoadedProject,
+  graph: Graph,
+  node: GraphNode,
+): Promise<Explanation> {
   if (node.kind === 'asset') {
     return {
       label: formatLabel(node.label),
@@ -260,6 +332,14 @@ export function explain(project: LoadedProject, graph: Graph, node: GraphNode): 
     label: formatLabel(d.label),
     sha256: d.kind === 'asset' ? d.asset.sha256 : '',
   }));
+  if (node.target.rule === 'sc-render') {
+    // The program participates as an input by content hash; shown by path
+    // since it is a file, not a graph node.
+    inputs.push({
+      label: node.target.program,
+      sha256: await sha256File(join(project.root, node.target.program)),
+    });
+  }
   const sampleRate = project.manifest?.data.sample_rate ?? 48000;
   const key = actionKey(node, inputs.map((i) => i.sha256), sampleRate);
   const cached = readAction(project, key);

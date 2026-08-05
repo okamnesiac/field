@@ -173,6 +173,125 @@ describe('build', () => {
   });
 });
 
+const scTargetsYaml = (seed: number) =>
+  [
+    'targets:',
+    '  - name: texture',
+    '    rule: sc-render',
+    '    program: shared/sc/texture.scd',
+    `    seed: ${seed}`,
+    '    duration: 0.25',
+    '    channels: 1',
+    '',
+  ].join('\n');
+
+describe('sc-render', () => {
+  beforeEach(() => {
+    writeFileSync(join(root, 'shared/sc/texture.scd'), '// fake program v1\n');
+    writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(42));
+  });
+
+  it('builds, caches, and rebuilds when seed or program change', async () => {
+    const { state, runner } = countingRunner();
+    const label = '//songs/creek/targets:texture';
+
+    const first = await buildTargets(root, [label], runner);
+    expect(state.runs).toBe(1);
+    expect(first[0]!.cached).toBe(false);
+
+    await buildTargets(root, [label], runner);
+    expect(state.runs).toBe(1); // cache hit
+
+    writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(43));
+    await buildTargets(root, [label], runner);
+    expect(state.runs).toBe(2); // seed is a parameter
+
+    writeFileSync(join(root, 'shared/sc/texture.scd'), '// fake program v2\n');
+    await buildTargets(root, [label], runner);
+    expect(state.runs).toBe(3); // program content is an input
+  });
+
+  it('has no graph deps but shows the program as an explain input', async () => {
+    expect(queryDeps(root, 'deps(//songs/creek/targets:texture)')).toEqual([
+      '//songs/creek/targets:texture',
+    ]);
+    const e = await explainTarget(root, '//songs/creek/targets:texture');
+    expect(e.rule).toBe('sc-render');
+    expect(e.inputs).toHaveLength(1);
+    expect(e.inputs[0]!.label).toBe('shared/sc/texture.scd');
+    expect(e.parameters).toEqual({ seed: 42, duration: 0.25, channels: 1 });
+  });
+
+  it('rejects missing and escaping program paths', async () => {
+    writeFileSync(
+      join(root, 'songs/creek/targets.yaml'),
+      scTargetsYaml(42).replace('shared/sc/texture.scd', 'shared/sc/ghost.scd'),
+    );
+    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('not found');
+
+    writeFileSync(
+      join(root, 'songs/creek/targets.yaml'),
+      scTargetsYaml(42).replace('shared/sc/texture.scd', '../outside.scd'),
+    );
+    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('escapes the project');
+  });
+});
+
+const sclangPresent =
+  existsSync('/Applications/SuperCollider.app/Contents/MacOS/sclang') ||
+  (process.env['PATH'] ?? '').split(':').some((p) => p !== '' && existsSync(join(p, 'sclang')));
+
+describe.skipIf(!sclangPresent)('sc-render integration (requires sclang)', () => {
+  const SC_PROGRAM = `(
+var seed = "BLOOM_SEED".getenv.asInteger;
+var dur = "BLOOM_DURATION".getenv.asFloat;
+var rate = "BLOOM_SAMPLE_RATE".getenv.asInteger;
+var out = "BLOOM_OUTPUT".getenv;
+var chans = "BLOOM_CHANNELS".getenv.asInteger;
+var freq, score;
+thisThread.randSeed = seed;
+freq = rrand(200.0, 800.0);
+SynthDef(\\bloomTestTone, { |freq = 440|
+	var env = EnvGen.kr(Env.linen(0.01, dur - 0.02, 0.01), doneAction: 2);
+	Out.ar(0, (SinOsc.ar(freq) * 0.2 * env) ! chans);
+}).store;
+score = Score([
+	[0.0, Synth.basicNew(\\bloomTestTone).newMsg(args: [\\freq, freq])],
+	[dur, [0]]
+]);
+score.recordNRT(
+	outputFilePath: out,
+	sampleRate: rate,
+	headerFormat: "WAV",
+	sampleFormat: "int16",
+	options: ServerOptions.new.numOutputBusChannels_(chans),
+	duration: dur,
+	action: { 0.exit }
+);
+)
+`;
+
+  it('renders a seeded tone deterministically through real sclang', { timeout: 120_000 }, async () => {
+    writeFileSync(join(root, 'shared/sc/texture.scd'), SC_PROGRAM);
+    writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(42));
+    const label = '//songs/creek/targets:texture';
+
+    const first = await buildTargets(root, [label]);
+    expect(first[0]!.cached).toBe(false);
+    expect(existsSync(first[0]!.outputPath!)).toBe(true);
+    expect(readFileSync(first[0]!.outputPath!).length).toBeGreaterThan(1000);
+
+    const again = await buildTargets(root, [label]);
+    expect(again[0]!.cached).toBe(true);
+
+    // Same seed, wiped cache: the render is reproducible bit-for-bit.
+    rmSync(join(root, '.bloom/cache'), { recursive: true, force: true });
+    const rebuilt = await buildTargets(root, [label]);
+    expect(rebuilt[0]!.cached).toBe(false);
+    expect(rebuilt[0]!.sha256).toBe(first[0]!.sha256);
+  });
+});
+
 describe('query and explain', () => {
   it('lists deps in dependency order', () => {
     expect(queryDeps(root, 'deps(//songs/creek/targets:pad-normalized)')).toEqual([
@@ -186,7 +305,7 @@ describe('query and explain', () => {
   });
 
   it('explains a rule target', async () => {
-    const before = explainTarget(root, '//songs/creek/targets:pad-normalized');
+    const before = await explainTarget(root, '//songs/creek/targets:pad-normalized');
     expect(before.rule).toBe('normalize');
     expect(before.cached).toBe(false);
     expect(before.parameters).toEqual({ sample_rate: 96000, bit_depth: 16 });
@@ -194,7 +313,7 @@ describe('query and explain', () => {
 
     const { runner } = countingRunner();
     await buildTargets(root, ['//songs/creek/targets:pad-normalized'], runner);
-    const after = explainTarget(root, '//songs/creek/targets:pad-normalized');
+    const after = await explainTarget(root, '//songs/creek/targets:pad-normalized');
     expect(after.cached).toBe(true);
     expect(after.actionKey).toBe(before.actionKey);
     expect(after.outputs).toHaveLength(1);

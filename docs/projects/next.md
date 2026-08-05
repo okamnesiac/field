@@ -5,8 +5,6 @@ Coming up, not started, in rough order. One line each, linking a plan in
 begins, or down to [later](later.md) if it turns out bigger than expected. See
 [README](README.md) for how these lists work.
 
-- [SuperCollider offline rendering](all/sc-render.md) — the first real build
-  rule, and the first thing a DAW can't do.
 - [ACE generation](all/ace-generation.md) — the Python worker protocol, with
   ACE-Step as its first client.
 - [Offline mix assembly](all/mix-assembly.md) — the first listenable

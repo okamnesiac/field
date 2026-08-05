@@ -298,8 +298,19 @@ function validate(project: LoadedProject): void {
           push(song.targets.path, `duplicate target "${target.name}"`);
         }
         targetNames.add(target.name);
-        if (!assetNames.has(target.input)) {
-          push(song.targets.path, `target "${target.name}" references unknown asset "${target.input}"`);
+        if (target.rule === 'normalize') {
+          if (!assetNames.has(target.input)) {
+            push(song.targets.path, `target "${target.name}" references unknown asset "${target.input}"`);
+          }
+        } else if (target.rule === 'sc-render') {
+          // Programs are project-relative (they usually live in shared/sc/).
+          if (target.program !== posix.normalize(target.program) || target.program.includes('\\')) {
+            push(song.targets.path, `target "${target.name}" program path not in normalized form: ${target.program}`);
+          }
+          const resolved = resolveAssetFile(project.root, '', target.program);
+          if (resolved.problem) {
+            push(song.targets.path, `target "${target.name}" program ${resolved.problem}`);
+          }
         }
       }
     }

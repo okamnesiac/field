@@ -6,6 +6,7 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
-- [Project core](all/project-core.md) — the format, CLI, and build-graph
-  skeleton everything else hangs off; §3 holds the schema decisions to settle
-  first.
+- [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
+  stays here until real use (field, sc-render) stops surfacing surprises.
+- [SuperCollider offline rendering](all/sc-render.md) — the first real build
+  rule, and the first thing a DAW can't do.

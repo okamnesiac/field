@@ -126,7 +126,24 @@ export const normalizeTargetSchema = z.strictObject({
   bit_depth: z.union([z.literal(16), z.literal(24), z.literal(32)]),
 });
 
-export const targetSchema = z.discriminatedUnion('rule', [normalizeTargetSchema]);
+// sc-render: a SuperCollider program renders an asset offline (NRT). The
+// program is run via sclang with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION /
+// BLOOM_SAMPLE_RATE / BLOOM_CHANNELS in the environment; it must write
+// BLOOM_OUTPUT and exit. Determinism given the seed is the program's job;
+// the program's content hash is the cache input.
+export const scRenderTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('sc-render'),
+  program: z.string().min(1), // project-relative path to the .scd
+  seed: z.number().int().min(0),
+  duration: z.number().positive().max(3600), // seconds
+  channels: z.union([z.literal(1), z.literal(2)]).default(2),
+});
+
+export const targetSchema = z.discriminatedUnion('rule', [
+  normalizeTargetSchema,
+  scRenderTargetSchema,
+]);
 export type Target = z.infer<typeof targetSchema>;
 
 export const targetsFileSchema = z.strictObject({
@@ -136,7 +153,21 @@ export type TargetsFile = z.infer<typeof targetsFileSchema>;
 export const targetsFileOrder: KeyOrder = {
   keys: ['targets'],
   children: {
-    targets: { items: { keys: ['name', 'rule', 'input', 'sample_rate', 'bit_depth'] } },
+    targets: {
+      items: {
+        keys: [
+          'name',
+          'rule',
+          'input',
+          'program',
+          'seed',
+          'duration',
+          'channels',
+          'sample_rate',
+          'bit_depth',
+        ],
+      },
+    },
   },
 };
 

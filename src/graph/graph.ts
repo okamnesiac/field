@@ -42,13 +42,16 @@ export function buildGraph(project: LoadedProject): Graph {
     if (song.targets) {
       for (const target of song.targets.data.targets) {
         const label: Label = { pkg: `${pkgBase}/targets`, name: target.name };
-        const dep: Label = { pkg: `${pkgBase}/assets`, name: target.input };
+        // Only asset references become graph edges; an sc-render program is
+        // an input by content hash, not a node.
+        const deps: Label[] =
+          target.rule === 'normalize' ? [{ pkg: `${pkgBase}/assets`, name: target.input }] : [];
         nodes.set(formatLabel(label), {
           kind: 'rule',
           label,
           songDir: song.dir,
           target,
-          deps: [dep],
+          deps,
         });
       }
     }
