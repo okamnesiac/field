@@ -89,6 +89,29 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(Math.min(...samples)).toBeGreaterThanOrEqual(24000);
   });
 
+  // 20 s: each item costs a few round-trips plus the daemon's 250 ms
+  // heartbeat noticing end-of-stream, and there are twelve of them.
+  it('a long queue leaks no listeners (#13 review P3)', { timeout: 20_000 }, async () => {
+    for (let i = 0; i < 11; i++) await importTone(`t${i}`, 2400); // 50 ms each
+    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    expect(items.length).toBe(12); // blip + 11
+
+    const warnings: string[] = [];
+    const onWarning = (w: Error) => warnings.push(w.name);
+    process.on('warning', onWarning);
+    try {
+      const played: string[] = [];
+      await playThroughDaemon(root, project, items, {}, {
+        onItem: (label) => played.push(label),
+      });
+      expect(played).toHaveLength(12);
+      await new Promise((r) => setImmediate(r)); // warnings are emitted async
+      expect(warnings).not.toContain('MaxListenersExceededWarning');
+    } finally {
+      process.removeListener('warning', onWarning);
+    }
+  });
+
   it('an interrupt between load and play never starts the transport (#13 review)', async () => {
     await importTone('blop', 480000); // long enough that a leak would be obvious
     const items = await resolvePlayables(root, ['//songs/creek/assets:all']);

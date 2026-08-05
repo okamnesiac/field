@@ -125,6 +125,9 @@ function waitForStop(client: AudiodClient, onPosition: (sample: number) => void)
     const finish = (err?: Error) => {
       clearInterval(poll);
       client.removeListener('event', onEvent);
+      // The close listener too: one leaked per queue item otherwise, and a
+      // dozen-item queue trips MaxListenersExceededWarning (#13 review).
+      client.removeListener('close', onClose);
       if (err) reject(err);
       else resolve();
     };
@@ -132,8 +135,9 @@ function waitForStop(client: AudiodClient, onPosition: (sample: number) => void)
       if (e.event === 'position' && e.sample !== undefined) onPosition(e.sample);
       if (e.event === 'state' && e.state === 'stopped') finish();
     };
+    const onClose = () => finish(new Error('bloom-audiod connection closed'));
     client.on('event', onEvent);
-    client.once('close', () => finish(new Error('bloom-audiod connection closed')));
+    client.once('close', onClose);
     // Events cover the normal path; the poll covers the race where a
     // zero-length or already-finished file never transitions at all.
     const poll = setInterval(() => {
