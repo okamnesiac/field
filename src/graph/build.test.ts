@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -6,7 +6,7 @@ import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { buildTargets, explainTarget, queryDeps } from '../commands/build.js';
-import type { RuleRunner } from './build.js';
+import { runScProgram, type RuleRunner } from './build.js';
 
 let root: string;
 
@@ -234,6 +234,69 @@ describe('sc-render', () => {
       scTargetsYaml(42).replace('shared/sc/texture.scd', '../outside.scd'),
     );
     await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('escapes the project');
+  });
+});
+
+describe('runScProgram edges (no sclang needed)', () => {
+  const scratch = () => join(root, '.bloom');
+  const params = { seed: 1, duration: 0.1, channels: 1 as const, sampleRate: 48000 };
+
+  const withSclang = async (binary: string, fn: () => Promise<void>) => {
+    const prev = process.env['BLOOM_SCLANG'];
+    process.env['BLOOM_SCLANG'] = binary;
+    try {
+      await fn();
+    } finally {
+      if (prev === undefined) delete process.env['BLOOM_SCLANG'];
+      else process.env['BLOOM_SCLANG'] = prev;
+    }
+  };
+
+  it('errors hard when BLOOM_SCLANG points at a missing binary', async () => {
+    await withSclang('/nonexistent/sclang-determinism-wrapper', async () => {
+      await expect(
+        runScProgram(join(root, 'x.scd'), join(scratch(), 'out.wav'), params),
+      ).rejects.toThrow('BLOOM_SCLANG points at a missing binary');
+    });
+  });
+
+  it('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
+    const hang = join(root, 'hang.sh');
+    writeFileSync(hang, '#!/bin/sh\nsleep 5\n');
+    chmodSync(hang, 0o755);
+    await withSclang(hang, async () => {
+      await expect(
+        runScProgram(join(root, 'x.scd'), join(scratch(), 'out.wav'), { ...params, timeoutMs: 300 }),
+      ).rejects.toThrow('0.exit');
+    });
+  });
+
+  it('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
+    const fail = join(root, 'fail.sh');
+    writeFileSync(fail, '#!/bin/sh\necho "ERROR: Class not defined: Blah"\necho "boring stderr" >&2\nexit 1\n');
+    chmodSync(fail, 0o755);
+    await withSclang(fail, async () => {
+      await expect(
+        runScProgram(join(root, 'x.scd'), join(scratch(), 'out.wav'), params),
+      ).rejects.toThrow('Class not defined: Blah');
+    });
+  });
+
+  it('refuses to cache when the program changes during the render', async () => {
+    writeFileSync(join(root, 'shared/sc/texture.scd'), '// v1\n');
+    writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(42));
+    const midRenderEdit: RuleRunner = async (_node, _inputPath, outputPath) => {
+      writeFileSync(join(root, 'shared/sc/texture.scd'), '// edited mid-render\n');
+      writeFileSync(outputPath, 'audio');
+    };
+    await expect(
+      buildTargets(root, ['//songs/creek/targets:texture'], midRenderEdit),
+    ).rejects.toThrow('changed during the render');
+
+    // Nothing was cached: the next build executes again.
+    const { state, runner } = countingRunner();
+    await buildTargets(root, ['//songs/creek/targets:texture'], runner);
+    expect(state.runs).toBe(1);
   });
 });
 

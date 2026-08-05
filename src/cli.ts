@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
+import { parseChannels, parseDurationSeconds, parseSeed } from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
 import { check } from './commands/check.js';
 import { runScProgram } from './graph/build.js';
@@ -49,9 +50,9 @@ program
 const sc = program.command('sc').description('SuperCollider');
 sc.command('render <program>')
   .description('render an SC program directly (uncached, for iteration; commit it as a target for builds)')
-  .requiredOption('--seed <n>', 'random seed', (v) => Number(v))
-  .requiredOption('--duration <seconds>', 'render length in seconds', (v) => Number(v))
-  .option('--channels <n>', '1 or 2', (v) => Number(v), 2)
+  .requiredOption('--seed <n>', 'random seed', parseSeed)
+  .requiredOption('--duration <seconds>', 'render length in seconds', parseDurationSeconds)
+  .option('--channels <n>', '1 or 2', parseChannels, 2)
   .option('--output <path>', 'output WAV path (defaults to <program>.wav in the current directory)')
   .action(async (programPath: string, opts: { seed: number; duration: number; channels: number; output?: string }) => {
     try {

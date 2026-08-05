@@ -57,19 +57,46 @@ export type RuleRunner = (
   ctx: RunContext,
 ) => Promise<void>;
 
-function sclangBinary(): string {
-  const override = process.env['BLOOM_SCLANG'];
-  return override ?? 'sclang'; // PATH; the app-bundle fallback is tried on ENOENT
-}
-
 const SCLANG_APP_FALLBACK = '/Applications/SuperCollider.app/Contents/MacOS/sclang';
+
+type ExecError = Error & {
+  code?: string;
+  killed?: boolean;
+  stdout?: string;
+  stderr?: string;
+};
+
+// sclang reports compile and runtime errors on *stdout*; Node's exec error
+// message carries only stderr. Surface both, or the edit-retry loop this
+// exists for is flying blind.
+function formatScError(err: ExecError, programPath: string, timeoutMs: number): Error {
+  if (err.killed) {
+    return new Error(
+      `sclang timed out after ${Math.round(timeoutMs / 1000)}s for ${programPath} — ` +
+        `did the program call 0.exit?`,
+    );
+  }
+  const stdoutTail = (err.stdout ?? '')
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .slice(-15)
+    .join('\n');
+  const detail = stdoutTail ? `\n${stdoutTail}` : '';
+  return new Error(`sclang failed for ${programPath}: ${err.message}${detail}`);
+}
 
 // Run an SC program under the sc-render contract: sclang gets the render
 // parameters in the environment, and must write BLOOM_OUTPUT and exit.
 export async function runScProgram(
   programPath: string,
   outputPath: string,
-  params: { seed: number; duration: number; channels: number; sampleRate: number },
+  params: {
+    seed: number;
+    duration: number;
+    channels: number;
+    sampleRate: number;
+    timeoutMs?: number;
+  },
 ): Promise<void> {
   const env = {
     ...process.env,
@@ -79,15 +106,33 @@ export async function runScProgram(
     BLOOM_SAMPLE_RATE: String(params.sampleRate),
     BLOOM_CHANNELS: String(params.channels),
   };
-  const options = { env, timeout: 180_000 };
+  // The ceiling scales with the render: NRT is usually faster than realtime,
+  // but the schema admits hour-long renders, and the ceiling exists to catch
+  // hangs, not to race legitimate work.
+  const timeout = params.timeoutMs ?? Math.max(180_000, 60_000 + params.duration * 10_000);
+  const options = { env, timeout };
+  const override = process.env['BLOOM_SCLANG'];
   try {
-    await execFileAsync(sclangBinary(), [programPath], options);
+    await execFileAsync(override ?? 'sclang', [programPath], options);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT' && existsSync(SCLANG_APP_FALLBACK)) {
-      await execFileAsync(SCLANG_APP_FALLBACK, [programPath], options);
-      return;
+    const e = err as ExecError;
+    if (e.code === 'ENOENT') {
+      if (override) {
+        // The override is the determinism escape hatch (sc-render.md §2); a
+        // typo'd wrapper must never silently render through the app bundle.
+        throw new Error(`BLOOM_SCLANG points at a missing binary: ${override}`);
+      }
+      if (existsSync(SCLANG_APP_FALLBACK)) {
+        try {
+          await execFileAsync(SCLANG_APP_FALLBACK, [programPath], options);
+          return;
+        } catch (fallbackErr) {
+          throw formatScError(fallbackErr as ExecError, programPath, timeout);
+        }
+      }
+      throw new Error('sclang not found on PATH (install SuperCollider or set BLOOM_SCLANG)');
     }
-    throw new Error(`sclang failed for ${programPath}: ${(err as Error).message}`);
+    throw formatScError(e, programPath, timeout);
   }
 }
 
@@ -280,6 +325,19 @@ async function buildNode(
   await runner(node, inputPath, tmpOut, { sampleRate });
   if (!existsSync(tmpOut)) {
     throw new Error(`rule "${node.target.rule}" produced no output for ${formatLabel(node.label)}`);
+  }
+
+  // The program hash was read for the key before the render; if the file
+  // changed underneath the run, the output came from code the key doesn't
+  // describe — refuse to cache it.
+  if (node.target.rule === 'sc-render') {
+    const after = await sha256File(join(project.root, node.target.program));
+    if (after !== inputHashes[inputHashes.length - 1]) {
+      throw new Error(
+        `refusing to cache: ${node.target.program} changed during the render of ` +
+          `${formatLabel(node.label)} — re-run the build`,
+      );
+    }
   }
 
   const sha256 = await sha256File(tmpOut);
