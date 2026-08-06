@@ -88,13 +88,16 @@ export async function transportStatusLines(
     } else {
       const ctx = musicalContext(project, songDirOfPath(root, status.path));
       const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
-      lines.push(`${status.state}  ${formatPosition(status.sample, rate, ctx)}`);
+      const looping = status.looping === true ? '  (looping)' : '';
+      lines.push(`${status.state}  ${formatPosition(status.sample, rate, ctx)}${looping}`);
       lines.push(`file: ${relative(root, status.path) || status.path}`);
     }
     if (status.device) {
       const note = status.resampling ? ' (resampling)' : '';
       lines.push(`device: ${status.device.name} @ ${status.device.sample_rate} Hz${note}`);
     }
+    // Answers "am I on the latest daemon?" without folklore.
+    lines.push(`daemon: bloom-audiod ${client.daemonVersion}`);
     return lines;
   } finally {
     client.close();

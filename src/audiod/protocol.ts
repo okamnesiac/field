@@ -43,6 +43,7 @@ export const statusResponseSchema = z.object({
   null_output: z.boolean(),
   device: z.object({ name: z.string(), sample_rate: z.number() }).optional(),
   resampling: z.boolean(),
+  looping: z.boolean().optional(), // daemon >= 0.3
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });
