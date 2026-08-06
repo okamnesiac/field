@@ -229,6 +229,39 @@ describe('check', () => {
     expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown asset');
   });
 
+  it('flags loops over targets without loop.every', async () => {
+    createSong(root, 'opener');
+    writeFileSync(
+      join(root, 'songs/opener/targets.yaml'),
+      [
+        'targets:',
+        '  - name: pad',
+        '    rule: sc-render',
+        '    program: sc/pad.scd',
+        '    seed: 1',
+        '    duration: 2',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/opener/tracks/pad.yaml'),
+      [
+        'name: pad',
+        'type: audio',
+        'clips:',
+        '  - id: loop-pad-abc12',
+        '    target: pad',
+        '    position: 0',
+        '    duration: 3840',
+        '    loop:',
+        '      enabled: true',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('set loop.every');
+  });
+
   it('flags tampered asset content', async () => {
     createSong(root, 'opener');
     const src = sourceFile('original bytes');

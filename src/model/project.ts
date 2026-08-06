@@ -390,6 +390,16 @@ function validate(project: LoadedProject): void {
         } else if (clip.target !== undefined && !targetNames.has(clip.target)) {
           push(track.path, `clip "${clip.id}" references unknown target "${clip.target}"`);
         }
+        // Loops that tile at source length need that length at plan time —
+        // a target's output length isn't known until it builds
+        // (clip-looping.md §1.3).
+        if (clip.loop?.enabled && clip.target !== undefined && clip.loop.every === undefined) {
+          push(
+            track.path,
+            `clip "${clip.id}" loops a target — set loop.every ` +
+              `(a target's length is unknown before it builds)`,
+          );
+        }
         // Fades live inside the clip window; whether they fit is only known
         // in samples, so musical clips are checked through the tempo map.
         if (tempoMap) {

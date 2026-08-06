@@ -320,6 +320,20 @@ export const mixFileOrder: KeyOrder = {
 // of: a committed asset (assets.yaml) or a same-song rule target
 // (targets.yaml) — clipping a target means the arrangement plays a render
 // that is never committed, only its recipe (mix-assembly.md §5).
+// Looping (clip-looping.md §1): the window is authoritative and the source
+// tiles to fill it — extending a loop is extending `duration`. `every` is
+// the repetition interval in anchor units (grid-locked through tempo
+// ramps); omitted, repeats tile at the source's sample length. `mode` says
+// what happens when a repeat outlives its slot: cut, or ring over its
+// successors (summed like any overlapping clips). `fade` guards each seam.
+export const clipLoopSchema = z.strictObject({
+  enabled: z.boolean().default(true), // switch a loop off without deleting it
+  every: z.number().int().positive().optional(), // anchor units
+  mode: z.enum(['truncate', 'overlay']).default('truncate'),
+  fade: samples.default(480), // ≈10 ms at 48 k; the naive loop must not click
+});
+export type ClipLoop = z.infer<typeof clipLoopSchema>;
+
 export const clipSchema = z
   .strictObject({
     id: slug,
@@ -328,6 +342,7 @@ export const clipSchema = z
     anchor: z.enum(['musical', 'absolute']).default('musical'),
     position: z.number().int().min(0), // ticks when musical, samples when absolute
     duration: z.number().int().positive(), // same units as position
+    loop: clipLoopSchema.optional(),
     source_offset: samples.default(0),
     slip: z.number().int().default(0),
     gain_db: z.number().default(0),
@@ -346,12 +361,14 @@ export const clipOrder: KeyOrder = {
     'anchor',
     'position',
     'duration',
+    'loop',
     'source_offset',
     'slip',
     'gain_db',
     'fade_in',
     'fade_out',
   ],
+  children: { loop: { keys: ['enabled', 'every', 'mode', 'fade'] } },
 };
 
 // songs/<song>/tracks/<name>.yaml — name must match the filename; the slug

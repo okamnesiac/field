@@ -16,6 +16,37 @@ const FORMAT_PCM = 1;
 const FORMAT_FLOAT = 3;
 const FORMAT_EXTENSIBLE = 0xfffe;
 
+// Frame count without decoding — plan-time looping needs source lengths
+// (clip-looping.md §1.3) and must not pay for sample conversion.
+export function wavFrameCount(path: string): number {
+  const buf = readFileSync(path);
+  if (
+    buf.length < 12 ||
+    buf.toString('ascii', 0, 4) !== 'RIFF' ||
+    buf.toString('ascii', 8, 12) !== 'WAVE'
+  ) {
+    throw new Error(`${path}: not a RIFF/WAVE file`);
+  }
+  let bytesPerFrame: number | undefined;
+  let dataBytes: number | undefined;
+  let offset = 12;
+  while (offset + 8 <= buf.length) {
+    const id = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (id === 'fmt ' && size >= 16 && body + size <= buf.length) {
+      bytesPerFrame = (buf.readUInt16LE(body + 14) / 8) * buf.readUInt16LE(body + 2);
+    } else if (id === 'data') {
+      dataBytes = Math.min(size, buf.length - body);
+    }
+    offset = body + size + (size % 2); // chunks are word-aligned
+  }
+  if (!bytesPerFrame || dataBytes === undefined) {
+    throw new Error(`${path}: missing fmt or data chunk`);
+  }
+  return Math.floor(dataBytes / bytesPerFrame);
+}
+
 export function readWav(path: string): WavData {
   const buf = readFileSync(path);
   if (

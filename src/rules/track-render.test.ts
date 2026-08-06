@@ -63,6 +63,99 @@ const hashes = new Map([
   ['snare', '2222222222222222222222222222222222222222222222222222222222222222'],
 ]);
 
+describe('loop expansion (clip-looping.md)', () => {
+  // One beat of kick (24000 samples at 120), looped over a four-beat window.
+  const frames = new Map([['kick', 24000]]);
+
+  it('tiles at source length when every is omitted, seams click-guarded', () => {
+    const spec = planTrack(
+      track([clip({ position: 0, duration: 3840, loop: { enabled: true }, fade_in: 100, fade_out: 200 })]),
+      map120,
+      hashes,
+      frames,
+    );
+    expect(spec.clips.map((c) => [c.start, c.duration, c.fade_in, c.fade_out])).toEqual([
+      [0, 24000, 100, 480],
+      [24000, 24000, 480, 480],
+      [48000, 24000, 480, 480],
+      [72000, 24000, 480, 200], // window fade_out on the last repetition
+    ]);
+  });
+
+  it('every ticks keeps repeats on the grid, with a partial last slot', () => {
+    const spec = planTrack(
+      track([clip({ position: 0, duration: 2400, loop: { every: 960 } })]),
+      map120,
+      hashes,
+      frames,
+    );
+    // Repeats at beats 0, 1, 2; the window ends mid-slot at 2.5 beats.
+    expect(spec.clips.map((c) => [c.start, c.duration])).toEqual([
+      [0, 24000],
+      [24000, 24000],
+      [48000, 12000],
+    ]);
+  });
+
+  it('overlay repetitions ring to the window edge and sum', () => {
+    const spec = planTrack(
+      track([clip({ position: 0, duration: 2880, loop: { every: 960, mode: 'overlay' }, fade_out: 300 })]),
+      map120,
+      hashes,
+      frames,
+    );
+    // Each voice runs to the window end; reads past the source end are
+    // silence, so voices end where their content does.
+    expect(spec.clips.map((c) => [c.start, c.duration, c.fade_out])).toEqual([
+      [0, 72000, 300],
+      [24000, 48000, 300],
+      [48000, 24000, 300],
+    ]);
+  });
+
+  it('enabled: false is not a loop, and the plan matches a plain clip exactly', () => {
+    const plain = planTrack(track([clip()]), map120, hashes);
+    const disabled = planTrack(
+      track([clip({ loop: { enabled: false, every: 960 } })]),
+      map120,
+      hashes,
+      frames,
+    );
+    expect(disabled.clips).toEqual(plain.clips);
+  });
+
+  it('a loop reproducing hand-tiled clips produces the identical plan', () => {
+    // The field keys shape: butt-jointed repeats with 480-sample seams.
+    const looped = planTrack(
+      track([clip({ position: 0, duration: 2880, loop: { every: 960 }, fade_out: 200 })]),
+      map120,
+      hashes,
+      frames,
+    );
+    const hand = planTrack(
+      track([
+        clip({ id: 'k1', position: 0, duration: 960, fade_out: 480 }),
+        clip({ id: 'k2', position: 960, duration: 960, fade_in: 480, fade_out: 480 }),
+        clip({ id: 'k3', position: 1920, duration: 960, fade_in: 480, fade_out: 200 }),
+      ]),
+      map120,
+      hashes,
+    );
+    expect(looped.clips).toEqual(hand.clips);
+  });
+
+  it('refuses to tile a source exhausted by its read offset', () => {
+    expect(() =>
+      planTrack(
+        track([clip({ position: 0, duration: 3840, loop: { enabled: true }, source_offset: 24000 })]),
+        map120,
+        hashes,
+        frames,
+      ),
+    ).toThrow('source content after its read offset');
+  });
+});
+
 describe('planTrack', () => {
   it('resolves clips to samples and indexes distinct assets in hash order', () => {
     const spec = planTrack(

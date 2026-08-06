@@ -1,4 +1,5 @@
-import { posix } from 'node:path';
+import { join, posix } from 'node:path';
+import { wavFrameCount } from '../audio/wav.js';
 import { formatLabel, matchesPattern, type Label, type LabelPattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { ruleImpl, type RuleSpec } from '../rules/index.js';
@@ -100,13 +101,27 @@ export function buildGraph(project: LoadedProject): Graph {
       .map((t) => t.data);
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
+      // Loops without `every` tile at the source's length, so the plan
+      // needs frame counts — but only for the assets such loops touch.
+      const fileByAsset = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
+      const framesByAsset = new Map<string, number>();
+      for (const track of mixable) {
+        for (const clip of track.clips) {
+          if (clip.loop?.enabled && clip.loop.every === undefined && clip.asset) {
+            const file = fileByAsset.get(clip.asset);
+            if (file && !framesByAsset.has(clip.asset)) {
+              framesByAsset.set(clip.asset, wavFrameCount(join(project.root, song.dir, file)));
+            }
+          }
+        }
+      }
       for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
         // useful artifact — implicit targets exist where there is content.
         addRule(
           { pkg: `${pkgBase}/tracks`, name: track.name },
           song.dir,
-          planTrack(track, tempoMap, sha256ByAsset),
+          planTrack(track, tempoMap, sha256ByAsset, framesByAsset),
         );
       }
       if (song.mix) {
@@ -135,7 +150,17 @@ export function resolveLabel(graph: Graph, label: Label): GraphNode {
 export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] {
   const matched = [...graph.nodes.values()].filter((n) => matchesPattern(n.label, pattern));
   if (matched.length === 0) {
-    throw new Error('pattern matched no targets');
+    // Echo the expanded form: with songs-relative shorthand, what the
+    // user typed is not always what was looked up.
+    const expanded =
+      pattern.kind === 'label'
+        ? formatLabel(pattern.label)
+        : pattern.kind === 'package-all'
+          ? `//${pattern.pkg}:all`
+          : pattern.pkg === ''
+            ? '//...'
+            : `//${pattern.pkg}/...`;
+    throw new Error(`pattern matched no targets: ${expanded}`);
   }
   return matched;
 }
