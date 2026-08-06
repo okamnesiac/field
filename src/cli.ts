@@ -404,7 +404,7 @@ program
                 void reloadClient.reload(moved.outputPath).then(
                   () =>
                     display
-                      ? display.queue(moved.sha256)
+                      ? display.queue(moved.sha256, moved.outputPath!)
                       : say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
                   // A ctrl-c racing an in-flight reload closes the socket
                   // under it; that is the session ending, not a failure.
@@ -443,7 +443,8 @@ program
             },
             onDevice: (name) =>
               display ? display.deviceMoved(name) : say(`→ output moved to ${name}`),
-            onReloaded: () => (display ? display.swapped() : say('↻ swapped at the wrap')),
+            onReloaded: (path) =>
+              display ? display.swapped(path) : say('↻ swapped at the wrap'),
             interrupted: () => interrupted,
           },
         );

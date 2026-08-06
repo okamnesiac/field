@@ -76,8 +76,10 @@ agent story: an agent edits YAML while a human just keeps listening.
   carrying the loop iteration (`[10] 8.4`) and the queued takeover
   (`(new version <shortHash>)`); the wrap closes the block as
   `played …` history and opens the successor's. Device moves repeat
-  the header with the new route. Non-tty output stays plain
-  sequential lines (`↻ … at the next wrap`, `↻ swapped at the wrap`).
+  the header with the new route. A `--from` region loop still
+  announces `↻ … next pass` at queue time — its swap moment is the
+  pass boundary, not a wrap. Non-tty output stays plain sequential
+  lines (`↻ … at the next wrap`, `↻ swapped at the wrap`).
 - **Coalescing:** a change arriving mid-build marks the build stale;
   its artifact still lands in the CAS (warm for later), but its swap is
   skipped and the loop body re-runs. Only ever one build in flight.

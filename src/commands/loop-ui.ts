@@ -32,7 +32,12 @@ export class LoopDisplay {
   private label = '';
   private note = ''; // ' (Volt 476)' — the daemon-status suffix from onItem
   private hash = '';
-  private pending: string | undefined;
+  // The reload we sent: hash for the display, path for correlating the
+  // daemon's answer — the takeover that sounds may not be ours (#36
+  // review: a reload from another shell wins latest-wins, and stamping
+  // the new block with our hash would be confidently wrong about what
+  // is playing).
+  private pending: { sha256: string; path: string } | undefined;
   private pass = 1;
   private lastAt: number | undefined;
   private posText = ''; // last bar.beat text, without pass/pending suffixes
@@ -125,15 +130,16 @@ export class LoopDisplay {
   }
 
   private render(): void {
-    const pending = this.pending !== undefined ? `     (new version ${short(this.pending)})` : '';
+    const pending =
+      this.pending !== undefined ? `     (new version ${short(this.pending.sha256)})` : '';
     this.write(`\r\x1b[2K  ${this.passPrefix()}${this.posText}${pending}`);
     this.onPositionLine = true;
   }
 
   // A reload was accepted: the position line carries it until the wrap.
   // Latest wins, like the daemon's own queue.
-  queue(sha256: string): void {
-    this.pending = sha256;
+  queue(sha256: string, path: string): void {
+    this.pending = { sha256, path };
     if (this.onPositionLine) this.render();
   }
 
@@ -152,9 +158,12 @@ export class LoopDisplay {
   }
 
   // The takeover sounded: close the old block as history, open the new.
-  swapped(): void {
+  // The daemon says which path took over; our queued hash is claimed
+  // only when it matches — otherwise someone else's reload won, and the
+  // header opens hashless rather than confidently wrong.
+  swapped(path: string): void {
     const old = this.hash;
-    this.hash = this.pending ?? ''; // '' — a reload queued from another shell
+    this.hash = this.pending?.path === path ? this.pending.sha256 : '';
     this.pending = undefined;
     if (this.onPositionLine && !this.buried) {
       // Rewrite the header one line up to `played`, freeze the position

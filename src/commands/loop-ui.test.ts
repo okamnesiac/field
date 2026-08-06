@@ -21,10 +21,10 @@ describe('LoopDisplay', () => {
     d.start('//songs/creek/mix:main', A, ' (Volt 476)');
     d.position('1.1', 0);
     d.position('1.2', 240);
-    d.queue(B); // reload accepted: the position line carries it
+    d.queue(B, '/out/main.wav'); // reload accepted: the position line carries it
     d.position('1.3', 480);
     d.position('1.1', 0); // the wrap: successor's beat, held until confirmed
-    d.swapped();
+    d.swapped('/out/main.wav');
     d.position('1.2', 240);
     d.end();
     expect(text()).toBe(
@@ -60,11 +60,11 @@ describe('LoopDisplay', () => {
     const { d, text } = harness();
     d.start('//songs/x/mix:main', A, ' (Volt 476)');
     d.position('1.1', 0);
-    d.queue(B);
+    d.queue(B, '/out/main.wav');
     d.say('check: songs/x/tracks/keys.yaml: something');
     d.position('1.2', 240);
     d.position('1.1', 0);
-    d.swapped();
+    d.swapped('/out/main.wav');
     expect(text()).not.toContain('\x1b[1A'); // never steps onto the said line
     expect(text()).toContain('\nplayed //songs/x/mix:main@a1b2c3d4e5f6\n');
     expect(text()).toContain('playing //songs/x/mix:main@f6e5d4c3b2a1 → (Volt 476)\n');
@@ -92,11 +92,26 @@ describe('LoopDisplay', () => {
     expect(text()).not.toContain('[2]');
   });
 
+  it("a swap that isn't ours opens the block hashless (#36 review P3)", () => {
+    const { d, text } = harness();
+    d.start('//songs/x/sounds:gen1', A, '');
+    d.position('12.4', 9000);
+    d.queue(B, '/out/gen1/1.wav');
+    // Another shell's reload won latest-wins: the daemon names a path we
+    // never sent. Claiming our hash would be internally consistent and
+    // entirely wrong about what is playing.
+    d.position('1.1', 0);
+    d.swapped('/audio/gen1/2.wav');
+    expect(text()).toContain('played //songs/x/sounds:gen1@a1b2c3d4e5f6\n');
+    expect(text()).toContain('playing //songs/x/sounds:gen1\n'); // no @hash claimed
+    expect(text()).not.toContain('playing //songs/x/sounds:gen1@f6e5d4c3b2a1');
+  });
+
   it('dequeue takes the notice back down', () => {
     const { d, text } = harness();
     d.start('//songs/x/mix:main', A, '');
     d.position('1.1', 0);
-    d.queue(B);
+    d.queue(B, '/out/main.wav');
     d.dequeue();
     expect(text().endsWith('\r\x1b[2K  [1] 1.1')).toBe(true); // repainted clean
   });
@@ -105,7 +120,7 @@ describe('LoopDisplay', () => {
     const { d, text } = harness();
     d.start('//songs/x/mix:main', A, '');
     d.position('12.4', 9000);
-    d.queue(B);
+    d.queue(B, '/out/main.wav');
     d.position('1.1', 0);
     d.position('1.2', 240);
     d.position('1.3', 480); // third held beat: give up waiting, it was a plain wrap
