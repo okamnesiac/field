@@ -36,6 +36,14 @@ what the build graph sees.
    spans — "bar 0" is nonsense while "0 bars, 2 beats" is essential, so
    the two kinds genuinely differ and pretending otherwise makes zeros
    ambiguous.
+   **Caveat (#24 review):** a span resolves once, at its anchor. That is
+   exact for `duration` and `length` — the single walk crosses any meter
+   change — but `loop.every` then acts as a fixed tick interval from the
+   clip's position, so repetitions beyond a mid-window meter change keep
+   the anchor-time bar length instead of re-resolving per repetition.
+   Documented rather than engineered: per-repetition resolution would
+   change plan output for a case no song has yet, and deserves its own
+   decision record if one ever does.
 5. **The schema validates shape only; the model resolves.** Legal beat
    and tick ranges depend on the meter map, which lives in another file
    (tempo.yaml) — so zod checks "1–3 positive/non-negative integers" and

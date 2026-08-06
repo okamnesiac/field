@@ -70,7 +70,9 @@ resolved through the song's meter map. Positions are ordinal and 1-indexed
 — `at: [9, 2]` is bar 9, beat 2 — while spans are cardinal counts where
 zero is legal — `duration: [4]` is four bars, `every: [0, 2]` is two beats,
 advanced from the field's anchor so meter changes mean what a musician
-means. Arrays are resolved to ticks at load: either spelling produces the
+means (`loop.every` resolves once, at the clip's position, and repeats as
+that fixed interval thereafter). Arrays are resolved to ticks at load:
+either spelling produces the
 same build, and `bloom fmt` preserves whichever notation the author wrote,
 keeping arrays single-line.
 
