@@ -70,6 +70,7 @@ describe('mixRule.execute', () => {
     faders: { gain_db: number; pan: number }[],
     gain_db = 0,
     lengthSamples?: number,
+    loop?: boolean,
   ) {
     const inputPaths = stems.map((s, i) => {
       const path = join(dir, `stem-${i}.wav`);
@@ -85,6 +86,7 @@ describe('mixRule.execute', () => {
         faders,
         gain_db,
         ...(lengthSamples !== undefined ? { length_samples: lengthSamples } : {}),
+        ...(loop === true ? { loop: true } : {}),
       },
       inputPaths,
       out,
@@ -121,6 +123,20 @@ describe('mixRule.execute', () => {
 
     const padded = await mix([{ left: [1], right: [1] }], [{ gain_db: 0, pan: 0 }], 0, 4);
     expect([...padded.channels[0]!]).toEqual([1, 0, 0, 0]);
+  });
+
+  it('loop folds the overhang onto the start — one pass of the infinite loop', async () => {
+    // 3-sample loop, 8 samples of content: the tail wraps twice.
+    // out[0] = c[0]+c[3]+c[6], out[1] = c[1]+c[4]+c[7], out[2] = c[2]+c[5].
+    const out = await mix(
+      [{ left: [1, 2, 3, 0.5, 0.25, 0.125, 0.0625, 0.03125], right: [0, 0, 0, 0, 0, 0, 0, 0] }],
+      [{ gain_db: 0, pan: 0 }],
+      0,
+      3,
+      true,
+    );
+    expect([...out.channels[0]!]).toEqual([1.5625, 2.28125, 3.125]);
+    expect(out.channels[0]).toHaveLength(3);
   });
 
   it('pads shorter stems with silence', async () => {

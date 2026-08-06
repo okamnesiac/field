@@ -132,7 +132,7 @@ export function buildGraph(project: LoadedProject): Graph {
             ? tempoMap.ticksToSamples(song.song.data.length)
             : undefined;
         for (const mix of song.mix.data.mixes) {
-          const spec = planMix(mix, mixable, lengthSamples);
+          const spec = planMix(mix, mixable, lengthSamples, song.song?.data.loop);
           if (spec.tracks.length === 0) continue; // nothing to mix yet
           // Mix inputs are track stems — rule→rule edges, wired here where
           // the spec is synthesized rather than through assetDeps (which is

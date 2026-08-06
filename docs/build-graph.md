@@ -121,7 +121,10 @@ outside the hash.
   (ticks, `song.yaml`): the mix then renders *exactly* that long — tails
   truncate after the master chain, short content pads — so a song's
   extent is authored rather than emergent from whichever stem rings
-  longest, and a whole song can loop on its own bar line.
+  longest. Adding `loop: true` folds the overhang back onto the start
+  instead (bar 12's reverb tail rings into bar 1): the render is one
+  seamless pass of the infinite loop, and a looping song's length *is*
+  its loop length.
 
 ## Determinism policy
 

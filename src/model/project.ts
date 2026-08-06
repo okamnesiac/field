@@ -265,6 +265,9 @@ function validate(project: LoadedProject): void {
     if (song.song && song.song.data.name !== song.name) {
       push(song.song.path, `name "${song.song.data.name}" must match directory "${song.name}"`);
     }
+    if (song.song?.data.loop === true && song.song.data.length === undefined) {
+      push(song.song.path, 'loop needs a declared length — the loop point is the length');
+    }
 
     let tempoMap: TempoMap | undefined;
     if (song.tempo) {
