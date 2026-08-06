@@ -253,15 +253,15 @@ program
   .option('--from <position>', 'start at bar[.beat[.tick]] (single target only)')
   .option('--device <name>', 'output device (bloom devices lists them)')
   .option('--loop', 'replay the queue until ctrl-c')
-  .option('--tick', 'overlay a metronome (rendered CLI-side; loops with the file)')
-  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; tick?: boolean }) => {
+  .option('--click', 'overlay a metronome (rendered CLI-side; loops with the file)')
+  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean }) => {
     try {
       const root = requireRoot();
       let items = await resolvePlayables(root, patterns);
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
-        if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.tick === true) {
-          throw new Error('--from, --device, --loop, and --tick need bloom-audiod (pnpm build:native)');
+        if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true) {
+          throw new Error('--from, --device, --loop, and --click need bloom-audiod (pnpm build:native)');
         }
         process.stderr.write('bloom-audiod is not built; using afplay (pnpm build:native)\n');
         await playWithAfplay(items);
@@ -285,9 +285,9 @@ program
       });
 
       const project = loadProject(root);
-      if (opts.tick === true) {
-        const { applyTick } = await import('./commands/click.js');
-        items = applyTick(root, project, items);
+      if (opts.click === true) {
+        const { applyClick } = await import('./commands/click.js');
+        items = applyClick(root, project, items);
       }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;

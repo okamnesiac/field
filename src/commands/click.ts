@@ -6,7 +6,7 @@ import type { LoadedProject } from '../model/project.js';
 import { musicalContext, songDirOfPkg, type MusicalContext } from './transport.js';
 import type { Playable } from './play.js';
 
-// --tick: a metronome over whatever is auditioning. The click renders
+// --click: a metronome over whatever is auditioning. The click renders
 // CLI-side into a temp copy of the artifact — the daemon stays
 // artifacts-only (playback.md §1), and the click loops with the file.
 // Each beat projects through the tempo map individually, so ramps click
@@ -58,17 +58,17 @@ export function withClick(root: string, ctx: MusicalContext, item: Playable): Pl
   }
   const dir = join(root, '.bloom', 'tmp');
   mkdirSync(dir, { recursive: true });
-  const path = join(dir, `tick-${item.label.replace(/[^a-z0-9]+/g, '-')}.wav`);
+  const path = join(dir, `click-${item.label.replace(/[^a-z0-9]+/g, '-')}.wav`);
   writeWavFloat32(path, wav.sampleRate, [left, right]);
   return { ...item, path };
 }
 
 // Every playable gets its own song's grid; a playable outside any song
 // (no tempo map) is a clear error rather than a silent no-click.
-export function applyTick(root: string, project: LoadedProject, items: Playable[]): Playable[] {
+export function applyClick(root: string, project: LoadedProject, items: Playable[]): Playable[] {
   return items.map((item) => {
     const ctx = musicalContext(project, songDirOfPkg(item.pkg));
-    if (!ctx) throw new Error(`--tick needs a song's tempo map; ${item.label} has none`);
+    if (!ctx) throw new Error(`--click needs a song's tempo map; ${item.label} has none`);
     return withClick(root, ctx, item);
   });
 }

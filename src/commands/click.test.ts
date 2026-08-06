@@ -65,12 +65,12 @@ describe('withClick', () => {
   it('overlays clicks on beats and leaves the space between silent', () => {
     const src = join(root, 'silent.wav');
     writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
-    const ticked = withClick(root, ctx44, { label: '//songs/x/mix:main', pkg: 'songs/x/mix', path: src });
+    const clicked = withClick(root, ctx44, { label: '//songs/x/mix:main', pkg: 'songs/x/mix', path: src });
 
-    const wav = readWav(ticked.path);
+    const wav = readWav(clicked.path);
     expect(wav.channels[0]).toHaveLength(48000); // length untouched
     expect(Math.abs(wav.channels[0]![24001]!)).toBeGreaterThan(0.01); // beat 2 clicks
     expect(Math.abs(wav.channels[0]![23000]!)).toBe(0); // between beats: silence
-    expect(ticked.path).not.toBe(src); // the artifact itself is never touched
+    expect(clicked.path).not.toBe(src); // the artifact itself is never touched
   });
 });
