@@ -1,18 +1,18 @@
 // The watch-loop display (watch.md §2): two live lines on a tty —
 //
 //   playing //songs/creek/mix:main@45a7b1c2d853 → (Volt 476)
-//     8.4 ✕ 10     (new version fa105f281f9b)
+//     [10] 8.4     (new version fa105f281f9b)
 //
 // The header carries what the daemon is looping; the position line
-// carries where in the pass it is, which pass (✕ N from 2 on), and the
-// queued takeover while one is pending. When the swap lands at the wrap,
-// the old block closes as history — `played …@old` with its final
+// carries the loop iteration, where in the pass it is, and the queued
+// takeover while one is pending. When the swap lands at the wrap, the
+// old block closes as history — `played …@old` with its final
 // position — and a fresh block opens for the successor:
 //
 //   played //songs/creek/mix:main@45a7b1c2d853
-//     12.4 ✕ 10
+//     [10] 12.4
 //   playing //songs/creek/mix:main@fa105f281f9b → (Volt 476)
-//     1.1
+//     [1] 1.1
 //
 // Rendering is a pure function of the calls below over an injected
 // write, so the exact byte stream (ANSI included) is unit-testable.
@@ -40,7 +40,14 @@ export class LoopDisplay {
   private buried = false; // a said() line sits between header and position
   private held: { line: string; at: number }[] = [];
 
-  constructor(private readonly write: (chunk: string) => void) {}
+  // `looping` gates the [N] iteration prefix: only a looping session has
+  // iterations to count. Watch implies --loop today, so the CLI always
+  // passes true; the flag keeps the renderer honest for any future
+  // non-loop use.
+  constructor(
+    private readonly write: (chunk: string) => void,
+    private readonly looping: boolean = true,
+  ) {}
 
   start(label: string, sha256: string, note: string): void {
     this.label = label;
@@ -113,10 +120,13 @@ export class LoopDisplay {
     this.render();
   }
 
+  private passPrefix(): string {
+    return this.looping ? `[${this.pass}] ` : '';
+  }
+
   private render(): void {
-    const pass = this.pass > 1 ? ` ✕ ${this.pass}` : '';
     const pending = this.pending !== undefined ? `     (new version ${short(this.pending)})` : '';
-    this.write(`\r\x1b[2K  ${this.posText}${pass}${pending}`);
+    this.write(`\r\x1b[2K  ${this.passPrefix()}${this.posText}${pending}`);
     this.onPositionLine = true;
   }
 
@@ -146,12 +156,11 @@ export class LoopDisplay {
     const old = this.hash;
     this.hash = this.pending ?? ''; // '' — a reload queued from another shell
     this.pending = undefined;
-    const pass = this.pass > 1 ? ` ✕ ${this.pass}` : '';
     if (this.onPositionLine && !this.buried) {
       // Rewrite the header one line up to `played`, freeze the position
       // line at the pass's final beat, and fall through to a new block.
       this.write(`\r\x1b[1A\x1b[2Kplayed ${this.label}${old ? `@${short(old)}` : ''}\n`);
-      this.write(`\x1b[2K  ${this.posText}${pass}\n`);
+      this.write(`\x1b[2K  ${this.passPrefix()}${this.posText}\n`);
     } else {
       if (this.onPositionLine) this.write('\n');
       this.write(`played ${this.label}${old ? `@${short(old)}` : ''}\n`);

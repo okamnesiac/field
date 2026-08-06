@@ -73,7 +73,7 @@ agent story: an agent edits YAML while a human just keeps listening.
   normal engine; if the outcome hash differs from what the daemon is
   looping, send `reload`. On a tty the session renders a live block —
   `playing <label>@<shortHash> → (<device>)` over a position line
-  carrying the loop iteration (`8.4 ✕ 10`) and the queued takeover
+  carrying the loop iteration (`[10] 8.4`) and the queued takeover
   (`(new version <shortHash>)`); the wrap closes the block as
   `played …` history and opens the successor's. Device moves repeat
   the header with the new route. Non-tty output stays plain

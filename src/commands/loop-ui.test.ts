@@ -29,17 +29,17 @@ describe('LoopDisplay', () => {
     d.end();
     expect(text()).toBe(
       'playing //songs/creek/mix:main@a1b2c3d4e5f6 → (Volt 476)\n' +
-        '\r\x1b[2K  1.1' +
-        '\r\x1b[2K  1.2' +
-        '\r\x1b[2K  1.2     (new version f6e5d4c3b2a1)' +
-        '\r\x1b[2K  1.3     (new version f6e5d4c3b2a1)' +
+        '\r\x1b[2K  [1] 1.1' +
+        '\r\x1b[2K  [1] 1.2' +
+        '\r\x1b[2K  [1] 1.2     (new version f6e5d4c3b2a1)' +
+        '\r\x1b[2K  [1] 1.3     (new version f6e5d4c3b2a1)' +
         // the held 1.1 renders nothing until the swap confirms; then the
         // old block closes at its final position, without the notice
         '\r\x1b[1A\x1b[2Kplayed //songs/creek/mix:main@a1b2c3d4e5f6\n' +
-        '\x1b[2K  1.3\n' +
+        '\x1b[2K  [1] 1.3\n' +
         'playing //songs/creek/mix:main@f6e5d4c3b2a1 → (Volt 476)\n' +
-        '\r\x1b[2K  1.1' +
-        '\r\x1b[2K  1.2' +
+        '\r\x1b[2K  [1] 1.1' +
+        '\r\x1b[2K  [1] 1.2' +
         '\n',
     );
   });
@@ -52,8 +52,8 @@ describe('LoopDisplay', () => {
     d.position('1.1', 0); // dedupe upstream normally prevents this; harmless
     d.position('12.4', 9000);
     d.position('1.1', 0);
-    expect(text()).toContain('\r\x1b[2K  1.1 ✕ 2');
-    expect(text()).toContain('\r\x1b[2K  1.1 ✕ 3');
+    expect(text()).toContain('\r\x1b[2K  [2] 1.1');
+    expect(text()).toContain('\r\x1b[2K  [3] 1.1');
   });
 
   it('a said line buries the header: the swap opens a fresh block instead of rewriting history', () => {
@@ -81,7 +81,7 @@ describe('LoopDisplay', () => {
     expect(text()).toContain('playing //songs/x/mix:main@a1b2c3d4e5f6 → (MacBook Pro Speakers)\n');
     expect(text()).toContain('\nplaying //songs/x/mix:main@a1b2c3d4e5f6 → (Volt 476)\n');
     expect(text()).not.toContain('output moved'); // uniform lines instead
-    expect(text().endsWith('\r\x1b[2K  5.3 ✕ 2')).toBe(true); // same iteration
+    expect(text().endsWith('\r\x1b[2K  [2] 5.3')).toBe(true); // same iteration
   });
 
   it('resample-ratio jitter is not a wrap', () => {
@@ -89,7 +89,7 @@ describe('LoopDisplay', () => {
     d.start('//songs/x/mix:main', A, '');
     d.position('5.3', 4600);
     d.position('5.2', 4400); // a device switch stepping back, not a return to the top
-    expect(text()).not.toContain('✕');
+    expect(text()).not.toContain('[2]');
   });
 
   it('dequeue takes the notice back down', () => {
@@ -98,7 +98,7 @@ describe('LoopDisplay', () => {
     d.position('1.1', 0);
     d.queue(B);
     d.dequeue();
-    expect(text().endsWith('\r\x1b[2K  1.1')).toBe(true); // repainted clean
+    expect(text().endsWith('\r\x1b[2K  [1] 1.1')).toBe(true); // repainted clean
   });
 
   it('held positions flush as a plain pass boundary when no confirmation comes', () => {
@@ -109,7 +109,7 @@ describe('LoopDisplay', () => {
     d.position('1.1', 0);
     d.position('1.2', 240);
     d.position('1.3', 480); // third held beat: give up waiting, it was a plain wrap
-    expect(text()).toContain('  1.1 ✕ 2');
-    expect(text()).toContain('  1.3 ✕ 2     (new version f6e5d4c3b2a1)'); // still queued
+    expect(text()).toContain('  [2] 1.1');
+    expect(text()).toContain('  [2] 1.3     (new version f6e5d4c3b2a1)'); // still queued
   });
 });
