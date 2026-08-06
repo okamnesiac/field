@@ -18,7 +18,9 @@ agent story: an agent edits YAML while a human just keeps listening.
    file — you always hear whole passes, and the daemon change is small:
    a `reload(path)` request that queues a takeover at the wrap point,
    alongside the native-loop reader that already wraps at end-of-file
-   (playback.md). Worst-case latency is one loop length. The recorded
+   (#23, recorded in [clip-looping.md](clip-looping.md)'s status line;
+   [playback.md](playback.md) predates looping and gains its reload
+   note with chunk 2). Worst-case latency is one loop length. The recorded
    successor, deliberately not now: a bar-synced in-place swap —
    stems and mixes share a sample-0-aligned timeline, so a same-length
    rebuild could take over at the next bar line (computed CLI-side in
@@ -40,8 +42,10 @@ agent story: an agent edits YAML while a human just keeps listening.
    `play --watch` composes it.** The headless form is useful alone (an
    agent keeping a project green; a CI-like local loop), and the play
    form is exactly: watch-build, then reload-at-wrap on hash movement.
-   `--watch` on `play` requires `--loop` — without a loop there is no
-   session to keep fresh.
+   `--watch` on `play` requires `--loop` and exactly one label — a
+   multi-item `--loop` queue is requeue-path playback with no wrap to
+   swap at, so watching it is out of scope until a need appears (the
+   headless `build --watch` is the multi-label form).
 5. **Trigger policy holds under watch — for free.** Watch runs `build`,
    and build never generates a generative sound (project-layout.md
    §1.2), so no watcher event can burn model-minutes or replace chosen
