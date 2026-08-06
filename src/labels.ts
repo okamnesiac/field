@@ -1,10 +1,16 @@
-// Build labels (project-core.md §3.4): `//path:name`, absolute-only in V1,
-// with wildcards `//path/...` (every target under path) and `//path:all`
-// (every target in one package). The project model is the build file —
-// packages derive from it by convention:
+// Build labels (project-core.md §3.4): `//path:name`, with wildcards
+// `//path/...` (every target under path) and `//path:all` (every target
+// in one package). The project model is the build file — packages derive
+// from it by convention:
 //   entity file      songs/creek/tracks/drums.yaml  → //songs/creek/tracks:drums
 //   collection file  songs/creek/assets.yaml        → //songs/creek/assets:<entry>
 //                    songs/creek/targets.yaml       → //songs/creek/targets:<entry>
+// Canonical form is absolute; the CLI additionally accepts songs-relative
+// shorthand (`creek/mix:main` = `//songs/creek/mix:main`) because nearly
+// everything addressable lives under songs/, and a bare song name
+// (`creek`) means its main mix — `main` is a convention, not a
+// requirement, so a song that names its mixes otherwise gets a clean
+// no-such-target error. Other roots (shared/, later) keep the full form.
 
 export interface Label {
   pkg: string; // slash-separated path, no leading or trailing slash
@@ -37,7 +43,16 @@ export function parseLabel(text: string): Label {
 
 export function parsePattern(text: string): LabelPattern {
   if (!text.startsWith('//')) {
-    throw new Error(`labels are absolute: "${text}" must start with //`);
+    if (text.startsWith('/')) {
+      throw new Error(`invalid label "${text}": use //pkg:name, or songs-relative pkg:name`);
+    }
+    // A bare song name is its main mix, the thing you almost always want.
+    if (!text.includes('/') && !text.includes(':') && text !== '...') {
+      text = `${text}/mix:main`;
+    }
+    // Uniformly: no special cases, so a song named "songs" stays
+    // addressable like any other. The absolute form is the escape hatch.
+    text = `//songs/${text}`;
   }
   const rest = text.slice(2);
 
