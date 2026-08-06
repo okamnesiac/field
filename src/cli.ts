@@ -82,6 +82,58 @@ sc.command('render <program>')
     }
   });
 
+const ace = program.command('ace').description('ACE-Step generation (outputs are committed, not cached)');
+ace
+  .command('setup')
+  .description('set up the bloom-aced Python environment (uv; explicit, never automatic)')
+  .action(async () => {
+    try {
+      const { aceSetup } = await import('./commands/ace.js');
+      await aceSetup((line) => process.stdout.write(`${line}\n`));
+    } catch (err) {
+      fail(err);
+    }
+  });
+ace
+  .command('generate <name>')
+  .description('generate variants into songs/<song>/generation/<name>/ with a provenance recipe')
+  .requiredOption('--song <name>', 'song whose tempo map projects musical time')
+  .requiredOption('--prompt <text>', 'what to generate')
+  .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
+  .option('--bars <n>', 'length in bars at the song tempo (or use --duration)', (v) => Number(v))
+  .option('--duration <seconds>', 'length in seconds (or use --bars)', (v) => Number(v))
+  .option('--variants <n>', 'how many variants (1-8)', (v) => Number(v), 2)
+  .option('--lyrics <text>', 'lyrics (omit for instrumental)')
+  .option('--bpm <n>', 'override the tempo-map bpm hint', (v) => Number(v))
+  .action(async (name: string, opts: {
+    song: string; prompt: string; seed: number; bars?: number; duration?: number;
+    variants: number; lyrics?: string; bpm?: number;
+  }) => {
+    try {
+      const { aceGenerate } = await import('./commands/ace.js');
+      const result = await aceGenerate(requireRoot(), name, {
+        song: opts.song,
+        prompt: opts.prompt,
+        seed: opts.seed,
+        bars: opts.bars,
+        durationSeconds: opts.duration,
+        variants: opts.variants,
+        lyrics: opts.lyrics,
+        bpm: opts.bpm,
+        onProgress: (stage) => process.stdout.write(`… ${stage}\n`),
+      });
+      process.stdout.write(
+        `generated ${result.files.length} variants (${result.durationSeconds.toFixed(1)}s` +
+          `${result.bpm !== undefined ? ` @ ${result.bpm} bpm` : ''}, ${result.model})\n`,
+      );
+      for (const file of result.files) process.stdout.write(`  ${file}\n`);
+      process.stdout.write(`recipe: ${result.recipePath}\n`);
+      process.stdout.write(`audition: afplay ${result.files[0]}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 const song = program.command('song').description('manage songs');
 song
   .command('create <name>')

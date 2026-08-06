@@ -27,4 +27,10 @@ jobs:
           path: native/audiod/build
           key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
       - run: pnpm build:native
+      # Python worker: pyright strict is the gate (ace-generation.md §3.4).
+      # Only the dev group installs — the model environment (torch, mlx)
+      # is far too heavy for CI, which is also why the daemon's protocol
+      # tests are local-only.
+      - uses: astral-sh/setup-uv@v5
+      - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
       - run: pnpm test
