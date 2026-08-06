@@ -3,7 +3,14 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
-import { parseChannels, parseDurationSeconds, parseSeed } from './cliParsers.js';
+import {
+  parseBars,
+  parseBpm,
+  parseChannels,
+  parseDurationSeconds,
+  parseSeed,
+  parseVariants,
+} from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
 import {
@@ -100,11 +107,11 @@ ace
   .requiredOption('--song <name>', 'song whose tempo map projects musical time')
   .requiredOption('--prompt <text>', 'what to generate')
   .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
-  .option('--bars <n>', 'length in bars at the song tempo (or use --duration)', (v) => Number(v))
-  .option('--duration <seconds>', 'length in seconds (or use --bars)', (v) => Number(v))
-  .option('--variants <n>', 'how many variants (1-8)', (v) => Number(v), 2)
+  .option('--bars <n>', 'length in bars at the song tempo (or use --duration)', parseBars)
+  .option('--duration <seconds>', 'length in seconds (or use --bars)', parseDurationSeconds)
+  .option('--variants <n>', 'how many variants (1-8)', parseVariants, 2)
   .option('--lyrics <text>', 'lyrics (omit for instrumental)')
-  .option('--bpm <n>', 'override the tempo-map bpm hint', (v) => Number(v))
+  .option('--bpm <n>', 'override the tempo-map bpm hint', parseBpm)
   .action(async (name: string, opts: {
     song: string; prompt: string; seed: number; bars?: number; duration?: number;
     variants: number; lyrics?: string; bpm?: number;

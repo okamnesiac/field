@@ -50,7 +50,10 @@ class Server:
         self._connections: list[socket.socket] = []
         self._connections_lock = threading.Lock()
         self._last_activity = time.monotonic()
-        self._generating = threading.Event()
+        # Single-flight gate: acquire(blocking=False) is the atomic
+        # check-and-set an Event's is_set()/set() pair is not — two reader
+        # threads must never both pass (the model is the resource).
+        self._generation_gate = threading.Lock()
         self._quit = threading.Event()
 
     def start(self) -> str | None:
@@ -81,7 +84,7 @@ class Server:
     def run_until_idle(self) -> None:
         while not self._quit.is_set():
             time.sleep(0.5)
-            if self._generating.is_set():
+            if self._generation_gate.locked():
                 self._last_activity = time.monotonic()
                 continue
             with self._connections_lock:
@@ -148,11 +151,10 @@ class Server:
                 ),
             )
         elif op == "generate":
-            if self._generating.is_set():
+            job = GenerateJob.from_request(request)
+            if not self._generation_gate.acquire(blocking=False):
                 self._send(connection, error_response(request_id, "a generation is already running"))
                 return
-            job = GenerateJob.from_request(request)
-            self._generating.set()
             threading.Thread(
                 target=self._run_generation, args=(connection, job, request_id), daemon=True
             ).start()
@@ -182,7 +184,7 @@ class Server:
         except Exception as err:  # noqa: BLE001
             self._send(connection, error_response(request_id, str(err)))
         finally:
-            self._generating.clear()
+            self._generation_gate.release()
             self._last_activity = time.monotonic()
 
     def _send(self, connection: socket.socket, message: JsonObject) -> None:

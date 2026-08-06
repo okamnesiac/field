@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import {
@@ -26,6 +26,27 @@ const SOCKET_RELATIVE = '.bloom/aced.sock';
 function acedProject(): string {
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   return join(packageRoot, 'python', 'aced');
+}
+
+// BLOOM_ACED_PYTHON mirrors BLOOM_AUDIOD (ace-generation.md §3.4): an
+// interpreter that can import bloom_aced replaces the uv-managed
+// environment — wrappers, alternate venvs, and daemon tests without the
+// model environment (PYTHONPATH=python/aced/src is enough).
+function daemonCommand(): { command: string; args: string[] } {
+  const override = process.env['BLOOM_ACED_PYTHON'];
+  if (override) {
+    // Resolved now because the daemon spawns with its cwd at the project
+    // root, where a relative override would no longer mean anything.
+    const absolute = resolve(override);
+    if (!existsSync(absolute)) {
+      throw new Error(`BLOOM_ACED_PYTHON points at a missing interpreter: ${override}`);
+    }
+    return { command: absolute, args: ['-m', 'bloom_aced', '--socket', SOCKET_RELATIVE] };
+  }
+  return {
+    command: 'uv',
+    args: ['run', '--project', acedProject(), 'bloom-aced', '--socket', SOCKET_RELATIVE],
+  };
 }
 
 export function acedAvailable(): { ok: boolean; reason?: string } {
@@ -94,11 +115,12 @@ export class AcedClient extends EventEmitter {
       const log = openSync(join(root, '.bloom', 'aced.log'), 'a');
       // uv resolves the environment; --project keeps the daemon's cwd at
       // the project root (the socket path is root-relative — sun_path).
-      const child = spawn(
-        'uv',
-        ['run', '--project', acedProject(), 'bloom-aced', '--socket', SOCKET_RELATIVE],
-        { cwd: root, detached: true, stdio: ['ignore', 'ignore', log] },
-      );
+      const { command, args } = daemonCommand();
+      const child = spawn(command, args, {
+        cwd: root,
+        detached: true,
+        stdio: ['ignore', 'ignore', log],
+      });
       child.on('error', () => {}); // surfaced as the connect timeout below
       child.unref();
       closeSync(log);
