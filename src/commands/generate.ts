@@ -7,7 +7,7 @@ import { AcedClient } from '../aced/client.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
-import { RESERVED_TARGET_NAME } from '../labels.js';
+import { RESERVED_LABEL_NAME } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
 import { generateSoundSchema, soundOrder, soundSchema } from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
@@ -70,8 +70,8 @@ export async function generateVariants(
   options: GenerateOptions,
 ): Promise<GenerateResult> {
   if (!isSlug(name)) throw new Error(`sound name "${name}" must be a lowercase-slug`);
-  if (name === RESERVED_TARGET_NAME) {
-    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar`);
+  if (name === RESERVED_LABEL_NAME) {
+    throw new Error(`"${RESERVED_LABEL_NAME}" is reserved by the label grammar`);
   }
   if ((options.bars === undefined) === (options.durationSeconds === undefined)) {
     throw new Error('give exactly one of --bars or --duration');

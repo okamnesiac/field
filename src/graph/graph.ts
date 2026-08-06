@@ -9,9 +9,9 @@ import {
   type LabelPattern,
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
-import { ruleImpl, type RuleSpec } from '../rules/index.js';
-import { planMix } from '../rules/mix.js';
-import { planTrack } from '../rules/track-render.js';
+import { generatorFor, type GeneratorSpec } from '../generators/index.js';
+import { planMix } from '../generators/mix.js';
+import { planTrack } from '../generators/track-render.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -33,12 +33,12 @@ export interface AssetNode {
   asset: Asset;
 }
 
-export interface RuleNode {
+export interface GeneratorNode {
   kind: 'rule';
   label: Label;
   songDir: string;
   // A declared target, or a spec synthesized from the model (track-render).
-  spec: RuleSpec;
+  spec: GeneratorSpec;
   deps: Label[];
 }
 
@@ -56,7 +56,7 @@ export interface GenerationNode {
   sha256: string;
 }
 
-export type GraphNode = AssetNode | RuleNode | GenerationNode;
+export type GraphNode = AssetNode | GeneratorNode | GenerationNode;
 
 export interface Graph {
   nodes: Map<string, GraphNode>; // keyed by formatted label
@@ -70,14 +70,14 @@ export function buildGraph(project: LoadedProject): Graph {
   const addRule = (
     label: Label,
     songDir: string,
-    spec: RuleSpec,
+    spec: GeneratorSpec,
     refLabel: (ref: string) => Label,
   ) => {
     // Each rule declares its ordered sources; the classifier maps each
     // ref — a name in the song's one namespace or a //shared/assets:
     // label — onto the node it means. Other inputs (like sc programs)
     // participate by content hash without being nodes.
-    const impl = ruleImpl(spec);
+    const impl = generatorFor(spec);
     const deps: Label[] = impl.sources(spec).map(refLabel);
     nodes.set(formatLabel(label), { kind: 'rule', label, songDir, spec, deps });
   };
@@ -215,7 +215,7 @@ export function buildGraph(project: LoadedProject): Graph {
 
 export function resolveLabel(graph: Graph, label: Label): GraphNode {
   const node = graph.nodes.get(formatLabel(label));
-  if (!node) throw new Error(`no such target: ${formatLabel(label)}`);
+  if (!node) throw new Error(`no such label: ${formatLabel(label)}`);
   return node;
 }
 
@@ -232,7 +232,7 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
           : pattern.pkg === ''
             ? '//...'
             : `//${pattern.pkg}/...`;
-    throw new Error(`pattern matched no targets: ${expanded}`);
+    throw new Error(`pattern matched no labels: ${expanded}`);
   }
   return matched;
 }

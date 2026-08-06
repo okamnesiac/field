@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SLUG_PATTERN } from '../ids.js';
-import { RESERVED_TARGET_NAME, sharedAssetName } from '../labels.js';
+import { RESERVED_LABEL_NAME, sharedAssetName } from '../labels.js';
 
 // Shared building blocks for the per-file schemas (index.ts is the
 // barrel). Zod schemas are the single source of truth for the canonical
@@ -11,8 +11,8 @@ export const slug = z.string().regex(SLUG_PATTERN, 'must be a lowercase-slug');
 
 // For anything addressable as //pkg:name — assets, targets, tracks — the
 // grammar's reserved word is not a legal name.
-export const labelName = slug.refine((n) => n !== RESERVED_TARGET_NAME, {
-  message: `"${RESERVED_TARGET_NAME}" is reserved by the label grammar`,
+export const labelName = slug.refine((n) => n !== RESERVED_LABEL_NAME, {
+  message: `"${RESERVED_LABEL_NAME}" is reserved by the label grammar`,
 });
 
 // A source reference (project-layout.md §4.3): a bare slug resolves in

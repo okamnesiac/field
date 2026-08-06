@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { NormalizeSound } from '../schema/index.js';
 import { singleInputSources, validateSingleInput } from './single-input.js';
-import type { RuleImpl } from './types.js';
+import type { Generator } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 // afconvert (project-core.md §5). Accepting sounds as sources is what
 // makes "add a normalize sound" a complete fix for rate-mismatched
 // renders.
-export const normalizeRule: RuleImpl<NormalizeSound> = {
+export const normalizeGenerator: Generator<NormalizeSound> = {
   version: 1,
   wiringFields: ['source'],
   sources: singleInputSources,

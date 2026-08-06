@@ -4,7 +4,7 @@ import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
 import type { SupercolliderSound } from '../schema/index.js';
-import type { RuleImpl } from './types.js';
+import type { Generator } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
 // BLOOM_OUTPUT and exits. Determinism given the seed is the program's
 // job; the program's content hash is a cache input, so editing the code
 // invalidates its own renders. `source:` names the program: a bare
-// filename resolves on the type's home shelf, shared/generators/
+// filename resolves on the type's home shelf, shared/instruments/
 // (project-layout.md §4.3); a slashed path is project-relative.
 
 const SCLANG_APP_FALLBACK = '/Applications/SuperCollider.app/Contents/MacOS/sclang';
@@ -49,7 +49,7 @@ function formatScError(err: ExecError, programPath: string, timeoutMs: number): 
 // The home-shelf resolution (§4.3): every bare spelling resolves in its
 // natural home, explicit spellings escape — never a search path.
 export function programPath(sound: SupercolliderSound): string {
-  return sound.source.includes('/') ? sound.source : posix.join('shared/generators', sound.source);
+  return sound.source.includes('/') ? sound.source : posix.join('shared/instruments', sound.source);
 }
 
 // Run an SC program under the supercollider contract. Used by the rule
@@ -103,7 +103,7 @@ export async function runScProgram(
   }
 }
 
-export const supercolliderRule: RuleImpl<SupercolliderSound> = {
+export const supercolliderGenerator: Generator<SupercolliderSound> = {
   version: 1,
   wiringFields: ['source'],
 

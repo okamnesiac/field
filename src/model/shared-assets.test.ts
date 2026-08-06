@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildTargets, queryDeps } from '../commands/build.js';
+import { buildLabels, queryDeps } from '../commands/build.js';
 import { check } from '../commands/check.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { loadProject } from '../model/project.js';
-import type { RuleRunner } from '../graph/build.js';
+import type { GeneratorRunner } from '../graph/build.js';
 
 // The shared scope end to end (project-layout.md §1.5–1.6):
 // shared/assets.yaml pins committed material, //shared/assets:<name> is
@@ -116,13 +116,13 @@ describe('cross-scope clip references', () => {
     ]);
 
     const runs: string[] = [];
-    const runner: RuleRunner = async (node, inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (node, inputPaths, outputPath) => {
       runs.push(node.label.name);
       // The stem's input path resolves into shared/.
       expect(inputPaths[0]).toBe(join(root, 'shared/samples/rain.wav'));
       writeFileSync(outputPath, 'out');
     };
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['drums']);
   });
 

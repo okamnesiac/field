@@ -54,7 +54,7 @@ export type ReverbSound = z.infer<typeof reverbSoundSchema>;
 // the environment; it must write BLOOM_OUTPUT and exit. Determinism
 // given the seed is the program's job; the program's content hash is the
 // cache input. `source:` is the program file — a bare filename resolves
-// on the type's home shelf, shared/generators/ (§4.3); a slashed path is
+// on the type's home shelf, shared/instruments/ (§4); a slashed path is
 // project-relative.
 export const supercolliderSoundSchema = z.strictObject({
   name: labelName,
@@ -77,7 +77,7 @@ export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
 // voices are not nameable via say -v (only a few Siri-branded regional
 // voices ever list), so the system default is the only way to reach
 // them; the caveat that the bytes follow a Settings toggle is accepted
-// deliberately (rules/say.ts).
+// deliberately (generators/say.ts).
 export const saySoundSchema = z.strictObject({
   name: labelName,
   type: z.literal('say'),
@@ -87,9 +87,9 @@ export const saySoundSchema = z.strictObject({
 });
 export type SaySound = z.infer<typeof saySoundSchema>;
 
-// generate: a deliberate-trigger generator run (project-layout.md §1.2,
-// §1.4) — a sound with no rule behind it: nothing may re-run it
-// mechanically. Model inference does not reproduce across GPU/framework
+// generate: deliberate generation (project-layout.md §1.2, §1.4) — a
+// sound with no in-graph Generator behind it: nothing may generate it
+// mechanically; you run it, with bloom generate. Model inference does not reproduce across GPU/framework
 // versions, so the outputs are committed (variants under audio/<name>/,
 // content-addressed like assets) and the file is provenance plus
 // promotion state: `bloom generate` writes it, `bloom choose` records
@@ -132,10 +132,11 @@ export const soundSchema = z.discriminatedUnion('type', [
 ]);
 export type Sound = z.infer<typeof soundSchema>;
 
-// The sounds the build system may realize mechanically — the ones with a
-// rule behind them (src/rules/). `generate` is deliberately excluded:
-// it has no RuleImpl, which is the §1.2 trigger policy expressed in the
-// type system, so code that dispatches to a rule narrows to this first.
+// The types the graph may generate automatically — the ones with a
+// Generator (src/generators/). `generate` is deliberately excluded: its
+// generation is human-triggered, which is the §1.2 trigger policy
+// expressed in the type system, so dispatching code narrows to this
+// first.
 export type BuildableSound = Exclude<Sound, GenerateSound>;
 
 export const soundOrder: KeyOrder = {

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isSlug } from '../ids.js';
-import { RESERVED_TARGET_NAME } from '../labels.js';
+import { RESERVED_LABEL_NAME } from '../labels.js';
 import {
   mixOrder,
   mixSchema,
@@ -49,8 +49,8 @@ export function createTrack(
   type: 'audio' | 'midi',
 ): string {
   if (!isSlug(name)) throw new Error(`track name "${name}" must be a lowercase-slug`);
-  if (name === RESERVED_TARGET_NAME) {
-    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar`);
+  if (name === RESERVED_LABEL_NAME) {
+    throw new Error(`"${RESERVED_LABEL_NAME}" is reserved by the label grammar`);
   }
   const songDir = join(root, 'songs', song);
   if (!existsSync(join(songDir, 'song.yaml'))) {

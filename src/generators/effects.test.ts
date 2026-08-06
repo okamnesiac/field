@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import { buildTargets, queryDeps } from '../commands/build.js';
+import { buildLabels, queryDeps } from '../commands/build.js';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
@@ -73,18 +73,18 @@ describe('effect chains', () => {
       '//songs/creek/sounds:tone-verb',
     ]);
 
-    const first = await buildTargets(root, ['//songs/creek/sounds:tone-verb']);
+    const first = await buildLabels(root, ['//songs/creek/sounds:tone-verb']);
     const verb = first.find((o) => o.label.endsWith(':tone-verb'))!;
     expect(readWav(verb.outputPath!).channels[0]!.length).toBe(48000 + 24000); // + tail
 
-    const again = await buildTargets(root, ['//songs/creek/sounds:tone-verb']);
+    const again = await buildLabels(root, ['//songs/creek/sounds:tone-verb']);
     expect(again.every((o) => o.cached)).toBe(true);
 
     // A parameter edit upstream cascades: eq and reverb rebuild, the
     // asset stays an asset.
     const path = join(root, 'songs/creek/sounds/tone-eq.yaml');
     writeFileSync(path, readFileSync(path, 'utf8').replace('gain_db: -6', 'gain_db: -9'));
-    const after = await buildTargets(root, ['//songs/creek/sounds:tone-verb']);
+    const after = await buildLabels(root, ['//songs/creek/sounds:tone-verb']);
     expect(after.filter((o) => !o.cached).map((o) => o.label)).toEqual([
       '//songs/creek/sounds:tone-eq',
       '//songs/creek/sounds:tone-verb',
@@ -96,7 +96,7 @@ describe('effect chains', () => {
       'eq-norm': eqLines('source: tone', 6, ['normalize: true']),
       'eq-raw': eqLines('source: tone', 6, ['normalize: false']),
     });
-    const outcomes = await buildTargets(root, ['//songs/creek/sounds:all']);
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:all']);
     const norm = rmsOf(outcomes.find((o) => o.label.endsWith(':eq-norm'))!.outputPath!);
     const raw = rmsOf(outcomes.find((o) => o.label.endsWith(':eq-raw'))!.outputPath!);
     // Unnormalized: a bell boost right on the tone ≈ +6 dB of level. The
@@ -110,7 +110,7 @@ describe('effect chains', () => {
       'tone-hot': eqLines('source: tone', 24, ['normalize: false']),
       'tone-safe': ['type: limit', 'source: tone-hot', 'ceiling_db: -3'],
     });
-    const outcomes = await buildTargets(root, ['//songs/creek/sounds:tone-safe']);
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:tone-safe']);
     const safe = outcomes.find((o) => o.label.endsWith(':tone-safe'))!;
     const [channel] = readWav(safe.outputPath!).channels;
     const ceiling = Math.pow(10, -3 / 20);
@@ -122,7 +122,7 @@ describe('effect chains', () => {
       'tone-eq': eqLines('source: tone', -3),
       'tone-eq-441': ['type: normalize', 'source: tone-eq', 'sample_rate: 44100', 'bit_depth: 16'],
     });
-    const outcomes = await buildTargets(root, ['//songs/creek/sounds:tone-eq-441']);
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:tone-eq-441']);
     const converted = outcomes.find((o) => o.label.endsWith(':tone-eq-441'))!;
     expect(readWav(converted.outputPath!).sampleRate).toBe(44100);
   });

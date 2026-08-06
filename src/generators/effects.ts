@@ -1,7 +1,7 @@
 import { applyInsertChain } from '../audio/insert-chain.js';
 import type { EqSound, LimitSound, ReverbSound } from '../schema/index.js';
 import { singleInputSources, transformAudio, validateSingleInput } from './single-input.js';
-import type { RuleImpl } from './types.js';
+import type { Generator } from './types.js';
 
 // The three offline effects as standalone rules (effects.md §2). Each is
 // a one-entry insert chain over its single source — the same DSP that
@@ -9,7 +9,7 @@ import type { RuleImpl } from './types.js';
 // src/audio/insert-chain.ts, where the future live engine can treat it as
 // the reference implementation. The executor is the replaceable part.
 
-export const eqRule: RuleImpl<EqSound> = {
+export const eqGenerator: Generator<EqSound> = {
   version: 1,
   wiringFields: ['source'],
   sources: singleInputSources,
@@ -26,7 +26,7 @@ export const eqRule: RuleImpl<EqSound> = {
   },
 };
 
-export const limitRule: RuleImpl<LimitSound> = {
+export const limitGenerator: Generator<LimitSound> = {
   version: 1,
   wiringFields: ['source'],
   sources: singleInputSources,
@@ -50,7 +50,7 @@ export const limitRule: RuleImpl<LimitSound> = {
   },
 };
 
-export const reverbRule: RuleImpl<ReverbSound> = {
+export const reverbGenerator: Generator<ReverbSound> = {
   version: 1,
   wiringFields: ['source'],
   sources: singleInputSources,

@@ -4,14 +4,14 @@ import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { wavFrameCount } from '../audio/wav.js';
-import { ruleImpl } from '../rules/index.js';
-import { expandLoop, placedWindow } from '../rules/track-render.js';
+import { generatorFor } from '../generators/index.js';
+import { expandLoop, placedWindow } from '../generators/track-render.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
 import { sharedAssetName } from '../labels.js';
-import { checkSource } from '../rules/single-input.js';
-import type { SourceNames } from '../rules/types.js';
+import { checkSource } from '../generators/single-input.js';
+import type { SourceNames } from '../generators/types.js';
 import {
   arrangementOrder,
   arrangementSchema,
@@ -437,7 +437,7 @@ function validate(project: LoadedProject): void {
     // (project-layout.md §1.3, §4). Names are collected first, in full:
     // sources may reference sounds declared in other files, and forward
     // references are fine. Deliberate `generate` sounds share the
-    // namespace but not the machinery — no RuleImpl, no cycle
+    // namespace but not the machinery — no Generator, no cycle
     // participation — and mint per-variant audition labels (<name>-<n>)
     // that must not collide with other sounds.
     const soundNames = new Set<string>();
@@ -479,8 +479,8 @@ function validate(project: LoadedProject): void {
       shared: sharedNames,
     };
     for (const { path, sound } of buildableSounds) {
-      // Rule-specific semantics live with the rule (src/rules/).
-      ruleImpl(sound).validate(sound, {
+      // Rule-specific semantics live with the rule (src/generators/).
+      generatorFor(sound).validate(sound, {
         root: project.root,
         songDir: song.dir,
         names,
@@ -505,7 +505,7 @@ function validate(project: LoadedProject): void {
       state.set(name, 'visiting');
       const sound = byName.get(name);
       if (sound) {
-        for (const dep of ruleImpl(sound).sources(sound)) {
+        for (const dep of generatorFor(sound).sources(sound)) {
           if (byName.has(dep)) visit(dep, [...path, name]);
         }
       }

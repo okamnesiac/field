@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import { buildTargets, explainTarget, queryDeps } from '../commands/build.js';
+import { buildLabels, explainLabel, queryDeps } from '../commands/build.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import type { RuleRunner } from '../graph/build.js';
+import type { GeneratorRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
 import { mixSchema, trackSchema, type Track } from '../schema/index.js';
-import { balanceGains, mixRule, planMix } from './mix.js';
+import { balanceGains, mixGenerator, planMix } from './mix.js';
 
 // Fixture times are scalar ticks, so the parse output already satisfies
 // the resolved Track type — the same promise the loader's cast makes
@@ -57,7 +57,7 @@ describe('balanceGains', () => {
   });
 });
 
-describe('mixRule.execute', () => {
+describe('mixGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
@@ -81,7 +81,7 @@ describe('mixRule.execute', () => {
       return path;
     });
     const out = join(dir, 'mix.wav');
-    await mixRule.execute(
+    await mixGenerator.execute(
       {
         name: 'main',
         type: 'mix',
@@ -207,11 +207,11 @@ describe('mix targets in the build graph', () => {
       '//songs/creek/mix:main',
     ]);
 
-    const before = await explainTarget(root, '//songs/creek/mix:main');
+    const before = await explainLabel(root, '//songs/creek/mix:main');
     expect(before.inputs.map((i) => i.sha256)).toEqual(['', '']); // stems not built yet
     expect(before.actionKey).toBeUndefined();
 
-    const outcomes = await buildTargets(root, ['//songs/creek/mix:main']);
+    const outcomes = await buildLabels(root, ['//songs/creek/mix:main']);
     const mixOutcome = outcomes.find((o) => o.label === '//songs/creek/mix:main')!;
     expect(mixOutcome.cached).toBe(false);
 
@@ -221,22 +221,22 @@ describe('mix targets in the build graph', () => {
     expect(out.channels[0]![1]).toBeCloseTo(0.5 + 0.25, 6);
     expect(out.channels[0]![2]).toBeCloseTo(0.25, 6);
 
-    const after = await explainTarget(root, '//songs/creek/mix:main');
+    const after = await explainLabel(root, '//songs/creek/mix:main');
     expect(after.inputs.every((i) => /^[0-9a-f]{64}$/.test(i.sha256))).toBe(true);
     expect(after.cached).toBe(true);
 
-    const again = await buildTargets(root, ['//songs/creek/mix:main']);
+    const again = await buildLabels(root, ['//songs/creek/mix:main']);
     expect(again.every((o) => o.cached)).toBe(true);
   });
 
   it('re-runs only the sum on a fader move; stems stay cached', async () => {
     const runs: string[] = [];
-    const runner: RuleRunner = async (node, _inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
       runs.push(`${node.label.pkg}:${node.label.name}`);
       writeFileSync(outputPath, `out:${node.label.name}`);
     };
 
-    await buildTargets(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['songs/creek/tracks:kick', 'songs/creek/tracks:snare', 'songs/creek/mix:main']);
 
     runs.length = 0;
@@ -244,25 +244,25 @@ describe('mix targets in the build graph', () => {
       join(root, 'songs/creek/tracks/kick.yaml'),
       trackYaml('kick', 'kick-src', 0, ['gain_db: -6', 'pan: -0.25']),
     );
-    await buildTargets(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['songs/creek/mix:main']);
   });
 
   it('stops at unchanged stems: a rebuilt-but-identical stem is early cutoff', async () => {
     const runs: string[] = [];
-    const runner: RuleRunner = async (node, _inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
       runs.push(`${node.label.pkg}:${node.label.name}`);
       writeFileSync(outputPath, `out:${node.label.name}`); // content ignores clip placement
     };
 
-    await buildTargets(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/mix:main'], runner);
     runs.length = 0;
 
     // Moving a clip re-renders that stem, but this fake renderer produces
     // identical bytes — so the mix's input hashes are unchanged and the sum
     // is a cache hit. Content-addressing gives early cutoff for free.
     writeFileSync(join(root, 'songs/creek/tracks/kick.yaml'), trackYaml('kick', 'kick-src', 7));
-    await buildTargets(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['songs/creek/tracks:kick']);
   });
 
@@ -280,6 +280,6 @@ describe('mix targets in the build graph', () => {
     // A fresh song's default mix has nothing to mix yet: legal, no node.
     createSong(root, 'sprout');
     expect(loadProject(root).diagnostics.filter((d) => d.file.includes('sprout'))).toEqual([]);
-    expect(() => queryDeps(root, '//songs/sprout/mix:main')).toThrow('matched no targets');
+    expect(() => queryDeps(root, '//songs/sprout/mix:main')).toThrow('matched no labels');
   });
 });

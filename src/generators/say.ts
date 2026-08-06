@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { SaySound } from '../schema/index.js';
-import type { RuleImpl } from './types.js';
+import type { Generator } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,7 +43,7 @@ async function listVoices(): Promise<Set<string>> {
   }
 }
 
-export const sayRule: RuleImpl<SaySound> = {
+export const sayGenerator: Generator<SaySound> = {
   version: 1,
   wiringFields: [],
 

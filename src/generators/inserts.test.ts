@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import { buildTargets } from '../commands/build.js';
+import { buildLabels } from '../commands/build.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import type { RuleRunner } from '../graph/build.js';
+import type { GeneratorRunner } from '../graph/build.js';
 
 // Inserts in their two remaining homes (effects.md §5): track chains that
 // bake into the stem, and the mix master chain applied after the master
@@ -67,16 +67,16 @@ function rmsOf(path: string): number {
 describe('track inserts', () => {
   it('bake into the stem and re-render it on edit; faders still do not', async () => {
     const runs: string[] = [];
-    const runner: RuleRunner = async (node, _inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
       runs.push(node.label.name);
       writeFileSync(outputPath, 'out');
     };
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['drums']);
 
     // Adding an insert is a content edit: the stem re-renders.
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml(eqInsert(-6)));
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['drums', 'drums']);
 
     // A fader move on the same track is still mix-stage only.
@@ -84,13 +84,13 @@ describe('track inserts', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml(['gain_db: -6', ...eqInsert(-6)]),
     );
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['drums', 'drums']);
   });
 
   it('apply real DSP after clip summing', async () => {
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml(eqInsert(-6)));
-    const outcomes = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const outcomes = await buildLabels(root, ['//songs/creek/tracks:drums']);
     const stem = outcomes.find((o) => o.label.endsWith(':drums'))!;
     // −6 dB bell right on the tone ≈ half amplitude; the dry tone RMS is
     // 0.1/√2 ≈ 0.0707.
@@ -102,7 +102,7 @@ describe('track inserts', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml(['inserts:', '  - effect: reverb', '    decay: 0.5']),
     );
-    const outcomes = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const outcomes = await buildLabels(root, ['//songs/creek/tracks:drums']);
     const stem = outcomes.find((o) => o.label.endsWith(':drums'))!;
     expect(readWav(stem.outputPath!).channels[0]!.length).toBe(48000 + 24000);
   });
@@ -121,7 +121,7 @@ describe('the master chain', () => {
         '',
       ].join('\n'),
     );
-    const outcomes = await buildTargets(root, ['//songs/creek/mix:main']);
+    const outcomes = await buildLabels(root, ['//songs/creek/mix:main']);
     const mix = outcomes.find((o) => o.label.endsWith('mix:main'))!;
     const ceiling = Math.pow(10, -3 / 20);
     for (const channel of readWav(mix.outputPath!).channels) {
@@ -131,11 +131,11 @@ describe('the master chain', () => {
 
   it('re-runs only the sum on a master edit; stems stay cached', async () => {
     const runs: string[] = [];
-    const runner: RuleRunner = async (node, _inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
       runs.push(node.label.name);
       writeFileSync(outputPath, 'out');
     };
-    await buildTargets(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['drums', 'main']);
 
     const path = join(root, 'songs/creek/mixes/main.yaml');
@@ -143,7 +143,7 @@ describe('the master chain', () => {
       path,
       readFileSync(path, 'utf8').replace('master: []', 'master:\n  - effect: limit'),
     );
-    await buildTargets(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['drums', 'main', 'main']);
   });
 });

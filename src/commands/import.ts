@@ -3,7 +3,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { parseDocument, Document, isSeq } from 'yaml';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
-import { RESERVED_TARGET_NAME } from '../labels.js';
+import { RESERVED_LABEL_NAME } from '../labels.js';
 import { assetsFileOrder, assetsFileSchema } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
@@ -42,8 +42,8 @@ export async function importAsset(
   if (!isSlug(assetName)) {
     throw new Error(`asset name "${assetName}" must be a lowercase-slug (use --name)`);
   }
-  if (assetName === RESERVED_TARGET_NAME) {
-    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar (use --name)`);
+  if (assetName === RESERVED_LABEL_NAME) {
+    throw new Error(`"${RESERVED_LABEL_NAME}" is reserved by the label grammar (use --name)`);
   }
 
   const ext = extname(sourcePath).toLowerCase();

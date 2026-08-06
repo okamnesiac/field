@@ -4,14 +4,14 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
-import { ruleImpl, type ExtraInput, type RunContext } from '../rules/index.js';
-import { deps, resolveLabel, type Graph, type GraphNode, type RuleNode } from './graph.js';
+import { generatorFor, type ExtraInput, type RunContext } from '../generators/index.js';
+import { deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
 // store under .bloom/cache/cas/<sha256>; the action index maps an action
 // key — the hash of canonical JSON of {rule, rule_version, input hashes,
 // parameters, project sample rate} — to its output hashes. Same key, no
-// work. Rule behavior lives in src/rules/; this engine only knows that
+// work. Rule behavior lives in src/generators/; this engine only knows that
 // rules exist.
 
 export interface ActionEntry {
@@ -40,15 +40,15 @@ export interface Explanation {
 
 // Executes a rule: reads input files, writes the output file. Injectable so
 // tests can count executions or fake the tool.
-export type RuleRunner = (
-  rule: RuleNode,
+export type GeneratorRunner = (
+  rule: GeneratorNode,
   inputPaths: string[],
   outputPath: string,
   ctx: RunContext,
 ) => Promise<void>;
 
-export const defaultRunner: RuleRunner = (node, inputPaths, outputPath, ctx) =>
-  ruleImpl(node.spec).execute(node.spec, inputPaths, outputPath, ctx);
+export const defaultRunner: GeneratorRunner = (node, inputPaths, outputPath, ctx) =>
+  generatorFor(node.spec).execute(node.spec, inputPaths, outputPath, ctx);
 
 function cacheDir(project: LoadedProject): string {
   return join(project.root, '.bloom', 'cache');
@@ -103,12 +103,12 @@ export function canonicalJson(value: unknown): string {
 
 // The knobs that shape the output: everything except identity (name, type)
 // and the rule's declared wiring, which already contributes as input hashes.
-function ruleParameters(node: RuleNode): Record<string, unknown> {
-  const wiring = new Set(['name', 'type', ...ruleImpl(node.spec).wiringFields]);
+function ruleParameters(node: GeneratorNode): Record<string, unknown> {
+  const wiring = new Set(['name', 'type', ...generatorFor(node.spec).wiringFields]);
   return Object.fromEntries(Object.entries(node.spec).filter(([k]) => !wiring.has(k)));
 }
 
-function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: number): string {
+function actionKey(node: GeneratorNode, inputHashes: string[], projectSampleRate: number): string {
   // The serialized field stays spelled `rule` deliberately: it is pure
   // cache machinery, and renaming a hash key would invalidate every
   // cached action for zero semantic gain (project-layout.md §4 keeps
@@ -117,7 +117,7 @@ function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: num
   return sha256Text(
     canonicalJson({
       rule: node.spec.type,
-      rule_version: ruleImpl(node.spec).version,
+      rule_version: generatorFor(node.spec).version,
       inputs: inputHashes,
       parameters: ruleParameters(node),
       project_sample_rate: projectSampleRate,
@@ -132,7 +132,7 @@ function assetFilePath(project: LoadedProject, node: GraphNode): string {
 
 // Materialized outputs land under .bloom/out mirroring the label path, so
 // humans can play what they built without digging in the CAS.
-function outPath(project: LoadedProject, node: RuleNode): string {
+function outPath(project: LoadedProject, node: GeneratorNode): string {
   return join(project.root, '.bloom', 'out', node.label.pkg, `${node.label.name}.wav`);
 }
 
@@ -140,7 +140,7 @@ async function buildNode(
   project: LoadedProject,
   graph: Graph,
   node: GraphNode,
-  runner: RuleRunner,
+  runner: GeneratorRunner,
   built: Map<string, BuildOutcome>,
 ): Promise<BuildOutcome> {
   if (node.kind === 'asset') {
@@ -156,7 +156,7 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, sha256: node.sha256 };
   }
 
-  const impl = ruleImpl(node.spec);
+  const impl = generatorFor(node.spec);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
   // Asset inputs contribute their declared hash; rule inputs (mix ← stems)
   // contribute the output hash of the already-built dependency — build()
@@ -261,7 +261,7 @@ export async function build(
   project: LoadedProject,
   graph: Graph,
   nodes: GraphNode[],
-  runner: RuleRunner = defaultRunner,
+  runner: GeneratorRunner = defaultRunner,
 ): Promise<BuildOutcome[]> {
   const outcomes: BuildOutcome[] = [];
   const built = new Map<string, BuildOutcome>();
@@ -314,7 +314,7 @@ export async function explain(
     memo.set(label, explanation);
     return explanation;
   }
-  const impl = ruleImpl(node.spec);
+  const impl = generatorFor(node.spec);
   // A rule input's hash is its dependency's cached output — explaining
   // recursively without executing anything. An unbuilt dependency means
   // this node's action key cannot be known yet.

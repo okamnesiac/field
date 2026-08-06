@@ -2,22 +2,22 @@ import type { BuildableSound } from '../schema/index.js';
 import type { MixSpec } from './mix.js';
 import type { TrackRenderSpec } from './track-render.js';
 
-// A build rule is a pluggable module. The engine (graph/build.ts) knows
-// that rules exist — it owns caching, keys, and ordering — and rule modules
-// own everything rule-specific: wiring, validation, inputs, execution, and
-// post-run integrity. SuperCollider is not special; it is one programmable
-// synth behind this interface, and the mixer arrives the same way.
-//
-// "Rule" is deliberately the engine's word (project-layout.md §4): a
-// sound declares a `type:`, and a rule is the mechanical executor a type
-// may or may not have — `generate` has none, which is exactly the §1.2
-// trigger policy, encoded as BuildableSound. A rule's spec is either a
-// declared sound (sounds/<name>.yaml) or a spec synthesized from the
-// project model (track-render from track files, mix from mixes/). Each
-// impl is typed against its own spec — RuleImpl<NormalizeSound> and so
-// on — so per-method "wrong rule" narrowing is proven by the compiler.
+// A Generator is a pluggable module that generates a type of sound
+// automatically — §1.2's "one generator category, two trigger policies"
+// expressed as code. The engine (graph/build.ts) owns caching, keys,
+// and ordering; each Generator owns everything type-specific: wiring,
+// validation, inputs, execution, and post-run integrity. SuperCollider
+// is not special; it is one programmable synth behind this interface,
+// and the mixer arrives the same way. A deliberate type (`generate`)
+// has no Generator here — its generation is human-triggered
+// (bloom generate), which is what BuildableSound encodes. A Generator's
+// spec is either a declared sound (sounds/<name>.yaml) or a spec
+// synthesized from the project model (track-render from track files,
+// mix from mixes/). Each is typed against its own spec —
+// Generator<NormalizeSound> and so on — so per-method "wrong type"
+// narrowing is proven by the compiler.
 
-export type RuleSpec = BuildableSound | TrackRenderSpec | MixSpec;
+export type GeneratorSpec = BuildableSound | TrackRenderSpec | MixSpec;
 
 export interface RunContext {
   root: string; // absolute project root
@@ -50,7 +50,7 @@ export interface ExtraInput {
   sha256: string;
 }
 
-export interface RuleImpl<T extends RuleSpec = RuleSpec> {
+export interface Generator<T extends GeneratorSpec = GeneratorSpec> {
   version: number; // bumped to invalidate cached outputs (§3.5)
   // Fields that are identity or wiring rather than knobs; excluded from
   // parameter hashing (name and type are always excluded).

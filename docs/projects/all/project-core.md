@@ -91,10 +91,12 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    guess. The canonical form everywhere else (files, output, docs)
    remains absolute; future roots (`//shared/...`) use the full form.
    Amended 2026-08-06: authored specs became per-file
-   ([project-layout.md](project-layout.md) §1.3) — targets and mixes
-   derive like tracks (`songs/opener/targets/pad.yaml` →
-   `//songs/opener/targets:pad`), so "declared in a song's mix file"
-   reads "declared in `mixes/<name>.yaml`". The grammar itself is
+   ([project-layout.md](project-layout.md) §1.3) — sounds and mixes
+   derive like tracks (`songs/opener/sounds/pad.yaml` →
+   `//songs/opener/sounds:pad`), so "declared in a song's mix file"
+   reads "declared in `mixes/<name>.yaml`"; project-layout §4 then
+   renamed the shelf (`targets/` → `sounds/`) and retired "target" as a
+   term — the addressable thing is a label. The grammar itself is
    unchanged.
 5. **Cache key definition (DECIDED).** SHA-256 everywhere, chosen so asset
    hash = Git LFS OID — store, pointer, and cache speak one identifier

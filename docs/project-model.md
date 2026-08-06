@@ -13,43 +13,55 @@ generation recipes). A DAWproject *exporter* is a possible later feature.
 ## Projects contain songs
 
 A project is an album-shaped workspace: one or more songs plus shared material
-— instruments, loops, samples, plugin chains — reused across them. Songs are
-packages; shared material is a library; build labels address both
-(`//songs/opener/mix:main`, `//shared/instruments:dark-pad`).
+reused across them. Songs are packages; shared material is a library; build
+labels address both (`//songs/opener/mix:main`, `//shared/assets:rain`).
 
-The shared library is organized by **musical role, not file format**: a loop
-authored as a SuperCollider recipe (`.scd`) sits in `loops/` beside committed
-`.wav` loops, and a code instrument (an `.scd` that takes MIDI) will sit in
-`instruments/` beside hosted ones. What a thing *is* in the music is the
-taxonomy; whether it is bytes or a recipe is the same distinction the build
-graph already erases — clips source assets and targets interchangeably. Song
-directories are the opposite: a song is a workspace, not a library, so its
-subdirectories are medium-named (`audio/`, `midi/`, `sc/`).
+The shared library has three shelves, split by **contract** — make, is,
+change ([projects/all/project-layout.md](projects/all/project-layout.md)
+§1.1, §4.6): `instruments/` holds definitions that *make* sound (`.scd`
+programs, later model definitions and AU references — however a sound or
+a track ends up invoking them), `samples/` holds committed sound that
+just *is*, and `plugins/` holds things that *change* sound. Whether a
+definition renders from a spec or responds to MIDI is a property of how
+it is invoked, not of the definition — the same `.scd` legitimately does
+both — so there is no shelf split along that line, exactly as there is
+no loops shelf (looping is a clip property). `shared/assets.yaml` is the
+shared scope's ledger: one pin per committed file under `shared/`,
+labeled `//shared/assets:<name>`.
+
+Song directories are a workspace, not a library. `sounds/` holds one
+file per **defined sound** — audio is committed bytes, a sound is a
+definition, and a sound wrapped in an effect is a different sound —
+while `audio/` holds *all* of a song's committed sound: recorded,
+imported, or generated, the producer is irrelevant. Where a file lives
+declares who may see it (project-layout.md §1.5): a clip references its
+own song's names plus `//shared/assets:` pins, and nothing else.
 
 ```text
 project/
 ├── bloom.yaml            # project manifest: name, engine versions
 ├── bloom.lock            # locked environment: plugin versions, model versions
-├── shared/               # material reused across songs, by musical role
-│   ├── instruments/      # hosted or coded (.scd taking MIDI)
-│   ├── loops/            # committed audio or recipes (.scd)
-│   ├── samples/
-│   └── plugins/          # shared chains and presets
+├── shared/               # material reused across songs, by contract
+│   ├── instruments/      # definitions that make sound (.scd, model defs, AU)
+│   ├── samples/          # committed sound that just is
+│   ├── plugins/          # things that change sound: chains and presets
+│   └── assets.yaml       # the shared ledger: //shared/assets:<name>
 ├── songs/
 │   └── <song>/
 │       ├── song.yaml
 │       ├── arrangement.yaml
 │       ├── tempo.yaml
 │       ├── markers.yaml
-│       ├── tracks/       # one file per track: routing, inserts, sources
-│       ├── clips/
+│       ├── tracks/       # one file per track: routing, inserts, clips
+│       ├── sounds/       # one file per defined sound (type: + source:)
+│       ├── mixes/        # one file per mix
 │       ├── takes/        # take manifests (see below)
 │       ├── comps/
 │       ├── midi/
-│       ├── audio/        # recorded/imported assets (LFS)
+│       ├── audio/        # ALL committed song sound (LFS): recorded,
+│       │                 # imported, generated (variants in audio/<sound>/)
 │       ├── automation/
-│       ├── generation/   # ACE recipes and provenance
-│       ├── sc/           # song-specific SC programs
+│       ├── assets.yaml   # the song's ledger
 │       └── monitoring/
 ├── plugins/
 │   ├── manifests/        # scanned plugin inventory
@@ -59,17 +71,19 @@ project/
 └── .bloom/               # unversioned: cache, recording transactions, sockets
 ```
 
-Exact schemas are designed in [projects/all/project-core.md](projects/all/project-core.md).
+Exact schemas are designed in [projects/all/project-core.md](projects/all/project-core.md);
+the layout and its vocabulary are decided in
+[projects/all/project-layout.md](projects/all/project-layout.md).
 
-> **Layout revision decided, not yet migrated
-> ([projects/all/project-layout.md](projects/all/project-layout.md)):**
-> `shared/` becomes instruments / generators / samples / plugins (loops
-> merges into samples, render programs move to generators); `targets.yaml`
-> and `mix.yaml` become per-file `targets/` and `mixes/`; `generation/`
-> dissolves into `targets/` + `audio/`; `shared/assets.yaml` pins shared
-> material. The tree above and the prose below describe the layout the
-> tooling accepts *today*; they will be rewritten when the migration
-> lands.
+A sound file is discriminated by `type:` (`supercollider`, `say`, `eq`,
+`generate`, …) and fed by `source:` — a bare name resolving in the
+song's one namespace (assets and sounds together), a
+`//shared/assets:<name>` label crossing into the shared scope, or, for
+`supercollider`, a program file (a bare filename resolves in
+`shared/instruments/`). Automatic types are generated in-graph and
+cached; the `generate` type is deliberate — its variants are committed
+under `audio/<sound>/` and `bloom choose` repoints which one the
+sound's label means.
 
 ## Timeline and tempo
 
@@ -96,10 +110,12 @@ keeping arrays single-line.
 
 ## Clips are metadata; audio is immutable
 
-Audio files are never edited in place. A clip's content is exactly one of a
-committed asset or a same-song build target — clipping a target means the
-arrangement plays a render that is never committed, only its recipe. A clip
-carries three independent, non-destructive offsets:
+Audio files are never edited in place. A clip's content is its `source:`
+— an asset, a sound, or a shared pin, resolved exactly like a sound's
+own source. Clipping an automatic sound means the arrangement plays a
+render that is never committed, only its definition; clipping a
+`generate` sound plays its chosen committed variant. A clip carries
+three independent, non-destructive offsets:
 
 1. **Timeline position** — where the clip sits in the arrangement (musical
    position by default).
@@ -126,9 +142,12 @@ Nothing in a Bloom project carries an opaque ID. Identity comes in three
 tiers, by how a thing gets it:
 
 - **Humans name it → the slug is the ID.** Tracks (`lead-vocal`), songs
-  (directory name), targets. Filenames are keys. Renaming is a repo-wide,
-  tool-assisted refactor (`bloom track rename` rewrites every reference
-  atomically), exactly as renaming a function is in code.
+  (directory name), sounds, assets. Filenames are keys, and a song's
+  asset and sound names share one namespace — `source: pad` must mean
+  exactly one thing (project-layout.md §4.3), enforced by `bloom check`.
+  Renaming is a repo-wide, tool-assisted refactor (`bloom track rename`
+  rewrites every reference atomically), exactly as renaming a function
+  is in code.
 - **Content is the identity → SHA-256.** Assets and cached outputs.
 - **Machines mint it → timestamp or slug-plus-short-random.** Takes are
   timestamped (`take-20260804-202355`, sortable, merge-safe); clips — which
@@ -159,33 +178,37 @@ determinism policy.
 
 ## Assets
 
-All audio/MIDI assets are content-addressed: each song's `assets.yaml` binds a
-readable asset name to its file path, SHA-256, and size, and clips/takes
-reference assets **by name** — so human-edited files stay readable while the
-hash carries the content identity. The SHA-256 equals the Git LFS OID for the
+All audio/MIDI assets are content-addressed: each scope's ledger — a
+song's `assets.yaml`, or `shared/assets.yaml` with the identical shape —
+binds a readable asset name to its file path, SHA-256, and size, and
+clips/takes reference assets **by name** — so human-edited files stay
+readable while the hash carries the content identity. The SHA-256 equals the Git LFS OID for the
 same file, so the manifest, the LFS pointer, and the build cache share one
 identifier. Where the bytes live is a pluggable detail. **Git LFS is backend
 #1**;
 a remote store (S3-backed) is a manifest-preserving migration later, when LFS
-storage/bandwidth costs hurt. Generated assets are committed with their recipe
-and provenance, never silently regenerated.
+storage/bandwidth costs hurt. Generated variants are committed with their recipe and provenance,
+never silently regenerated — and pinned by their own sound file's
+per-variant hashes rather than the ledger (project-layout.md §4.8), so
+every committed file is still pinned exactly once.
 
-## Generation recipes
+## Deliberate generation
 
-A generated asset's recipe is committed alongside it: engine, model name +
-version + checksum where possible, prompt, seed, duration, conditioning
-(chords, MIDI, reference audio), generation parameters, output hashes, and
-licensing/provenance metadata. For SuperCollider, the recipe is the program
-plus an explicit seed. Reproducibility of the recipe is the contract; the
-committed bits are the artifact.
+A `generate` sound is provenance and promotion state in one file: model
+name + version, prompt, seed, duration, conditioning, per-variant output
+hashes — everything needed to audit or deliberately regenerate.
+Reproducibility of the recipe is the contract; the committed bits are
+the artifact. (For SuperCollider the "recipe" is the program plus an
+explicit seed, and it *is* reproducible, which is why `supercollider` is
+an automatic type instead.)
 
-Concretely (ACE): `bloom ace generate` writes
-`songs/<song>/generation/<name>.yaml` plus numbered variant WAVs under
-`generation/<name>/`. Recipes are schema-validated project files — `bloom
-check` verifies variant hashes, `bloom fmt` covers them — and each variant is
-addressable as `//songs/<song>/generation:<name>-<n>` for audition via `bloom
-play`, without being referenceable by clips. Promotion is `bloom ace choose`:
-it declares the chosen variant in `assets.yaml` where it lies (no bytes move)
-and records `chosen` in the recipe. Choosing again moves the reference —
-promotion is cheap and reversible, and only ever replaces an entry a previous
-choose created.
+Concretely: `bloom generate <name> --song <song> --prompt …` runs the
+model through its worker and writes `songs/<song>/sounds/<name>.yaml`
+plus numbered variant WAVs under `audio/<name>/`. The sound is a
+schema-validated project file — `bloom check` verifies variant hashes,
+`bloom fmt` covers it — and each variant auditions as
+`//songs/<song>/sounds:<name>-<n>` via `bloom play`. `bloom choose
+<name> --variant <n>` records `chosen:`, and from then on the sound's
+own label resolves to that variant — clips say
+`source: <name>` and follow every re-choose, a one-line diff. Nothing
+is copied into a ledger, and nothing ever regenerates mechanically.

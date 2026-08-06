@@ -3,15 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import { buildTargets, queryDeps } from '../commands/build.js';
+import { buildLabels, queryDeps } from '../commands/build.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import type { RuleRunner } from '../graph/build.js';
+import type { GeneratorRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
 import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
-import { placedWindow, planTrack, trackRenderRule, type PlacedClip } from './track-render.js';
+import { placedWindow, planTrack, trackRenderGenerator, type PlacedClip } from './track-render.js';
 
 // 120 bpm at 48 kHz: one beat = 960 ticks = 0.5 s = 24000 samples.
 const map120 = new TempoMap([{ at: 0, bpm: 120 }], 48000);
@@ -215,7 +215,7 @@ describe('planTrack', () => {
   });
 });
 
-describe('trackRenderRule.execute', () => {
+describe('trackRenderGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
@@ -234,7 +234,7 @@ describe('trackRenderRule.execute', () => {
 
   async function render(clips: Partial<PlacedClip>[], inputPaths: string[]) {
     const out = join(dir, 'stem.wav');
-    await trackRenderRule.execute(
+    await trackRenderGenerator.execute(
       {
         name: 'drums',
         type: 'track-render',
@@ -359,7 +359,7 @@ describe('track stems in the build graph', () => {
       '//songs/creek/tracks:drums',
     ]);
 
-    const first = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const first = await buildLabels(root, ['//songs/creek/tracks:drums']);
     const stemOutcome = first.find((o) => o.label === '//songs/creek/tracks:drums')!;
     expect(stemOutcome.cached).toBe(false);
     expect(existsSync(stemOutcome.outputPath!)).toBe(true);
@@ -373,14 +373,14 @@ describe('track stems in the build graph', () => {
     expect(stem.channels[0]![24001]).toBe(0.5);
     expect(stem.channels[0]![23999]).toBe(0);
 
-    const second = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const second = await buildLabels(root, ['//songs/creek/tracks:drums']);
     expect(second.find((o) => o.label === '//songs/creek/tracks:drums')!.cached).toBe(true);
   });
 
   it('rebuilds musical clips on tempo edits; absolute clips ride through', async () => {
     const counting = () => {
       const state = { runs: 0 };
-      const runner: RuleRunner = async (_node, _inputPaths, outputPath) => {
+      const runner: GeneratorRunner = async (_node, _inputPaths, outputPath) => {
         state.runs++;
         writeFileSync(outputPath, 'stem');
       };
@@ -388,17 +388,17 @@ describe('track stems in the build graph', () => {
     };
 
     const { state, runner } = counting();
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
 
     // Same placement → cache hit.
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
 
     // A tempo edit moves the musical clip → rebuild.
     const tempoPath = join(root, 'songs/creek/tempo.yaml');
     writeFileSync(tempoPath, readFileSync(tempoPath, 'utf8').replace('bpm: 120', 'bpm: 90'));
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(2);
 
     // An absolute-anchored clip is untouched by tempo.
@@ -406,17 +406,17 @@ describe('track stems in the build graph', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml(clipYaml({ anchor: 'absolute', position: 100, duration: 200 })),
     );
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(3);
     writeFileSync(tempoPath, readFileSync(tempoPath, 'utf8').replace('bpm: 90', 'bpm: 240'));
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(3); // cache hit despite the tempo change
   });
 
   it('ignores fader moves and YAML clip order in the stem action key', async () => {
     const counting = () => {
       const state = { runs: 0 };
-      const runner: RuleRunner = async (_node, _inputPaths, outputPath) => {
+      const runner: GeneratorRunner = async (_node, _inputPaths, outputPath) => {
         state.runs++;
         writeFileSync(outputPath, 'stem');
       };
@@ -424,7 +424,7 @@ describe('track stems in the build graph', () => {
     };
 
     const { state, runner } = counting();
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
 
     // Track gain/pan are mix parameters, not stem contents.
@@ -434,17 +434,17 @@ describe('track stems in the build graph', () => {
         '\n',
       ),
     );
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
 
     // Reordering clips in the file is not an edit to the sound.
     const c1 = clipYaml();
     const c2 = clipYaml({ id: 'kick-2', position: 1920 });
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml([...c1, ...c2]));
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(2); // new clip: renders once…
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml([...c2, ...c1]));
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(2); // …and the reordered file is a cache hit
   });
 
@@ -460,11 +460,11 @@ describe('track stems in the build graph', () => {
     );
 
     const state = { runs: 0 };
-    const runner: RuleRunner = async (_node, _inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (_node, _inputPaths, outputPath) => {
       state.runs++;
       writeFileSync(outputPath, 'stem');
     };
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
 
     // snare → apple sorts before kick by name, but content hashes are the
@@ -475,7 +475,7 @@ describe('track stems in the build graph', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', source: 'apple', position: 1920 })]),
     );
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
   });
 
@@ -580,14 +580,14 @@ describe('clips over rule outputs', () => {
 
     // Real normalize (afconvert) feeding the real TS mixer: the stem plays
     // a render nothing ever committed.
-    const outcomes = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const outcomes = await buildLabels(root, ['//songs/creek/tracks:drums']);
     const stem = outcomes.find((o) => o.label === '//songs/creek/tracks:drums')!;
     const wav = readWav(stem.outputPath!);
     expect(wav.channels[0]).toHaveLength(7);
     expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
     expect(wav.channels[0]![4]).toBeCloseTo(0.5, 4);
 
-    const again = await buildTargets(root, ['//songs/creek/tracks:drums']);
+    const again = await buildLabels(root, ['//songs/creek/tracks:drums']);
     expect(again.every((o) => o.cached)).toBe(true);
   });
 
@@ -595,19 +595,19 @@ describe('clips over rule outputs', () => {
     // Content tracks the spec and the inputs, so an upstream parameter
     // change flows through every downstream hash.
     const runs: string[] = [];
-    const runner: RuleRunner = async (node, inputPaths, outputPath) => {
+    const runner: GeneratorRunner = async (node, inputPaths, outputPath) => {
       runs.push(node.label.name);
       const inputs = inputPaths.map((p) => readFileSync(p).toString('base64').slice(0, 64));
       writeFileSync(outputPath, JSON.stringify({ spec: node.spec, inputs }));
     };
 
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']);
 
     runs.length = 0;
     const soundPath = join(root, 'songs/creek/sounds/kick-24.yaml');
     writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
-    await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
   });
 });

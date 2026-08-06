@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import { buildTargets, explainTarget, queryDeps } from '../commands/build.js';
+import { buildLabels, explainLabel, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
-import { runScProgram } from '../rules/supercollider.js';
-import type { RuleRunner } from './build.js';
+import { runScProgram } from '../generators/supercollider.js';
+import type { GeneratorRunner } from './build.js';
 
 let root: string;
 
@@ -59,7 +59,7 @@ afterEach(() => {
 
 const countingRunner = () => {
   const state = { runs: 0 };
-  const runner: RuleRunner = async (node, inputPaths, outputPath) => {
+  const runner: GeneratorRunner = async (node, inputPaths, outputPath) => {
     state.runs++;
     // Rules with asset inputs copy the first through; input-less rules
     // (sc-render) get deterministic placeholder content.
@@ -73,30 +73,30 @@ describe('build', () => {
   it('builds, caches, and rebuilds on parameter change', async () => {
     const { state, runner } = countingRunner();
 
-    const first = await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const first = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(1);
     const target = first.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
 
-    const second = await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const second = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(1); // action-cache hit, nothing executed
     expect(second.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
 
     writeSound('pad-normalized', normalizeYaml(44100));
-    await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
   it('expands wildcards, including the everything pattern', async () => {
     const { state, runner } = countingRunner();
-    const outcomes = await buildTargets(root, ['//songs/...'], runner);
+    const outcomes = await buildLabels(root, ['//songs/...'], runner);
     expect(outcomes.map((o) => o.label).sort()).toEqual([
       '//songs/creek/assets:pad',
       '//songs/creek/sounds:pad-normalized',
     ]);
     expect(state.runs).toBe(1);
-    const everything = await buildTargets(root, ['//...'], runner);
+    const everything = await buildLabels(root, ['//...'], runner);
     expect(everything).toHaveLength(2);
   });
 
@@ -107,17 +107,17 @@ describe('build', () => {
     rmSync(src);
     // Hand-written YAML is caught by the schema.
     writeSound('pad-normalized', normalizeYaml(96000).replace('name: pad-normalized', 'name: all'));
-    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('reserved');
+    await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('reserved');
   });
 
   it('refuses to build an invalid project', async () => {
     writeSound('pad-normalized', normalizeYaml(96000).replace('source: pad', 'source: ghost'));
-    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('unknown source');
+    await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('unknown source');
   });
 
   it('errors on unmatched patterns and unknown labels', async () => {
-    await expect(buildTargets(root, ['//nowhere/...'])).rejects.toThrow('matched no targets');
-    expect(() => queryDeps(root, 'deps(//songs/creek/sounds:ghost)')).toThrow('no such target');
+    await expect(buildLabels(root, ['//nowhere/...'])).rejects.toThrow('matched no labels');
+    expect(() => queryDeps(root, 'deps(//songs/creek/sounds:ghost)')).toThrow('no such label');
   });
 
   it('refuses to build when input bytes disagree with the declaration', async () => {
@@ -126,49 +126,49 @@ describe('build', () => {
     const original = readFileSync(assetPath);
     writeFileSync(assetPath, Buffer.concat([original, Buffer.from([0, 0])]));
     await expect(
-      buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner),
+      buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0); // nothing executed, nothing cached
 
     // Same-size tamper is caught by the hash, not the size.
     writeFileSync(assetPath, Buffer.from(original.map((b, i) => (i === 50 ? b ^ 0xff : b))));
     await expect(
-      buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner),
+      buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0);
 
     // Restore the declared bytes and the build proceeds.
     writeFileSync(assetPath, original);
-    const outcomes = await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(1);
     expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
   });
 
   it('treats a corrupt action entry as a cache miss and repairs it', async () => {
     const { state, runner } = countingRunner();
-    await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(1);
 
     const actionsDir = join(root, '.bloom/cache/actions');
     const entry = readdirSync(actionsDir).find((f) => f.endsWith('.json'))!;
     writeFileSync(join(actionsDir, entry), '{"rule": "norm'); // crash mid-write
 
-    const outcomes = await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(2); // re-ran instead of crashing
     expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
 
-    const again = await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const again = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(2); // entry rewritten; cache healthy again
     expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
   });
 
   it('normalizes real audio through afconvert', async () => {
-    const outcomes = await buildTargets(root, ['//songs/creek/sounds:pad-normalized']);
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized']);
     const target = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
     // Second build is a cache hit even with the real runner.
-    const again = await buildTargets(root, ['//songs/creek/sounds:pad-normalized']);
+    const again = await buildLabels(root, ['//songs/creek/sounds:pad-normalized']);
     expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
   });
 });
@@ -177,7 +177,7 @@ const scYaml = (seed: number) =>
   [
     'name: texture',
     'type: supercollider',
-    'source: shared/generators/texture.scd',
+    'source: shared/instruments/texture.scd',
     `seed: ${seed}`,
     'duration: 0.25',
     'channels: 1',
@@ -186,7 +186,7 @@ const scYaml = (seed: number) =>
 
 describe('supercollider', () => {
   beforeEach(() => {
-    writeFileSync(join(root, 'shared/generators/texture.scd'), '// fake program v1\n');
+    writeFileSync(join(root, 'shared/instruments/texture.scd'), '// fake program v1\n');
     writeSound('texture', scYaml(42));
   });
 
@@ -194,19 +194,19 @@ describe('supercollider', () => {
     const { state, runner } = countingRunner();
     const label = '//songs/creek/sounds:texture';
 
-    const first = await buildTargets(root, [label], runner);
+    const first = await buildLabels(root, [label], runner);
     expect(state.runs).toBe(1);
     expect(first[0]!.cached).toBe(false);
 
-    await buildTargets(root, [label], runner);
+    await buildLabels(root, [label], runner);
     expect(state.runs).toBe(1); // cache hit
 
     writeSound('texture', scYaml(43));
-    await buildTargets(root, [label], runner);
+    await buildLabels(root, [label], runner);
     expect(state.runs).toBe(2); // seed is a parameter
 
-    writeFileSync(join(root, 'shared/generators/texture.scd'), '// fake program v2\n');
-    await buildTargets(root, [label], runner);
+    writeFileSync(join(root, 'shared/instruments/texture.scd'), '// fake program v2\n');
+    await buildLabels(root, [label], runner);
     expect(state.runs).toBe(3); // program content is an input
   });
 
@@ -214,19 +214,19 @@ describe('supercollider', () => {
     expect(queryDeps(root, 'deps(//songs/creek/sounds:texture)')).toEqual([
       '//songs/creek/sounds:texture',
     ]);
-    const e = await explainTarget(root, '//songs/creek/sounds:texture');
+    const e = await explainLabel(root, '//songs/creek/sounds:texture');
     expect(e.rule).toBe('supercollider');
     expect(e.inputs).toHaveLength(1);
-    expect(e.inputs[0]!.label).toBe('shared/generators/texture.scd');
+    expect(e.inputs[0]!.label).toBe('shared/instruments/texture.scd');
     expect(e.parameters).toEqual({ seed: 42, duration: 0.25, channels: 1 });
   });
 
   it('rejects missing and escaping program paths', async () => {
-    writeSound('texture', scYaml(42).replace('shared/generators/texture.scd', 'shared/generators/ghost.scd'));
-    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('not found');
+    writeSound('texture', scYaml(42).replace('shared/instruments/texture.scd', 'shared/instruments/ghost.scd'));
+    await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('not found');
 
-    writeSound('texture', scYaml(42).replace('shared/generators/texture.scd', '../outside.scd'));
-    await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('escapes the project');
+    writeSound('texture', scYaml(42).replace('shared/instruments/texture.scd', '../outside.scd'));
+    await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('escapes the project');
   });
 });
 
@@ -276,19 +276,19 @@ describe('runScProgram edges (no sclang needed)', () => {
   });
 
   it('refuses to cache when the program changes during the render', async () => {
-    writeFileSync(join(root, 'shared/generators/texture.scd'), '// v1\n');
+    writeFileSync(join(root, 'shared/instruments/texture.scd'), '// v1\n');
     writeSound('texture', scYaml(42));
-    const midRenderEdit: RuleRunner = async (_node, _inputPath, outputPath) => {
-      writeFileSync(join(root, 'shared/generators/texture.scd'), '// edited mid-render\n');
+    const midRenderEdit: GeneratorRunner = async (_node, _inputPath, outputPath) => {
+      writeFileSync(join(root, 'shared/instruments/texture.scd'), '// edited mid-render\n');
       writeFileSync(outputPath, 'audio');
     };
     await expect(
-      buildTargets(root, ['//songs/creek/sounds:texture'], midRenderEdit),
+      buildLabels(root, ['//songs/creek/sounds:texture'], midRenderEdit),
     ).rejects.toThrow('changed during the render');
 
     // Nothing was cached: the next build executes again.
     const { state, runner } = countingRunner();
-    await buildTargets(root, ['//songs/creek/sounds:texture'], runner);
+    await buildLabels(root, ['//songs/creek/sounds:texture'], runner);
     expect(state.runs).toBe(1);
   });
 });
@@ -328,21 +328,21 @@ score.recordNRT(
 `;
 
   it('renders a seeded tone deterministically through real sclang', { timeout: 120_000 }, async () => {
-    writeFileSync(join(root, 'shared/generators/texture.scd'), SC_PROGRAM);
+    writeFileSync(join(root, 'shared/instruments/texture.scd'), SC_PROGRAM);
     writeSound('texture', scYaml(42));
     const label = '//songs/creek/sounds:texture';
 
-    const first = await buildTargets(root, [label]);
+    const first = await buildLabels(root, [label]);
     expect(first[0]!.cached).toBe(false);
     expect(existsSync(first[0]!.outputPath!)).toBe(true);
     expect(readFileSync(first[0]!.outputPath!).length).toBeGreaterThan(1000);
 
-    const again = await buildTargets(root, [label]);
+    const again = await buildLabels(root, [label]);
     expect(again[0]!.cached).toBe(true);
 
     // Same seed, wiped cache: the render is reproducible bit-for-bit.
     rmSync(join(root, '.bloom/cache'), { recursive: true, force: true });
-    const rebuilt = await buildTargets(root, [label]);
+    const rebuilt = await buildLabels(root, [label]);
     expect(rebuilt[0]!.cached).toBe(false);
     expect(rebuilt[0]!.sha256).toBe(first[0]!.sha256);
   });
@@ -379,15 +379,15 @@ describe('query and explain', () => {
   });
 
   it('explains a rule target', async () => {
-    const before = await explainTarget(root, '//songs/creek/sounds:pad-normalized');
+    const before = await explainLabel(root, '//songs/creek/sounds:pad-normalized');
     expect(before.rule).toBe('normalize');
     expect(before.cached).toBe(false);
     expect(before.parameters).toEqual({ sample_rate: 96000, bit_depth: 16 });
     expect(before.inputs[0]!.label).toBe('//songs/creek/assets:pad');
 
     const { runner } = countingRunner();
-    await buildTargets(root, ['//songs/creek/sounds:pad-normalized'], runner);
-    const after = await explainTarget(root, '//songs/creek/sounds:pad-normalized');
+    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const after = await explainLabel(root, '//songs/creek/sounds:pad-normalized');
     expect(after.cached).toBe(true);
     expect(after.actionKey).toBe(before.actionKey);
     expect(after.outputs).toHaveLength(1);

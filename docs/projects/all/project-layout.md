@@ -1,10 +1,11 @@
 # Plan: Project layout revision
 
-**Status:** Decided (2026-08-06), not yet migrated. This records a design
-conversation that amended three earlier DECIDED records; until the
-migration lands, code and field follow the old layout and
-[project-model.md](../project-model.md) carries a pointer here. The
-migration is queued in [next](../next.md).
+**Status:** Decided (2026-08-06); the loader/CLI migration (§2.1) and
+the §4 vocabulary are implemented on the migration PR, with field's
+migration staged to land on merge. This records a design conversation
+that amended three earlier DECIDED records; §4 records the vocabulary
+decided mid-migration, which amends spellings in §1–§3 without changing
+any decision's substance.
 
 **Goal:** every file in a project has exactly one home, chosen by what
 the file *is* — its contract, scope, and who writes it — with no shelf
@@ -26,7 +27,9 @@ or a scope boundary.
    role-naming decision (#25), which filed `.scd` render programs under
    `loops/` — that conflated the artifact's role with its *output's*
    role. What a render program is, is a generator; what its render gets
-   used as is not a property of the program.
+   used as is not a property of the program. *Amended by §4.6: the same
+   reasoning then merged `generators/` into `instruments/` — four
+   shelves became three.*
 2. **One generator category; two trigger policies.** A generator
    produces audio from a spec. Per generator, one question: is it safe
    for the build system to re-run it without asking? **Automatic**
@@ -60,6 +63,9 @@ or a scope boundary.
    `chosen:` where a say target carries nothing extra. Committed
    variants move to the song's committed-audio home:
    `audio/<target>/<variant>.wav`. Ledger rows stay in `assets.yaml`.
+   *Superseded by §4.8: under the unified namespace there is no ledger
+   row — choosing repoints the sound's own label, and the sound file
+   pins its variants.*
    Supersedes [ace-generation.md](ace-generation.md)'s layout — the
    `generation/` workflow convention (§3.2) and its
    `//songs/<s>/generation:` labels (§4.2); those addresses migrate to
@@ -90,7 +96,10 @@ or a scope boundary.
    re-renders, which is editing working normally), whereas a pin is a
    verification promise (drift fails `bloom check`). Code's integrity
    story is git; pinning programs would fail check on every legitimate
-   edit.
+   edit. *Nuanced by §4.8: pin authority splits — imported/recorded
+   audio pins in the ledger, generated variants pin in their sound spec
+   (the per-variant sha256 check verifies). Every committed file is
+   still pinned exactly once.*
 7. **The `ace` prefix retires.** `bloom generate` and `bloom choose`
    are verbs over the generator category — the recipe's `model:` field
    says which generator ran. Answers
@@ -169,10 +178,10 @@ every existing citation stay stable.
    (`source: //shared/assets:rain`, answering §3's open question), and
    a path (slashes, extension) is a program file, still wiring, still
    keyed by content. A bare filename (`source: creek-kit.scd`, no
-   slash) resolves on the type's home shelf — `shared/generators/` for
-   `supercollider` — the same principle as a bare slug resolving in the
-   song's namespace: every bare spelling resolves in its natural home,
-   explicit spellings escape. Never a search path: each spelling names
+   slash) resolves on the type's home shelf — `shared/instruments/` for
+   `supercollider` (§4.6) — the same principle as a bare slug resolving
+   in the song's namespace: every bare spelling resolves in its natural
+   home, explicit spellings escape. Never a search path: each spelling names
    exactly one location (the §7-flavored one-spelling rule), so a
    song-local program, if one ever exists, writes the slashed path.
    Clips adopt the same field: a clip's `source:` is an asset name, a
@@ -190,3 +199,41 @@ every existing citation stay stable.
    (track stems, mixes) were never comfortably "targets" anyway. Mix
    labels keep their `mix:` package; a mix file's `rule: mix` becomes
    `type: mix`.
+6. **`shared/` lands on three shelves: `instruments/`, `samples/`,
+   `plugins/` — make, is, change.** `generators/` merges into
+   `instruments/` by §1.1's own argument: whether a definition
+   auto-triggers from a spec or responds to notes is a property of *how
+   it is invoked* — a sound handing it a spec, a track handing it MIDI
+   — not of the definition, exactly as looping was a clip property, not
+   content. The same `.scd` legitimately renders in a sound today and
+   plays from a MIDI clip later; under a split it has no honest home. A
+   drum kit, a pad, a voice, an AI model you play with prompts — all
+   instruments, in the way musicians already talk. Rejected:
+   `synths/` as a separate shelf (strong SC/TTS/AI resonance, but it
+   recreated the invoker-encoding split with an adjacency trap beside
+   `instruments/`); `programs/`, `defs/`, `models/`, `specs/` (each
+   honest for part of the shelf, false or colliding for the rest).
+   Bare program filenames (§4.3) resolve in `shared/instruments/`.
+7. **The engine's executor is a `Generator`.** §1.2 already named the
+   category — "a generator produces audio from a spec" — so the code
+   speaks the record's language: `Generator<T>` implementations in
+   `src/generators/`, one per automatic type; a deliberate type has no
+   in-graph Generator — *you* generate it, with `bloom generate`. The
+   poles were never generate-vs-something-else; they were always
+   automatic-vs-deliberate generation. Rejected: keeping `RuleImpl`
+   ("rule" was only ever true engine-side, and §1.2's own noun is
+   better); `Renderer` (a third word for a category the record had
+   already named — and "render is a word for visual stuff"). One deliberate fossil: the action-key JSON keeps its
+   serialized field spelled `rule` — renaming a hash key would
+   invalidate every cache for zero semantic gain, so only the
+   `sc-render` → `supercollider` *value* change re-keys (§4.4).
+8. **Choosing repoints; the ledger copy dissolves.** Forced by §4.3's
+   one-namespace rule: `choose` minting an asset named after its own
+   sound would self-collide, so §1.4's recorded follow-on lands inside
+   the migration rather than after it. A generate sound's own label
+   resolves to its chosen variant; clips reference the sound by name
+   (`source: still-water-keys`), `bloom choose` rewrites only `chosen:`
+   — a one-line diff every reference follows — and the sound spec pins
+   its variants (per-variant sha256, verified by check). `--as` retires
+   with the ledger step; the reference is scope-stable, since it names
+   the sound, not a file.

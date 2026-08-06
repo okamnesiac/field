@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { AudiodClient } from '../audiod/client.js';
 import { parsePattern } from '../labels.js';
 import { formatLabel } from '../labels.js';
-import { build, type RuleRunner } from '../graph/build.js';
+import { build, type GeneratorRunner } from '../graph/build.js';
 import { expandPattern } from '../graph/graph.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
@@ -27,7 +27,7 @@ export interface Playable {
 export async function resolvePlayables(
   root: string,
   patterns: string[],
-  runner?: RuleRunner,
+  runner?: GeneratorRunner,
 ): Promise<Playable[]> {
   const { project, graph } = loadValid(root);
   const requested = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));

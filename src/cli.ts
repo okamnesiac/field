@@ -12,7 +12,7 @@ import {
   parseVariantNumber,
   parseVariants,
 } from './cliParsers.js';
-import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
+import { buildLabels, explainLabel, queryDeps } from './commands/build.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
 import {
   transportCommand,
@@ -20,7 +20,7 @@ import {
   transportStatusLines,
 } from './commands/transport.js';
 import { check } from './commands/check.js';
-import { runScProgram } from './rules/supercollider.js';
+import { runScProgram } from './generators/supercollider.js';
 import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
 import { importAsset } from './commands/import.js';
@@ -218,7 +218,7 @@ program
   .description('build labels (creek/sounds:pad-96k, creek/..., or a bare song for its main mix)')
   .action(async (patterns: string[]) => {
     try {
-      const outcomes = await buildTargets(requireRoot(), patterns);
+      const outcomes = await buildLabels(requireRoot(), patterns);
       for (const o of outcomes) {
         const status = o.cached ? 'cached' : 'built';
         const where = o.outputPath ? ` → ${o.outputPath}` : '';
@@ -399,7 +399,7 @@ program
   .description('show a label\'s type, inputs, action key, and cache status')
   .action(async (label: string) => {
     try {
-      const e = await explainTarget(requireRoot(), label);
+      const e = await explainLabel(requireRoot(), label);
       process.stdout.write(`${e.label} (${e.kind})\n`);
       // The CLI speaks the format's language (project-layout.md §4):
       // type, not the engine's rule.

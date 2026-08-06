@@ -1,7 +1,7 @@
 import { applyInsertChain } from '../audio/insert-chain.js';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import type { Insert, Mix, Track } from '../schema/index.js';
-import type { RuleImpl } from './types.js';
+import type { Generator } from './types.js';
 
 // mix: sums track stems into the listenable artifact behind
 // //songs/<song>/mix:<name> (mix-assembly.md §3). Inputs are track-render
@@ -70,7 +70,7 @@ export function balanceGains(pan: number): { left: number; right: number } {
   };
 }
 
-export const mixRule: RuleImpl<MixSpec> = {
+export const mixGenerator: Generator<MixSpec> = {
   version: 1,
   wiringFields: ['tracks'],
 

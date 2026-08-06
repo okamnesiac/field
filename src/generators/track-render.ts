@@ -2,7 +2,7 @@ import { applyInsertChain } from '../audio/insert-chain.js';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import type { Clip, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
-import type { RuleImpl } from './types.js';
+import type { Generator } from './types.js';
 
 // track-render: the implicit stem target behind //songs/<song>/tracks:<name>
 // (mix-assembly.md §3). The spec is synthesized from the track file, not
@@ -182,7 +182,7 @@ export function planTrack(
   };
 }
 
-export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
+export const trackRenderGenerator: Generator<TrackRenderSpec> = {
   version: 1,
   wiringFields: ['sources'],
 

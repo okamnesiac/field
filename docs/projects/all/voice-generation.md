@@ -2,7 +2,11 @@
 
 **Status:** Planned, deferred (2026-08-06). The design was settled and
 recorded ahead of the build, then deliberately queued behind other work —
-nothing here is started. The other side of the determinism boundary from
+nothing here is started. Written before
+[project-layout.md](project-layout.md) §4: where this plan says
+`generation/<name>.yaml` and recipe fields, read a `generate` sound in
+`sounds/<name>.yaml` (`type:`/`source:` spellings, §4.3), with choosing
+as repointing (§4.8). The other side of the determinism boundary from
 the `say` rule (#27), kept separate by design — "got to keep them
 separated."
 
