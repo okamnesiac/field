@@ -521,7 +521,8 @@ function validate(project: LoadedProject): void {
       sound.variants.forEach((_, i) => {
         const label = `${sound.name}-${i + 1}`;
         if (soundNames.has(label) || assetNames.has(label)) {
-          push(path, `variant ${i + 1} audition label "${label}" collides with "${label}"`);
+          const what = assetNames.has(label) ? 'asset' : 'sound';
+          push(path, `variant ${i + 1} audition label "${label}" collides with the ${what} of that name`);
         }
       });
       const variantFiles = new Set<string>();

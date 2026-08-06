@@ -33,8 +33,8 @@ renders.
 
 There is no separate freeze machinery. **A frozen track is a cached
 intermediate output**; invalidate the cache (change a parameter) and it is
-unfrozen automatically. A bounce is a cached output promoted to a named
-target. Outputs are stored under their content hash, so a rebuild never
+unfrozen automatically. A bounce is a cached output given a name.
+Outputs are stored under their content hash, so a rebuild never
 overwrites an old render — it produces a new artifact and moves a pointer.
 
 ## Render strategies
@@ -52,7 +52,7 @@ How a node's output can be produced is a declared, per-node property:
   pure function of the timeline: a live microphone input, a monitoring chain, a
   SuperCollider node played by hand, MIDI sent to an external device with no
   declared return. There is no answer to "what does this node output at bar
-  42," so there is nothing to cache. A mix target depending on a live-only node
+  42," so there is nothing to cache. A mix depending on a live-only node
   fails the build with a clear error: *this output doesn't exist until someone
   performs it — capture it first.* A capture of a live-only node's output is a
   take, and re-enters the buildable world.

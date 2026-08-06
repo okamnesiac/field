@@ -5,6 +5,7 @@ import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
 import { assetsFileOrder, assetsFileSchema } from '../schema/index.js';
+import { takenSongNames } from '../model/namespace.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 export interface ImportResult {
@@ -73,6 +74,15 @@ export async function importAsset(
   // a declared entry may reference the same file under a different name.
   if (existing.data.assets.some((a) => a.name === assetName)) {
     throw new Error(`asset "${assetName}" already declared in "${song}"`);
+  }
+  // One namespace per song (project-layout.md §4.3): an imported asset
+  // may not shadow a sound or a generative sound's audition label — the
+  // collision would only surface as a check-red project after the copy.
+  if (takenSongNames(songDir).has(assetName)) {
+    throw new Error(
+      `"${assetName}" is already a sound (or an audition label) in "${song}" — ` +
+        `a song's names are one namespace (use --name)`,
+    );
   }
   // Compare by resolved path, not string equality: check accepts any
   // relative spelling that resolves inside the project ("./audio/x.wav"),

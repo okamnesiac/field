@@ -9,6 +9,7 @@ import { isSlug } from '../ids.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
+import { takenSongNames } from '../model/namespace.js';
 import { generativeSoundSchema, soundOrder, soundSchema } from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
@@ -92,12 +93,17 @@ export async function generateVariants(
   if (existsSync(recipeAbsolute)) {
     throw new Error(`sound "${name}" already exists in ${options.song} (pick a new name)`);
   }
-  // One namespace per song (§4.3): the sound's name must not shadow an
-  // asset, or `source: <name>` stops meaning one thing.
-  const song = project.songs.find((s) => s.name === options.song);
-  if (song?.assets?.data.assets.some((a) => a.name === name)) {
+  // One namespace per song (§4.3): everything this run will mint — the
+  // sound's name AND its <name>-<n> audition labels — must be free, or
+  // the model-minutes get spent and the project lands check-red.
+  const taken = takenSongNames(songDir);
+  const minted = [name, ...Array.from({ length: options.variants }, (_, i) => `${name}-${i + 1}`)];
+  const collision = minted.find((n) => taken.has(n));
+  if (collision !== undefined) {
     throw new Error(
-      `"${name}" is already an asset in ${options.song} — a song's names are one namespace (pick a new name)`,
+      `"${collision}" is already a name in ${options.song} — a song's names are one ` +
+        `namespace, and generating "${name}" with ${options.variants} variants would mint it ` +
+        `(pick a new name)`,
     );
   }
   mkdirSync(outputDir, { recursive: true });

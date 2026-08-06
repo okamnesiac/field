@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { check } from './check.js';
 import { createSong } from './create.js';
 import { init } from './init.js';
-import { chooseVariant } from './generate.js';
+import { chooseVariant, generateVariants } from './generate.js';
+import { importAsset } from './import.js';
 import { resolvePlayables } from './play.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
@@ -143,6 +144,37 @@ describe('generative sounds in the project model', () => {
         d.message.includes('collides with an asset of the same name'),
       ),
     ).toBe(true);
+  });
+
+  it('import pre-flights the namespace: sound names and audition labels refuse', async () => {
+    // The #31 review's asymmetry, closed from the import side: without
+    // the guard the copy succeeds and check goes red afterwards.
+    const src = join(root, 'water.wav');
+    writeFileSync(src, 'not really a wav');
+    await expect(importAsset(root, 'opener', src, 'keys')).rejects.toThrow('one namespace');
+    await expect(importAsset(root, 'opener', src, 'keys-2')).rejects.toThrow('one namespace');
+    // A free name passes the namespace gate.
+    const result = await importAsset(root, 'opener', src, 'rain');
+    expect(result.name).toBe('rain');
+  });
+
+  it('generate pre-flights the audition labels its variants would mint', async () => {
+    // A sound named keys-1 exists (the variant label of "keys" would be
+    // fine — "keys" itself is taken — so test a fresh name whose -N
+    // label collides).
+    writeFileSync(
+      join(root, 'songs/opener/sounds/other-2.yaml'),
+      'name: other-2\ntype: say\ntext: hello\nvoice: Siri\n',
+    );
+    await expect(
+      generateVariants(root, 'other', {
+        song: 'opener',
+        prompt: 'water',
+        seed: 1,
+        bars: 1,
+        variants: 2,
+      }),
+    ).rejects.toThrow('"other-2" is already a name');
   });
 });
 
