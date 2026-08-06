@@ -70,7 +70,86 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     });
     expect(played).toEqual(items.map((i) => i.label));
     expect(positions.length).toBeGreaterThan(0);
-    expect(positions[0]).toMatch(/^\d+\.\d+\.\d+ \(/); // musical time, derived CLI-side
+    expect(positions[0]).toMatch(/^\d+\.\d+$/); // bar.beat, beat-gated, CLI-side
+  });
+
+  it(
+    '--loop with one target loops in the daemon: positions outlive the file',
+    { timeout: 10_000 },
+    async () => {
+      await importTone('spin', 60000); // 1.25 s = 2.5 beats: beat changes keep coming
+      const items = await resolvePlayables(root, ['//songs/creek/assets:spin']);
+
+      // Gapless native loop: one load, one play, and beat-gated position
+      // updates keep arriving well past the file's real-time length until
+      // ctrl-c. Event-driven, not clock-driven (a fixed window was
+      // CI-flaky): the 4th beat change is >1.5 s of streaming — a
+      // non-looping 1.25 s file stops mid third beat and can never get
+      // there, whether or not the looping reader wraps its position.
+      const played: string[] = [];
+      const positions: string[] = [];
+      let interrupted = false;
+      await playThroughDaemon(root, project, items, { loop: true }, {
+        onItem: (label) => played.push(label),
+        onPosition: (line) => {
+          positions.push(line);
+          if (positions.length === 4 && !interrupted) {
+            interrupted = true;
+            void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
+              await c.stop();
+              c.close();
+            });
+          }
+        },
+        interrupted: () => interrupted,
+      });
+      expect(played).toEqual([items[0]!.label]); // one load — no reload gap
+      expect(positions.length).toBeGreaterThanOrEqual(4);
+    },
+  );
+
+  it('--loop with several targets replays the queue until interrupted', async () => {
+    await importTone('blop', 12000);
+    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    expect(items).toHaveLength(2); // 2+ items: the CLI-requeue path, not native loop
+
+    const played: string[] = [];
+    let interrupted = false;
+    await playThroughDaemon(root, project, items, { loop: true }, {
+      onItem: (label) => {
+        played.push(label);
+        if (played.length === 3) interrupted = true; // mid second pass
+      },
+      interrupted: () => interrupted,
+    });
+    expect(played).toEqual([items[0]!.label, items[1]!.label, items[0]!.label]);
+  });
+
+  it('--from + --loop repeats the region: requeue path, never native (#23 review)', async () => {
+    await importTone('tone', 36000); // 0.75 s
+    const items = await resolvePlayables(root, ['//songs/creek/assets:tone']);
+
+    // The daemon's native wrap returns to sample 0, not the locate point,
+    // so a region audition must take the requeue path — every pass locates
+    // again and no position ever falls before the region start.
+    const samples: number[] = [];
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    client.on('event', (e: { event: string; sample?: number }) => {
+      if (e.event === 'position' && e.sample !== undefined) samples.push(e.sample);
+    });
+    const played: string[] = [];
+    let interrupted = false;
+    await playThroughDaemon(root, project, items, { from: '1.2.1', loop: true }, {
+      onItem: (label) => {
+        played.push(label);
+        if (played.length === 2) interrupted = true; // two region passes
+      },
+      interrupted: () => interrupted,
+    });
+    client.close();
+    expect(played).toHaveLength(2); // reloaded per pass — the requeue path
+    expect(samples.length).toBeGreaterThan(0);
+    expect(Math.min(...samples)).toBeGreaterThanOrEqual(24000); // never before beat 2
   });
 
   it('--from projects musical time to a locate before playing', async () => {

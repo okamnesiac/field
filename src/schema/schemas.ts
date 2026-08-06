@@ -41,9 +41,18 @@ export const projectOrder: KeyOrder = { keys: ['bloom', 'name', 'sample_rate'] }
 export const songSchema = z.strictObject({
   name: slug,
   title: z.string().optional(),
+  // Declared song length in ticks: the mix renders exactly this long —
+  // tails truncate, short content pads — so a song's extent is authored,
+  // not emergent from whichever stem happens to ring longest.
+  length: z.number().int().positive().optional(),
+  // The song is a loop: everything past `length` folds back onto the
+  // start (bar 12's reverb tail rings into bar 1), so the render is
+  // exactly one loop of the infinite performance. A looping song's
+  // length IS its loop length — no second field to disagree with.
+  loop: z.boolean().optional(),
 });
 export type Song = z.infer<typeof songSchema>;
-export const songOrder: KeyOrder = { keys: ['name', 'title'] };
+export const songOrder: KeyOrder = { keys: ['name', 'title', 'length', 'loop'] };
 
 // songs/<song>/tempo.yaml — tempo and meter maps.
 export const tempoEventSchema = z.strictObject({

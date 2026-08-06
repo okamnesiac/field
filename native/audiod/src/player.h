@@ -36,8 +36,11 @@ public:
     // output honest against the `*` in `bloom devices` (#16).
     void refreshAudioDevice();
 
-    // Returns {error} or {samples, sample_rate, channels}.
-    juce::var load (const juce::File& file);
+    // Returns {error} or {samples, sample_rate, channels}. With loop the
+    // reader wraps at end-of-file — gapless, sample-exact — and the
+    // stream never finishes: stop is the only way out, which is exactly
+    // the blocking-play contract `bloom play --loop` wants.
+    juce::var load (const juce::File& file, bool loop);
 
     juce::String play();
     void pause();
@@ -86,6 +89,7 @@ private:
     juce::int64 fileLengthSamples = 0;
     int fileChannels = 0;
     bool everStarted = false; // distinguishes "stopped at 0" from "never played"
+    bool looping = false;
 
     // Null-output mode: a thread pulls the transport at real-time pace so
     // transport, position, and end-of-stream all behave exactly as with a

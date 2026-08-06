@@ -117,7 +117,14 @@ outside the hash.
   clip edit that leaves a stem byte-identical stops there: early cutoff
   falls out of content addressing. `tracks:` omitted means every audio
   track with clips; a mix with nothing to mix is legal and simply absent
-  from the graph until content exists.
+  from the graph until content exists. A song may declare `length:`
+  (ticks, `song.yaml`): the mix then renders *exactly* that long — tails
+  truncate after the master chain, short content pads — so a song's
+  extent is authored rather than emergent from whichever stem rings
+  longest. Adding `loop: true` folds the overhang back onto the start
+  instead (bar 12's reverb tail rings into bar 1): the render is one
+  seamless pass of the infinite loop, and a looping song's length *is*
+  its loop length.
 
 ## Determinism policy
 

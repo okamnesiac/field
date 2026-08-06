@@ -6,8 +6,8 @@ import { build, type RuleRunner } from '../graph/build.js';
 import { expandPattern } from '../graph/graph.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
+import { beatTicks } from '../time/tempo.js';
 import {
-  formatPosition,
   musicalContext,
   parseMusicalPosition,
   songDirOfPkg,
@@ -62,6 +62,7 @@ export async function resolvePlayables(
 export interface PlayOptions {
   from?: string | undefined; // bar[.beat[.tick]], musical time — CLI-side only
   device?: string | undefined;
+  loop?: boolean | undefined; // replay the queue until interrupted
 }
 
 export interface PlayHooks {
@@ -92,41 +93,128 @@ export async function playThroughDaemon(
     if (options.device !== undefined) await client.selectDevice(options.device);
     const sampleRate = project.manifest?.data.sample_rate ?? 48000;
 
-    for (const item of items) {
-      if (hooks.interrupted?.()) break;
-      await client.load(item.path);
-      const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
-      if (options.from !== undefined) {
-        if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
-        await client.locate(parseMusicalPosition(options.from, ctx));
+    // --loop with a single target loops in the daemon — gapless, the
+    // reader wrapping at end-of-file — and the queue walk runs once,
+    // blocking until ctrl-c stops the transport. A multi-target --loop
+    // falls back to replaying the queue, which reloads between passes —
+    // and so does --from + --loop: the daemon's wrap returns to sample 0,
+    // not the locate point, so repeating a *region* audition takes the
+    // requeue path, where --from re-applies each pass (#23 review).
+    const nativeLoop =
+      options.loop === true && items.length === 1 && options.from === undefined;
+    if (nativeLoop) {
+      const [major = 0, minor = 0] = client.daemonVersion.split('.').map(Number);
+      if (major === 0 && minor < 3) {
+        throw new Error(
+          `bloom-audiod ${client.daemonVersion} predates --loop — ` +
+            'bloom transport quit, then play again (it respawns on the new build)',
+        );
       }
-
-      const status = await client.status();
-      const note = status.device
-        ? ` (${status.device.name}${status.resampling ? ', resampling' : ''})`
-        : '';
-      hooks.onItem?.(item.label, note);
-
-      // Ctrl-c can land while load/status were in flight: the handler's
-      // stop() would hit a stopped transport and this play() would undo it
-      // — so check on both sides, and after play() stop it ourselves,
-      // since the handler's stop may have been processed first.
-      if (hooks.interrupted?.()) break;
-      await client.play();
-      if (hooks.interrupted?.()) {
-        await client.stop();
-        break;
-      }
-      await waitForStop(
-        client,
-        (sample) => hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
-        (name) => hooks.onDevice?.(name),
-      );
-      if (hooks.interrupted?.()) break;
     }
+    do {
+      for (const item of items) {
+        if (hooks.interrupted?.()) break;
+        await client.load(item.path, nativeLoop);
+        const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
+        if (options.from !== undefined) {
+          if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
+          await client.locate(parseMusicalPosition(options.from, ctx));
+        }
+
+        const status = await client.status();
+        const note = status.device
+          ? ` (${status.device.name}${status.resampling ? ', resampling' : ''})`
+          : '';
+        hooks.onItem?.(item.label, note);
+
+        // Ctrl-c can land while load/status were in flight: the handler's
+        // stop() would hit a stopped transport and this play() would undo it
+        // — so check on both sides, and after play() stop it ourselves,
+        // since the handler's stop may have been processed first.
+        if (hooks.interrupted?.()) break;
+        await client.play();
+        if (hooks.interrupted?.()) {
+          await client.stop();
+          break;
+        }
+        // The readout is phase-locked to the beat: heartbeat positions are
+        // only anchors (sample ↔ wall clock), and each beat's print is
+        // scheduled with a timer at the moment the beat actually sounds,
+        // drift-corrected by every fresh anchor. The daemon stays
+        // musically ignorant; musical time never crosses the socket.
+        const readout = beatScheduler(sampleRate, ctx, (line) => hooks.onPosition?.(line));
+        try {
+          await waitForStop(client, readout.onSample, (name) => hooks.onDevice?.(name));
+        } finally {
+          readout.cancel();
+        }
+        if (hooks.interrupted?.()) break;
+      }
+    } while (options.loop === true && !nativeLoop && !(hooks.interrupted?.() ?? false));
   } finally {
     client.close();
   }
+}
+
+// The first beat-boundary tick strictly after `tick`, through the meter map.
+function nextBeatTick(meter: MusicalContext['meter'], tick: number): number {
+  let i = 0;
+  while (i + 1 < meter.events.length && meter.events[i + 1]!.at <= tick) i++;
+  const ev = meter.events[i]!;
+  const step = beatTicks(ev.denominator);
+  const next = ev.at + (Math.floor((tick - ev.at) / step) + 1) * step;
+  const boundary = meter.events[i + 1]?.at;
+  return boundary !== undefined && next > boundary ? boundary : next;
+}
+
+// Phase-locked bar.beat readout (1-indexed — musicians count from one, and
+// --from and YAML positions agree). Position events serve as anchors; the
+// print for each beat fires on a timer at the beat itself. A paused
+// transport (anchor not advancing) suspends the timers. Targets without a
+// tempo map fall back to whole seconds, printed as anchors arrive.
+function beatScheduler(
+  sampleRate: number,
+  ctx: MusicalContext | undefined,
+  print: (line: string) => void,
+): { onSample: (sample: number) => void; cancel: () => void } {
+  let anchor: { sample: number; at: number } | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let lastLine = '';
+  const emit = (line: string) => {
+    if (line !== lastLine) {
+      lastLine = line;
+      print(line);
+    }
+  };
+  const barBeat = (tick: number): string => {
+    const [bar, beat] = ctx!.meter.format(Math.max(0, tick)).split('.');
+    return `${bar}.${beat}`;
+  };
+  const schedule = () => {
+    if (!anchor || !ctx) return;
+    const nowSample = anchor.sample + ((Date.now() - anchor.at) / 1000) * sampleRate;
+    const beat = nextBeatTick(ctx.meter, ctx.tempo.samplesToTicks(nowSample));
+    const ms = ((ctx.tempo.ticksToSamples(beat) - nowSample) / sampleRate) * 1000;
+    timer = setTimeout(() => {
+      emit(barBeat(beat));
+      schedule();
+    }, Math.max(0, ms));
+  };
+  return {
+    onSample: (sample) => {
+      if (!ctx) {
+        emit(`0:${String(Math.floor(sample / sampleRate)).padStart(2, '0')}`);
+        return;
+      }
+      const stalled = anchor !== undefined && sample === anchor.sample;
+      anchor = { sample, at: Date.now() };
+      clearTimeout(timer);
+      if (stalled) return; // paused: freeze the readout, resume on movement
+      emit(barBeat(Math.floor(ctx.tempo.samplesToTicks(sample))));
+      schedule();
+    },
+    cancel: () => clearTimeout(timer),
+  };
 }
 
 function waitForStop(

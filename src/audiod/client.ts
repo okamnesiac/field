@@ -207,8 +207,10 @@ export class AudiodClient extends EventEmitter {
   selectDevice(name: string) {
     return this.request('device.select', { name }, okResponseSchema);
   }
-  load(path: string) {
-    return this.request('load', { path }, loadResponseSchema);
+  load(path: string, loop = false) {
+    // The flag is only sent when set: an older daemon would silently
+    // ignore it, so callers version-guard before asking (play.ts).
+    return this.request('load', loop ? { path, loop: true } : { path }, loadResponseSchema);
   }
   play() {
     return this.request('play', {}, okResponseSchema);

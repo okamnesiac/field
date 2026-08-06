@@ -252,14 +252,16 @@ program
   .description('build targets if needed, then audition them in order (ctrl-c stops)')
   .option('--from <position>', 'start at bar[.beat[.tick]] (single target only)')
   .option('--device <name>', 'output device (bloom devices lists them)')
-  .action(async (patterns: string[], opts: { from?: string; device?: string }) => {
+  .option('--loop', 'replay the queue until ctrl-c')
+  .option('--click', 'overlay a metronome (rendered CLI-side; loops with the file)')
+  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean }) => {
     try {
       const root = requireRoot();
-      const items = await resolvePlayables(root, patterns);
+      let items = await resolvePlayables(root, patterns);
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
-        if (opts.from !== undefined || opts.device !== undefined) {
-          throw new Error('--from and --device need bloom-audiod (pnpm build:native)');
+        if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true) {
+          throw new Error('--from, --device, --loop, and --click need bloom-audiod (pnpm build:native)');
         }
         process.stderr.write('bloom-audiod is not built; using afplay (pnpm build:native)\n');
         await playWithAfplay(items);
@@ -283,6 +285,10 @@ program
       });
 
       const project = loadProject(root);
+      if (opts.click === true) {
+        const { applyClick } = await import('./commands/click.js');
+        items = applyClick(root, project, items);
+      }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;
       await playThroughDaemon(root, project, items, opts, {
@@ -337,10 +343,14 @@ transport
       fail(err);
     }
   });
-for (const op of ['play', 'pause', 'stop'] as const) {
+for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
   transport
     .command(op)
-    .description(`${op} the transport`)
+    .description(
+      op === 'quit'
+        ? 'shut the daemon down (it respawns on the next play — how to pick up a new build)'
+        : `${op} the transport`,
+    )
     .action(async () => {
       try {
         await transportCommand(requireRoot(), op);

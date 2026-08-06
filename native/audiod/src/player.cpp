@@ -192,7 +192,7 @@ void Player::maybeMatchDeviceRate (double fileRate)
     deviceManager.setAudioDeviceSetup (setup, false);
 }
 
-juce::var Player::load (const juce::File& file)
+juce::var Player::load (const juce::File& file, bool loop)
 {
     auto result = obj();
     std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
@@ -214,7 +214,9 @@ juce::var Player::load (const juce::File& file)
 
     maybeMatchDeviceRate (fileSampleRate);
 
+    looping = loop;
     readerSource = std::make_unique<juce::AudioFormatReaderSource> (reader.release(), true);
+    readerSource->setLooping (loop);
     // Handing the transport the file's rate is what makes it resample when
     // the device runs at a different one.
     transport.setSource (readerSource.get(), 1 << 15, &readThread, fileSampleRate);
@@ -268,7 +270,8 @@ juce::int64 Player::positionSamples() const
 
 bool Player::streamFinished() const
 {
-    return readerSource != nullptr && everStarted && transport.hasStreamFinished();
+    // A looping stream never finishes; stop is the only way out.
+    return readerSource != nullptr && everStarted && ! looping && transport.hasStreamFinished();
 }
 
 juce::String Player::transportState()
@@ -286,6 +289,7 @@ juce::var Player::status()
     result->setProperty ("state", transportState());
     result->setProperty ("sample", positionSamples());
     result->setProperty ("samples", fileLengthSamples);
+    result->setProperty ("looping", looping);
     result->setProperty ("path", loadedPath.isEmpty() ? juce::var() : juce::var (loadedPath));
     result->setProperty ("null_output", nullMode);
 
