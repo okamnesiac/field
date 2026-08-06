@@ -60,9 +60,11 @@ or a scope boundary.
    `chosen:` where a say target carries nothing extra. Committed
    variants move to the song's committed-audio home:
    `audio/<target>/<variant>.wav`. Ledger rows stay in `assets.yaml`.
-   Supersedes [ace-generation.md](ace-generation.md) §3.1's layout
-   (`generation/` directory, `//songs/<s>/generation:` labels — those
-   addresses migrate to `targets:`). Follow-on, not prerequisite: clips
+   Supersedes [ace-generation.md](ace-generation.md)'s layout — the
+   `generation/` workflow convention (§3.2) and its
+   `//songs/<s>/generation:` labels (§4.2); those addresses migrate to
+   `targets:`. (§3.1 — outputs committed, never cached — is untouched;
+   decision 2 here restates it as the deliberate trigger policy.) Follow-on, not prerequisite: clips
    can then reference `target:` directly and `choose` repoints which
    committed variant the target resolves to — promotion stops being a
    copy-into-the-ledger step and becomes choosing what the target
@@ -78,9 +80,9 @@ or a scope boundary.
    `.scd` relocation was a full cache hit).
 6. **One ledger per scope.** `shared/assets.yaml` mirrors
    `songs/<song>/assets.yaml` — same schema, `file:` paths relative to
-   the scope root, labels `//shared/assets:<name>` (superseding older
-   `//shared/samples:<name>` sketches; the assets-kind spelling keeps
-   the two scopes symmetric). Every committed file is pinned exactly
+   the scope root, labels `//shared/assets:<name>` (superseding the
+   `//shared/samples:<name>` spelling sketched in discussion; the
+   assets-kind spelling keeps the two scopes symmetric). Every committed file is pinned exactly
    once; promotion moves the pin with the file. The ledger pins
    **committed audio only**: programs are *keyed, not pinned* —
    sc-render hashes program content into the action key (drift

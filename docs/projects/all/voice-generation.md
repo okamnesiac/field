@@ -80,3 +80,6 @@ on the M3 Max in seconds-not-minutes; recipe hashes verified by
   Schema reuse sharpens this (#29 review): `bloom ace choose` promotes
   voice recipes on day one, making the `ace` prefix a misnomer-in-waiting
   — the same seam decision should cover `choose`, not just `generate`.
+  Answered 2026-08-06 ([project-layout.md](project-layout.md) §1.7):
+  `bloom generate` and `bloom choose` are verbs over the generator
+  category; the `ace` prefix retires with the layout migration.
