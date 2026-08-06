@@ -1,6 +1,7 @@
 import { eqRule, limitRule, reverbRule } from './effects.js';
 import { mixRule } from './mix.js';
 import { normalizeRule } from './normalize.js';
+import { sayRule } from './say.js';
 import { scRenderRule } from './sc-render.js';
 import { trackRenderRule } from './track-render.js';
 import type { RuleImpl, RuleSpec } from './types.js';
@@ -18,6 +19,7 @@ const RULES = {
   mix: mixRule,
   normalize: normalizeRule,
   reverb: reverbRule,
+  say: sayRule,
   'sc-render': scRenderRule,
   'track-render': trackRenderRule,
 };

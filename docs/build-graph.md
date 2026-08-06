@@ -75,6 +75,17 @@ outside the hash.
   seed, renders are reproducible bit-for-bit. `bloom sc render` runs a
   program directly (uncached) for iteration. Full contract:
   [projects/all/sc-render.md](projects/all/sc-render.md) §2.
+- **`say`** — macOS text-to-speech as a recipe: `text`/`voice`/`rate` are
+  the whole action key, the output (a WAV at the project rate, via
+  `afconvert`) is cached and never committed. `voice` is required, and
+  the rule verifies it against the installed inventory before rendering —
+  `say` itself silently falls back to the user's default voice, which
+  would be an under-specified recipe lying under a stable key.
+  Reproducibility is same-machine, like sc-render's: an OS or voice-data
+  update may change the bytes, and the key deliberately does not chase OS
+  versions. Voice *generation* (cloned/sung voices, committed outputs) is
+  a separate ACE-style workflow on the other side of the determinism
+  boundary.
 - **`track-render`** — the first *implicit* rule: every audio track with
   clips is buildable as `//songs/<song>/tracks:<name>` without declaring
   anything, because the track file **is** the declaration. A clip sources
