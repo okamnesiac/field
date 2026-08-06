@@ -56,9 +56,12 @@ export function withClick(root: string, ctx: MusicalContext, item: Playable): Pl
       right[sample + i] = right[sample + i]! + blip;
     }
   }
-  const dir = join(root, '.bloom', 'tmp');
+  // Under the label's package path, so the copy keeps a songs/<song>/
+  // segment — that is what lets transport status and the position stream
+  // show musical time for a clicked file (songDirOfPath).
+  const dir = join(root, '.bloom', 'tmp', item.pkg);
   mkdirSync(dir, { recursive: true });
-  const path = join(dir, `click-${item.label.replace(/[^a-z0-9]+/g, '-')}.wav`);
+  const path = join(dir, `click-${item.label.split(':').pop() ?? 'target'}.wav`);
   writeWavFloat32(path, wav.sampleRate, [left, right]);
   return { ...item, path };
 }
