@@ -63,7 +63,7 @@ or a scope boundary.
    `chosen:` where a say target carries nothing extra. Committed
    variants move to the song's committed-audio home:
    `audio/<target>/<variant>.wav`. Ledger rows stay in `assets.yaml`.
-   *Superseded by §4.9: under the unified namespace there is no ledger
+   *Superseded by §4.8: under the unified namespace there is no ledger
    row — choosing repoints the sound's own label, and the sound file
    pins its variants.*
    Supersedes [ace-generation.md](ace-generation.md)'s layout — the
@@ -96,7 +96,7 @@ or a scope boundary.
    re-renders, which is editing working normally), whereas a pin is a
    verification promise (drift fails `bloom check`). Code's integrity
    story is git; pinning programs would fail check on every legitimate
-   edit. *Nuanced by §4.9: pin authority splits — imported/recorded
+   edit. *Nuanced by §4.8: pin authority splits — imported/recorded
    audio pins in the ledger, generated variants pin in their sound spec
    (the per-variant sha256 check verifies). Every committed file is
    still pinned exactly once.*
@@ -228,20 +228,34 @@ every existing citation stay stable.
    serialized field spelled `rule` — renaming a hash key would
    invalidate every cache for zero semantic gain, so only the
    `sc-render` → `supercollider` *value* change re-keys (§4.4).
-8. **The deliberate type spells `generative`.** The `type:` slot answers
-   "what kind of sound is this," and the kind has a musicians' name —
-   generative music — so the adjective wins over the verb: a *generative
-   sound*, produced by `bloom generate` (the verb stays the act, §1.7).
-   Rejected: `type: generate` (the verb in the type slot — initially
-   ratified for verb symmetry, but "a generate sound" never parsed, and
-   the symmetry survives through the shared root).
-9. **Choosing repoints; the ledger copy dissolves.** Forced by §4.3's
+8. **Choosing repoints; the ledger copy dissolves.** Forced by §4.3's
    one-namespace rule: `choose` minting an asset named after its own
    sound would self-collide, so §1.4's recorded follow-on lands inside
-   the migration rather than after it. A generate sound's own label
+   the migration rather than after it. A generative sound's own label
    resolves to its chosen variant; clips reference the sound by name
    (`source: still-water-keys`), `bloom choose` rewrites only `chosen:`
    — a one-line diff every reference follows — and the sound spec pins
    its variants (per-variant sha256, verified by check). `--as` retires
    with the ledger step; the reference is scope-stable, since it names
    the sound, not a file.
+9. **The deliberate type spells `generative`.** The `type:` slot answers
+   "what kind of sound is this," and the kind has a musicians' name —
+   generative music — so the adjective wins over the verb: a *generative
+   sound*, produced by `bloom generate` (the verb stays the act, §1.7).
+   Rejected: `type: generate` (the verb in the type slot — initially
+   ratified for verb symmetry, but "a generate sound" never parsed, and
+   the symmetry survives through the shared root). Decided after §4.8
+   and moved below it in the list — §4.8 already had incoming citations,
+   this decision had none, and the §4 preamble's own promise is that
+   numbering stays stable for citers.
+10. **The implicit track type spells `stem`.** `track-render` was the
+    last `-render` fossil (§4.7 struck the word from the executor) and
+    the odd one out beside `mix`: a mix file defines a `mix`, a track
+    file implies a `stem` — the artifact's real name everywhere the
+    docs speak ("track stems", "the mix sums stems"). Rejected:
+    `track-generate` (the verb in the type slot, per §4.9); `track`
+    (the track is the declaration, not the artifact, and its file
+    already discriminates on `type: audio|midi`). The type value is in
+    the action key, so stems re-key once — deterministic summing means
+    they re-render byte-identically and mixes stay cached, same class
+    as §4.4's supercollider re-key, free inside the same flag-day.
