@@ -70,20 +70,22 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     });
     expect(played).toEqual(items.map((i) => i.label));
     expect(positions.length).toBeGreaterThan(0);
-    expect(positions[0]).toMatch(/^\d+\.\d+\.\d+ \(/); // musical time, derived CLI-side
+    expect(positions[0]).toMatch(/^\d+\.\d+$/); // bar.beat, beat-gated, CLI-side
   });
 
   it(
     '--loop with one target loops in the daemon: positions outlive the file',
     { timeout: 10_000 },
     async () => {
-      const items = await resolvePlayables(root, ['//songs/creek/assets:blip']); // 0.25 s
+      await importTone('spin', 60000); // 1.25 s = 2.5 beats: beat changes keep coming
+      const items = await resolvePlayables(root, ['//songs/creek/assets:spin']);
 
-      // Gapless native loop: one load, one play, and position events keep
-      // arriving well past the file's real-time length until ctrl-c.
-      // Event-driven, not clock-driven (a fixed window was CI-flaky): the
-      // 4th heartbeat-paced position is ~1 s of streaming — a non-looping
-      // 0.25 s file stops after one or two and can never get there.
+      // Gapless native loop: one load, one play, and beat-gated position
+      // updates keep arriving well past the file's real-time length until
+      // ctrl-c. Event-driven, not clock-driven (a fixed window was
+      // CI-flaky): the 4th beat change is >1.5 s of streaming — a
+      // non-looping 1.25 s file stops mid third beat and can never get
+      // there, whether or not the looping reader wraps its position.
       const played: string[] = [];
       const positions: string[] = [];
       let interrupted = false;

@@ -7,7 +7,6 @@ import { expandPattern } from '../graph/graph.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
 import {
-  formatPosition,
   musicalContext,
   parseMusicalPosition,
   songDirOfPkg,
@@ -135,9 +134,19 @@ export async function playThroughDaemon(
           await client.stop();
           break;
         }
+        // The readout advances on beats, not heartbeats: raw positions
+        // arrive at polling pace and land on arbitrary ticks, which reads
+        // as noise. bar.beat only, printed when it changes.
+        let lastBeat = '';
         await waitForStop(
           client,
-          (sample) => hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
+          (sample) => {
+            const line = beatReadout(sample, sampleRate, ctx);
+            if (line !== lastBeat) {
+              lastBeat = line;
+              hooks.onPosition?.(line);
+            }
+          },
           (name) => hooks.onDevice?.(name),
         );
         if (hooks.interrupted?.()) break;
@@ -146,6 +155,15 @@ export async function playThroughDaemon(
   } finally {
     client.close();
   }
+}
+
+// bar.beat for the playing readout (1-indexed, matching --from and YAML
+// positions); whole seconds when the target has no tempo map.
+function beatReadout(sample: number, sampleRate: number, ctx: MusicalContext | undefined): string {
+  if (!ctx) return `0:${String(Math.floor(sample / sampleRate)).padStart(2, '0')}`;
+  const ticks = Math.round(ctx.tempo.samplesToTicks(sample));
+  const [bar, beat] = ctx.meter.format(ticks).split('.');
+  return `${bar}.${beat}`;
 }
 
 function waitForStop(
