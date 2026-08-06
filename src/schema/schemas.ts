@@ -276,7 +276,11 @@ export type ScRenderTarget = z.infer<typeof scRenderTargetSchema>;
 // rate are the whole action key; output is cached, never committed.
 // `voice` is required because the system default voice is a per-user
 // setting — a recipe that renders differently on two Macs under the same
-// key would lie.
+// key would lie. The one recorded exception: `voice: Siri` selects the
+// machine's Spoken Content voice (Siri voices are hidden from say -v
+// entirely, so the system default is the only way to reach them) — the
+// caveat that the bytes follow a Settings toggle is accepted
+// deliberately (rules/say.ts).
 export const sayTargetSchema = z.strictObject({
   name: labelName,
   rule: z.literal('say'),

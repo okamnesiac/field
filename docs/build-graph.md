@@ -80,8 +80,12 @@ outside the hash.
   `afconvert`) is cached and never committed. `voice` is required, and
   the rule verifies it against the installed inventory before rendering —
   `say` itself silently falls back to the user's default voice, which
-  would be an under-specified recipe lying under a stable key.
-  Reproducibility is same-machine, like sc-render's: an OS or voice-data
+  would be an under-specified recipe lying under a stable key. The one
+  recorded exception is `voice: Siri`: Siri voices are hidden from
+  `say -v` entirely, so `Siri` selects the machine's Spoken Content
+  voice — deliberately accepting that those bytes follow a Settings
+  toggle, because the alternative is the best voices being unreachable
+  by any recipe. Reproducibility is same-machine, like sc-render's: an OS or voice-data
   update may change the bytes, and the key deliberately does not chase OS
   versions. Voice *generation* (cloned/sung voices, committed outputs) is
   a separate ACE-style workflow on the other side of the determinism

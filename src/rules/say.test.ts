@@ -61,6 +61,18 @@ describe('sayRule.execute', () => {
       }),
     ).rejects.toThrow('no-such-voice-xyz');
   });
+
+  it('voice: Siri renders with the system voice — the recorded escape hatch', async () => {
+    // Siri voices are hidden from say -v, so "Siri" omits -v entirely and
+    // takes whatever the machine's Spoken Content voice is.
+    const a = join(dir, 'siri-a.wav');
+    const b = join(dir, 'siri-b.wav');
+    const ctx = { root: dir, sampleRate: 48000 };
+    await sayRule.execute(target({ voice: 'Siri' }), [], a, ctx);
+    await sayRule.execute(target({ voice: 'Siri' }), [], b, ctx);
+    expect(readWav(a).channels[0]!.length).toBeGreaterThan(4800);
+    expect(await sha256File(a)).toBe(await sha256File(b)); // stable while Settings are
+  });
 });
 
 describe('say targets in the build graph', () => {

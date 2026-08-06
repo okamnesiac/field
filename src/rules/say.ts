@@ -64,11 +64,22 @@ export const sayRule: RuleImpl<SayTarget> = {
     // failure a required `voice` exists to prevent. So the rule verifies
     // the name against `say -v ?` itself, exact match: a typo is an
     // error, never someone else's voice under the same action key.
-    const voices = await listVoices();
-    if (!voices.has(target.voice)) {
-      throw new Error(
-        `voice "${target.voice}" is not installed — say -v '?' lists voices (names are exact)`,
-      );
+    //
+    // `Siri` is the recorded exception: Siri voices are hidden from -v
+    // entirely — the system default is the only way to reach them — so
+    // voice: Siri omits -v and renders with the machine's Spoken Content
+    // voice. That deliberately widens the same-machine caveat (the bytes
+    // follow a Settings toggle, not just OS updates); the alternative is
+    // the best voices on the machine being unreachable by any recipe.
+    const siri = target.voice === 'Siri';
+    if (!siri) {
+      const voices = await listVoices();
+      if (!voices.has(target.voice)) {
+        throw new Error(
+          `voice "${target.voice}" is not installed — say -v '?' lists voices ` +
+            `(names are exact; "Siri" selects the system voice)`,
+        );
+      }
     }
     // The text goes through a file (-f): text is data, never argv — a
     // line starting with "-" must not become a flag.
@@ -81,8 +92,7 @@ export const sayRule: RuleImpl<SayTarget> = {
         await execFileAsync(
           'say',
           [
-            '-v',
-            target.voice,
+            ...(siri ? [] : ['-v', target.voice]),
             ...(target.rate !== undefined ? ['-r', String(target.rate)] : []),
             '-o',
             aiffPath,
