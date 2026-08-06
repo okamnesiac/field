@@ -1,0 +1,106 @@
+# Plan: Watch mode — the loop follows the project
+
+**Status:** Planned (2026-08-06), not started. Written against the
+layout-migration vocabulary (project-layout.md §4, lands with the
+migration PR); nothing here depends on the migration beyond spellings.
+
+**Goal:** `bloom play <song> --loop --watch` keeps the loop playing
+while the project changes underneath it: edit a clip, nudge a fader,
+rewrite an `.scd`, `bloom choose` a different variant — and the running
+loop picks it up without anyone stopping the transport. The dev-tool
+move (`tsc --watch`, hot reload) applied to music, and the core of the
+agent story: an agent edits YAML while a human just keeps listening.
+
+## 1 Decisions (DECIDED, 2026-08-06)
+
+1. **Swap at the loop wrap.** When a rebuild produces a new mix, the
+   daemon finishes the current pass and the next wrap starts the new
+   file — you always hear whole passes, and the daemon change is small:
+   a `reload(path)` request that queues a takeover at the wrap point,
+   alongside the native-loop reader that already wraps at end-of-file
+   (#23, recorded in [clip-looping.md](clip-looping.md)'s status line;
+   [playback.md](playback.md) predates looping and gains its reload
+   note with chunk 2). Worst-case latency is one loop length. The recorded
+   successor, deliberately not now: a bar-synced in-place swap —
+   stems and mixes share a sample-0-aligned timeline, so a same-length
+   rebuild could take over at the next bar line (computed CLI-side in
+   samples; musical time never crosses the socket) with the daemon
+   double-buffering two readers. That lands when wrap-latency actually
+   chafes, not before.
+2. **A red project never stops the music.** On every change burst:
+   `check` first. Diagnostics print, the last good build keeps looping,
+   and the next change retries. A half-saved file mid-edit is the
+   *common* case, not an error case.
+3. **"Did anything audible change" is an output-hash question.** The
+   watcher never diffs files or reasons about what an edit meant — it
+   rebuilds the playing label and compares the output hash. The graph
+   makes this cheap by construction (a fader move re-runs one sum; a
+   comment edit or `fmt` pass is all cache hits) and correct by
+   construction: hash moved ⇒ swap, hash same ⇒ silence. No debounce
+   heuristics beyond a few hundred ms of write-burst coalescing.
+4. **`bloom build --watch <label>` is the underlying verb;
+   `play --watch` composes it.** The headless form is useful alone (an
+   agent keeping a project green; a CI-like local loop), and the play
+   form is exactly: watch-build, then reload-at-wrap on hash movement.
+   `--watch` on `play` requires `--loop` and exactly one label — a
+   multi-item `--loop` queue is requeue-path playback with no wrap to
+   swap at, so watching it is out of scope until a need appears (the
+   headless `build --watch` is the multi-label form).
+5. **Trigger policy holds under watch — for free.** Watch runs `build`,
+   and build never generates a generative sound (project-layout.md
+   §1.2), so no watcher event can burn model-minutes or replace chosen
+   audio. But a `chosen:` repoint is just a YAML edit, so
+   `bloom choose` against a running watch is live A/B-ing of variants
+   inside the loop — likely the single best demo of the system.
+6. **Slow rebuilds don't glitch.** Builds land atomically in the CAS;
+   until the new artifact exists, the old mix keeps looping. An `.scd`
+   edit that takes ten seconds to render swaps ten seconds later, at
+   the wrap after it lands.
+
+## 2 Shape
+
+- **Watcher:** FSEvents via `fs.watch(root, { recursive: true })`
+  (macOS-only by charter), filtered to the files the loader reads plus
+  program files and assets — in practice: everything except `.bloom/`
+  (watching build output would self-trigger forever) and `.git/`.
+  Debounce ~300 ms to coalesce editor write-bursts and `fmt` rewrites.
+- **Loop body:** on a settled burst — `loadProject`; if diagnostics,
+  print them and wait. Else `build` the playing label through the
+  normal engine; if the outcome hash differs from what the daemon is
+  looping, send `reload`, print one line
+  (`↻ mix:main <shortHash> at next wrap`).
+- **Coalescing:** a change arriving mid-build marks the build stale;
+  its artifact still lands in the CAS (warm for later), but its swap is
+  skipped and the loop body re-runs. Only ever one build in flight.
+- **Daemon:** protocol gains `reload(path)` (queue takeover at wrap) —
+  a daemon version bump; `--watch` requires the new daemon, no
+  fallback shims.
+- **`--from` + `--watch`:** region loops take the requeue path already
+  (#23); after a swap the region re-applies to the new file. Same
+  rule as ever: the CLI owns musical time.
+
+## 3 Definition of done
+
+`bloom play creek --loop --watch`, then, without touching the
+transport: edit a clip position (loop updates at the wrap), change a
+track fader (sum-only rebuild, updates), edit an `.scd` (render
+completes, updates one wrap later), break a YAML file (diagnostics
+print, loop keeps playing, fixing it recovers), `bloom fmt` (nothing
+rebuilds, nothing swaps), and `bloom choose <sound> --variant 2` from
+another shell (the loop is A/B-ing variants live). Ctrl-C still ends
+the session cleanly.
+
+## 4 Chunks
+
+1. Daemon `reload` + protocol bump; CLI `build --watch` (watcher,
+   debounce, coalescing, check-gate) with tests against a fake runner.
+2. `play --loop --watch` composing the two; field demo of the
+   definition-of-done walk; docs (build-graph.md gains the watch
+   paragraph; playback.md note on reload).
+
+## 5 Open questions
+
+- Multi-target watch (`build --watch //songs/creek/...`) — probably
+  falls out of the engine loop, but the reporting format is undecided.
+- Whether `status` should show watch state (playing hash vs freshest
+  hash) for agents polling the session.
