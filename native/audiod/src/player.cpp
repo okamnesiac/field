@@ -2,6 +2,8 @@
 
 #include <CoreAudio/CoreAudio.h>
 
+#include <utility>
+
 namespace
 {
 // Core Audio calls property listeners on its own thread; the handler
@@ -43,6 +45,7 @@ Player::Player (bool useNullOutput) : nullMode (useNullOutput)
 
 Player::~Player()
 {
+    stopTimer();
     removeHardwareListeners();
     if (nullClockRunning.exchange (false) && nullClock.joinable())
         nullClock.join();
@@ -205,6 +208,10 @@ juce::var Player::load (const juce::File& file, bool loop)
     transport.stop();
     transport.setSource (nullptr);
     readerSource.reset();
+    // A fresh load supersedes any queued takeover — it was aimed at the
+    // stream that just ended.
+    pendingReload.reset();
+    stopTimer();
 
     fileSampleRate = reader->sampleRate;
     fileLengthSamples = reader->lengthInSamples;
@@ -226,6 +233,105 @@ juce::var Player::load (const juce::File& file, bool loop)
     result->setProperty ("sample_rate", fileSampleRate);
     result->setProperty ("channels", fileChannels);
     return juce::var (result.get());
+}
+
+juce::var Player::reload (const juce::File& file)
+{
+    auto result = obj();
+    if (readerSource == nullptr)
+    {
+        result->setProperty ("error", "nothing loaded");
+        return juce::var (result.get());
+    }
+    if (! looping)
+    {
+        result->setProperty ("error", "reload needs a looping stream (load with loop first)");
+        return juce::var (result.get());
+    }
+    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
+    if (reader == nullptr)
+    {
+        result->setProperty ("error", "cannot read audio file: " + file.getFullPathName());
+        return juce::var (result.get());
+    }
+
+    auto pending = std::make_unique<PendingReload>();
+    pending->path = file.getFullPathName();
+    pending->sampleRate = reader->sampleRate;
+    pending->length = reader->lengthInSamples;
+    pending->channels = (int) reader->numChannels;
+    pending->source = std::make_unique<juce::AudioFormatReaderSource> (reader.release(), true);
+    pending->source->setLooping (true);
+
+    // Latest wins: a second reload before the wrap replaces the first —
+    // the watcher's coalescing means only the freshest build matters.
+    pendingReload = std::move (pending);
+    result->setProperty ("samples", pendingReload->length);
+    result->setProperty ("sample_rate", pendingReload->sampleRate);
+    result->setProperty ("channels", pendingReload->channels);
+
+    if (transport.isPlaying())
+    {
+        reloadPollPosition = positionSamples();
+        startTimer (20);
+    }
+    else
+    {
+        applyReload(); // no pass in progress to finish
+    }
+    return juce::var (result.get());
+}
+
+void Player::timerCallback()
+{
+    if (pendingReload == nullptr)
+    {
+        stopTimer();
+        return;
+    }
+    if (! transport.isPlaying())
+    {
+        applyReload(); // stopped or paused mid-wait: nothing left to finish
+        return;
+    }
+    auto pos = positionSamples();
+    // Backwards is the reader wrapping (a backwards locate lands the swap
+    // early — harmless, and the CLI never locates a watched loop).
+    if (pos < reloadPollPosition)
+        applyReload();
+    else
+        reloadPollPosition = pos;
+}
+
+void Player::applyReload()
+{
+    stopTimer();
+    auto pending = std::move (pendingReload);
+    if (pending == nullptr)
+        return;
+
+    const bool wasPlaying = transport.isPlaying();
+    transport.stop();
+    transport.setSource (nullptr);
+    readerSource = std::move (pending->source);
+
+    fileSampleRate = pending->sampleRate;
+    fileLengthSamples = pending->length;
+    fileChannels = pending->channels;
+    loadedPath = pending->path;
+    looping = true;
+
+    maybeMatchDeviceRate (fileSampleRate);
+    transport.setSource (readerSource.get(), 1 << 15, &readThread, fileSampleRate);
+    transport.setPosition (0.0);
+    if (wasPlaying)
+        transport.start();
+    reloadedPath = loadedPath;
+}
+
+juce::String Player::takeReloadedPath()
+{
+    return std::exchange (reloadedPath, {});
 }
 
 juce::String Player::play()

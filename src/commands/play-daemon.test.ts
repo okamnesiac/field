@@ -108,6 +108,44 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     },
   );
 
+  it('reload takes over the looping stream at the wrap', { timeout: 15_000 }, async () => {
+    await importTone('spin', 96000); // 2 s pass: room to observe the pre-wrap state
+    await importTone('swap', 24000); // 0.5 s successor
+    const spin = await resolvePlayables(root, ['//songs/creek/assets:spin']);
+    const swap = await resolvePlayables(root, ['//songs/creek/assets:swap']);
+
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    const reloaded = new Promise<string>((resolve) => {
+      client.on('event', (e: { event: string; path?: string }) => {
+        if (e.event === 'reloaded' && e.path !== undefined) resolve(e.path);
+      });
+    });
+    await client.load(spin[0]!.path, true);
+    await client.play();
+    // reload answers immediately with the queued file's shape; the
+    // takeover itself waits for the wrap (watch.md §1.1).
+    const info = await client.reload(swap[0]!.path);
+    expect(info.samples).toBe(24000);
+    expect((await client.status()).path).toBe(spin[0]!.path); // still the old pass
+
+    // The daemon says so on the socket when the swap actually sounds.
+    expect(await reloaded).toBe(swap[0]!.path);
+    const status = await client.status();
+    expect(status.path).toBe(swap[0]!.path);
+    expect(status.state).toBe('playing'); // the transport never stopped
+    expect(status.looping).toBe(true); // and the successor loops too
+    await client.stop();
+    client.close();
+  });
+
+  it('reload without a looping stream is an error', async () => {
+    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']);
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    await client.load(items[0]!.path, false);
+    await expect(client.reload(items[0]!.path)).rejects.toThrow('looping stream');
+    client.close();
+  });
+
   it('--loop with several targets replays the queue until interrupted', async () => {
     await importTone('blop', 12000);
     const items = await resolvePlayables(root, ['//songs/creek/assets:all']);

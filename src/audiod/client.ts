@@ -212,6 +212,12 @@ export class AudiodClient extends EventEmitter {
     // ignore it, so callers version-guard before asking (play.ts).
     return this.request('load', loop ? { path, loop: true } : { path }, loadResponseSchema);
   }
+  reload(path: string) {
+    // Queues a takeover of the looping stream at the next wrap
+    // (watch.md §1.1). Daemon >= 0.4; callers version-guard like load's
+    // loop flag — an older daemon answers "unknown op".
+    return this.request('reload', { path }, loadResponseSchema);
+  }
   play() {
     return this.request('play', {}, okResponseSchema);
   }

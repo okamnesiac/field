@@ -1,8 +1,10 @@
 # Plan: Watch mode — the loop follows the project
 
-**Status:** Planned (2026-08-06), not started. Written against the
-layout-migration vocabulary (project-layout.md §4, lands with the
-migration PR); nothing here depends on the migration beyond spellings.
+**Status:** In progress (2026-08-06). Chunk 1 — the daemon `reload` op
+(takeover at the wrap, daemon 0.4) and `bloom build --watch` — is on
+its PR; chunk 2 (`play --loop --watch`, the field demo, the docs-root
+paragraphs) follows. Written against the layout-migration vocabulary
+(project-layout.md §4, landed in #31).
 
 **Goal:** `bloom play <song> --loop --watch` keeps the loop playing
 while the project changes underneath it: edit a clip, nudge a fader,

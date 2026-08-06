@@ -216,14 +216,53 @@ program
 program
   .command('build <patterns...>')
   .description('build labels (creek/sounds:pad-96k, creek/..., or a bare song for its main mix)')
-  .action(async (patterns: string[]) => {
+  .option('--watch', 'rebuild on project changes until ctrl-c, reporting outputs that audibly moved')
+  .action(async (patterns: string[], opts: { watch?: boolean }) => {
     try {
-      const outcomes = await buildLabels(requireRoot(), patterns);
-      for (const o of outcomes) {
-        const status = o.cached ? 'cached' : 'built';
-        const where = o.outputPath ? ` → ${o.outputPath}` : '';
-        process.stdout.write(`${status}  ${o.label}${where}\n`);
+      const root = requireRoot();
+      if (opts.watch !== true) {
+        const outcomes = await buildLabels(root, patterns);
+        for (const o of outcomes) {
+          const status = o.cached ? 'cached' : 'built';
+          const where = o.outputPath ? ` → ${o.outputPath}` : '';
+          process.stdout.write(`${status}  ${o.label}${where}\n`);
+        }
+        return;
       }
+      // Watch mode (watch.md): the first build is the baseline; every
+      // settled change rebuilds and reports labels whose output hash
+      // moved. A red project prints its diagnostics and keeps the last
+      // good outputs (§1.2) — so unlike a plain build, watch starts fine
+      // on a project that doesn't currently check.
+      const abort = new AbortController();
+      process.once('SIGINT', () => abort.abort());
+      let first = true;
+      await import('./commands/watch.js').then(({ watchBuild }) =>
+        watchBuild(root, patterns, { signal: abort.signal }, {
+          onDiagnostics: (lines) => {
+            for (const line of lines) process.stdout.write(`check: ${line}\n`);
+          },
+          onOutcomes: (outcomes, changed) => {
+            if (first) {
+              first = false;
+              for (const o of outcomes) {
+                const status = o.cached ? 'cached' : 'built';
+                process.stdout.write(`${status}  ${o.label}\n`);
+              }
+              process.stdout.write('watching for changes (ctrl-c stops)\n');
+              return;
+            }
+            if (changed.length === 0) {
+              process.stdout.write('· no audible change\n');
+              return;
+            }
+            for (const o of changed) {
+              process.stdout.write(`↻ ${o.label} ${o.sha256.slice(0, 12)}\n`);
+            }
+          },
+          onError: (err) => process.stdout.write(`build failed: ${err.message}\n`),
+        }),
+      );
     } catch (err) {
       fail(err);
     }
