@@ -3,8 +3,9 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
+import { wavFrameCount } from '../audio/wav.js';
 import { ruleImpl } from '../rules/index.js';
-import { placedWindow } from '../rules/track-render.js';
+import { expandLoop, placedWindow } from '../rules/track-render.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
@@ -371,6 +372,7 @@ function validate(project: LoadedProject): void {
       }
     };
 
+    const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
     const trackNames = new Set<string>();
     for (const track of song.tracks) {
       const expected = basename(track.path, '.yaml');
@@ -390,15 +392,59 @@ function validate(project: LoadedProject): void {
         } else if (clip.target !== undefined && !targetNames.has(clip.target)) {
           push(track.path, `clip "${clip.id}" references unknown target "${clip.target}"`);
         }
-        // Loops that tile at source length need that length at plan time —
-        // a target's output length isn't known until it builds
-        // (clip-looping.md §1.3).
-        if (clip.loop?.enabled && clip.target !== undefined && clip.loop.every === undefined) {
-          push(
-            track.path,
-            `clip "${clip.id}" loops a target — set loop.every ` +
-              `(a target's length is unknown before it builds)`,
-          );
+        // Loops are diagnosed here in full — running the same expansion the
+        // plan will run — because check is the gate: a check-clean project
+        // must never fail to construct its graph (#21 review).
+        if (clip.loop?.enabled && tempoMap) {
+          const loop = clip.loop;
+          if (clip.target !== undefined && loop.every === undefined) {
+            push(
+              track.path,
+              `clip "${clip.id}" loops a target — set loop.every ` +
+                `(a target's length is unknown before it builds)`,
+            );
+          } else {
+            // Tiling at source length needs the frame count; the seek-based
+            // header read costs no audio bytes (wav.ts).
+            let frames: number | undefined;
+            let sourceUnreadable = false;
+            if (clip.asset !== undefined && loop.every === undefined) {
+              const file = assetFileByName.get(clip.asset);
+              const resolved = file
+                ? resolveAssetFile(project.root, song.dir, file)
+                : { path: undefined };
+              if (resolved.path) {
+                try {
+                  frames = wavFrameCount(resolved.path);
+                } catch (err) {
+                  sourceUnreadable = true;
+                  push(track.path, `clip "${clip.id}" loop source: ${(err as Error).message}`);
+                }
+              } else {
+                sourceUnreadable = true; // the asset itself is already diagnosed
+              }
+            }
+            if (!sourceUnreadable) {
+              try {
+                for (const rep of expandLoop(clip, loop, tempoMap, frames)) {
+                  // Fades must fit slots (clip-looping.md §3): overlapping
+                  // seam fades duck the audio silently — every: 30 at 120 bpm
+                  // makes 750-sample slots the default 480+480 outgrows.
+                  if (rep.fade_in + rep.fade_out > rep.duration) {
+                    push(
+                      track.path,
+                      `clip "${clip.id}" loop fades (${rep.fade_in} + ${rep.fade_out} samples) ` +
+                        `exceed a ${rep.duration}-sample repetition — ` +
+                        `shrink loop.fade or lengthen loop.every`,
+                    );
+                    break;
+                  }
+                }
+              } catch (err) {
+                push(track.path, (err as Error).message); // names the clip itself
+              }
+            }
+          }
         }
         // Fades live inside the clip window; whether they fit is only known
         // in samples, so musical clips are checked through the tempo map.

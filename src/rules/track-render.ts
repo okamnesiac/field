@@ -57,8 +57,11 @@ export function placedWindow(clip: Clip, tempoMap: TempoMap): { start: number; d
 // Loop expansion (clip-looping.md §1.6): a looped clip becomes the same
 // resolved per-repetition entries equivalent hand-written clips would
 // produce — the renderer and the action-key format don't know loops exist.
-// Returns entries without input wiring; planTrack fills that in.
-function expandLoop(
+// Returns entries without input wiring; planTrack fills that in. Exported
+// for validate, which runs the same expansion to diagnose exhausted
+// sources and fades that outgrow their slots before any graph exists —
+// the throw below is a backstop the gate makes unreachable.
+export function expandLoop(
   clip: Clip,
   loop: NonNullable<Clip['loop']>,
   tempoMap: TempoMap,
