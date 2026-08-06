@@ -6,6 +6,9 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [Watch mode](all/watch.md) — rebuild on change, swap at the loop wrap;
+  chunk 1 (daemon `reload` + `bloom build --watch`) on its PR, chunk 2
+  (`play --loop --watch` + field demo) follows.
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, new phases) stops surfacing
   surprises.

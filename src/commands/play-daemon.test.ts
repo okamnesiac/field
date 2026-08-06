@@ -108,6 +108,85 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     },
   );
 
+  it('reload takes over the looping stream at the wrap', { timeout: 15_000 }, async () => {
+    await importTone('spin', 96000); // 2 s pass: room to observe the pre-wrap state
+    await importTone('swap', 24000); // 0.5 s successor
+    const spin = await resolvePlayables(root, ['//songs/creek/assets:spin']);
+    const swap = await resolvePlayables(root, ['//songs/creek/assets:swap']);
+
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    const reloaded = new Promise<string>((resolve) => {
+      client.on('event', (e: { event: string; path?: string }) => {
+        if (e.event === 'reloaded' && e.path !== undefined) resolve(e.path);
+      });
+    });
+    await client.load(spin[0]!.path, true);
+    await client.play();
+    // reload answers immediately with the queued file's shape; the
+    // takeover itself waits for the wrap (watch.md §1.1).
+    const info = await client.reload(swap[0]!.path);
+    expect(info.samples).toBe(24000);
+    expect((await client.status()).path).toBe(spin[0]!.path); // still the old pass
+
+    // The daemon says so on the socket when the swap actually sounds.
+    expect(await reloaded).toBe(swap[0]!.path);
+    const status = await client.status();
+    expect(status.path).toBe(swap[0]!.path);
+    expect(status.state).toBe('playing'); // the transport never stopped
+    expect(status.looping).toBe(true); // and the successor loops too
+    await client.stop();
+    client.close();
+  });
+
+  it('reload against a paused transport keeps the pause and position (#34 review P3)', { timeout: 15_000 }, async () => {
+    await importTone('hold', 48000); // 1 s pass
+    await importTone('takeover', 24000);
+    const hold = (await resolvePlayables(root, ['//songs/creek/assets:hold']))[0]!;
+    const takeover = (await resolvePlayables(root, ['//songs/creek/assets:takeover']))[0]!;
+
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    await client.load(hold.path, true);
+    await client.play();
+    const deadline = Date.now() + 5000;
+    while ((await client.status()).sample === 0) {
+      if (Date.now() > deadline) throw new Error('position never advanced');
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await client.pause();
+    const paused = await client.status();
+    expect(paused.state).toBe('paused');
+
+    // The takeover queues; a human's pause position is not the daemon's
+    // to discard — nothing may move until resume.
+    await client.reload(takeover.path);
+    await new Promise((r) => setTimeout(r, 300)); // a wrong immediate apply would land here
+    const after = await client.status();
+    expect(after.state).toBe('paused');
+    expect(after.path).toBe(hold.path);
+    expect(after.sample).toBe(paused.sample);
+
+    // Resume: the pass finishes from the held position and the takeover
+    // lands at its wrap.
+    const reloaded = new Promise<string>((resolve) => {
+      client.on('event', (e: { event: string; path?: string }) => {
+        if (e.event === 'reloaded' && e.path !== undefined) resolve(e.path);
+      });
+    });
+    await client.play();
+    expect(await reloaded).toBe(takeover.path);
+    expect((await client.status()).path).toBe(takeover.path);
+    await client.stop();
+    client.close();
+  });
+
+  it('reload without a looping stream is an error', async () => {
+    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']);
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    await client.load(items[0]!.path, false);
+    await expect(client.reload(items[0]!.path)).rejects.toThrow('looping stream');
+    client.close();
+  });
+
   it('--loop with several targets replays the queue until interrupted', async () => {
     await importTone('blop', 12000);
     const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
