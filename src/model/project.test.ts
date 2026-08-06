@@ -458,6 +458,205 @@ describe('takes', () => {
   });
 });
 
+describe('musical time (musical-time.md)', () => {
+  // 4/4 at PPQ 960: a bar is 3840 ticks.
+  const BAR = 3840;
+
+  function writeMusicalSong() {
+    createSong(root, 'opener');
+    writeFileSync(
+      join(root, 'songs/opener/song.yaml'),
+      'name: opener\nlength: [12]\nloop: true\n',
+    );
+    writeFileSync(
+      join(root, 'songs/opener/arrangement.yaml'),
+      'sections:\n  - name: verse\n    at: [5]\n',
+    );
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      [
+        'name: keys',
+        'type: audio',
+        'clips:',
+        '  - id: keys-1',
+        '    asset: hit',
+        '    position: [2]',
+        '    duration: [4]',
+        '    loop:',
+        '      every: [1]',
+        '',
+      ].join('\n'),
+    );
+  }
+
+  async function importHit() {
+    const src = sourceFile('pretend audio');
+    await importAsset(root, 'opener', src, 'hit');
+    rmSync(src);
+  }
+
+  it('resolves arrays to ticks at load — the graph never sees them', async () => {
+    writeMusicalSong();
+    await importHit();
+    const project = loadProject(root);
+    expect(project.diagnostics).toEqual([]);
+    const song = project.songs[0]!;
+    expect(song.song?.data.length).toBe(BAR * 12);
+    expect(song.arrangement?.data.sections[0]!.at).toBe(BAR * 4);
+    const clip = song.tracks[0]!.data.clips[0]!;
+    expect(clip.position).toBe(BAR);
+    expect(clip.duration).toBe(BAR * 4);
+    expect(clip.loop?.every).toBe(BAR);
+  });
+
+  it('loads array and tick spellings to identical data', async () => {
+    writeMusicalSong();
+    await importHit();
+    const musical = loadProject(root);
+
+    const other = mkdtempSync(join(tmpdir(), 'bloom-test-ticks-'));
+    try {
+      init({ dir: other, name: 'test-album' });
+      createSong(other, 'opener');
+      writeFileSync(
+        join(other, 'songs/opener/song.yaml'),
+        `name: opener\nlength: ${BAR * 12}\nloop: true\n`,
+      );
+      writeFileSync(
+        join(other, 'songs/opener/arrangement.yaml'),
+        `sections:\n  - name: verse\n    at: ${BAR * 4}\n`,
+      );
+      writeFileSync(
+        join(other, 'songs/opener/tracks/keys.yaml'),
+        [
+          'name: keys',
+          'type: audio',
+          'clips:',
+          '  - id: keys-1',
+          '    asset: hit',
+          `    position: ${BAR}`,
+          `    duration: ${BAR * 4}`,
+          '    loop:',
+          `      every: ${BAR}`,
+          '',
+        ].join('\n'),
+      );
+      const src = sourceFile('pretend audio');
+      await importAsset(other, 'opener', src, 'hit');
+      rmSync(src);
+      const ticks = loadProject(other);
+
+      expect(musical.diagnostics).toEqual([]);
+      expect(ticks.diagnostics).toEqual([]);
+      expect(musical.songs[0]!.tracks[0]!.data).toEqual(ticks.songs[0]!.tracks[0]!.data);
+      expect(musical.songs[0]!.song?.data).toEqual(ticks.songs[0]!.song?.data);
+      expect(musical.songs[0]!.arrangement?.data).toEqual(ticks.songs[0]!.arrangement?.data);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('fmt keeps musical arrays single-line and never rewrites notation', async () => {
+    writeMusicalSong();
+    await importHit();
+    fmt(root);
+    const song = readFileSync(join(root, 'songs/opener/song.yaml'), 'utf8');
+    expect(song).toContain('length: [12]');
+    const track = readFileSync(join(root, 'songs/opener/tracks/keys.yaml'), 'utf8');
+    expect(track).toContain('position: [2]');
+    expect(track).toContain('every: [1]');
+    expect((await check(root)).ok).toBe(true);
+  });
+
+  it('flags out-of-range beats through the meter map', async () => {
+    writeMusicalSong();
+    await importHit();
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      [
+        'name: keys',
+        'type: audio',
+        'clips:',
+        '  - id: keys-1',
+        '    asset: hit',
+        '    position: [2, 5]',
+        '    duration: [4]',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain(
+      'beat 5 out of range for 4/4',
+    );
+  });
+
+  it('flags musical arrays on absolute clips instead of unit-punning', async () => {
+    writeMusicalSong();
+    await importHit();
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      [
+        'name: keys',
+        'type: audio',
+        'clips:',
+        '  - id: keys-1',
+        '    asset: hit',
+        '    anchor: absolute',
+        '    position: [2]',
+        '    duration: 960',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('anchor: musical');
+  });
+
+  it('flags spans that resolve to zero ticks', async () => {
+    writeMusicalSong();
+    await importHit();
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      [
+        'name: keys',
+        'type: audio',
+        'clips:',
+        '  - id: keys-1',
+        '    asset: hit',
+        '    position: [2]',
+        '    duration: [0]',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('resolves to zero ticks');
+  });
+
+  it('diagnoses musical time when the meter map itself is invalid', async () => {
+    writeMusicalSong();
+    await importHit();
+    writeFileSync(
+      join(root, 'songs/opener/tempo.yaml'),
+      [
+        'tempo:',
+        '  - at: 0',
+        '    bpm: 120',
+        'meter:',
+        '  - at: 0',
+        '    numerator: 4',
+        '    denominator: 4',
+        '  - at: 2880', // off the bar boundary: the map will not construct
+        '    numerator: 3',
+        '    denominator: 4',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    const messages = result.diagnostics.map((d) => d.message).join();
+    expect(messages).toContain('bar boundary');
+    expect(messages).toContain('no valid meter map');
+  });
+});
+
 describe('anchors and aliases', () => {
   it('rejects anchors and aliases in project files (§3.6)', async () => {
     createSong(root, 'opener');

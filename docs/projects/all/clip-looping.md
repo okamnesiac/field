@@ -1,8 +1,15 @@
 # Plan: Clip looping
 
-**Status:** In progress (started 2026-08-05). Motivated by field's keys
-track — one 4-bar generation hand-tiled four times on the grid with
-click-guard micro-fades ([ace-generation.md](ace-generation.md) shipped the
+**Status:** Complete. Clip looping shipped in #21; #23 extended looping
+to the song layer (`length` + `loop: true` in song.yaml — the mix folds
+the overhang onto the start, one seamless pass of the infinite
+performance) and the player (`bloom play --loop`, gapless in the daemon,
+with the `--click` metronome and phase-locked beat readout built to
+verify it). field's creek is the proof: one looped keys clip replaced
+the four hand-tiled ones with a byte-identical placement plan, and the
+song loops at exactly 12 bars. Motivated by field's keys track — one
+4-bar generation hand-tiled four times on the grid with click-guard
+micro-fades ([ace-generation.md](ace-generation.md) shipped the
 generation; the tiling hack shipped with it).
 
 **Goal:** a clip plays its source repeatedly to fill its window, so a short

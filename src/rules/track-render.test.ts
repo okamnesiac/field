@@ -17,7 +17,10 @@ import { placedWindow, planTrack, trackRenderRule, type PlacedClip } from './tra
 const map120 = new TempoMap([{ at: 0, bpm: 120 }], 48000);
 
 function track(clips: unknown[]): Track {
-  return trackSchema.parse({ name: 'drums', type: 'audio', clips });
+  // Fixture times are scalar ticks, so the parse output already satisfies
+  // the resolved Track type — the same promise the loader's cast makes
+  // after resolution (musical-time.md §1.6).
+  return trackSchema.parse({ name: 'drums', type: 'audio', clips }) as Track;
 }
 
 const clip = (over: Record<string, unknown> = {}) => ({

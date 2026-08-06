@@ -115,4 +115,35 @@ describe('MeterMap', () => {
     expect(() => map.parse('1.1.961')).toThrow('out of range');
     expect(() => map.parse('0.1.1')).toThrow('>= 1');
   });
+
+  it('resolves ordinal positions from array parts, like parse', () => {
+    const map = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+    expect(map.positionTicks(1)).toBe(0);
+    expect(map.positionTicks(2)).toBe(PPQ * 4);
+    expect(map.positionTicks(2, 2)).toBe(PPQ * 5);
+    expect(map.positionTicks(42, 2, 1)).toBe(PPQ * 4 * 41 + PPQ);
+    expect(() => map.positionTicks(0)).toThrow('>= 1');
+    expect(() => map.positionTicks(1, 5)).toThrow('out of range');
+  });
+
+  it('advances cardinal spans from an anchor — zero is legal', () => {
+    const map = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+    expect(map.spanTicks(0, [4])).toBe(PPQ * 16);
+    expect(map.spanTicks(0, [0, 2])).toBe(PPQ * 2);
+    expect(map.spanTicks(0, [1, 2, 5])).toBe(PPQ * 6 + 5);
+    expect(map.spanTicks(0, [0])).toBe(0);
+    // The anchor moves the span, not its length, in constant meter.
+    expect(map.spanTicks(PPQ * 7, [2])).toBe(PPQ * 8);
+  });
+
+  it('steps spans at the meter in force at the moving position', () => {
+    const map = new MeterMap([
+      { at: 0, numerator: 4, denominator: 4 },
+      { at: PPQ * 8, numerator: 7, denominator: 8 }, // bar 3 becomes 7/8
+    ]);
+    // Two bars from bar 2: one 4/4 bar, then one 7/8 bar.
+    expect(map.spanTicks(PPQ * 4, [2])).toBe(PPQ * 4 + 7 * 480);
+    // Beats after the change are eighth-note beats.
+    expect(map.spanTicks(PPQ * 8, [0, 2])).toBe(480 * 2);
+  });
 });

@@ -8,6 +8,6 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, sc-render) stops surfacing surprises.
-- [Clip looping](all/clip-looping.md) — a `loop:` map on clips (window
-  fills, `every` on the grid, truncate/overlay); replaces field's
-  hand-tiled keys.
+- [Musical time arrays](all/musical-time.md) — `[bar, beat?, tick?]` in
+  project YAML; scalars stay ticks, resolution through the meter map,
+  cache-identical to the tick spelling.

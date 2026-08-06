@@ -19,6 +19,20 @@ export const labelName = slug.refine((n) => n !== RESERVED_TARGET_NAME, {
 const ticks = z.number().int().min(0);
 const samples = z.number().int().min(0);
 
+// Musical time arrays (musical-time.md §1): scalar numbers are ticks
+// (samples on absolute clips); arrays are musical. Positions are ordinal
+// and 1-indexed — [9, 2] is bar 9, beat 2 — and spans are cardinal counts
+// where zero is legal — [0, 2] is two beats. The schema validates shape
+// only: legal beat and tick ranges depend on the meter map (tempo.yaml),
+// so resolution and range diagnostics live in the model layer
+// (model/project.ts), which rewrites arrays to tick scalars at load — the
+// build graph never sees an array, and either spelling of a time produces
+// the same action key.
+const musicalPosition = z.array(z.number().int().min(1)).min(1).max(3);
+const musicalSpan = z.array(z.number().int().min(0)).min(1).max(3);
+const timePosition = z.union([ticks, musicalPosition]);
+const timeSpan = z.union([z.number().int().positive(), musicalSpan]);
+
 export const sampleRate = z.union([
   z.literal(44100),
   z.literal(48000),
@@ -41,18 +55,26 @@ export const projectOrder: KeyOrder = { keys: ['bloom', 'name', 'sample_rate'] }
 export const songSchema = z.strictObject({
   name: slug,
   title: z.string().optional(),
-  // Declared song length in ticks: the mix renders exactly this long —
-  // tails truncate, short content pads — so a song's extent is authored,
-  // not emergent from whichever stem happens to ring longest.
-  length: z.number().int().positive().optional(),
+  // Declared song length — ticks, or a musical span from bar 1
+  // ([12] = twelve bars): the mix renders exactly this long — tails
+  // truncate, short content pads — so a song's extent is authored, not
+  // emergent from whichever stem happens to ring longest.
+  length: timeSpan.optional(),
   // The song is a loop: everything past `length` folds back onto the
   // start (bar 12's reverb tail rings into bar 1), so the render is
   // exactly one loop of the infinite performance. A looping song's
   // length IS its loop length — no second field to disagree with.
   loop: z.boolean().optional(),
 });
-export type Song = z.infer<typeof songSchema>;
-export const songOrder: KeyOrder = { keys: ['name', 'title', 'length', 'loop'] };
+// File types (z.infer) admit musical arrays; the exported types are the
+// post-load shape — loadProject resolves every array to a tick scalar
+// before anything else sees the data (musical-time.md §1.6).
+type SongFile = z.infer<typeof songSchema>;
+export type Song = Omit<SongFile, 'length'> & { length?: number | undefined };
+export const songOrder: KeyOrder = {
+  keys: ['name', 'title', 'length', 'loop'],
+  children: { length: { flow: true } },
+};
 
 // songs/<song>/tempo.yaml — tempo and meter maps.
 export const tempoEventSchema = z.strictObject({
@@ -90,16 +112,19 @@ export const tempoFileOrder: KeyOrder = {
 // songs/<song>/arrangement.yaml — named sections on the timeline.
 export const sectionSchema = z.strictObject({
   name: slug,
-  at: ticks,
+  at: timePosition, // ticks, or [bar, beat?, tick?]
 });
 
 export const arrangementSchema = z.strictObject({
   sections: z.array(sectionSchema),
 });
-export type Arrangement = z.infer<typeof arrangementSchema>;
+type SectionFile = z.infer<typeof sectionSchema>;
+export type Section = Omit<SectionFile, 'at'> & { at: number };
+type ArrangementFile = z.infer<typeof arrangementSchema>;
+export type Arrangement = Omit<ArrangementFile, 'sections'> & { sections: Section[] };
 export const arrangementOrder: KeyOrder = {
   keys: ['sections'],
-  children: { sections: { items: { keys: ['name', 'at'] } } },
+  children: { sections: { items: { keys: ['name', 'at'], children: { at: { flow: true } } } } },
 };
 
 // songs/<song>/assets.yaml — binds a readable asset name to its file and
@@ -337,11 +362,12 @@ export const mixFileOrder: KeyOrder = {
 // successors (summed like any overlapping clips). `fade` guards each seam.
 export const clipLoopSchema = z.strictObject({
   enabled: z.boolean().default(true), // switch a loop off without deleting it
-  every: z.number().int().positive().optional(), // anchor units
+  every: timeSpan.optional(), // anchor units, or a musical span on musical clips
   mode: z.enum(['truncate', 'overlay']).default('truncate'),
   fade: samples.default(480), // ≈10 ms at 48 k; the naive loop must not click
 });
-export type ClipLoop = z.infer<typeof clipLoopSchema>;
+type ClipLoopFile = z.infer<typeof clipLoopSchema>;
+export type ClipLoop = Omit<ClipLoopFile, 'every'> & { every?: number | undefined };
 
 export const clipSchema = z
   .strictObject({
@@ -349,8 +375,8 @@ export const clipSchema = z
     asset: slug.optional(), // an asset name declared in the song's assets.yaml
     target: slug.optional(), // a target name declared in the song's targets.yaml
     anchor: z.enum(['musical', 'absolute']).default('musical'),
-    position: z.number().int().min(0), // ticks when musical, samples when absolute
-    duration: z.number().int().positive(), // same units as position
+    position: timePosition, // ticks when musical, samples when absolute
+    duration: timeSpan, // same units as position
     loop: clipLoopSchema.optional(),
     source_offset: samples.default(0),
     slip: z.number().int().default(0),
@@ -361,7 +387,12 @@ export const clipSchema = z
   .refine((c) => (c.asset === undefined) !== (c.target === undefined), {
     message: 'a clip sources exactly one of asset or target',
   });
-export type Clip = z.infer<typeof clipSchema>;
+type ClipFile = z.infer<typeof clipSchema>;
+export type Clip = Omit<ClipFile, 'position' | 'duration' | 'loop'> & {
+  position: number;
+  duration: number;
+  loop?: ClipLoop | undefined;
+};
 export const clipOrder: KeyOrder = {
   keys: [
     'id',
@@ -377,7 +408,11 @@ export const clipOrder: KeyOrder = {
     'fade_in',
     'fade_out',
   ],
-  children: { loop: { keys: ['enabled', 'every', 'mode', 'fade'] } },
+  children: {
+    position: { flow: true },
+    duration: { flow: true },
+    loop: { keys: ['enabled', 'every', 'mode', 'fade'], children: { every: { flow: true } } },
+  },
 };
 
 // songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
@@ -394,7 +429,8 @@ export const trackSchema = z.strictObject({
   inserts: z.array(insertSchema).default([]),
   clips: z.array(clipSchema).default([]),
 });
-export type Track = z.infer<typeof trackSchema>;
+type TrackFile = z.infer<typeof trackSchema>;
+export type Track = Omit<TrackFile, 'clips'> & { clips: Clip[] };
 export const trackOrder: KeyOrder = {
   keys: ['name', 'type', 'gain_db', 'pan', 'inserts', 'clips'],
   children: { inserts: { items: insertOrder }, clips: { items: clipOrder } },

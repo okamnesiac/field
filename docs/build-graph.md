@@ -118,7 +118,9 @@ outside the hash.
   falls out of content addressing. `tracks:` omitted means every audio
   track with clips; a mix with nothing to mix is legal and simply absent
   from the graph until content exists. A song may declare `length:`
-  (ticks, `song.yaml`): the mix then renders *exactly* that long — tails
+  (`song.yaml`, in ticks or a musical span like `[12]` — see
+  [project-model.md](project-model.md) "Timeline and tempo"): the mix
+  then renders *exactly* that long — tails
   truncate after the master chain, short content pads — so a song's
   extent is authored rather than emergent from whichever stem rings
   longest. Adding `loop: true` folds the overhang back onto the start

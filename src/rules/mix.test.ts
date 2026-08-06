@@ -9,16 +9,19 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import type { RuleRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
-import { mixTargetSchema, trackSchema } from '../schema/schemas.js';
+import { mixTargetSchema, trackSchema, type Track } from '../schema/schemas.js';
 import { balanceGains, mixRule, planMix } from './mix.js';
 
-const mkTrack = (name: string, over: Record<string, unknown> = {}) =>
+// Fixture times are scalar ticks, so the parse output already satisfies
+// the resolved Track type — the same promise the loader's cast makes
+// after resolution (musical-time.md §1.6).
+const mkTrack = (name: string, over: Record<string, unknown> = {}): Track =>
   trackSchema.parse({
     name,
     type: 'audio',
     clips: [{ id: 'c', asset: 'a', position: 0, duration: 960 }],
     ...over,
-  });
+  }) as Track;
 
 describe('planMix', () => {
   it('defaults to every mixable track, name-sorted, faders aligned', () => {
