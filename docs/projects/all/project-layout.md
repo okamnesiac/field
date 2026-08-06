@@ -64,11 +64,11 @@ or a scope boundary.
    `generation/` workflow convention (§3.2) and its
    `//songs/<s>/generation:` labels (§4.2); those addresses migrate to
    `targets:`. (§3.1 — outputs committed, never cached — is untouched;
-   decision 2 here restates it as the deliberate trigger policy.) Follow-on, not prerequisite: clips
-   can then reference `target:` directly and `choose` repoints which
-   committed variant the target resolves to — promotion stops being a
-   copy-into-the-ledger step and becomes choosing what the target
-   *means*.
+   decision 2 here restates it as the deliberate trigger policy.)
+   Follow-on, not prerequisite: clips can then reference `target:`
+   directly and `choose` repoints which committed variant the target
+   resolves to — promotion stops being a copy-into-the-ledger step and
+   becomes choosing what the target *means*.
 5. **`audio/` is all of a song's committed sound** — recorded, imported,
    or generated; the producer is irrelevant. `shared/samples/` vs
    `songs/<song>/audio/` is **enforced visibility, not content**: a clip
@@ -82,8 +82,9 @@ or a scope boundary.
    `songs/<song>/assets.yaml` — same schema, `file:` paths relative to
    the scope root, labels `//shared/assets:<name>` (superseding the
    `//shared/samples:<name>` spelling sketched in discussion; the
-   assets-kind spelling keeps the two scopes symmetric). Every committed file is pinned exactly
-   once; promotion moves the pin with the file. The ledger pins
+   assets-kind spelling keeps the two scopes symmetric). Every
+   committed file is pinned exactly once; promotion moves the pin with
+   the file. The ledger pins
    **committed audio only**: programs are *keyed, not pinned* —
    sc-render hashes program content into the action key (drift
    re-renders, which is editing working normally), whereas a pin is a
@@ -123,6 +124,69 @@ only project:
 
 - Cross-scope reference spelling on clips (`asset: //shared/assets:rain`
   vs a scoped field) — decided during migration chunk 1, forced by §2.3.
+  Answered by §4.3: one `source:` field whose spellings are
+  syntactically disjoint.
 - Variant filenames once the directory carries the identity
   (`audio/still-water-keys/1.wav` vs repeating the name) — decided at
-  migration.
+  migration: the directory carries the identity, so the filename is the
+  bare number (`audio/still-water-keys/1.wav`).
+
+## 4 Vocabulary (DECIDED, 2026-08-06)
+
+Decided during the migration itself, before any of the §1.3 file shapes
+shipped. This amends the *spellings* in §1–§3 without changing any
+decision's substance: where earlier sections say `targets/`, `rule:`,
+and `asset:`/`target:`/`program:`, the implementation reads `sounds/`,
+`type:`, and `source:`. Recorded as a new section so §1's numbering and
+every existing citation stay stable.
+
+1. **The authored-spec shelf is `sounds/`.** The per-file targets of
+   §1.3 become `songs/<song>/sounds/<name>.yaml`, labeled
+   `//songs/<song>/sounds:<name>`. What such a file defines *is* a
+   sound — a say line, a SuperCollider render, a generated part, a
+   sound wrapped in an effect (still a sound; the algebra closes,
+   exactly as the graph composes nodes). This finishes the
+   contract-naming §1.1 started — `tracks/`, `mixes/`, `sounds/`,
+   `audio/` — and the audio/sounds pair teaches the system's central
+   distinction: audio is committed bytes, a sound is a definition.
+   Rejected: keeping `targets/` (mechanism-named Bazel inheritance —
+   the project's own informal register always said "recipe"); `nodes/`
+   (the engine's word, and wrong twice over: everything in the graph is
+   a node, while the shelf holds only authored specs).
+2. **The discriminator is `type:`.** `rule:` was engine jargon in
+   musician-facing YAML, and false since §1.2 — a deliberate `generate`
+   entry is precisely *not* a rule, whereas `type: generate` is simply
+   a type that is not machine-runnable. `type:` is already the format's
+   discriminator convention (tracks' `type: audio|midi`, eq bands'
+   `type: lowshelf`). Rejected: `kind`, `class` — a third spelling
+   where the format has a house style. (Inserts' `effect:` becomes the
+   one remaining odd discriminator; renaming it is a separable
+   cleanup, not part of this decision.)
+3. **Inputs unify as `source:`.** `asset:`, `target:`, and `program:`
+   collapse into one field: the thing this sound is made from. Its
+   spellings are syntactically disjoint, so the loader never guesses —
+   a bare slug is a name in the song, a `//` label crosses scope
+   (`source: //shared/assets:rain`, answering §3's open question), and
+   a path (slashes, extension) is a program file, still wiring, still
+   keyed by content. A bare filename (`source: creek-kit.scd`, no
+   slash) resolves on the type's home shelf — `shared/generators/` for
+   `supercollider` — the same principle as a bare slug resolving in the
+   song's namespace: every bare spelling resolves in its natural home,
+   explicit spellings escape. Never a search path: each spelling names
+   exactly one location (the §7-flavored one-spelling rule), so a
+   song-local program, if one ever exists, writes the slashed path.
+   Clips adopt the same field: a clip's `source:` is an asset name, a
+   sound name, or a shared label. Forced consequence,
+   accepted deliberately: a song's asset and sound names now share one
+   namespace — `source: pad` must mean exactly one thing — enforced by
+   check, in the spirit of project-core.md §6 (names are identity).
+4. **`sc-render` becomes `supercollider`.** The type names the
+   instrument, not the engine verb (`say` was already right). The type
+   value participates in the action key, so this is a one-time
+   re-render of SuperCollider nodes — free inside the flag-day that
+   relabels them anyway.
+5. **"Target" retires as a term.** The addressable thing is a *label*;
+   `bloom build` builds labels, and things that never had spec files
+   (track stems, mixes) were never comfortably "targets" anyway. Mix
+   labels keep their `mix:` package; a mix file's `rule: mix` becomes
+   `type: mix`.
