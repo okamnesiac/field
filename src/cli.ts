@@ -137,7 +137,7 @@ ace
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: bloom play //songs/${opts.song}/generation:${name}-1\n` +
+        `audition: bloom play ${opts.song}/generation:${name}-1\n` +
           `promote:  bloom ace choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
@@ -215,7 +215,7 @@ program
 
 program
   .command('build <patterns...>')
-  .description('build targets (//songs/creek/targets:pad-96k, //songs/..., :all)')
+  .description('build targets (creek/targets:pad-96k, creek/..., or a bare song for its main mix)')
   .action(async (patterns: string[]) => {
     try {
       const outcomes = await buildTargets(requireRoot(), patterns);
@@ -373,7 +373,7 @@ program
 
 program
   .command('query <expr>')
-  .description("query the graph: a pattern, or deps(//songs/creek/targets:pad-96k)")
+  .description("query the graph: a pattern, or deps(creek/targets:pad-96k)")
   .action((expr: string) => {
     try {
       for (const label of queryDeps(requireRoot(), expr)) {
