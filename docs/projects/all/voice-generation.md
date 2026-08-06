@@ -46,6 +46,15 @@ trades its spoken `say` line for a generated voice worth listening to.
    and `bloom ace choose`-style promotion work unchanged. Rejected: a
    parallel recipe kind — two files that differ only in which model
    family wrote them would split the variant tooling for no reason.
+   The subtractions are the real schema change (#29 review): `prompt`
+   loosens to optional with a refine requiring **exactly one of
+   `prompt` or `text`** — the clip asset-vs-target precedent, so no
+   recipe is a chimera of both kinds or neither (a refine is fine here:
+   the recipe schema is a single object, not a discriminated union);
+   `duration_seconds` loosens to optional and is omitted for voice — a
+   line's length follows from its text, and the committed variant WAV is
+   its own record; `bpm`/`bars`/`lyrics` stay music-only, `voice_ref`
+   voice-only, both enforced by the same refine's kind split.
 
 ## 2 Definition of done
 
@@ -68,3 +77,6 @@ on the M3 Max in seconds-not-minutes; recipe hashes verified by
   takes — deferred to chunk 2, does not block the worker.)
 - CLI naming: `bloom voice generate` vs folding into a general
   `bloom generate` once two generators exist — decide at the CLI seam.
+  Schema reuse sharpens this (#29 review): `bloom ace choose` promotes
+  voice recipes on day one, making the `ace` prefix a misnomer-in-waiting
+  — the same seam decision should cover `choose`, not just `generate`.
