@@ -357,6 +357,11 @@ program
       // --from region loop just repoints what the next pass loads.
       let watchDone = Promise.resolve();
       let fresh: string | undefined;
+      // One line per swap: the queued reload is remembered silently and
+      // printed only when the takeover actually sounds — announcing and
+      // confirming on the same line. Latest-wins queueing means the
+      // remembered hash is the one that swaps.
+      let queued: { label: string; sha256: string } | undefined;
       if (opts.watch === true) {
         const item = items[0]!;
         const native = opts.from === undefined;
@@ -389,7 +394,9 @@ program
               if (!moved?.outputPath) return;
               if (reloadClient) {
                 void reloadClient.reload(moved.outputPath).then(
-                  () => say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
+                  () => {
+                    queued = { label: moved.label, sha256: moved.sha256 };
+                  },
                   // A ctrl-c racing an in-flight reload closes the socket
                   // under it; that is the session ending, not a failure.
                   (err: Error) => {
@@ -420,7 +427,14 @@ program
               }
             },
             onDevice: (name) => say(`→ output moved to ${name}`),
-            onReloaded: () => say('↻ swapped at the wrap'),
+            onReloaded: () => {
+              say(
+                queued
+                  ? `↻ ${queued.label} ${queued.sha256.slice(0, 12)} swapped at the wrap`
+                  : '↻ swapped at the wrap', // a reload queued from another shell
+              );
+              queued = undefined;
+            },
             interrupted: () => interrupted,
           },
         );

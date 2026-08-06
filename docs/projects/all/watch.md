@@ -71,8 +71,10 @@ agent story: an agent edits YAML while a human just keeps listening.
 - **Loop body:** on a settled burst — `loadProject`; if diagnostics,
   print them and wait. Else `build` the playing label through the
   normal engine; if the outcome hash differs from what the daemon is
-  looping, send `reload`, print one line
-  (`↻ mix:main <shortHash> at next wrap`).
+  looping, send `reload` and print one line per swap, when the
+  takeover actually sounds (`↻ mix:main <shortHash> swapped at the
+  wrap` — announced and confirmed on the same line; queueing itself
+  is silent).
 - **Coalescing:** a change arriving mid-build marks the build stale;
   its artifact still lands in the CAS (warm for later), but its swap is
   skipped and the loop body re-runs. Only ever one build in flight.
