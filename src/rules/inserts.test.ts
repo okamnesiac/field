@@ -111,14 +111,13 @@ describe('track inserts', () => {
 describe('the master chain', () => {
   it('is applied after the master gain, so the limiter guards the true output', async () => {
     writeFileSync(
-      join(root, 'songs/creek/mix.yaml'),
+      join(root, 'songs/creek/mixes/main.yaml'),
       [
-        'mixes:',
-        '  - name: main',
-        '    gain_db: 24 # drive the sum well past full scale',
-        '    master:',
-        '      - effect: limit',
-        '        ceiling_db: -3',
+        'name: main',
+        'gain_db: 24 # drive the sum well past full scale',
+        'master:',
+        '  - effect: limit',
+        '    ceiling_db: -3',
         '',
       ].join('\n'),
     );
@@ -139,10 +138,10 @@ describe('the master chain', () => {
     await buildTargets(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['drums', 'main']);
 
-    const path = join(root, 'songs/creek/mix.yaml');
+    const path = join(root, 'songs/creek/mixes/main.yaml');
     writeFileSync(
       path,
-      readFileSync(path, 'utf8').replace('master: []', 'master:\n      - effect: limit'),
+      readFileSync(path, 'utf8').replace('master: []', 'master:\n  - effect: limit'),
     );
     await buildTargets(root, ['//songs/creek/mix:main'], runner);
     expect(runs).toEqual(['drums', 'main', 'main']);

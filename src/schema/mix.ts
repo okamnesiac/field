@@ -3,10 +3,12 @@ import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, slug } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 
-// songs/<song>/mix.yaml — declared mixes, addressed as
-// //songs/<song>/mix:<name> (mix-assembly.md §3). A mix sums track stems
-// with each track's gain_db/pan (constant-power balance) and a master
-// gain. `tracks` omitted means every audio track with clips.
+// songs/<song>/mixes/<name>.yaml — one declared mix per file, name
+// matching the filename (project-layout.md §1.3), addressed as
+// //songs/<song>/mix:<name> (mix-assembly.md §3 — the label package
+// predates the directory and is unchanged). A mix sums track stems with
+// each track's gain_db/pan (constant-power balance) and a master gain.
+// `tracks` omitted means every audio track with clips.
 export const mixTargetSchema = z.strictObject({
   name: labelName,
   rule: z.literal('mix').default('mix'),
@@ -18,18 +20,7 @@ export const mixTargetSchema = z.strictObject({
 });
 export type MixTarget = z.infer<typeof mixTargetSchema>;
 
-export const mixFileSchema = z.strictObject({
-  mixes: z.array(mixTargetSchema).default([]),
-});
-export type MixFile = z.infer<typeof mixFileSchema>;
-export const mixFileOrder: KeyOrder = {
-  keys: ['mixes'],
-  children: {
-    mixes: {
-      items: {
-        keys: ['name', 'rule', 'tracks', 'gain_db', 'master'],
-        children: { master: { items: insertOrder } },
-      },
-    },
-  },
+export const mixOrder: KeyOrder = {
+  keys: ['name', 'rule', 'tracks', 'gain_db', 'master'],
+  children: { master: { items: insertOrder } },
 };

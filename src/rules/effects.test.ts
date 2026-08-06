@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -15,16 +15,24 @@ import { loadProject } from '../model/project.js';
 
 let root: string;
 
-const targetsYaml = (lines: string[]) => ['targets:', ...lines, ''].join('\n');
+// One file per target (project-layout.md §1.3).
+const writeTargets = (targets: Record<string, string[]>) => {
+  mkdirSync(join(root, 'songs/creek/targets'), { recursive: true });
+  for (const [name, lines] of Object.entries(targets)) {
+    writeFileSync(
+      join(root, `songs/creek/targets/${name}.yaml`),
+      [`name: ${name}`, ...lines, ''].join('\n'),
+    );
+  }
+};
 
-const eqTarget = (name: string, source: string, gain: number, extra: string[] = []) => [
-  `  - name: ${name}`,
-  '    rule: eq',
-  `    ${source}`,
-  '    bands:',
-  '      - type: bell',
-  '        frequency: 1000',
-  `        gain_db: ${gain}`,
+const eqLines = (source: string, gain: number, extra: string[] = []) => [
+  'rule: eq',
+  source,
+  'bands:',
+  '  - type: bell',
+  '    frequency: 1000',
+  `    gain_db: ${gain}`,
   ...extra,
 ];
 
@@ -54,16 +62,10 @@ function rmsOf(path: string): number {
 
 describe('effect chains', () => {
   it('builds asset → eq → reverb with real DSP, cached per link', async () => {
-    writeFileSync(
-      join(root, 'songs/creek/targets.yaml'),
-      targetsYaml([
-        ...eqTarget('tone-eq', 'asset: tone', -6),
-        '  - name: tone-verb',
-        '    rule: reverb',
-        '    target: tone-eq',
-        '    decay: 0.5',
-      ]),
-    );
+    writeTargets({
+      'tone-eq': eqLines('asset: tone', -6),
+      'tone-verb': ['rule: reverb', 'target: tone-eq', 'decay: 0.5'],
+    });
 
     expect(queryDeps(root, 'deps(//songs/creek/targets:tone-verb)')).toEqual([
       '//songs/creek/assets:tone',
@@ -80,7 +82,7 @@ describe('effect chains', () => {
 
     // A parameter edit upstream cascades: eq and reverb rebuild, the
     // asset stays an asset.
-    const path = join(root, 'songs/creek/targets.yaml');
+    const path = join(root, 'songs/creek/targets/tone-eq.yaml');
     writeFileSync(path, readFileSync(path, 'utf8').replace('gain_db: -6', 'gain_db: -9'));
     const after = await buildTargets(root, ['//songs/creek/targets:tone-verb']);
     expect(after.filter((o) => !o.cached).map((o) => o.label)).toEqual([
@@ -90,13 +92,10 @@ describe('effect chains', () => {
   });
 
   it('eq normalize holds level while shaping tone (Fyra semantics)', async () => {
-    writeFileSync(
-      join(root, 'songs/creek/targets.yaml'),
-      targetsYaml([
-        ...eqTarget('eq-norm', 'asset: tone', 6, ['    normalize: true']),
-        ...eqTarget('eq-raw', 'asset: tone', 6, ['    normalize: false']),
-      ]),
-    );
+    writeTargets({
+      'eq-norm': eqLines('asset: tone', 6, ['normalize: true']),
+      'eq-raw': eqLines('asset: tone', 6, ['normalize: false']),
+    });
     const outcomes = await buildTargets(root, ['//songs/creek/targets:all']);
     const norm = rmsOf(outcomes.find((o) => o.label.endsWith(':eq-norm'))!.outputPath!);
     const raw = rmsOf(outcomes.find((o) => o.label.endsWith(':eq-raw'))!.outputPath!);
@@ -107,16 +106,10 @@ describe('effect chains', () => {
   });
 
   it('limits a hot render to the ceiling', async () => {
-    writeFileSync(
-      join(root, 'songs/creek/targets.yaml'),
-      targetsYaml([
-        ...eqTarget('tone-hot', 'asset: tone', 24, ['    normalize: false']),
-        '  - name: tone-safe',
-        '    rule: limit',
-        '    target: tone-hot',
-        '    ceiling_db: -3',
-      ]),
-    );
+    writeTargets({
+      'tone-hot': eqLines('asset: tone', 24, ['normalize: false']),
+      'tone-safe': ['rule: limit', 'target: tone-hot', 'ceiling_db: -3'],
+    });
     const outcomes = await buildTargets(root, ['//songs/creek/targets:tone-safe']);
     const safe = outcomes.find((o) => o.label.endsWith(':tone-safe'))!;
     const [channel] = readWav(safe.outputPath!).channels;
@@ -125,41 +118,22 @@ describe('effect chains', () => {
   });
 
   it('normalize accepts a target, closing the rate-fix loop', async () => {
-    writeFileSync(
-      join(root, 'songs/creek/targets.yaml'),
-      targetsYaml([
-        ...eqTarget('tone-eq', 'asset: tone', -3),
-        '  - name: tone-eq-441',
-        '    rule: normalize',
-        '    target: tone-eq',
-        '    sample_rate: 44100',
-        '    bit_depth: 16',
-      ]),
-    );
+    writeTargets({
+      'tone-eq': eqLines('asset: tone', -3),
+      'tone-eq-441': ['rule: normalize', 'target: tone-eq', 'sample_rate: 44100', 'bit_depth: 16'],
+    });
     const outcomes = await buildTargets(root, ['//songs/creek/targets:tone-eq-441']);
     const converted = outcomes.find((o) => o.label.endsWith(':tone-eq-441'))!;
     expect(readWav(converted.outputPath!).sampleRate).toBe(44100);
   });
 
   it('diagnoses cycles, unknown references, and ambiguous sources', () => {
-    writeFileSync(
-      join(root, 'songs/creek/targets.yaml'),
-      targetsYaml([
-        '  - name: a',
-        '    rule: reverb',
-        '    target: b',
-        '  - name: b',
-        '    rule: reverb',
-        '    target: a',
-        '  - name: c',
-        '    rule: reverb',
-        '    target: ghost',
-        '  - name: d',
-        '    rule: reverb',
-        '    asset: tone',
-        '    target: a',
-      ]),
-    );
+    writeTargets({
+      a: ['rule: reverb', 'target: b'],
+      b: ['rule: reverb', 'target: a'],
+      c: ['rule: reverb', 'target: ghost'],
+      d: ['rule: reverb', 'asset: tone', 'target: a'],
+    });
     const messages = loadProject(root).diagnostics.map((d) => d.message);
     expect(messages).toContain('target dependency cycle: a → b → a');
     expect(messages).toContain('target "c" references unknown target "ghost"');

@@ -29,6 +29,19 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 // addressable thing may be named `all`.
 export const RESERVED_TARGET_NAME = 'all';
 
+// The shared ledger's package (project-layout.md §1.6): shared/assets.yaml
+// pins reusable committed audio, labeled //shared/assets:<name>.
+export const SHARED_ASSETS_PKG = 'shared/assets';
+
+// The one cross-scope reference a clip may make (project-layout.md §1.5):
+// a bare name resolves in the song's own ledger, the full
+// //shared/assets:<name> label crosses into the shared scope. Returns the
+// shared asset's name, or undefined for a bare (song-scoped) ref.
+export function sharedAssetName(ref: string): string | undefined {
+  const prefix = `//${SHARED_ASSETS_PKG}:`;
+  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
+}
+
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
 }

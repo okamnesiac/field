@@ -1,4 +1,4 @@
-import type { Target } from '../schema/index.js';
+import type { BuildableTarget } from '../schema/index.js';
 import type { MixSpec } from './mix.js';
 import type { TrackRenderSpec } from './track-render.js';
 
@@ -8,14 +8,17 @@ import type { TrackRenderSpec } from './track-render.js';
 // post-run integrity. SuperCollider is not special; it is one programmable
 // synth behind this interface, and the mixer and ACE arrive the same way.
 //
-// A rule's spec is either a declared target (targets.yaml) or a spec
-// synthesized from the project model (track-render, derived from track
-// files). Each impl is typed against its own spec — RuleImpl<NormalizeTarget>
-// and so on — so the per-method "wrong rule" narrowing the ungeneric
-// interface forced is now proven by the compiler (the #7 review's deferred
-// polish; the third rule was the agreed trigger).
+// A rule's spec is either a declared target (targets/<name>.yaml) or a
+// spec synthesized from the project model (track-render, derived from
+// track files). Each impl is typed against its own spec —
+// RuleImpl<NormalizeTarget> and so on — so the per-method "wrong rule"
+// narrowing the ungeneric interface forced is now proven by the compiler
+// (the #7 review's deferred polish; the third rule was the agreed
+// trigger). Deliberate `generate` targets are not rule specs at all: they
+// have no impl because nothing may re-run them mechanically
+// (project-layout.md §1.2), which BuildableTarget encodes.
 
-export type RuleSpec = Target | TrackRenderSpec | MixSpec;
+export type RuleSpec = BuildableTarget | TrackRenderSpec | MixSpec;
 
 export interface RunContext {
   root: string; // absolute project root

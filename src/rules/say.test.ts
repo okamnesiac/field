@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -82,15 +82,15 @@ describe('say targets in the build graph', () => {
     root = mkdtempSync(join(tmpdir(), 'bloom-say-graph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'opener');
+    mkdirSync(join(root, 'songs/opener/targets'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/targets.yaml'),
+      join(root, 'songs/opener/targets/scratch-vocal.yaml'),
       [
-        'targets:',
-        '  - name: scratch-vocal',
-        '    rule: say',
-        '    text: down by the creek',
-        '    voice: Samantha',
-        '    rate: 180',
+        'name: scratch-vocal',
+        'rule: say',
+        'text: down by the creek',
+        'voice: Samantha',
+        'rate: 180',
         '',
       ].join('\n'),
     );
@@ -112,14 +112,13 @@ describe('say targets in the build graph', () => {
     expect(again[0]!.cached).toBe(true);
 
     writeFileSync(
-      join(root, 'songs/opener/targets.yaml'),
+      join(root, 'songs/opener/targets/scratch-vocal.yaml'),
       [
-        'targets:',
-        '  - name: scratch-vocal',
-        '    rule: say',
-        '    text: down by the wide creek', // the text is the action key
-        '    voice: Samantha',
-        '    rate: 180',
+        'name: scratch-vocal',
+        'rule: say',
+        'text: down by the wide creek', // the text is the action key
+        'voice: Samantha',
+        'rate: 180',
         '',
       ].join('\n'),
     );

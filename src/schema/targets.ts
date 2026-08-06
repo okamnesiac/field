@@ -3,14 +3,15 @@ import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, sampleRate, slug } from './common.js';
 import { eqParams, limitParams, reverbParams } from './effects.js';
 
-// songs/<song>/targets.yaml — declared build targets (project-core.md §3.4:
-// the project model is the build file; these entries become
-// //songs/<song>/targets:<name>). Rule-specific fields are flat and
-// strict, discriminated by `rule`.
+// songs/<song>/targets/<name>.yaml — one declared target per file, name
+// matching the filename like tracks and takes (project-core.md §3.4 as
+// amended by project-layout.md §1.3: the directory is the package, so the
+// label //songs/<song>/targets:<name> reads as directory + filename).
+// Rule-specific fields are flat and strict, discriminated by `rule`.
 // Single-input rules source exactly one of `asset` (assets.yaml) or
-// `target` (targets.yaml, same song) — the clip pattern. Enforced by each
-// rule's validate() rather than a schema refine, because refined objects
-// cannot join a discriminated union.
+// `target` (another file in targets/, same song) — the clip pattern.
+// Enforced by each rule's validate() rather than a schema refine, because
+// refined objects cannot join a discriminated union.
 const singleInput = {
   asset: slug.optional(),
   target: slug.optional(),
@@ -65,9 +66,9 @@ export const scRenderTargetSchema = z.strictObject({
 export type ScRenderTarget = z.infer<typeof scRenderTargetSchema>;
 
 // say: macOS text-to-speech as a build rule — the deterministic, keyless
-// side of the voice boundary (voice *generation* is an ACE-style workflow
-// with committed outputs; this is a recipe like sc-render). text/voice/
-// rate are the whole action key; output is cached, never committed.
+// side of the voice boundary (voice *generation* is a deliberate `generate`
+// target with committed outputs; this is a recipe like sc-render). text/
+// voice/rate are the whole action key; output is cached, never committed.
 // `voice` is required because the system default voice is a per-user
 // setting — a recipe that renders differently on two Macs under the same
 // key would lie. The one recorded exception: `voice: Siri` selects the
@@ -85,53 +86,91 @@ export const sayTargetSchema = z.strictObject({
 });
 export type SayTarget = z.infer<typeof sayTargetSchema>;
 
+// generate: a deliberate-trigger generator run (project-layout.md §1.2,
+// §1.4) — a target, but not a build rule. Model inference does not
+// reproduce across GPU/framework versions, so the outputs are committed
+// (variants under audio/<name>/, content-addressed like assets) and the
+// target is provenance plus promotion state: `bloom generate` writes the
+// file, `bloom choose` records `chosen` and pins the winning variant in
+// assets.yaml. The graph gives each variant an audition node
+// (//songs/<song>/targets:<name>-<n>) and never re-runs the model —
+// automatic re-run would replace chosen audio and burn model-minutes
+// uninvited. The `model` field says which generator ran.
+export const generateVariantSchema = z.strictObject({
+  file: z.string().min(1), // song-relative, under audio/<name>/
+  seed: z.number().int().min(0),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256'),
+});
+export type GenerateVariant = z.infer<typeof generateVariantSchema>;
+
+export const generateTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('generate'),
+  model: z.string().min(1),
+  prompt: z.string().min(1),
+  lyrics: z.string().optional(),
+  bpm: z.number().int().min(30).max(300).optional(),
+  duration_seconds: z.number().positive(),
+  bars: z.number().int().positive().optional(),
+  seed: z.number().int().min(0),
+  chosen: z.number().int().min(1).optional(), // 1-based variant number
+  variants: z.array(generateVariantSchema).min(1),
+  generated_at: z.iso.datetime(),
+});
+export type GenerateTarget = z.infer<typeof generateTargetSchema>;
+
 export const targetSchema = z.discriminatedUnion('rule', [
   normalizeTargetSchema,
   scRenderTargetSchema,
   sayTargetSchema,
+  generateTargetSchema,
   eqTargetSchema,
   limitTargetSchema,
   reverbTargetSchema,
 ]);
 export type Target = z.infer<typeof targetSchema>;
 
-export const targetsFileSchema = z.strictObject({
-  targets: z.array(targetSchema).default([]),
-});
-export type TargetsFile = z.infer<typeof targetsFileSchema>;
-export const targetsFileOrder: KeyOrder = {
-  keys: ['targets'],
+// The targets the build system may execute. `generate` is deliberately
+// excluded: it has no RuleImpl — nothing may re-run it mechanically — so
+// code that dispatches to a rule narrows to this type first.
+export type BuildableTarget = Exclude<Target, GenerateTarget>;
+
+export const targetOrder: KeyOrder = {
+  keys: [
+    'name',
+    'rule',
+    'asset',
+    'target',
+    'program',
+    'model',
+    'prompt',
+    'lyrics',
+    'bpm',
+    'seed',
+    'duration',
+    'duration_seconds',
+    'bars',
+    'channels',
+    'text',
+    'voice',
+    'rate',
+    'sample_rate',
+    'bit_depth',
+    'bands',
+    'normalize',
+    'ceiling_db',
+    'lookahead_ms',
+    'release_ms',
+    'mix',
+    'decay',
+    'predelay_ms',
+    'damping',
+    'chosen',
+    'variants',
+    'generated_at',
+  ],
   children: {
-    targets: {
-      items: {
-        keys: [
-          'name',
-          'rule',
-          'asset',
-          'target',
-          'program',
-          'seed',
-          'duration',
-          'channels',
-          'text',
-          'voice',
-          'rate',
-          'sample_rate',
-          'bit_depth',
-          'bands',
-          'normalize',
-          'ceiling_db',
-          'lookahead_ms',
-          'release_ms',
-          'mix',
-          'decay',
-          'predelay_ms',
-          'damping',
-        ],
-        children: {
-          bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } },
-        },
-      },
-    },
+    bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } },
+    variants: { items: { keys: ['file', 'seed', 'sha256'] } },
   },
 };

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { join, posix, resolve, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { Document, isSeq, parseDocument } from 'yaml';
 import { AcedClient } from '../aced/client.js';
@@ -12,21 +12,24 @@ import { loadProject, type LoadedProject } from '../model/project.js';
 import {
   assetsFileOrder,
   assetsFileSchema,
-  generationRecipeOrder,
-  generationRecipeSchema,
+  generateTargetSchema,
+  targetOrder,
+  targetSchema,
 } from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 const execFileAsync = promisify(execFile);
 
-// bloom ace (ace-generation.md §3): generation lives OUTSIDE the build
-// graph — outputs are committed, not cached. `generate` runs the model
-// through bloom-aced and lands variants plus a provenance recipe under
-// songs/<song>/generation/; choosing and promoting a variant to an asset
-// is chunk 2.
+// bloom generate / bloom choose (project-layout.md §1.4, §1.7): the
+// deliberate-trigger verbs over the generator category. Generation lives
+// OUTSIDE the build graph — outputs are committed, not cached. `generate`
+// runs the model (the recipe's `model:` field says which generator) and
+// lands variants in songs/<song>/audio/<name>/ with the recipe as a
+// deliberate target in targets/<name>.yaml; `choose` promotes a variant
+// to an asset clips can reference.
 
-export interface AceGenerateOptions {
+export interface GenerateOptions {
   song: string;
   prompt: string;
   seed: number;
@@ -38,7 +41,7 @@ export interface AceGenerateOptions {
   onProgress?: ((stage: string) => void) | undefined;
 }
 
-export interface AceGenerateResult {
+export interface GenerateResult {
   recipePath: string; // project-relative
   files: string[]; // project-relative variant WAVs, seed order
   seeds: number[];
@@ -65,12 +68,15 @@ function songTime(project: LoadedProject, songName: string): SongTime {
   };
 }
 
-export async function aceGenerate(
+export async function generateVariants(
   root: string,
   name: string,
-  options: AceGenerateOptions,
-): Promise<AceGenerateResult> {
-  if (!isSlug(name)) throw new Error(`generation name "${name}" must be a lowercase-slug`);
+  options: GenerateOptions,
+): Promise<GenerateResult> {
+  if (!isSlug(name)) throw new Error(`target name "${name}" must be a lowercase-slug`);
+  if (name === RESERVED_TARGET_NAME) {
+    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar`);
+  }
   if ((options.bars === undefined) === (options.durationSeconds === undefined)) {
     throw new Error('give exactly one of --bars or --duration');
   }
@@ -84,11 +90,11 @@ export async function aceGenerate(
   // The model wants a whole-number hint; ramped songs get their opening tempo.
   const bpm = options.bpm ?? Math.round(time.initialBpm);
 
-  const generationDir = join(root, 'songs', options.song, 'generation');
-  const outputDir = join(generationDir, name);
-  const recipeAbsolute = join(generationDir, `${name}.yaml`);
+  const songDir = join(root, 'songs', options.song);
+  const outputDir = join(songDir, 'audio', name);
+  const recipeAbsolute = join(songDir, 'targets', `${name}.yaml`);
   if (existsSync(recipeAbsolute)) {
-    throw new Error(`generation "${name}" already exists in ${options.song} (pick a new name)`);
+    throw new Error(`target "${name}" already exists in ${options.song} (pick a new name)`);
   }
   mkdirSync(outputDir, { recursive: true });
 
@@ -108,22 +114,24 @@ export async function aceGenerate(
     });
 
     // The worker writes uuid names; variants get deterministic, seed-order
-    // names the recipe can reference readably.
+    // names. The directory carries the identity, so the filename is just
+    // the number (project-layout.md §3, decided at migration).
     const files: string[] = [];
     const hashes: string[] = [];
     for (let i = 0; i < response.paths.length; i++) {
-      const target = join(outputDir, `${name}-${i + 1}.wav`);
+      const target = join(outputDir, `${i + 1}.wav`);
       renameSync(response.paths[i]!, target);
-      files.push(join('songs', options.song, 'generation', name, `${name}-${i + 1}.wav`));
+      files.push(join('songs', options.song, 'audio', name, `${i + 1}.wav`));
       hashes.push(await sha256File(target));
     }
 
-    // Provenance (§1 of the plan): everything needed to audit or
-    // deliberately regenerate. Parsed through the schema before writing —
-    // this command must never emit a recipe `bloom check` would reject —
-    // and canonicalized so `bloom fmt` is a no-op on fresh recipes.
-    const recipe = generationRecipeSchema.parse({
+    // Provenance: everything needed to audit or deliberately regenerate.
+    // Parsed through the schema before writing — this command must never
+    // emit a target `bloom check` would reject — and canonicalized so
+    // `bloom fmt` is a no-op on fresh recipes.
+    const recipe = generateTargetSchema.parse({
       name,
+      rule: 'generate',
       model: response.model,
       prompt: options.prompt,
       ...(options.lyrics !== undefined ? { lyrics: options.lyrics } : {}),
@@ -131,19 +139,20 @@ export async function aceGenerate(
       duration_seconds: Number(durationSeconds.toFixed(3)),
       ...(options.bars !== undefined ? { bars: options.bars } : {}),
       seed: options.seed,
-      variants: files.map((file, i) => ({
-        file: `${name}/${name}-${i + 1}.wav`,
+      variants: files.map((_, i) => ({
+        file: `audio/${name}/${i + 1}.wav`,
         seed: response.seeds[i]!, // schema guarantees paths/seeds align
         sha256: hashes[i]!,
       })),
       generated_at: new Date().toISOString(),
     });
+    mkdirSync(join(songDir, 'targets'), { recursive: true });
     const doc = new Document(recipe);
-    canonicalizeDocument(doc, generationRecipeOrder);
+    canonicalizeDocument(doc, targetOrder);
     writeFileSync(recipeAbsolute, stringifyDocument(doc));
 
     return {
-      recipePath: join('songs', options.song, 'generation', `${name}.yaml`),
+      recipePath: join('songs', options.song, 'targets', `${name}.yaml`),
       files,
       seeds: response.seeds,
       model: response.model,
@@ -155,48 +164,53 @@ export async function aceGenerate(
   }
 }
 
-export interface AceChooseOptions {
+export interface ChooseOptions {
   song: string;
   variant: number; // 1-based, matching the file names and recipe order
   as?: string | undefined;
 }
 
-export interface AceChooseResult {
+export interface ChooseResult {
   assetName: string;
   file: string; // song-relative
   sha256: string;
   bytes: number;
-  replaced: boolean; // a previous choose for this generation was updated
+  replaced: boolean; // a previous choose for this target was updated
 }
 
-// Promotion (ace-generation.md §4.2, build-graph.md): a reference to a
+// Promotion (project-layout.md §1.4, build-graph.md): a reference to a
 // content-addressed artifact — cheap, and reversible. The variant's bytes
-// stay where they are under generation/; choosing declares them in
+// stay where they are under audio/<name>/; choosing declares them in
 // assets.yaml so clips can reference the name. Choosing again moves the
 // reference — it only ever replaces an entry a previous choose created.
-export async function aceChoose(
+export async function chooseVariant(
   root: string,
   name: string,
-  options: AceChooseOptions,
-): Promise<AceChooseResult> {
+  options: ChooseOptions,
+): Promise<ChooseResult> {
   // Both names build paths; both must be slugs before any join.
-  if (!isSlug(name)) throw new Error(`generation name "${name}" must be a lowercase-slug`);
+  if (!isSlug(name)) throw new Error(`target name "${name}" must be a lowercase-slug`);
   if (!isSlug(options.song)) throw new Error(`song "${options.song}" must be a lowercase-slug`);
   const songDir = join(root, 'songs', options.song);
   if (!existsSync(join(songDir, 'song.yaml'))) {
     throw new Error(`song "${options.song}" does not exist`);
   }
-  const recipePath = join(songDir, 'generation', `${name}.yaml`);
+  const recipePath = join(songDir, 'targets', `${name}.yaml`);
   if (!existsSync(recipePath)) {
-    throw new Error(`no generation "${name}" in ${options.song}`);
+    throw new Error(`no target "${name}" in ${options.song}`);
   }
   const recipeDoc = parseDocument(readFileSync(recipePath, 'utf8'));
   if (recipeDoc.errors.length > 0) {
     throw new Error(`invalid YAML in ${name}.yaml: ${recipeDoc.errors[0]!.message}`);
   }
-  const recipe = generationRecipeSchema.safeParse(recipeDoc.toJS());
+  const recipe = targetSchema.safeParse(recipeDoc.toJS());
   if (!recipe.success) {
-    throw new Error(`recipe ${name}.yaml is invalid; fix it before choosing (bloom check)`);
+    throw new Error(`target ${name}.yaml is invalid; fix it before choosing (bloom check)`);
+  }
+  if (recipe.data.rule !== 'generate') {
+    throw new Error(
+      `"${name}" is a ${recipe.data.rule} target — only deliberate generate targets have variants to choose`,
+    );
   }
 
   const variant = recipe.data.variants[options.variant - 1];
@@ -205,8 +219,8 @@ export async function aceChoose(
       `variant ${options.variant} does not exist (${recipe.data.variants.length} variants)`,
     );
   }
-  const file = posix.join('generation', variant.file);
-  const absolute = join(songDir, 'generation', variant.file);
+  const file = variant.file;
+  const absolute = join(songDir, variant.file);
   if (!existsSync(absolute)) throw new Error(`variant file not found: ${file}`);
   // Promotion asserts provenance, so the bytes must still be the bytes the
   // recipe recorded — drifted output gets diagnosed, never promoted.
@@ -250,14 +264,15 @@ export async function aceChoose(
     throw new Error(`variant ${options.variant} is already promoted as asset "${other.name}"`);
   }
   // A same-name entry may only be replaced if a previous choose for this
-  // generation created it — never an unrelated asset the name collides with.
-  const generationPrefix = resolve(songDir, 'generation', name) + sep;
+  // target created it — never an unrelated asset the name collides with.
+  // Validate pins variants inside audio/<name>/, so the prefix is sound.
+  const variantPrefix = resolve(songDir, 'audio', name) + sep;
   const index = existing.data.assets.findIndex((a) => a.name === assetName);
   const prior = index >= 0 ? existing.data.assets[index]! : undefined;
-  if (prior && !resolve(songDir, prior.file).startsWith(generationPrefix)) {
+  if (prior && !resolve(songDir, prior.file).startsWith(variantPrefix)) {
     throw new Error(
       `asset "${assetName}" already declared in "${options.song}" and is not a ` +
-        `promotion of this generation (use --as)`,
+        `promotion of this target (use --as)`,
     );
   }
 
@@ -280,7 +295,7 @@ export async function aceChoose(
   // repairs that. The reverse order could leave `chosen` pointing at a
   // promotion that never landed.
   recipeDoc.setIn(['chosen'], options.variant);
-  canonicalizeDocument(recipeDoc, generationRecipeOrder);
+  canonicalizeDocument(recipeDoc, targetOrder);
   writeFileSync(recipePath, stringifyDocument(recipeDoc));
 
   return { assetName, file, sha256, bytes, replaced: prior !== undefined };
@@ -289,7 +304,7 @@ export async function aceChoose(
 // Explicit, loud environment setup (ace-generation.md §3.4): uv sync for
 // the worker env. The multi-GB weights download happens on the first
 // generate, announced by its progress events.
-export async function aceSetup(onLine: (line: string) => void): Promise<void> {
+export async function setupWorker(onLine: (line: string) => void): Promise<void> {
   const { acedAvailable } = await import('../aced/client.js');
   const available = acedAvailable();
   if (!available.ok) throw new Error(available.reason ?? 'bloom-aced unavailable');
@@ -301,5 +316,5 @@ export async function aceSetup(onLine: (line: string) => void): Promise<void> {
     maxBuffer: 10 * 1024 * 1024,
   });
   for (const line of stderr.split('\n').slice(-5)) if (line.trim()) onLine(line);
-  onLine('environment ready — the first `bloom ace generate` downloads ~10 GB of model weights');
+  onLine('environment ready — the first `bloom generate` downloads ~10 GB of model weights');
 }

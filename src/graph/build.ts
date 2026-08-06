@@ -122,7 +122,7 @@ function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: num
 
 function assetFilePath(project: LoadedProject, node: GraphNode): string {
   if (node.kind !== 'asset') throw new Error('not an asset node');
-  return join(project.root, node.songDir, node.asset.file);
+  return join(project.root, node.scopeDir, node.asset.file);
 }
 
 // Materialized outputs land under .bloom/out mirroring the label path, so

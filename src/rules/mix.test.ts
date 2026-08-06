@@ -268,14 +268,14 @@ describe('mix targets in the build graph', () => {
 
   it('diagnoses bad mix declarations; an empty mix has no node', async () => {
     writeFileSync(
-      join(root, 'songs/creek/mix.yaml'),
-      ['mixes:', '  - name: main', '  - name: alt', '    tracks:', '      - kick', '      - ghost', ''].join('\n'),
+      join(root, 'songs/creek/mixes/alt.yaml'),
+      ['name: alt', 'tracks:', '  - kick', '  - ghost', ''].join('\n'),
     );
     const project = loadProject(root);
     expect(project.diagnostics.map((d) => d.message).join('\n')).toContain(
       'mix "alt" references unknown track "ghost"',
     );
-    writeFileSync(join(root, 'songs/creek/mix.yaml'), 'mixes:\n  - name: main\n');
+    rmSync(join(root, 'songs/creek/mixes/alt.yaml'));
 
     // A fresh song's default mix has nothing to mix yet: legal, no node.
     createSong(root, 'sprout');

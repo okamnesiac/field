@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
-import { labelName, samples, slug, timePosition, timeSpan } from './common.js';
+import { assetRef, labelName, samples, slug, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 
 // A clip is a window (position, duration, in anchor units) on content
@@ -30,8 +30,11 @@ export type ClipLoop = Omit<ClipLoopFile, 'every'> & { every?: number | undefine
 export const clipSchema = z
   .strictObject({
     id: slug,
-    asset: slug.optional(), // an asset name declared in the song's assets.yaml
-    target: slug.optional(), // a target name declared in the song's targets.yaml
+    // A name from the song's assets.yaml, or //shared/assets:<name> from
+    // the shared ledger — the one cross-scope spelling (project-layout.md
+    // §1.5).
+    asset: assetRef.optional(),
+    target: slug.optional(), // a target name declared in the song's targets/
     anchor: z.enum(['musical', 'absolute']).default('musical'),
     position: timePosition, // ticks when musical, samples when absolute
     duration: timeSpan, // same units as position

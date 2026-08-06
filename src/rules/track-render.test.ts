@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -510,15 +510,15 @@ describe('clips over rule outputs', () => {
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
     rmSync(src);
+    mkdirSync(join(root, 'songs/creek/targets'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/creek/targets.yaml'),
+      join(root, 'songs/creek/targets/kick-24.yaml'),
       [
-        'targets:',
-        '  - name: kick-24',
-        '    rule: normalize',
-        '    asset: kick',
-        '    sample_rate: 48000',
-        '    bit_depth: 24',
+        'name: kick-24',
+        'rule: normalize',
+        'asset: kick',
+        'sample_rate: 48000',
+        'bit_depth: 24',
         '',
       ].join('\n'),
     );
@@ -612,7 +612,7 @@ describe('clips over rule outputs', () => {
     expect(runs).toEqual(['kick-24', 'drums']);
 
     runs.length = 0;
-    const targetsPath = join(root, 'songs/creek/targets.yaml');
+    const targetsPath = join(root, 'songs/creek/targets/kick-24.yaml');
     writeFileSync(targetsPath, readFileSync(targetsPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
     await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem

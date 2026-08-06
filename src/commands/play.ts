@@ -46,11 +46,11 @@ export async function resolvePlayables(
   return nodes.map((node) => {
     const label = formatLabel(node.label);
     if (node.kind === 'asset') {
-      return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.asset.file) };
+      return { label, pkg: node.label.pkg, path: join(project.root, node.scopeDir, node.asset.file) };
     }
     if (node.kind === 'generation') {
       // Variants audition straight from the committed file, pre-promotion
-      // (ace-generation.md §4.2).
+      // (project-layout.md §1.4).
       return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.file) };
     }
     const outcome = outputs.get(label);

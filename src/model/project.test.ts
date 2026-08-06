@@ -286,15 +286,15 @@ describe('check', () => {
 
   it('flags loops over targets without loop.every', async () => {
     createSong(root, 'opener');
+    mkdirSync(join(root, 'songs/opener/targets'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/targets.yaml'),
+      join(root, 'songs/opener/targets/pad.yaml'),
       [
-        'targets:',
-        '  - name: pad',
-        '    rule: sc-render',
-        '    program: sc/pad.scd',
-        '    seed: 1',
-        '    duration: 2',
+        'name: pad',
+        'rule: sc-render',
+        'program: sc/pad.scd',
+        'seed: 1',
+        'duration: 2',
         '',
       ].join('\n'),
     );

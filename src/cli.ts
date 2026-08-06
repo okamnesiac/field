@@ -90,21 +90,23 @@ sc.command('render <program>')
     }
   });
 
-const ace = program.command('ace').description('ACE-Step generation (outputs are committed, not cached)');
-ace
+// The deliberate-trigger verbs over the generator category
+// (project-layout.md §1.7): the recipe's model field says which generator
+// ran, so the verbs carry no model prefix.
+program
   .command('setup')
-  .description('set up the bloom-aced Python environment (uv; explicit, never automatic)')
+  .description('set up generation worker environments (uv; explicit, never automatic)')
   .action(async () => {
     try {
-      const { aceSetup } = await import('./commands/ace.js');
-      await aceSetup((line) => process.stdout.write(`${line}\n`));
+      const { setupWorker } = await import('./commands/generate.js');
+      await setupWorker((line) => process.stdout.write(`${line}\n`));
     } catch (err) {
       fail(err);
     }
   });
-ace
+program
   .command('generate <name>')
-  .description('generate variants into songs/<song>/generation/<name>/ with a provenance recipe')
+  .description('run a deliberate generator: variants land in songs/<song>/audio/<name>/ with the recipe as a target')
   .requiredOption('--song <name>', 'song whose tempo map projects musical time')
   .requiredOption('--prompt <text>', 'what to generate')
   .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
@@ -118,8 +120,8 @@ ace
     variants: number; lyrics?: string; bpm?: number;
   }) => {
     try {
-      const { aceGenerate } = await import('./commands/ace.js');
-      const result = await aceGenerate(requireRoot(), name, {
+      const { generateVariants } = await import('./commands/generate.js');
+      const result = await generateVariants(requireRoot(), name, {
         song: opts.song,
         prompt: opts.prompt,
         seed: opts.seed,
@@ -137,23 +139,23 @@ ace
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: bloom play ${opts.song}/generation:${name}-1\n` +
-          `promote:  bloom ace choose ${name} --song ${opts.song} --variant <n>\n`,
+        `audition: bloom play ${opts.song}/targets:${name}-1\n` +
+          `promote:  bloom choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
       fail(err);
     }
   });
-ace
+program
   .command('choose <name>')
-  .description('promote a generation variant to a committed asset clips can reference')
-  .requiredOption('--song <name>', 'song the generation belongs to')
+  .description('promote a generated variant to a committed asset clips can reference')
+  .requiredOption('--song <name>', 'song the target belongs to')
   .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
-  .option('--as <name>', 'asset name (default: the generation name)')
+  .option('--as <name>', 'asset name (default: the target name)')
   .action(async (name: string, opts: { song: string; variant: number; as?: string }) => {
     try {
-      const { aceChoose } = await import('./commands/ace.js');
-      const result = await aceChoose(requireRoot(), name, {
+      const { chooseVariant } = await import('./commands/generate.js');
+      const result = await chooseVariant(requireRoot(), name, {
         song: opts.song,
         variant: opts.variant,
         as: opts.as,
