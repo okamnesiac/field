@@ -18,6 +18,7 @@ export interface Playable {
   label: string;
   pkg: string; // the label's package, for deriving the song's tempo map
   path: string; // absolute path to a playable file
+  sha256: string; // content hash of what path holds — watch's baseline seed
 }
 
 // What `bloom play` plays: asset targets resolve to their files directly;
@@ -46,16 +47,26 @@ export async function resolvePlayables(
   return nodes.map((node) => {
     const label = formatLabel(node.label);
     if (node.kind === 'asset') {
-      return { label, pkg: node.label.pkg, path: join(project.root, node.scopeDir, node.asset.file) };
+      return {
+        label,
+        pkg: node.label.pkg,
+        path: join(project.root, node.scopeDir, node.asset.file),
+        sha256: node.asset.sha256,
+      };
     }
     if (node.kind === 'generation') {
       // Variants audition straight from the committed file, pre-promotion
       // (project-layout.md §1.4).
-      return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.file) };
+      return {
+        label,
+        pkg: node.label.pkg,
+        path: join(project.root, node.songDir, node.file),
+        sha256: node.sha256,
+      };
     }
     const outcome = outputs.get(label);
     if (!outcome?.outputPath) throw new Error(`no output for ${label}`);
-    return { label, pkg: node.label.pkg, path: outcome.outputPath };
+    return { label, pkg: node.label.pkg, path: outcome.outputPath, sha256: outcome.sha256 };
   });
 }
 

@@ -22,7 +22,12 @@ export interface ActionEntry {
 export interface BuildOutcome {
   label: string;
   cached: boolean; // action-cache hit, nothing executed
-  outputPath?: string; // materialized path for rule targets
+  // Where the output lives: the materialized .bloom/out path for rule
+  // targets, the committed file for assets and generation labels — every
+  // outcome names a playable path, so watch can hand any label's fresh
+  // artifact to the daemon (#35 review: a chosen-variant repoint is
+  // exactly a committed label whose path moved).
+  outputPath?: string;
   sha256: string;
 }
 
@@ -146,14 +151,24 @@ async function buildNode(
   if (node.kind === 'asset') {
     // Source targets: the declared hash is the identity; check verifies
     // content, the build system trusts the declaration.
-    return { label: formatLabel(node.label), cached: true, sha256: node.asset.sha256 };
+    return {
+      label: formatLabel(node.label),
+      cached: true,
+      sha256: node.asset.sha256,
+      outputPath: assetFilePath(project, node),
+    };
   }
   if (node.kind === 'generation') {
     // Deliberate sounds and their variants are committed sources like
     // assets — recorded hash as identity, nothing to execute. A chosen
     // sound's node is consumable by clips and rules like any committed
     // content (project-layout.md §1.4).
-    return { label: formatLabel(node.label), cached: true, sha256: node.sha256 };
+    return {
+      label: formatLabel(node.label),
+      cached: true,
+      sha256: node.sha256,
+      outputPath: join(project.root, node.songDir, node.file),
+    };
   }
 
   const impl = generatorFor(node.spec);

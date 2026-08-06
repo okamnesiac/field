@@ -88,6 +88,14 @@ describe('build', () => {
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
+  it('committed outcomes name their file path (#35 review)', async () => {
+    const { runner } = countingRunner();
+    const outcomes = await buildLabels(root, ['//songs/creek/assets:pad'], runner);
+    // Every outcome names a playable path — watch hands any label's fresh
+    // artifact to the daemon, including committed content.
+    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad.wav')).toBe(true);
+  });
+
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
     const { runner } = countingRunner();
     const first = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);

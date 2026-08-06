@@ -375,7 +375,10 @@ program
         watchDone = watchBuild(
           root,
           patterns,
-          { signal: watchAbort.signal },
+          // The baseline is what the daemon starts looping: an edit that
+          // lands between the play's own build and the watcher's first
+          // pass is reported and swapped, not silently absorbed.
+          { signal: watchAbort.signal, baseline: new Map([[item.label, item.sha256]]) },
           {
             onDiagnostics: (lines) => {
               for (const line of lines) say(`check: ${line}`);
@@ -387,7 +390,11 @@ program
               if (reloadClient) {
                 void reloadClient.reload(moved.outputPath).then(
                   () => say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
-                  (err: Error) => say(`reload failed: ${err.message}`),
+                  // A ctrl-c racing an in-flight reload closes the socket
+                  // under it; that is the session ending, not a failure.
+                  (err: Error) => {
+                    if (!watchAbort.signal.aborted) say(`reload failed: ${err.message}`);
+                  },
                 );
               } else {
                 fresh = moved.outputPath;

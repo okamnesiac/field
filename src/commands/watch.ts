@@ -32,6 +32,12 @@ export interface WatchOptions {
   debounceMs?: number; // write-burst coalescing, default 300
   signal?: AbortSignal; // ends the session; the returned promise resolves
   runner?: GeneratorRunner;
+  // Seed hash baseline (label → sha256). When provided, the first build
+  // compares against it instead of silently baselining — play --watch
+  // passes what the daemon started looping, so an edit landing between
+  // the play's own build and the watcher's first pass is reported and
+  // swapped, not absorbed (#35 review).
+  baseline?: ReadonlyMap<string, string>;
 }
 
 // Everything except the build's own output and git's: watching .bloom/
@@ -53,8 +59,12 @@ export async function watchBuild(
   hooks: WatchHooks = {},
 ): Promise<void> {
   const debounceMs = options.debounceMs ?? 300;
-  const lastGood = new Map<string, string>(); // label → sha256
-  let baselined = false;
+  const lastGood = new Map<string, string>(options.baseline ?? []); // label → sha256
+  // True once a full build has recorded every matched label. A seed only
+  // speaks for the labels it names: seeded labels compare immediately,
+  // while their dependencies baseline silently on the first build — only
+  // after a full baseline does a newly appearing label count as changed.
+  let fullBaseline = false;
   let building = false;
   let stale = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -99,11 +109,18 @@ export async function watchBuild(
           hooks.onError?.(err instanceof Error ? err : new Error(String(err)), 'build');
           continue;
         }
+        // An abort landing mid-build must not report: the session is
+        // over, and play --watch's reload socket is already closed —
+        // edit-then-ctrl-c is an ordinary way to quit (#35 review).
+        if (options.signal?.aborted) return;
         if (stale) continue; // a mid-build change: report nothing, go again
-        const changed = outcomes.filter((o) => baselined && lastGood.get(o.label) !== o.sha256);
+        const changed = outcomes.filter((o) => {
+          const prev = lastGood.get(o.label);
+          return prev !== undefined ? prev !== o.sha256 : fullBaseline;
+        });
         lastGood.clear();
         for (const o of outcomes) lastGood.set(o.label, o.sha256);
-        baselined = true;
+        fullBaseline = true;
         hooks.onOutcomes?.(outcomes, changed);
       } while (stale && !(options.signal?.aborted ?? false));
     } finally {
