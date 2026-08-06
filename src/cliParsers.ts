@@ -44,6 +44,14 @@ export function parseBpm(value: string): number {
   return n;
 }
 
+export function parseVariantNumber(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new InvalidArgumentError('variant must be a positive integer (1-based)');
+  }
+  return n;
+}
+
 export function parseChannels(value: string): 1 | 2 {
   const n = Number(value);
   if (n !== 1 && n !== 2) {

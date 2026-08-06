@@ -34,9 +34,11 @@ const interpreter = findInterpreter();
 describe.skipIf(!interpreter)('bloom-aced protocol (live daemon)', () => {
   let root: string;
   let client: AcedClient;
+  let savedPythonPath: string | undefined;
 
   beforeEach(async () => {
     process.env['BLOOM_ACED_PYTHON'] = interpreter;
+    savedPythonPath = process.env['PYTHONPATH'];
     process.env['PYTHONPATH'] = acedSrc;
     root = mkdtempSync(join(tmpdir(), 'bloom-aced-'));
     client = await AcedClient.connect(root);
@@ -50,7 +52,8 @@ describe.skipIf(!interpreter)('bloom-aced protocol (live daemon)', () => {
     }
     client.close();
     delete process.env['BLOOM_ACED_PYTHON'];
-    delete process.env['PYTHONPATH'];
+    if (savedPythonPath === undefined) delete process.env['PYTHONPATH'];
+    else process.env['PYTHONPATH'] = savedPythonPath;
     rmSync(root, { recursive: true, force: true });
   });
 

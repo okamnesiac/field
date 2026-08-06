@@ -18,6 +18,10 @@ const STRINGIFY_OPTIONS = {
 } as const;
 
 function keyName(pair: Pair): string | undefined {
+  // Parsed pairs carry Scalar keys; pairs added via Document.setIn carry
+  // plain strings. Both must rank, or programmatic edits end up appended
+  // in place instead of in canonical position.
+  if (typeof pair.key === 'string') return pair.key;
   return isScalar(pair.key) && typeof pair.key.value === 'string' ? pair.key.value : undefined;
 }
 

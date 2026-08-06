@@ -1,14 +1,22 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { join, posix, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { stringify } from 'yaml';
+import { Document, isSeq, parseDocument } from 'yaml';
 import { AcedClient } from '../aced/client.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
+import { RESERVED_TARGET_NAME } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
+import {
+  assetsFileOrder,
+  assetsFileSchema,
+  generationRecipeOrder,
+  generationRecipeSchema,
+} from '../schema/schemas.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
+import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -111,8 +119,10 @@ export async function aceGenerate(
     }
 
     // Provenance (§1 of the plan): everything needed to audit or
-    // deliberately regenerate. Formal schema + choose/promote is chunk 2.
-    const recipe = {
+    // deliberately regenerate. Parsed through the schema before writing —
+    // this command must never emit a recipe `bloom check` would reject —
+    // and canonicalized so `bloom fmt` is a no-op on fresh recipes.
+    const recipe = generationRecipeSchema.parse({
       name,
       model: response.model,
       prompt: options.prompt,
@@ -127,8 +137,10 @@ export async function aceGenerate(
         sha256: hashes[i]!,
       })),
       generated_at: new Date().toISOString(),
-    };
-    writeFileSync(recipeAbsolute, stringify(recipe));
+    });
+    const doc = new Document(recipe);
+    canonicalizeDocument(doc, generationRecipeOrder);
+    writeFileSync(recipeAbsolute, stringifyDocument(doc));
 
     return {
       recipePath: join('songs', options.song, 'generation', `${name}.yaml`),
@@ -141,6 +153,134 @@ export async function aceGenerate(
   } finally {
     client.close();
   }
+}
+
+export interface AceChooseOptions {
+  song: string;
+  variant: number; // 1-based, matching the file names and recipe order
+  as?: string | undefined;
+}
+
+export interface AceChooseResult {
+  assetName: string;
+  file: string; // song-relative
+  sha256: string;
+  bytes: number;
+  replaced: boolean; // a previous choose for this generation was updated
+}
+
+// Promotion (ace-generation.md §4.2, build-graph.md): a reference to a
+// content-addressed artifact — cheap, and reversible. The variant's bytes
+// stay where they are under generation/; choosing declares them in
+// assets.yaml so clips can reference the name. Choosing again moves the
+// reference — it only ever replaces an entry a previous choose created.
+export async function aceChoose(
+  root: string,
+  name: string,
+  options: AceChooseOptions,
+): Promise<AceChooseResult> {
+  const songDir = join(root, 'songs', options.song);
+  if (!existsSync(join(songDir, 'song.yaml'))) {
+    throw new Error(`song "${options.song}" does not exist`);
+  }
+  const recipePath = join(songDir, 'generation', `${name}.yaml`);
+  if (!existsSync(recipePath)) {
+    throw new Error(`no generation "${name}" in ${options.song}`);
+  }
+  const recipeDoc = parseDocument(readFileSync(recipePath, 'utf8'));
+  if (recipeDoc.errors.length > 0) {
+    throw new Error(`invalid YAML in ${name}.yaml: ${recipeDoc.errors[0]!.message}`);
+  }
+  const recipe = generationRecipeSchema.safeParse(recipeDoc.toJS());
+  if (!recipe.success) {
+    throw new Error(`recipe ${name}.yaml is invalid; fix it before choosing (bloom check)`);
+  }
+
+  const variant = recipe.data.variants[options.variant - 1];
+  if (!variant) {
+    throw new Error(
+      `variant ${options.variant} does not exist (${recipe.data.variants.length} variants)`,
+    );
+  }
+  const file = posix.join('generation', variant.file);
+  const absolute = join(songDir, 'generation', variant.file);
+  if (!existsSync(absolute)) throw new Error(`variant file not found: ${file}`);
+  // Promotion asserts provenance, so the bytes must still be the bytes the
+  // recipe recorded — drifted output gets diagnosed, never promoted.
+  const sha256 = await sha256File(absolute);
+  if (sha256 !== variant.sha256) {
+    throw new Error(
+      `variant ${options.variant} does not match its recorded sha256 — refusing to promote (bloom check)`,
+    );
+  }
+  const bytes = statSync(absolute).size;
+
+  const assetName = options.as ?? name;
+  if (!isSlug(assetName)) {
+    throw new Error(`asset name "${assetName}" must be a lowercase-slug (use --as)`);
+  }
+  if (assetName === RESERVED_TARGET_NAME) {
+    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar (use --as)`);
+  }
+
+  const assetsPath = join(songDir, 'assets.yaml');
+  let doc: Document;
+  if (existsSync(assetsPath)) {
+    const parsed = parseDocument(readFileSync(assetsPath, 'utf8'));
+    if (parsed.errors.length > 0) {
+      throw new Error(`invalid YAML in assets.yaml: ${parsed.errors[0]!.message}`);
+    }
+    doc = parsed;
+  } else {
+    doc = new Document({ assets: [] });
+  }
+  const existing = assetsFileSchema.safeParse(doc.toJS());
+  if (!existing.success) {
+    throw new Error(`assets.yaml is invalid; fix it before choosing (bloom check)`);
+  }
+
+  // Same file under a different name is a promotion that already happened.
+  const other = existing.data.assets.find(
+    (a) => a.name !== assetName && resolve(songDir, a.file) === resolve(songDir, file),
+  );
+  if (other) {
+    throw new Error(`variant ${options.variant} is already promoted as asset "${other.name}"`);
+  }
+  // A same-name entry may only be replaced if a previous choose for this
+  // generation created it — never an unrelated asset the name collides with.
+  const generationPrefix = resolve(songDir, 'generation', name) + sep;
+  const index = existing.data.assets.findIndex((a) => a.name === assetName);
+  const prior = index >= 0 ? existing.data.assets[index]! : undefined;
+  if (prior && !resolve(songDir, prior.file).startsWith(generationPrefix)) {
+    throw new Error(
+      `asset "${assetName}" already declared in "${options.song}" and is not a ` +
+        `promotion of this generation (use --as)`,
+    );
+  }
+
+  const entry = { name: assetName, file, sha256, bytes };
+  if (index >= 0) {
+    doc.setIn(['assets', index], doc.createNode(entry));
+  } else {
+    if (!isSeq(doc.getIn(['assets']))) {
+      // `{}` or `assets:` (null) parse fine but have no sequence for addIn
+      // to extend; without this it would set a bare map and corrupt the file.
+      doc.setIn(['assets'], doc.createNode([]));
+    }
+    doc.addIn(['assets'], doc.createNode(entry));
+  }
+  canonicalizeDocument(doc, assetsFileOrder);
+  writeFileSync(assetsPath, stringifyDocument(doc));
+
+  // The annotation comes second: a crash between the writes leaves a
+  // working promotion whose recipe understates it — re-running choose
+  // repairs that. The reverse order could leave `chosen` pointing at a
+  // promotion that never landed.
+  recipeDoc.setIn(['chosen'], options.variant);
+  canonicalizeDocument(recipeDoc, generationRecipeOrder);
+  writeFileSync(recipePath, stringifyDocument(recipeDoc));
+
+  return { assetName, file, sha256, bytes, replaced: prior !== undefined };
 }
 
 // Explicit, loud environment setup (ace-generation.md §3.4): uv sync for

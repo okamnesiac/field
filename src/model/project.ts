@@ -13,6 +13,8 @@ import {
   arrangementSchema,
   assetsFileOrder,
   assetsFileSchema,
+  generationRecipeOrder,
+  generationRecipeSchema,
   mixFileOrder,
   mixFileSchema,
   projectOrder,
@@ -29,6 +31,7 @@ import {
   trackSchema,
   type Arrangement,
   type AssetsFile,
+  type GenerationRecipe,
   type MixFile,
   type Project,
   type Song,
@@ -63,6 +66,7 @@ export interface LoadedSong {
   mix?: LoadedFile<MixFile> | undefined;
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
+  generation: LoadedFile<GenerationRecipe>[];
 }
 
 export interface LoadedProject {
@@ -153,6 +157,7 @@ export function loadProject(root: string): LoadedProject {
       dir: relative(project.root, dir),
       tracks: [],
       takes: [],
+      generation: [],
     };
 
     const songYaml = join(dir, 'song.yaml');
@@ -203,6 +208,14 @@ export function loadProject(root: string): LoadedProject {
       if (track) song.tracks.push(track);
     }
 
+    for (const file of yamlFiles(join(dir, 'generation'))) {
+      const recipe = loadFile(project, file, {
+        schema: generationRecipeSchema,
+        order: generationRecipeOrder,
+      });
+      if (recipe) song.generation.push(recipe);
+    }
+
     const takesDir = join(dir, 'takes');
     if (existsSync(takesDir)) {
       for (const trackDir of readdirSync(takesDir).sort()) {
@@ -236,6 +249,7 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.mix,
       ...s.tracks,
       ...s.takes,
+      ...s.generation,
     ]),
   ];
   return files.filter((f) => f !== undefined);
@@ -464,6 +478,39 @@ function validate(project: LoadedProject): void {
         }
       }
     }
+
+    // Generation recipes (ace-generation.md §3.1): filenames are keys like
+    // everywhere else, variant files are content-addressed committed
+    // artifacts under generation/<name>/, and `chosen` must name a variant
+    // that exists.
+    for (const recipe of song.generation) {
+      const expected = basename(recipe.path, '.yaml');
+      if (recipe.data.name !== expected) {
+        push(recipe.path, `name "${recipe.data.name}" must match filename "${expected}"`);
+      }
+      const generationDir = join(song.dir, 'generation');
+      const variantFiles = new Set<string>();
+      for (const variant of recipe.data.variants) {
+        if (variantFiles.has(variant.file)) {
+          push(recipe.path, `duplicate variant file "${variant.file}"`);
+        }
+        variantFiles.add(variant.file);
+        if (variant.file !== posix.normalize(variant.file) || variant.file.includes('\\')) {
+          push(recipe.path, `variant file path not in normalized form: ${variant.file}`);
+        }
+        const resolved = resolveAssetFile(project.root, generationDir, variant.file);
+        if (resolved.problem) {
+          push(recipe.path, `variant ${resolved.problem}`);
+        }
+      }
+      if (recipe.data.chosen !== undefined && recipe.data.chosen > recipe.data.variants.length) {
+        push(
+          recipe.path,
+          `chosen variant ${recipe.data.chosen} does not exist ` +
+            `(${recipe.data.variants.length} variants)`,
+        );
+      }
+    }
   }
 }
 
@@ -521,6 +568,24 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
           file: song.assets.path,
           message: `asset "${asset.name}" content does not match its recorded sha256 (${asset.file} hashes to ${actual})`,
         });
+      }
+    }
+  }
+  // Generation variants are committed artifacts with recorded hashes too
+  // (ace-generation.md §3.1) — a recipe whose WAVs drifted is provenance
+  // that lies, which is the one thing a recipe must never do.
+  for (const song of project.songs) {
+    for (const recipe of song.generation) {
+      for (const variant of recipe.data.variants) {
+        const { path } = resolveAssetFile(project.root, join(song.dir, 'generation'), variant.file);
+        if (!path) continue; // already diagnosed by validate
+        const actual = await sha256File(path);
+        if (actual !== variant.sha256) {
+          diagnostics.push({
+            file: recipe.path,
+            message: `variant "${variant.file}" content does not match its recorded sha256 (hashes to ${actual})`,
+          });
+        }
       }
     }
   }

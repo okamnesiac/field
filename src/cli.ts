@@ -9,6 +9,7 @@ import {
   parseChannels,
   parseDurationSeconds,
   parseSeed,
+  parseVariantNumber,
   parseVariants,
 } from './cliParsers.js';
 import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
@@ -135,7 +136,33 @@ ace
       );
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
-      process.stdout.write(`audition: afplay ${result.files[0]}\n`);
+      process.stdout.write(
+        `audition: bloom play //songs/${opts.song}/generation:${name}-1\n` +
+          `promote:  bloom ace choose ${name} --song ${opts.song} --variant <n>\n`,
+      );
+    } catch (err) {
+      fail(err);
+    }
+  });
+ace
+  .command('choose <name>')
+  .description('promote a generation variant to a committed asset clips can reference')
+  .requiredOption('--song <name>', 'song the generation belongs to')
+  .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
+  .option('--as <name>', 'asset name (default: the generation name)')
+  .action(async (name: string, opts: { song: string; variant: number; as?: string }) => {
+    try {
+      const { aceChoose } = await import('./commands/ace.js');
+      const result = await aceChoose(requireRoot(), name, {
+        song: opts.song,
+        variant: opts.variant,
+        as: opts.as,
+      });
+      process.stdout.write(
+        `${result.replaced ? 'moved' : 'promoted'} ${name} variant ${opts.variant} → ` +
+          `//songs/${opts.song}/assets:${result.assetName}\n` +
+          `clips can now reference it: asset: ${result.assetName}\n`,
+      );
     } catch (err) {
       fail(err);
     }

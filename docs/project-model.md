@@ -147,3 +147,14 @@ version + checksum where possible, prompt, seed, duration, conditioning
 licensing/provenance metadata. For SuperCollider, the recipe is the program
 plus an explicit seed. Reproducibility of the recipe is the contract; the
 committed bits are the artifact.
+
+Concretely (ACE): `bloom ace generate` writes
+`songs/<song>/generation/<name>.yaml` plus numbered variant WAVs under
+`generation/<name>/`. Recipes are schema-validated project files — `bloom
+check` verifies variant hashes, `bloom fmt` covers them — and each variant is
+addressable as `//songs/<song>/generation:<name>-<n>` for audition via `bloom
+play`, without being referenceable by clips. Promotion is `bloom ace choose`:
+it declares the chosen variant in `assets.yaml` where it lies (no bytes move)
+and records `chosen` in the recipe. Choosing again moves the reference —
+promotion is cheap and reversible, and only ever replaces an entry a previous
+choose created.

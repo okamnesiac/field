@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { formatLabel, matchesPattern, type Label, type LabelPattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { ruleImpl, type RuleSpec } from '../rules/index.js';
@@ -28,7 +29,19 @@ export interface RuleNode {
   deps: Label[];
 }
 
-export type GraphNode = AssetNode | RuleNode;
+// A generation variant (ace-generation.md §3.1): committed, content-addressed
+// audio like an asset, addressable so `bloom play` can audition it — but
+// deliberately not referenceable by clips or rules. Promotion via
+// `bloom ace choose` is what turns a variant into an asset.
+export interface GenerationNode {
+  kind: 'generation';
+  label: Label;
+  songDir: string;
+  file: string; // song-dir-relative (generation/<name>/<variant>.wav)
+  sha256: string;
+}
+
+export type GraphNode = AssetNode | RuleNode | GenerationNode;
 
 export interface Graph {
   nodes: Map<string, GraphNode>; // keyed by formatted label
@@ -68,6 +81,19 @@ export function buildGraph(project: LoadedProject): Graph {
       for (const target of song.targets.data.targets) {
         addRule({ pkg: `${pkgBase}/targets`, name: target.name }, song.dir, target);
       }
+    }
+    for (const recipe of song.generation) {
+      recipe.data.variants.forEach((variant, i) => {
+        // Numbered like the files on disk: //songs/<song>/generation:<name>-<i>.
+        const label: Label = { pkg: `${pkgBase}/generation`, name: `${recipe.data.name}-${i + 1}` };
+        nodes.set(formatLabel(label), {
+          kind: 'generation',
+          label,
+          songDir: song.dir,
+          file: posix.join('generation', variant.file),
+          sha256: variant.sha256,
+        });
+      });
     }
     const mixable = song.tracks
       .filter((t) => t.data.type === 'audio' && t.data.clips.length > 0)
