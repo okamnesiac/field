@@ -69,6 +69,7 @@ describe('mixRule.execute', () => {
     stems: { left: number[]; right: number[] }[],
     faders: { gain_db: number; pan: number }[],
     gain_db = 0,
+    lengthSamples?: number,
   ) {
     const inputPaths = stems.map((s, i) => {
       const path = join(dir, `stem-${i}.wav`);
@@ -83,6 +84,7 @@ describe('mixRule.execute', () => {
         tracks: stems.map((_, i) => `t${i}`),
         faders,
         gain_db,
+        ...(lengthSamples !== undefined ? { length_samples: lengthSamples } : {}),
       },
       inputPaths,
       out,
@@ -106,6 +108,19 @@ describe('mixRule.execute', () => {
     const g6 = 10 ** (-6 / 20);
     expect(out.channels[0]![0]).toBeCloseTo(1 * g6 * g6, 5); // stem2 left killed by pan
     expect(out.channels[1]![0]).toBeCloseTo((0.5 * g6 + 0.25) * g6, 5);
+  });
+
+  it('a declared length is exact: tails truncate, short content pads', async () => {
+    const truncated = await mix(
+      [{ left: [1, 1, 1, 1, 1], right: [1, 1, 1, 1, 1] }],
+      [{ gain_db: 0, pan: 0 }],
+      0,
+      3,
+    );
+    expect([...truncated.channels[0]!]).toEqual([1, 1, 1]);
+
+    const padded = await mix([{ left: [1], right: [1] }], [{ gain_db: 0, pan: 0 }], 0, 4);
+    expect([...padded.channels[0]!]).toEqual([1, 0, 0, 0]);
   });
 
   it('pads shorter stems with silence', async () => {

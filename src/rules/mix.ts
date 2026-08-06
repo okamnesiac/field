@@ -25,12 +25,21 @@ export interface MixSpec {
   // the true output. Omitted when empty so chainless mixes keep their
   // pre-inserts action keys.
   master?: Insert[];
+  // The song's declared length projected to samples: the output is exactly
+  // this long — tails truncate, short content pads — so a song's extent is
+  // authored, not emergent. Omitted (no declared length) keeps the old
+  // behavior and the old action keys.
+  length_samples?: number;
 }
 
 // Resolve a declared mix against the song's mixable tracks (audio, with
 // clips). Track order is name-sorted for a canonical key — summing is
 // commutative, so declaration order must not matter.
-export function planMix(target: MixTarget, mixableTracks: Track[]): MixSpec {
+export function planMix(
+  target: MixTarget,
+  mixableTracks: Track[],
+  lengthSamples?: number,
+): MixSpec {
   const byName = new Map(mixableTracks.map((t) => [t.name, t]));
   const names = [...(target.tracks ?? byName.keys())].sort();
   return {
@@ -43,6 +52,7 @@ export function planMix(target: MixTarget, mixableTracks: Track[]): MixSpec {
     }),
     gain_db: target.gain_db,
     ...(target.master.length > 0 ? { master: target.master } : {}),
+    ...(lengthSamples !== undefined ? { length_samples: lengthSamples } : {}),
   };
 }
 
@@ -109,6 +119,16 @@ export const mixRule: RuleImpl<MixSpec> = {
     let channels: Float32Array[] = [left, right];
     if (spec.master !== undefined) {
       channels = applyInsertChain(channels, spec.master, ctx.sampleRate);
+    }
+    // The declared length is exact and applies last — after the master
+    // chain, so a reverb tail the chain grew is cut at the bar line too.
+    const declared = spec.length_samples;
+    if (declared !== undefined) {
+      channels = channels.map((ch) => {
+        const out = new Float32Array(declared);
+        out.set(ch.subarray(0, declared));
+        return out;
+      });
     }
     writeWavFloat32(outputPath, ctx.sampleRate, channels);
   },
