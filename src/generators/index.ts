@@ -3,7 +3,7 @@ import { mixGenerator } from './mix.js';
 import { normalizeGenerator } from './normalize.js';
 import { sayGenerator } from './say.js';
 import { supercolliderGenerator } from './supercollider.js';
-import { trackRenderGenerator } from './track-render.js';
+import { stemGenerator } from './stem.js';
 import type { Generator, GeneratorSpec } from './types.js';
 
 // The translation point between the format's vocabulary and the
@@ -25,7 +25,7 @@ const RULES = {
   reverb: reverbGenerator,
   say: sayGenerator,
   supercollider: supercolliderGenerator,
-  'track-render': trackRenderGenerator,
+  stem: stemGenerator,
 };
 
 export function generatorFor<T extends GeneratorSpec>(spec: T): Generator<T> {

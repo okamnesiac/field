@@ -4,9 +4,10 @@ import type { Clip, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
 
-// track-render: the implicit stem target behind //songs/<song>/tracks:<name>
-// (mix-assembly.md §3). The spec is synthesized from the track file, not
-// declared in targets.yaml: clip windows are projected through the tempo map
+// stem: the implicit generator behind //songs/<song>/tracks:<name>
+// (mix-assembly.md §3) — a mix file defines a mix, a track file implies
+// a stem. The spec is synthesized from the track file, never declared:
+// clip windows are projected through the tempo map
 // to samples *before* hashing, so the action key sees the resolved placement
 // plan. A tempo edit therefore rebuilds exactly the tracks whose musical
 // clips moved; reordering clips in YAML or renaming an asset changes
@@ -26,9 +27,9 @@ export interface PlacedClip {
   fade_out: number; // samples, linear, to the window end
 }
 
-export interface TrackRenderSpec {
+export interface StemSpec {
   name: string;
-  type: 'track-render';
+  type: 'stem';
   // Wiring: clips index into this source list, matching the graph's dep
   // order. Committed-content sources (assets, shared pins, chosen
   // generate sounds — anything whose hash is known before building) sort
@@ -129,7 +130,7 @@ export function planTrack(
   // action key at all (#9 review) — and name order for buildable sounds.
   sha256BySource: Map<string, string>,
   framesBySource: Map<string, number> = new Map(),
-): TrackRenderSpec {
+): StemSpec {
   const refs = [...new Set(track.clips.map((c) => c.source))];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
@@ -175,14 +176,14 @@ export function planTrack(
   );
   return {
     name: track.name,
-    type: 'track-render',
+    type: 'stem',
     sources,
     clips,
     ...(track.inserts.length > 0 ? { inserts: track.inserts } : {}),
   };
 }
 
-export const trackRenderGenerator: Generator<TrackRenderSpec> = {
+export const stemGenerator: Generator<StemSpec> = {
   version: 1,
   wiringFields: ['sources'],
 

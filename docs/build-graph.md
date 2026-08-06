@@ -108,9 +108,10 @@ sound by name and follow).
   the key deliberately does not chase OS versions. Voice *generation*
   (cloned/sung voices, committed outputs) will be a deliberate
   generative sound on the other side of the determinism boundary.
-- **`track-render`** — the first *implicit* type: every audio track with
-  clips is buildable as `//songs/<song>/tracks:<name>` without declaring
-  anything, because the track file **is** the declaration. A clip's
+- **`stem`** — the first *implicit* type: every audio track with clips
+  is buildable as `//songs/<song>/tracks:<name>` without declaring
+  anything, because the track file **is** the declaration — a mix file
+  defines a `mix`, a track file implies a `stem`. A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an
   automatic sound pulls its whole definition into the stem's subgraph,
   so the arrangement can play audio nothing ever committed, and editing

@@ -11,7 +11,7 @@ import type { GeneratorRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
 import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
-import { placedWindow, planTrack, trackRenderGenerator, type PlacedClip } from './track-render.js';
+import { placedWindow, planTrack, stemGenerator, type PlacedClip } from './stem.js';
 
 // 120 bpm at 48 kHz: one beat = 960 ticks = 0.5 s = 24000 samples.
 const map120 = new TempoMap([{ at: 0, bpm: 120 }], 48000);
@@ -215,7 +215,7 @@ describe('planTrack', () => {
   });
 });
 
-describe('trackRenderGenerator.execute', () => {
+describe('stemGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
@@ -234,10 +234,10 @@ describe('trackRenderGenerator.execute', () => {
 
   async function render(clips: Partial<PlacedClip>[], inputPaths: string[]) {
     const out = join(dir, 'stem.wav');
-    await trackRenderGenerator.execute(
+    await stemGenerator.execute(
       {
         name: 'drums',
-        type: 'track-render',
+        type: 'stem',
         sources: inputPaths.map((_, i) => `a${i}`),
         clips: clips.map((c) => ({
           input: 0,

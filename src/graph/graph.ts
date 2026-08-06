@@ -11,7 +11,7 @@ import {
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import { planMix } from '../generators/mix.js';
-import { planTrack } from '../generators/track-render.js';
+import { planTrack } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -37,7 +37,7 @@ export interface GeneratorNode {
   kind: 'rule';
   label: Label;
   songDir: string;
-  // A declared target, or a spec synthesized from the model (track-render).
+  // A declared sound, or a spec synthesized from the model (stem, mix).
   spec: GeneratorSpec;
   deps: Label[];
 }

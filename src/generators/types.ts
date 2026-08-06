@@ -1,6 +1,6 @@
 import type { BuildableSound } from '../schema/index.js';
 import type { MixSpec } from './mix.js';
-import type { TrackRenderSpec } from './track-render.js';
+import type { StemSpec } from './stem.js';
 
 // A Generator is a pluggable module that generates a type of sound
 // automatically — §1.2's "one generator category, two trigger policies"
@@ -12,12 +12,12 @@ import type { TrackRenderSpec } from './track-render.js';
 // has no Generator here — its generation is human-triggered
 // (bloom generate), which is what BuildableSound encodes. A Generator's
 // spec is either a declared sound (sounds/<name>.yaml) or a spec
-// synthesized from the project model (track-render from track files,
-// mix from mixes/). Each is typed against its own spec —
+// synthesized from the project model (stem from track files, mix from
+// mixes/). Each is typed against its own spec —
 // Generator<NormalizeSound> and so on — so per-method "wrong type"
 // narrowing is proven by the compiler.
 
-export type GeneratorSpec = BuildableSound | TrackRenderSpec | MixSpec;
+export type GeneratorSpec = BuildableSound | StemSpec | MixSpec;
 
 export interface RunContext {
   root: string; // absolute project root

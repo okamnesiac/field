@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { wavFrameCount } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
-import { expandLoop, placedWindow } from '../generators/track-render.js';
+import { expandLoop, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
