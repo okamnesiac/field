@@ -93,14 +93,26 @@ export async function playThroughDaemon(
     if (options.device !== undefined) await client.selectDevice(options.device);
     const sampleRate = project.manifest?.data.sample_rate ?? 48000;
 
-    // --loop replays the whole queue until ctrl-c; --from re-applies each
-    // pass, so looping a region audition repeats the region. Each pass
-    // reloads the artifact — a short gap; gapless looping is the daemon's
-    // to offer if the gap ever matters.
+    // --loop with a single target loops in the daemon — gapless, the
+    // reader wrapping at end-of-file — and the queue walk runs once,
+    // blocking until ctrl-c stops the transport. A multi-target --loop
+    // falls back to replaying the queue, which reloads between passes.
+    // --from re-applies each pass, so looping a region audition repeats
+    // the region.
+    const nativeLoop = options.loop === true && items.length === 1;
+    if (nativeLoop) {
+      const [major = 0, minor = 0] = client.daemonVersion.split('.').map(Number);
+      if (major === 0 && minor < 3) {
+        throw new Error(
+          `bloom-audiod ${client.daemonVersion} predates --loop — ` +
+            'bloom transport quit, then play again (it respawns on the new build)',
+        );
+      }
+    }
     do {
       for (const item of items) {
         if (hooks.interrupted?.()) break;
-        await client.load(item.path);
+        await client.load(item.path, nativeLoop);
         const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
@@ -130,7 +142,7 @@ export async function playThroughDaemon(
         );
         if (hooks.interrupted?.()) break;
       }
-    } while (options.loop === true && !(hooks.interrupted?.() ?? false));
+    } while (options.loop === true && !nativeLoop && !(hooks.interrupted?.() ?? false));
   } finally {
     client.close();
   }

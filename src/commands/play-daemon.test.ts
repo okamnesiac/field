@@ -73,21 +73,49 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(positions[0]).toMatch(/^\d+\.\d+\.\d+ \(/); // musical time, derived CLI-side
   });
 
-  it('--loop replays the queue until interrupted', async () => {
-    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']);
+  it('--loop with one target loops in the daemon: positions outlive the file', async () => {
+    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']); // 0.25 s
 
-    // Without --loop this plays once; with it, the queue restarts until
-    // the interrupt hook says stop — here, after the third pass begins.
+    // Gapless native loop: one load, one play, and position events keep
+    // arriving well past the file's real-time length until ctrl-c.
+    const played: string[] = [];
+    const positions: string[] = [];
+    let interrupted = false;
+    const timer = setTimeout(() => {
+      interrupted = true;
+      void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
+        await c.stop();
+        c.close();
+      });
+    }, 900); // > 3× the file length: only a loop is still playing by then
+    try {
+      await playThroughDaemon(root, project, items, { loop: true }, {
+        onItem: (label) => played.push(label),
+        onPosition: (line) => positions.push(line),
+        interrupted: () => interrupted,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(played).toEqual([items[0]!.label]); // one load — no reload gap
+    expect(positions.length).toBeGreaterThan(2); // still streaming past 0.25 s
+  });
+
+  it('--loop with several targets replays the queue until interrupted', async () => {
+    await importTone('blop', 12000);
+    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    expect(items).toHaveLength(2); // 2+ items: the CLI-requeue path, not native loop
+
     const played: string[] = [];
     let interrupted = false;
     await playThroughDaemon(root, project, items, { loop: true }, {
       onItem: (label) => {
         played.push(label);
-        if (played.length === 3) interrupted = true;
+        if (played.length === 3) interrupted = true; // mid second pass
       },
       interrupted: () => interrupted,
     });
-    expect(played).toEqual([items[0]!.label, items[0]!.label, items[0]!.label]);
+    expect(played).toEqual([items[0]!.label, items[1]!.label, items[0]!.label]);
   });
 
   it('--from projects musical time to a locate before playing', async () => {

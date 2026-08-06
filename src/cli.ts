@@ -338,10 +338,14 @@ transport
       fail(err);
     }
   });
-for (const op of ['play', 'pause', 'stop'] as const) {
+for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
   transport
     .command(op)
-    .description(`${op} the transport`)
+    .description(
+      op === 'quit'
+        ? 'shut the daemon down (it respawns on the next play — how to pick up a new build)'
+        : `${op} the transport`,
+    )
     .action(async () => {
       try {
         await transportCommand(requireRoot(), op);

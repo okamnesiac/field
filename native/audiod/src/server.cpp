@@ -210,7 +210,7 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "bloom-audiod");
-        ok->setProperty ("version", "0.2.0");
+        ok->setProperty ("version", "0.3.0"); // 0.3: load accepts loop
     }
     else if (op == "devices")
     {
@@ -228,7 +228,8 @@ juce::String Server::dispatch (const juce::var& request)
     else if (op == "load")
     {
         auto path = request.getProperty ("path", juce::var()).toString();
-        auto info = player.load (juce::File (path));
+        auto loop = (bool) request.getProperty ("loop", false);
+        auto info = player.load (juce::File (path), loop);
         if (info.getProperty ("error", juce::var()).isString())
             return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
         if (auto* o = info.getDynamicObject())

@@ -123,7 +123,10 @@ export async function transportLocate(
   }
 }
 
-export async function transportCommand(root: string, op: 'play' | 'pause' | 'stop'): Promise<void> {
+export async function transportCommand(
+  root: string,
+  op: 'play' | 'pause' | 'stop' | 'quit',
+): Promise<void> {
   const client = await connectTransport(root);
   try {
     await client[op]();
