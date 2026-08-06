@@ -498,6 +498,12 @@ function validate(project: LoadedProject): void {
         if (variant.file !== posix.normalize(variant.file) || variant.file.includes('\\')) {
           push(recipe.path, `variant file path not in normalized form: ${variant.file}`);
         }
+        // `../` is normalized but escapes generation/ — and choose's
+        // same-generation prefix guard (which licenses re-choosing)
+        // assumes containment, so containment is validated, not assumed.
+        if (variant.file.split('/').includes('..')) {
+          push(recipe.path, `variant file path must stay inside generation/: ${variant.file}`);
+        }
         const resolved = resolveAssetFile(project.root, generationDir, variant.file);
         if (resolved.problem) {
           push(recipe.path, `variant ${resolved.problem}`);

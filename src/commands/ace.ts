@@ -179,6 +179,9 @@ export async function aceChoose(
   name: string,
   options: AceChooseOptions,
 ): Promise<AceChooseResult> {
+  // Both names build paths; both must be slugs before any join.
+  if (!isSlug(name)) throw new Error(`generation name "${name}" must be a lowercase-slug`);
+  if (!isSlug(options.song)) throw new Error(`song "${options.song}" must be a lowercase-slug`);
   const songDir = join(root, 'songs', options.song);
   if (!existsSync(join(songDir, 'song.yaml'))) {
     throw new Error(`song "${options.song}" does not exist`);

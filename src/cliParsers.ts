@@ -38,8 +38,10 @@ export function parseVariants(value: string): number {
 
 export function parseBpm(value: string): number {
   const n = Number(value);
-  if (!Number.isFinite(n) || n < 30 || n > 300) {
-    throw new InvalidArgumentError('bpm must be in [30, 300]');
+  // Integer, not merely in range: the recipe schema records integer bpm,
+  // and a fractional value must fail here — not after the WAVs land.
+  if (!Number.isInteger(n) || n < 30 || n > 300) {
+    throw new InvalidArgumentError('bpm must be an integer in [30, 300]');
   }
   return n;
 }

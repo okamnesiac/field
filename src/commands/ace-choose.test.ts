@@ -81,6 +81,20 @@ describe('generation recipes in the project model', () => {
     ).toBe(true);
   });
 
+  it('rejects ../ variant paths — normalized, but they escape generation/', async () => {
+    // choose's same-generation prefix guard assumes containment (#18 review).
+    const escapee = join(root, 'songs/opener/escapee.wav');
+    writeFileSync(escapee, 'fake wav one');
+    const recipePath = join(root, 'songs/opener/generation/keys.yaml');
+    const raw = readFileSync(recipePath, 'utf8');
+    writeFileSync(recipePath, raw.replace('keys/keys-1.wav', '../escapee.wav'));
+    expect(
+      (await check(root)).diagnostics.some((d) =>
+        d.message.includes('must stay inside generation/'),
+      ),
+    ).toBe(true);
+  });
+
   it('check catches variant content drift', async () => {
     writeFileSync(join(root, 'songs/opener/generation/keys/keys-1.wav'), 'tampered');
     const result = await check(root);
@@ -159,6 +173,15 @@ describe('bloom ace choose', () => {
     const result = await aceChoose(root, 'keys', { song: 'opener', variant: 1, as: 'keys-gen' });
     expect(result.assetName).toBe('keys-gen');
     expect(loadProject(root).diagnostics).toEqual([]);
+  });
+
+  it('rejects non-slug generation and song names before building any path', async () => {
+    await expect(aceChoose(root, '../other', { song: 'opener', variant: 1 })).rejects.toThrow(
+      'lowercase-slug',
+    );
+    await expect(aceChoose(root, 'keys', { song: '../opener', variant: 1 })).rejects.toThrow(
+      'lowercase-slug',
+    );
   });
 
   it('refuses out-of-range variants and drifted content', async () => {
