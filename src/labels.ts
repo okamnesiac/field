@@ -50,8 +50,9 @@ export function parsePattern(text: string): LabelPattern {
     if (!text.includes('/') && !text.includes(':') && text !== '...') {
       text = `${text}/mix:main`;
     }
-    // `songs/creek:x` reads as already rooted — don't double the prefix.
-    text = text.startsWith('songs/') ? `//${text}` : `//songs/${text}`;
+    // Uniformly: no special cases, so a song named "songs" stays
+    // addressable like any other. The absolute form is the escape hatch.
+    text = `//songs/${text}`;
   }
   const rest = text.slice(2);
 

@@ -17,9 +17,11 @@ describe('labels', () => {
 
   // Songs-relative shorthand (project-core.md §3.4, amended): the CLI
   // accepts what people actually type; canonical output stays absolute.
-  it('expands songs-relative shorthand', () => {
+  it('expands songs-relative shorthand uniformly — no special cases', () => {
     expect(parseLabel('creek/mix:main')).toEqual({ pkg: 'songs/creek/mix', name: 'main' });
-    expect(parseLabel('songs/creek/mix:main')).toEqual({ pkg: 'songs/creek/mix', name: 'main' });
+    // Even a song literally named "songs": shorthand always prefixes.
+    expect(parseLabel('songs/mix:main')).toEqual({ pkg: 'songs/songs/mix', name: 'main' });
+    expect(parseLabel('songs')).toEqual({ pkg: 'songs/songs/mix', name: 'main' });
     expect(parsePattern('creek/...')).toEqual({ kind: 'tree', pkg: 'songs/creek' });
     expect(parsePattern('creek/tracks:all')).toEqual({
       kind: 'package-all',
