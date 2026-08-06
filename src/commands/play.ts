@@ -96,10 +96,12 @@ export async function playThroughDaemon(
     // --loop with a single target loops in the daemon — gapless, the
     // reader wrapping at end-of-file — and the queue walk runs once,
     // blocking until ctrl-c stops the transport. A multi-target --loop
-    // falls back to replaying the queue, which reloads between passes.
-    // --from re-applies each pass, so looping a region audition repeats
-    // the region.
-    const nativeLoop = options.loop === true && items.length === 1;
+    // falls back to replaying the queue, which reloads between passes —
+    // and so does --from + --loop: the daemon's wrap returns to sample 0,
+    // not the locate point, so repeating a *region* audition takes the
+    // requeue path, where --from re-applies each pass (#23 review).
+    const nativeLoop =
+      options.loop === true && items.length === 1 && options.from === undefined;
     if (nativeLoop) {
       const [major = 0, minor = 0] = client.daemonVersion.split('.').map(Number);
       if (major === 0 && minor < 3) {

@@ -125,6 +125,33 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(played).toEqual([items[0]!.label, items[1]!.label, items[0]!.label]);
   });
 
+  it('--from + --loop repeats the region: requeue path, never native (#23 review)', async () => {
+    await importTone('tone', 36000); // 0.75 s
+    const items = await resolvePlayables(root, ['//songs/creek/assets:tone']);
+
+    // The daemon's native wrap returns to sample 0, not the locate point,
+    // so a region audition must take the requeue path — every pass locates
+    // again and no position ever falls before the region start.
+    const samples: number[] = [];
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    client.on('event', (e: { event: string; sample?: number }) => {
+      if (e.event === 'position' && e.sample !== undefined) samples.push(e.sample);
+    });
+    const played: string[] = [];
+    let interrupted = false;
+    await playThroughDaemon(root, project, items, { from: '1.2.1', loop: true }, {
+      onItem: (label) => {
+        played.push(label);
+        if (played.length === 2) interrupted = true; // two region passes
+      },
+      interrupted: () => interrupted,
+    });
+    client.close();
+    expect(played).toHaveLength(2); // reloaded per pass — the requeue path
+    expect(samples.length).toBeGreaterThan(0);
+    expect(Math.min(...samples)).toBeGreaterThanOrEqual(24000); // never before beat 2
+  });
+
   it('--from projects musical time to a locate before playing', async () => {
     await importTone('tone', 36000); // 0.75 s
     const items = await resolvePlayables(root, ['//songs/creek/assets:tone']);
