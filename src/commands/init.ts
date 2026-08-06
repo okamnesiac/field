@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { basename, join, resolve } from 'node:path';
 import { DEFAULT_SAMPLE_RATE, PROJECT_MANIFEST } from '../constants.js';
 import { isSlug } from '../ids.js';
-import { projectOrder, projectSchema } from '../schema/schemas.js';
+import { projectOrder, projectSchema } from '../schema/index.js';
 import { stringifyCanonical } from '../yaml/emit.js';
 
 // Audio and MIDI assets ride Git LFS; manifests stay plain text

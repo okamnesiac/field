@@ -7,7 +7,7 @@ import { buildTargets, queryDeps } from '../commands/build.js';
 import { createSong } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { sha256File } from '../hash.js';
-import { sayTargetSchema } from '../schema/schemas.js';
+import { sayTargetSchema } from '../schema/index.js';
 import { sayRule } from './say.js';
 
 // These run the real `say` and `afconvert` — macOS-only, like the sclang

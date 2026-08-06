@@ -40,7 +40,7 @@ import {
   type TargetsFile,
   type TempoFile,
   type Track,
-} from '../schema/schemas.js';
+} from '../schema/index.js';
 
 export interface Diagnostic {
   file: string; // project-relative path

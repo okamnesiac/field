@@ -14,7 +14,7 @@ import {
   assetsFileSchema,
   generationRecipeOrder,
   generationRecipeSchema,
-} from '../schema/schemas.js';
+} from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 

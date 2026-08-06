@@ -9,7 +9,7 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import type { RuleRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
-import { trackSchema, type Track } from '../schema/schemas.js';
+import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
 import { placedWindow, planTrack, trackRenderRule, type PlacedClip } from './track-render.js';
 

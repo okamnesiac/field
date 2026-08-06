@@ -10,7 +10,7 @@ import { aceChoose } from './ace.js';
 import { resolvePlayables } from './play.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
-import { generationRecipeOrder, generationRecipeSchema } from '../schema/schemas.js';
+import { generationRecipeOrder, generationRecipeSchema } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 // Generation recipes as project citizens (ace-generation.md §4.2): loaded,

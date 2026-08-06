@@ -1,4 +1,4 @@
-import type { Insert } from '../schema/schemas.js';
+import type { Insert } from '../schema/index.js';
 import { autoGainDB, design, processBiquad } from './biquad.js';
 import { limit } from './limiter.js';
 import { reverb } from './reverb.js';

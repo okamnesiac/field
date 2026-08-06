@@ -11,7 +11,7 @@ import {
   tempoFileSchema,
   trackOrder,
   trackSchema,
-} from '../schema/schemas.js';
+} from '../schema/index.js';
 import { stringifyCanonical } from '../yaml/emit.js';
 
 export function createSong(root: string, name: string): string {
