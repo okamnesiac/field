@@ -1,33 +1,29 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { Document, isSeq, parseDocument } from 'yaml';
+import { Document, parseDocument } from 'yaml';
 import { AcedClient } from '../aced/client.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { RESERVED_TARGET_NAME } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
-import {
-  assetsFileOrder,
-  assetsFileSchema,
-  generateTargetSchema,
-  targetOrder,
-  targetSchema,
-} from '../schema/index.js';
+import { generateSoundSchema, soundOrder, soundSchema } from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 const execFileAsync = promisify(execFile);
 
-// bloom generate / bloom choose (project-layout.md §1.4, §1.7): the
+// bloom generate / bloom choose (project-layout.md §1.4, §1.7, §4): the
 // deliberate-trigger verbs over the generator category. Generation lives
 // OUTSIDE the build graph — outputs are committed, not cached. `generate`
 // runs the model (the recipe's `model:` field says which generator) and
 // lands variants in songs/<song>/audio/<name>/ with the recipe as a
-// deliberate target in targets/<name>.yaml; `choose` promotes a variant
-// to an asset clips can reference.
+// deliberate sound in sounds/<name>.yaml; `choose` repoints which
+// variant the sound's own label resolves to — clips reference the sound
+// by name, so choosing again moves what they play, and nothing is ever
+// copied into a ledger.
 
 export interface GenerateOptions {
   song: string;
@@ -73,7 +69,7 @@ export async function generateVariants(
   name: string,
   options: GenerateOptions,
 ): Promise<GenerateResult> {
-  if (!isSlug(name)) throw new Error(`target name "${name}" must be a lowercase-slug`);
+  if (!isSlug(name)) throw new Error(`sound name "${name}" must be a lowercase-slug`);
   if (name === RESERVED_TARGET_NAME) {
     throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar`);
   }
@@ -92,9 +88,17 @@ export async function generateVariants(
 
   const songDir = join(root, 'songs', options.song);
   const outputDir = join(songDir, 'audio', name);
-  const recipeAbsolute = join(songDir, 'targets', `${name}.yaml`);
+  const recipeAbsolute = join(songDir, 'sounds', `${name}.yaml`);
   if (existsSync(recipeAbsolute)) {
-    throw new Error(`target "${name}" already exists in ${options.song} (pick a new name)`);
+    throw new Error(`sound "${name}" already exists in ${options.song} (pick a new name)`);
+  }
+  // One namespace per song (§4.3): the sound's name must not shadow an
+  // asset, or `source: <name>` stops meaning one thing.
+  const song = project.songs.find((s) => s.name === options.song);
+  if (song?.assets?.data.assets.some((a) => a.name === name)) {
+    throw new Error(
+      `"${name}" is already an asset in ${options.song} — a song's names are one namespace (pick a new name)`,
+    );
   }
   mkdirSync(outputDir, { recursive: true });
 
@@ -129,9 +133,9 @@ export async function generateVariants(
     // Parsed through the schema before writing — this command must never
     // emit a target `bloom check` would reject — and canonicalized so
     // `bloom fmt` is a no-op on fresh recipes.
-    const recipe = generateTargetSchema.parse({
+    const recipe = generateSoundSchema.parse({
       name,
-      rule: 'generate',
+      type: 'generate',
       model: response.model,
       prompt: options.prompt,
       ...(options.lyrics !== undefined ? { lyrics: options.lyrics } : {}),
@@ -146,13 +150,13 @@ export async function generateVariants(
       })),
       generated_at: new Date().toISOString(),
     });
-    mkdirSync(join(songDir, 'targets'), { recursive: true });
+    mkdirSync(join(songDir, 'sounds'), { recursive: true });
     const doc = new Document(recipe);
-    canonicalizeDocument(doc, targetOrder);
+    canonicalizeDocument(doc, soundOrder);
     writeFileSync(recipeAbsolute, stringifyDocument(doc));
 
     return {
-      recipePath: join('songs', options.song, 'targets', `${name}.yaml`),
+      recipePath: join('songs', options.song, 'sounds', `${name}.yaml`),
       files,
       seeds: response.seeds,
       model: response.model,
@@ -167,49 +171,49 @@ export async function generateVariants(
 export interface ChooseOptions {
   song: string;
   variant: number; // 1-based, matching the file names and recipe order
-  as?: string | undefined;
 }
 
 export interface ChooseResult {
-  assetName: string;
-  file: string; // song-relative
+  file: string; // song-relative, what the sound's label now resolves to
   sha256: string;
   bytes: number;
-  replaced: boolean; // a previous choose for this target was updated
+  previous?: number | undefined; // the previously chosen variant, if any
 }
 
-// Promotion (project-layout.md §1.4, build-graph.md): a reference to a
-// content-addressed artifact — cheap, and reversible. The variant's bytes
-// stay where they are under audio/<name>/; choosing declares them in
-// assets.yaml so clips can reference the name. Choosing again moves the
-// reference — it only ever replaces an entry a previous choose created.
+// Choosing repoints what the sound *means* (project-layout.md §1.4, §4):
+// the sound's own label resolves to its chosen variant, clips reference
+// the sound by name, and the bytes never move — so choosing again is a
+// one-line diff and every reference follows. There is no ledger step:
+// the sound file itself pins its variants (sha256 per variant, verified
+// by check), and a same-name asset would violate the song's one
+// namespace anyway.
 export async function chooseVariant(
   root: string,
   name: string,
   options: ChooseOptions,
 ): Promise<ChooseResult> {
   // Both names build paths; both must be slugs before any join.
-  if (!isSlug(name)) throw new Error(`target name "${name}" must be a lowercase-slug`);
+  if (!isSlug(name)) throw new Error(`sound name "${name}" must be a lowercase-slug`);
   if (!isSlug(options.song)) throw new Error(`song "${options.song}" must be a lowercase-slug`);
   const songDir = join(root, 'songs', options.song);
   if (!existsSync(join(songDir, 'song.yaml'))) {
     throw new Error(`song "${options.song}" does not exist`);
   }
-  const recipePath = join(songDir, 'targets', `${name}.yaml`);
+  const recipePath = join(songDir, 'sounds', `${name}.yaml`);
   if (!existsSync(recipePath)) {
-    throw new Error(`no target "${name}" in ${options.song}`);
+    throw new Error(`no sound "${name}" in ${options.song}`);
   }
   const recipeDoc = parseDocument(readFileSync(recipePath, 'utf8'));
   if (recipeDoc.errors.length > 0) {
     throw new Error(`invalid YAML in ${name}.yaml: ${recipeDoc.errors[0]!.message}`);
   }
-  const recipe = targetSchema.safeParse(recipeDoc.toJS());
+  const recipe = soundSchema.safeParse(recipeDoc.toJS());
   if (!recipe.success) {
-    throw new Error(`target ${name}.yaml is invalid; fix it before choosing (bloom check)`);
+    throw new Error(`sound ${name}.yaml is invalid; fix it before choosing (bloom check)`);
   }
-  if (recipe.data.rule !== 'generate') {
+  if (recipe.data.type !== 'generate') {
     throw new Error(
-      `"${name}" is a ${recipe.data.rule} target — only deliberate generate targets have variants to choose`,
+      `"${name}" is a ${recipe.data.type} sound — only deliberate generate sounds have variants to choose`,
     );
   }
 
@@ -219,86 +223,24 @@ export async function chooseVariant(
       `variant ${options.variant} does not exist (${recipe.data.variants.length} variants)`,
     );
   }
-  const file = variant.file;
   const absolute = join(songDir, variant.file);
-  if (!existsSync(absolute)) throw new Error(`variant file not found: ${file}`);
-  // Promotion asserts provenance, so the bytes must still be the bytes the
-  // recipe recorded — drifted output gets diagnosed, never promoted.
+  if (!existsSync(absolute)) throw new Error(`variant file not found: ${variant.file}`);
+  // Choosing asserts provenance, so the bytes must still be the bytes the
+  // recipe recorded — drifted output gets diagnosed, never chosen.
   const sha256 = await sha256File(absolute);
   if (sha256 !== variant.sha256) {
     throw new Error(
-      `variant ${options.variant} does not match its recorded sha256 — refusing to promote (bloom check)`,
+      `variant ${options.variant} does not match its recorded sha256 — refusing to choose (bloom check)`,
     );
   }
   const bytes = statSync(absolute).size;
 
-  const assetName = options.as ?? name;
-  if (!isSlug(assetName)) {
-    throw new Error(`asset name "${assetName}" must be a lowercase-slug (use --as)`);
-  }
-  if (assetName === RESERVED_TARGET_NAME) {
-    throw new Error(`"${RESERVED_TARGET_NAME}" is reserved by the label grammar (use --as)`);
-  }
-
-  const assetsPath = join(songDir, 'assets.yaml');
-  let doc: Document;
-  if (existsSync(assetsPath)) {
-    const parsed = parseDocument(readFileSync(assetsPath, 'utf8'));
-    if (parsed.errors.length > 0) {
-      throw new Error(`invalid YAML in assets.yaml: ${parsed.errors[0]!.message}`);
-    }
-    doc = parsed;
-  } else {
-    doc = new Document({ assets: [] });
-  }
-  const existing = assetsFileSchema.safeParse(doc.toJS());
-  if (!existing.success) {
-    throw new Error(`assets.yaml is invalid; fix it before choosing (bloom check)`);
-  }
-
-  // Same file under a different name is a promotion that already happened.
-  const other = existing.data.assets.find(
-    (a) => a.name !== assetName && resolve(songDir, a.file) === resolve(songDir, file),
-  );
-  if (other) {
-    throw new Error(`variant ${options.variant} is already promoted as asset "${other.name}"`);
-  }
-  // A same-name entry may only be replaced if a previous choose for this
-  // target created it — never an unrelated asset the name collides with.
-  // Validate pins variants inside audio/<name>/, so the prefix is sound.
-  const variantPrefix = resolve(songDir, 'audio', name) + sep;
-  const index = existing.data.assets.findIndex((a) => a.name === assetName);
-  const prior = index >= 0 ? existing.data.assets[index]! : undefined;
-  if (prior && !resolve(songDir, prior.file).startsWith(variantPrefix)) {
-    throw new Error(
-      `asset "${assetName}" already declared in "${options.song}" and is not a ` +
-        `promotion of this target (use --as)`,
-    );
-  }
-
-  const entry = { name: assetName, file, sha256, bytes };
-  if (index >= 0) {
-    doc.setIn(['assets', index], doc.createNode(entry));
-  } else {
-    if (!isSeq(doc.getIn(['assets']))) {
-      // `{}` or `assets:` (null) parse fine but have no sequence for addIn
-      // to extend; without this it would set a bare map and corrupt the file.
-      doc.setIn(['assets'], doc.createNode([]));
-    }
-    doc.addIn(['assets'], doc.createNode(entry));
-  }
-  canonicalizeDocument(doc, assetsFileOrder);
-  writeFileSync(assetsPath, stringifyDocument(doc));
-
-  // The annotation comes second: a crash between the writes leaves a
-  // working promotion whose recipe understates it — re-running choose
-  // repairs that. The reverse order could leave `chosen` pointing at a
-  // promotion that never landed.
+  const previous = recipe.data.chosen;
   recipeDoc.setIn(['chosen'], options.variant);
-  canonicalizeDocument(recipeDoc, targetOrder);
+  canonicalizeDocument(recipeDoc, soundOrder);
   writeFileSync(recipePath, stringifyDocument(recipeDoc));
 
-  return { assetName, file, sha256, bytes, replaced: prior !== undefined };
+  return { file: variant.file, sha256, bytes, previous };
 }
 
 // Explicit, loud environment setup (ace-generation.md §3.4): uv sync for

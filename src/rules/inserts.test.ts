@@ -22,7 +22,7 @@ const trackYaml = (extra: string[]) =>
     ...extra,
     'clips:',
     '  - id: c1',
-    '    asset: tone',
+    '    source: tone',
     '    anchor: absolute',
     '    position: 0',
     '    duration: 48000',

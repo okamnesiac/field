@@ -9,25 +9,25 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { loadProject } from '../model/project.js';
 
-// Effect rules end to end: chains as targets-referencing-targets, cache
+// Effect rules end to end: chains as sounds-sourcing-sounds, cache
 // cascade on parameter edits, cycle and reference diagnostics
 // (effects.md §3). All real DSP — no fake runners.
 
 let root: string;
 
-// One file per target (project-layout.md §1.3).
-const writeTargets = (targets: Record<string, string[]>) => {
-  mkdirSync(join(root, 'songs/creek/targets'), { recursive: true });
-  for (const [name, lines] of Object.entries(targets)) {
+// One file per sound (project-layout.md §1.3, §4).
+const writeSounds = (sounds: Record<string, string[]>) => {
+  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+  for (const [name, lines] of Object.entries(sounds)) {
     writeFileSync(
-      join(root, `songs/creek/targets/${name}.yaml`),
+      join(root, `songs/creek/sounds/${name}.yaml`),
       [`name: ${name}`, ...lines, ''].join('\n'),
     );
   }
 };
 
 const eqLines = (source: string, gain: number, extra: string[] = []) => [
-  'rule: eq',
+  'type: eq',
   source,
   'bands:',
   '  - type: bell',
@@ -62,41 +62,41 @@ function rmsOf(path: string): number {
 
 describe('effect chains', () => {
   it('builds asset → eq → reverb with real DSP, cached per link', async () => {
-    writeTargets({
-      'tone-eq': eqLines('asset: tone', -6),
-      'tone-verb': ['rule: reverb', 'target: tone-eq', 'decay: 0.5'],
+    writeSounds({
+      'tone-eq': eqLines('source: tone', -6),
+      'tone-verb': ['type: reverb', 'source: tone-eq', 'decay: 0.5'],
     });
 
-    expect(queryDeps(root, 'deps(//songs/creek/targets:tone-verb)')).toEqual([
+    expect(queryDeps(root, 'deps(//songs/creek/sounds:tone-verb)')).toEqual([
       '//songs/creek/assets:tone',
-      '//songs/creek/targets:tone-eq',
-      '//songs/creek/targets:tone-verb',
+      '//songs/creek/sounds:tone-eq',
+      '//songs/creek/sounds:tone-verb',
     ]);
 
-    const first = await buildTargets(root, ['//songs/creek/targets:tone-verb']);
+    const first = await buildTargets(root, ['//songs/creek/sounds:tone-verb']);
     const verb = first.find((o) => o.label.endsWith(':tone-verb'))!;
     expect(readWav(verb.outputPath!).channels[0]!.length).toBe(48000 + 24000); // + tail
 
-    const again = await buildTargets(root, ['//songs/creek/targets:tone-verb']);
+    const again = await buildTargets(root, ['//songs/creek/sounds:tone-verb']);
     expect(again.every((o) => o.cached)).toBe(true);
 
     // A parameter edit upstream cascades: eq and reverb rebuild, the
     // asset stays an asset.
-    const path = join(root, 'songs/creek/targets/tone-eq.yaml');
+    const path = join(root, 'songs/creek/sounds/tone-eq.yaml');
     writeFileSync(path, readFileSync(path, 'utf8').replace('gain_db: -6', 'gain_db: -9'));
-    const after = await buildTargets(root, ['//songs/creek/targets:tone-verb']);
+    const after = await buildTargets(root, ['//songs/creek/sounds:tone-verb']);
     expect(after.filter((o) => !o.cached).map((o) => o.label)).toEqual([
-      '//songs/creek/targets:tone-eq',
-      '//songs/creek/targets:tone-verb',
+      '//songs/creek/sounds:tone-eq',
+      '//songs/creek/sounds:tone-verb',
     ]);
   });
 
   it('eq normalize holds level while shaping tone (Fyra semantics)', async () => {
-    writeTargets({
-      'eq-norm': eqLines('asset: tone', 6, ['normalize: true']),
-      'eq-raw': eqLines('asset: tone', 6, ['normalize: false']),
+    writeSounds({
+      'eq-norm': eqLines('source: tone', 6, ['normalize: true']),
+      'eq-raw': eqLines('source: tone', 6, ['normalize: false']),
     });
-    const outcomes = await buildTargets(root, ['//songs/creek/targets:all']);
+    const outcomes = await buildTargets(root, ['//songs/creek/sounds:all']);
     const norm = rmsOf(outcomes.find((o) => o.label.endsWith(':eq-norm'))!.outputPath!);
     const raw = rmsOf(outcomes.find((o) => o.label.endsWith(':eq-raw'))!.outputPath!);
     // Unnormalized: a bell boost right on the tone ≈ +6 dB of level. The
@@ -106,11 +106,11 @@ describe('effect chains', () => {
   });
 
   it('limits a hot render to the ceiling', async () => {
-    writeTargets({
-      'tone-hot': eqLines('asset: tone', 24, ['normalize: false']),
-      'tone-safe': ['rule: limit', 'target: tone-hot', 'ceiling_db: -3'],
+    writeSounds({
+      'tone-hot': eqLines('source: tone', 24, ['normalize: false']),
+      'tone-safe': ['type: limit', 'source: tone-hot', 'ceiling_db: -3'],
     });
-    const outcomes = await buildTargets(root, ['//songs/creek/targets:tone-safe']);
+    const outcomes = await buildTargets(root, ['//songs/creek/sounds:tone-safe']);
     const safe = outcomes.find((o) => o.label.endsWith(':tone-safe'))!;
     const [channel] = readWav(safe.outputPath!).channels;
     const ceiling = Math.pow(10, -3 / 20);
@@ -118,25 +118,25 @@ describe('effect chains', () => {
   });
 
   it('normalize accepts a target, closing the rate-fix loop', async () => {
-    writeTargets({
-      'tone-eq': eqLines('asset: tone', -3),
-      'tone-eq-441': ['rule: normalize', 'target: tone-eq', 'sample_rate: 44100', 'bit_depth: 16'],
+    writeSounds({
+      'tone-eq': eqLines('source: tone', -3),
+      'tone-eq-441': ['type: normalize', 'source: tone-eq', 'sample_rate: 44100', 'bit_depth: 16'],
     });
-    const outcomes = await buildTargets(root, ['//songs/creek/targets:tone-eq-441']);
+    const outcomes = await buildTargets(root, ['//songs/creek/sounds:tone-eq-441']);
     const converted = outcomes.find((o) => o.label.endsWith(':tone-eq-441'))!;
     expect(readWav(converted.outputPath!).sampleRate).toBe(44100);
   });
 
-  it('diagnoses cycles, unknown references, and ambiguous sources', () => {
-    writeTargets({
-      a: ['rule: reverb', 'target: b'],
-      b: ['rule: reverb', 'target: a'],
-      c: ['rule: reverb', 'target: ghost'],
-      d: ['rule: reverb', 'asset: tone', 'target: a'],
+  it('diagnoses cycles, unknown sources, and namespace collisions', () => {
+    writeSounds({
+      a: ['type: reverb', 'source: b'],
+      b: ['type: reverb', 'source: a'],
+      c: ['type: reverb', 'source: ghost'],
+      tone: ['type: reverb', 'source: a'], // shadows the imported asset
     });
     const messages = loadProject(root).diagnostics.map((d) => d.message);
-    expect(messages).toContain('target dependency cycle: a → b → a');
-    expect(messages).toContain('target "c" references unknown target "ghost"');
-    expect(messages).toContain('target "d" sources exactly one of asset or target');
+    expect(messages).toContain('sound dependency cycle: a → b → a');
+    expect(messages).toContain('sound "c" source references unknown source "ghost"');
+    expect(messages.some((m) => m.includes('collides with an asset of the same name'))).toBe(true);
   });
 });

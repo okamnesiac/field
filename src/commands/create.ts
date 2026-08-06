@@ -4,7 +4,7 @@ import { isSlug } from '../ids.js';
 import { RESERVED_TARGET_NAME } from '../labels.js';
 import {
   mixOrder,
-  mixTargetSchema,
+  mixSchema,
   songOrder,
   songSchema,
   tempoFileOrder,
@@ -36,7 +36,7 @@ export function createSong(root: string, name: string): string {
   // Every song is mixable from birth: main mixes all audio tracks with
   // clips, so //songs/<name>/mix:main exists as soon as there is content.
   mkdirSync(join(dir, 'mixes'), { recursive: true });
-  const mix = mixTargetSchema.parse({ name: 'main' });
+  const mix = mixSchema.parse({ name: 'main' });
   writeFileSync(join(dir, 'mixes', 'main.yaml'), stringifyCanonical(mix, mixOrder));
   writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
   return dir;

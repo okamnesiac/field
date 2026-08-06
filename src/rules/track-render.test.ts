@@ -25,7 +25,7 @@ function track(clips: unknown[]): Track {
 
 const clip = (over: Record<string, unknown> = {}) => ({
   id: 'c1',
-  asset: 'kick',
+  source: 'kick',
   position: 960,
   duration: 960,
   ...over,
@@ -163,13 +163,13 @@ describe('planTrack', () => {
   it('resolves clips to samples and indexes distinct assets in hash order', () => {
     const spec = planTrack(
       track([
-        clip({ id: 'c1', asset: 'snare', position: 960, duration: 960 }),
-        clip({ id: 'c2', asset: 'kick', position: 0, duration: 960, slip: 100 }),
+        clip({ id: 'c1', source: 'snare', position: 960, duration: 960 }),
+        clip({ id: 'c2', source: 'kick', position: 0, duration: 960, slip: 100 }),
       ]),
       map120,
       hashes,
     );
-    expect(spec.assets).toEqual(['kick', 'snare']);
+    expect(spec.sources).toEqual(['kick', 'snare']);
     expect(spec.clips).toEqual([
       {
         input: 0,
@@ -193,8 +193,8 @@ describe('planTrack', () => {
   });
 
   it('is invariant under YAML clip order (summing is commutative)', () => {
-    const a = clip({ id: 'c1', asset: 'kick', position: 960 });
-    const b = clip({ id: 'c2', asset: 'snare', position: 0 });
+    const a = clip({ id: 'c1', source: 'kick', position: 960 });
+    const b = clip({ id: 'c2', source: 'snare', position: 0 });
     expect(planTrack(track([a, b]), map120, hashes)).toEqual(
       planTrack(track([b, a]), map120, hashes),
     );
@@ -206,12 +206,12 @@ describe('planTrack', () => {
       ['kick', '0000000000000000000000000000000000000000000000000000000000000000'],
     ]);
     const spec = planTrack(
-      track([clip({ id: 'c1', asset: 'apple' }), clip({ id: 'c2', asset: 'kick' })]),
+      track([clip({ id: 'c1', source: 'apple' }), clip({ id: 'c2', source: 'kick' })]),
       map120,
       byHash,
     );
     // Name order would be [apple, kick]; hash order wins.
-    expect(spec.assets).toEqual(['kick', 'apple']);
+    expect(spec.sources).toEqual(['kick', 'apple']);
   });
 });
 
@@ -237,9 +237,8 @@ describe('trackRenderRule.execute', () => {
     await trackRenderRule.execute(
       {
         name: 'drums',
-        rule: 'track-render',
-        assets: inputPaths.map((_, i) => `a${i}`),
-        targets: [],
+        type: 'track-render',
+        sources: inputPaths.map((_, i) => `a${i}`),
         clips: clips.map((c) => ({
           input: 0,
           start: 0,
@@ -329,7 +328,7 @@ describe('track stems in the build graph', () => {
   const clipYaml = (over: Record<string, string | number> = {}) => {
     const fields: Record<string, string | number> = {
       id: 'kick-1',
-      asset: 'kick',
+      source: 'kick',
       position: 960,
       duration: 960,
       ...over,
@@ -457,7 +456,7 @@ describe('track stems in the build graph', () => {
     rmSync(src);
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', asset: 'snare', position: 1920 })]),
+      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', source: 'snare', position: 1920 })]),
     );
 
     const state = { runs: 0 };
@@ -474,7 +473,7 @@ describe('track stems in the build graph', () => {
     writeFileSync(assetsPath, readFileSync(assetsPath, 'utf8').replace('name: snare', 'name: apple'));
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', asset: 'apple', position: 1920 })]),
+      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', source: 'apple', position: 1920 })]),
     );
     await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
     expect(state.runs).toBe(1);
@@ -510,13 +509,13 @@ describe('clips over rule outputs', () => {
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
     rmSync(src);
-    mkdirSync(join(root, 'songs/creek/targets'), { recursive: true });
+    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/creek/targets/kick-24.yaml'),
+      join(root, 'songs/creek/sounds/kick-24.yaml'),
       [
         'name: kick-24',
-        'rule: normalize',
-        'asset: kick',
+        'type: normalize',
+        'source: kick',
         'sample_rate: 48000',
         'bit_depth: 24',
         '',
@@ -529,7 +528,7 @@ describe('clips over rule outputs', () => {
         'type: audio',
         'clips:',
         '  - id: kick-1',
-        '    target: kick-24',
+        '    source: kick-24',
         '    anchor: absolute',
         '    position: 3',
         '    duration: 4',
@@ -542,46 +541,40 @@ describe('clips over rule outputs', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('rejects clips with zero or two sources', () => {
+  it('rejects clips without a source', () => {
     const base = { id: 'c', position: 0, duration: 1 };
-    expect(() => trackSchema.parse({ name: 't', type: 'audio', clips: [base] })).toThrow(
-      'exactly one of asset or target',
-    );
-    expect(() =>
-      trackSchema.parse({ name: 't', type: 'audio', clips: [{ ...base, asset: 'a', target: 'b' }] }),
-    ).toThrow('exactly one of asset or target');
+    expect(() => trackSchema.parse({ name: 't', type: 'audio', clips: [base] })).toThrow();
   });
 
-  it('plans target sources after hash-sorted assets, name-sorted', () => {
+  it('plans buildable-sound sources after hash-sorted committed ones, name-sorted', () => {
     const spec = planTrack(
       track([
-        clip({ id: 'c1', asset: 'kick' }),
-        clip({ id: 'c2', asset: undefined, target: 'pad-sc', position: 0 }),
-        clip({ id: 'c3', asset: undefined, target: 'kit-sc', position: 0 }),
+        clip({ id: 'c1', source: 'kick' }),
+        clip({ id: 'c2', source: 'pad-sc', position: 0 }),
+        clip({ id: 'c3', source: 'kit-sc', position: 0 }),
       ]),
       map120,
-      hashes,
+      hashes, // kick has a hash; pad-sc/kit-sc are buildable
     );
-    expect(spec.assets).toEqual(['kick']);
-    expect(spec.targets).toEqual(['kit-sc', 'pad-sc']);
+    expect(spec.sources).toEqual(['kick', 'kit-sc', 'pad-sc']);
     const byInput = [...spec.clips].sort((a, b) => a.input - b.input).map((c) => c.input);
     expect(byInput).toEqual([0, 1, 2]); // kick, kit-sc, pad-sc
   });
 
-  it('diagnoses a clip on an unknown target', () => {
+  it('diagnoses a clip on an unknown source', () => {
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      ['name: drums', 'type: audio', 'clips:', '  - id: c1', '    target: ghost', '    position: 0', '    duration: 4', ''].join('\n'),
+      ['name: drums', 'type: audio', 'clips:', '  - id: c1', '    source: ghost', '    position: 0', '    duration: 4', ''].join('\n'),
     );
     expect(loadProject(root).diagnostics.map((d) => d.message).join('\n')).toContain(
-      'clip "c1" references unknown target "ghost"',
+      'clip "c1" references unknown source "ghost"',
     );
   });
 
   it('builds the whole recipe chain: asset → target → stem, with real rules', async () => {
     expect(queryDeps(root, 'deps(//songs/creek/tracks:drums)')).toEqual([
       '//songs/creek/assets:kick',
-      '//songs/creek/targets:kick-24',
+      '//songs/creek/sounds:kick-24',
       '//songs/creek/tracks:drums',
     ]);
 
@@ -612,8 +605,8 @@ describe('clips over rule outputs', () => {
     expect(runs).toEqual(['kick-24', 'drums']);
 
     runs.length = 0;
-    const targetsPath = join(root, 'songs/creek/targets/kick-24.yaml');
-    writeFileSync(targetsPath, readFileSync(targetsPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
+    const soundPath = join(root, 'songs/creek/sounds/kick-24.yaml');
+    writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
     await buildTargets(root, ['//songs/creek/tracks:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
   });

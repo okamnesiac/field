@@ -3,17 +3,20 @@ import { existsSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
-import type { ScRenderTarget } from '../schema/index.js';
+import type { SupercolliderSound } from '../schema/index.js';
 import type { RuleImpl } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-// sc-render: a SuperCollider program renders an asset offline (NRT). The
-// contract (sc-render.md §2): the program is a plain .scd run via sclang
-// with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION / BLOOM_SAMPLE_RATE /
-// BLOOM_CHANNELS in the environment; it writes BLOOM_OUTPUT and exits.
-// Determinism given the seed is the program's job; the program's content
-// hash is a cache input, so editing the code invalidates its own renders.
+// supercollider: a SuperCollider program defines the sound, rendered
+// offline (NRT). The contract (sc-render.md §2): the program is a plain
+// .scd run via sclang with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION /
+// BLOOM_SAMPLE_RATE / BLOOM_CHANNELS in the environment; it writes
+// BLOOM_OUTPUT and exits. Determinism given the seed is the program's
+// job; the program's content hash is a cache input, so editing the code
+// invalidates its own renders. `source:` names the program: a bare
+// filename resolves on the type's home shelf, shared/generators/
+// (project-layout.md §4.3); a slashed path is project-relative.
 
 const SCLANG_APP_FALLBACK = '/Applications/SuperCollider.app/Contents/MacOS/sclang';
 
@@ -43,8 +46,14 @@ function formatScError(err: ExecError, programPath: string, timeoutMs: number): 
   return new Error(`sclang failed for ${programPath}: ${err.message}${detail}`);
 }
 
-// Run an SC program under the sc-render contract. Used by the rule and by
-// `bloom sc render` (direct, uncached iteration).
+// The home-shelf resolution (§4.3): every bare spelling resolves in its
+// natural home, explicit spellings escape — never a search path.
+export function programPath(sound: SupercolliderSound): string {
+  return sound.source.includes('/') ? sound.source : posix.join('shared/generators', sound.source);
+}
+
+// Run an SC program under the supercollider contract. Used by the rule
+// and by `bloom sc render` (direct, uncached iteration).
 export async function runScProgram(
   programPath: string,
   outputPath: string,
@@ -94,48 +103,49 @@ export async function runScProgram(
   }
 }
 
-export const scRenderRule: RuleImpl<ScRenderTarget> = {
+export const supercolliderRule: RuleImpl<SupercolliderSound> = {
   version: 1,
-  wiringFields: ['program'],
+  wiringFields: ['source'],
 
-  assetDeps() {
+  sources() {
     // The program is an input by content hash, not a graph node.
     return [];
   },
 
-  validate(target, ctx) {
-    if (target.program !== posix.normalize(target.program) || target.program.includes('\\')) {
-      ctx.push(`program path not in normalized form: ${target.program}`);
+  validate(sound, ctx) {
+    if (sound.source !== posix.normalize(sound.source) || sound.source.includes('\\')) {
+      ctx.push(`program path not in normalized form: ${sound.source}`);
       return;
     }
-    const resolved = ctx.resolveFile('', target.program); // project-relative
+    const resolved = ctx.resolveFile('', programPath(sound)); // project-relative
     if (resolved.problem) ctx.push(`program ${resolved.problem}`);
   },
 
-  async extraInputs(root, target) {
-    return [{ label: target.program, sha256: await sha256File(join(root, target.program)) }];
+  async extraInputs(root, sound) {
+    const program = programPath(sound);
+    return [{ label: program, sha256: await sha256File(join(root, program)) }];
   },
 
-  async execute(target, _inputPaths, outputPath, ctx) {
-    await runScProgram(join(ctx.root, target.program), outputPath, {
-      seed: target.seed,
-      duration: target.duration,
-      channels: target.channels,
+  async execute(sound, _inputPaths, outputPath, ctx) {
+    await runScProgram(join(ctx.root, programPath(sound)), outputPath, {
+      seed: sound.seed,
+      duration: sound.duration,
+      channels: sound.channels,
       sampleRate: ctx.sampleRate,
     });
     if (!existsSync(outputPath)) {
       throw new Error(
-        `sc program ${target.program} exited without writing BLOOM_OUTPUT — ` +
+        `sc program ${sound.source} exited without writing BLOOM_OUTPUT — ` +
           `it must render to the path in BLOOM_OUTPUT and call 0.exit`,
       );
     }
   },
 
-  async verifyAfterRun(root, target, extraInputs) {
-    const after = await sha256File(join(root, target.program));
+  async verifyAfterRun(root, sound, extraInputs) {
+    const after = await sha256File(join(root, programPath(sound)));
     if (after !== extraInputs[0]!.sha256) {
       throw new Error(
-        `refusing to cache: ${target.program} changed during the render — re-run the build`,
+        `refusing to cache: ${sound.source} changed during the render — re-run the build`,
       );
     }
   },

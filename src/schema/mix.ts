@@ -9,18 +9,18 @@ import { insertOrder, insertSchema } from './effects.js';
 // predates the directory and is unchanged). A mix sums track stems with
 // each track's gain_db/pan (constant-power balance) and a master gain.
 // `tracks` omitted means every audio track with clips.
-export const mixTargetSchema = z.strictObject({
+export const mixSchema = z.strictObject({
   name: labelName,
-  rule: z.literal('mix').default('mix'),
+  type: z.literal('mix').default('mix'),
   tracks: z.array(slug).optional(),
   gain_db: z.number().default(0), // master gain, applied before the master chain
   // Applied after the sum and the master gain, so a final limiter's
   // ceiling guards the true output (effects.md §5).
   master: z.array(insertSchema).default([]),
 });
-export type MixTarget = z.infer<typeof mixTargetSchema>;
+export type Mix = z.infer<typeof mixSchema>;
 
 export const mixOrder: KeyOrder = {
-  keys: ['name', 'rule', 'tracks', 'gain_db', 'master'],
+  keys: ['name', 'type', 'tracks', 'gain_db', 'master'],
   children: { master: { items: insertOrder } },
 };

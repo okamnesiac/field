@@ -38,13 +38,13 @@ function wavBytes(): Buffer {
   return Buffer.concat([header, data]);
 }
 
-const clipTrack = (assetRef: string) =>
+const clipTrack = (sourceRef: string) =>
   [
     'name: drums',
     'type: audio',
     'clips:',
     '  - id: c1',
-    `    asset: ${assetRef}`,
+    `    source: ${sourceRef}`,
     '    anchor: absolute',
     '    position: 0',
     '    duration: 100',
@@ -144,7 +144,7 @@ describe('cross-scope clip references', () => {
     // Rejected at the schema layer — the ref shape admits exactly two scopes.
     expect(
       loadProject(root).diagnostics.some((d) =>
-        d.message.includes('must be an asset name or //shared/assets:<name>'),
+        d.message.includes('must be a name in the song or //shared/assets:<name>'),
       ),
     ).toBe(true);
   });
@@ -158,7 +158,7 @@ describe('cross-scope clip references', () => {
         'type: audio',
         'clips:',
         '  - id: c1',
-        '    asset: //shared/assets:rain',
+        '    source: //shared/assets:rain',
         '    anchor: absolute',
         '    position: 0',
         '    duration: 300',
@@ -180,7 +180,7 @@ describe('the old layout is diagnosed, not ignored', () => {
     writeFileSync(join(root, 'songs/creek/mix.yaml'), 'mixes: []\n');
     mkdirSync(join(root, 'songs/creek/generation'), { recursive: true });
     const messages = loadProject(root).diagnostics.map((d) => `${d.file}: ${d.message}`);
-    expect(messages.some((m) => m.includes('targets.yaml') && m.includes('targets/'))).toBe(true);
+    expect(messages.some((m) => m.includes('targets.yaml') && m.includes('sounds/'))).toBe(true);
     expect(messages.some((m) => m.includes('mix.yaml') && m.includes('mixes/'))).toBe(true);
     expect(messages.some((m) => m.includes('generation') && m.includes('audio/'))).toBe(true);
   });

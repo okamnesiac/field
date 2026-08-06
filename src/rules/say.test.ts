@@ -7,13 +7,13 @@ import { buildTargets, queryDeps } from '../commands/build.js';
 import { createSong } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { sha256File } from '../hash.js';
-import { sayTargetSchema } from '../schema/index.js';
+import { saySoundSchema } from '../schema/index.js';
 import { sayRule } from './say.js';
 
 // These run the real `say` and `afconvert` — macOS-only, like the sclang
 // integration tests. Samantha ships with macOS.
 const target = (over: Record<string, unknown> = {}) =>
-  sayTargetSchema.parse({ name: 'scratch', rule: 'say', text: 'bloom', voice: 'Samantha', ...over });
+  saySoundSchema.parse({ name: 'scratch', type: 'say', text: 'bloom', voice: 'Samantha', ...over });
 
 describe('sayRule.execute', () => {
   let dir: string;
@@ -75,19 +75,19 @@ describe('sayRule.execute', () => {
   });
 });
 
-describe('say targets in the build graph', () => {
+describe('say sounds in the build graph', () => {
   let root: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'bloom-say-graph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'opener');
-    mkdirSync(join(root, 'songs/opener/targets'), { recursive: true });
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/targets/scratch-vocal.yaml'),
+      join(root, 'songs/opener/sounds/scratch-vocal.yaml'),
       [
         'name: scratch-vocal',
-        'rule: say',
+        'type: say',
         'text: down by the creek',
         'voice: Samantha',
         'rate: 180',
@@ -101,7 +101,7 @@ describe('say targets in the build graph', () => {
   });
 
   it('builds, caches, and re-keys on a text edit', { timeout: 30_000 }, async () => {
-    const label = '//songs/opener/targets:scratch-vocal';
+    const label = '//songs/opener/sounds:scratch-vocal';
     expect(queryDeps(root, `deps(${label})`)).toEqual([label]);
 
     const first = await buildTargets(root, [label]);
@@ -112,10 +112,10 @@ describe('say targets in the build graph', () => {
     expect(again[0]!.cached).toBe(true);
 
     writeFileSync(
-      join(root, 'songs/opener/targets/scratch-vocal.yaml'),
+      join(root, 'songs/opener/sounds/scratch-vocal.yaml'),
       [
         'name: scratch-vocal',
-        'rule: say',
+        'type: say',
         'text: down by the wide creek', // the text is the action key
         'voice: Samantha',
         'rate: 180',

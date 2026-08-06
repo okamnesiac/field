@@ -1,6 +1,6 @@
 import { applyInsertChain } from '../audio/insert-chain.js';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import type { Insert, MixTarget, Track } from '../schema/index.js';
+import type { Insert, Mix, Track } from '../schema/index.js';
 import type { RuleImpl } from './types.js';
 
 // mix: sums track stems into the listenable artifact behind
@@ -17,7 +17,7 @@ export interface Fader {
 
 export interface MixSpec {
   name: string;
-  rule: 'mix';
+  type: 'mix';
   tracks: string[]; // wiring: track names, sorted; dep and fader order
   faders: Fader[]; // aligned with tracks
   gain_db: number; // master, applied before the master chain
@@ -39,23 +39,23 @@ export interface MixSpec {
 // clips). Track order is name-sorted for a canonical key — summing is
 // commutative, so declaration order must not matter.
 export function planMix(
-  target: MixTarget,
+  mix: Mix,
   mixableTracks: Track[],
   lengthSamples?: number,
   loop?: boolean,
 ): MixSpec {
   const byName = new Map(mixableTracks.map((t) => [t.name, t]));
-  const names = [...(target.tracks ?? byName.keys())].sort();
+  const names = [...(mix.tracks ?? byName.keys())].sort();
   return {
-    name: target.name,
-    rule: 'mix',
+    name: mix.name,
+    type: 'mix',
     tracks: names,
     faders: names.map((name) => {
       const track = byName.get(name)!;
       return { gain_db: track.gain_db, pan: track.pan };
     }),
-    gain_db: target.gain_db,
-    ...(target.master.length > 0 ? { master: target.master } : {}),
+    gain_db: mix.gain_db,
+    ...(mix.master.length > 0 ? { master: mix.master } : {}),
     ...(lengthSamples !== undefined ? { length_samples: lengthSamples } : {}),
     ...(loop === true && lengthSamples !== undefined ? { loop: true } : {}),
   };
@@ -74,14 +74,14 @@ export const mixRule: RuleImpl<MixSpec> = {
   version: 1,
   wiringFields: ['tracks'],
 
-  assetDeps() {
+  sources() {
     // Inputs are track stems, not assets; the graph wires those edges when
     // it synthesizes the spec (graph.ts).
     return [];
   },
 
   validate() {
-    // Declared mixes are validated on mix.yaml itself (model/project.ts):
+    // Declared mixes are validated on their own files (model/project.ts):
     // referenced tracks must exist and be mixable.
   },
 

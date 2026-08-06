@@ -3,15 +3,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { SayTarget } from '../schema/index.js';
+import type { SaySound } from '../schema/index.js';
 import type { RuleImpl } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
 // say: macOS text-to-speech as a build rule. Local and hermetic — no keys,
-// no network — so it belongs in the graph, unlike voice generation (an
-// ACE-style workflow on the other side of the determinism boundary).
-// Reproducibility is same-machine, like sc-render's: an OS or voice-data
+// no network — so it belongs in the graph, unlike voice generation (a
+// deliberate generate sound on the other side of the determinism
+// boundary). Reproducibility is same-machine, like supercollider's: an OS or voice-data
 // update may change the rendered bytes, and the action key deliberately
 // does not chase OS versions — the contract is recipe-reproducibility
 // (build-graph.md "Determinism policy").
@@ -43,11 +43,11 @@ async function listVoices(): Promise<Set<string>> {
   }
 }
 
-export const sayRule: RuleImpl<SayTarget> = {
+export const sayRule: RuleImpl<SaySound> = {
   version: 1,
   wiringFields: [],
 
-  assetDeps() {
+  sources() {
     return [];
   },
 
@@ -58,7 +58,7 @@ export const sayRule: RuleImpl<SayTarget> = {
     // this machine's voice inventory.
   },
 
-  async execute(target, _inputPaths, outputPath, ctx) {
+  async execute(sound, _inputPaths, outputPath, ctx) {
     // `say` never rejects a voice name — it silently renders with the
     // user's default voice, which is exactly the under-specified-recipe
     // failure a required `voice` exists to prevent. So the rule verifies
@@ -73,12 +73,12 @@ export const sayRule: RuleImpl<SayTarget> = {
     // follow a Settings toggle, not just OS updates; cached renders keep
     // pre-toggle bytes until the key changes); the alternative is the
     // best voices on the machine being unreachable by any recipe.
-    const siri = target.voice === 'Siri';
+    const siri = sound.voice === 'Siri';
     if (!siri) {
       const voices = await listVoices();
-      if (!voices.has(target.voice)) {
+      if (!voices.has(sound.voice)) {
         throw new Error(
-          `voice "${target.voice}" is not installed — say -v '?' lists voices ` +
+          `voice "${sound.voice}" is not installed — say -v '?' lists voices ` +
             `(names are exact; "Siri" selects the system voice)`,
         );
       }
@@ -89,13 +89,13 @@ export const sayRule: RuleImpl<SayTarget> = {
     try {
       const textPath = join(dir, 'text.txt');
       const aiffPath = join(dir, 'say.aiff');
-      writeFileSync(textPath, target.text);
+      writeFileSync(textPath, sound.text);
       try {
         await execFileAsync(
           'say',
           [
-            ...(siri ? [] : ['-v', target.voice]),
-            ...(target.rate !== undefined ? ['-r', String(target.rate)] : []),
+            ...(siri ? [] : ['-v', sound.voice]),
+            ...(sound.rate !== undefined ? ['-r', String(sound.rate)] : []),
             '-o',
             aiffPath,
             '-f',
@@ -104,7 +104,7 @@ export const sayRule: RuleImpl<SayTarget> = {
           { timeout: 120_000 },
         );
       } catch (err) {
-        throw formatSayError(err as ExecError, `say (voice "${target.voice}")`);
+        throw formatSayError(err as ExecError, `say (voice "${sound.voice}")`);
       }
       // say renders at the voice's native rate; the graph expects the
       // project rate and Bloom never resamples implicitly downstream, so

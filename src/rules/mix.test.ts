@@ -9,7 +9,7 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import type { RuleRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
-import { mixTargetSchema, trackSchema, type Track } from '../schema/index.js';
+import { mixSchema, trackSchema, type Track } from '../schema/index.js';
 import { balanceGains, mixRule, planMix } from './mix.js';
 
 // Fixture times are scalar ticks, so the parse output already satisfies
@@ -19,13 +19,13 @@ const mkTrack = (name: string, over: Record<string, unknown> = {}): Track =>
   trackSchema.parse({
     name,
     type: 'audio',
-    clips: [{ id: 'c', asset: 'a', position: 0, duration: 960 }],
+    clips: [{ id: 'c', source: 'a', position: 0, duration: 960 }],
     ...over,
   }) as Track;
 
 describe('planMix', () => {
   it('defaults to every mixable track, name-sorted, faders aligned', () => {
-    const spec = planMix(mixTargetSchema.parse({ name: 'main' }), [
+    const spec = planMix(mixSchema.parse({ name: 'main' }), [
       mkTrack('snare', { pan: 0.5 }),
       mkTrack('kick', { gain_db: -3 }),
     ]);
@@ -39,7 +39,7 @@ describe('planMix', () => {
 
   it('honors an explicit subset, still name-sorted', () => {
     const spec = planMix(
-      mixTargetSchema.parse({ name: 'drums', tracks: ['snare', 'kick'], gain_db: -1 }),
+      mixSchema.parse({ name: 'drums', tracks: ['snare', 'kick'], gain_db: -1 }),
       [mkTrack('kick'), mkTrack('snare'), mkTrack('pad')],
     );
     expect(spec.tracks).toEqual(['kick', 'snare']);
@@ -84,7 +84,7 @@ describe('mixRule.execute', () => {
     await mixRule.execute(
       {
         name: 'main',
-        rule: 'mix',
+        type: 'mix',
         tracks: stems.map((_, i) => `t${i}`),
         faders,
         gain_db,
@@ -168,7 +168,7 @@ describe('mix targets in the build graph', () => {
       ...extra,
       'clips:',
       `  - id: ${name}-1`,
-      `    asset: ${asset}`,
+      `    source: ${asset}`,
       '    anchor: absolute',
       `    position: ${at}`,
       '    duration: 2',

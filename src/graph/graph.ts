@@ -18,9 +18,11 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention
 // (project-core.md §3.4). Node kinds so far: source assets (song and
-// shared ledgers), declared rule targets (targets/), and implicit track
-// stems — every audio track with clips is buildable as
-// //songs/<song>/tracks:<name> (mix-assembly.md §3).
+// shared ledgers), defined sounds (sounds/), and implicit track stems —
+// every audio track with clips is buildable as
+// //songs/<song>/tracks:<name> (mix-assembly.md §3). "Node" and "rule"
+// are deliberately the engine's words (project-layout.md §4): the
+// format speaks sounds and types, and this module realizes them.
 
 export interface AssetNode {
   kind: 'asset';
@@ -40,11 +42,12 @@ export interface RuleNode {
   deps: Label[];
 }
 
-// A deliberate target's variant (project-layout.md §1.4): committed,
-// content-addressed audio like an asset, addressable as
-// //songs/<song>/targets:<name>-<n> so `bloom play` can audition it — but
-// not referenceable by clips or rules. Promotion via `bloom choose` is
-// what turns a variant into an asset.
+// A deliberate sound's committed audio (project-layout.md §1.4):
+// content-addressed like an asset. The sound's own label
+// (//songs/<song>/sounds:<name>) resolves to its *chosen* variant — that
+// node is what clips and rules consume — while every variant is
+// additionally auditionable as :<name>-<n>. `bloom choose` repoints
+// which variant the sound's label means; nothing is ever re-run.
 export interface GenerationNode {
   kind: 'generation';
   label: Label;
@@ -64,27 +67,18 @@ export interface Graph {
 export function buildGraph(project: LoadedProject): Graph {
   const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const nodes = new Map<string, GraphNode>();
-  // An asset ref is a bare name (the song's own ledger) or a
-  // //shared/assets:<name> label — the ref string itself is the key
-  // everywhere a spec carries one, so both spellings resolve here.
-  const refLabel = (ref: string, songDir: string): Label => {
-    const shared = sharedAssetName(ref);
-    return shared !== undefined
-      ? { pkg: SHARED_ASSETS_PKG, name: shared }
-      : { pkg: `${songDir}/assets`, name: ref };
-  };
-  const addRule = (label: Label, songDir: string, spec: RuleSpec) => {
-    // Each rule declares which assets and same-song targets it consumes;
-    // those are the graph edges, in that order — matching the input order
-    // every impl expects. Other inputs (like sc programs) participate by
-    // content hash without being nodes.
+  const addRule = (
+    label: Label,
+    songDir: string,
+    spec: RuleSpec,
+    refLabel: (ref: string) => Label,
+  ) => {
+    // Each rule declares its ordered sources; the classifier maps each
+    // ref — a name in the song's one namespace or a //shared/assets:
+    // label — onto the node it means. Other inputs (like sc programs)
+    // participate by content hash without being nodes.
     const impl = ruleImpl(spec);
-    const deps: Label[] = [
-      ...impl.assetDeps(spec).map((ref) => refLabel(ref, songDir)),
-      ...(impl.targetDeps?.(spec) ?? []).map(
-        (name): Label => ({ pkg: `${songDir}/targets`, name }),
-      ),
-    ];
+    const deps: Label[] = impl.sources(spec).map(refLabel);
     nodes.set(formatLabel(label), { kind: 'rule', label, songDir, spec, deps });
   };
 
@@ -99,27 +93,49 @@ export function buildGraph(project: LoadedProject): Graph {
 
   for (const song of project.songs) {
     const pkgBase = song.dir;
-    // Keyed by ref string — bare names for the song's ledger, full
-    // //shared/assets: labels for shared pins — matching what clips carry.
-    const sha256ByAsset = new Map<string, string>();
+    // Keyed by ref string — bare names in the song's namespace, full
+    // //shared/assets: labels for shared pins — matching what clips and
+    // sounds carry. Chosen generate variants are committed content, so
+    // they join the map; a ref absent here is a buildable sound.
+    const sha256BySource = new Map<string, string>();
+    const assetNames = new Set<string>();
     for (const [name, asset] of sharedByName) {
-      sha256ByAsset.set(`//${SHARED_ASSETS_PKG}:${name}`, asset.sha256);
+      sha256BySource.set(`//${SHARED_ASSETS_PKG}:${name}`, asset.sha256);
     }
     if (song.assets) {
       for (const asset of song.assets.data.assets) {
         const label: Label = { pkg: `${pkgBase}/assets`, name: asset.name };
         nodes.set(formatLabel(label), { kind: 'asset', label, scopeDir: song.dir, asset });
-        sha256ByAsset.set(asset.name, asset.sha256);
+        sha256BySource.set(asset.name, asset.sha256);
+        assetNames.add(asset.name);
       }
     }
-    for (const file of song.targets) {
-      const target = file.data;
-      if (target.rule === 'generate') {
-        // A deliberate target contributes audition nodes for its committed
-        // variants, never a rule node — nothing may re-run it
-        // (project-layout.md §1.2/§1.4).
-        target.variants.forEach((variant, i) => {
-          const label: Label = { pkg: `${pkgBase}/targets`, name: `${target.name}-${i + 1}` };
+    // Where a committed source's bytes live, for loop tiling and for
+    // materializing generation inputs.
+    const fileBySource = new Map<string, { base: string; file: string }>();
+    for (const [name, asset] of sharedByName) {
+      fileBySource.set(`//${SHARED_ASSETS_PKG}:${name}`, { base: 'shared', file: asset.file });
+    }
+    if (song.assets) {
+      for (const asset of song.assets.data.assets) {
+        fileBySource.set(asset.name, { base: song.dir, file: asset.file });
+      }
+    }
+    const refLabel = (ref: string): Label => {
+      const shared = sharedAssetName(ref);
+      if (shared !== undefined) return { pkg: SHARED_ASSETS_PKG, name: shared };
+      if (assetNames.has(ref)) return { pkg: `${pkgBase}/assets`, name: ref };
+      return { pkg: `${pkgBase}/sounds`, name: ref };
+    };
+    for (const file of song.sounds) {
+      const sound = file.data;
+      if (sound.type === 'generate') {
+        // A deliberate sound contributes committed-content nodes, never a
+        // rule node — nothing may re-run it (project-layout.md §1.2/§1.4).
+        // Its own label resolves to the chosen variant; every variant is
+        // auditionable by number.
+        sound.variants.forEach((variant, i) => {
+          const label: Label = { pkg: `${pkgBase}/sounds`, name: `${sound.name}-${i + 1}` };
           nodes.set(formatLabel(label), {
             kind: 'generation',
             label,
@@ -128,8 +144,21 @@ export function buildGraph(project: LoadedProject): Graph {
             sha256: variant.sha256,
           });
         });
+        if (sound.chosen !== undefined) {
+          const variant = sound.variants[sound.chosen - 1]!;
+          const label: Label = { pkg: `${pkgBase}/sounds`, name: sound.name };
+          nodes.set(formatLabel(label), {
+            kind: 'generation',
+            label,
+            songDir: song.dir,
+            file: variant.file,
+            sha256: variant.sha256,
+          });
+          sha256BySource.set(sound.name, variant.sha256);
+          fileBySource.set(sound.name, { base: song.dir, file: variant.file });
+        }
       } else {
-        addRule({ pkg: `${pkgBase}/targets`, name: target.name }, song.dir, target);
+        addRule({ pkg: `${pkgBase}/sounds`, name: sound.name }, song.dir, sound, refLabel);
       }
     }
     const mixable = song.tracks
@@ -138,34 +167,29 @@ export function buildGraph(project: LoadedProject): Graph {
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
       // Loops without `every` tile at the source's length, so the plan
-      // needs frame counts — but only for the assets such loops touch.
-      const sourcePath = (ref: string): string | undefined => {
-        const shared = sharedAssetName(ref);
-        const file =
-          shared !== undefined
-            ? sharedByName.get(shared)?.file
-            : song.assets?.data.assets.find((a) => a.name === ref)?.file;
-        if (file === undefined) return undefined;
-        return join(project.root, shared !== undefined ? 'shared' : song.dir, file);
-      };
-      const framesByAsset = new Map<string, number>();
+      // needs frame counts — but only for the sources such loops touch.
+      const framesBySource = new Map<string, number>();
       for (const track of mixable) {
         for (const clip of track.clips) {
-          if (clip.loop?.enabled && clip.loop.every === undefined && clip.asset) {
-            const path = sourcePath(clip.asset);
-            if (path !== undefined && !framesByAsset.has(clip.asset)) {
-              framesByAsset.set(clip.asset, wavFrameCount(path));
+          if (clip.loop?.enabled && clip.loop.every === undefined) {
+            const committed = fileBySource.get(clip.source);
+            if (committed !== undefined && !framesBySource.has(clip.source)) {
+              framesBySource.set(
+                clip.source,
+                wavFrameCount(join(project.root, committed.base, committed.file)),
+              );
             }
           }
         }
       }
       for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
-        // useful artifact — implicit targets exist where there is content.
+        // useful artifact — implicit stems exist where there is content.
         addRule(
           { pkg: `${pkgBase}/tracks`, name: track.name },
           song.dir,
-          planTrack(track, tempoMap, sha256ByAsset, framesByAsset),
+          planTrack(track, tempoMap, sha256BySource, framesBySource),
+          refLabel,
         );
       }
       // A declared song length projects to samples here, where the tempo

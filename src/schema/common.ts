@@ -15,17 +15,18 @@ export const labelName = slug.refine((n) => n !== RESERVED_TARGET_NAME, {
   message: `"${RESERVED_TARGET_NAME}" is reserved by the label grammar`,
 });
 
-// An asset reference: a bare name resolves in the referencing song's own
-// ledger; the full //shared/assets:<name> label crosses into the shared
-// scope — the only cross-scope reference there is (project-layout.md
-// §1.5: where a file lives declares who may see it, and a clip sees
-// exactly its own song plus shared/). Existence checks live in the model
-// layer; the schema admits exactly the two spellings.
-export const assetRef = z
+// A source reference (project-layout.md §4.3): a bare slug resolves in
+// the song's one namespace (assets and sounds together — names are
+// identity, project-core.md §6), and the full //shared/assets:<name>
+// label crosses into the shared scope — the only cross-scope reference
+// there is (§1.5: where a file lives declares who may see it, and a
+// song sees exactly itself plus shared/). Existence checks live in the
+// model layer; the schema admits exactly the two spellings.
+export const sourceRef = z
   .string()
   .refine(
     (ref) => SLUG_PATTERN.test(sharedAssetName(ref) ?? ref),
-    'must be an asset name or //shared/assets:<name>',
+    'must be a name in the song or //shared/assets:<name>',
   );
 
 export const ticks = z.number().int().min(0);

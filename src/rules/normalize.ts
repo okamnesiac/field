@@ -1,31 +1,27 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { NormalizeTarget } from '../schema/index.js';
-import {
-  singleInputAssetDeps,
-  singleInputTargetDeps,
-  validateSingleInput,
-} from './single-input.js';
+import type { NormalizeSound } from '../schema/index.js';
+import { singleInputSources, validateSingleInput } from './single-input.js';
 import type { RuleImpl } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-// normalize: sample-rate/bit-depth conversion of one asset or target via
-// macOS afconvert (project-core.md §5). Accepting targets is what makes
-// "add a normalize target" a complete fix for rate-mismatched renders.
-export const normalizeRule: RuleImpl<NormalizeTarget> = {
+// normalize: sample-rate/bit-depth conversion of one source via macOS
+// afconvert (project-core.md §5). Accepting sounds as sources is what
+// makes "add a normalize sound" a complete fix for rate-mismatched
+// renders.
+export const normalizeRule: RuleImpl<NormalizeSound> = {
   version: 1,
-  wiringFields: ['asset', 'target'],
-  assetDeps: singleInputAssetDeps,
-  targetDeps: singleInputTargetDeps,
+  wiringFields: ['source'],
+  sources: singleInputSources,
   validate: validateSingleInput,
 
-  async execute(target, inputPaths, outputPath) {
+  async execute(sound, inputPaths, outputPath) {
     await execFileAsync('afconvert', [
       '-f',
       'WAVE',
       '-d',
-      `LEI${target.bit_depth}@${target.sample_rate}`,
+      `LEI${sound.bit_depth}@${sound.sample_rate}`,
       inputPaths[0]!,
       outputPath,
     ]);

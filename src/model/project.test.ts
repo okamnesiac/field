@@ -220,14 +220,14 @@ describe('check', () => {
         'type: audio',
         'clips:',
         '  - id: intro-vox-abc12',
-        '    asset: nonexistent',
+        '    source: nonexistent',
         '    position: 0',
         '    duration: 960',
         '',
       ].join('\n'),
     );
     const result = await check(root);
-    expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown asset');
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown source');
   });
 
   it('diagnoses loop sources exhausted by their read offset — check, not a graph crash', async () => {
@@ -244,7 +244,7 @@ describe('check', () => {
         'type: audio',
         'clips:',
         '  - id: loop-vox-abc12',
-        '    asset: hit',
+        '    source: hit',
         '    position: 0',
         '    duration: 3840',
         '    loop:',
@@ -272,7 +272,7 @@ describe('check', () => {
         'type: audio',
         'clips:',
         '  - id: loop-vox-abc12',
-        '    asset: hit',
+        '    source: hit',
         '    position: 0',
         '    duration: 960',
         '    loop:',
@@ -286,13 +286,13 @@ describe('check', () => {
 
   it('flags loops over targets without loop.every', async () => {
     createSong(root, 'opener');
-    mkdirSync(join(root, 'songs/opener/targets'), { recursive: true });
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/targets/pad.yaml'),
+      join(root, 'songs/opener/sounds/pad.yaml'),
       [
         'name: pad',
-        'rule: sc-render',
-        'program: sc/pad.scd',
+        'type: supercollider',
+        'source: sc/pad.scd',
         'seed: 1',
         'duration: 2',
         '',
@@ -305,7 +305,7 @@ describe('check', () => {
         'type: audio',
         'clips:',
         '  - id: loop-pad-abc12',
-        '    target: pad',
+        '    source: pad',
         '    position: 0',
         '    duration: 3840',
         '    loop:',
@@ -479,7 +479,7 @@ describe('musical time (musical-time.md)', () => {
         'type: audio',
         'clips:',
         '  - id: keys-1',
-        '    asset: hit',
+        '    source: hit',
         '    position: [2]',
         '    duration: [4]',
         '    loop:',
@@ -533,7 +533,7 @@ describe('musical time (musical-time.md)', () => {
           'type: audio',
           'clips:',
           '  - id: keys-1',
-          '    asset: hit',
+          '    source: hit',
           `    position: ${BAR}`,
           `    duration: ${BAR * 4}`,
           '    loop:',
@@ -578,7 +578,7 @@ describe('musical time (musical-time.md)', () => {
         'type: audio',
         'clips:',
         '  - id: keys-1',
-        '    asset: hit',
+        '    source: hit',
         '    position: [2, 5]',
         '    duration: [4]',
         '',
@@ -600,7 +600,7 @@ describe('musical time (musical-time.md)', () => {
         'type: audio',
         'clips:',
         '  - id: keys-1',
-        '    asset: hit',
+        '    source: hit',
         '    anchor: absolute',
         '    position: [2]',
         '    duration: 960',
@@ -621,7 +621,7 @@ describe('musical time (musical-time.md)', () => {
         'type: audio',
         'clips:',
         '  - id: keys-1',
-        '    asset: hit',
+        '    source: hit',
         '    position: [2]',
         '    duration: [0]',
         '',

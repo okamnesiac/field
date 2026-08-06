@@ -14,7 +14,7 @@ import type { RuleImpl } from './types.js';
 // and start at timeline sample 0 so the mix can sum by alignment alone.
 
 export interface PlacedClip {
-  input: number; // index into spec.assets
+  input: number; // index into spec.sources
   start: number; // stem sample where the clip window begins
   duration: number; // window length in samples
   // Sample of the asset playing at the window start (source_offset − slip,
@@ -28,13 +28,14 @@ export interface PlacedClip {
 
 export interface TrackRenderSpec {
   name: string;
-  rule: 'track-render';
-  // Wiring: clips index into the concatenation [assets..., targets...],
-  // matching the graph's dep order. Assets sort by content hash (renames
-  // cannot reach the key); targets sort by name — their content hashes
-  // don't exist until they build, and a target rename is a real relabel.
-  assets: string[];
-  targets: string[];
+  type: 'track-render';
+  // Wiring: clips index into this source list, matching the graph's dep
+  // order. Committed-content sources (assets, shared pins, chosen
+  // generate sounds — anything whose hash is known before building) sort
+  // by content hash, so renames cannot reach the key; buildable sounds
+  // sort by name — their content hashes don't exist until they build,
+  // and a sound rename is a real relabel.
+  sources: string[];
   clips: PlacedClip[];
   // Inserts bake into the stem (effects.md §5): parameters here mean an
   // insert edit re-renders it. Omitted entirely when the track has none,
@@ -120,30 +121,31 @@ export function expandLoop(
 export function planTrack(
   track: Track,
   tempoMap: TempoMap,
-  sha256ByAsset: Map<string, string>,
-  framesByAsset: Map<string, number> = new Map(),
+  // Content hashes for committed sources, keyed by the exact ref string
+  // clips carry (bare name or //shared/assets: label); a ref absent here
+  // is a buildable sound. Wiring order is content-hash order for the
+  // committed ones (name tiebreak for determinism), so renaming cannot
+  // permute the input list or the clip indices — names never reach the
+  // action key at all (#9 review) — and name order for buildable sounds.
+  sha256BySource: Map<string, string>,
+  framesBySource: Map<string, number> = new Map(),
 ): TrackRenderSpec {
-  // Asset wiring order is content-hash order (name tiebreak for
-  // determinism), so renaming an asset cannot permute the input list or
-  // the clip indices — names never reach the action key at all (#9 review).
-  const assets = [...new Set(track.clips.flatMap((c) => (c.asset ? [c.asset] : [])))].sort(
-    (a, b) => {
-      const ha = sha256ByAsset.get(a) ?? '';
-      const hb = sha256ByAsset.get(b) ?? '';
+  const refs = [...new Set(track.clips.map((c) => c.source))];
+  const committed = refs
+    .filter((r) => sha256BySource.has(r))
+    .sort((a, b) => {
+      const ha = sha256BySource.get(a)!;
+      const hb = sha256BySource.get(b)!;
       return ha < hb ? -1 : ha > hb ? 1 : a < b ? -1 : 1;
-    },
-  );
-  const targets = [...new Set(track.clips.flatMap((c) => (c.target ? [c.target] : [])))].sort();
-  const inputIndex = new Map<string, number>([
-    ...assets.map((name, i): [string, number] => [`asset:${name}`, i]),
-    ...targets.map((name, i): [string, number] => [`target:${name}`, assets.length + i]),
-  ]);
+    });
+  const buildable = refs.filter((r) => !sha256BySource.has(r)).sort();
+  const sources = [...committed, ...buildable];
+  const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
   const clips = track.clips.flatMap((clip): PlacedClip[] => {
-    const source = clip.asset ? `asset:${clip.asset}` : `target:${clip.target}`;
-    const input = inputIndex.get(source)!;
+    const input = inputIndex.get(clip.source)!;
     const loop = clip.loop?.enabled ? clip.loop : undefined;
     if (loop) {
-      const frames = clip.asset ? framesByAsset.get(clip.asset) : undefined;
+      const frames = framesBySource.get(clip.source);
       return expandLoop(clip, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
     }
     const { start, duration } = placedWindow(clip, tempoMap);
@@ -173,9 +175,8 @@ export function planTrack(
   );
   return {
     name: track.name,
-    rule: 'track-render',
-    assets,
-    targets,
+    type: 'track-render',
+    sources,
     clips,
     ...(track.inserts.length > 0 ? { inserts: track.inserts } : {}),
   };
@@ -183,16 +184,12 @@ export function planTrack(
 
 export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
   version: 1,
-  wiringFields: ['assets', 'targets'],
+  wiringFields: ['sources'],
 
-  assetDeps(spec) {
-    return spec.assets;
-  },
-
-  targetDeps(spec) {
-    // Clip-source targets: a clip on an SC render pulls the whole recipe
-    // into the stem's subgraph (mix-assembly.md §5).
-    return spec.targets;
+  sources(spec) {
+    // Clip sources: a clip on a buildable sound pulls its whole
+    // definition into the stem's subgraph (mix-assembly.md §5).
+    return spec.sources;
   },
 
   validate() {
@@ -201,7 +198,7 @@ export const trackRenderRule: RuleImpl<TrackRenderSpec> = {
   },
 
   async execute(spec, inputPaths, outputPath, ctx) {
-    const sources = [...spec.assets, ...spec.targets].map((name, i) => {
+    const sources = spec.sources.map((name, i) => {
       const wav = readWav(inputPaths[i]!);
       if (wav.sampleRate !== ctx.sampleRate) {
         throw new Error(
