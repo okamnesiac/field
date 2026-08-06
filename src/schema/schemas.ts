@@ -270,9 +270,30 @@ export const scRenderTargetSchema = z.strictObject({
 });
 export type ScRenderTarget = z.infer<typeof scRenderTargetSchema>;
 
+// say: macOS text-to-speech as a build rule — the deterministic, keyless
+// side of the voice boundary (voice *generation* is an ACE-style workflow
+// with committed outputs; this is a recipe like sc-render). text/voice/
+// rate are the whole action key; output is cached, never committed.
+// `voice` is required because the system default voice is a per-user
+// setting — a recipe that renders differently on two Macs under the same
+// key would lie. The one recorded exception: `voice: Siri` selects the
+// machine's Spoken Content voice (Siri voices are hidden from say -v
+// entirely, so the system default is the only way to reach them) — the
+// caveat that the bytes follow a Settings toggle is accepted
+// deliberately (rules/say.ts).
+export const sayTargetSchema = z.strictObject({
+  name: labelName,
+  rule: z.literal('say'),
+  text: z.string().min(1),
+  voice: z.string().min(1),
+  rate: z.number().int().min(60).max(720).optional(), // words per minute
+});
+export type SayTarget = z.infer<typeof sayTargetSchema>;
+
 export const targetSchema = z.discriminatedUnion('rule', [
   normalizeTargetSchema,
   scRenderTargetSchema,
+  sayTargetSchema,
   eqTargetSchema,
   limitTargetSchema,
   reverbTargetSchema,
@@ -297,6 +318,9 @@ export const targetsFileOrder: KeyOrder = {
           'seed',
           'duration',
           'channels',
+          'text',
+          'voice',
+          'rate',
           'sample_rate',
           'bit_depth',
           'bands',

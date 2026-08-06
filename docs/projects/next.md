@@ -5,11 +5,6 @@ Coming up, not started, in rough order. One line each, linking a plan in
 begins, or down to [later](later.md) if it turns out bigger than expected. See
 [README](README.md) for how these lists work.
 
-- **`say` as a build rule** — macOS `say` becomes a rule like `sc-render`:
-  text/voice/rate in the spec, hashed into the action key, output cached
-  never committed. Local and hermetic, so it belongs in the graph; creek's
-  committed scratch vocal becomes a recipe. Same-machine reproducibility
-  caveat (voice/OS drift) recorded like sc's.
 - **Voice generation** — the other side of the determinism boundary from
   the `say` rule (kept separate by design): a generation workflow like
   ACE — committed outputs, recipe provenance, variants/choose. Local-first
