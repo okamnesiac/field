@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -86,6 +86,28 @@ describe('build', () => {
     writeSound('pad-normalized', normalizeYaml(44100));
     await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
     expect(state.runs).toBe(2); // key changed, rule re-ran
+  });
+
+  it('committed outcomes name their file path (#35 review)', async () => {
+    const { runner } = countingRunner();
+    const outcomes = await buildLabels(root, ['//songs/creek/assets:pad'], runner);
+    // Every outcome names a playable path — watch hands any label's fresh
+    // artifact to the daemon, including committed content.
+    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad.wav')).toBe(true);
+  });
+
+  it('materializes by rename, never in place (watch.md §1.6)', async () => {
+    const { runner } = countingRunner();
+    const first = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const out = first.find((o) => o.label.endsWith(':pad-normalized'))!.outputPath!;
+    const before = statSync(out).ino;
+
+    // Under watch the daemon streams the previous artifact from this very
+    // path; a rebuild must land on a fresh inode so an open reader keeps
+    // its bytes — an in-place copy would truncate under it.
+    writeSound('pad-normalized', normalizeYaml(44100));
+    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    expect(statSync(out).ino).not.toBe(before);
   });
 
   it('expands wildcards, including the everything pattern', async () => {

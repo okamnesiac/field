@@ -65,7 +65,12 @@ describe('withClick', () => {
   it('overlays clicks on beats and leaves the space between silent', () => {
     const src = join(root, 'silent.wav');
     writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
-    const clicked = withClick(root, ctx44, { label: '//songs/x/mix:main', pkg: 'songs/x/mix', path: src });
+    const clicked = withClick(root, ctx44, {
+      label: '//songs/x/mix:main',
+      pkg: 'songs/x/mix',
+      path: src,
+      sha256: 'deadbeef'.repeat(8), // withClick carries it through untouched
+    });
 
     const wav = readWav(clicked.path);
     expect(wav.channels[0]).toHaveLength(48000); // length untouched

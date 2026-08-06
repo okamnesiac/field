@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BuildOutcome, GeneratorRunner } from '../graph/build.js';
+import { sha256Text } from '../hash.js';
 import { createSong } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
-import { watchBuild } from './watch.js';
+import { watchBuild, type WatchOptions } from './watch.js';
 
 // The watch loop against a real project and real FS events (FSEvents via
 // fs.watch — macOS is the charter): baseline build, hash-moved reporting,
@@ -53,19 +54,19 @@ const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
 type Recorded =
   | { kind: 'outcomes'; outcomes: BuildOutcome[]; changed: BuildOutcome[] }
   | { kind: 'diagnostics'; lines: string[] }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; phase: string };
 
-function startWatch(patterns: string[]) {
+function startWatch(patterns: string[], extra: Partial<WatchOptions> = {}) {
   const events: Recorded[] = [];
   const abort = new AbortController();
   const done = watchBuild(
     root,
     patterns,
-    { debounceMs: 50, signal: abort.signal, runner },
+    { debounceMs: 50, signal: abort.signal, runner, ...extra },
     {
       onOutcomes: (outcomes, changed) => events.push({ kind: 'outcomes', outcomes, changed }),
       onDiagnostics: (lines) => events.push({ kind: 'diagnostics', lines }),
-      onError: (err) => events.push({ kind: 'error', message: err.message }),
+      onError: (err, phase) => events.push({ kind: 'error', message: err.message, phase }),
     },
   );
   return { events, abort, done };
@@ -173,6 +174,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     const crashed = await until(() => events.find((e) => e.kind === 'error'));
     if (crashed.kind !== 'error') return;
     expect(crashed.message).toBeTruthy();
+    expect(crashed.phase).toBe('load'); // the report never blames the build
 
     // Removing the wreckage plus a real edit: the same session recovers
     // and reports against the last good baseline.
@@ -186,6 +188,104 @@ describe('watchBuild', { timeout: 20_000 }, () => {
 
     abort.abort();
     await done;
+  });
+
+  it('a chosen-variant repoint reports with the committed path (#35 P2)', async () => {
+    // A hand-authored generative sound: two committed variants, chosen: 1.
+    const writeGenerative = (chosen: number): void => {
+      const songDir = join(root, 'songs/creek');
+      mkdirSync(join(songDir, 'audio/gen1'), { recursive: true });
+      const variants = ['variant one bytes', 'variant two bytes'].map((content, i) => {
+        writeFileSync(join(songDir, `audio/gen1/${i + 1}.wav`), content);
+        return { file: `audio/gen1/${i + 1}.wav`, sha256: sha256Text(content) };
+      });
+      writeSound(
+        'gen1',
+        [
+          'name: gen1',
+          'type: generative',
+          'model: acestep-v15-turbo',
+          'prompt: test keys',
+          'duration_seconds: 10',
+          'seed: 7',
+          `chosen: ${chosen}`,
+          'variants:',
+          ...variants.flatMap((v, i) => [
+            `  - file: ${v.file}`,
+            `    seed: ${7 + i}`,
+            `    sha256: ${v.sha256}`,
+          ]),
+          "generated_at: '2026-08-06T00:00:00.000Z'",
+          '',
+        ].join('\n'),
+      );
+    };
+    writeGenerative(1);
+    const { events, abort, done } = startWatch(['//songs/creek/sounds:gen1']);
+    const first = await until(() => events.find((e) => e.kind === 'outcomes'));
+    if (first.kind !== 'outcomes') return;
+    const base = first.outcomes.find((o) => o.label === '//songs/creek/sounds:gen1')!;
+    expect(base.outputPath!.endsWith('audio/gen1/1.wav')).toBe(true);
+
+    // bloom choose is exactly this YAML edit (watch.md §1.5): the label's
+    // hash moves and the report carries the newly chosen committed file —
+    // the path play --watch hands the daemon.
+    writeGenerative(2);
+    const moved = await until(() =>
+      events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
+    );
+    if (moved.kind !== 'outcomes') return;
+    const repointed = moved.changed.find((o) => o.label === '//songs/creek/sounds:gen1')!;
+    expect(repointed.outputPath!.endsWith('audio/gen1/2.wav')).toBe(true);
+    expect(repointed.sha256).toBe(sha256Text('variant two bytes'));
+
+    abort.abort();
+    await done;
+  });
+
+  it('a seeded baseline reports drift on the first build (#35 review)', async () => {
+    // play --watch seeds what the daemon started looping; a stale seed
+    // (an edit landing before the watcher's first pass) must be reported,
+    // not silently absorbed as the baseline.
+    const { events, abort, done } = startWatch(
+      ['//songs/creek/sounds:pad-normalized'],
+      { baseline: new Map([['//songs/creek/sounds:pad-normalized', 'deadbeef'.repeat(8)]]) },
+    );
+    const first = await until(() => events.find((e) => e.kind === 'outcomes'));
+    if (first.kind !== 'outcomes') return;
+    expect(first.changed.map((o) => o.label)).toEqual(['//songs/creek/sounds:pad-normalized']);
+    abort.abort();
+    await done;
+  });
+
+  it('an abort landing mid-build suppresses the report (#35 review)', async () => {
+    const events: Recorded[] = [];
+    const abort = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let executions = 0;
+    const stallingRunner: GeneratorRunner = async (node, _inputs, outputPath) => {
+      executions++;
+      if (executions > 1) await gate; // stall only the rebuild
+      writeFileSync(outputPath, JSON.stringify({ spec: node.spec }));
+    };
+    const done = watchBuild(
+      root,
+      ['//songs/creek/sounds:pad-normalized'],
+      { debounceMs: 50, signal: abort.signal, runner: stallingRunner },
+      { onOutcomes: (outcomes, changed) => events.push({ kind: 'outcomes', outcomes, changed }) },
+    );
+    await until(() => events.find((e) => e.kind === 'outcomes'));
+
+    // Edit, then ctrl-c inside the render — an ordinary way to quit. The
+    // stalled build completes after the abort and must report nothing.
+    writeSound('pad-normalized', normalizeYaml(44100));
+    await until(() => (executions >= 2 ? true : undefined));
+    abort.abort();
+    release();
+    await done;
+    await new Promise((r) => setTimeout(r, 150)); // a wrong report would land here
+    expect(events.filter((e) => e.kind === 'outcomes')).toHaveLength(1); // baseline only
   });
 
   it('an aborted session resolves', async () => {

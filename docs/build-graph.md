@@ -37,6 +37,22 @@ unfrozen automatically. A bounce is a cached output given a name.
 Outputs are stored under their content hash, so a rebuild never
 overwrites an old render — it produces a new artifact and moves a pointer.
 
+### Watch mode
+
+The cache is what makes watching cheap
+([watch.md](projects/all/watch.md)): `bloom build --watch <label>`
+rebuilds on every settled change and answers "did anything audible
+change" as an output-hash question — a fader move re-runs one sum, a
+comment edit or `bloom fmt` pass is all cache hits and reports silence.
+`check` gates every rebuild, so a red project (a half-saved file
+mid-edit — the common case) keeps its last good outputs and retries on
+the next change. `bloom play <song> --loop --watch` composes the same
+loop with playback: when the playing label's hash moves, the daemon
+finishes the current pass and the next wrap starts the new file. Watch
+runs `build`, and build never generates a generative sound — but a
+`chosen:` repoint is just a YAML edit, so `bloom choose` against a
+running watch is live variant A/B-ing inside the loop.
+
 ## Render strategies
 
 How a node's output can be produced is a declared, per-node property:
