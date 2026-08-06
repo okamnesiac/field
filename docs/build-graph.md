@@ -15,6 +15,13 @@ bloom explain //songs/opener/mix:main
 Labels address songs and shared material alike: a mix in one song can depend
 on `//shared/instruments:dark-pad` exactly as it depends on its own tracks.
 
+The absolute form is canonical, but the CLI accepts songs-relative shorthand
+for all of the above — `bloom build opener/mix:main`, `bloom explain
+opener/...` — and a bare song name plays its main mix: `bloom play opener`
+(project-core.md §3.4; `main` is a convention, and a song that names its
+mixes otherwise gets a no-such-target error). `//shared/...` material, when
+it exists, uses the full form.
+
 ## Caching, and freezing is caching
 
 The cache key for a node's output is the hash of its inputs: input asset
