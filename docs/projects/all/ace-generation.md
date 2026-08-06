@@ -1,9 +1,10 @@
 # Plan: ACE generation
 
-**Status:** In progress (started 2026-08-05). Follows the effects phase
-([effects.md](effects.md), inserted ahead of it); first use of the Python
-model-runner layer. ACE-Step is not yet installed on the development
-machine — setup is part of the phase.
+**Status:** Complete (2026-08-05, #17 + #18). Both chunks shipped; field
+demonstrates the full loop — generate, audition variants in the mix,
+`choose`, clip the promoted asset into creek. The goal's further verbs
+(`extend`, `repaint`, …) are future phases, not this plan. §5 has the
+open follow-ups.
 
 **Goal:** `bloom ace generate` (then `extend`, `repaint`, `variants`, …):
 committed generation recipes produce audio assets through ACE-Step running in
