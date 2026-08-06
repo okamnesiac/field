@@ -252,14 +252,15 @@ program
   .description('build targets if needed, then audition them in order (ctrl-c stops)')
   .option('--from <position>', 'start at bar[.beat[.tick]] (single target only)')
   .option('--device <name>', 'output device (bloom devices lists them)')
-  .action(async (patterns: string[], opts: { from?: string; device?: string }) => {
+  .option('--loop', 'replay the queue until ctrl-c')
+  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean }) => {
     try {
       const root = requireRoot();
       const items = await resolvePlayables(root, patterns);
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
-        if (opts.from !== undefined || opts.device !== undefined) {
-          throw new Error('--from and --device need bloom-audiod (pnpm build:native)');
+        if (opts.from !== undefined || opts.device !== undefined || opts.loop === true) {
+          throw new Error('--from, --device, and --loop need bloom-audiod (pnpm build:native)');
         }
         process.stderr.write('bloom-audiod is not built; using afplay (pnpm build:native)\n');
         await playWithAfplay(items);

@@ -73,6 +73,23 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(positions[0]).toMatch(/^\d+\.\d+\.\d+ \(/); // musical time, derived CLI-side
   });
 
+  it('--loop replays the queue until interrupted', async () => {
+    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']);
+
+    // Without --loop this plays once; with it, the queue restarts until
+    // the interrupt hook says stop — here, after the third pass begins.
+    const played: string[] = [];
+    let interrupted = false;
+    await playThroughDaemon(root, project, items, { loop: true }, {
+      onItem: (label) => {
+        played.push(label);
+        if (played.length === 3) interrupted = true;
+      },
+      interrupted: () => interrupted,
+    });
+    expect(played).toEqual([items[0]!.label, items[0]!.label, items[0]!.label]);
+  });
+
   it('--from projects musical time to a locate before playing', async () => {
     await importTone('tone', 36000); // 0.75 s
     const items = await resolvePlayables(root, ['//songs/creek/assets:tone']);

@@ -62,6 +62,7 @@ export async function resolvePlayables(
 export interface PlayOptions {
   from?: string | undefined; // bar[.beat[.tick]], musical time — CLI-side only
   device?: string | undefined;
+  loop?: boolean | undefined; // replay the queue until interrupted
 }
 
 export interface PlayHooks {
@@ -92,38 +93,44 @@ export async function playThroughDaemon(
     if (options.device !== undefined) await client.selectDevice(options.device);
     const sampleRate = project.manifest?.data.sample_rate ?? 48000;
 
-    for (const item of items) {
-      if (hooks.interrupted?.()) break;
-      await client.load(item.path);
-      const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
-      if (options.from !== undefined) {
-        if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
-        await client.locate(parseMusicalPosition(options.from, ctx));
-      }
+    // --loop replays the whole queue until ctrl-c; --from re-applies each
+    // pass, so looping a region audition repeats the region. Each pass
+    // reloads the artifact — a short gap; gapless looping is the daemon's
+    // to offer if the gap ever matters.
+    do {
+      for (const item of items) {
+        if (hooks.interrupted?.()) break;
+        await client.load(item.path);
+        const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
+        if (options.from !== undefined) {
+          if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
+          await client.locate(parseMusicalPosition(options.from, ctx));
+        }
 
-      const status = await client.status();
-      const note = status.device
-        ? ` (${status.device.name}${status.resampling ? ', resampling' : ''})`
-        : '';
-      hooks.onItem?.(item.label, note);
+        const status = await client.status();
+        const note = status.device
+          ? ` (${status.device.name}${status.resampling ? ', resampling' : ''})`
+          : '';
+        hooks.onItem?.(item.label, note);
 
-      // Ctrl-c can land while load/status were in flight: the handler's
-      // stop() would hit a stopped transport and this play() would undo it
-      // — so check on both sides, and after play() stop it ourselves,
-      // since the handler's stop may have been processed first.
-      if (hooks.interrupted?.()) break;
-      await client.play();
-      if (hooks.interrupted?.()) {
-        await client.stop();
-        break;
+        // Ctrl-c can land while load/status were in flight: the handler's
+        // stop() would hit a stopped transport and this play() would undo it
+        // — so check on both sides, and after play() stop it ourselves,
+        // since the handler's stop may have been processed first.
+        if (hooks.interrupted?.()) break;
+        await client.play();
+        if (hooks.interrupted?.()) {
+          await client.stop();
+          break;
+        }
+        await waitForStop(
+          client,
+          (sample) => hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
+          (name) => hooks.onDevice?.(name),
+        );
+        if (hooks.interrupted?.()) break;
       }
-      await waitForStop(
-        client,
-        (sample) => hooks.onPosition?.(formatPosition(sample, sampleRate, ctx)),
-        (name) => hooks.onDevice?.(name),
-      );
-      if (hooks.interrupted?.()) break;
-    }
+    } while (options.loop === true && !(hooks.interrupted?.() ?? false));
   } finally {
     client.close();
   }
