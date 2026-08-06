@@ -70,7 +70,18 @@ export async function watchBuild(
     try {
       do {
         stale = false;
-        const project = loadProject(root);
+        // Guarded like the build below: the loader reads a tree that is by
+        // definition mid-edit (a dangling symlink, a file where a directory
+        // belongs, a checkout mid-flight), and a throw here must be a
+        // report-and-wait, not the end of the session (§1.2 — the watch
+        // never dies on a bad tree).
+        let project: ReturnType<typeof loadProject>;
+        try {
+          project = loadProject(root);
+        } catch (err) {
+          hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
+          continue;
+        }
         if (options.signal?.aborted) return;
         if (project.diagnostics.length > 0) {
           hooks.onDiagnostics?.(project.diagnostics.map((d) => `${d.file}: ${d.message}`));
@@ -101,7 +112,16 @@ export async function watchBuild(
     if (options.signal?.aborted) return;
     if (filename !== null && !relevant(filename)) return;
     clearTimeout(timer);
-    timer = setTimeout(() => void runBody(), debounceMs);
+    // The catch is a last resort (loader and build throws are already
+    // routed above): a rejection escaping the timer would be unhandled
+    // and kill the process — the one thing a watch must never do.
+    timer = setTimeout(
+      () =>
+        void runBody().catch((err: unknown) =>
+          hooks.onError?.(err instanceof Error ? err : new Error(String(err))),
+        ),
+      debounceMs,
+    );
   };
 
   const close = (): void => {

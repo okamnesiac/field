@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -155,6 +155,34 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     if (quiet.kind !== 'outcomes') return;
     expect(quiet.changed).toEqual([]);
     expect(quiet.outcomes.every((o) => o.cached)).toBe(true);
+
+    abort.abort();
+    await done;
+  });
+
+  it('a loader throw routes to onError and the watch survives (P2)', async () => {
+    const { events, abort, done } = startWatch(['//songs/creek/sounds:pad-normalized']);
+    await until(() => events.find((e) => e.kind === 'outcomes'));
+
+    // The reviewer's repro: a dangling symlink directly under songs/
+    // makes loadProject itself throw (statSync on the song scan) — not a
+    // diagnostic, a loader crash. The session must report and wait, not
+    // die (§1.2).
+    const ghost = join(root, 'songs/ghost');
+    symlinkSync(join(root, 'nowhere-to-be-found'), ghost);
+    const crashed = await until(() => events.find((e) => e.kind === 'error'));
+    if (crashed.kind !== 'error') return;
+    expect(crashed.message).toBeTruthy();
+
+    // Removing the wreckage plus a real edit: the same session recovers
+    // and reports against the last good baseline.
+    rmSync(ghost);
+    writeSound('pad-normalized', normalizeYaml(44100));
+    const recovered = await until(() =>
+      events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
+    );
+    if (recovered.kind !== 'outcomes') return;
+    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sounds:pad-normalized']);
 
     abort.abort();
     await done;

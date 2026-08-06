@@ -270,14 +270,18 @@ juce::var Player::reload (const juce::File& file)
     result->setProperty ("sample_rate", pendingReload->sampleRate);
     result->setProperty ("channels", pendingReload->channels);
 
-    if (transport.isPlaying())
+    // A stopped transport has no pass in progress and no position worth
+    // keeping: swap now. A paused one holds a human's position — the
+    // takeover stays queued and lands at the wrap after resume (#34
+    // review: reload must never turn a pause into a rewound stop).
+    if (transportState() == "stopped")
     {
-        reloadPollPosition = positionSamples();
-        startTimer (20);
+        applyReload();
     }
     else
     {
-        applyReload(); // no pass in progress to finish
+        reloadPollPosition = positionSamples();
+        startTimer (20);
     }
     return juce::var (result.get());
 }
@@ -291,8 +295,9 @@ void Player::timerCallback()
     }
     if (! transport.isPlaying())
     {
-        applyReload(); // stopped or paused mid-wait: nothing left to finish
-        return;
+        if (transportState() == "stopped")
+            applyReload(); // stopped mid-wait: nothing left to finish
+        return; // paused: hold the position, swap at the wrap after resume
     }
     auto pos = positionSamples();
     // Backwards is the reader wrapping (a backwards locate lands the swap

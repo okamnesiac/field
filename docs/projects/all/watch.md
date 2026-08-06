@@ -102,7 +102,11 @@ the session cleanly.
 
 ## 5 Open questions
 
-- Multi-target watch (`build --watch //songs/creek/...`) — probably
-  falls out of the engine loop, but the reporting format is undecided.
+- ~~Multi-target watch (`build --watch //songs/creek/...`)~~ —
+  *resolved by chunk 1:* it fell out of the engine loop as predicted
+  (any pattern watches; every matched label baselines), and the format
+  decided itself in review: one `↻ <label> <shortHash>` line per moved
+  label, one silence line per quiet rebuild — which is what decision 4
+  already meant by "the multi-label form".
 - Whether `status` should show watch state (playing hash vs freshest
   hash) for agents polling the session.

@@ -138,6 +138,47 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     client.close();
   });
 
+  it('reload against a paused transport keeps the pause and position (#34 review P3)', { timeout: 15_000 }, async () => {
+    await importTone('hold', 48000); // 1 s pass
+    await importTone('takeover', 24000);
+    const hold = (await resolvePlayables(root, ['//songs/creek/assets:hold']))[0]!;
+    const takeover = (await resolvePlayables(root, ['//songs/creek/assets:takeover']))[0]!;
+
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    await client.load(hold.path, true);
+    await client.play();
+    const deadline = Date.now() + 5000;
+    while ((await client.status()).sample === 0) {
+      if (Date.now() > deadline) throw new Error('position never advanced');
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await client.pause();
+    const paused = await client.status();
+    expect(paused.state).toBe('paused');
+
+    // The takeover queues; a human's pause position is not the daemon's
+    // to discard — nothing may move until resume.
+    await client.reload(takeover.path);
+    await new Promise((r) => setTimeout(r, 300)); // a wrong immediate apply would land here
+    const after = await client.status();
+    expect(after.state).toBe('paused');
+    expect(after.path).toBe(hold.path);
+    expect(after.sample).toBe(paused.sample);
+
+    // Resume: the pass finishes from the held position and the takeover
+    // lands at its wrap.
+    const reloaded = new Promise<string>((resolve) => {
+      client.on('event', (e: { event: string; path?: string }) => {
+        if (e.event === 'reloaded' && e.path !== undefined) resolve(e.path);
+      });
+    });
+    await client.play();
+    expect(await reloaded).toBe(takeover.path);
+    expect((await client.status()).path).toBe(takeover.path);
+    await client.stop();
+    client.close();
+  });
+
   it('reload without a looping stream is an error', async () => {
     const items = await resolvePlayables(root, ['//songs/creek/assets:blip']);
     const client = await AudiodClient.connect(root, { nullOutput: true });

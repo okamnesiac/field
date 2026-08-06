@@ -52,8 +52,9 @@ public:
     // point. (watch.md §1.1's recorded successor, a sample-exact
     // double-buffered bar-synced swap, replaces this poll when wrap
     // latency chafes.) Returns {error} or the new file's {samples,
-    // sample_rate, channels}. Requires a loaded looping stream; a paused
-    // or stopped transport swaps immediately without starting.
+    // sample_rate, channels}. Requires a loaded looping stream. A
+    // stopped transport swaps immediately without starting; a paused one
+    // keeps its position and the takeover lands at the wrap after resume.
     juce::var reload (const juce::File& file);
 
     // The path applied by the last completed reload takeover, cleared on
