@@ -16,7 +16,7 @@ describe('song derivation', () => {
   it('finds the song in a label package', () => {
     expect(songDirOfPkg('songs/creek/mix')).toBe('songs/creek');
     expect(songDirOfPkg('songs/creek')).toBe('songs/creek');
-    expect(songDirOfPkg('shared/sc')).toBeUndefined();
+    expect(songDirOfPkg('shared/loops')).toBeUndefined();
   });
 
   it('finds the song in asset and artifact paths', () => {

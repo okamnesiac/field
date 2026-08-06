@@ -183,7 +183,7 @@ const scTargetsYaml = (seed: number) =>
     'targets:',
     '  - name: texture',
     '    rule: sc-render',
-    '    program: shared/sc/texture.scd',
+    '    program: shared/loops/texture.scd',
     `    seed: ${seed}`,
     '    duration: 0.25',
     '    channels: 1',
@@ -192,7 +192,7 @@ const scTargetsYaml = (seed: number) =>
 
 describe('sc-render', () => {
   beforeEach(() => {
-    writeFileSync(join(root, 'shared/sc/texture.scd'), '// fake program v1\n');
+    writeFileSync(join(root, 'shared/loops/texture.scd'), '// fake program v1\n');
     writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(42));
   });
 
@@ -211,7 +211,7 @@ describe('sc-render', () => {
     await buildTargets(root, [label], runner);
     expect(state.runs).toBe(2); // seed is a parameter
 
-    writeFileSync(join(root, 'shared/sc/texture.scd'), '// fake program v2\n');
+    writeFileSync(join(root, 'shared/loops/texture.scd'), '// fake program v2\n');
     await buildTargets(root, [label], runner);
     expect(state.runs).toBe(3); // program content is an input
   });
@@ -223,20 +223,20 @@ describe('sc-render', () => {
     const e = await explainTarget(root, '//songs/creek/targets:texture');
     expect(e.rule).toBe('sc-render');
     expect(e.inputs).toHaveLength(1);
-    expect(e.inputs[0]!.label).toBe('shared/sc/texture.scd');
+    expect(e.inputs[0]!.label).toBe('shared/loops/texture.scd');
     expect(e.parameters).toEqual({ seed: 42, duration: 0.25, channels: 1 });
   });
 
   it('rejects missing and escaping program paths', async () => {
     writeFileSync(
       join(root, 'songs/creek/targets.yaml'),
-      scTargetsYaml(42).replace('shared/sc/texture.scd', 'shared/sc/ghost.scd'),
+      scTargetsYaml(42).replace('shared/loops/texture.scd', 'shared/loops/ghost.scd'),
     );
     await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('not found');
 
     writeFileSync(
       join(root, 'songs/creek/targets.yaml'),
-      scTargetsYaml(42).replace('shared/sc/texture.scd', '../outside.scd'),
+      scTargetsYaml(42).replace('shared/loops/texture.scd', '../outside.scd'),
     );
     await expect(buildTargets(root, ['//songs/...'])).rejects.toThrow('escapes the project');
   });
@@ -288,10 +288,10 @@ describe('runScProgram edges (no sclang needed)', () => {
   });
 
   it('refuses to cache when the program changes during the render', async () => {
-    writeFileSync(join(root, 'shared/sc/texture.scd'), '// v1\n');
+    writeFileSync(join(root, 'shared/loops/texture.scd'), '// v1\n');
     writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(42));
     const midRenderEdit: RuleRunner = async (_node, _inputPath, outputPath) => {
-      writeFileSync(join(root, 'shared/sc/texture.scd'), '// edited mid-render\n');
+      writeFileSync(join(root, 'shared/loops/texture.scd'), '// edited mid-render\n');
       writeFileSync(outputPath, 'audio');
     };
     await expect(
@@ -340,7 +340,7 @@ score.recordNRT(
 `;
 
   it('renders a seeded tone deterministically through real sclang', { timeout: 120_000 }, async () => {
-    writeFileSync(join(root, 'shared/sc/texture.scd'), SC_PROGRAM);
+    writeFileSync(join(root, 'shared/loops/texture.scd'), SC_PROGRAM);
     writeFileSync(join(root, 'songs/creek/targets.yaml'), scTargetsYaml(42));
     const label = '//songs/creek/targets:texture';
 

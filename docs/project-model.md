@@ -13,19 +13,27 @@ generation recipes). A DAWproject *exporter* is a possible later feature.
 ## Projects contain songs
 
 A project is an album-shaped workspace: one or more songs plus shared material
-— instruments, loops, samples, SuperCollider programs, plugin chains — reused
-across them. Songs are packages; shared material is a library; build labels
-address both (`//songs/opener/mix:main`, `//shared/instruments:dark-pad`).
+— instruments, loops, samples, plugin chains — reused across them. Songs are
+packages; shared material is a library; build labels address both
+(`//songs/opener/mix:main`, `//shared/instruments:dark-pad`).
+
+The shared library is organized by **musical role, not file format**: a loop
+authored as a SuperCollider recipe (`.scd`) sits in `loops/` beside committed
+`.wav` loops, and a code instrument (an `.scd` that takes MIDI) will sit in
+`instruments/` beside hosted ones. What a thing *is* in the music is the
+taxonomy; whether it is bytes or a recipe is the same distinction the build
+graph already erases — clips source assets and targets interchangeably. Song
+directories are the opposite: a song is a workspace, not a library, so its
+subdirectories are medium-named (`audio/`, `midi/`, `sc/`).
 
 ```text
 project/
 ├── bloom.yaml            # project manifest: name, engine versions
 ├── bloom.lock            # locked environment: plugin versions, model versions
-├── shared/               # material reused across songs
-│   ├── instruments/
-│   ├── loops/
+├── shared/               # material reused across songs, by musical role
+│   ├── instruments/      # hosted or coded (.scd taking MIDI)
+│   ├── loops/            # committed audio or recipes (.scd)
 │   ├── samples/
-│   ├── sc/               # SuperCollider programs (synths, effects, textures)
 │   └── plugins/          # shared chains and presets
 ├── songs/
 │   └── <song>/

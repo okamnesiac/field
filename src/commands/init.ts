@@ -37,7 +37,10 @@ export function init(options: InitOptions): string {
   });
 
   mkdirSync(root, { recursive: true });
-  for (const dir of ['songs', 'shared/instruments', 'shared/loops', 'shared/samples', 'shared/sc']) {
+  // shared/ is organized by musical role, not file format: a loop authored
+  // as a SuperCollider recipe belongs in loops/ beside committed audio
+  // loops (project-model.md "Project layout").
+  for (const dir of ['songs', 'shared/instruments', 'shared/loops', 'shared/samples']) {
     mkdirSync(join(root, dir), { recursive: true });
     // Git can't track an empty directory; .gitkeep makes the project's
     // shape survive clone.
