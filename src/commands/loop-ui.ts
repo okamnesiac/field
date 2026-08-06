@@ -1,18 +1,24 @@
 // The watch-loop display (watch.md §2): two live lines on a tty —
 //
-//   playing //songs/creek/mix:main@45a7b1c2d853 → (Volt 476)
-//     [10] 8.4     (new version fa105f281f9b)
+//   playing //songs/creek/mix:main┬45a7b1c2d853 → (Volt 476)
+//     [10] 8.4                    └fa105f281f9b
 //
 // The header carries what the daemon is looping; the position line
-// carries the loop iteration, where in the pass it is, and the queued
-// takeover while one is pending. When the swap lands at the wrap, the
-// old block closes as history — `played …@old` with its final
-// position — and a fresh block opens for the successor:
+// carries the loop iteration and where in the pass it is. While a
+// takeover is pending the separator becomes a tee, and the successor's
+// hash hangs └ beneath the one it will replace. When the swap sounds
+// at the wrap, the old block closes as history — `played …─old` with
+// its final position — and a fresh block opens for the successor:
 //
-//   played //songs/creek/mix:main@45a7b1c2d853
+//   played //songs/creek/mix:main─45a7b1c2d853
 //     [10] 12.4
-//   playing //songs/creek/mix:main@fa105f281f9b → (Volt 476)
+//   playing //songs/creek/mix:main─fa105f281f9b → (Volt 476)
 //     [1] 1.1
+//
+// Two invisibilities are deliberate: a pending hash equal to the
+// playing one (the edit was changed back) renders as nothing pending —
+// ─ separator, no └ — and the byte-identical swap that follows keeps
+// the block open; audibly it is just another pass, so it counts as one.
 //
 // Rendering is a pure function of the calls below over an injected
 // write, so the exact byte stream (ANSI included) is unit-testable.
@@ -61,14 +67,35 @@ export class LoopDisplay {
     this.openBlock();
   }
 
+  // The label─hash separator is state: ┬ while a different version hangs
+  // pending beneath it (the position line's └ connects to it), ─ when
+  // what you hear is the only version there is. The arrow reads "routed
+  // to" and only appears with a device to point at — null-output
+  // sessions have none. `played` history never shows ┬.
+  private headerLine(verb: 'playing' | 'played', hash: string): string {
+    const tee =
+      verb === 'playing' && this.pending !== undefined && this.pending.sha256 !== this.hash;
+    const sep = tee ? '┬' : '─';
+    const route = verb === 'playing' && this.note ? ` →${this.note}` : '';
+    return `${verb} ${this.label}${hash ? `${sep}${short(hash)}` : ''}${route}`;
+  }
+
   private writeHeader(): void {
-    // The arrow reads "routed to" and only appears with a device to point
-    // at — null-output sessions have none.
-    this.write(
-      `playing ${this.label}${this.hash ? `@${short(this.hash)}` : ''}${this.note ? ` →${this.note}` : ''}\n`,
-    );
+    this.write(`${this.headerLine('playing', this.hash)}\n`);
     this.buried = false;
     this.onPositionLine = false;
+  }
+
+  // Pending state changed: the header's separator and the position
+  // line's └ must move together. With the header buried under said
+  // lines, the └ line alone tells the story.
+  private repaintBlock(): void {
+    if (this.buried) {
+      if (this.onPositionLine) this.render();
+      return;
+    }
+    this.write(`\r\x1b[1A\x1b[2K${this.headerLine('playing', this.hash)}\n`);
+    if (this.onPositionLine || this.posText !== '') this.render();
   }
 
   private openBlock(): void {
@@ -109,13 +136,9 @@ export class LoopDisplay {
     if (at !== undefined && this.lastAt !== undefined && at < this.lastAt / 2) {
       if (this.pending !== undefined) {
         this.held.push({ line, at });
-        if (this.held.length < MAX_HELD_POSITIONS) return;
-        // No confirmation came: treat it as the plain wrap it was.
-        const flush = this.held;
-        this.held = [];
-        this.pass++;
-        this.lastAt = undefined;
-        for (const p of flush) this.position(p.line, p.at);
+        // No confirmation after a few beats: it was the plain wrap it
+        // looked like.
+        if (this.held.length >= MAX_HELD_POSITIONS) this.flushHeldAsPassBoundary();
         return;
       }
       this.pass++;
@@ -130,31 +153,44 @@ export class LoopDisplay {
   }
 
   private render(): void {
-    const pending =
-      this.pending !== undefined ? `     (new version ${short(this.pending.sha256)})` : '';
-    this.write(`\r\x1b[2K  ${this.passPrefix()}${this.posText}${pending}`);
+    const base = `  ${this.passPrefix()}${this.posText}`;
+    let pending = '';
+    if (this.pending !== undefined && this.pending.sha256 !== this.hash) {
+      // └<hash> hangs directly under the header's ┬<hash> — right where
+      // the successor will land. A pending hash equal to the playing one
+      // is an edit changed back: nothing new is coming, show nothing.
+      const column = 'playing '.length + this.label.length;
+      pending = `${' '.repeat(Math.max(1, column - base.length))}└${short(this.pending.sha256)}`;
+    }
+    this.write(`\r\x1b[2K${base}${pending}`);
     this.onPositionLine = true;
   }
 
-  // A reload was accepted: the position line carries it until the wrap.
-  // Latest wins, like the daemon's own queue.
+  // A reload was accepted: the block carries it until the wrap — ┬ on
+  // the header, └<hash> beneath. Latest wins, like the daemon's own
+  // queue; a pending hash equal to the playing one (the edit was changed
+  // back) renders as nothing pending at all.
   queue(sha256: string, path: string): void {
     this.pending = { sha256, path };
-    if (this.onPositionLine) this.render();
+    this.repaintBlock();
+  }
+
+  // Held wrap positions were a plain pass boundary after all: count the
+  // pass and replay them.
+  private flushHeldAsPassBoundary(): void {
+    const flush = this.held;
+    this.held = [];
+    if (flush.length === 0) return;
+    this.pass++;
+    this.lastAt = undefined;
+    for (const p of flush) this.position(p.line, p.at);
   }
 
   // The queued reload failed after all — take the notice back down.
   dequeue(): void {
     this.pending = undefined;
-    const flush = this.held;
-    this.held = [];
-    if (flush.length > 0) {
-      this.pass++;
-      this.lastAt = undefined;
-      for (const p of flush) this.position(p.line, p.at);
-    } else if (this.onPositionLine) {
-      this.render();
-    }
+    if (this.held.length > 0) this.flushHeldAsPassBoundary();
+    else this.repaintBlock();
   }
 
   // The takeover sounded: close the old block as history, open the new.
@@ -162,17 +198,25 @@ export class LoopDisplay {
   // only when it matches — otherwise someone else's reload won, and the
   // header opens hashless rather than confidently wrong.
   swapped(path: string): void {
-    const old = this.hash;
-    this.hash = this.pending?.path === path ? this.pending.sha256 : '';
+    const ours = this.pending?.path === path ? this.pending.sha256 : undefined;
     this.pending = undefined;
+    if (ours !== undefined && ours === this.hash) {
+      // The edit was changed back before the wrap: the daemon swapped to
+      // byte-identical content. Audibly just another pass — the block
+      // stays open and the wrap counts as one.
+      this.flushHeldAsPassBoundary();
+      return;
+    }
+    const old = this.hash;
+    this.hash = ours ?? '';
     if (this.onPositionLine && !this.buried) {
       // Rewrite the header one line up to `played`, freeze the position
       // line at the pass's final beat, and fall through to a new block.
-      this.write(`\r\x1b[1A\x1b[2Kplayed ${this.label}${old ? `@${short(old)}` : ''}\n`);
+      this.write(`\r\x1b[1A\x1b[2K${this.headerLine('played', old)}\n`);
       this.write(`\x1b[2K  ${this.passPrefix()}${this.posText}\n`);
     } else {
       if (this.onPositionLine) this.write('\n');
-      this.write(`played ${this.label}${old ? `@${short(old)}` : ''}\n`);
+      this.write(`${this.headerLine('played', old)}\n`);
     }
     this.onPositionLine = false;
     this.openBlock();

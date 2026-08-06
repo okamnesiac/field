@@ -72,11 +72,14 @@ agent story: an agent edits YAML while a human just keeps listening.
   print them and wait. Else `build` the playing label through the
   normal engine; if the outcome hash differs from what the daemon is
   looping, send `reload`. On a tty the session renders a live block —
-  `playing <label>@<shortHash> → (<device>)` over a position line
-  carrying the loop iteration (`[10] 8.4`) and the queued takeover
-  (`(new version <shortHash>)`); the wrap closes the block as
-  `played …` history and opens the successor's. Device moves repeat
-  the header with the new route. A `--from` region loop still
+  `playing <label>─<shortHash> → (<device>)` over a position line
+  carrying the loop iteration (`[10] 8.4`); while a takeover is
+  pending the separator becomes `┬` and the successor's hash hangs
+  `└<shortHash>` beneath the one it replaces. The wrap closes the
+  block as `played …` history and opens the successor's — except a
+  byte-identical swap (an edit changed back before the wrap), which
+  renders as nothing pending and just another pass. Device moves
+  repeat the header with the new route. A `--from` region loop still
   announces `↻ … next pass` at queue time — its swap moment is the
   pass boundary, not a wrap. Non-tty output stays plain sequential
   lines (`↻ … at the next wrap`, `↻ swapped at the wrap`).
