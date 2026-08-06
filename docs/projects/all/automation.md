@@ -63,11 +63,26 @@ the part Bloom's declarative model sidesteps.
    evaluated statelessly at an arbitrary transport position (locate,
    loop wrap), it does not get in.
 4. **Generators are a discriminated union, like inserts.** `lfo` first —
-   shape, rate, depth, phase — with envelope followers, seeded random,
-   and friends joining additively later (the `effect:`/`insertSchema`
-   precedent). Musical rates use musical time arrays
-   ([musical-time.md](musical-time.md)): `rate: [1]` is one cycle per
-   bar, grid-locked through the tempo map the way `loop.every` is.
+   shape, rate, depth, phase — with seeded random and friends joining
+   additively later (the `effect:`/`insertSchema` precedent). Musical
+   rates use musical time arrays ([musical-time.md](musical-time.md)):
+   `rate: [1]` is one cycle per bar, grid-locked through the tempo map
+   the way `loop.every` is. Envelope followers are deliberately *not* on
+   the list: a follower is a function of the audio signal's history, not
+   of time — the §2.3 admission test's first catch. Offline it would be
+   easy and realtime it is running state, the first step toward the
+   signal-graph runtime this design refuses to become; it lives on SC's
+   side of the boundary unless a later decision record admits it as
+   offline-only.
+5. **Realtime cost is bounded and small — this is not SC.** Per audio
+   block: sample position → musical position (the tempo map), one
+   binary-search-plus-lerp per breakpoint lane or one closed-form
+   oscillator evaluation per LFO, a standard anti-zipper smoother per
+   parameter. No signal graph, no buses, no modulator-of-modulator
+   routing, no dynamic node creation — targets are fixed parameter
+   addresses declared in YAML. Every shipping DAW's realtime automation
+   is this exact shape; the realtime era's hard costs (AU hosting, delay
+   compensation) exist with or without automation.
 
 ## 3 Open questions
 
