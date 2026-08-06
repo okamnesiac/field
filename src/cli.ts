@@ -345,7 +345,20 @@ program
       }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;
+      // On a tty, a watch session renders the live two-line block (header
+      // + position, loop-ui.ts) with the queued takeover on the position
+      // line; everywhere else — non-tty, or plain play — plain lines.
+      const display =
+        tty && opts.watch === true
+          ? new (await import('./commands/loop-ui.js')).LoopDisplay((chunk) =>
+              process.stdout.write(chunk),
+            )
+          : undefined;
       const say = (line: string): void => {
+        if (display) {
+          display.say(line);
+          return;
+        }
         if (onPositionLine) process.stdout.write('\n');
         onPositionLine = false;
         process.stdout.write(`${line}\n`);
@@ -389,10 +402,14 @@ program
               if (!moved?.outputPath) return;
               if (reloadClient) {
                 void reloadClient.reload(moved.outputPath).then(
-                  () => say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
+                  () =>
+                    display
+                      ? display.queue(moved.sha256)
+                      : say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
                   // A ctrl-c racing an in-flight reload closes the socket
                   // under it; that is the session ending, not a failure.
                   (err: Error) => {
+                    display?.dequeue();
                     if (!watchAbort.signal.aborted) say(`reload failed: ${err.message}`);
                   },
                 );
@@ -412,15 +429,21 @@ program
           items,
           { ...opts, currentPath: opts.watch === true ? () => fresh : undefined },
           {
-            onItem: (label, note) => say(`playing ${label}${note}`),
-            onPosition: (line) => {
-              if (tty) {
+            onItem: (label, note) =>
+              display
+                ? display.start(label, items[0]!.sha256, note)
+                : say(`playing ${label}${note}`),
+            onPosition: (line, at) => {
+              if (display) {
+                display.position(line, at);
+              } else if (tty) {
                 process.stdout.write(`\r  ${line}   `);
                 onPositionLine = true;
               }
             },
-            onDevice: (name) => say(`→ output moved to ${name}`),
-            onReloaded: () => say('↻ swapped at the wrap'),
+            onDevice: (name) =>
+              display ? display.deviceMoved(name) : say(`→ output moved to ${name}`),
+            onReloaded: () => (display ? display.swapped() : say('↻ swapped at the wrap')),
             interrupted: () => interrupted,
           },
         );
@@ -428,6 +451,7 @@ program
         watchAbort.abort();
         await watchDone;
       }
+      display?.end();
       if (onPositionLine) process.stdout.write('\n');
     } catch (err) {
       fail(err);

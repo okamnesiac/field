@@ -71,8 +71,13 @@ agent story: an agent edits YAML while a human just keeps listening.
 - **Loop body:** on a settled burst — `loadProject`; if diagnostics,
   print them and wait. Else `build` the playing label through the
   normal engine; if the outcome hash differs from what the daemon is
-  looping, send `reload`, print one line
-  (`↻ mix:main <shortHash> at next wrap`).
+  looping, send `reload`. On a tty the session renders a live block —
+  `playing <label>@<shortHash> → (<device>)` over a position line
+  carrying the loop iteration (`8.4 ✕ 10`) and the queued takeover
+  (`(new version <shortHash>)`); the wrap closes the block as
+  `played …` history and opens the successor's. Device moves repeat
+  the header with the new route. Non-tty output stays plain
+  sequential lines (`↻ … at the next wrap`, `↻ swapped at the wrap`).
 - **Coalescing:** a change arriving mid-build marks the build stale;
   its artifact still lands in the CAS (warm for later), but its swap is
   skipped and the loop body re-runs. Only ever one build in flight.

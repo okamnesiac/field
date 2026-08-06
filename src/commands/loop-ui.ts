@@ -1,0 +1,173 @@
+// The watch-loop display (watch.md §2): two live lines on a tty —
+//
+//   playing //songs/creek/mix:main@45a7b1c2d853 → (Volt 476)
+//     8.4 ✕ 10     (new version fa105f281f9b)
+//
+// The header carries what the daemon is looping; the position line
+// carries where in the pass it is, which pass (✕ N from 2 on), and the
+// queued takeover while one is pending. When the swap lands at the wrap,
+// the old block closes as history — `played …@old` with its final
+// position — and a fresh block opens for the successor:
+//
+//   played //songs/creek/mix:main@45a7b1c2d853
+//     12.4 ✕ 10
+//   playing //songs/creek/mix:main@fa105f281f9b → (Volt 476)
+//     1.1
+//
+// Rendering is a pure function of the calls below over an injected
+// write, so the exact byte stream (ANSI included) is unit-testable.
+// Non-tty sessions never construct one of these — the CLI prints plain
+// sequential lines instead.
+
+const short = (sha256: string): string => sha256.slice(0, 12);
+
+// Positions arriving after a wrap while a takeover is pending belong to
+// the successor; they are held until the daemon's `reloaded` confirms
+// (normally the same heartbeat batch). If confirmation never comes —
+// the reload raced a teardown, say — a few held beats flush as a plain
+// pass boundary rather than freezing the display.
+const MAX_HELD_POSITIONS = 3;
+
+export class LoopDisplay {
+  private label = '';
+  private note = ''; // ' (Volt 476)' — the daemon-status suffix from onItem
+  private hash = '';
+  private pending: string | undefined;
+  private pass = 1;
+  private lastAt: number | undefined;
+  private posText = ''; // last bar.beat text, without pass/pending suffixes
+  private onPositionLine = false;
+  private buried = false; // a said() line sits between header and position
+  private held: { line: string; at: number }[] = [];
+
+  constructor(private readonly write: (chunk: string) => void) {}
+
+  start(label: string, sha256: string, note: string): void {
+    this.label = label;
+    this.note = note;
+    this.hash = sha256;
+    this.openBlock();
+  }
+
+  private writeHeader(): void {
+    // The arrow reads "routed to" and only appears with a device to point
+    // at — null-output sessions have none.
+    this.write(
+      `playing ${this.label}${this.hash ? `@${short(this.hash)}` : ''}${this.note ? ` →${this.note}` : ''}\n`,
+    );
+    this.buried = false;
+    this.onPositionLine = false;
+  }
+
+  private openBlock(): void {
+    this.writeHeader();
+    this.pass = 1;
+    this.lastAt = undefined;
+    this.posText = '';
+  }
+
+  // The output moved (default-follow, a vanished device): repeat the
+  // header with the new route so every line reads alike. Same block —
+  // the loop didn't restart, so the pass counter and position axis
+  // carry straight on.
+  deviceMoved(name: string): void {
+    this.note = ` (${name})`;
+    if (this.onPositionLine) this.write('\n');
+    this.writeHeader();
+  }
+
+  // A plain line (diagnostics, a device move): closes the position line
+  // and buries the header — the next swap opens a fresh block instead of
+  // rewriting history it can no longer reach.
+  say(line: string): void {
+    if (this.onPositionLine) {
+      this.write('\n');
+      this.onPositionLine = false;
+    }
+    this.write(`${line}\n`);
+    this.buried = true;
+  }
+
+  position(line: string, at?: number): void {
+    // A wrap is a return to the top, not any backwards motion: switching
+    // output devices recomputes the transport's resample ratio and can
+    // step the reported position slightly back, which must not count a
+    // phantom pass. Half the last position is comfortably below any
+    // ratio jitter and comfortably above a real wrap's landing point.
+    if (at !== undefined && this.lastAt !== undefined && at < this.lastAt / 2) {
+      if (this.pending !== undefined) {
+        this.held.push({ line, at });
+        if (this.held.length < MAX_HELD_POSITIONS) return;
+        // No confirmation came: treat it as the plain wrap it was.
+        const flush = this.held;
+        this.held = [];
+        this.pass++;
+        this.lastAt = undefined;
+        for (const p of flush) this.position(p.line, p.at);
+        return;
+      }
+      this.pass++;
+    }
+    if (at !== undefined) this.lastAt = at;
+    this.posText = line;
+    this.render();
+  }
+
+  private render(): void {
+    const pass = this.pass > 1 ? ` ✕ ${this.pass}` : '';
+    const pending = this.pending !== undefined ? `     (new version ${short(this.pending)})` : '';
+    this.write(`\r\x1b[2K  ${this.posText}${pass}${pending}`);
+    this.onPositionLine = true;
+  }
+
+  // A reload was accepted: the position line carries it until the wrap.
+  // Latest wins, like the daemon's own queue.
+  queue(sha256: string): void {
+    this.pending = sha256;
+    if (this.onPositionLine) this.render();
+  }
+
+  // The queued reload failed after all — take the notice back down.
+  dequeue(): void {
+    this.pending = undefined;
+    const flush = this.held;
+    this.held = [];
+    if (flush.length > 0) {
+      this.pass++;
+      this.lastAt = undefined;
+      for (const p of flush) this.position(p.line, p.at);
+    } else if (this.onPositionLine) {
+      this.render();
+    }
+  }
+
+  // The takeover sounded: close the old block as history, open the new.
+  swapped(): void {
+    const old = this.hash;
+    this.hash = this.pending ?? ''; // '' — a reload queued from another shell
+    this.pending = undefined;
+    const pass = this.pass > 1 ? ` ✕ ${this.pass}` : '';
+    if (this.onPositionLine && !this.buried) {
+      // Rewrite the header one line up to `played`, freeze the position
+      // line at the pass's final beat, and fall through to a new block.
+      this.write(`\r\x1b[1A\x1b[2Kplayed ${this.label}${old ? `@${short(old)}` : ''}\n`);
+      this.write(`\x1b[2K  ${this.posText}${pass}\n`);
+    } else {
+      if (this.onPositionLine) this.write('\n');
+      this.write(`played ${this.label}${old ? `@${short(old)}` : ''}\n`);
+    }
+    this.onPositionLine = false;
+    this.openBlock();
+    const flush = this.held;
+    this.held = [];
+    for (const p of flush) this.position(p.line, p.at);
+  }
+
+  // Session over: leave the cursor on a fresh line.
+  end(): void {
+    if (this.onPositionLine) {
+      this.write('\n');
+      this.onPositionLine = false;
+    }
+  }
+}
