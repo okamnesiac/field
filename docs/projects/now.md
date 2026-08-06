@@ -8,6 +8,3 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, sc-render) stops surfacing surprises.
-- [ACE generation](all/ace-generation.md) — the Python worker protocol
-  (`bloom-aced`, audiod's lifecycle), with ACE-Step as its first client;
-  outputs committed, not cached.

@@ -5,8 +5,6 @@ Coming up, not started, in rough order. One line each, linking a plan in
 begins, or down to [later](later.md) if it turns out bigger than expected. See
 [README](README.md) for how these lists work.
 
-- [ACE generation](all/ace-generation.md) — the Python worker protocol, with
-  ACE-Step as its first client.
 - **Clip looping** — a repeat/loop field on clips so a short generated
   phrase can tile a section without hand-chained copies; field's keys
   track (one 4-bar generation butt-jointed four times on the grid, with
