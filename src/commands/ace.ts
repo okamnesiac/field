@@ -123,7 +123,7 @@ export async function aceGenerate(
       seed: options.seed,
       variants: files.map((file, i) => ({
         file: `${name}/${name}-${i + 1}.wav`,
-        seed: response.seeds[i] ?? options.seed + i,
+        seed: response.seeds[i]!, // schema guarantees paths/seeds align
         sha256: hashes[i]!,
       })),
       generated_at: new Date().toISOString(),

@@ -15,12 +15,16 @@ export const acedHelloResponseSchema = z.object({
   model_loaded: z.boolean(),
 });
 
-export const acedGenerateResponseSchema = z.object({
-  ok: z.literal(true),
-  paths: z.array(z.string()).min(1),
-  seeds: z.array(z.number().int()),
-  model: z.string(),
-});
+export const acedGenerateResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    paths: z.array(z.string()).min(1),
+    seeds: z.array(z.number().int()),
+    model: z.string(),
+  })
+  .refine((r) => r.paths.length === r.seeds.length, {
+    message: 'paths and seeds must align — the recipe pairs them by index',
+  });
 
 export const acedErrorResponseSchema = z.object({
   ok: z.literal(false),

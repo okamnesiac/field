@@ -36,6 +36,17 @@ describe('aced protocol schemas', () => {
     ).toThrow();
   });
 
+  it('rejects misaligned paths/seeds (the recipe pairs them by index)', () => {
+    expect(
+      acedGenerateResponseSchema.safeParse({
+        ok: true,
+        paths: ['/tmp/a.wav'],
+        seeds: [90210, 90211],
+        model: 'acestep-v15-turbo',
+      }).success,
+    ).toBe(false);
+  });
+
   it('parses progress events and ignores unknown ones', () => {
     expect(
       acedEventSchema.parse({ event: 'progress', fraction: 0.1, stage: 'generating' }).stage,

@@ -117,7 +117,12 @@ class Pipeline:
         result = generate_music(self._handler, None, params, config, save_dir=str(output_dir))
         if not result.success:
             raise RuntimeError(result.error or result.status_message or "generation failed")
+        # The recipe pairs variant i with seeds[i]; a partial batch would
+        # silently shift that pairing, so all-or-nothing is the contract.
         paths = [Path(audio["path"]) for audio in result.audios if audio.get("path")]
-        if not paths:
-            raise RuntimeError("ACE-Step reported success but produced no audio files")
+        if len(paths) != job.variants:
+            raise RuntimeError(
+                f"ACE-Step reported success but produced {len(paths)} of "
+                f"{job.variants} requested variants"
+            )
         return GenerationOutput(paths=paths, seeds=seeds, model=CONFIG_PATH)
