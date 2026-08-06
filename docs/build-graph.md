@@ -91,7 +91,13 @@ outside the hash.
   reordering clips in the file changes nothing, and track `gain_db`/`pan`
   are excluded entirely — they are mix-stage parameters, so a fader move
   never re-renders a stem. Assets must already be at the project sample
-  rate: Bloom never resamples implicitly (mix-assembly.md §4).
+  rate: Bloom never resamples implicitly (mix-assembly.md §4). A clip's
+  `loop:` map tiles its source to fill the window
+  ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
+  repetitions expand into ordinary placement-plan entries — grid-locked
+  via `loop.every`, cut or rung-out per `loop.mode`, seams click-guarded
+  by `loop.fade` — so the renderer and action-key format don't know loops
+  exist, and a loop hashes identically to its hand-tiled equivalent.
 - **`eq` / `limit` / `reverb`** — the offline effects
   ([projects/all/effects.md](projects/all/effects.md)): Fyra's
   auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based

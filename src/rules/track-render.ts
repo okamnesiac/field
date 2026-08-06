@@ -54,10 +54,74 @@ export function placedWindow(clip: Clip, tempoMap: TempoMap): { start: number; d
   return { start, duration: tempoMap.ticksToSamples(clip.position + clip.duration) - start };
 }
 
+// Loop expansion (clip-looping.md §1.6): a looped clip becomes the same
+// resolved per-repetition entries equivalent hand-written clips would
+// produce — the renderer and the action-key format don't know loops exist.
+// Returns entries without input wiring; planTrack fills that in. Exported
+// for validate, which runs the same expansion to diagnose exhausted
+// sources and fades that outgrow their slots before any graph exists —
+// the throw below is a backstop the gate makes unreachable.
+export function expandLoop(
+  clip: Clip,
+  loop: NonNullable<Clip['loop']>,
+  tempoMap: TempoMap,
+  sourceFrames: number | undefined,
+): Omit<PlacedClip, 'input'>[] {
+  const { start, duration } = placedWindow(clip, tempoMap);
+  const windowEnd = start + duration;
+  const readOffset = clip.source_offset - clip.slip;
+
+  // Repetition boundaries on the stem timeline, in samples.
+  const bounds: number[] = [];
+  if (loop.every !== undefined) {
+    // Anchor units, like position/duration: musical loops repeat on the
+    // grid straight through tempo ramps.
+    for (let at = clip.position; ; at += loop.every) {
+      const sample = clip.anchor === 'absolute' ? at : tempoMap.ticksToSamples(at);
+      if (sample >= windowEnd) break;
+      bounds.push(sample);
+    }
+  } else {
+    // Tile at the source's own length. A target's length is unknown at
+    // plan time (validate already demands `every` there); an asset whose
+    // content is exhausted by the read offset has nothing to tile.
+    const interval = (sourceFrames ?? 0) - readOffset;
+    if (interval <= 0) {
+      throw new Error(
+        `clip "${clip.id}": loop without 'every' needs source content after its read offset`,
+      );
+    }
+    for (let at = start; at < windowEnd; at += interval) bounds.push(at);
+  }
+
+  return bounds.map((slotStart, k) => {
+    const last = k === bounds.length - 1;
+    const slotEnd = last ? windowEnd : bounds[k + 1]!;
+    // truncate cuts each repetition at its slot; overlay lets it ring to
+    // the window's edge — reads past the source's end are silence, so the
+    // voice ends where its content does, and overlapping voices sum like
+    // any overlapping clips.
+    const repDuration = loop.mode === 'overlay' ? windowEnd - slotStart : slotEnd - slotStart;
+    return {
+      start: slotStart,
+      duration: repDuration,
+      read_offset: readOffset,
+      gain_db: clip.gain_db,
+      // Whole-clip fades keep their meaning (first head, window tail);
+      // seams get the loop's click-guard. Overlay voices all end at the
+      // window edge, so the window fade covers whatever is cut there.
+      fade_in: k === 0 ? clip.fade_in : loop.fade,
+      fade_out:
+        loop.mode === 'overlay' ? clip.fade_out : last ? clip.fade_out : loop.fade,
+    };
+  });
+}
+
 export function planTrack(
   track: Track,
   tempoMap: TempoMap,
   sha256ByAsset: Map<string, string>,
+  framesByAsset: Map<string, number> = new Map(),
 ): TrackRenderSpec {
   // Asset wiring order is content-hash order (name tiebreak for
   // determinism), so renaming an asset cannot permute the input list or
@@ -74,18 +138,26 @@ export function planTrack(
     ...assets.map((name, i): [string, number] => [`asset:${name}`, i]),
     ...targets.map((name, i): [string, number] => [`target:${name}`, assets.length + i]),
   ]);
-  const clips = track.clips.map((clip): PlacedClip => {
-    const { start, duration } = placedWindow(clip, tempoMap);
+  const clips = track.clips.flatMap((clip): PlacedClip[] => {
     const source = clip.asset ? `asset:${clip.asset}` : `target:${clip.target}`;
-    return {
-      input: inputIndex.get(source)!,
-      start,
-      duration,
-      read_offset: clip.source_offset - clip.slip,
-      gain_db: clip.gain_db,
-      fade_in: clip.fade_in,
-      fade_out: clip.fade_out,
-    };
+    const input = inputIndex.get(source)!;
+    const loop = clip.loop?.enabled ? clip.loop : undefined;
+    if (loop) {
+      const frames = clip.asset ? framesByAsset.get(clip.asset) : undefined;
+      return expandLoop(clip, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
+    }
+    const { start, duration } = placedWindow(clip, tempoMap);
+    return [
+      {
+        input,
+        start,
+        duration,
+        read_offset: clip.source_offset - clip.slip,
+        gain_db: clip.gain_db,
+        fade_in: clip.fade_in,
+        fade_out: clip.fade_out,
+      },
+    ];
   });
   // Canonical order: summing is commutative, so the action key must not
   // depend on YAML clip order.

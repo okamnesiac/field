@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 
 // Minimal WAV I/O for the offline mixer (mix-assembly.md §1: offline DSP is
 // TypeScript; there is no deadline here). Reads the formats afconvert,
@@ -15,6 +15,48 @@ export interface WavData {
 const FORMAT_PCM = 1;
 const FORMAT_FLOAT = 3;
 const FORMAT_EXTENSIBLE = 0xfffe;
+
+// Frame count without decoding or reading audio bytes — seek-based chunk
+// walk, cheap enough for validate to call on every load (clip-looping.md
+// §1.3: loops without `every` need source lengths, and "check is the
+// gate" means validate must be able to afford the answer).
+export function wavFrameCount(path: string): number {
+  const fd = openSync(path, 'r');
+  try {
+    const fileSize = fstatSync(fd).size;
+    const header = Buffer.alloc(12);
+    if (
+      readSync(fd, header, 0, 12, 0) !== 12 ||
+      header.toString('ascii', 0, 4) !== 'RIFF' ||
+      header.toString('ascii', 8, 12) !== 'WAVE'
+    ) {
+      throw new Error(`${path}: not a RIFF/WAVE file`);
+    }
+    let bytesPerFrame: number | undefined;
+    let dataBytes: number | undefined;
+    const chunk = Buffer.alloc(8);
+    const fmt = Buffer.alloc(16);
+    let offset = 12;
+    while (offset + 8 <= fileSize) {
+      if (readSync(fd, chunk, 0, 8, offset) !== 8) break;
+      const id = chunk.toString('ascii', 0, 4);
+      const size = chunk.readUInt32LE(4);
+      const body = offset + 8;
+      if (id === 'fmt ' && size >= 16 && readSync(fd, fmt, 0, 16, body) === 16) {
+        bytesPerFrame = (fmt.readUInt16LE(14) / 8) * fmt.readUInt16LE(2);
+      } else if (id === 'data') {
+        dataBytes = Math.min(size, Math.max(0, fileSize - body));
+      }
+      offset = body + size + (size % 2); // chunks are word-aligned
+    }
+    if (!bytesPerFrame || dataBytes === undefined) {
+      throw new Error(`${path}: missing fmt or data chunk`);
+    }
+    return Math.floor(dataBytes / bytesPerFrame);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 export function readWav(path: string): WavData {
   const buf = readFileSync(path);

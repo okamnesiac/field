@@ -8,6 +8,7 @@ import { check } from '../commands/check.js';
 import { fmt } from '../commands/fmt.js';
 import { importAsset } from '../commands/import.js';
 import { sha256Text } from '../hash.js';
+import { writeWavFloat32 } from '../audio/wav.js';
 import { findProjectRoot, loadProject } from './project.js';
 
 let root: string;
@@ -227,6 +228,93 @@ describe('check', () => {
     );
     const result = await check(root);
     expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown asset');
+  });
+
+  it('diagnoses loop sources exhausted by their read offset — check, not a graph crash', async () => {
+    createSong(root, 'opener');
+    // A real one-second wav, so validate can learn its true frame count.
+    const wavPath = join(root, '..', `bloom-test-loop-${Date.now()}.wav`);
+    writeWavFloat32(wavPath, 48000, [new Float32Array(48000)]);
+    await importAsset(root, 'opener', wavPath, 'hit');
+    rmSync(wavPath);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/vox.yaml'),
+      [
+        'name: vox',
+        'type: audio',
+        'clips:',
+        '  - id: loop-vox-abc12',
+        '    asset: hit',
+        '    position: 0',
+        '    duration: 3840',
+        '    loop:',
+        '      enabled: true',
+        '    source_offset: 48000',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain(
+      'source content after its read offset',
+    );
+  });
+
+  it('diagnoses loop fades that outgrow their slots', async () => {
+    createSong(root, 'opener');
+    const wavPath = join(root, '..', `bloom-test-slot-${Date.now()}.wav`);
+    writeWavFloat32(wavPath, 48000, [new Float32Array(48000)]);
+    await importAsset(root, 'opener', wavPath, 'hit');
+    rmSync(wavPath);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/vox.yaml'),
+      [
+        'name: vox',
+        'type: audio',
+        'clips:',
+        '  - id: loop-vox-abc12',
+        '    asset: hit',
+        '    position: 0',
+        '    duration: 960',
+        '    loop:',
+        '      every: 30', // 750-sample slots at 120; the default 480+480 seam fades overlap
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('loop fades');
+  });
+
+  it('flags loops over targets without loop.every', async () => {
+    createSong(root, 'opener');
+    writeFileSync(
+      join(root, 'songs/opener/targets.yaml'),
+      [
+        'targets:',
+        '  - name: pad',
+        '    rule: sc-render',
+        '    program: sc/pad.scd',
+        '    seed: 1',
+        '    duration: 2',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/opener/tracks/pad.yaml'),
+      [
+        'name: pad',
+        'type: audio',
+        'clips:',
+        '  - id: loop-pad-abc12',
+        '    target: pad',
+        '    position: 0',
+        '    duration: 3840',
+        '    loop:',
+        '      enabled: true',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('set loop.every');
   });
 
   it('flags tampered asset content', async () => {
