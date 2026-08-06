@@ -63,6 +63,17 @@ disagree. The semantics of editing the tempo map under existing content
 (do clips hold musical position or sample position?) is a per-track,
 explicitly-stored property, not an ambient behavior.
 
+Time fields in project YAML take two spellings
+([projects/all/musical-time.md](projects/all/musical-time.md)): a scalar is
+ticks (samples on absolute-anchored clips), and an array is musical,
+resolved through the song's meter map. Positions are ordinal and 1-indexed
+— `at: [9, 2]` is bar 9, beat 2 — while spans are cardinal counts where
+zero is legal — `duration: [4]` is four bars, `every: [0, 2]` is two beats,
+advanced from the field's anchor so meter changes mean what a musician
+means. Arrays are resolved to ticks at load: either spelling produces the
+same build, and `bloom fmt` preserves whichever notation the author wrote,
+keeping arrays single-line.
+
 ## Clips are metadata; audio is immutable
 
 Audio files are never edited in place. A clip's content is exactly one of a

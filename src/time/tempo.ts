@@ -152,14 +152,11 @@ export class MeterMap {
     return `${bar}.${beat}.${tick}`;
   }
 
-  parse(position: string): number {
-    const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(position.trim());
-    if (!m) throw new Error(`invalid position "${position}" (expected bar[.beat[.tick]])`);
-    const bar = Number(m[1]);
-    const beat = m[2] === undefined ? 1 : Number(m[2]);
-    const tick = m[3] === undefined ? 1 : Number(m[3]);
-    if (bar < 1) throw new Error(`bar must be >= 1 in "${position}"`);
-
+  // Ordinal musical position → ticks: bar[, beat[, tick]], 1-indexed —
+  // where a musician points (musical-time.md §1.3). There is no bar 0;
+  // beat and tick ranges come from the meter in force at that bar.
+  positionTicks(bar: number, beat = 1, tick = 1): number {
+    if (bar < 1) throw new Error(`bar must be >= 1`);
     let i = 0;
     while (i + 1 < this.events.length && this.segmentStartBar(i + 1) <= bar) i++;
     const meter = this.events[i]!;
@@ -167,7 +164,7 @@ export class MeterMap {
       throw new Error(`beat ${beat} out of range for ${meter.numerator}/${meter.denominator} at bar ${bar}`);
     }
     if (tick < 1 || tick > beatTicks(meter.denominator)) {
-      throw new Error(`tick ${tick} out of range in "${position}"`);
+      throw new Error(`tick ${tick} out of range at bar ${bar}`);
     }
     return (
       meter.at +
@@ -175,5 +172,31 @@ export class MeterMap {
       (beat - 1) * beatTicks(meter.denominator) +
       (tick - 1)
     );
+  }
+
+  // Cardinal span → tick count from an anchor: [bars, beats?, ticks?],
+  // zero-legal ([0, 2] is two beats). Bars and beats step at the meter in
+  // force at the moving position, so a span crossing a meter change means
+  // what a musician means by it (musical-time.md §1.4).
+  spanTicks(from: number, span: number[]): number {
+    const [bars = 0, beats = 0, ticks = 0] = span;
+    let at = from;
+    for (let i = 0; i < bars; i++) at += barTicks(this.events[this.segmentFor(at)]!);
+    for (let i = 0; i < beats; i++) at += beatTicks(this.events[this.segmentFor(at)]!.denominator);
+    return at + ticks - from;
+  }
+
+  parse(position: string): number {
+    const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(position.trim());
+    if (!m) throw new Error(`invalid position "${position}" (expected bar[.beat[.tick]])`);
+    try {
+      return this.positionTicks(
+        Number(m[1]),
+        m[2] === undefined ? 1 : Number(m[2]),
+        m[3] === undefined ? 1 : Number(m[3]),
+      );
+    } catch (err) {
+      throw new Error(`${(err as Error).message} in "${position}"`);
+    }
   }
 }

@@ -59,3 +59,31 @@ describe('canonicalText', () => {
     expect(out).toBe('name: t\ntype: audio\nclips: []\n');
   });
 });
+
+describe('flow-flagged sequences (musical time, musical-time.md §1.7)', () => {
+  const timeOrder: KeyOrder = {
+    keys: ['name', 'length', 'clips'],
+    children: {
+      length: { flow: true },
+      clips: { items: { keys: ['id', 'position'], children: { position: { flow: true } } } },
+    },
+  };
+
+  it('keeps flagged arrays single-line, unpadded', () => {
+    const text = stringifyCanonical({ name: 'creek', length: [12] }, timeOrder);
+    expect(text).toBe('name: creek\nlength: [12]\n');
+  });
+
+  it('restores flow on a flagged array written in block style, comments intact', () => {
+    const out = canonicalText('name: creek # the song\nlength:\n  - 12\n  - 2\n', timeOrder);
+    expect(out).toBe('name: creek # the song\nlength: [12, 2]\n');
+  });
+
+  it('flags nested keys without unflagging their siblings', () => {
+    const out = canonicalText(
+      'name: creek\nclips:\n  - position: [9, 2]\n    id: a\n', //
+      timeOrder,
+    );
+    expect(out).toBe('name: creek\nclips:\n  - id: a\n    position: [9, 2]\n');
+  });
+});

@@ -161,9 +161,17 @@ export function loadProject(root: string): LoadedProject {
       generation: [],
     };
 
+    // The casts on time-carrying files (song, arrangement, tracks) are
+    // the load boundary of musical-time.md §1.6: their schemas parse the
+    // file types, whose time fields may be [bar, beat?, tick?] arrays;
+    // validate() resolves every array to a tick scalar (or diagnoses)
+    // before loadProject returns, which is what makes the resolved types
+    // true for every caller.
     const songYaml = join(dir, 'song.yaml');
     if (existsSync(songYaml)) {
-      song.song = loadFile(project, songYaml, { schema: songSchema, order: songOrder });
+      song.song = loadFile(project, songYaml, { schema: songSchema, order: songOrder }) as
+        | LoadedFile<Song>
+        | undefined;
     } else {
       project.diagnostics.push({ file: song.dir, message: 'missing song.yaml' });
     }
@@ -180,7 +188,7 @@ export function loadProject(root: string): LoadedProject {
       song.arrangement = loadFile(project, arrangementYaml, {
         schema: arrangementSchema,
         order: arrangementOrder,
-      });
+      }) as LoadedFile<Arrangement> | undefined;
     }
 
     const assetsYaml = join(dir, 'assets.yaml');
@@ -205,7 +213,9 @@ export function loadProject(root: string): LoadedProject {
     }
 
     for (const file of yamlFiles(join(dir, 'tracks'))) {
-      const track = loadFile(project, file, { schema: trackSchema, order: trackOrder });
+      const track = loadFile(project, file, { schema: trackSchema, order: trackOrder }) as
+        | LoadedFile<Track>
+        | undefined;
       if (track) song.tracks.push(track);
     }
 
@@ -270,6 +280,7 @@ function validate(project: LoadedProject): void {
     }
 
     let tempoMap: TempoMap | undefined;
+    let meterMap: MeterMap | undefined;
     if (song.tempo) {
       try {
         tempoMap = new TempoMap(song.tempo.data.tempo, project.manifest?.data.sample_rate ?? 48000);
@@ -277,24 +288,79 @@ function validate(project: LoadedProject): void {
         push(song.tempo.path, (err as Error).message);
       }
       try {
-        new MeterMap(song.tempo.data.meter);
+        meterMap = new MeterMap(song.tempo.data.meter);
       } catch (err) {
         push(song.tempo.path, (err as Error).message);
       }
     }
 
+    // Musical time arrays resolve to tick scalars here, at the load
+    // boundary (musical-time.md §1.5–1.6): the schema admits the
+    // [bar, beat?, tick?] shapes, the meter map gives them meaning, and
+    // everything downstream — the rest of validate included — sees only
+    // ticks. The resolved types exported from schemas.ts are this pass's
+    // promise, which is why a failed resolution always pushes a
+    // diagnostic: nothing past the check gate may meet an array.
+    const musical = (
+      file: string,
+      what: string,
+      value: number | number[] | undefined,
+      resolve: (meter: MeterMap, arr: number[]) => number,
+    ): number | undefined => {
+      if (!Array.isArray(value)) return value;
+      if (!meterMap) {
+        push(file, `${what} is musical time but the song has no valid meter map`);
+        return undefined;
+      }
+      try {
+        return resolve(meterMap, value);
+      } catch (err) {
+        push(file, `${what}: ${(err as Error).message}`);
+        return undefined;
+      }
+    };
+    const positionTicks = (file: string, what: string, value: number | number[]) =>
+      musical(file, what, value, (meter, arr) => meter.positionTicks(arr[0]!, arr[1], arr[2]));
+    const spanTicks = (
+      file: string,
+      what: string,
+      value: number | number[] | undefined,
+      from: number,
+    ) => musical(file, what, value, (meter, arr) => meter.spanTicks(from, arr));
+
+    if (song.song?.data.length !== undefined) {
+      const resolved = spanTicks(song.song.path, 'length', song.song.data.length, 0);
+      if (resolved !== undefined) {
+        if (resolved <= 0) push(song.song.path, 'length resolves to zero ticks');
+        else song.song.data.length = resolved;
+      }
+    }
+
     if (song.arrangement) {
       const seen = new Set<string>();
-      let last = -1;
+      let resolved = true;
       for (const section of song.arrangement.data.sections) {
         if (seen.has(section.name)) {
           push(song.arrangement.path, `duplicate section "${section.name}"`);
         }
         seen.add(section.name);
-        if (section.at <= last && last >= 0) {
-          push(song.arrangement.path, `sections must be ordered by position ("${section.name}")`);
+        const at = positionTicks(
+          song.arrangement.path,
+          `section "${section.name}" at`,
+          section.at,
+        );
+        if (at === undefined) resolved = false;
+        else section.at = at;
+      }
+      // Ordering is only meaningful once every position resolved.
+      if (resolved) {
+        let last = -1;
+        for (const section of song.arrangement.data.sections) {
+          if (section.at <= last && last >= 0) {
+            push(song.arrangement.path, `sections must be ordered by position ("${section.name}")`);
+          }
+          last = section.at;
         }
-        last = section.at;
       }
     }
 
@@ -394,6 +460,40 @@ function validate(project: LoadedProject): void {
           checkAssetRef(track.path, `clip "${clip.id}"`, clip.asset);
         } else if (clip.target !== undefined && !targetNames.has(clip.target)) {
           push(track.path, `clip "${clip.id}" references unknown target "${clip.target}"`);
+        }
+        // Musical arrays need the musical anchor: an absolute clip's
+        // scalars are samples, and silently converting [9, 2] would be a
+        // unit pun, not a convenience. A clip whose time fields fail to
+        // resolve skips the numeric checks below — its diagnostic already
+        // holds the gate.
+        if (
+          clip.anchor === 'absolute' &&
+          [clip.position, clip.duration, clip.loop?.every].some((v) => Array.isArray(v))
+        ) {
+          push(
+            track.path,
+            `clip "${clip.id}" uses musical time on an absolute clip — ` +
+              `musical arrays need anchor: musical`,
+          );
+          continue;
+        }
+        const pos = positionTicks(track.path, `clip "${clip.id}" position`, clip.position);
+        const dur = spanTicks(track.path, `clip "${clip.id}" duration`, clip.duration, pos ?? 0);
+        if (pos === undefined || dur === undefined) continue;
+        if (dur <= 0) {
+          push(track.path, `clip "${clip.id}" duration resolves to zero ticks`);
+          continue;
+        }
+        clip.position = pos;
+        clip.duration = dur;
+        if (clip.loop?.every !== undefined) {
+          const every = spanTicks(track.path, `clip "${clip.id}" loop.every`, clip.loop.every, pos);
+          if (every === undefined) continue;
+          if (every <= 0) {
+            push(track.path, `clip "${clip.id}" loop.every resolves to zero ticks`);
+            continue;
+          }
+          clip.loop.every = every;
         }
         // Loops are diagnosed here in full — running the same expansion the
         // plan will run — because check is the gate: a check-clean project

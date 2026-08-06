@@ -9,12 +9,17 @@ export interface KeyOrder {
   keys?: string[];
   children?: Record<string, KeyOrder>;
   items?: KeyOrder; // applied to each element of a sequence
+  // Musical time arrays are the one recorded exception to block style
+  // (musical-time.md §1.7): a flow-flagged sequence stays inline —
+  // `length: [12]`, not a block item per element.
+  flow?: boolean;
 }
 
 const STRINGIFY_OPTIONS = {
   indent: 2,
   lineWidth: 80,
   aliasDuplicateObjects: false,
+  flowCollectionPadding: false, // `[12, 2]`, not `[ 12, 2 ]`
 } as const;
 
 function keyName(pair: Pair): string | undefined {
@@ -27,6 +32,8 @@ function keyName(pair: Pair): string | undefined {
 
 function orderNode(node: Node | null, order: KeyOrder | undefined): void {
   if (!order || node == null) return;
+  // Applied after clearFlow, so the flag wins over blocks-everywhere.
+  if (order.flow && isSeq(node) && node.items.length > 0) node.flow = true;
   if (isMap(node)) {
     const keys = order.keys ?? [];
     const rank = new Map(keys.map((k, i) => [k, i]));
