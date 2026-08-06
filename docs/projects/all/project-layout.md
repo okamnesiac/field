@@ -1,8 +1,9 @@
 # Plan: Project layout revision
 
-**Status:** Decided (2026-08-06); the loader/CLI migration (§2.1) and
-the §4 vocabulary are implemented on the migration PR, with field's
-migration staged to land on merge. This records a design conversation
+**Status:** Done (2026-08-06); the loader/CLI migration (§2.1) and the
+§4 vocabulary shipped in #31, and field migrated the same day (field
+7fbdbc5, which also adds the first shared sample). This records a
+design conversation
 that amended three earlier DECIDED records; §4 records the vocabulary
 decided mid-migration, which amends spellings in §1–§3 without changing
 any decision's substance.
