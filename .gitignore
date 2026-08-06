@@ -3,3 +3,5 @@
 node_modules/
 dist/
 native/audiod/build/
+python/aced/.venv/
+__pycache__/

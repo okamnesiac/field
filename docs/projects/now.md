@@ -8,6 +8,6 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
   stays here until real use (field, sc-render) stops surfacing surprises.
-- [Offline effects](all/effects.md) — eq (Fyra-style auto-normalizing),
-  limiter, reverb: chainable rules now, inserts and a master chain next;
-  deliberately ahead of ACE.
+- [ACE generation](all/ace-generation.md) — the Python worker protocol
+  (`bloom-aced`, audiod's lifecycle), with ACE-Step as its first client;
+  outputs committed, not cached.
