@@ -61,6 +61,16 @@ project/
 
 Exact schemas are designed in [projects/all/project-core.md](projects/all/project-core.md).
 
+> **Layout revision decided, not yet migrated
+> ([projects/all/project-layout.md](projects/all/project-layout.md)):**
+> `shared/` becomes instruments / generators / samples / plugins (loops
+> merges into samples, render programs move to generators); `targets.yaml`
+> and `mix.yaml` become per-file `targets/` and `mixes/`; `generation/`
+> dissolves into `targets/` + `audio/`; `shared/assets.yaml` pins shared
+> material. The tree above and the prose below describe the layout the
+> tooling accepts *today*; they will be rewritten when the migration
+> lands.
+
 ## Timeline and tempo
 
 The tempo map is the single source of truth for the mapping between sample
