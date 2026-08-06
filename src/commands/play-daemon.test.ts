@@ -73,33 +73,38 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(positions[0]).toMatch(/^\d+\.\d+\.\d+ \(/); // musical time, derived CLI-side
   });
 
-  it('--loop with one target loops in the daemon: positions outlive the file', async () => {
-    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']); // 0.25 s
+  it(
+    '--loop with one target loops in the daemon: positions outlive the file',
+    { timeout: 10_000 },
+    async () => {
+      const items = await resolvePlayables(root, ['//songs/creek/assets:blip']); // 0.25 s
 
-    // Gapless native loop: one load, one play, and position events keep
-    // arriving well past the file's real-time length until ctrl-c.
-    const played: string[] = [];
-    const positions: string[] = [];
-    let interrupted = false;
-    const timer = setTimeout(() => {
-      interrupted = true;
-      void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
-        await c.stop();
-        c.close();
-      });
-    }, 900); // > 3× the file length: only a loop is still playing by then
-    try {
+      // Gapless native loop: one load, one play, and position events keep
+      // arriving well past the file's real-time length until ctrl-c.
+      // Event-driven, not clock-driven (a fixed window was CI-flaky): the
+      // 4th heartbeat-paced position is ~1 s of streaming — a non-looping
+      // 0.25 s file stops after one or two and can never get there.
+      const played: string[] = [];
+      const positions: string[] = [];
+      let interrupted = false;
       await playThroughDaemon(root, project, items, { loop: true }, {
         onItem: (label) => played.push(label),
-        onPosition: (line) => positions.push(line),
+        onPosition: (line) => {
+          positions.push(line);
+          if (positions.length === 4 && !interrupted) {
+            interrupted = true;
+            void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
+              await c.stop();
+              c.close();
+            });
+          }
+        },
         interrupted: () => interrupted,
       });
-    } finally {
-      clearTimeout(timer);
-    }
-    expect(played).toEqual([items[0]!.label]); // one load — no reload gap
-    expect(positions.length).toBeGreaterThan(2); // still streaming past 0.25 s
-  });
+      expect(played).toEqual([items[0]!.label]); // one load — no reload gap
+      expect(positions.length).toBeGreaterThanOrEqual(4);
+    },
+  );
 
   it('--loop with several targets replays the queue until interrupted', async () => {
     await importTone('blop', 12000);
