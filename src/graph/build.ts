@@ -179,7 +179,13 @@ async function buildNode(
   const materialize = (sha256: string): string => {
     const out = outPath(project, node);
     mkdirSync(dirname(out), { recursive: true });
-    copyFileSync(casPath(project, sha256), out);
+    // Copy-to-temp + rename, never copy-in-place: under watch the daemon
+    // may be streaming the previous artifact from this very path, and an
+    // in-place copy truncates under its reader. A fresh inode leaves the
+    // playing pass untouched until the swap (watch.md §1.6).
+    const tmp = `${out}.tmp-${process.pid}`;
+    copyFileSync(casPath(project, sha256), tmp);
+    renameSync(tmp, out);
     return out;
   };
 

@@ -63,6 +63,11 @@ export interface PlayOptions {
   from?: string | undefined; // bar[.beat[.tick]], musical time — CLI-side only
   device?: string | undefined;
   loop?: boolean | undefined; // replay the queue until interrupted
+  // Watch mode's freshest artifact for the (single) looped item: consulted
+  // at every load, so a requeue-path loop (--from) picks up a swap on its
+  // next pass (watch.md §2). The native loop loads once and swaps through
+  // the daemon's reload op instead.
+  currentPath?: (() => string | undefined) | undefined;
 }
 
 export interface PlayHooks {
@@ -70,6 +75,9 @@ export interface PlayHooks {
   onPosition?: (line: string) => void;
   // The output moved mid-play (default-follow or a vanished device).
   onDevice?: (name: string) => void;
+  // A queued reload took over at the loop wrap (daemon >= 0.4) — fires
+  // when the swap actually sounds, not when it was requested.
+  onReloaded?: (path: string) => void;
   // Wired to SIGINT by the CLI: stop the daemon and end the queue.
   interrupted?: () => boolean;
 }
@@ -114,7 +122,7 @@ export async function playThroughDaemon(
     do {
       for (const item of items) {
         if (hooks.interrupted?.()) break;
-        await client.load(item.path, nativeLoop);
+        await client.load(options.currentPath?.() ?? item.path, nativeLoop);
         const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
@@ -144,7 +152,12 @@ export async function playThroughDaemon(
         // musically ignorant; musical time never crosses the socket.
         const readout = beatScheduler(sampleRate, ctx, (line) => hooks.onPosition?.(line));
         try {
-          await waitForStop(client, readout.onSample, (name) => hooks.onDevice?.(name));
+          await waitForStop(
+            client,
+            readout.onSample,
+            (name) => hooks.onDevice?.(name),
+            (path) => hooks.onReloaded?.(path),
+          );
         } finally {
           readout.cancel();
         }
@@ -221,6 +234,7 @@ function waitForStop(
   client: AudiodClient,
   onPosition: (sample: number) => void,
   onDevice?: (name: string) => void,
+  onReloaded?: (path: string) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const finish = (err?: Error) => {
@@ -232,9 +246,16 @@ function waitForStop(
       if (err) reject(err);
       else resolve();
     };
-    const onEvent = (e: { event: string; state?: string; sample?: number; name?: string }) => {
+    const onEvent = (e: {
+      event: string;
+      state?: string;
+      sample?: number;
+      name?: string;
+      path?: string;
+    }) => {
       if (e.event === 'position' && e.sample !== undefined) onPosition(e.sample);
       if (e.event === 'device' && e.name !== undefined) onDevice?.(e.name);
+      if (e.event === 'reloaded' && e.path !== undefined) onReloaded?.(e.path);
       if (e.event === 'state' && e.state === 'stopped') finish();
     };
     const onClose = () => finish(new Error('bloom-audiod connection closed'));

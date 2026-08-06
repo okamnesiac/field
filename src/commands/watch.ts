@@ -20,9 +20,12 @@ export interface WatchHooks {
   // A build completed: all outcomes, plus the ones whose output hash moved
   // since the last good build (empty on the baseline-setting first build).
   onOutcomes?: (outcomes: BuildOutcome[], changed: BuildOutcome[]) => void;
-  // The build itself failed (a generator error, a label that no longer
-  // resolves): last good outputs stand, the next change retries.
-  onError?: (err: Error) => void;
+  // Something threw: last good outputs stand, the next change retries.
+  // The phase says what failed — 'load' (the loader crashed on a bad
+  // tree), 'build' (a generator error, a label that no longer resolves),
+  // or 'watch' (the last-resort catch) — so the report never blames the
+  // build for a loader crash (#34 review footnote).
+  onError?: (err: Error, phase: 'load' | 'build' | 'watch') => void;
 }
 
 export interface WatchOptions {
@@ -79,7 +82,7 @@ export async function watchBuild(
         try {
           project = loadProject(root);
         } catch (err) {
-          hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
+          hooks.onError?.(err instanceof Error ? err : new Error(String(err)), 'load');
           continue;
         }
         if (options.signal?.aborted) return;
@@ -93,7 +96,7 @@ export async function watchBuild(
           const nodes = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
           outcomes = await build(project, graph, nodes, options.runner);
         } catch (err) {
-          hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
+          hooks.onError?.(err instanceof Error ? err : new Error(String(err)), 'build');
           continue;
         }
         if (stale) continue; // a mid-build change: report nothing, go again
@@ -118,7 +121,7 @@ export async function watchBuild(
     timer = setTimeout(
       () =>
         void runBody().catch((err: unknown) =>
-          hooks.onError?.(err instanceof Error ? err : new Error(String(err))),
+          hooks.onError?.(err instanceof Error ? err : new Error(String(err)), 'watch'),
         ),
       debounceMs,
     );

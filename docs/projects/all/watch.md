@@ -1,9 +1,11 @@
 # Plan: Watch mode — the loop follows the project
 
-**Status:** In progress (2026-08-06). Chunk 1 — the daemon `reload` op
-(takeover at the wrap, daemon 0.4) and `bloom build --watch` — is on
-its PR; chunk 2 (`play --loop --watch`, the field demo, the docs-root
-paragraphs) follows. Written against the layout-migration vocabulary
+**Status:** Implemented (2026-08-06). Chunk 1 — the daemon `reload` op
+(takeover at the wrap, daemon 0.4) and `bloom build --watch` — landed
+in #34; chunk 2 — `play --loop --watch`, the §3 walk run against field
+(scripted, null output; every step behaved), and the docs paragraphs —
+is on the PR that carries this status line. §5's `status`-visibility
+question remains open. Written against the layout-migration vocabulary
 (project-layout.md §4, landed in #31).
 
 **Goal:** `bloom play <song> --loop --watch` keeps the loop playing

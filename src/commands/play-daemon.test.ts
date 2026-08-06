@@ -187,6 +187,75 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     client.close();
   });
 
+  it('native loop surfaces the takeover through onReloaded', { timeout: 15_000 }, async () => {
+    await importTone('base', 96000); // 2 s pass
+    await importTone('next', 24000);
+    const base = (await resolvePlayables(root, ['//songs/creek/assets:base']))[0]!;
+    const next = (await resolvePlayables(root, ['//songs/creek/assets:next']))[0]!;
+
+    // The watch composition in miniature: a blocking native-loop play,
+    // and a second connection queueing the reload — exactly how play
+    // --loop --watch swaps (watch.md §1.4).
+    const reloadedPaths: string[] = [];
+    let interrupted = false;
+    const playing = playThroughDaemon(root, project, [base], { loop: true }, {
+      onReloaded: (path) => {
+        reloadedPaths.push(path);
+        interrupted = true;
+        void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
+          await c.stop();
+          c.close();
+        });
+      },
+      interrupted: () => interrupted,
+    });
+
+    const c2 = await AudiodClient.connect(root);
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const s = await c2.status();
+      if (s.state === 'playing' && s.looping === true) break;
+      if (Date.now() > deadline) throw new Error('loop never started');
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await c2.reload(next.path);
+    c2.close();
+
+    await playing;
+    expect(reloadedPaths).toEqual([next.path]);
+  });
+
+  it('--watch requeue path: currentPath repoints what the next pass loads', async () => {
+    await importTone('one', 24000); // 0.5 s passes keep the requeue quick
+    await importTone('two', 24000);
+    const one = (await resolvePlayables(root, ['//songs/creek/assets:one']))[0]!;
+    const two = (await resolvePlayables(root, ['//songs/creek/assets:two']))[0]!;
+
+    // A --from region loop takes the requeue path — no wrap to swap at,
+    // so the freshest artifact is consulted at every load (watch.md §2).
+    let current = one.path;
+    let passes = 0;
+    let interrupted = false;
+    await playThroughDaemon(
+      root,
+      project,
+      [one],
+      { loop: true, from: '1.1.1', currentPath: () => current },
+      {
+        onItem: () => {
+          passes++;
+          if (passes === 1) current = two.path; // the "swap"
+          if (passes === 3) interrupted = true;
+        },
+        interrupted: () => interrupted,
+      },
+    );
+    expect(passes).toBe(3);
+    const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
+    expect((await client.status()).path).toBe(two.path); // later passes load the fresh file
+    client.close();
+  });
+
   it('--loop with several targets replays the queue until interrupted', async () => {
     await importTone('blop', 12000);
     const items = await resolvePlayables(root, ['//songs/creek/assets:all']);

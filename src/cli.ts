@@ -260,7 +260,7 @@ program
               process.stdout.write(`↻ ${o.label} ${o.sha256.slice(0, 12)}\n`);
             }
           },
-          onError: (err) => process.stdout.write(`build failed: ${err.message}\n`),
+          onError: (err, phase) => process.stdout.write(`${phase} failed: ${err.message}\n`),
         }),
       );
     } catch (err) {
@@ -293,25 +293,40 @@ program
   .option('--device <name>', 'output device (bloom devices lists them)')
   .option('--loop', 'replay the queue until ctrl-c')
   .option('--click', 'overlay a metronome (rendered CLI-side; loops with the file)')
-  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean }) => {
+  .option('--watch', 'rebuild on project changes, swap the loop at the wrap (needs --loop, one label)')
+  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean }) => {
     try {
       const root = requireRoot();
       let items = await resolvePlayables(root, patterns);
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
-        if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true) {
-          throw new Error('--from, --device, --loop, and --click need bloom-audiod (pnpm build:native)');
+        if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
+          throw new Error('--from, --device, --loop, --click, and --watch need bloom-audiod (pnpm build:native)');
         }
         process.stderr.write('bloom-audiod is not built; using afplay (pnpm build:native)\n');
         await playWithAfplay(items);
         return;
       }
+      if (opts.watch === true && (opts.loop !== true || items.length !== 1)) {
+        // A multi-item --loop queue is requeue-path playback with no wrap
+        // to swap at (watch.md §1.4); build --watch is the multi-label form.
+        throw new Error(
+          `--watch needs --loop and exactly one label (got ${items.length}) — watch.md §1.4`,
+        );
+      }
+      if (opts.watch === true && opts.click === true) {
+        // The click bakes into a CLI-side temp file, which a swap would
+        // silently drop — refuse rather than un-click the loop mid-listen.
+        throw new Error('--watch does not compose with --click yet');
+      }
 
+      const watchAbort = new AbortController();
       let interrupted = false;
       process.once('SIGINT', () => {
         // Stop the daemon's transport from a second connection — the
         // blocking play then sees 'stopped' and winds down the queue.
         interrupted = true;
+        watchAbort.abort();
         void (async () => {
           try {
             const c = await AudiodClient.connect(root, { spawnIfNeeded: false });
@@ -330,25 +345,82 @@ program
       }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;
-      await playThroughDaemon(root, project, items, opts, {
-        onItem: (label, note) => {
-          if (onPositionLine) process.stdout.write('\n');
-          onPositionLine = false;
-          process.stdout.write(`playing ${label}${note}\n`);
-        },
-        onPosition: (line) => {
-          if (tty) {
-            process.stdout.write(`\r  ${line}   `);
-            onPositionLine = true;
+      const say = (line: string): void => {
+        if (onPositionLine) process.stdout.write('\n');
+        onPositionLine = false;
+        process.stdout.write(`${line}\n`);
+      };
+
+      // --watch (watch.md §1.4): watch-build the same pattern alongside
+      // the blocking play; when the played label's output hash moves, the
+      // native loop queues a daemon reload (takeover at the wrap), and a
+      // --from region loop just repoints what the next pass loads.
+      let watchDone = Promise.resolve();
+      let fresh: string | undefined;
+      if (opts.watch === true) {
+        const item = items[0]!;
+        const native = opts.from === undefined;
+        const reloadClient = native ? await AudiodClient.connect(root) : undefined;
+        if (reloadClient) {
+          const [major = 0, minor = 0] = reloadClient.daemonVersion.split('.').map(Number);
+          if (major === 0 && minor < 4) {
+            reloadClient.close();
+            throw new Error(
+              `bloom-audiod ${reloadClient.daemonVersion} predates --watch — ` +
+                'bloom transport quit, then play again (it respawns on the new build)',
+            );
           }
-        },
-        onDevice: (name) => {
-          if (onPositionLine) process.stdout.write('\n');
-          onPositionLine = false;
-          process.stdout.write(`→ output moved to ${name}\n`);
-        },
-        interrupted: () => interrupted,
-      });
+        }
+        const { watchBuild } = await import('./commands/watch.js');
+        watchDone = watchBuild(
+          root,
+          patterns,
+          { signal: watchAbort.signal },
+          {
+            onDiagnostics: (lines) => {
+              for (const line of lines) say(`check: ${line}`);
+            },
+            onError: (err, phase) => say(`${phase} failed: ${err.message}`),
+            onOutcomes: (_outcomes, changed) => {
+              const moved = changed.find((o) => o.label === item.label);
+              if (!moved?.outputPath) return;
+              if (reloadClient) {
+                void reloadClient.reload(moved.outputPath).then(
+                  () => say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
+                  (err: Error) => say(`reload failed: ${err.message}`),
+                );
+              } else {
+                fresh = moved.outputPath;
+                say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} next pass`);
+              }
+            },
+          },
+        ).finally(() => reloadClient?.close());
+      }
+
+      try {
+        await playThroughDaemon(
+          root,
+          project,
+          items,
+          { ...opts, currentPath: opts.watch === true ? () => fresh : undefined },
+          {
+            onItem: (label, note) => say(`playing ${label}${note}`),
+            onPosition: (line) => {
+              if (tty) {
+                process.stdout.write(`\r  ${line}   `);
+                onPositionLine = true;
+              }
+            },
+            onDevice: (name) => say(`→ output moved to ${name}`),
+            onReloaded: () => say('↻ swapped at the wrap'),
+            interrupted: () => interrupted,
+          },
+        );
+      } finally {
+        watchAbort.abort();
+        await watchDone;
+      }
       if (onPositionLine) process.stdout.write('\n');
     } catch (err) {
       fail(err);

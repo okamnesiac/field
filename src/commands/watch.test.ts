@@ -53,7 +53,7 @@ const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
 type Recorded =
   | { kind: 'outcomes'; outcomes: BuildOutcome[]; changed: BuildOutcome[] }
   | { kind: 'diagnostics'; lines: string[] }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; phase: string };
 
 function startWatch(patterns: string[]) {
   const events: Recorded[] = [];
@@ -65,7 +65,7 @@ function startWatch(patterns: string[]) {
     {
       onOutcomes: (outcomes, changed) => events.push({ kind: 'outcomes', outcomes, changed }),
       onDiagnostics: (lines) => events.push({ kind: 'diagnostics', lines }),
-      onError: (err) => events.push({ kind: 'error', message: err.message }),
+      onError: (err, phase) => events.push({ kind: 'error', message: err.message, phase }),
     },
   );
   return { events, abort, done };
@@ -173,6 +173,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     const crashed = await until(() => events.find((e) => e.kind === 'error'));
     if (crashed.kind !== 'error') return;
     expect(crashed.message).toBeTruthy();
+    expect(crashed.phase).toBe('load'); // the report never blames the build
 
     // Removing the wreckage plus a real edit: the same session recovers
     // and reports against the last good baseline.

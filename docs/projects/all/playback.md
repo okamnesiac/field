@@ -104,3 +104,12 @@ will eventually use.
   and a blocking `bloom play` prints it. The mental model this buys: the
   `*` in `bloom devices` and the actual output can never disagree, and
   `pkill bloom-audiod` stops being a tool users need to know about.
+- **Reload at the loop wrap** (daemon 0.4, [watch.md](watch.md) §1.1) —
+  the protocol gains `reload(path)`: the daemon opens and prepares the
+  new file at request time, a fine position poll detects the looping
+  reader's wrap, and the takeover lands there — whole passes only, the
+  transport never stops, and a broadcast `reloaded` event fires when
+  the swap actually sounds. Latest reload wins; a fresh `load`
+  supersedes any queued takeover. This is what `--watch` on a looping
+  `bloom play` rides; the recorded successor (a sample-exact,
+  bar-synced double-buffered swap) waits until wrap latency chafes.
