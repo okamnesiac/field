@@ -9,8 +9,8 @@ describe('labels', () => {
   });
 
   it('rejects bad names and malformed labels', () => {
-    expect(() => parseLabel('//songs/creek')).toThrow('missing target name');
-    expect(() => parseLabel('//songs/creek:Bad_Name')).toThrow('invalid target name');
+    expect(() => parseLabel('//songs/creek')).toThrow('missing label name');
+    expect(() => parseLabel('//songs/creek:Bad_Name')).toThrow('invalid label name');
     expect(() => parseLabel('//songs//creek:x')).toThrow('invalid package');
     expect(() => parseLabel('/creek:x')).toThrow('songs-relative');
   });

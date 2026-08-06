@@ -4,40 +4,42 @@ import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { wavFrameCount } from '../audio/wav.js';
-import { ruleImpl } from '../rules/index.js';
-import { expandLoop, placedWindow } from '../rules/track-render.js';
+import { generatorFor } from '../generators/index.js';
+import { expandLoop, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
+import { sharedAssetName } from '../labels.js';
+import { checkSource } from '../generators/single-input.js';
+import type { SourceNames } from '../generators/types.js';
 import {
   arrangementOrder,
   arrangementSchema,
   assetsFileOrder,
   assetsFileSchema,
-  generationRecipeOrder,
-  generationRecipeSchema,
-  mixFileOrder,
-  mixFileSchema,
+  mixOrder,
+  mixSchema,
   projectOrder,
   projectSchema,
   songOrder,
   songSchema,
+  soundOrder,
+  soundSchema,
   takeOrder,
   takeSchema,
-  targetsFileOrder,
-  targetsFileSchema,
   tempoFileOrder,
   tempoFileSchema,
   trackOrder,
   trackSchema,
   type Arrangement,
   type AssetsFile,
-  type GenerationRecipe,
-  type MixFile,
+  type BuildableSound,
+  type GenerativeSound,
+  type Mix,
   type Project,
   type Song,
+  type Sound,
   type Take,
-  type TargetsFile,
   type TempoFile,
   type Track,
 } from '../schema/index.js';
@@ -63,16 +65,21 @@ export interface LoadedSong {
   tempo?: LoadedFile<TempoFile> | undefined;
   arrangement?: LoadedFile<Arrangement> | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
-  targets?: LoadedFile<TargetsFile> | undefined;
-  mix?: LoadedFile<MixFile> | undefined;
+  // One file per authored spec (project-layout.md §1.3, §4): sounds/
+  // holds defined sounds — buildable types and deliberate `generate`
+  // recipes alike — and mixes/ holds mixes.
+  sounds: LoadedFile<Sound>[];
+  mixes: LoadedFile<Mix>[];
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
-  generation: LoadedFile<GenerationRecipe>[];
 }
 
 export interface LoadedProject {
   root: string; // absolute
   manifest?: LoadedFile<Project> | undefined;
+  // shared/assets.yaml — the shared scope's ledger, same shape as a
+  // song's, paths relative to shared/ (project-layout.md §1.6).
+  shared?: LoadedFile<AssetsFile> | undefined;
   songs: LoadedSong[];
   diagnostics: Diagnostic[];
 }
@@ -144,6 +151,14 @@ export function loadProject(root: string): LoadedProject {
     order: projectOrder,
   });
 
+  const sharedAssets = join(project.root, 'shared', 'assets.yaml');
+  if (existsSync(sharedAssets)) {
+    project.shared = loadFile(project, sharedAssets, {
+      schema: assetsFileSchema,
+      order: assetsFileOrder,
+    });
+  }
+
   const songsDir = join(project.root, 'songs');
   const songDirs = existsSync(songsDir)
     ? readdirSync(songsDir)
@@ -156,10 +171,27 @@ export function loadProject(root: string): LoadedProject {
     const song: LoadedSong = {
       name: basename(dir),
       dir: relative(project.root, dir),
+      sounds: [],
+      mixes: [],
       tracks: [],
       takes: [],
-      generation: [],
     };
+
+    // The pre-2026-08-06 layout is diagnosed, not silently ignored: a
+    // leftover list-file or generation/ directory would otherwise just
+    // stop contributing targets, which reads as data loss.
+    for (const [legacy, replacement] of [
+      ['targets.yaml', 'one file per sound in sounds/ (project-layout.md §1.3, §4)'],
+      ['mix.yaml', 'one file per mix in mixes/ (project-layout.md §1.3)'],
+      ['generation', 'deliberate sounds in sounds/, variants in audio/ (project-layout.md §1.4)'],
+    ] as const) {
+      if (existsSync(join(dir, legacy))) {
+        project.diagnostics.push({
+          file: posix.join(song.dir, legacy),
+          message: `the old layout is no longer read — ${replacement}`,
+        });
+      }
+    }
 
     // The casts on time-carrying files (song, arrangement, tracks) are
     // the load boundary of musical-time.md §1.6: their schemas parse the
@@ -199,17 +231,14 @@ export function loadProject(root: string): LoadedProject {
       });
     }
 
-    const targetsYaml = join(dir, 'targets.yaml');
-    if (existsSync(targetsYaml)) {
-      song.targets = loadFile(project, targetsYaml, {
-        schema: targetsFileSchema,
-        order: targetsFileOrder,
-      });
+    for (const file of yamlFiles(join(dir, 'sounds'))) {
+      const sound = loadFile(project, file, { schema: soundSchema, order: soundOrder });
+      if (sound) song.sounds.push(sound);
     }
 
-    const mixYaml = join(dir, 'mix.yaml');
-    if (existsSync(mixYaml)) {
-      song.mix = loadFile(project, mixYaml, { schema: mixFileSchema, order: mixFileOrder });
+    for (const file of yamlFiles(join(dir, 'mixes'))) {
+      const mix = loadFile(project, file, { schema: mixSchema, order: mixOrder });
+      if (mix) song.mixes.push(mix);
     }
 
     for (const file of yamlFiles(join(dir, 'tracks'))) {
@@ -217,14 +246,6 @@ export function loadProject(root: string): LoadedProject {
         | LoadedFile<Track>
         | undefined;
       if (track) song.tracks.push(track);
-    }
-
-    for (const file of yamlFiles(join(dir, 'generation'))) {
-      const recipe = loadFile(project, file, {
-        schema: generationRecipeSchema,
-        order: generationRecipeOrder,
-      });
-      if (recipe) song.generation.push(recipe);
     }
 
     const takesDir = join(dir, 'takes');
@@ -251,16 +272,16 @@ export function loadProject(root: string): LoadedProject {
 export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
   const files: (LoadedFile<unknown> | undefined)[] = [
     project.manifest,
+    project.shared,
     ...project.songs.flatMap((s): (LoadedFile<unknown> | undefined)[] => [
       s.song,
       s.tempo,
       s.arrangement,
       s.assets,
-      s.targets,
-      s.mix,
+      ...s.sounds,
+      ...s.mixes,
       ...s.tracks,
       ...s.takes,
-      ...s.generation,
     ]),
   ];
   return files.filter((f) => f !== undefined);
@@ -270,6 +291,31 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
 // validity, referential integrity, and canonical formatting.
 function validate(project: LoadedProject): void {
   const push = (file: string, message: string) => project.diagnostics.push({ file, message });
+
+  // The shared ledger validates like a song's, against its own scope root
+  // (project-layout.md §1.6); its names are what //shared/assets: refs
+  // resolve against below.
+  const sharedNames = new Set<string>();
+  const sharedFileByName = new Map<string, string>();
+  if (project.shared) {
+    for (const asset of project.shared.data.assets) {
+      if (sharedNames.has(asset.name)) {
+        push(project.shared.path, `duplicate asset "${asset.name}"`);
+      }
+      sharedNames.add(asset.name);
+      sharedFileByName.set(asset.name, asset.file);
+      if (asset.file !== posix.normalize(asset.file) || asset.file.includes('\\')) {
+        push(
+          project.shared.path,
+          `asset "${asset.name}" file path not in normalized form: ${asset.file}`,
+        );
+      }
+      const resolved = resolveAssetFile(project.root, 'shared', asset.file);
+      if (resolved.problem) {
+        push(project.shared.path, `asset "${asset.name}" ${resolved.problem}`);
+      }
+    }
+  }
 
   for (const song of project.songs) {
     if (song.song && song.song.data.name !== song.name) {
@@ -387,61 +433,147 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    const targetNames = new Set<string>();
-    if (song.targets) {
-      const targetsPath = song.targets.path;
-      // Names first, in full: single-input rules may reference targets
-      // declared later in the file, and forward references are fine.
-      for (const target of song.targets.data.targets) {
-        if (targetNames.has(target.name)) {
-          push(targetsPath, `duplicate target "${target.name}"`);
-        }
-        targetNames.add(target.name);
+    // Defined sounds are one file each, name matching filename
+    // (project-layout.md §1.3, §4). Names are collected first, in full:
+    // sources may reference sounds declared in other files, and forward
+    // references are fine. Deliberate `generate` sounds share the
+    // namespace but not the machinery — no Generator, no cycle
+    // participation — and mint per-variant audition labels (<name>-<n>)
+    // that must not collide with other sounds.
+    const soundNames = new Set<string>();
+    const buildableSounds: { path: string; sound: BuildableSound }[] = [];
+    const generateSounds: { path: string; sound: GenerativeSound }[] = [];
+    for (const file of song.sounds) {
+      const expected = basename(file.path, '.yaml');
+      if (file.data.name !== expected) {
+        push(file.path, `name "${file.data.name}" must match filename "${expected}"`);
       }
-      for (const target of song.targets.data.targets) {
-        // Rule-specific semantics live with the rule (src/rules/).
-        ruleImpl(target).validate(target, {
-          root: project.root,
-          songDir: song.dir,
-          assetNames,
-          targetNames,
-          push: (message) => push(targetsPath, `target "${target.name}" ${message}`),
-          resolveFile: (baseDir, file) => resolveAssetFile(project.root, baseDir, file),
-        });
+      if (soundNames.has(file.data.name)) {
+        push(file.path, `duplicate sound "${file.data.name}"`);
       }
-      // Target→target references make cycles declarable (effects.md §3);
-      // check must name the cycle before the engine's ordering guard ever
-      // trips on it.
-      const byName = new Map(song.targets.data.targets.map((t) => [t.name, t]));
-      const state = new Map<string, 'visiting' | 'done'>();
-      const visit = (name: string, path: string[]): void => {
-        if (state.get(name) === 'done') return;
-        if (state.get(name) === 'visiting') {
-          const cycle = [...path.slice(path.indexOf(name)), name].join(' → ');
-          push(targetsPath, `target dependency cycle: ${cycle}`);
-          return;
+      soundNames.add(file.data.name);
+      // One namespace per song (§4.3): `source: pad` must mean exactly
+      // one thing, so a sound may not shadow an asset.
+      if (assetNames.has(file.data.name)) {
+        push(
+          file.path,
+          `sound "${file.data.name}" collides with an asset of the same name — ` +
+            `a song's names are one namespace (project-layout.md §4.3)`,
+        );
+      }
+      if (file.data.type === 'generative') {
+        generateSounds.push({ path: file.path, sound: file.data });
+      } else {
+        buildableSounds.push({ path: file.path, sound: file.data });
+      }
+    }
+    const names: SourceNames = {
+      assets: assetNames,
+      sounds: new Set(buildableSounds.map((t) => t.sound.name)),
+      chosen: new Set(
+        generateSounds.filter((t) => t.sound.chosen !== undefined).map((t) => t.sound.name),
+      ),
+      unchosen: new Set(
+        generateSounds.filter((t) => t.sound.chosen === undefined).map((t) => t.sound.name),
+      ),
+      shared: sharedNames,
+    };
+    for (const { path, sound } of buildableSounds) {
+      // Rule-specific semantics live with the rule (src/generators/).
+      generatorFor(sound).validate(sound, {
+        root: project.root,
+        songDir: song.dir,
+        names,
+        push: (message) => push(path, `sound "${sound.name}" ${message}`),
+        resolveFile: (baseDir, file) => resolveAssetFile(project.root, baseDir, file),
+      });
+    }
+    // Sound→sound references make cycles declarable (effects.md §3);
+    // check must name the cycle before the engine's ordering guard ever
+    // trips on it. Only buildable-sound sources are edges — assets and
+    // chosen variants are committed leaves.
+    const byName = new Map(buildableSounds.map(({ sound }) => [sound.name, sound]));
+    const pathByName = new Map(buildableSounds.map(({ path, sound }) => [sound.name, path]));
+    const state = new Map<string, 'visiting' | 'done'>();
+    const visit = (name: string, path: string[]): void => {
+      if (state.get(name) === 'done') return;
+      if (state.get(name) === 'visiting') {
+        const cycle = [...path.slice(path.indexOf(name)), name].join(' → ');
+        push(pathByName.get(name)!, `sound dependency cycle: ${cycle}`);
+        return;
+      }
+      state.set(name, 'visiting');
+      const sound = byName.get(name);
+      if (sound) {
+        for (const dep of generatorFor(sound).sources(sound)) {
+          if (byName.has(dep)) visit(dep, [...path, name]);
         }
-        state.set(name, 'visiting');
-        const target = byName.get(name);
-        if (target) {
-          for (const dep of ruleImpl(target).targetDeps?.(target) ?? []) {
-            if (byName.has(dep)) visit(dep, [...path, name]);
-          }
+      }
+      state.set(name, 'done');
+    };
+    for (const { sound } of buildableSounds) visit(sound.name, []);
+
+    // Deliberate sounds (project-layout.md §1.4): variants are committed,
+    // content-addressed artifacts in the song's audio/<name>/ — the
+    // containment is also what makes choose's re-choose guard sound — and
+    // `chosen` must name a variant that exists.
+    for (const { path, sound } of generateSounds) {
+      sound.variants.forEach((_, i) => {
+        const label = `${sound.name}-${i + 1}`;
+        if (soundNames.has(label) || assetNames.has(label)) {
+          const what = assetNames.has(label) ? 'asset' : 'sound';
+          push(path, `variant ${i + 1} audition label "${label}" collides with the ${what} of that name`);
         }
-        state.set(name, 'done');
-      };
-      for (const target of song.targets.data.targets) visit(target.name, []);
+      });
+      const variantFiles = new Set<string>();
+      for (const variant of sound.variants) {
+        if (variantFiles.has(variant.file)) {
+          push(path, `duplicate variant file "${variant.file}"`);
+        }
+        variantFiles.add(variant.file);
+        if (variant.file !== posix.normalize(variant.file) || variant.file.includes('\\')) {
+          push(path, `variant file path not in normalized form: ${variant.file}`);
+          continue;
+        }
+        if (!variant.file.startsWith(`audio/${sound.name}/`)) {
+          push(path, `variant file must live in audio/${sound.name}/: ${variant.file}`);
+        }
+        const resolved = resolveAssetFile(project.root, song.dir, variant.file);
+        if (resolved.problem) {
+          push(path, `variant ${resolved.problem}`);
+        }
+      }
+      if (sound.chosen !== undefined && sound.chosen > sound.variants.length) {
+        push(
+          path,
+          `chosen variant ${sound.chosen} does not exist (${sound.variants.length} variants)`,
+        );
+      }
     }
 
-    // Clips and takes reference assets by name (readable diffs); the
-    // assets.yaml entry carries the content hash.
-    const checkAssetRef = (file: string, label: string, name: string) => {
-      if (!assetNames.has(name)) {
-        push(file, `${label} references unknown asset "${name}"`);
-      }
-    };
-
+    // Clip sources resolve like every other source (project-layout.md
+    // §4.3, checkSource): a bare name in the song's one namespace, or a
+    // shared pin — the whole visibility rule (§1.5) is that no spelling
+    // reaches another song. Takes reference assets only: a take is a
+    // recording, and its asset is the ledger row import wrote.
     const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
+    // Where a committed source's bytes live (undefined for buildable
+    // sounds): the ledger file, the shared file, or a chosen variant.
+    const fileBySource = (ref: string): { base: string; file: string } | undefined => {
+      const shared = sharedAssetName(ref);
+      if (shared !== undefined) {
+        const file = sharedFileByName.get(shared);
+        return file !== undefined ? { base: 'shared', file } : undefined;
+      }
+      const asset = assetFileByName.get(ref);
+      if (asset !== undefined) return { base: song.dir, file: asset };
+      const generate = generateSounds.find((g) => g.sound.name === ref)?.sound;
+      if (generate?.chosen !== undefined) {
+        const variant = generate.variants[generate.chosen - 1];
+        if (variant) return { base: song.dir, file: variant.file };
+      }
+      return undefined;
+    };
     const trackNames = new Set<string>();
     for (const track of song.tracks) {
       const expected = basename(track.path, '.yaml');
@@ -450,17 +582,22 @@ function validate(project: LoadedProject): void {
       }
       trackNames.add(track.data.name);
 
+      const trackCtx = {
+        root: project.root,
+        songDir: song.dir,
+        names,
+        push: (message: string) => push(track.path, message),
+        resolveFile: (baseDir: string, file: string) =>
+          resolveAssetFile(project.root, baseDir, file),
+      };
       const clipIds = new Set<string>();
       for (const clip of track.data.clips) {
         if (clipIds.has(clip.id)) push(track.path, `duplicate clip id "${clip.id}"`);
         clipIds.add(clip.id);
-        // Exactly one source per clip (schema-enforced): an asset, or a
-        // same-song target whose render the clip plays (mix-assembly.md §5).
-        if (clip.asset !== undefined) {
-          checkAssetRef(track.path, `clip "${clip.id}"`, clip.asset);
-        } else if (clip.target !== undefined && !targetNames.has(clip.target)) {
-          push(track.path, `clip "${clip.id}" references unknown target "${clip.target}"`);
-        }
+        // The clip's source is an asset, a sound, or a shared pin
+        // (mix-assembly.md §5; project-layout.md §4.3) — same resolution,
+        // same messages, as a sound's own source.
+        checkSource(clip.source, `clip "${clip.id}"`, trackCtx);
         // Musical arrays need the musical anchor: an absolute clip's
         // scalars are samples, and silently converting [9, 2] would be a
         // unit pun, not a convenience. A clip whose time fields fail to
@@ -500,22 +637,20 @@ function validate(project: LoadedProject): void {
         // must never fail to construct its graph (#21 review).
         if (clip.loop?.enabled && tempoMap) {
           const loop = clip.loop;
-          if (clip.target !== undefined && loop.every === undefined) {
+          const committed = fileBySource(clip.source);
+          if (committed === undefined && loop.every === undefined) {
             push(
               track.path,
-              `clip "${clip.id}" loops a target — set loop.every ` +
-                `(a target's length is unknown before it builds)`,
+              `clip "${clip.id}" loops a sound — set loop.every ` +
+                `(a sound's length is unknown before it builds)`,
             );
           } else {
             // Tiling at source length needs the frame count; the seek-based
             // header read costs no audio bytes (wav.ts).
             let frames: number | undefined;
             let sourceUnreadable = false;
-            if (clip.asset !== undefined && loop.every === undefined) {
-              const file = assetFileByName.get(clip.asset);
-              const resolved = file
-                ? resolveAssetFile(project.root, song.dir, file)
-                : { path: undefined };
+            if (committed !== undefined && loop.every === undefined) {
+              const resolved = resolveAssetFile(project.root, committed.base, committed.file);
               if (resolved.path) {
                 try {
                   frames = wavFrameCount(resolved.path);
@@ -524,7 +659,7 @@ function validate(project: LoadedProject): void {
                   push(track.path, `clip "${clip.id}" loop source: ${(err as Error).message}`);
                 }
               } else {
-                sourceUnreadable = true; // the asset itself is already diagnosed
+                sourceUnreadable = true; // the source itself is already diagnosed
               }
             }
             if (!sourceUnreadable) {
@@ -567,31 +702,31 @@ function validate(project: LoadedProject): void {
     // Mixes reference tracks that can actually produce stems: audio, with
     // clips (mix-assembly.md §3). Omitted `tracks` means all of them, which
     // may be none — an empty mix is legal (a fresh song), it just has no
-    // graph node yet.
-    if (song.mix) {
+    // graph node yet. One mix per file, so the filesystem is the duplicate
+    // check; the name must match the filename like everything else.
+    if (song.mixes.length > 0) {
       const mixable = new Set(
         song.tracks
           .filter((t) => t.data.type === 'audio' && t.data.clips.length > 0)
           .map((t) => t.data.name),
       );
-      const mixNames = new Set<string>();
-      for (const mix of song.mix.data.mixes) {
-        if (mixNames.has(mix.name)) push(song.mix.path, `duplicate mix "${mix.name}"`);
-        mixNames.add(mix.name);
+      for (const file of song.mixes) {
+        const mix = file.data;
+        const expected = basename(file.path, '.yaml');
+        if (mix.name !== expected) {
+          push(file.path, `name "${mix.name}" must match filename "${expected}"`);
+        }
         if (!mix.tracks) continue;
         const listed = new Set<string>();
         for (const trackName of mix.tracks) {
           if (listed.has(trackName)) {
-            push(song.mix.path, `mix "${mix.name}" lists track "${trackName}" twice`);
+            push(file.path, `mix "${mix.name}" lists track "${trackName}" twice`);
           }
           listed.add(trackName);
           if (!trackNames.has(trackName)) {
-            push(song.mix.path, `mix "${mix.name}" references unknown track "${trackName}"`);
+            push(file.path, `mix "${mix.name}" references unknown track "${trackName}"`);
           } else if (!mixable.has(trackName)) {
-            push(
-              song.mix.path,
-              `mix "${mix.name}" track "${trackName}" has no audio clips to mix`,
-            );
+            push(file.path, `mix "${mix.name}" track "${trackName}" has no audio clips to mix`);
           }
         }
       }
@@ -610,7 +745,9 @@ function validate(project: LoadedProject): void {
       if (!trackNames.has(take.data.track)) {
         push(take.path, `take references unknown track "${take.data.track}"`);
       }
-      checkAssetRef(take.path, 'take', take.data.asset);
+      if (!assetNames.has(take.data.asset)) {
+        push(take.path, `take references unknown asset "${take.data.asset}"`);
+      }
 
       // Takes store both time representations under a declared anchor; the
       // derived one must agree with the tempo map (project-core.md §3.1).
@@ -638,44 +775,6 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Generation recipes (ace-generation.md §3.1): filenames are keys like
-    // everywhere else, variant files are content-addressed committed
-    // artifacts under generation/<name>/, and `chosen` must name a variant
-    // that exists.
-    for (const recipe of song.generation) {
-      const expected = basename(recipe.path, '.yaml');
-      if (recipe.data.name !== expected) {
-        push(recipe.path, `name "${recipe.data.name}" must match filename "${expected}"`);
-      }
-      const generationDir = join(song.dir, 'generation');
-      const variantFiles = new Set<string>();
-      for (const variant of recipe.data.variants) {
-        if (variantFiles.has(variant.file)) {
-          push(recipe.path, `duplicate variant file "${variant.file}"`);
-        }
-        variantFiles.add(variant.file);
-        if (variant.file !== posix.normalize(variant.file) || variant.file.includes('\\')) {
-          push(recipe.path, `variant file path not in normalized form: ${variant.file}`);
-        }
-        // `../` is normalized but escapes generation/ — and choose's
-        // same-generation prefix guard (which licenses re-choosing)
-        // assumes containment, so containment is validated, not assumed.
-        if (variant.file.split('/').includes('..')) {
-          push(recipe.path, `variant file path must stay inside generation/: ${variant.file}`);
-        }
-        const resolved = resolveAssetFile(project.root, generationDir, variant.file);
-        if (resolved.problem) {
-          push(recipe.path, `variant ${resolved.problem}`);
-        }
-      }
-      if (recipe.data.chosen !== undefined && recipe.data.chosen > recipe.data.variants.length) {
-        push(
-          recipe.path,
-          `chosen variant ${recipe.data.chosen} does not exist ` +
-            `(${recipe.data.variants.length} variants)`,
-        );
-      }
-    }
   }
 }
 
@@ -712,17 +811,23 @@ export function unformattedFiles(project: LoadedProject): string[] {
 // (already diagnosed by validate) are never opened.
 export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnostic[]> {
   const diagnostics: Diagnostic[] = [];
-  for (const song of project.songs) {
-    if (!song.assets) continue;
-    for (const asset of song.assets.data.assets) {
-      const { path } = resolveAssetFile(project.root, song.dir, asset.file);
+  // One ledger per scope (project-layout.md §1.6): shared/assets.yaml and
+  // each song's assets.yaml verify identically, paths relative to their
+  // scope root.
+  const ledgers = [
+    ...(project.shared ? [{ ledger: project.shared, base: 'shared' }] : []),
+    ...project.songs.flatMap((s) => (s.assets ? [{ ledger: s.assets, base: s.dir }] : [])),
+  ];
+  for (const { ledger, base } of ledgers) {
+    for (const asset of ledger.data.assets) {
+      const { path } = resolveAssetFile(project.root, base, asset.file);
       if (!path) continue; // already diagnosed by validate
       // Size first: cheaper than hashing, and truncation gets a clearer
       // message than a bare hash mismatch.
       const size = statSync(path).size;
       if (size !== asset.bytes) {
         diagnostics.push({
-          file: song.assets.path,
+          file: ledger.path,
           message: `asset "${asset.name}" is ${size} bytes on disk but ${asset.bytes} recorded`,
         });
         continue;
@@ -730,24 +835,25 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
       const actual = await sha256File(path);
       if (actual !== asset.sha256) {
         diagnostics.push({
-          file: song.assets.path,
+          file: ledger.path,
           message: `asset "${asset.name}" content does not match its recorded sha256 (${asset.file} hashes to ${actual})`,
         });
       }
     }
   }
-  // Generation variants are committed artifacts with recorded hashes too
-  // (ace-generation.md §3.1) — a recipe whose WAVs drifted is provenance
-  // that lies, which is the one thing a recipe must never do.
+  // Deliberate-target variants are committed artifacts with recorded
+  // hashes too (project-layout.md §1.4) — a recipe whose WAVs drifted is
+  // provenance that lies, which is the one thing a recipe must never do.
   for (const song of project.songs) {
-    for (const recipe of song.generation) {
-      for (const variant of recipe.data.variants) {
-        const { path } = resolveAssetFile(project.root, join(song.dir, 'generation'), variant.file);
+    for (const file of song.sounds) {
+      if (file.data.type !== 'generative') continue;
+      for (const variant of file.data.variants) {
+        const { path } = resolveAssetFile(project.root, song.dir, variant.file);
         if (!path) continue; // already diagnosed by validate
         const actual = await sha256File(path);
         if (actual !== variant.sha256) {
           diagnostics.push({
-            file: recipe.path,
+            file: file.path,
             message: `variant "${variant.file}" content does not match its recorded sha256 (hashes to ${actual})`,
           });
         }

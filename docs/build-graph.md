@@ -1,8 +1,10 @@
 # Build graph
 
-Bloom treats a project as an explicit dependency graph, Bazel-style: targets,
-dependencies, content-addressed outputs, incremental rebuilds, cached outputs,
-queries, and tests — without Bazel syntax.
+Bloom treats a project as an explicit dependency graph, Bazel-style:
+labels, dependencies, content-addressed outputs, incremental rebuilds,
+cached outputs, queries, and tests — without Bazel syntax or its
+vocabulary (project-layout.md §4: the format speaks sounds, types, and
+sources; the engine speaks nodes, generators, and action keys).
 
 ```bash
 bloom build //songs/opener/mix:main
@@ -12,15 +14,15 @@ bloom query 'deps(//songs/opener/mix:main)'
 bloom explain //songs/opener/mix:main
 ```
 
-Labels address songs and shared material alike: a mix in one song can depend
-on `//shared/instruments:dark-pad` exactly as it depends on its own tracks.
+Labels address songs and shared material alike: a clip in one song
+plays `//shared/assets:rain` exactly as it plays the song's own sounds.
 
 The absolute form is canonical, but the CLI accepts songs-relative shorthand
 for all of the above — `bloom build opener/mix:main`, `bloom explain
 opener/...` — and a bare song name plays its main mix: `bloom play opener`
 (project-core.md §3.4; `main` is a convention, and a song that names its
-mixes otherwise gets a no-such-target error). `//shared/...` material, when
-it exists, uses the full form.
+mixes otherwise gets a no-such-label error). `//shared/...` material
+uses the full form.
 
 ## Caching, and freezing is caching
 
@@ -31,8 +33,8 @@ renders.
 
 There is no separate freeze machinery. **A frozen track is a cached
 intermediate output**; invalidate the cache (change a parameter) and it is
-unfrozen automatically. A bounce is a cached output promoted to a named
-target. Outputs are stored under their content hash, so a rebuild never
+unfrozen automatically. A bounce is a cached output given a name.
+Outputs are stored under their content hash, so a rebuild never
 overwrites an old render — it produces a new artifact and moves a pointer.
 
 ## Render strategies
@@ -50,7 +52,7 @@ How a node's output can be produced is a declared, per-node property:
   pure function of the timeline: a live microphone input, a monitoring chain, a
   SuperCollider node played by hand, MIDI sent to an external device with no
   declared return. There is no answer to "what does this node output at bar
-  42," so there is nothing to cache. A mix target depending on a live-only node
+  42," so there is nothing to cache. A mix depending on a live-only node
   fails the build with a clear error: *this output doesn't exist until someone
   performs it — capture it first.* A capture of a live-only node's output is a
   take, and re-enters the buildable world.
@@ -61,20 +63,30 @@ declaring an audio return path ("this device's output returns on Apollo inputs
 other render — and flags it nondeterministic, because knobs on hardware are
 outside the hash.
 
-## Rules so far
+## Sound types and their generators
 
-- **`normalize`** — sample-rate/bit-depth conversion via macOS `afconvert`.
-  Input: a declared asset (verified against its declaration before the rule
-  executes).
-- **`sc-render`** — a SuperCollider program renders an asset offline via
-  scsynth's NRT mode. The program is a plain `.scd` run through `sclang`
+Every automatic type has a `Generator` in `src/generators/` — the code
+that generates it mechanically, in-graph, cached. The `generative` type
+has none: its generation is human-triggered (`bloom generate`), its
+variants are committed under `audio/<sound>/`, and its label resolves
+to the chosen variant (`bloom choose` repoints it; clips reference the
+sound by name and follow).
+
+- **`normalize`** — sample-rate/bit-depth conversion via macOS
+  `afconvert`. `source:` is any committed or buildable name (verified
+  against its declaration before the generator executes).
+- **`supercollider`** — a SuperCollider program defines the sound,
+  rendered offline via scsynth's NRT mode. `source:` names the program —
+  a bare filename resolves in `shared/instruments/`, a slashed path is
+  project-relative. The program is a plain `.scd` run through `sclang`
   with `BLOOM_OUTPUT` / `BLOOM_SEED` / `BLOOM_DURATION` /
   `BLOOM_SAMPLE_RATE` / `BLOOM_CHANNELS` in the environment; it writes
   `BLOOM_OUTPUT` and exits. The program's *content hash* is a cache input,
   so editing the code invalidates exactly its own renders; with a fixed
   seed, renders are reproducible bit-for-bit. `bloom sc render` runs a
   program directly (uncached) for iteration. Full contract:
-  [projects/all/sc-render.md](projects/all/sc-render.md) §2.
+  [projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
+  predates the §4 rename).
 - **`say`** — macOS text-to-speech as a recipe: `text`/`voice`/`rate` are
   the whole action key, the output (a WAV at the project rate, via
   `afconvert`) is cached and never committed. `voice` is required, and
@@ -92,18 +104,18 @@ outside the hash.
   serving pre-toggle bytes until `text`/`voice`/`rate` changes the key —
   which is also the feature: a render you liked survives voice drift
   until the recipe itself moves. Reproducibility is same-machine, like
-  sc-render's: an OS or voice-data
-  update may change the bytes, and the key deliberately does not chase OS
-  versions. Voice *generation* (cloned/sung voices, committed outputs) is
-  a separate ACE-style workflow on the other side of the determinism
-  boundary.
-- **`track-render`** — the first *implicit* rule: every audio track with
-  clips is buildable as `//songs/<song>/tracks:<name>` without declaring
-  anything, because the track file **is** the declaration. A clip sources
-  a committed asset *or a same-song target* — clipping an SC render pulls
-  the whole recipe into the stem's subgraph, so the arrangement can play
-  audio nothing ever committed, and editing the recipe rebuilds straight
-  through stem and mix. It places the
+  supercollider's: an OS or voice-data update may change the bytes, and
+  the key deliberately does not chase OS versions. Voice *generation*
+  (cloned/sung voices, committed outputs) will be a deliberate
+  generative sound on the other side of the determinism boundary.
+- **`stem`** — the first *implicit* type: every audio track with clips
+  is buildable as `//songs/<song>/tracks:<name>` without declaring
+  anything, because the track file **is** the declaration — a mix file
+  defines a `mix`, a track file implies a `stem`. A clip's
+  `source:` is an asset, a sound, or a shared pin — clipping an
+  automatic sound pulls its whole definition into the stem's subgraph,
+  so the arrangement can play audio nothing ever committed, and editing
+  the definition rebuilds straight through stem and mix. It places the
   track's clips through the tempo map (position, source offset, slip,
   clip gain, linear fades) and sums them into a pre-fader Float32 stereo
   stem, in TypeScript — offline mixing has no deadline
@@ -125,14 +137,16 @@ outside the hash.
   auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
   compensation on by default — tone changes, level doesn't), an offline
   lookahead limiter with a hard ceiling guarantee, and a deterministic
-  Freeverb whose output grows by its tail. Each sources exactly one of
-  `asset:`/`target:`, so chains are just targets referencing targets —
-  `sc-render → eq → reverb` — cached per link. The same parameters run as
+  Freeverb whose output grows by its tail. Each takes one `source:`, so
+  chains are just sounds sourcing sounds — `supercollider → eq →
+  reverb` — cached per link, and a sound wrapped in an effect is a
+  different sound. The same parameters run as
   track `inserts:` (baked into the stem) and in the mix `master:` chain
   (post-gain, so the limiter guards the true output). Cycles became
-  declarable with target→target edges, so `bloom check` names them.
-- **`mix`** — declared in `songs/<song>/mix.yaml` (`//songs/<song>/mix:<name>`;
-  `bloom song create` writes a default `main`). Sums track stems — the
+  declarable with sound→sound edges, so `bloom check` names them.
+- **`mix`** — declared one file per mix in `songs/<song>/mixes/`
+  (`//songs/<song>/mix:<name>`; `bloom song create` writes a default
+  `main`). Sums track stems — the
   graph's first rule→rule edges — applying each track's `gain_db`/`pan`
   (constant-power balance) and a master gain while summing. Because inputs
   are the stems' *content hashes*, a fader move re-runs only the sum, and a
@@ -158,7 +172,8 @@ floating-point scheduling) but sound the same; the build system never
 re-renders unchanged inputs, so nondeterminism only surfaces on deliberate
 cold rebuilds. Seeded SC renders are deterministic; ACE with a fixed seed is
 reproducible on the same machine but not guaranteed across GPU/framework
-versions — which is why generated assets are committed, not regenerated.
+versions — which is why generative sounds commit their variants, never
+regenerating mechanically.
 
 Nodes that can differ *audibly* between renders are flagged
 **nondeterministic**, in three tiers:

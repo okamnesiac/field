@@ -1,6 +1,6 @@
 import { parseLabel, parsePattern } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
-import { build, explain, type BuildOutcome, type Explanation, type RuleRunner } from '../graph/build.js';
+import { build, explain, type BuildOutcome, type Explanation, type GeneratorRunner } from '../graph/build.js';
 import { buildGraph, deps, expandPattern, resolveLabel, type Graph } from '../graph/graph.js';
 import { formatLabel } from '../labels.js';
 
@@ -15,10 +15,10 @@ export function loadValid(root: string): { project: LoadedProject; graph: Graph 
   return { project, graph: buildGraph(project) };
 }
 
-export async function buildTargets(
+export async function buildLabels(
   root: string,
   patterns: string[],
-  runner?: RuleRunner,
+  runner?: GeneratorRunner,
 ): Promise<BuildOutcome[]> {
   const { project, graph } = loadValid(root);
   const nodes = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
@@ -36,7 +36,7 @@ export function queryDeps(root: string, query: string): string[] {
   return expandPattern(graph, parsePattern(query.trim())).map((n) => formatLabel(n.label));
 }
 
-export async function explainTarget(root: string, label: string): Promise<Explanation> {
+export async function explainLabel(root: string, label: string): Promise<Explanation> {
   const { project, graph } = loadValid(root);
   return explain(project, graph, resolveLabel(graph, parseLabel(label)));
 }

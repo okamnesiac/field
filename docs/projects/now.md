@@ -6,8 +6,11 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [Layout migration](all/project-layout.md) — the layout revision and
+  its §4 vocabulary made real: per-file `sounds/` and `mixes/`,
+  `type:`/`source:` spellings, three-shelf `shared/` with its ledger,
+  choose-as-repoint, `bloom generate`/`choose`/`setup`; field migrates
+  on merge with the demo shared sample.
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
-  stays here until real use (field, sc-render) stops surfacing surprises.
-- [Musical time arrays](all/musical-time.md) — `[bar, beat?, tick?]` in
-  project YAML; scalars stay ticks, resolution through the meter map,
-  cache-identical to the tick spelling.
+  stays here until real use (field, new phases) stops surfacing
+  surprises.

@@ -4,14 +4,14 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
-import { ruleImpl, type ExtraInput, type RunContext } from '../rules/index.js';
-import { deps, resolveLabel, type Graph, type GraphNode, type RuleNode } from './graph.js';
+import { generatorFor, type ExtraInput, type RunContext } from '../generators/index.js';
+import { deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
 // store under .bloom/cache/cas/<sha256>; the action index maps an action
 // key — the hash of canonical JSON of {rule, rule_version, input hashes,
 // parameters, project sample rate} — to its output hashes. Same key, no
-// work. Rule behavior lives in src/rules/; this engine only knows that
+// work. Rule behavior lives in src/generators/; this engine only knows that
 // rules exist.
 
 export interface ActionEntry {
@@ -40,15 +40,15 @@ export interface Explanation {
 
 // Executes a rule: reads input files, writes the output file. Injectable so
 // tests can count executions or fake the tool.
-export type RuleRunner = (
-  rule: RuleNode,
+export type GeneratorRunner = (
+  rule: GeneratorNode,
   inputPaths: string[],
   outputPath: string,
   ctx: RunContext,
 ) => Promise<void>;
 
-export const defaultRunner: RuleRunner = (node, inputPaths, outputPath, ctx) =>
-  ruleImpl(node.spec).execute(node.spec, inputPaths, outputPath, ctx);
+export const defaultRunner: GeneratorRunner = (node, inputPaths, outputPath, ctx) =>
+  generatorFor(node.spec).execute(node.spec, inputPaths, outputPath, ctx);
 
 function cacheDir(project: LoadedProject): string {
   return join(project.root, '.bloom', 'cache');
@@ -101,18 +101,23 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-// The knobs that shape the output: everything except identity (name, rule)
+// The knobs that shape the output: everything except identity (name, type)
 // and the rule's declared wiring, which already contributes as input hashes.
-function ruleParameters(node: RuleNode): Record<string, unknown> {
-  const wiring = new Set(['name', 'rule', ...ruleImpl(node.spec).wiringFields]);
+function ruleParameters(node: GeneratorNode): Record<string, unknown> {
+  const wiring = new Set(['name', 'type', ...generatorFor(node.spec).wiringFields]);
   return Object.fromEntries(Object.entries(node.spec).filter(([k]) => !wiring.has(k)));
 }
 
-function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: number): string {
+function actionKey(node: GeneratorNode, inputHashes: string[], projectSampleRate: number): string {
+  // The serialized field stays spelled `rule` deliberately: it is pure
+  // cache machinery, and renaming a hash key would invalidate every
+  // cached action for zero semantic gain (project-layout.md §4 keeps
+  // engine words in the engine). Only type *values* changing re-keys —
+  // sc-render → supercollider, priced in by §4.4.
   return sha256Text(
     canonicalJson({
-      rule: node.spec.rule,
-      rule_version: ruleImpl(node.spec).version,
+      rule: node.spec.type,
+      rule_version: generatorFor(node.spec).version,
       inputs: inputHashes,
       parameters: ruleParameters(node),
       project_sample_rate: projectSampleRate,
@@ -122,12 +127,12 @@ function actionKey(node: RuleNode, inputHashes: string[], projectSampleRate: num
 
 function assetFilePath(project: LoadedProject, node: GraphNode): string {
   if (node.kind !== 'asset') throw new Error('not an asset node');
-  return join(project.root, node.songDir, node.asset.file);
+  return join(project.root, node.scopeDir, node.asset.file);
 }
 
 // Materialized outputs land under .bloom/out mirroring the label path, so
 // humans can play what they built without digging in the CAS.
-function outPath(project: LoadedProject, node: RuleNode): string {
+function outPath(project: LoadedProject, node: GeneratorNode): string {
   return join(project.root, '.bloom', 'out', node.label.pkg, `${node.label.name}.wav`);
 }
 
@@ -135,7 +140,7 @@ async function buildNode(
   project: LoadedProject,
   graph: Graph,
   node: GraphNode,
-  runner: RuleRunner,
+  runner: GeneratorRunner,
   built: Map<string, BuildOutcome>,
 ): Promise<BuildOutcome> {
   if (node.kind === 'asset') {
@@ -144,12 +149,14 @@ async function buildNode(
     return { label: formatLabel(node.label), cached: true, sha256: node.asset.sha256 };
   }
   if (node.kind === 'generation') {
-    // Generation variants are committed sources like assets — recipe hash
-    // as identity, nothing to execute. They are never rule inputs.
+    // Deliberate sounds and their variants are committed sources like
+    // assets — recorded hash as identity, nothing to execute. A chosen
+    // sound's node is consumable by clips and rules like any committed
+    // content (project-layout.md §1.4).
     return { label: formatLabel(node.label), cached: true, sha256: node.sha256 };
   }
 
-  const impl = ruleImpl(node.spec);
+  const impl = generatorFor(node.spec);
   const inputNodes = node.deps.map((d) => resolveLabel(graph, d));
   // Asset inputs contribute their declared hash; rule inputs (mix ← stems)
   // contribute the output hash of the already-built dependency — build()
@@ -190,35 +197,45 @@ async function buildNode(
   // materialized from the CAS this build just wrote — machine-managed
   // state, unlike asset files a human can edit.
   for (const input of inputNodes) {
-    if (input.kind !== 'asset') continue;
-    const path = assetFilePath(project, input);
-    const size = statSync(path).size;
-    if (size !== input.asset.bytes) {
-      throw new Error(
-        `refusing to build: input ${formatLabel(input.label)} is ${size} bytes on disk but ` +
-          `${input.asset.bytes} declared (bloom check, then re-import or restore the file)`,
-      );
-    }
-    const actual = await sha256File(path);
-    if (actual !== input.asset.sha256) {
-      throw new Error(
-        `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
-          `declared sha256 (bloom check, then re-import or restore the file)`,
-      );
+    if (input.kind === 'asset') {
+      const path = assetFilePath(project, input);
+      const size = statSync(path).size;
+      if (size !== input.asset.bytes) {
+        throw new Error(
+          `refusing to build: input ${formatLabel(input.label)} is ${size} bytes on disk but ` +
+            `${input.asset.bytes} declared (bloom check, then re-import or restore the file)`,
+        );
+      }
+      const actual = await sha256File(path);
+      if (actual !== input.asset.sha256) {
+        throw new Error(
+          `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
+            `declared sha256 (bloom check, then re-import or restore the file)`,
+        );
+      }
+    } else if (input.kind === 'generation') {
+      // Committed variants are human-visible files too; same tamper guard.
+      const actual = await sha256File(join(project.root, input.songDir, input.file));
+      if (actual !== input.sha256) {
+        throw new Error(
+          `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
+            `recorded sha256 (bloom check)`,
+        );
+      }
     }
   }
 
-  const inputPaths = inputNodes.map((d) =>
-    d.kind === 'asset'
-      ? assetFilePath(project, d)
-      : built.get(formatLabel(d.label))!.outputPath!,
-  );
+  const inputPaths = inputNodes.map((d) => {
+    if (d.kind === 'asset') return assetFilePath(project, d);
+    if (d.kind === 'generation') return join(project.root, d.songDir, d.file);
+    return built.get(formatLabel(d.label))!.outputPath!;
+  });
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
   await runner(node, inputPaths, tmpOut, { root: project.root, sampleRate });
   if (!existsSync(tmpOut)) {
-    throw new Error(`rule "${node.spec.rule}" produced no output for ${formatLabel(node.label)}`);
+    throw new Error(`type "${node.spec.type}" produced no output for ${formatLabel(node.label)}`);
   }
 
   // Extra inputs were hashed for the key before the run; a rule may refuse
@@ -234,7 +251,7 @@ async function buildNode(
 
   // The action entry is the cache marker, written last: a crash between
   // CAS write and here just re-runs the rule next time.
-  writeAction(project, key, { rule: node.spec.rule, outputs: [{ sha256, bytes }] });
+  writeAction(project, key, { rule: node.spec.type, outputs: [{ sha256, bytes }] });
 
   return { label: formatLabel(node.label), cached: false, outputPath: materialize(sha256), sha256 };
 }
@@ -244,7 +261,7 @@ export async function build(
   project: LoadedProject,
   graph: Graph,
   nodes: GraphNode[],
-  runner: RuleRunner = defaultRunner,
+  runner: GeneratorRunner = defaultRunner,
 ): Promise<BuildOutcome[]> {
   const outcomes: BuildOutcome[] = [];
   const built = new Map<string, BuildOutcome>();
@@ -297,7 +314,7 @@ export async function explain(
     memo.set(label, explanation);
     return explanation;
   }
-  const impl = ruleImpl(node.spec);
+  const impl = generatorFor(node.spec);
   // A rule input's hash is its dependency's cached output — explaining
   // recursively without executing anything. An unbuilt dependency means
   // this node's action key cannot be known yet.
@@ -318,7 +335,7 @@ export async function explain(
   const explanation: Explanation = {
     label,
     kind: 'rule',
-    rule: node.spec.rule,
+    rule: node.spec.type,
     ruleVersion: impl.version,
     inputs,
     parameters: ruleParameters(node),

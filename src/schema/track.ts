@@ -1,14 +1,16 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
-import { labelName, samples, slug, timePosition, timeSpan } from './common.js';
+import { labelName, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 
 // A clip is a window (position, duration, in anchor units) on content
 // (source, source_offset, slip, in samples). Effective read offset =
-// source_offset − slip (project-core.md §3.2). The content is exactly one
-// of: a committed asset (assets.yaml) or a same-song rule target
-// (targets.yaml) — clipping a target means the arrangement plays a render
-// that is never committed, only its recipe (mix-assembly.md §5).
+// source_offset − slip (project-core.md §3.2). `source:` names the
+// content (project-layout.md §4.3): an asset or a sound in the song's
+// one namespace, or a shared pin — clipping a buildable sound means the
+// arrangement plays a render that is never committed, only its
+// definition (mix-assembly.md §5), and clipping a generate sound plays
+// its chosen committed variant.
 // Looping (clip-looping.md §1): the window is authoritative and the source
 // tiles to fill it — extending a loop is extending `duration`. `every` is
 // the repetition interval in anchor units (grid-locked through tempo
@@ -27,24 +29,19 @@ export const clipLoopSchema = z.strictObject({
 type ClipLoopFile = z.infer<typeof clipLoopSchema>;
 export type ClipLoop = Omit<ClipLoopFile, 'every'> & { every?: number | undefined };
 
-export const clipSchema = z
-  .strictObject({
-    id: slug,
-    asset: slug.optional(), // an asset name declared in the song's assets.yaml
-    target: slug.optional(), // a target name declared in the song's targets.yaml
-    anchor: z.enum(['musical', 'absolute']).default('musical'),
-    position: timePosition, // ticks when musical, samples when absolute
-    duration: timeSpan, // same units as position
-    loop: clipLoopSchema.optional(),
-    source_offset: samples.default(0),
-    slip: z.number().int().default(0),
-    gain_db: z.number().default(0),
-    fade_in: samples.default(0),
-    fade_out: samples.default(0),
-  })
-  .refine((c) => (c.asset === undefined) !== (c.target === undefined), {
-    message: 'a clip sources exactly one of asset or target',
-  });
+export const clipSchema = z.strictObject({
+  id: slug,
+  source: sourceRef, // what the clip plays (§4.3): asset, sound, or shared pin
+  anchor: z.enum(['musical', 'absolute']).default('musical'),
+  position: timePosition, // ticks when musical, samples when absolute
+  duration: timeSpan, // same units as position
+  loop: clipLoopSchema.optional(),
+  source_offset: samples.default(0),
+  slip: z.number().int().default(0),
+  gain_db: z.number().default(0),
+  fade_in: samples.default(0),
+  fade_out: samples.default(0),
+});
 type ClipFile = z.infer<typeof clipSchema>;
 export type Clip = Omit<ClipFile, 'position' | 'duration' | 'loop'> & {
   position: number;
@@ -54,8 +51,7 @@ export type Clip = Omit<ClipFile, 'position' | 'duration' | 'loop'> & {
 export const clipOrder: KeyOrder = {
   keys: [
     'id',
-    'asset',
-    'target',
+    'source',
     'anchor',
     'position',
     'duration',

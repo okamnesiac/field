@@ -24,17 +24,18 @@ small native control surface, all driving the same engine and the same files.
 
 - **Project** — a Git repository of schema-validated YAML plus content-addressed
   audio assets. A project contains one or more songs — think album — plus
-  shared instruments, loops, and sounds reused across them. See
+  shared instruments and samples reused across them. See
   [project-model.md](project-model.md).
 - **Song** — one piece within a project: its own arrangement, tempo map,
-  tracks, takes, and mix targets, drawing freely on the project's shared
+  tracks, sounds, takes, and mixes, drawing freely on the project's shared
   material.
 - **Asset** — an immutable audio/MIDI file, referenced by content hash. Audio is
   never edited in place; all placement and editing is metadata.
 - **Node** — a producer or processor in the dependency graph: a recorded track,
-  a SuperCollider program, an ACE generation recipe, a plugin chain, a bus.
-- **Target** — something buildable: a stem, a cue mix, the main mix, an
-  analysis output. `bloom build //mix:main`. See [build-graph.md](build-graph.md).
+  a SuperCollider program, a generative sound, a plugin chain, a bus.
+- **Label** — the address of something buildable: a stem, a sound, a cue mix,
+  the main mix. `bloom build //songs/opener/mix:main`. See
+  [build-graph.md](build-graph.md).
 - **Take** — one performance of something. Recorded takes and renders of
   nondeterministic nodes use the same machinery: numbered, auditioned, one
   active, none destroyed.

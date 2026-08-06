@@ -5,10 +5,12 @@ demonstrates the full loop — generate, audition variants in the mix,
 `choose`, clip the promoted asset into creek. The goal's further verbs
 (`extend`, `repaint`, …) are future phases, not this plan. §5 has the
 open follow-ups. Layout superseded 2026-08-06
-([project-layout.md](project-layout.md) §1.4): the `generation/`
+([project-layout.md](project-layout.md) §1.4, §4): the `generation/`
 directory and `//songs/<s>/generation:` labels (§3.2, §4.2 below)
-migrate to deliberate targets in `targets/` with variants in `audio/`;
-the committed-not-cached decision (§3.1) stands.
+migrate to deliberate `generate` sounds in `sounds/` with variants in
+`audio/`, chosen by repointing (`bloom choose`) rather than promotion
+into the ledger (§4.8); the committed-not-cached decision (§3.1)
+stands. The `ace` CLI prefix retired with §1.7.
 
 **Goal:** `bloom ace generate` (then `extend`, `repaint`, `variants`, …):
 committed generation recipes produce audio assets through ACE-Step running in

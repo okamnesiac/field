@@ -12,7 +12,7 @@ import {
   parseVariantNumber,
   parseVariants,
 } from './cliParsers.js';
-import { buildTargets, explainTarget, queryDeps } from './commands/build.js';
+import { buildLabels, explainLabel, queryDeps } from './commands/build.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
 import {
   transportCommand,
@@ -20,7 +20,7 @@ import {
   transportStatusLines,
 } from './commands/transport.js';
 import { check } from './commands/check.js';
-import { runScProgram } from './rules/sc-render.js';
+import { runScProgram } from './generators/supercollider.js';
 import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
 import { importAsset } from './commands/import.js';
@@ -64,7 +64,7 @@ program
 
 const sc = program.command('sc').description('SuperCollider');
 sc.command('render <program>')
-  .description('render an SC program directly (uncached, for iteration; commit it as a target for builds)')
+  .description('render an SC program directly (uncached, for iteration; commit it as a sound for builds)')
   .requiredOption('--seed <n>', 'random seed', parseSeed)
   .requiredOption('--duration <seconds>', 'render length in seconds', parseDurationSeconds)
   .option('--channels <n>', '1 or 2', parseChannels, 2)
@@ -90,21 +90,23 @@ sc.command('render <program>')
     }
   });
 
-const ace = program.command('ace').description('ACE-Step generation (outputs are committed, not cached)');
-ace
+// The deliberate-trigger verbs over the generator category
+// (project-layout.md §1.7): the recipe's model field says which generator
+// ran, so the verbs carry no model prefix.
+program
   .command('setup')
-  .description('set up the bloom-aced Python environment (uv; explicit, never automatic)')
+  .description('set up generation worker environments (uv; explicit, never automatic)')
   .action(async () => {
     try {
-      const { aceSetup } = await import('./commands/ace.js');
-      await aceSetup((line) => process.stdout.write(`${line}\n`));
+      const { setupWorker } = await import('./commands/generate.js');
+      await setupWorker((line) => process.stdout.write(`${line}\n`));
     } catch (err) {
       fail(err);
     }
   });
-ace
+program
   .command('generate <name>')
-  .description('generate variants into songs/<song>/generation/<name>/ with a provenance recipe')
+  .description('run a deliberate generator: variants land in songs/<song>/audio/<name>/ with the recipe as a sound')
   .requiredOption('--song <name>', 'song whose tempo map projects musical time')
   .requiredOption('--prompt <text>', 'what to generate')
   .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
@@ -118,8 +120,8 @@ ace
     variants: number; lyrics?: string; bpm?: number;
   }) => {
     try {
-      const { aceGenerate } = await import('./commands/ace.js');
-      const result = await aceGenerate(requireRoot(), name, {
+      const { generateVariants } = await import('./commands/generate.js');
+      const result = await generateVariants(requireRoot(), name, {
         song: opts.song,
         prompt: opts.prompt,
         seed: opts.seed,
@@ -137,31 +139,29 @@ ace
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: bloom play ${opts.song}/generation:${name}-1\n` +
-          `promote:  bloom ace choose ${name} --song ${opts.song} --variant <n>\n`,
+        `audition: bloom play ${opts.song}/sounds:${name}-1\n` +
+          `choose:   bloom choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
       fail(err);
     }
   });
-ace
+program
   .command('choose <name>')
-  .description('promote a generation variant to a committed asset clips can reference')
-  .requiredOption('--song <name>', 'song the generation belongs to')
+  .description("repoint which committed variant a generate sound's label resolves to")
+  .requiredOption('--song <name>', 'song the sound belongs to')
   .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
-  .option('--as <name>', 'asset name (default: the generation name)')
-  .action(async (name: string, opts: { song: string; variant: number; as?: string }) => {
+  .action(async (name: string, opts: { song: string; variant: number }) => {
     try {
-      const { aceChoose } = await import('./commands/ace.js');
-      const result = await aceChoose(requireRoot(), name, {
+      const { chooseVariant } = await import('./commands/generate.js');
+      const result = await chooseVariant(requireRoot(), name, {
         song: opts.song,
         variant: opts.variant,
-        as: opts.as,
       });
+      const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
-        `${result.replaced ? 'moved' : 'promoted'} ${name} variant ${opts.variant} → ` +
-          `//songs/${opts.song}/assets:${result.assetName}\n` +
-          `clips can now reference it: asset: ${result.assetName}\n`,
+        `${moved ? 'moved' : 'chose'} ${name} → variant ${opts.variant} (${result.file})\n` +
+          `//songs/${opts.song}/sounds:${name} now plays it; clips reference it as source: ${name}\n`,
       );
     } catch (err) {
       fail(err);
@@ -215,10 +215,10 @@ program
 
 program
   .command('build <patterns...>')
-  .description('build targets (creek/targets:pad-96k, creek/..., or a bare song for its main mix)')
+  .description('build labels (creek/sounds:pad-96k, creek/..., or a bare song for its main mix)')
   .action(async (patterns: string[]) => {
     try {
-      const outcomes = await buildTargets(requireRoot(), patterns);
+      const outcomes = await buildLabels(requireRoot(), patterns);
       for (const o of outcomes) {
         const status = o.cached ? 'cached' : 'built';
         const where = o.outputPath ? ` → ${o.outputPath}` : '';
@@ -383,7 +383,7 @@ program
 
 program
   .command('query <expr>')
-  .description("query the graph: a pattern, or deps(creek/targets:pad-96k)")
+  .description("query the graph: a pattern, or deps(creek/sounds:pad-96k)")
   .action((expr: string) => {
     try {
       for (const label of queryDeps(requireRoot(), expr)) {
@@ -396,12 +396,14 @@ program
 
 program
   .command('explain <label>')
-  .description('show a target\'s rule, inputs, action key, and cache status')
+  .description('show a label\'s type, inputs, action key, and cache status')
   .action(async (label: string) => {
     try {
-      const e = await explainTarget(requireRoot(), label);
+      const e = await explainLabel(requireRoot(), label);
       process.stdout.write(`${e.label} (${e.kind})\n`);
-      if (e.rule) process.stdout.write(`rule: ${e.rule} v${e.ruleVersion}\n`);
+      // The CLI speaks the format's language (project-layout.md §4):
+      // type, not the engine's rule.
+      if (e.rule) process.stdout.write(`type: ${e.rule} v${e.ruleVersion}\n`);
       for (const input of e.inputs) {
         const sha = input.sha256 ? input.sha256.slice(0, 12) : '(not built)';
         process.stdout.write(`input: ${input.label} ${sha}\n`);

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { AudiodClient } from '../audiod/client.js';
 import { parsePattern } from '../labels.js';
 import { formatLabel } from '../labels.js';
-import { build, type RuleRunner } from '../graph/build.js';
+import { build, type GeneratorRunner } from '../graph/build.js';
 import { expandPattern } from '../graph/graph.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
@@ -27,7 +27,7 @@ export interface Playable {
 export async function resolvePlayables(
   root: string,
   patterns: string[],
-  runner?: RuleRunner,
+  runner?: GeneratorRunner,
 ): Promise<Playable[]> {
   const { project, graph } = loadValid(root);
   const requested = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
@@ -46,11 +46,11 @@ export async function resolvePlayables(
   return nodes.map((node) => {
     const label = formatLabel(node.label);
     if (node.kind === 'asset') {
-      return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.asset.file) };
+      return { label, pkg: node.label.pkg, path: join(project.root, node.scopeDir, node.asset.file) };
     }
     if (node.kind === 'generation') {
       // Variants audition straight from the committed file, pre-promotion
-      // (ace-generation.md §4.2).
+      // (project-layout.md §1.4).
       return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.file) };
     }
     const outcome = outputs.get(label);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SLUG_PATTERN } from '../ids.js';
-import { RESERVED_TARGET_NAME } from '../labels.js';
+import { RESERVED_LABEL_NAME, sharedAssetName } from '../labels.js';
 
 // Shared building blocks for the per-file schemas (index.ts is the
 // barrel). Zod schemas are the single source of truth for the canonical
@@ -11,9 +11,23 @@ export const slug = z.string().regex(SLUG_PATTERN, 'must be a lowercase-slug');
 
 // For anything addressable as //pkg:name — assets, targets, tracks — the
 // grammar's reserved word is not a legal name.
-export const labelName = slug.refine((n) => n !== RESERVED_TARGET_NAME, {
-  message: `"${RESERVED_TARGET_NAME}" is reserved by the label grammar`,
+export const labelName = slug.refine((n) => n !== RESERVED_LABEL_NAME, {
+  message: `"${RESERVED_LABEL_NAME}" is reserved by the label grammar`,
 });
+
+// A source reference (project-layout.md §4.3): a bare slug resolves in
+// the song's one namespace (assets and sounds together — names are
+// identity, project-core.md §6), and the full //shared/assets:<name>
+// label crosses into the shared scope — the only cross-scope reference
+// there is (§1.5: where a file lives declares who may see it, and a
+// song sees exactly itself plus shared/). Existence checks live in the
+// model layer; the schema admits exactly the two spellings.
+export const sourceRef = z
+  .string()
+  .refine(
+    (ref) => SLUG_PATTERN.test(sharedAssetName(ref) ?? ref),
+    'must be a name in the song or //shared/assets:<name>',
+  );
 
 export const ticks = z.number().int().min(0);
 export const samples = z.number().int().min(0);

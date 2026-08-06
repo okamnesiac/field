@@ -37,10 +37,11 @@ export function init(options: InitOptions): string {
   });
 
   mkdirSync(root, { recursive: true });
-  // shared/ is organized by musical role, not file format: a loop authored
-  // as a SuperCollider recipe belongs in loops/ beside committed audio
-  // loops (project-model.md "Project layout").
-  for (const dir of ['songs', 'shared/instruments', 'shared/loops', 'shared/samples']) {
+  // shared/'s three shelves split by contract (project-layout.md §1.1
+  // as amended by §4): instruments make sound (.scd programs, model
+  // defs, later AU — however they are invoked), samples are committed
+  // sound that just is, and plugins change sound.
+  for (const dir of ['songs', 'shared/instruments', 'shared/samples', 'shared/plugins']) {
     mkdirSync(join(root, dir), { recursive: true });
     // Git can't track an empty directory; .gitkeep makes the project's
     // shape survive clone.

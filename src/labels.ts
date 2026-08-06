@@ -1,16 +1,17 @@
 // Build labels (project-core.md §3.4): `//path:name`, with wildcards
-// `//path/...` (every target under path) and `//path:all` (every target
-// in one package). The project model is the build file — packages derive
+// `//path/...` (everything under path) and `//path:all` (everything in
+// one package). The project model is the build file — packages derive
 // from it by convention:
-//   entity file      songs/creek/tracks/drums.yaml  → //songs/creek/tracks:drums
-//   collection file  songs/creek/assets.yaml        → //songs/creek/assets:<entry>
-//                    songs/creek/targets.yaml       → //songs/creek/targets:<entry>
+//   entity file      songs/creek/tracks/drums.yaml   → //songs/creek/tracks:drums
+//                    songs/creek/sounds/kit-sc.yaml  → //songs/creek/sounds:kit-sc
+//   collection file  songs/creek/assets.yaml         → //songs/creek/assets:<entry>
+//                    shared/assets.yaml              → //shared/assets:<entry>
 // Canonical form is absolute; the CLI additionally accepts songs-relative
 // shorthand (`creek/mix:main` = `//songs/creek/mix:main`) because nearly
 // everything addressable lives under songs/, and a bare song name
 // (`creek`) means its main mix — `main` is a convention, not a
 // requirement, so a song that names its mixes otherwise gets a clean
-// no-such-target error. Other roots (shared/, later) keep the full form.
+// no-such-label error. Other roots (`//shared/...`) keep the full form.
 
 export interface Label {
   pkg: string; // slash-separated path, no leading or trailing slash
@@ -27,7 +28,20 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 // Names the grammar claims for itself: `:all` is package expansion, so no
 // addressable thing may be named `all`.
-export const RESERVED_TARGET_NAME = 'all';
+export const RESERVED_LABEL_NAME = 'all';
+
+// The shared ledger's package (project-layout.md §1.6): shared/assets.yaml
+// pins reusable committed audio, labeled //shared/assets:<name>.
+export const SHARED_ASSETS_PKG = 'shared/assets';
+
+// The one cross-scope reference a clip may make (project-layout.md §1.5):
+// a bare name resolves in the song's own ledger, the full
+// //shared/assets:<name> label crosses into the shared scope. Returns the
+// shared asset's name, or undefined for a bare (song-scoped) ref.
+export function sharedAssetName(ref: string): string | undefined {
+  const prefix = `//${SHARED_ASSETS_PKG}:`;
+  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
+}
 
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
@@ -65,13 +79,13 @@ export function parsePattern(text: string): LabelPattern {
 
   const colon = rest.indexOf(':');
   if (colon === -1) {
-    throw new Error(`missing target name in "${text}" (use //pkg:name, //pkg:all, or //pkg/...)`);
+    throw new Error(`missing label name in "${text}" (use //pkg:name, //pkg:all, or //pkg/...)`);
   }
   const pkg = rest.slice(0, colon);
   const name = rest.slice(colon + 1);
   if (!PKG_PATTERN.test(pkg)) throw new Error(`invalid package in "${text}"`);
   if (name === 'all') return { kind: 'package-all', pkg };
-  if (!NAME_PATTERN.test(name)) throw new Error(`invalid target name in "${text}"`);
+  if (!NAME_PATTERN.test(name)) throw new Error(`invalid label name in "${text}"`);
   return { kind: 'label', label: { pkg, name } };
 }
 
