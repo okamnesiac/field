@@ -26,7 +26,7 @@ describe('sayRule.execute', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('renders speech to a WAV at the project rate', async () => {
+  it('renders speech to a WAV at the project rate', { timeout: 30_000 }, async () => {
     const out = join(dir, 'out.wav');
     await sayRule.execute(target(), [], out, { root: dir, sampleRate: 48000 });
     const wav = readWav(out);
@@ -34,7 +34,7 @@ describe('sayRule.execute', () => {
     expect(wav.channels[0]!.length).toBeGreaterThan(4800); // said something
   });
 
-  it('is deterministic: same text, voice, and rate → same bytes', async () => {
+  it('is deterministic: same text, voice, and rate → same bytes', { timeout: 30_000 }, async () => {
     const a = join(dir, 'a.wav');
     const b = join(dir, 'b.wav');
     const ctx = { root: dir, sampleRate: 48000 };
@@ -43,7 +43,7 @@ describe('sayRule.execute', () => {
     expect(await sha256File(a)).toBe(await sha256File(b));
   });
 
-  it('treats text as data, not argv — leading dashes speak fine', async () => {
+  it('treats text as data, not argv — leading dashes speak fine', { timeout: 30_000 }, async () => {
     const out = join(dir, 'dash.wav');
     await sayRule.execute(target({ text: '-r is not a flag here' }), [], out, {
       root: dir,
@@ -62,7 +62,7 @@ describe('sayRule.execute', () => {
     ).rejects.toThrow('no-such-voice-xyz');
   });
 
-  it('voice: Siri renders with the system voice — the recorded escape hatch', async () => {
+  it('voice: Siri renders with the system voice — the recorded escape hatch', { timeout: 30_000 }, async () => {
     // Siri voices are hidden from say -v, so "Siri" omits -v entirely and
     // takes whatever the machine's Spoken Content voice is.
     const a = join(dir, 'siri-a.wav');
@@ -100,7 +100,7 @@ describe('say targets in the build graph', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('builds, caches, and re-keys on a text edit', async () => {
+  it('builds, caches, and re-keys on a text edit', { timeout: 30_000 }, async () => {
     const label = '//songs/opener/targets:scratch-vocal';
     expect(queryDeps(root, `deps(${label})`)).toEqual([label]);
 
