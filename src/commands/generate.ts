@@ -9,7 +9,7 @@ import { isSlug } from '../ids.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
-import { generateSoundSchema, soundOrder, soundSchema } from '../schema/index.js';
+import { generativeSoundSchema, soundOrder, soundSchema } from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
@@ -133,9 +133,9 @@ export async function generateVariants(
     // Parsed through the schema before writing — this command must never
     // emit a target `bloom check` would reject — and canonicalized so
     // `bloom fmt` is a no-op on fresh recipes.
-    const recipe = generateSoundSchema.parse({
+    const recipe = generativeSoundSchema.parse({
       name,
-      type: 'generate',
+      type: 'generative',
       model: response.model,
       prompt: options.prompt,
       ...(options.lyrics !== undefined ? { lyrics: options.lyrics } : {}),
@@ -211,9 +211,9 @@ export async function chooseVariant(
   if (!recipe.success) {
     throw new Error(`sound ${name}.yaml is invalid; fix it before choosing (bloom check)`);
   }
-  if (recipe.data.type !== 'generate') {
+  if (recipe.data.type !== 'generative') {
     throw new Error(
-      `"${name}" is a ${recipe.data.type} sound — only deliberate generate sounds have variants to choose`,
+      `"${name}" is a ${recipe.data.type} sound — only deliberate generative sounds have variants to choose`,
     );
   }
 

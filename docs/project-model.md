@@ -76,12 +76,12 @@ the layout and its vocabulary are decided in
 [projects/all/project-layout.md](projects/all/project-layout.md).
 
 A sound file is discriminated by `type:` (`supercollider`, `say`, `eq`,
-`generate`, …) and fed by `source:` — a bare name resolving in the
+`generative`, …) and fed by `source:` — a bare name resolving in the
 song's one namespace (assets and sounds together), a
 `//shared/assets:<name>` label crossing into the shared scope, or, for
 `supercollider`, a program file (a bare filename resolves in
 `shared/instruments/`). Automatic types are generated in-graph and
-cached; the `generate` type is deliberate — its variants are committed
+cached; the `generative` type is deliberate — its variants are committed
 under `audio/<sound>/` and `bloom choose` repoints which one the
 sound's label means.
 
@@ -114,7 +114,7 @@ Audio files are never edited in place. A clip's content is its `source:`
 — an asset, a sound, or a shared pin, resolved exactly like a sound's
 own source. Clipping an automatic sound means the arrangement plays a
 render that is never committed, only its definition; clipping a
-`generate` sound plays its chosen committed variant. A clip carries
+`generative` sound plays its chosen committed variant. A clip carries
 three independent, non-destructive offsets:
 
 1. **Timeline position** — where the clip sits in the arrangement (musical
@@ -194,7 +194,7 @@ every committed file is still pinned exactly once.
 
 ## Deliberate generation
 
-A `generate` sound is provenance and promotion state in one file: model
+A `generative` sound is provenance and promotion state in one file: model
 name + version, prompt, seed, duration, conditioning, per-variant output
 hashes — everything needed to audit or deliberately regenerate.
 Reproducibility of the recipe is the contract; the committed bits are

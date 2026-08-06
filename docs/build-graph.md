@@ -66,7 +66,7 @@ outside the hash.
 ## Sound types and their generators
 
 Every automatic type has a `Generator` in `src/generators/` — the code
-that generates it mechanically, in-graph, cached. The `generate` type
+that generates it mechanically, in-graph, cached. The `generative` type
 has none: its generation is human-triggered (`bloom generate`), its
 variants are committed under `audio/<sound>/`, and its label resolves
 to the chosen variant (`bloom choose` repoints it; clips reference the
@@ -107,7 +107,7 @@ sound by name and follow).
   supercollider's: an OS or voice-data update may change the bytes, and
   the key deliberately does not chase OS versions. Voice *generation*
   (cloned/sung voices, committed outputs) will be a deliberate
-  `generate`-style sound on the other side of the determinism boundary.
+  generative sound on the other side of the determinism boundary.
 - **`track-render`** — the first *implicit* type: every audio track with
   clips is buildable as `//songs/<song>/tracks:<name>` without declaring
   anything, because the track file **is** the declaration. A clip's
@@ -171,7 +171,7 @@ floating-point scheduling) but sound the same; the build system never
 re-renders unchanged inputs, so nondeterminism only surfaces on deliberate
 cold rebuilds. Seeded SC renders are deterministic; ACE with a fixed seed is
 reproducible on the same machine but not guaranteed across GPU/framework
-versions — which is why `generate` sounds commit their variants, never
+versions — which is why generative sounds commit their variants, never
 regenerating mechanically.
 
 Nodes that can differ *audibly* between renders are flagged

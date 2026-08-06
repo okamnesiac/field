@@ -63,7 +63,7 @@ or a scope boundary.
    `chosen:` where a say target carries nothing extra. Committed
    variants move to the song's committed-audio home:
    `audio/<target>/<variant>.wav`. Ledger rows stay in `assets.yaml`.
-   *Superseded by §4.8: under the unified namespace there is no ledger
+   *Superseded by §4.9: under the unified namespace there is no ledger
    row — choosing repoints the sound's own label, and the sound file
    pins its variants.*
    Supersedes [ace-generation.md](ace-generation.md)'s layout — the
@@ -96,7 +96,7 @@ or a scope boundary.
    re-renders, which is editing working normally), whereas a pin is a
    verification promise (drift fails `bloom check`). Code's integrity
    story is git; pinning programs would fail check on every legitimate
-   edit. *Nuanced by §4.8: pin authority splits — imported/recorded
+   edit. *Nuanced by §4.9: pin authority splits — imported/recorded
    audio pins in the ledger, generated variants pin in their sound spec
    (the per-variant sha256 check verifies). Every committed file is
    still pinned exactly once.*
@@ -164,7 +164,7 @@ every existing citation stay stable.
    a node, while the shelf holds only authored specs).
 2. **The discriminator is `type:`.** `rule:` was engine jargon in
    musician-facing YAML, and false since §1.2 — a deliberate `generate`
-   entry is precisely *not* a rule, whereas `type: generate` is simply
+   entry is precisely *not* a rule, whereas `type: generative` is simply
    a type that is not machine-runnable. `type:` is already the format's
    discriminator convention (tracks' `type: audio|midi`, eq bands'
    `type: lowshelf`). Rejected: `kind`, `class` — a third spelling
@@ -227,7 +227,14 @@ every existing citation stay stable.
    serialized field spelled `rule` — renaming a hash key would
    invalidate every cache for zero semantic gain, so only the
    `sc-render` → `supercollider` *value* change re-keys (§4.4).
-8. **Choosing repoints; the ledger copy dissolves.** Forced by §4.3's
+8. **The deliberate type spells `generative`.** The `type:` slot answers
+   "what kind of sound is this," and the kind has a musicians' name —
+   generative music — so the adjective wins over the verb: a *generative
+   sound*, produced by `bloom generate` (the verb stays the act, §1.7).
+   Rejected: `type: generate` (the verb in the type slot — initially
+   ratified for verb symmetry, but "a generate sound" never parsed, and
+   the symmetry survives through the shared root).
+9. **Choosing repoints; the ledger copy dissolves.** Forced by §4.3's
    one-namespace rule: `choose` minting an asset named after its own
    sound would self-collide, so §1.4's recorded follow-on lands inside
    the migration rather than after it. A generate sound's own label

@@ -129,7 +129,7 @@ export function buildGraph(project: LoadedProject): Graph {
     };
     for (const file of song.sounds) {
       const sound = file.data;
-      if (sound.type === 'generate') {
+      if (sound.type === 'generative') {
         // A deliberate sound contributes committed-content nodes, never a
         // rule node — nothing may re-run it (project-layout.md §1.2/§1.4).
         // Its own label resolves to the chosen variant; every variant is

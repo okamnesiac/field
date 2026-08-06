@@ -10,7 +10,7 @@ import { chooseVariant } from './generate.js';
 import { resolvePlayables } from './play.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
-import { generateSoundSchema, soundOrder, type GenerateSound } from '../schema/index.js';
+import { generativeSoundSchema, soundOrder, type GenerativeSound } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 // Deliberate sounds as project citizens (project-layout.md §1.4, §4):
@@ -45,9 +45,9 @@ function writeGenerateSound(name: string, variantContents: string[]): void {
     writeFileSync(join(songDir, file), content);
     return { file, seed: 90210 + i, sha256: sha256Text(content) };
   });
-  const recipe = generateSoundSchema.parse({
+  const recipe = generativeSoundSchema.parse({
     name,
-    type: 'generate',
+    type: 'generative',
     model: 'acestep-v15-turbo',
     prompt: 'warm keys over still water',
     bpm: 96,
@@ -62,16 +62,16 @@ function writeGenerateSound(name: string, variantContents: string[]): void {
   writeFileSync(join(songDir, 'sounds', `${name}.yaml`), stringifyDocument(doc));
 }
 
-function loadedGenerate(): GenerateSound {
+function loadedGenerate(): GenerativeSound {
   const sound = loadProject(root).songs[0]!.sounds[0]!.data;
-  expect(sound.type).toBe('generate');
-  return sound as GenerateSound;
+  expect(sound.type).toBe('generative');
+  return sound as GenerativeSound;
 }
 
 const clipYaml = (source: string) =>
   `name: piano\ntype: audio\nclips:\n  - id: intro\n    source: ${source}\n    position: 0\n    duration: 960\n`;
 
-describe('generate sounds in the project model', () => {
+describe('generative sounds in the project model', () => {
   it('loads, validates, and formats canonically', async () => {
     const result = await check(root);
     expect(result.diagnostics).toEqual([]);
@@ -210,7 +210,7 @@ describe('bloom choose', () => {
       'name: verse\ntype: say\ntext: hello\nvoice: Siri\n',
     );
     await expect(chooseVariant(root, 'verse', { song: 'opener', variant: 1 })).rejects.toThrow(
-      'only deliberate generate sounds',
+      'only deliberate generative sounds',
     );
   });
 });

@@ -34,7 +34,7 @@ import {
   type Arrangement,
   type AssetsFile,
   type BuildableSound,
-  type GenerateSound,
+  type GenerativeSound,
   type Mix,
   type Project,
   type Song,
@@ -442,7 +442,7 @@ function validate(project: LoadedProject): void {
     // that must not collide with other sounds.
     const soundNames = new Set<string>();
     const buildableSounds: { path: string; sound: BuildableSound }[] = [];
-    const generateSounds: { path: string; sound: GenerateSound }[] = [];
+    const generateSounds: { path: string; sound: GenerativeSound }[] = [];
     for (const file of song.sounds) {
       const expected = basename(file.path, '.yaml');
       if (file.data.name !== expected) {
@@ -461,7 +461,7 @@ function validate(project: LoadedProject): void {
             `a song's names are one namespace (project-layout.md §4.3)`,
         );
       }
-      if (file.data.type === 'generate') {
+      if (file.data.type === 'generative') {
         generateSounds.push({ path: file.path, sound: file.data });
       } else {
         buildableSounds.push({ path: file.path, sound: file.data });
@@ -845,7 +845,7 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
   // provenance that lies, which is the one thing a recipe must never do.
   for (const song of project.songs) {
     for (const file of song.sounds) {
-      if (file.data.type !== 'generate') continue;
+      if (file.data.type !== 'generative') continue;
       for (const variant of file.data.variants) {
         const { path } = resolveAssetFile(project.root, song.dir, variant.file);
         if (!path) continue; // already diagnosed by validate

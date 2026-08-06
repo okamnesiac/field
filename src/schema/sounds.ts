@@ -87,7 +87,7 @@ export const saySoundSchema = z.strictObject({
 });
 export type SaySound = z.infer<typeof saySoundSchema>;
 
-// generate: deliberate generation (project-layout.md §1.2, §1.4) — a
+// generative: deliberate generation (project-layout.md §1.2, §1.4) — a
 // sound with no in-graph Generator behind it: nothing may generate it
 // mechanically; you run it, with bloom generate. Model inference does not reproduce across GPU/framework
 // versions, so the outputs are committed (variants under audio/<name>/,
@@ -98,16 +98,16 @@ export type SaySound = z.infer<typeof saySoundSchema>;
 // variant is additionally auditionable as
 // //songs/<song>/sounds:<name>-<n>. The `model` field says which
 // generator ran.
-export const generateVariantSchema = z.strictObject({
+export const generativeVariantSchema = z.strictObject({
   file: z.string().min(1), // song-relative, under audio/<name>/
   seed: z.number().int().min(0),
   sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256'),
 });
-export type GenerateVariant = z.infer<typeof generateVariantSchema>;
+export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
 
-export const generateSoundSchema = z.strictObject({
+export const generativeSoundSchema = z.strictObject({
   name: labelName,
-  type: z.literal('generate'),
+  type: z.literal('generative'),
   model: z.string().min(1),
   prompt: z.string().min(1),
   lyrics: z.string().optional(),
@@ -116,16 +116,16 @@ export const generateSoundSchema = z.strictObject({
   bars: z.number().int().positive().optional(),
   seed: z.number().int().min(0),
   chosen: z.number().int().min(1).optional(), // 1-based variant number
-  variants: z.array(generateVariantSchema).min(1),
+  variants: z.array(generativeVariantSchema).min(1),
   generated_at: z.iso.datetime(),
 });
-export type GenerateSound = z.infer<typeof generateSoundSchema>;
+export type GenerativeSound = z.infer<typeof generativeSoundSchema>;
 
 export const soundSchema = z.discriminatedUnion('type', [
   normalizeSoundSchema,
   supercolliderSoundSchema,
   saySoundSchema,
-  generateSoundSchema,
+  generativeSoundSchema,
   eqSoundSchema,
   limitSoundSchema,
   reverbSoundSchema,
@@ -133,11 +133,11 @@ export const soundSchema = z.discriminatedUnion('type', [
 export type Sound = z.infer<typeof soundSchema>;
 
 // The types the graph may generate automatically — the ones with a
-// Generator (src/generators/). `generate` is deliberately excluded: its
+// Generator (src/generators/). `generative` is deliberately excluded: its
 // generation is human-triggered, which is the §1.2 trigger policy
 // expressed in the type system, so dispatching code narrows to this
 // first.
-export type BuildableSound = Exclude<Sound, GenerateSound>;
+export type BuildableSound = Exclude<Sound, GenerativeSound>;
 
 export const soundOrder: KeyOrder = {
   keys: [
