@@ -6,7 +6,7 @@ import { ruleImpl, type RuleSpec } from '../rules/index.js';
 import { planMix } from '../rules/mix.js';
 import { planTrack } from '../rules/track-render.js';
 import { TempoMap } from '../time/tempo.js';
-import type { Asset } from '../schema/schemas.js';
+import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention

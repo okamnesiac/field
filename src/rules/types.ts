@@ -1,4 +1,4 @@
-import type { Target } from '../schema/schemas.js';
+import type { Target } from '../schema/index.js';
 import type { MixSpec } from './mix.js';
 import type { TrackRenderSpec } from './track-render.js';
 

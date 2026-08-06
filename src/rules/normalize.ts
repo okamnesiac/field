@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { NormalizeTarget } from '../schema/schemas.js';
+import type { NormalizeTarget } from '../schema/index.js';
 import {
   singleInputAssetDeps,
   singleInputTargetDeps,

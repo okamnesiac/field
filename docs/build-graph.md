@@ -81,11 +81,18 @@ outside the hash.
   the rule verifies it against the installed inventory before rendering —
   `say` itself silently falls back to the user's default voice, which
   would be an under-specified recipe lying under a stable key. The one
-  recorded exception is `voice: Siri`: Siri voices are hidden from
-  `say -v` entirely, so `Siri` selects the machine's Spoken Content
-  voice — deliberately accepting that those bytes follow a Settings
-  toggle, because the alternative is the best voices being unreachable
-  by any recipe. Reproducibility is same-machine, like sc-render's: an OS or voice-data
+  recorded exception is `voice: Siri`: the system-selected Siri voices
+  are not nameable via `say -v` (a few Siri-branded regional voices do
+  list, but the system US voices match no nameable entry, and nothing is
+  literally named "Siri" for the magic string to shadow), so `Siri`
+  selects the machine's Spoken Content voice — deliberately accepting
+  that those bytes follow a Settings toggle, because the alternative is
+  the best voices being unreachable by any recipe. Note the cache does
+  not watch Settings: after a toggle, existing `Siri` renders keep
+  serving pre-toggle bytes until `text`/`voice`/`rate` changes the key —
+  which is also the feature: a render you liked survives voice drift
+  until the recipe itself moves. Reproducibility is same-machine, like
+  sc-render's: an OS or voice-data
   update may change the bytes, and the key deliberately does not chase OS
   versions. Voice *generation* (cloned/sung voices, committed outputs) is
   a separate ACE-style workflow on the other side of the determinism

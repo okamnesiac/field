@@ -1,6 +1,6 @@
 import { applyInsertChain } from '../audio/insert-chain.js';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import type { Insert, MixTarget, Track } from '../schema/schemas.js';
+import type { Insert, MixTarget, Track } from '../schema/index.js';
 import type { RuleImpl } from './types.js';
 
 // mix: sums track stems into the listenable artifact behind

@@ -4,7 +4,7 @@ import { parseDocument, Document, isSeq } from 'yaml';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { RESERVED_TARGET_NAME } from '../labels.js';
-import { assetsFileOrder, assetsFileSchema } from '../schema/schemas.js';
+import { assetsFileOrder, assetsFileSchema } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 export interface ImportResult {

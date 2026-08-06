@@ -1,5 +1,5 @@
 import { applyInsertChain } from '../audio/insert-chain.js';
-import type { EqTarget, LimitTarget, ReverbTarget } from '../schema/schemas.js';
+import type { EqTarget, LimitTarget, ReverbTarget } from '../schema/index.js';
 import {
   singleInputAssetDeps,
   singleInputTargetDeps,

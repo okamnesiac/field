@@ -9,7 +9,7 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import type { RuleRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
-import { mixTargetSchema, trackSchema, type Track } from '../schema/schemas.js';
+import { mixTargetSchema, trackSchema, type Track } from '../schema/index.js';
 import { balanceGains, mixRule, planMix } from './mix.js';
 
 // Fixture times are scalar ticks, so the parse output already satisfies
