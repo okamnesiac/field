@@ -1,8 +1,10 @@
 # Plan: Voice generation
 
-**Status:** In progress (started 2026-08-06). The other side of the
-determinism boundary from the `say` rule (#27), kept separate by design —
-"got to keep them separated."
+**Status:** Planned, deferred (2026-08-06). The design was settled and
+recorded ahead of the build, then deliberately queued behind other work —
+nothing here is started. The other side of the determinism boundary from
+the `say` rule (#27), kept separate by design — "got to keep them
+separated."
 
 **Goal:** `bloom voice generate`: text (and a voice) produce committed,
 provenance-carrying vocal audio through a local model, auditioned and

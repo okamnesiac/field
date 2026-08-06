@@ -6,6 +6,10 @@ Wanted, nobody has committed to it. One line each, linking a plan in
 line that never graduates can just be deleted; it cost nothing and losing it
 costs nothing. See [README](README.md) for how these lists work.
 
+- **Voice generation** — `bloom-voiced` (Chatterbox on the ACE worker
+  pattern): committed vocals from text + a committed reference voice;
+  design settled in [voice-generation.md](all/voice-generation.md),
+  deliberately deferred.
 - **Automation** — breakpoint lanes + control-rate generators (LFO first),
   one compile target, realtime-evaluable by design; audio-rate stays SC's
   job ([automation.md](all/automation.md) records the decided shape).

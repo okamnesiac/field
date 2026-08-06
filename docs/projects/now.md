@@ -11,6 +11,3 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 - [Musical time arrays](all/musical-time.md) — `[bar, beat?, tick?]` in
   project YAML; scalars stay ticks, resolution through the meter map,
   cache-identical to the tick spelling.
-- [Voice generation](all/voice-generation.md) — `bloom-voiced` (Chatterbox
-  on the ACE worker pattern): committed vocals from text + a committed
-  reference voice; creek's spoken line gets a real voice.
