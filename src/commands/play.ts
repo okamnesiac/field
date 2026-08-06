@@ -48,6 +48,11 @@ export async function resolvePlayables(
     if (node.kind === 'asset') {
       return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.asset.file) };
     }
+    if (node.kind === 'generation') {
+      // Variants audition straight from the committed file, pre-promotion
+      // (ace-generation.md §4.2).
+      return { label, pkg: node.label.pkg, path: join(project.root, node.songDir, node.file) };
+    }
     const outcome = outputs.get(label);
     if (!outcome?.outputPath) throw new Error(`no output for ${label}`);
     return { label, pkg: node.label.pkg, path: outcome.outputPath };

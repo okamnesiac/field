@@ -28,7 +28,7 @@ export interface BuildOutcome {
 
 export interface Explanation {
   label: string;
-  kind: 'asset' | 'rule';
+  kind: 'asset' | 'rule' | 'generation';
   rule?: string;
   ruleVersion?: number;
   inputs: { label: string; sha256: string }[];
@@ -142,6 +142,11 @@ async function buildNode(
     // Source targets: the declared hash is the identity; check verifies
     // content, the build system trusts the declaration.
     return { label: formatLabel(node.label), cached: true, sha256: node.asset.sha256 };
+  }
+  if (node.kind === 'generation') {
+    // Generation variants are committed sources like assets — recipe hash
+    // as identity, nothing to execute. They are never rule inputs.
+    return { label: formatLabel(node.label), cached: true, sha256: node.sha256 };
   }
 
   const impl = ruleImpl(node.spec);
@@ -271,6 +276,23 @@ export async function explain(
       kind: 'asset',
       inputs: [],
       outputs: [{ sha256: node.asset.sha256, bytes: node.asset.bytes }],
+    };
+    memo.set(label, explanation);
+    return explanation;
+  }
+  if (node.kind === 'generation') {
+    // Recipes record the hash but not the size; the file is on disk (a
+    // valid project has no dangling variants), so stat answers bytes.
+    const explanation: Explanation = {
+      label,
+      kind: 'generation',
+      inputs: [],
+      outputs: [
+        {
+          sha256: node.sha256,
+          bytes: statSync(join(project.root, node.songDir, node.file)).size,
+        },
+      ],
     };
     memo.set(label, explanation);
     return explanation;

@@ -90,8 +90,22 @@ as a reviewable diff.
    `bloom ace setup` and `bloom ace generate` end to end: prompt → WAV
    variants on disk + provenance YAML. First generation ran 2×12 s in
    ~15 s on the M3 Max after a one-time model load.
-2. **Variants as takes** — the `generation/` recipe schema, numbered
-   variants with hashes, audition via `bloom play`, and
-   `bloom ace choose` promoting the active variant to a committed asset
-   wired for clips; field demonstrates with a generated part in creek or
-   a new song.
+2. **Variants as takes** (shipped, #18) — the `generation/` recipe schema,
+   numbered variants with hashes, audition via `bloom play`
+   (`//songs/<song>/generation:<name>-<n>`), and `bloom ace choose`
+   promoting the active variant to a committed asset wired for clips — in
+   place, no bytes copied, reversibly; field demonstrates with a generated
+   part in creek.
+
+## 5 Follow-ups
+
+- The worker enforces a 10-second duration floor, so 1–2 bar loops at
+  common tempos can't generate directly. Tolerable because a clip can
+  reference just the first N bars of a longer generation; revisit if it
+  chafes in practice.
+- `quit`/SIGTERM mid-generation kills the worker thread silently. Safe —
+  the CLI writes the recipe only after all variants land — but a politer
+  cancel could come with the recording era's job control.
+- ACE-Step writes `.cache/acestep/progress_estimates.json` into the
+  daemon's cwd, i.e. the user's project. Redirect next to the weights in
+  `~/.bloom/models` if ACE-Step's env allows it.
