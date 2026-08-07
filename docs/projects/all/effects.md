@@ -95,3 +95,32 @@ a one-line-diff-sized edit that rebuilds exactly its own chain.
    guards the true output (gain drives *into* the limiter; anything else
    would defeat it). Same effect schemas in all three positions. bloom
    demonstrates everything (§4).
+
+## 6 §1 revisited (2026-08-07)
+
+§1 called the TypeScript implementations disposable and said they would
+"either remain the offline executors or become the bit-exact reference
+the native code is tested against."
+[render-pipeline.md](render-pipeline.md) takes neither branch, and §1's
+two recorded obligations are the reason.
+
+The **parity seam** is discharged by removing it rather than bridging
+it: the daemon becomes the single executor for rendered audio, so there
+is no second implementation to keep in parity. The forcing argument is
+§1's other obligation — **`au:` as an additive variant**. That remains
+exactly right as a schema decision, and the schema already ships it
+(`src/schema/effects.ts`). But an insert chain is a serial signal path,
+and TypeScript cannot host an AudioUnit, so a chain reading
+`eq → au:1176 → limit` settles who executes. That consequence was not
+followed through here.
+
+The **bit-exact reference** branch is dropped too. Keeping `src/audio/`
+alive as a test oracle is permanent dual maintenance — the cost the
+disposability decision was meant to avoid. The tests become properties
+measured from rendered output (bandwidth ratios, T60, ceiling
+guarantees, auto-gain level), which survive deleting the TypeScript and
+would have caught a substituted renderer on their own.
+
+Nothing in §2, §3 or §5 changes: same effects, same parameter
+semantics, same three homes, same shipped artifacts. Only the executor
+moves.
