@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import { sha256FileSync } from '../hash.js';
+import { playable } from '../testing/playable.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { beatGrid, withClick } from './click.js';
 
@@ -66,13 +67,7 @@ describe('withClick', () => {
   it('overlays clicks on beats and leaves the space between silent', () => {
     const src = join(root, 'silent.wav');
     writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
-    const clicked = withClick(root, ctx44, {
-      label: '//songs/x/mix:main',
-      pkg: 'songs/x/mix',
-      path: src,
-      sha256: 'deadbeef'.repeat(8),
-      committed: false,
-    });
+    const clicked = withClick(root, ctx44, playable({ path: src }));
 
     const wav = readWav(clicked.path);
     expect(wav.channels[0]).toHaveLength(48000); // length untouched
@@ -84,13 +79,9 @@ describe('withClick', () => {
   it('re-hashes: sha256 describes the clicked file, not the source', () => {
     const src = join(root, 'silent.wav');
     writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
-    const clicked = withClick(root, ctx44, {
-      label: '//songs/x/mix:main',
-      pkg: 'songs/x/mix',
-      path: src,
-      sha256: sha256FileSync(src),
-      committed: false,
-    });
+    // The source's own hash, so the assertions below are about withClick
+    // replacing it rather than about the default never matching.
+    const clicked = withClick(root, ctx44, playable({ path: src, sha256: sha256FileSync(src) }));
 
     // The invariant the field carries — "the hash of what path holds" —
     // is what watch seeds its baseline from, so the click must not leave
