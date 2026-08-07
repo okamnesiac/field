@@ -182,10 +182,12 @@ built-in tier, and no project using an `au:` insert can make it.
 
 ## 4 Chunks
 
-1. **CI split + concurrency** — *not started, and now the most urgent
-   thing here*. Two jobs, per-test guards on the nine platform-bound
-   cases (decision 4) so the Linux job skips those and runs the other
-   62 tests in the same files, and `cancel-in-progress`. **#46 is not this chunk**: it moved the one
+1. **CI split + concurrency** — in review (#49). Two jobs, per-test
+   guards on the nine platform-bound cases (decision 4) so the Linux job
+   skips those and runs the other 63 tests in the same files, and
+   `cancel-in-progress`. Verified both ways before opening: 320 passed
+   with the binaries present, 311 passed and 9 skipped with `afconvert`
+   and `say` off PATH. **#46 is not this chunk**: it moved the one
    job to `ubuntu-latest` by deleting `pnpm test` and
    `pnpm build:native`, and says so in a workflow comment — a temporary
    runner move that reduced coverage, not the split. Restoring
