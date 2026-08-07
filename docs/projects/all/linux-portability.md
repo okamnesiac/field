@@ -1,15 +1,16 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
-**Status:** Not started. Chunks 2–3 **withdrawn** to
-[render-pipeline.md](render-pipeline.md), which puts sample-rate
-conversion in the daemon's built-in tier rather than in TypeScript;
-§1.1 below records what that replaced and why. Chunks 1 and 4 remain,
-and chunk 1 is now more urgent than when this was written: #46 moved
-the single CI job to `ubuntu-latest` by **removing** `pnpm test` and
-`pnpm build:native`, so green CI currently does not mean the tests ran.
-#46 said that would be restored when this plan converted `normalize` to
-TypeScript — which is exactly what has been withdrawn. Restoring test
-coverage on CI is now chunk 1's platform guards and nothing else.
+**Status:** Chunk 1 in review (#49); chunk 4 not started. Chunks 2–3
+**withdrawn** to [render-pipeline.md](render-pipeline.md), which puts
+sample-rate conversion in the daemon's built-in tier rather than in
+TypeScript; §1.1 below records what that replaced and why.
+
+Chunk 1 became the urgent one after #46 moved the single CI job to
+`ubuntu-latest` by **removing** `pnpm test` and `pnpm build:native`, so
+green CI stopped meaning the tests ran. #46 said that would be restored
+when this plan converted `normalize` to TypeScript — which is exactly
+what has been withdrawn, leaving chunk 1's platform guards as the only
+route back.
 
 Written after measuring what actually binds to macOS: the whole suite
 was run on Linux in a container at `3e03322`, and **9 tests of 301
@@ -172,8 +173,15 @@ second supported product.
 `pnpm typecheck`, `pnpm build` and `pnpm test` pass on Linux with the
 `say` and `afconvert` tests skipped by platform guard rather than
 failing; the daemon builds on Linux and its protocol tests pass in
-null-output mode; and CI's macOS job runs only what needs macOS. bloom
-still builds and plays on macOS with the same audible result.
+null-output mode; and CI runs both jobs, with Linux carrying typecheck,
+`pyright` and everything that does not need a macOS binary. bloom still
+builds and plays on macOS with the same audible result.
+
+Not "the macOS job runs only what needs macOS", which is what this
+section asked for before the job was built: decision 4's amendment runs
+the whole suite there, because the suite is 12.4s against a job
+dominated by the native build and macOS is the platform the product
+ships on.
 
 Byte-identical cross-platform rendering was part of this plan's
 definition of done and is now [render-pipeline.md](render-pipeline.md)
