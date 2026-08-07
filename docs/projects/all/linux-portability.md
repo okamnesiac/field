@@ -1,15 +1,16 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
-**Status:** Not started. Chunks 2–3 **withdrawn** to
-[render-pipeline.md](render-pipeline.md), which puts sample-rate
-conversion in the daemon's built-in tier rather than in TypeScript;
-§1.1 below records what that replaced and why. Chunks 1 and 4 remain,
-and chunk 1 is now more urgent than when this was written: #46 moved
-the single CI job to `ubuntu-latest` by **removing** `pnpm test` and
-`pnpm build:native`, so green CI currently does not mean the tests ran.
-#46 said that would be restored when this plan converted `normalize` to
-TypeScript — which is exactly what has been withdrawn. Restoring test
-coverage on CI is now chunk 1's platform guards and nothing else.
+**Status:** Chunk 1 in review (#49); chunk 4 not started. Chunks 2–3
+**withdrawn** to [render-pipeline.md](render-pipeline.md), which puts
+sample-rate conversion in the daemon's built-in tier rather than in
+TypeScript; §1.1 below records what that replaced and why.
+
+Chunk 1 became the urgent one after #46 moved the single CI job to
+`ubuntu-latest` by **removing** `pnpm test` and `pnpm build:native`, so
+green CI stopped meaning the tests ran. #46 said that would be restored
+when this plan converted `normalize` to TypeScript — which is exactly
+what has been withdrawn, leaving chunk 1's platform guards as the only
+route back.
 
 Written after measuring what actually binds to macOS: the whole suite
 was run on Linux in a container at `3e03322`, and **9 tests of 301
@@ -106,16 +107,19 @@ second supported product.
 
    **The guard is per test, not per file.** "By what a test needs" is
    the whole decision, and excluding files breaks it. The nine
-   platform-bound cases live in four files holding 71 tests between them
-   at this head — `say.test.ts` 6, `stem.test.ts` 30,
-   `effects.test.ts` 5, `build.test.ts` 30 — so dropping the files would
-   take 62 platform-independent graph, stem and DSP tests off Linux,
-   which is the code the Linux job exists to exercise. Only
-   `say.test.ts` is wholly platform-bound. The other three contribute
-   one test each — `graph/build.test.ts:279` ("normalizes real audio
-   through afconvert"), `generators/stem.test.ts:581`, and
-   `generators/effects.test.ts:120` ("normalize accepts a target") — and
-   each gets its own guard or moves to a Darwin-only sibling file.
+   platform-bound cases live in four files holding 72 tests between them
+   — `say.test.ts` 6, `stem.test.ts` 30, `effects.test.ts` 5,
+   `build.test.ts` 31 — so dropping the files would take 63
+   platform-independent graph, stem and DSP tests off Linux, which is
+   the code the Linux job exists to exercise. Only `say.test.ts` is
+   wholly platform-bound. The other three contribute one test each,
+   named rather than numbered because line numbers rot:
+   `graph/build.test.ts` "normalizes real audio through afconvert",
+   `generators/stem.test.ts` "builds the whole recipe chain: asset →
+   target → stem, with real rules", and `generators/effects.test.ts`
+   "normalize accepts a target, closing the rate-fix loop". Each gets
+   its own guard rather than a move to a Darwin-only sibling file, so
+   the reason stays next to the test.
 
    Both jobs together keep today's coverage exactly, and most of the
    wall clock moves off the 10× meter.
@@ -124,6 +128,19 @@ second supported product.
    the rest affordable: the 3,000 included minutes are 300 macOS
    minutes, and a two-minute run means ~150 runs a month for the whole
    organization.
+
+   **Amended on implementation:** the macOS job runs the *whole* suite,
+   not the nine tests and the daemon. This decision assumed narrowing
+   macOS was where the minutes were, which was never measured; the suite
+   is **12.4s** wall clock, against a macOS job dominated by
+   `pnpm install` and `pnpm build:native`. Narrowing it would save
+   seconds and cost a hand-maintained file list that drifts silently as
+   tests move. The minutes argument above is untouched and still the
+   reason for the split — it is the *native build* that costs, which is
+   why the Linux job carries typecheck, `pyright` and the fast gate.
+   Running everything on macOS is also the right default for the
+   platform the product ships on (overview.md "V1 platform scope"):
+   giving the product platform partial coverage is the wrong way round.
 
 5. **Linux is a build-and-test target, not a support promise.** No
    Linux packaging, no audio-backend matrix, no "which of ALSA, JACK or
@@ -156,8 +173,15 @@ second supported product.
 `pnpm typecheck`, `pnpm build` and `pnpm test` pass on Linux with the
 `say` and `afconvert` tests skipped by platform guard rather than
 failing; the daemon builds on Linux and its protocol tests pass in
-null-output mode; and CI's macOS job runs only what needs macOS. bloom
-still builds and plays on macOS with the same audible result.
+null-output mode; and CI runs both jobs, with Linux carrying typecheck,
+`pyright` and everything that does not need a macOS binary. bloom still
+builds and plays on macOS with the same audible result.
+
+Not "the macOS job runs only what needs macOS", which is what this
+section asked for before the job was built: decision 4's amendment runs
+the whole suite there, because the suite is 12.4s against a job
+dominated by the native build and macOS is the platform the product
+ships on.
 
 Byte-identical cross-platform rendering was part of this plan's
 definition of done and is now [render-pipeline.md](render-pipeline.md)
@@ -166,10 +190,12 @@ built-in tier, and no project using an `au:` insert can make it.
 
 ## 4 Chunks
 
-1. **CI split + concurrency** — *not started, and now the most urgent
-   thing here*. Two jobs, per-test guards on the nine platform-bound
-   cases (decision 4) so the Linux job skips those and runs the other
-   62 tests in the same files, and `cancel-in-progress`. **#46 is not this chunk**: it moved the one
+1. **CI split + concurrency** — in review (#49). Two jobs, per-test
+   guards on the nine platform-bound cases (decision 4) so the Linux job
+   skips those and runs the other 63 tests in the same files, and
+   `cancel-in-progress`. Verified both ways before opening: 320 passed
+   with the binaries present, 311 passed and 9 skipped with `afconvert`
+   and `say` off PATH. **#46 is not this chunk**: it moved the one
    job to `ubuntu-latest` by deleting `pnpm test` and
    `pnpm build:native`, and says so in a workflow comment — a temporary
    runner move that reduced coverage, not the split. Restoring
