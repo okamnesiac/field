@@ -237,6 +237,51 @@ describe.skipIf(!binary)('render subprocess', () => {
     expect(readFileSync(output).length).toBeGreaterThan(0); // a valid, zero-frame WAV
   });
 
+  it('enforces the chain shape per operation, absent or malformed', async () => {
+    // The same required-vs-optional line as the arrays above, applied to
+    // the chains — and the one place it was still missing (#54 review).
+    // Optional means *absent* is allowed; present-but-not-an-array is a
+    // shape mismatch whichever op it is, and rendering as though the
+    // chain were not there caches audio under a key that still names it.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const output = join(dir, 'out.wav');
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const stem = { op: 'stem', output, sample_rate: RATE, inputs: [input], clips: [] };
+    const mix = {
+      op: 'mix',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      faders: [{ gain_db: 0, pan: 0 }],
+      gain_db: 0,
+    };
+
+    // effects: `inserts` is required, so absent is already wrong.
+    await expect(render({ op: 'effects', input, output })).rejects.toThrow(
+      /effects plan needs "inserts" to be an array/,
+    );
+    await expect(render({ op: 'effects', input, output, inserts: 'nope' })).rejects.toThrow(
+      /effects plan needs "inserts" to be an array/,
+    );
+    // stem and mix: optional, so present-but-wrong is the failure.
+    await expect(render({ ...stem, inserts: 5 })).rejects.toThrow(
+      /stem plan needs "inserts" to be an array/,
+    );
+    await expect(render({ ...mix, master: { effect: 'limit' } })).rejects.toThrow(
+      /mix plan needs "master" to be an array/,
+    );
+
+    // …and omitting an optional chain entirely still renders, which is
+    // what keeps insert-less stems on their pre-inserts action keys.
+    await render(stem);
+    await render(mix);
+  });
+
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
     await expect(
       renderInsertChain({

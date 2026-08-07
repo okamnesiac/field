@@ -79,8 +79,20 @@ std::vector<std::vector<std::vector<float>>> readInputs (const juce::var& plan)
 // src/audio/insert-chain.ts, and it stays a mirror until chunk 4 deletes
 // that file: eq and limit work in place, reverb returns longer buffers
 // (its tail), and the order is the order the user declared.
+// `required` is the schema's own optionality, per operation: an effects
+// plan always serializes `inserts`, while a stem's `inserts` and a mix's
+// `master` are omitted when they have no entries — that omission is what
+// keeps insert-less stems on their pre-inserts action keys.
+enum class ChainPresence
+{
+    required,
+    optional
+};
+
 void applyChain (const juce::var& plan,
                  const char* key,
+                 const char* what,
+                 ChainPresence presence,
                  std::vector<std::vector<float>>& channels,
                  double sampleRate);
 
@@ -155,12 +167,21 @@ void applyInsert (const juce::var& insert,
 }
 void applyChain (const juce::var& plan,
                  const char* key,
+                 const char* what,
+                 ChainPresence presence,
                  std::vector<std::vector<float>>& channels,
                  double sampleRate)
 {
-    if (const auto* inserts = plan.getProperty (key, juce::var()).getArray())
-        for (const auto& insert : *inserts)
-            applyInsert (insert, channels, sampleRate);
+    // Optional means *absent* is allowed. Present-but-not-an-array is a
+    // shape mismatch either way, and rendering the chain as though it
+    // were not there is the same fail-closed violation as dropping a
+    // clip: audio cached under a key that still describes the chain.
+    if (presence == ChainPresence::optional
+        && plan.getProperty (key, juce::var()).isVoid())
+        return;
+
+    for (const auto& insert : requireArray (plan, key, what))
+        applyInsert (insert, channels, sampleRate);
 }
 
 // stem: placed clips summed over their sources, then the track's inserts
@@ -188,7 +209,7 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
     }
 
     auto channels = dsp::sumClips (sources, clips);
-    applyChain (plan, "inserts", channels, sampleRate);
+    applyChain (plan, "inserts", "stem plan", ChainPresence::optional, channels, sampleRate);
     dsp::writeWavFloat32 (output, sampleRate, channels);
 }
 
@@ -222,7 +243,7 @@ void renderMix (const juce::var& plan, const std::string& output, double sampleR
             for (auto& sample : channel)
                 sample = (float) ((double) sample * masterGain);
 
-    applyChain (plan, "master", channels, sampleRate);
+    applyChain (plan, "master", "mix plan", ChainPresence::optional, channels, sampleRate);
 
     const auto declared = plan.getProperty ("length_samples", juce::var());
     if (! declared.isVoid())
@@ -261,7 +282,12 @@ std::string runRender (const std::string& planPath)
             // process at the file's rate (single-input.ts says so).
             auto wav = dsp::readWav (requireString (plan, "input", "render plan"));
             auto channels = std::move (wav.channels);
-            applyChain (plan, "inserts", channels, wav.sampleRate);
+            applyChain (plan,
+                        "inserts",
+                        "effects plan",
+                        ChainPresence::required,
+                        channels,
+                        wav.sampleRate);
             dsp::writeWavFloat32 (output, wav.sampleRate, channels);
         }
         else if (op == "stem")
