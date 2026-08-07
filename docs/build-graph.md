@@ -166,7 +166,12 @@ sound by name and follow).
   which is also the feature: a render you liked survives voice drift
   until the recipe itself moves. Reproducibility is same-machine, like
   supercollider's: an OS or voice-data update may change the bytes, and
-  the key deliberately does not chase OS versions. Voice *generation*
+  the key deliberately does not chase OS versions. `Siri` is weaker than
+  that, and now on the record as such: two consecutive renders on a
+  machine that has not already warmed or fetched the system voice can
+  differ, observed twice on CI. The determinism claim is about nameable
+  voices; `Siri` buys the best voices at the price of not promising
+  their bytes. Voice *generation*
   (cloned/sung voices, committed outputs) will be a deliberate
   generative sound on the other side of the determinism boundary.
 - **`stem`** — the first *implicit* type: every audio track with clips
