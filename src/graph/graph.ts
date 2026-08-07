@@ -213,24 +213,46 @@ export function buildGraph(project: LoadedProject): Graph {
   return { nodes };
 }
 
+// The canonical spelling of a pattern, for error messages: with
+// songs-relative shorthand, what the user typed is not always what was
+// looked up.
+function formatPattern(pattern: LabelPattern): string {
+  if (pattern.kind === 'label') return formatLabel(pattern.label);
+  if (pattern.kind === 'package-all') return `//${pattern.pkg}:all`;
+  return pattern.pkg === '' ? '//...' : `//${pattern.pkg}/...`;
+}
+
 // Packages went singular in the same change that made them read like
 // what they address ("the keys track"), and the plural is what fingers
 // and old docs still type. A bare "no such label" is a bad way to learn
 // that, so a pattern that would have matched under the old spelling says
 // so — for as long as anyone is still typing it.
-function singularHint(graph: Graph, pkg: string): string {
+//
+// The suggestion keeps the shape it was given: a tree pattern is
+// answered with a tree pattern, `:all` with `:all`, a label with that
+// same label. Correcting the package but not the shape would hand back
+// something that also does not work (#41 review).
+function singularHint(graph: Graph, pattern: LabelPattern): string {
+  const pkg = pattern.kind === 'label' ? pattern.label.pkg : pattern.pkg;
   const singular = pkg.replace(/(sounds|tracks|assets|mixes)$/, (plural) =>
     plural === 'mixes' ? 'mix' : plural.slice(0, -1),
   );
   if (singular === pkg) return '';
-  const exists = [...graph.nodes.values()].some((n) => n.label.pkg === singular);
-  return exists ? ` (packages are singular: try //${singular}:…)` : '';
+  // Only when that package really exists here: no guessing at a package
+  // this project does not have.
+  if (![...graph.nodes.values()].some((n) => n.label.pkg === singular)) return '';
+  const corrected: LabelPattern =
+    pattern.kind === 'label'
+      ? { kind: 'label', label: { ...pattern.label, pkg: singular } }
+      : { ...pattern, pkg: singular };
+  return ` (packages are singular: try ${formatPattern(corrected)})`;
 }
 
 export function resolveLabel(graph: Graph, label: Label): GraphNode {
   const node = graph.nodes.get(formatLabel(label));
   if (!node) {
-    throw new Error(`no such label: ${formatLabel(label)}${singularHint(graph, label.pkg)}`);
+    const hint = singularHint(graph, { kind: 'label', label });
+    throw new Error(`no such label: ${formatLabel(label)}${hint}`);
   }
   return node;
 }
@@ -238,18 +260,9 @@ export function resolveLabel(graph: Graph, label: Label): GraphNode {
 export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] {
   const matched = [...graph.nodes.values()].filter((n) => matchesPattern(n.label, pattern));
   if (matched.length === 0) {
-    // Echo the expanded form: with songs-relative shorthand, what the
-    // user typed is not always what was looked up.
-    const expanded =
-      pattern.kind === 'label'
-        ? formatLabel(pattern.label)
-        : pattern.kind === 'package-all'
-          ? `//${pattern.pkg}:all`
-          : pattern.pkg === ''
-            ? '//...'
-            : `//${pattern.pkg}/...`;
-    const pkg = pattern.kind === 'label' ? pattern.label.pkg : pattern.pkg;
-    throw new Error(`pattern matched no labels: ${expanded}${singularHint(graph, pkg)}`);
+    throw new Error(
+      `pattern matched no labels: ${formatPattern(pattern)}${singularHint(graph, pattern)}`,
+    );
   }
   return matched;
 }

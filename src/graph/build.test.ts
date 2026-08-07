@@ -155,12 +155,20 @@ describe('build', () => {
 
   it('points at the singular when someone types the old plural package', async () => {
     // Packages went singular; fingers and old docs still type the plural,
-    // and "no such label" is a bad way to find that out.
+    // and "no such label" is a bad way to find that out. The suggestion
+    // keeps the shape it was given — correcting the package but handing
+    // back a different shape would also not work (#41 review).
     await expect(buildLabels(root, ['//songs/creek/sounds:pad-normalized'])).rejects.toThrow(
-      'packages are singular: try //songs/creek/sound:…',
+      'try //songs/creek/sound:pad-normalized',
+    );
+    await expect(buildLabels(root, ['//songs/creek/sounds/...'])).rejects.toThrow(
+      'try //songs/creek/sound/...',
+    );
+    await expect(buildLabels(root, ['//songs/creek/sounds:all'])).rejects.toThrow(
+      'try //songs/creek/sound:all',
     );
     expect(() => queryDeps(root, 'deps(//songs/creek/assets:pad)')).toThrow(
-      'try //songs/creek/asset:…',
+      'try //songs/creek/asset:pad',
     );
     // Only when the singular actually exists — no guessing at a package
     // this project does not have.
