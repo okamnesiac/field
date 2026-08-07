@@ -5,9 +5,21 @@ on:
     branches: [main]
   pull_request:
 
+# TEMPORARY (2026-08-06): the macOS runner is off, so this job is the
+# platform-independent subset only — typecheck, build, and pyright strict.
+#
+# `pnpm test` is NOT run here. Measured on Linux in PR #45: 9 of 301 tests
+# fail, all of them shelling out to a macOS binary — `say` (6) and
+# `afconvert` (3). Everything else passes; the SuperCollider and daemon
+# tests skip on a missing sclang/binary, as they already did on macOS CI.
+# `pnpm build:native` is out for the same reason (JUCE/CoreAudio).
+#
+# So: **green here does not mean the tests ran.** Until PR #45 lands —
+# normalize converting in TypeScript instead of afconvert — the full
+# suite passing locally on macOS is the real gate.
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -18,19 +30,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
-      # The native daemon: cached on the CMakeLists hash so a JUCE recompile
-      # only happens when the pin or the build itself changes. The daemon
-      # protocol tests in pnpm test find the built binary and run against it
-      # in null-output mode (no audio device on runners).
-      - uses: actions/cache@v4
-        with:
-          path: native/audiod/build
-          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
-      - run: pnpm build:native
       # Python worker: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
-      # is far too heavy for CI, which is also why the daemon's protocol
-      # tests are local-only.
+      # is far too heavy for CI.
       - uses: astral-sh/setup-uv@v5
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
-      - run: pnpm test
