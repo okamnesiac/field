@@ -72,6 +72,17 @@ function startWatch(patterns: string[], extra: Partial<WatchOptions> = {}) {
   return { events, abort, done };
 }
 
+// Waits for the watch to stop emitting: two consecutive windows with no
+// new events. FSEvents delivers on its own schedule, so "nothing happened
+// because of what I just did" is only measurable from a quiet baseline.
+async function quiet(events: Recorded[], window = 300): Promise<void> {
+  for (;;) {
+    const before = events.length;
+    await new Promise((r) => setTimeout(r, window));
+    if (events.length === before) return;
+  }
+}
+
 // Polls until get() returns something, or the deadline passes.
 async function until<T>(get: () => T | undefined, ms = 8000): Promise<T> {
   const start = Date.now();
@@ -286,6 +297,36 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     await done;
     await new Promise((r) => setTimeout(r, 150)); // a wrong report would land here
     expect(events.filter((e) => e.kind === 'outcomes')).toHaveLength(1); // baseline only
+  });
+
+  it('ignores its own output tree, and stays live for real edits', async () => {
+    // The build writes .bloom/ on every pass, so watching it would
+    // self-trigger forever (§2). Nothing pinned that until now — and the
+    // second half is what makes the first half mean anything: a watcher
+    // that had simply died would also report no rebuild.
+    const { events, abort, done } = startWatch(['//songs/creek/sounds:pad-normalized']);
+    await until(() => events.find((e) => e.kind === 'outcomes'));
+    // Settle first: the fixture's own writes (init, createSong, import)
+    // can still be in FSEvents' pipeline when the baseline lands, and a
+    // straggler rebuild would otherwise be blamed on the probe below.
+    await quiet(events);
+
+    const before = events.length;
+    mkdirSync(join(root, '.bloom/out/songs/creek/sounds'), { recursive: true });
+    writeFileSync(join(root, '.bloom/out/songs/creek/sounds/probe.wav'), 'not a rebuild trigger');
+    writeFileSync(join(root, '.bloom/cache/probe.json'), '{}');
+    await new Promise((r) => setTimeout(r, 400)); // 8× the debounce
+    expect(events).toHaveLength(before);
+
+    writeSound('pad-normalized', normalizeYaml(44100));
+    const moved = await until(() =>
+      events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
+    );
+    if (moved.kind !== 'outcomes') return;
+    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sounds:pad-normalized']);
+
+    abort.abort();
+    await done;
   });
 
   it('an aborted session resolves', async () => {

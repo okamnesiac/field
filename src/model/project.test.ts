@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -83,6 +91,22 @@ describe('song and track creation', () => {
     rmSync(join(root, 'songs/opener/song.yaml'));
     expect(() => createSong(root, 'opener')).not.toThrow();
     expect((await check(root)).ok).toBe(true);
+  });
+
+  it('ignores editor dotfiles that end in .yaml', async () => {
+    createSong(root, 'opener');
+    createTrack(root, 'opener', 'lead-vocal', 'audio');
+    // Emacs marks an unsaved buffer with a dangling symlink whose name
+    // ends in .yaml. Loading it throws ENOENT rather than producing a
+    // diagnostic, so under --watch merely opening a track file would end
+    // the rebuild (#34 review footnote).
+    symlinkSync(
+      'justin@Mac.12345:1754500000',
+      join(root, 'songs/opener/tracks/.#lead-vocal.yaml'),
+    );
+    expect(() => loadProject(root)).not.toThrow();
+    expect((await check(root)).ok).toBe(true);
+    expect(loadProject(root).songs[0]!.tracks).toHaveLength(1);
   });
 });
 

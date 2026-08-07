@@ -219,6 +219,35 @@ describe('LoopDisplay', () => {
     expect(text()).toContain('  [1] 1.1 └f6e5d4c3b2a1'); // compact, hash whole
   });
 
+  it('quitting with a takeover pending says the edit built but never sounded', () => {
+    const { d, text } = harness();
+    d.start('//songs/x/mix:main', A, '');
+    d.position('4.1', 3000);
+    d.queue(B, '/out/main.wav');
+    d.end();
+    // Otherwise the frozen └ reads as "about to happen" when ctrl-c means
+    // it never will (#34 review footnote).
+    expect(text()).toContain('\n  f6e5d4c3b2a1 built, never sounded (stopped before the wrap)\n');
+  });
+
+  it('quitting with nothing pending ends silently', () => {
+    const { d, text } = harness();
+    d.start('//songs/x/mix:main', A, '');
+    d.position('4.1', 3000);
+    d.end();
+    expect(text()).not.toContain('never sounded');
+    expect(text().endsWith('\n')).toBe(true);
+  });
+
+  it('quitting after a changed-back edit stays silent: nothing new was coming', () => {
+    const { d, text } = harness();
+    d.start('//songs/x/mix:main', A, '');
+    d.position('4.1', 3000);
+    d.queue(A, '/out/main.wav'); // same hash: the edit was reverted
+    d.end();
+    expect(text()).not.toContain('never sounded');
+  });
+
   it('held positions flush as a plain pass boundary when no confirmation comes', () => {
     const { d, text } = harness();
     d.start('//songs/x/mix:main', A, '');

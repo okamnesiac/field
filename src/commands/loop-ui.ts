@@ -10,7 +10,7 @@
 // at the wrap, the old block closes as history — `played …─old` with
 // its final position — and a fresh block opens for the successor:
 //
-//   played //songs/creek/mix:main─45a7b1c2d853
+//   played  //songs/creek/mix:main─45a7b1c2d853
 //     [10] 12.4
 //   playing //songs/creek/mix:main─fa105f281f9b → (Volt 476)
 //     [1] 1.1
@@ -311,11 +311,19 @@ export class LoopDisplay {
     for (const p of flush) this.position(p.line, p.at);
   }
 
-  // Session over: leave the cursor on a fresh line.
+  // Session over: leave the cursor on a fresh line. A takeover still
+  // pending is the one thing the frozen block states ambiguously — the
+  // └hash sits there looking like it is about to happen, when ctrl-c
+  // means it never will. Say so, so quitting before the wrap still leaves
+  // evidence the edit built (#34 review footnote).
   end(): void {
     if (this.onPositionLine) {
       this.write('\n');
       this.onPositionLine = false;
+    }
+    if (this.pending !== undefined && this.pending.sha256 !== this.hash) {
+      this.write(`  ${short(this.pending.sha256)} built, never sounded (stopped before the wrap)\n`);
+      this.pending = undefined;
     }
   }
 }
