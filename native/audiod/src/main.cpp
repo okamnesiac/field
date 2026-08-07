@@ -47,6 +47,22 @@ public:
     {
         server.sweepClosedConnections();
 
+        // Where Core Audio's property listeners do not exist, the only way
+        // to notice a device arriving or vanishing is to look. Once a
+        // second rather than every tick: a rescan enumerates the whole
+        // device list, which is far too expensive at 250 ms and buys
+        // nothing, because hot-plug is a human-timescale event. The
+        // rescan lands before status() below, so a change still reaches
+        // the socket on the same tick it is noticed.
+        if constexpr (! Player::hardwareListenersAvailable)
+        {
+            if (++ticksSinceRescan >= 4)
+            {
+                ticksSinceRescan = 0;
+                player.refreshAudioDevice();
+            }
+        }
+
         if (player.streamFinished())
             player.stop();
 
@@ -100,6 +116,7 @@ private:
     const juce::int64 idleMs;
     juce::String lastKnownState;
     juce::String lastKnownDevice;
+    int ticksSinceRescan = 0;
 };
 } // namespace
 
@@ -126,8 +143,33 @@ int main (int argc, char* argv[])
         }
     }
 
-    // Belt to SO_NOSIGPIPE's suspenders: a write to a dying client must be
-    // an error return, never a process-killing signal.
+    // A write to a dying client must be an error return, never a
+    // process-killing signal. This is the whole mechanism, on every
+    // platform: with SIGPIPE ignored, write() to a closed peer returns
+    // EPIPE and Server::send stops.
+    //
+    // There used to be a per-socket SO_NOSIGPIPE alongside it, described
+    // as belt and braces. It was redundant, and the redundancy was
+    // load-bearing only in the argument for it: the daemon never forks or
+    // execs (so no child inherits this disposition), nothing else here
+    // touches SIGPIPE, and JUCE's only handler lives in NamedPipe, which
+    // the daemon never constructs — and is an empty function anyway. The
+    // second mechanism also happened to be the one thing in the daemon
+    // that did not port to Linux, which is a fair sign of what it was
+    // worth.
+    //
+    // What this line does cover is a real cross-thread race, not a
+    // hypothetical one: Server::send checks connection.open before
+    // writing and the reader thread clears that flag when the peer goes,
+    // but they are different threads — so a broadcast can read the flag
+    // as true and write microseconds after the close. Narrow, and fatal
+    // without this.
+    //
+    // It is not covered by a test. An attempt (30 connect-and-vanish
+    // cycles during playback) never lost the race, and passed with
+    // SIGPIPE back at SIG_DFL, so it asserted nothing. Provoking the
+    // window from outside means winning a race the daemon is built to
+    // lose, and a test that hits it only sometimes is worse than none.
     std::signal (SIGPIPE, SIG_IGN);
 
     juce::ScopedJuceInitialiser_GUI juceInit;

@@ -113,10 +113,6 @@ void Server::acceptLoop()
                 continue;
             break;
         }
-        // A client may vanish between our poll and our write (ctrl-c mid
-        // position stream); without this, that write is a fatal SIGPIPE.
-        int noSigpipe = 1;
-        ::setsockopt (fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, sizeof (noSigpipe));
         auto connection = std::make_shared<Connection>();
         connection->fd = fd;
         {
@@ -294,6 +290,10 @@ void Server::send (Connection& connection, const juce::String& line)
     auto remaining = strlen (utf8);
     while (remaining > 0 && connection.open)
     {
+        // A client may vanish between our poll and this write (ctrl-c mid
+        // position stream). SIGPIPE is ignored process-wide (main.cpp), so
+        // that write returns EPIPE and the loop below stops. There is
+        // deliberately no second mechanism — see the note there.
         auto n = ::write (connection.fd, utf8, remaining);
         if (n <= 0)
             break;

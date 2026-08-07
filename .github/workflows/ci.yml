@@ -7,10 +7,11 @@ on:
 
 # Two jobs, split by what a test needs rather than by platform loyalty
 # (linux-portability.md decision 4). The Linux job is the fast gate and
-# runs everything that does not shell out to a macOS binary; the macOS job
-# covers the nine tests that do, plus the daemon, which needs a native
-# build. Both run `pnpm test` — #46's stopgap dropped it entirely, and
-# green meaning "the tests ran" is the whole point of this file.
+# runs everything that does not shell out to a macOS binary — including
+# the daemon, which builds on both platforms since chunk 4. The macOS job
+# covers the nine tests that need a macOS binary, and is where the product
+# platform gets its full run. Both run `pnpm test` — #46's stopgap dropped
+# it entirely, and green meaning "the tests ran" is the whole point.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,11 +29,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      # JUCE's build helper `juceaide` links juce_gui_basics whatever the
+      # app links, so a headless console daemon still needs the X and
+      # freetype headers. This list is what an ubuntu:24.04 container
+      # actually needed, not a guess; `build-essential`, `cmake` and
+      # `pkg-config` are already on the runner.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxcomposite-dev libxrender-dev libglu1-mesa-dev
+      - uses: actions/cache@v4
+        with:
+          path: native/audiod/build
+          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      - run: pnpm build:native
       # Nine tests skip here — `say` (6) and `afconvert` (3) — on the
       # capability probes in src/testing/platform.ts, not by excluding
       # their files. Those four files hold 72 tests between them, and the
       # other 63 are the graph, stem and DSP code this job exists to
-      # exercise.
+      # exercise. The daemon's protocol tests are no longer among the
+      # skips: they run here too, in null-output mode.
       - run: pnpm test
       # Python worker: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
