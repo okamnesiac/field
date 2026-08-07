@@ -89,6 +89,19 @@ describe('projectRelative', () => {
   it('keeps the root itself absolute', () => {
     expect(projectRelative('/p', '/p')).toBe('/p');
   });
+
+  it('a sibling whose name merely extends the root is not inside it', () => {
+    // The case that makes `relative()` the right tool rather than a
+    // prefix test — the same trap homeRelative has, where /Users/justinx
+    // must not become ~x. Every other case in this block would still
+    // pass if someone "simplified" this into path.startsWith(root)
+    // (#42 review).
+    expect(projectRelative('/tmp/proj', '/tmp/projx/out.wav')).toBe('/tmp/projx/out.wav');
+  });
+
+  it('a name beginning with two dots is inside the root, not outside it', () => {
+    expect(projectRelative('/p', '/p/..hidden/out.wav')).toBe('..hidden/out.wav');
+  });
 });
 
 describe('build', () => {

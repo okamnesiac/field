@@ -199,7 +199,18 @@ export async function playThroughDaemon(
             client,
             readout.onSample,
             (name) => hooks.onDevice?.(name),
-            (path) => hooks.onReloaded?.(path),
+            (path) => {
+              hooks.onReloaded?.(path);
+              // The file changed under the readout, so its length did
+              // too. status() reports the loaded file's length, and a
+              // failure here (a teardown racing the swap) only leaves
+              // the previous bound in place — the same state as before
+              // the swap, never a broken readout.
+              void client.status().then(
+                (s) => readout.setEnd(s.samples),
+                () => undefined,
+              );
+            },
           );
         } finally {
           readout.cancel();
@@ -243,8 +254,18 @@ export function beatScheduler(
   // late lets a phantom through (#37 review). Bounding is the honest fix
   // — a beat past the end does not sound, whether the stream wraps there
   // or the transport stops there.
+  // The length is not fixed for the session: under --watch the daemon
+  // swaps the file at the wrap, and a bound describing the *previous*
+  // file is wrong in both directions — too long lets the phantom beat
+  // back in, too short suppresses every scheduled print from the stale
+  // end onwards (#42 review). setEnd moves it when the swap sounds.
   endSample?: number,
-): { onSample: (sample: number) => void; cancel: () => void } {
+): {
+  onSample: (sample: number) => void;
+  setEnd: (samples: number) => void;
+  cancel: () => void;
+} {
+  let end = endSample;
   let anchor: { sample: number; at: number } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastLine = '';
@@ -275,7 +296,7 @@ export function beatScheduler(
     const beatSample = ctx.tempo.ticksToSamples(beat);
     // The file ends first: nothing to announce. A wrap re-anchors and
     // the readout starts the next pass from its first beat.
-    if (endSample !== undefined && beatSample >= endSample) return;
+    if (end !== undefined && beatSample >= end) return;
     const ms = ((beatSample - nowSample) / sampleRate) * 1000;
     timer = setTimeout(() => {
       emit(barBeat(beat), beat);
@@ -294,6 +315,15 @@ export function beatScheduler(
       if (stalled) return; // paused: freeze the readout, resume on movement
       const tick = Math.floor(ctx.tempo.samplesToTicks(sample));
       emit(barBeat(tick), tick);
+      schedule();
+    },
+    // The swap sounded: the new file's length governs from here. Any
+    // timer armed against the old bound is re-armed — a longer successor
+    // has beats the old bound suppressed, and a shorter one has beats it
+    // would have let through.
+    setEnd: (samples: number) => {
+      end = samples;
+      clearTimeout(timer);
       schedule();
     },
     cancel: () => clearTimeout(timer),

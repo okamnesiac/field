@@ -99,4 +99,40 @@ describe('beatScheduler', () => {
     expect(lines).toEqual(['0:00', '0:01']);
     readout.cancel();
   });
+
+  it('a swap to a longer file un-suppresses the beats it now reaches (#42 review)', () => {
+    const lines: string[] = [];
+    // A 0.2 s file: nothing past beat 1 is scheduled.
+    const readout = beatScheduler(SR, ctx(), (line) => lines.push(line), 9600);
+    readout.onSample(0);
+    vi.advanceTimersByTime(600); // beat 2 (0.5 s) is past the 0.2 s bound
+    expect(lines).toEqual(['1.1']);
+
+    // Watch swaps in a four-second version. Keeping the old bound would
+    // suppress every scheduled print from here on — worse than carrying
+    // no bound at all, which is what made this a regression rather than
+    // cosmetic staleness.
+    readout.setEnd(SR * 4);
+    vi.advanceTimersByTime(1000); // now 1.6 s in: beats 3 and 4 sound
+
+    // Beat 2 is not announced late: its moment passed while it was
+    // rightly suppressed, and the readout says where the music is, not
+    // where it has been.
+    expect(lines).toEqual(['1.1', '1.3', '1.4']);
+    readout.cancel();
+  });
+
+  it('a swap to a shorter file re-bounds, so the phantom stays gone', () => {
+    const lines: string[] = [];
+    const readout = beatScheduler(SR, ctx(), (line) => lines.push(line), SR * 4);
+    readout.onSample(0);
+    vi.advanceTimersByTime(600); // beat 2 has sounded
+
+    // A 0.2 s successor: beat 3 belongs to the file that is gone.
+    readout.setEnd(9600);
+    vi.advanceTimersByTime(5000);
+
+    expect(lines).toEqual(['1.1', '1.2']);
+    readout.cancel();
+  });
 });

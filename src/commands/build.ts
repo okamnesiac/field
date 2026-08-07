@@ -1,4 +1,4 @@
-import { relative } from 'node:path';
+import { relative, sep } from 'node:path';
 import { parseLabel, parsePattern } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
 import { build, explain, type BuildOutcome, type Explanation, type GeneratorRunner } from '../graph/build.js';
@@ -14,7 +14,13 @@ import { formatLabel } from '../labels.js';
 // case where the prefix carries the information.
 export function projectRelative(root: string, path: string): string {
   const rel = relative(root, path);
-  return rel === '' || rel.startsWith('..') ? path : rel;
+  // "Outside the root" means `..` itself or a leading `..` *segment* —
+  // not any name that merely begins with two dots, which a bare
+  // startsWith would also catch (#42 review). Unreachable for build
+  // outputs, whose path parts are slugs by grammar, but the line should
+  // mean what it looks like it means.
+  const outside = rel === '..' || rel.startsWith(`..${sep}`);
+  return rel === '' || outside ? path : rel;
 }
 
 // Building trusts only a valid project: schema or reference errors fail
