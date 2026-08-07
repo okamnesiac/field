@@ -154,6 +154,47 @@ describe.skipIf(!binary)('render subprocess', () => {
     expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('5db5d230ea9f55016dad4d135d5d0d93b58203d92f2a321e14a0d0fe1793d262');
   });
 
+  it('refuses a clip naming an input that is not there', async () => {
+    // Shipped as a silent skip and caught in review (#54): the clip was
+    // dropped, the render exited 0, and the result cached under an action
+    // key that still described the missing clip. The same fail-closed
+    // rule as the unknown effect and the unknown band type — this one had
+    // a legitimate `continue` three lines below it, which is what made it
+    // look ordinary.
+    const only = join(dir, 'a.wav');
+    writeWavFloat32(only, RATE, [new Float32Array(256)]);
+    await expect(
+      renderInsertChain({
+        op: 'stem',
+        output: join(dir, 'stem.wav'),
+        sample_rate: RATE,
+        inputs: [only],
+        clips: [
+          { input: 1, start: 0, duration: 3, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0 },
+        ],
+      }),
+    ).rejects.toThrow(/clip names input 1 but the plan has 1/);
+  });
+
+  it('still treats reads outside a source as silence, which is not the same thing', async () => {
+    // The distinction the bug above blurred: slip may run past either
+    // edge and that is declared behaviour, so this must render rather
+    // than throw (project-core.md §3.2).
+    const only = join(dir, 'a.wav');
+    writeWavFloat32(only, RATE, [Float32Array.from({ length: 64 }, () => 0.5)]);
+    const output = join(dir, 'stem.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [only],
+      clips: [
+        { input: 0, start: 0, duration: 128, read_offset: -32, gain_db: 0, fade_in: 0, fade_out: 0 },
+      ],
+    });
+    expect(readFileSync(output).length).toBeGreaterThan(0);
+  });
+
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
     await expect(
       renderInsertChain({

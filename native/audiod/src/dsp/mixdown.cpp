@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace field::dsp
 {
@@ -27,8 +29,23 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
 
     for (const auto& clip : clips)
     {
-        if (clip.input < 0 || (size_t) clip.input >= sources.size() || sources[(size_t) clip.input].empty())
-            continue;
+        // A clip naming an input that is not there is a plan the daemon
+        // cannot render, not a clip to leave out. Skipping it would write
+        // plausible audio under an action key that still describes the
+        // omitted clip — the fail-closed rule from decision 6, which the
+        // unknown-effect and unknown-band-type checks already follow.
+        //
+        // Note this is a different animal from the `continue` a few lines
+        // down: *that* one is the declared behaviour of slip (reads
+        // outside a source are silence, so slipping never errors), and
+        // its legitimacy is precisely what made this one look normal
+        // while it was being written.
+        if (clip.input < 0 || (size_t) clip.input >= sources.size())
+            throw std::runtime_error ("clip names input " + std::to_string (clip.input)
+                                      + " but the plan has " + std::to_string (sources.size()));
+        if (sources[(size_t) clip.input].empty())
+            throw std::runtime_error ("clip input " + std::to_string (clip.input)
+                                      + " has no channels");
         const auto& srcL = sources[(size_t) clip.input][0];
         const auto& srcR = rightOf (sources[(size_t) clip.input]);
         const double gain = std::pow (10.0, clip.gainDb / 20.0);
@@ -36,8 +53,11 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
         for (long i = 0; i < clip.duration; ++i)
         {
             const long s = clip.readOffset + i;
+            // Declared behaviour, not a guard: reads outside the source are
+            // silence, which is what lets slip run past either edge
+            // without erroring (project-core.md §3.2).
             if (s < 0 || (size_t) s >= srcL.size())
-                continue; // out-of-range reads are silence
+                continue;
             double g = gain;
             if ((double) i < clip.fadeIn)
                 g *= (double) i / clip.fadeIn;
@@ -73,8 +93,12 @@ std::vector<std::vector<float>> sumStems (const std::vector<std::vector<std::vec
 
     for (size_t i = 0; i < stems.size(); ++i)
     {
-        if (stems[i].empty() || i >= faders.size())
-            continue;
+        // Same rule: a stem with no channels, or missing its fader, is a
+        // malformed plan rather than a track to drop from the mix.
+        if (i >= faders.size())
+            throw std::runtime_error ("mix input " + std::to_string (i) + " has no fader");
+        if (stems[i].empty())
+            throw std::runtime_error ("mix input " + std::to_string (i) + " has no channels");
         const auto& srcL = stems[i][0];
         const auto& srcR = rightOf (stems[i]);
         const double gain = std::pow (10.0, faders[i].gainDb / 20.0);
