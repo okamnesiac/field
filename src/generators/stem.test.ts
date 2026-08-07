@@ -11,6 +11,7 @@ import type { GeneratorRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
 import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
+import { hasAfconvert } from '../testing/platform.js';
 import { placedWindow, planTrack, stemGenerator, type PlacedClip } from './stem.js';
 
 // 120 bpm at 48 kHz: one beat = 960 ticks = 0.5 s = 24000 samples.
@@ -571,25 +572,28 @@ describe('clips over rule outputs', () => {
     );
   });
 
-  it('builds the whole recipe chain: asset → target → stem, with real rules', async () => {
-    expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
-      '//songs/creek/asset:kick',
-      '//songs/creek/sound:kick-24',
-      '//songs/creek/track:drums',
-    ]);
+  it.skipIf(!hasAfconvert)(
+    'builds the whole recipe chain: asset → target → stem, with real rules',
+    async () => {
+      expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
+        '//songs/creek/asset:kick',
+        '//songs/creek/sound:kick-24',
+        '//songs/creek/track:drums',
+      ]);
 
-    // Real normalize (afconvert) feeding the real TS mixer: the stem plays
-    // a render nothing ever committed.
-    const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
-    const stem = outcomes.find((o) => o.label === '//songs/creek/track:drums')!;
-    const wav = readWav(stem.outputPath!);
-    expect(wav.channels[0]).toHaveLength(7);
-    expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
-    expect(wav.channels[0]![4]).toBeCloseTo(0.5, 4);
+      // Real normalize (afconvert) feeding the real TS mixer: the stem plays
+      // a render nothing ever committed.
+      const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
+      const stem = outcomes.find((o) => o.label === '//songs/creek/track:drums')!;
+      const wav = readWav(stem.outputPath!);
+      expect(wav.channels[0]).toHaveLength(7);
+      expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
+      expect(wav.channels[0]![4]).toBeCloseTo(0.5, 4);
 
-    const again = await buildLabels(root, ['//songs/creek/track:drums']);
-    expect(again.every((o) => o.cached)).toBe(true);
-  });
+      const again = await buildLabels(root, ['//songs/creek/track:drums']);
+      expect(again.every((o) => o.cached)).toBe(true);
+    },
+  );
 
   it('cascades a recipe edit through the stem', async () => {
     // Content tracks the spec and the inputs, so an upstream parameter

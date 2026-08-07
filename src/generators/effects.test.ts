@@ -8,6 +8,7 @@ import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { loadProject } from '../model/project.js';
+import { hasAfconvert } from '../testing/platform.js';
 
 // Effect rules end to end: chains as sounds-sourcing-sounds, cache
 // cascade on parameter edits, cycle and reference diagnostics
@@ -117,7 +118,7 @@ describe('effect chains', () => {
     for (const v of channel!) expect(Math.abs(v)).toBeLessThanOrEqual(ceiling + 1e-6);
   });
 
-  it('normalize accepts a target, closing the rate-fix loop', async () => {
+  it.skipIf(!hasAfconvert)('normalize accepts a target, closing the rate-fix loop', async () => {
     writeSounds({
       'tone-eq': eqLines('source: tone', -3),
       'tone-eq-441': ['type: normalize', 'source: tone-eq', 'sample_rate: 44100', 'bit_depth: 16'],

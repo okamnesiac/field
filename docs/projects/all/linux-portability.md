@@ -106,16 +106,19 @@ second supported product.
 
    **The guard is per test, not per file.** "By what a test needs" is
    the whole decision, and excluding files breaks it. The nine
-   platform-bound cases live in four files holding 71 tests between them
-   at this head — `say.test.ts` 6, `stem.test.ts` 30,
-   `effects.test.ts` 5, `build.test.ts` 30 — so dropping the files would
-   take 62 platform-independent graph, stem and DSP tests off Linux,
-   which is the code the Linux job exists to exercise. Only
-   `say.test.ts` is wholly platform-bound. The other three contribute
-   one test each — `graph/build.test.ts:279` ("normalizes real audio
-   through afconvert"), `generators/stem.test.ts:581`, and
-   `generators/effects.test.ts:120` ("normalize accepts a target") — and
-   each gets its own guard or moves to a Darwin-only sibling file.
+   platform-bound cases live in four files holding 72 tests between them
+   — `say.test.ts` 6, `stem.test.ts` 30, `effects.test.ts` 5,
+   `build.test.ts` 31 — so dropping the files would take 63
+   platform-independent graph, stem and DSP tests off Linux, which is
+   the code the Linux job exists to exercise. Only `say.test.ts` is
+   wholly platform-bound. The other three contribute one test each,
+   named rather than numbered because line numbers rot:
+   `graph/build.test.ts` "normalizes real audio through afconvert",
+   `generators/stem.test.ts` "builds the whole recipe chain: asset →
+   target → stem, with real rules", and `generators/effects.test.ts`
+   "normalize accepts a target, closing the rate-fix loop". Each gets
+   its own guard rather than a move to a Darwin-only sibling file, so
+   the reason stays next to the test.
 
    Both jobs together keep today's coverage exactly, and most of the
    wall clock moves off the 10× meter.
@@ -124,6 +127,19 @@ second supported product.
    the rest affordable: the 3,000 included minutes are 300 macOS
    minutes, and a two-minute run means ~150 runs a month for the whole
    organization.
+
+   **Amended on implementation:** the macOS job runs the *whole* suite,
+   not the nine tests and the daemon. This decision assumed narrowing
+   macOS was where the minutes were, which was never measured; the suite
+   is **12.4s** wall clock, against a macOS job dominated by
+   `pnpm install` and `pnpm build:native`. Narrowing it would save
+   seconds and cost a hand-maintained file list that drifts silently as
+   tests move. The minutes argument above is untouched and still the
+   reason for the split — it is the *native build* that costs, which is
+   why the Linux job carries typecheck, `pyright` and the fast gate.
+   Running everything on macOS is also the right default for the
+   platform the product ships on (overview.md "V1 platform scope"):
+   giving the product platform partial coverage is the wrong way round.
 
 5. **Linux is a build-and-test target, not a support promise.** No
    Linux packaging, no audio-backend matrix, no "which of ALSA, JACK or

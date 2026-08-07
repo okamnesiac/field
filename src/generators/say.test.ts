@@ -8,14 +8,19 @@ import { createSong } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { sha256File } from '../hash.js';
 import { saySoundSchema } from '../schema/index.js';
+import { hasAfconvert, hasSay } from '../testing/platform.js';
 import { sayGenerator } from './say.js';
 
 // These run the real `say` and `afconvert` — macOS-only, like the sclang
-// integration tests. Samantha ships with macOS.
+// integration tests. Samantha ships with macOS. This is the one file
+// where every test is platform-bound, so the guard sits on the describes;
+// the other three afconvert tests are guarded one by one
+// (linux-portability.md decision 4).
+const macosAudioTools = hasSay && hasAfconvert;
 const target = (over: Record<string, unknown> = {}) =>
   saySoundSchema.parse({ name: 'scratch', type: 'say', text: 'field', voice: 'Samantha', ...over });
 
-describe('sayGenerator.execute', () => {
+describe.skipIf(!macosAudioTools)('sayGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
@@ -91,7 +96,7 @@ describe('sayGenerator.execute', () => {
   });
 });
 
-describe('say sounds in the build graph', () => {
+describe.skipIf(!macosAudioTools)('say sounds in the build graph', () => {
   let root: string;
 
   beforeEach(() => {

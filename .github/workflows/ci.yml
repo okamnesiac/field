@@ -5,20 +5,18 @@ on:
     branches: [main]
   pull_request:
 
-# TEMPORARY (2026-08-06): the macOS runner is off, so this job is the
-# platform-independent subset only — typecheck, build, and pyright strict.
-#
-# `pnpm test` is NOT run here. Measured on Linux in PR #45: 9 of 301 tests
-# fail, all of them shelling out to a macOS binary — `say` (6) and
-# `afconvert` (3). Everything else passes; the SuperCollider and daemon
-# tests skip on a missing sclang/binary, as they already did on macOS CI.
-# `pnpm build:native` is out for the same reason (JUCE/CoreAudio).
-#
-# So: **green here does not mean the tests ran.** Until PR #45 lands —
-# normalize converting in TypeScript instead of afconvert — the full
-# suite passing locally on macOS is the real gate.
+# Two jobs, split by what a test needs rather than by platform loyalty
+# (linux-portability.md decision 4). The Linux job is the fast gate and
+# runs everything that does not shell out to a macOS binary; the macOS job
+# covers the nine tests that do, plus the daemon, which needs a native
+# build. Both run `pnpm test` — #46's stopgap dropped it entirely, and
+# green meaning "the tests ran" is the whole point of this file.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,8 +28,40 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      # Nine tests skip here — `say` (6) and `afconvert` (3) — on the
+      # capability probes in src/testing/platform.ts, not by excluding
+      # their files. Those four files hold 72 tests between them, and the
+      # other 63 are the graph, stem and DSP code this job exists to
+      # exercise.
+      - run: pnpm test
       # Python worker: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
       # is far too heavy for CI.
       - uses: astral-sh/setup-uv@v5
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The native daemon: cached on the CMakeLists hash so a JUCE recompile
+      # only happens when the pin or the build itself changes. The daemon
+      # protocol tests in pnpm test find the built binary and run against it
+      # in null-output mode (no audio device on runners).
+      - uses: actions/cache@v4
+        with:
+          path: native/audiod/build
+          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      - run: pnpm build:native
+      # The whole suite, not the nine alone. macOS is the product platform
+      # (overview.md "V1 platform scope"), so it is the wrong one to give
+      # partial coverage — and the suite measures ~13s against a job
+      # dominated by install and the native build, so narrowing it would
+      # save seconds and cost a file list that silently drifts.
+      - run: pnpm test
