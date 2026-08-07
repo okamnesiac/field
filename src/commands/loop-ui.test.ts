@@ -39,7 +39,7 @@ describe('LoopDisplay', () => {
         `\r\x1b[2K  [1] 1.3${pad}└f6e5d4c3b2a1` +
         // the held 1.1 renders nothing until the swap confirms; then the
         // old block closes at its final beat, ─ and └-free
-        '\r\x1b[1A\x1b[2Kplayed //songs/creek/mix:main─a1b2c3d4e5f6\n' +
+        '\r\x1b[1A\x1b[2Kplayed  //songs/creek/mix:main─a1b2c3d4e5f6\n' +
         '\x1b[2K  [1] 1.3\n' +
         'playing //songs/creek/mix:main─f6e5d4c3b2a1 → (Volt 476)\n' +
         '\r\x1b[2K  [1] 1.1' +
@@ -112,7 +112,7 @@ describe('LoopDisplay', () => {
     // entirely wrong about what is playing.
     d.position('1.1', 0);
     d.swapped('/audio/gen1/2.wav');
-    expect(text()).toContain('played //songs/x/sounds:gen1─a1b2c3d4e5f6\n');
+    expect(text()).toContain('played  //songs/x/sounds:gen1─a1b2c3d4e5f6\n');
     expect(text()).toContain('playing //songs/x/sounds:gen1\n'); // no hash claimed
     expect(text()).not.toContain('playing //songs/x/sounds:gen1─f6e5d4c3b2a1');
   });
@@ -128,7 +128,7 @@ describe('LoopDisplay', () => {
     d.swapped('/out/main.wav');
     expect(text()).not.toContain('\x1b[1A'); // never steps onto the said line
     expect(text()).toContain('└f6e5d4c3b2a1'); // pending still visible below
-    expect(text()).toContain('\nplayed //songs/x/mix:main─a1b2c3d4e5f6\n');
+    expect(text()).toContain('\nplayed  //songs/x/mix:main─a1b2c3d4e5f6\n');
     expect(text()).toContain('playing //songs/x/mix:main─f6e5d4c3b2a1 → (Volt 476)\n');
   });
 
@@ -159,7 +159,7 @@ describe('LoopDisplay', () => {
     const t = text();
     expect(t).toContain('\r\x1b[2K  [2] 11.1'); // pass() counted it
     expect(t).toContain('\r\x1b[2K  [3] 11.1'); // and only pass() — no double count
-    expect(t).toContain('played //songs/x/sounds:long─a1b2c3d4e5f6\n');
+    expect(t).toContain('played  //songs/x/sounds:long─a1b2c3d4e5f6\n');
     expect(t).toContain('playing //songs/x/sounds:long─f6e5d4c3b2a1\n'); // correlated, not stale
     // exactly two playing headers ever: the start and the transition
     expect(t.split('playing ').length).toBe(3 + 1); // +1: the ┬ repaint from queue()
@@ -184,7 +184,7 @@ describe('LoopDisplay', () => {
     d.position('1.1', 0);
     d.swapped('/out/main.wav');
     expect(text()).not.toContain('\x1b[1A'); // one cursor-up would land mid-header
-    expect(text()).toContain('played //songs/creek/mix:main─a1b2c3d4e5f6\n'); // fresh lines instead
+    expect(text()).toContain('played  //songs/creek/mix:main─a1b2c3d4e5f6\n'); // fresh lines instead
   });
 
   it('the position line truncates to the terminal instead of wrapping', () => {
@@ -207,7 +207,7 @@ describe('LoopDisplay', () => {
     d.swapped('/out/main.wav');
     const t = text();
     expect(t).toContain('└f6e5d4c3b2a1'); // full 12 characters
-    expect(t).toContain('played //songs/creek/mix:main─a1b2c3d4e5f6\n');
+    expect(t).toContain('played  //songs/creek/mix:main─a1b2c3d4e5f6\n');
     expect(t).toContain('\x1b[1A'); // width unknown is not width zero: rewrites stay on
   });
 

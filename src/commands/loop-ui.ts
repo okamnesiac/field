@@ -113,7 +113,10 @@ export class LoopDisplay {
       verb === 'playing' && this.pending !== undefined && this.pending.sha256 !== this.hash;
     const sep = tee ? '┬' : '─';
     const route = verb === 'playing' && this.note ? ` →${this.note}` : '';
-    return `${verb} ${this.label}${hash ? `${sep}${short(hash)}` : ''}${route}`;
+    // "played" is a letter shorter than "playing": the extra space keeps
+    // every label — and the ─hash column — vertically aligned.
+    const spacing = verb === 'played' ? '  ' : ' ';
+    return `${verb}${spacing}${this.label}${hash ? `${sep}${short(hash)}` : ''}${route}`;
   }
 
   private writeHeader(): void {
