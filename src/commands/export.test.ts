@@ -89,22 +89,22 @@ afterEach(() => {
 describe('exportBaseName', () => {
   it('flattens the whole label, minus the songs/ prefix', () => {
     expect(exportBaseName('//songs/creek/mix:main')).toBe('creek-mix-main');
-    expect(exportBaseName('//songs/creek/tracks:drums')).toBe('creek-tracks-drums');
-    expect(exportBaseName('//songs/creek/sounds:still-water-keys')).toBe(
-      'creek-sounds-still-water-keys',
+    expect(exportBaseName('//songs/creek/track:drums')).toBe('creek-track-drums');
+    expect(exportBaseName('//songs/creek/sound:still-water-keys')).toBe(
+      'creek-sound-still-water-keys',
     );
   });
 
   it('keeps shared material on its shelf', () => {
-    expect(exportBaseName('//shared/assets:water')).toBe('shared-assets-water');
+    expect(exportBaseName('//shared/asset:water')).toBe('shared-asset-water');
   });
 
   it('distinguishes a track from a sound of the same name', () => {
     // The reason the name is long: both of these are legal in one song
     // (the one-namespace rule covers sounds and assets), and they are
     // different files.
-    expect(exportBaseName('//songs/creek/tracks:pad')).not.toBe(
-      exportBaseName('//songs/creek/sounds:pad'),
+    expect(exportBaseName('//songs/creek/track:pad')).not.toBe(
+      exportBaseName('//songs/creek/sound:pad'),
     );
   });
 });
@@ -183,12 +183,12 @@ describe('homeRelative', () => {
 
 describe('exportLabels', () => {
   it('copies the built artifact as v1', async () => {
-    const results = await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], {
+    const results = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
       to: dest,
       runner,
     });
     expect(results).toHaveLength(1);
-    expect(results[0]!.to).toBe(join(dest, 'creek-sounds-pad-normalized-v1.wav'));
+    expect(results[0]!.to).toBe(join(dest, 'creek-sound-pad-normalized-v1.wav'));
     expect(results[0]!.version).toBe(1);
     expect(results[0]!.unchanged).toBe(false);
     expect(readFileSync(results[0]!.to)).toEqual(readFileSync(results[0]!.from));
@@ -197,46 +197,46 @@ describe('exportLabels', () => {
   it('exports what was asked for, not what the build had to make', async () => {
     // The rule depends on the asset, so `bloom build` prints two labels.
     // Exporting must still put exactly one file on the Desktop.
-    await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], { to: dest, runner });
-    expect(readdirSync(dest)).toEqual(['creek-sounds-pad-normalized-v1.wav']);
+    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
+    expect(readdirSync(dest)).toEqual(['creek-sound-pad-normalized-v1.wav']);
   });
 
   it('exports committed sources too, straight from the song', async () => {
-    const [asset] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
-    expect(asset!.to).toBe(join(dest, 'creek-assets-pad-v1.wav'));
+    const [asset] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    expect(asset!.to).toBe(join(dest, 'creek-asset-pad-v1.wav'));
     expect(asset!.from).toBe(join(root, 'songs/creek/audio/pad.wav'));
   });
 
   it('a changed mix becomes the next version, and the old one survives', async () => {
-    const [v1] = await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], {
+    const [v1] = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
       to: dest,
       runner,
     });
     const before = readFileSync(v1!.to);
 
     writeSound('pad-normalized', normalizeYaml('pad-normalized', 44100)); // a real change
-    const [v2] = await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], {
+    const [v2] = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
       to: dest,
       runner,
     });
 
     expect(v2!.version).toBe(2);
-    expect(v2!.to).toBe(join(dest, 'creek-sounds-pad-normalized-v2.wav'));
+    expect(v2!.to).toBe(join(dest, 'creek-sound-pad-normalized-v2.wav'));
     expect(readdirSync(dest).sort()).toEqual([
-      'creek-sounds-pad-normalized-v1.wav',
-      'creek-sounds-pad-normalized-v2.wav',
+      'creek-sound-pad-normalized-v1.wav',
+      'creek-sound-pad-normalized-v2.wav',
     ]);
     // The point of the whole design: v1 is byte-for-byte what it was.
     expect(readFileSync(v1!.to)).toEqual(before);
   });
 
   it('re-exporting an unchanged mix mints nothing and names the version that stands', async () => {
-    await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
-    const [again] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    const [again] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
 
     expect(again!.unchanged).toBe(true);
     expect(again!.version).toBe(1);
-    expect(again!.to).toBe(join(dest, 'creek-assets-pad-v1.wav'));
+    expect(again!.to).toBe(join(dest, 'creek-asset-pad-v1.wav'));
     expect(readdirSync(dest)).toHaveLength(1);
   });
 
@@ -246,12 +246,12 @@ describe('exportLabels', () => {
     // version on the disk would no longer be what you just built — the
     // one case where a silent no-op would mislead, so the caller can see
     // both numbers.
-    await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
     writeSound('pad-normalized', normalizeYaml('pad-normalized', 44100));
-    await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
     writeSound('pad-normalized', normalizeYaml('pad-normalized', 96000)); // back to v1
 
-    const [third] = await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], {
+    const [third] = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
       to: dest,
       runner,
     });
@@ -259,13 +259,13 @@ describe('exportLabels', () => {
     expect(third!.unchanged).toBe(true);
     expect(third!.version).toBe(1); // the version these bytes already are
     expect(third!.newest).toBe(2); // and the one that is still newest
-    expect(third!.to).toBe(join(dest, 'creek-sounds-pad-normalized-v1.wav'));
+    expect(third!.to).toBe(join(dest, 'creek-sound-pad-normalized-v1.wav'));
     expect(readdirSync(dest)).toHaveLength(2); // nothing minted
   });
 
   it('matching the newest version is not a revert', async () => {
-    await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
-    const [again] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    const [again] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
     expect(again!.unchanged).toBe(true);
     expect(again!.version).toBe(again!.newest); // same number: nothing to warn about
   });
@@ -274,12 +274,12 @@ describe('exportLabels', () => {
     // The size pre-filter must not be able to end the search early: v2
     // has v1's exact length and different content, and v1 is still the
     // match.
-    const [v1] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    const [v1] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
     const sameSize = Buffer.from(readFileSync(v1!.to));
     sameSize[sameSize.length - 1] = sameSize[sameSize.length - 1]! ^ 0xff;
-    writeFileSync(join(dest, 'creek-assets-pad-v2.wav'), sameSize);
+    writeFileSync(join(dest, 'creek-asset-pad-v2.wav'), sameSize);
 
-    const [third] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    const [third] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
     expect(third!.unchanged).toBe(true);
     expect(third!.version).toBe(1);
     expect(third!.newest).toBe(2);
@@ -288,29 +288,29 @@ describe('exportLabels', () => {
   it('never touches a file it did not write', async () => {
     // Someone's own work, sitting on the Desktop under a name in the
     // family. Export must leave it exactly as it found it.
-    const theirs = join(dest, 'creek-sounds-pad-normalized-v1.wav');
+    const theirs = join(dest, 'creek-sound-pad-normalized-v1.wav');
     writeFileSync(theirs, 'a mix I bounced by hand');
-    await exportLabels(root, ['//songs/creek/sounds:pad-normalized'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
     expect(readFileSync(theirs, 'utf8')).toBe('a mix I bounced by hand');
     expect(readdirSync(dest).sort()).toEqual([
-      'creek-sounds-pad-normalized-v1.wav',
-      'creek-sounds-pad-normalized-v2.wav',
+      'creek-sound-pad-normalized-v1.wav',
+      'creek-sound-pad-normalized-v2.wav',
     ]);
   });
 
   it('never writes through a name that differs only in case (#39 P1)', async () => {
-    // On APFS `Creek-Assets-Pad-v1.wav` and `creek-assets-pad-v1.wav`
+    // On APFS `Creek-Asset-Pad-v1.wav` and `creek-asset-pad-v1.wav`
     // are one file, so copying to the lowercase name replaces their
     // bytes *under their filename* — a directory listing does not even
     // change. Their file must survive untouched.
-    const theirs = join(dest, 'Creek-Assets-Pad-v1.wav');
+    const theirs = join(dest, 'Creek-Asset-Pad-v1.wav');
     writeFileSync(theirs, 'a mix I bounced by hand');
 
-    const [result] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
 
     expect(readFileSync(theirs, 'utf8')).toBe('a mix I bounced by hand');
     expect(result!.version).toBe(2); // their v1 counts, whatever its case
-    expect(result!.to).toBe(join(dest, 'creek-assets-pad-v2.wav'));
+    expect(result!.to).toBe(join(dest, 'creek-asset-pad-v2.wav'));
   });
 
   it('counts case-differing versions when numbering, so a new export is newest', async () => {
@@ -318,14 +318,14 @@ describe('exportLabels', () => {
     // protect the file — v1 is free, so nothing collides — but we would
     // write a "v1" that is newer in time than their v5, and every later
     // comparison would read the family backwards.
-    writeFileSync(join(dest, 'Creek-Assets-Pad-v5.wav'), 'their fifth bounce');
-    const [result] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    writeFileSync(join(dest, 'Creek-Asset-Pad-v5.wav'), 'their fifth bounce');
+    const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
     expect(result!.version).toBe(6);
-    expect(readFileSync(join(dest, 'Creek-Assets-Pad-v5.wav'), 'utf8')).toBe('their fifth bounce');
+    expect(readFileSync(join(dest, 'Creek-Asset-Pad-v5.wav'), 'utf8')).toBe('their fifth bounce');
   });
 
   it('refuses to export a committed source whose bytes drifted (#39 P2)', async () => {
-    await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
     // A bounce written over the asset without re-importing: the declared
     // hash still describes the old bytes, and the build only verifies a
     // committed file when it consumes it as an input. Exporting it as
@@ -334,7 +334,7 @@ describe('exportLabels', () => {
     writeFileSync(join(root, 'songs/creek/audio/pad.wav'), 'different audio entirely');
 
     await expect(
-      exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner }),
+      exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner }),
     ).rejects.toThrow('refusing to export');
     expect(readdirSync(dest)).toHaveLength(1); // v1 stands, nothing minted
   });
@@ -353,7 +353,7 @@ describe('exportLabels', () => {
     writeFileSync(join(root, 'songs/creek/audio/pad.wav'), 'drifted after import');
 
     await expect(
-      exportLabels(root, ['//songs/creek/assets:aaa-first', '//songs/creek/assets:pad'], {
+      exportLabels(root, ['//songs/creek/asset:aaa-first', '//songs/creek/asset:pad'], {
         to: dest,
         runner,
       }),
@@ -363,7 +363,7 @@ describe('exportLabels', () => {
 
   it('refuses a destination that does not exist rather than creating one', async () => {
     await expect(
-      exportLabels(root, ['//songs/creek/assets:pad'], { to: join(dest, 'Desktps'), runner }),
+      exportLabels(root, ['//songs/creek/asset:pad'], { to: join(dest, 'Desktps'), runner }),
     ).rejects.toThrow('no such directory');
   });
 

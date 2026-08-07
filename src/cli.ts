@@ -140,7 +140,7 @@ program
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: bloom play ${opts.song}/sounds:${name}-1\n` +
+        `audition: bloom play ${opts.song}/sound:${name}-1\n` +
           `choose:   bloom choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
@@ -162,7 +162,7 @@ program
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
         `${moved ? 'moved' : 'chose'} ${name} → variant ${opts.variant} (${result.file})\n` +
-          `//songs/${opts.song}/sounds:${name} now plays it; clips reference it as source: ${name}\n`,
+          `//songs/${opts.song}/sound:${name} now plays it; clips reference it as source: ${name}\n`,
       );
     } catch (err) {
       fail(err);
@@ -225,7 +225,7 @@ function buildStatus(o: BuildOutcome): string {
 
 program
   .command('build <patterns...>')
-  .description('build labels (creek/sounds:pad-96k, creek/..., or a bare song for its main mix)')
+  .description('build labels (creek/sound:pad-96k, creek/..., or a bare song for its main mix)')
   .option('--watch', 'rebuild on project changes until ctrl-c, reporting outputs that audibly moved')
   .action(async (patterns: string[], opts: { watch?: boolean }) => {
     try {
@@ -605,7 +605,7 @@ program
 
 program
   .command('query <expr>')
-  .description("query the graph: a pattern, or deps(creek/sounds:pad-96k)")
+  .description("query the graph: a pattern, or deps(creek/sound:pad-96k)")
   .action((expr: string) => {
     try {
       for (const label of queryDeps(requireRoot(), expr)) {

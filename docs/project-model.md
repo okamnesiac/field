@@ -14,7 +14,7 @@ generation recipes). A DAWproject *exporter* is a possible later feature.
 
 A project is an album-shaped workspace: one or more songs plus shared material
 reused across them. Songs are packages; shared material is a library; build
-labels address both (`//songs/opener/mix:main`, `//shared/assets:rain`).
+labels address both (`//songs/opener/mix:main`, `//shared/asset:rain`).
 
 The shared library has three shelves, split by **contract** — make, is,
 change ([projects/all/project-layout.md](projects/all/project-layout.md)
@@ -27,7 +27,7 @@ it is invoked, not of the definition — the same `.scd` legitimately does
 both — so there is no shelf split along that line, exactly as there is
 no loops shelf (looping is a clip property). `shared/assets.yaml` is the
 shared scope's ledger: one pin per committed file under `shared/`,
-labeled `//shared/assets:<name>`.
+labeled `//shared/asset:<name>`.
 
 Song directories are a workspace, not a library. `sounds/` holds one
 file per **defined sound** — audio is committed bytes, a sound is a
@@ -35,7 +35,7 @@ definition, and a sound wrapped in an effect is a different sound —
 while `audio/` holds *all* of a song's committed sound: recorded,
 imported, or generated, the producer is irrelevant. Where a file lives
 declares who may see it (project-layout.md §1.5): a clip references its
-own song's names plus `//shared/assets:` pins, and nothing else.
+own song's names plus `//shared/asset:` pins, and nothing else.
 
 ```text
 project/
@@ -45,7 +45,7 @@ project/
 │   ├── instruments/      # definitions that make sound (.scd, model defs, AU)
 │   ├── samples/          # committed sound that just is
 │   ├── plugins/          # things that change sound: chains and presets
-│   └── assets.yaml       # the shared ledger: //shared/assets:<name>
+│   └── assets.yaml       # the shared ledger: //shared/asset:<name>
 ├── songs/
 │   └── <song>/
 │       ├── song.yaml
@@ -78,7 +78,7 @@ the layout and its vocabulary are decided in
 A sound file is discriminated by `type:` (`supercollider`, `say`, `eq`,
 `generative`, …) and fed by `source:` — a bare name resolving in the
 song's one namespace (assets and sounds together), a
-`//shared/assets:<name>` label crossing into the shared scope, or, for
+`//shared/asset:<name>` label crossing into the shared scope, or, for
 `supercollider`, a program file (a bare filename resolves in
 `shared/instruments/`). Automatic types are generated in-graph and
 cached; the `generative` type is deliberate — its variants are committed
@@ -131,7 +131,7 @@ arrangement. Tracks also carry `inserts:` (EQ, limiter, reverb — entries
 discriminated on `effect:` so hosted plugins can join later): inserts are
 *content*, baked into the stem, so editing one re-renders the stem where a
 fader move never does. The split matters to the build graph: every audio track with
-clips is implicitly buildable as `//songs/<song>/tracks:<name>`, a pre-fader
+clips is implicitly buildable as `//songs/<song>/track:<name>`, a pre-fader
 stem whose cache key sees clip placement but not the track fader, so mixing
 decisions never invalidate rendered stems (see
 [build-graph.md](build-graph.md) "Rules so far").
@@ -207,7 +207,7 @@ model through its worker and writes `songs/<song>/sounds/<name>.yaml`
 plus numbered variant WAVs under `audio/<name>/`. The sound is a
 schema-validated project file — `bloom check` verifies variant hashes,
 `bloom fmt` covers it — and each variant auditions as
-`//songs/<song>/sounds:<name>-<n>` via `bloom play`. `bloom choose
+`//songs/<song>/sound:<name>-<n>` via `bloom play`. `bloom choose
 <name> --variant <n>` records `chosen:`, and from then on the sound's
 own label resolves to that variant — clips say
 `source: <name>` and follow every re-choose, a one-line diff. Nothing

@@ -101,7 +101,7 @@ describe('say sounds in the build graph', () => {
   });
 
   it('builds, caches, and re-keys on a text edit', { timeout: 30_000 }, async () => {
-    const label = '//songs/opener/sounds:scratch-vocal';
+    const label = '//songs/opener/sound:scratch-vocal';
     expect(queryDeps(root, `deps(${label})`)).toEqual([label]);
 
     const first = await buildLabels(root, [label]);

@@ -119,7 +119,7 @@ describe('generative sounds in the project model', () => {
   });
 
   it('variants are auditionable by number under the sounds package', async () => {
-    const playables = await resolvePlayables(root, ['//songs/opener/sounds:keys-2']);
+    const playables = await resolvePlayables(root, ['//songs/opener/sound:keys-2']);
     expect(playables).toHaveLength(1);
     expect(playables[0]!.path).toBe(join(root, 'songs/opener/audio/keys/2.wav'));
   });
@@ -200,7 +200,7 @@ describe('bloom choose', () => {
   it('a chosen sound resolves by its own label and is clip-referenceable', async () => {
     await chooseVariant(root, 'keys', { song: 'opener', variant: 2 });
 
-    const playables = await resolvePlayables(root, ['//songs/opener/sounds:keys']);
+    const playables = await resolvePlayables(root, ['//songs/opener/sound:keys']);
     expect(playables[0]!.path).toBe(join(root, 'songs/opener/audio/keys/2.wav'));
 
     writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('keys'));
@@ -213,7 +213,7 @@ describe('bloom choose', () => {
     expect(result.previous).toBe(1);
     expect(loadedGenerate().chosen).toBe(2);
 
-    const playables = await resolvePlayables(root, ['//songs/opener/sounds:keys']);
+    const playables = await resolvePlayables(root, ['//songs/opener/sound:keys']);
     expect(playables[0]!.path).toBe(join(root, 'songs/opener/audio/keys/2.wav'));
   });
 

@@ -297,7 +297,7 @@ function validate(project: LoadedProject): void {
   const push = (file: string, message: string) => project.diagnostics.push({ file, message });
 
   // The shared ledger validates like a song's, against its own scope root
-  // (project-layout.md §1.6); its names are what //shared/assets: refs
+  // (project-layout.md §1.6); its names are what //shared/asset: refs
   // resolve against below.
   const sharedNames = new Set<string>();
   const sharedFileByName = new Map<string, string>();

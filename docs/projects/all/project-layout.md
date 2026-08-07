@@ -58,6 +58,12 @@ or a scope boundary.
    verified by check), and ledgers are the one shape that wants to be a
    table. Labels are unchanged: `//songs/creek/targets:kit-punch` now
    reads as directory + filename, even more literally than before.
+   **Amended 2026-08-06:** "the directory is the package" now reads *the
+   directory is the package's plural* — packages went singular (§4.5's
+   amendment), so the file is `sounds/kit-punch.yaml` and the label is
+   `//songs/creek/sound:kit-punch`. The mapping is still mechanical, and
+   a label now says what it addresses rather than which folder it came
+   from.
 4. **`generation/` dissolves.** A generation recipe *is* a spec handed
    to a generator, so it lives with the other specs:
    `targets/<name>.yaml`, deliberate kind, carrying `variants:` and
@@ -87,7 +93,7 @@ or a scope boundary.
    `.scd` relocation was a full cache hit).
 6. **One ledger per scope.** `shared/assets.yaml` mirrors
    `songs/<song>/assets.yaml` — same schema, `file:` paths relative to
-   the scope root, labels `//shared/assets:<name>` (superseding the
+   the scope root, labels `//shared/asset:<name>` (superseding the
    `//shared/samples:<name>` spelling sketched in discussion; the
    assets-kind spelling keeps the two scopes symmetric). Every
    committed file is pinned exactly once; promotion moves the pin with
@@ -132,7 +138,7 @@ only project:
 
 ## 3 Open questions
 
-- Cross-scope reference spelling on clips (`asset: //shared/assets:rain`
+- Cross-scope reference spelling on clips (`asset: //shared/asset:rain`
   vs a scoped field) — decided during migration chunk 1, forced by §2.3.
   Answered by §4.3: one `source:` field whose spellings are
   syntactically disjoint.
@@ -152,7 +158,7 @@ every existing citation stay stable.
 
 1. **The authored-spec shelf is `sounds/`.** The per-file targets of
    §1.3 become `songs/<song>/sounds/<name>.yaml`, labeled
-   `//songs/<song>/sounds:<name>`. What such a file defines *is* a
+   `//songs/<song>/sound:<name>`. What such a file defines *is* a
    sound — a say line, a SuperCollider render, a generated part, a
    sound wrapped in an effect (still a sound; the algebra closes,
    exactly as the graph composes nodes). This finishes the
@@ -176,7 +182,7 @@ every existing citation stay stable.
    collapse into one field: the thing this sound is made from. Its
    spellings are syntactically disjoint, so the loader never guesses —
    a bare slug is a name in the song, a `//` label crosses scope
-   (`source: //shared/assets:rain`, answering §3's open question), and
+   (`source: //shared/asset:rain`, answering §3's open question), and
    a path (slashes, extension) is a program file, still wiring, still
    keyed by content. A bare filename (`source: creek-kit.scd`, no
    slash) resolves on the type's home shelf — `shared/instruments/` for
@@ -201,6 +207,15 @@ every existing citation stay stable.
    (track stems, mixes) were never comfortably "targets" anyway. Mix
    labels keep their `mix:` package; a mix file's `rule: mix` becomes
    `type: mix`.
+   **Amended 2026-08-06:** keeping `mix:` while the file moved to
+   `mixes/<name>.yaml` left it the only package that did not equal its
+   directory, contradicting §1.3's "the directory is the package" —
+   a tension this record created and did not notice. Resolved the other
+   way: **every package is now the singular of its directory**
+   (`sound:`, `track:`, `asset:`, `mix:`), because a label addresses one
+   thing and reads as such. §1.3's principle is amended to match: the
+   directory is the package's *plural*. Directories and the `assets:`
+   ledger key keep their plurals — both hold many.
 6. **`shared/` lands on three shelves: `instruments/`, `samples/`,
    `plugins/` — make, is, change.** `generators/` merges into
    `instruments/` by §1.1's own argument: whether a definition

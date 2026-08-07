@@ -56,10 +56,10 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('plays a queue in order, streaming positions', async () => {
     await importTone('blop', 12000);
-    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:all']);
     expect(items.map((i) => i.label)).toEqual([
-      '//songs/creek/assets:blip',
-      '//songs/creek/assets:blop',
+      '//songs/creek/asset:blip',
+      '//songs/creek/asset:blop',
     ]);
 
     const played: string[] = [];
@@ -78,7 +78,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     { timeout: 10_000 },
     async () => {
       await importTone('spin', 60000); // 1.25 s = 2.5 beats: beat changes keep coming
-      const items = await resolvePlayables(root, ['//songs/creek/assets:spin']);
+      const items = await resolvePlayables(root, ['//songs/creek/asset:spin']);
 
       // Gapless native loop: one load, one play, and beat-gated position
       // updates keep arriving well past the file's real-time length until
@@ -110,7 +110,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('a sub-beat loop keeps the readout alive (#37 review: dedupe on movement, not text)', { timeout: 20_000 }, async () => {
     await importTone('tick', 9600); // 0.2 s: shorter than a beat, so the line never changes
-    const items = await resolvePlayables(root, ['//songs/creek/assets:tick']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:tick']);
 
     // Every wrap re-announces "1.1" with a smaller `at`; a text-keyed
     // dedupe froze this readout after one line. Event-driven: without
@@ -144,8 +144,8 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   it('reload takes over the looping stream at the wrap', { timeout: 15_000 }, async () => {
     await importTone('spin', 96000); // 2 s pass: room to observe the pre-wrap state
     await importTone('swap', 24000); // 0.5 s successor
-    const spin = await resolvePlayables(root, ['//songs/creek/assets:spin']);
-    const swap = await resolvePlayables(root, ['//songs/creek/assets:swap']);
+    const spin = await resolvePlayables(root, ['//songs/creek/asset:spin']);
+    const swap = await resolvePlayables(root, ['//songs/creek/asset:swap']);
 
     const client = await AudiodClient.connect(root, { nullOutput: true });
     const reloaded = new Promise<string>((resolve) => {
@@ -174,8 +174,8 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   it('reload against a paused transport keeps the pause and position (#34 review P3)', { timeout: 15_000 }, async () => {
     await importTone('hold', 48000); // 1 s pass
     await importTone('takeover', 24000);
-    const hold = (await resolvePlayables(root, ['//songs/creek/assets:hold']))[0]!;
-    const takeover = (await resolvePlayables(root, ['//songs/creek/assets:takeover']))[0]!;
+    const hold = (await resolvePlayables(root, ['//songs/creek/asset:hold']))[0]!;
+    const takeover = (await resolvePlayables(root, ['//songs/creek/asset:takeover']))[0]!;
 
     const client = await AudiodClient.connect(root, { nullOutput: true });
     await client.load(hold.path, true);
@@ -213,7 +213,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   });
 
   it('reload without a looping stream is an error', async () => {
-    const items = await resolvePlayables(root, ['//songs/creek/assets:blip']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:blip']);
     const client = await AudiodClient.connect(root, { nullOutput: true });
     await client.load(items[0]!.path, false);
     await expect(client.reload(items[0]!.path)).rejects.toThrow('looping stream');
@@ -223,8 +223,8 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   it('native loop surfaces the takeover through onReloaded', { timeout: 15_000 }, async () => {
     await importTone('base', 96000); // 2 s pass
     await importTone('next', 24000);
-    const base = (await resolvePlayables(root, ['//songs/creek/assets:base']))[0]!;
-    const next = (await resolvePlayables(root, ['//songs/creek/assets:next']))[0]!;
+    const base = (await resolvePlayables(root, ['//songs/creek/asset:base']))[0]!;
+    const next = (await resolvePlayables(root, ['//songs/creek/asset:next']))[0]!;
 
     // The watch composition in miniature: a blocking native-loop play,
     // and a second connection queueing the reload — exactly how play
@@ -264,8 +264,8 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   it('--watch requeue path: currentPath repoints what the next pass loads', { timeout: 20_000 }, async () => {
     await importTone('one', 24000); // 0.5 s passes keep the requeue quick
     await importTone('two', 24000);
-    const one = (await resolvePlayables(root, ['//songs/creek/assets:one']))[0]!;
-    const two = (await resolvePlayables(root, ['//songs/creek/assets:two']))[0]!;
+    const one = (await resolvePlayables(root, ['//songs/creek/asset:one']))[0]!;
+    const two = (await resolvePlayables(root, ['//songs/creek/asset:two']))[0]!;
 
     // A --from region loop takes the requeue path — no wrap to swap at,
     // so the freshest artifact is consulted at every load (watch.md §2).
@@ -294,7 +294,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('--loop with several targets replays the queue until interrupted', async () => {
     await importTone('blop', 12000);
-    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:all']);
     expect(items).toHaveLength(2); // 2+ items: the CLI-requeue path, not native loop
 
     const played: string[] = [];
@@ -311,7 +311,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('--from + --loop repeats the region: requeue path, never native (#23 review)', async () => {
     await importTone('tone', 36000); // 0.75 s
-    const items = await resolvePlayables(root, ['//songs/creek/assets:tone']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:tone']);
 
     // The daemon's native wrap returns to sample 0, not the locate point,
     // so a region audition must take the requeue path — every pass locates
@@ -338,7 +338,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('--from projects musical time to a locate before playing', async () => {
     await importTone('tone', 36000); // 0.75 s
-    const items = await resolvePlayables(root, ['//songs/creek/assets:tone']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:tone']);
 
     const samples: number[] = [];
     const client = await AudiodClient.connect(root, { nullOutput: true });
@@ -356,7 +356,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   // heartbeat noticing end-of-stream, and there are twelve of them.
   it('a long queue leaks no listeners (#13 review P3)', { timeout: 20_000 }, async () => {
     for (let i = 0; i < 11; i++) await importTone(`t${i}`, 2400); // 50 ms each
-    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:all']);
     expect(items.length).toBe(12); // blip + 11
 
     const warnings: string[] = [];
@@ -377,7 +377,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('an interrupt between load and play never starts the transport (#13 review)', async () => {
     await importTone('blop', 480000); // long enough that a leak would be obvious
-    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:all']);
 
     // onItem fires after load, before play — exactly the window Bugbot
     // flagged: a ctrl-c here must not let play() restart the transport.
@@ -402,7 +402,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('rejects --from with more than one target', async () => {
     await importTone('blop', 12000);
-    const items = await resolvePlayables(root, ['//songs/creek/assets:all']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:all']);
     await expect(playThroughDaemon(root, project, items, { from: '1.2.1' }, {})).rejects.toThrow(
       '--from needs a single target',
     );
@@ -410,7 +410,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
   it('is steerable from a second connection: status, locate, stop', async () => {
     await importTone('long', 480000); // 10 s — the queue outlives the test body
-    const items = await resolvePlayables(root, ['//songs/creek/assets:long']);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:long']);
     const playing = playThroughDaemon(root, project, items, {}, {});
 
     // Wait until the transport reports playing.

@@ -26,7 +26,7 @@ export interface RunContext {
 
 // The song's visible names, pre-classified for source resolution
 // (project-layout.md §4.3): a bare slug means exactly one thing in the
-// song's unified namespace, a //shared/assets: label crosses scope.
+// song's unified namespace, a //shared/asset: label crosses scope.
 export interface SourceNames {
   assets: Set<string>; // the song's ledger
   sounds: Set<string>; // buildable sounds (have a rule)
@@ -56,7 +56,7 @@ export interface Generator<T extends GeneratorSpec = GeneratorSpec> {
   // parameter hashing (name and type are always excluded).
   wiringFields: readonly string[];
   // Ordered node-backed sources this spec consumes — bare names in the
-  // song's namespace or //shared/assets: labels; the graph classifies
+  // song's namespace or //shared/asset: labels; the graph classifies
   // each into an asset, sound, or shared edge. Program files are not
   // here: they participate by content hash (extraInputs), not as nodes.
   sources(spec: T): string[];

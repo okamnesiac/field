@@ -353,14 +353,14 @@ describe('track stems in the build graph', () => {
   });
 
   it('renders a stem end-to-end and caches it', async () => {
-    expect(queryDeps(root, '//songs/creek/tracks:drums')).toEqual(['//songs/creek/tracks:drums']);
-    expect(queryDeps(root, 'deps(//songs/creek/tracks:drums)')).toEqual([
-      '//songs/creek/assets:kick',
-      '//songs/creek/tracks:drums',
+    expect(queryDeps(root, '//songs/creek/track:drums')).toEqual(['//songs/creek/track:drums']);
+    expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
+      '//songs/creek/asset:kick',
+      '//songs/creek/track:drums',
     ]);
 
-    const first = await buildLabels(root, ['//songs/creek/tracks:drums']);
-    const stemOutcome = first.find((o) => o.label === '//songs/creek/tracks:drums')!;
+    const first = await buildLabels(root, ['//songs/creek/track:drums']);
+    const stemOutcome = first.find((o) => o.label === '//songs/creek/track:drums')!;
     expect(stemOutcome.cached).toBe(false);
     expect(existsSync(stemOutcome.outputPath!)).toBe(true);
 
@@ -373,8 +373,8 @@ describe('track stems in the build graph', () => {
     expect(stem.channels[0]![24001]).toBe(0.5);
     expect(stem.channels[0]![23999]).toBe(0);
 
-    const second = await buildLabels(root, ['//songs/creek/tracks:drums']);
-    expect(second.find((o) => o.label === '//songs/creek/tracks:drums')!.cached).toBe(true);
+    const second = await buildLabels(root, ['//songs/creek/track:drums']);
+    expect(second.find((o) => o.label === '//songs/creek/track:drums')!.cached).toBe(true);
   });
 
   it('rebuilds musical clips on tempo edits; absolute clips ride through', async () => {
@@ -388,17 +388,17 @@ describe('track stems in the build graph', () => {
     };
 
     const { state, runner } = counting();
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
 
     // Same placement → cache hit.
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
 
     // A tempo edit moves the musical clip → rebuild.
     const tempoPath = join(root, 'songs/creek/tempo.yaml');
     writeFileSync(tempoPath, readFileSync(tempoPath, 'utf8').replace('bpm: 120', 'bpm: 90'));
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(2);
 
     // An absolute-anchored clip is untouched by tempo.
@@ -406,10 +406,10 @@ describe('track stems in the build graph', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml(clipYaml({ anchor: 'absolute', position: 100, duration: 200 })),
     );
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(3);
     writeFileSync(tempoPath, readFileSync(tempoPath, 'utf8').replace('bpm: 90', 'bpm: 240'));
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(3); // cache hit despite the tempo change
   });
 
@@ -424,7 +424,7 @@ describe('track stems in the build graph', () => {
     };
 
     const { state, runner } = counting();
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
 
     // Track gain/pan are mix parameters, not stem contents.
@@ -434,17 +434,17 @@ describe('track stems in the build graph', () => {
         '\n',
       ),
     );
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
 
     // Reordering clips in the file is not an edit to the sound.
     const c1 = clipYaml();
     const c2 = clipYaml({ id: 'kick-2', position: 1920 });
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml([...c1, ...c2]));
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(2); // new clip: renders once…
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml([...c2, ...c1]));
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(2); // …and the reordered file is a cache hit
   });
 
@@ -464,7 +464,7 @@ describe('track stems in the build graph', () => {
       state.runs++;
       writeFileSync(outputPath, 'stem');
     };
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
 
     // snare → apple sorts before kick by name, but content hashes are the
@@ -475,7 +475,7 @@ describe('track stems in the build graph', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', source: 'apple', position: 1920 })]),
     );
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
   });
 
@@ -493,7 +493,7 @@ describe('track stems in the build graph', () => {
   it('leaves midi and empty tracks out of the graph', async () => {
     createTrack(root, 'creek', 'sketch', 'midi');
     createTrack(root, 'creek', 'spare', 'audio');
-    expect(queryDeps(root, '//songs/creek/tracks:all')).toEqual(['//songs/creek/tracks:drums']);
+    expect(queryDeps(root, '//songs/creek/track:all')).toEqual(['//songs/creek/track:drums']);
   });
 });
 
@@ -572,22 +572,22 @@ describe('clips over rule outputs', () => {
   });
 
   it('builds the whole recipe chain: asset → target → stem, with real rules', async () => {
-    expect(queryDeps(root, 'deps(//songs/creek/tracks:drums)')).toEqual([
-      '//songs/creek/assets:kick',
-      '//songs/creek/sounds:kick-24',
-      '//songs/creek/tracks:drums',
+    expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
+      '//songs/creek/asset:kick',
+      '//songs/creek/sound:kick-24',
+      '//songs/creek/track:drums',
     ]);
 
     // Real normalize (afconvert) feeding the real TS mixer: the stem plays
     // a render nothing ever committed.
-    const outcomes = await buildLabels(root, ['//songs/creek/tracks:drums']);
-    const stem = outcomes.find((o) => o.label === '//songs/creek/tracks:drums')!;
+    const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
+    const stem = outcomes.find((o) => o.label === '//songs/creek/track:drums')!;
     const wav = readWav(stem.outputPath!);
     expect(wav.channels[0]).toHaveLength(7);
     expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
     expect(wav.channels[0]![4]).toBeCloseTo(0.5, 4);
 
-    const again = await buildLabels(root, ['//songs/creek/tracks:drums']);
+    const again = await buildLabels(root, ['//songs/creek/track:drums']);
     expect(again.every((o) => o.cached)).toBe(true);
   });
 
@@ -601,13 +601,13 @@ describe('clips over rule outputs', () => {
       writeFileSync(outputPath, JSON.stringify({ spec: node.spec, inputs }));
     };
 
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']);
 
     runs.length = 0;
     const soundPath = join(root, 'songs/creek/sounds/kick-24.yaml');
     writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
   });
 });

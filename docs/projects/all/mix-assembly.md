@@ -37,7 +37,7 @@ what changed.
 Two rules, and the incrementality falls out of where the cut is:
 
 - **`track-render`** — an *implicit* target per audio track that has clips:
-  `//songs/<song>/tracks:<name>`, derived from the track file the same way
+  `//songs/<song>/track:<name>`, derived from the track file the same way
   asset targets derive from `assets.yaml`. It places the track's clips
   through the tempo map and renders one Float32 stereo stem starting at
   timeline sample 0 (leading silence included), length = the track's own

@@ -104,7 +104,7 @@ describe('LoopDisplay', () => {
 
   it("a swap that isn't ours opens the block hashless (#36 review P3)", () => {
     const { d, text } = harness();
-    d.start('//songs/x/sounds:gen1', A, '');
+    d.start('//songs/x/sound:gen1', A, '');
     d.position('12.4', 9000);
     d.queue(B, '/out/gen1/1.wav');
     // Another shell's reload won latest-wins: the daemon names a path we
@@ -112,9 +112,9 @@ describe('LoopDisplay', () => {
     // entirely wrong about what is playing.
     d.position('1.1', 0);
     d.swapped('/audio/gen1/2.wav');
-    expect(text()).toContain('played  //songs/x/sounds:gen1─a1b2c3d4e5f6\n');
-    expect(text()).toContain('playing //songs/x/sounds:gen1\n'); // no hash claimed
-    expect(text()).not.toContain('playing //songs/x/sounds:gen1─f6e5d4c3b2a1');
+    expect(text()).toContain('played  //songs/x/sound:gen1─a1b2c3d4e5f6\n');
+    expect(text()).toContain('playing //songs/x/sound:gen1\n'); // no hash claimed
+    expect(text()).not.toContain('playing //songs/x/sound:gen1─f6e5d4c3b2a1');
   });
 
   it('a said line buries the header: no cursor-up onto history it cannot reach', () => {
@@ -147,7 +147,7 @@ describe('LoopDisplay', () => {
 
   it('requeue: passes count from pass(), and the queued pass transitions with its own hash (#37 P2)', () => {
     const { d, text } = harness({ requeue: true });
-    d.start('//songs/x/sounds:long', A, '');
+    d.start('//songs/x/sound:long', A, '');
     d.position('11.1', 8000);
     d.pass('/audio/long/orig.wav'); // plain requeue pass: same block, next iteration
     d.position('11.1', 8000); // region restart — must NOT count as a wrap on top
@@ -159,15 +159,15 @@ describe('LoopDisplay', () => {
     const t = text();
     expect(t).toContain('\r\x1b[2K  [2] 11.1'); // pass() counted it
     expect(t).toContain('\r\x1b[2K  [3] 11.1'); // and only pass() — no double count
-    expect(t).toContain('played  //songs/x/sounds:long─a1b2c3d4e5f6\n');
-    expect(t).toContain('playing //songs/x/sounds:long─f6e5d4c3b2a1\n'); // correlated, not stale
+    expect(t).toContain('played  //songs/x/sound:long─a1b2c3d4e5f6\n');
+    expect(t).toContain('playing //songs/x/sound:long─f6e5d4c3b2a1\n'); // correlated, not stale
     // exactly two playing headers ever: the start and the transition
     expect(t.split('playing ').length).toBe(3 + 1); // +1: the ┬ repaint from queue()
   });
 
   it('requeue: a pass that is not the queued one keeps the pending notice up', () => {
     const { d, text } = harness({ requeue: true });
-    d.start('//songs/x/sounds:long', A, '');
+    d.start('//songs/x/sound:long', A, '');
     d.position('11.1', 8000);
     d.queue(B, '/out/long.wav');
     d.pass('/audio/long/orig.wav'); // built after this pass loaded: not ours yet
@@ -297,7 +297,7 @@ describe('a rebuild that beats the first load', () => {
     // keeps the block open, and leaves no `never sounded` claim about
     // the version that was audible the whole time (#38 review P2).
     const { d, text } = harness();
-    d.start('//songs/creek/sounds:long-96k', openingHash('/out/long-96k.wav', A, {
+    d.start('//songs/creek/sound:long-96k', openingHash('/out/long-96k.wav', A, {
       outputPath: '/out/long-96k.wav',
       sha256: B,
     }), ' (Volt 476)');
@@ -308,7 +308,7 @@ describe('a rebuild that beats the first load', () => {
     d.end();
 
     const t = text();
-    expect(t).toContain('playing //songs/creek/sounds:long-96k─f6e5d4c3b2a1 → (Volt 476)');
+    expect(t).toContain('playing //songs/creek/sound:long-96k─f6e5d4c3b2a1 → (Volt 476)');
     expect(t).not.toContain('a1b2c3d4e5f6'); // the stale snapshot never appears
     expect(t).not.toContain('┬'); // nothing is pending: it is already playing
     expect(t).not.toContain('played'); // no phantom block for a zero-sample pass
