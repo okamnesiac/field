@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Planned (2026-08-07), not started. Written after
-[linux-portability.md](linux-portability.md) proposed a fourth
+**Status:** Chunk 1 in review (#50); chunks 2–6 not started. Written
+after [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
 Supersedes part of [effects.md](effects.md) §1 — see §6 there.
@@ -124,6 +124,82 @@ argument for *when*.
    alive as an oracle is permanent dual maintenance — the cost this plan
    exists to remove. Properties and golden hashes survive deleting
    `reverb.ts`; a cross-implementation diff does not.
+
+   **Amended on implementation (chunk 1).** The list above was the spec,
+   and it was short by two. Both gaps were found by mutating the renderer
+   and re-running — a property that survives its own mutation is not a
+   property — and neither is a bug in the shipped effects: they are
+   assertions this decision should have asked for and did not.
+
+   - **The diffusion chain is allpass.** Swapping field's Schroeder
+     allpass for JUCE's `read − x` left *every* assertion above green,
+     which is exactly the silent swap §2.4 says nothing would notice once
+     `reverb.ts` is deleted. It turns out to be measurable, and exactly:
+     a true allpass has unit magnitude at every frequency, so the wet
+     tail carries precisely the comb bank's energy, `Σ 1/(1−g_k²) / 64`.
+     That is derived rather than transcribed — nothing in `reverb.ts`
+     computes it — and it matches the render to 0.0000 dB, while Jezar's
+     variant misses by 14.7 dB. It locks the per-comb T60 feedback, the
+     scaled delay lengths and the ⅛ average in passing.
+   - **The attack ramp reaches back by `lookahead_ms`.** Deleting the
+     backward pass outright also left everything green, so the harness
+     could not defend the half of §2.4's limiter claim that is about
+     lookahead — and `limiter.test.ts`, which does cover it, is deleted
+     by chunk 4. Driving a spike 60 dB over the ceiling makes the window
+     itself measurable, since the slope is scaled so the deepest
+     reduction spans exactly it.
+
+   Three of the stated properties also needed sharpening once measured.
+   The ceiling holds to within **one float32 ulp**, not exactly: the
+   arithmetic pins each peak in double precision and the store to float32
+   rounds, by up to half an ulp. "Untouched audio passes at unity" is
+   genuinely bit-exact, and detects a leak from 1e-6 dB up — which is
+   where float32 begins to see one at all. And T60 has to be read as an
+   envelope *slope*: measured as a ratio against the first samples it
+   reads about 18 dB shallow, because the start of an impulse response is
+   the sparse tap burst rather than the steady envelope.
+
+   **A second round, from review.** The first ten properties were still
+   not deletion-safe, because every fixture was mono and every read kept
+   only channel 0. Five more contracts — all of them live in
+   [effects.md](effects.md) §2, and all of them covered today only by the
+   direct tests chunk 4 deletes — survived their own mutation:
+
+   - **The band types are discriminated.** Making `highpass`, `lowpass`
+     and `lowshelf` identity filters passed everything, because only
+     `bell` and `highshelf` were ever rendered.
+   - **The right channel is spread.** Removing the 23-sample offset left
+     the channels identical, which a mono harness cannot see. It is
+     exact: the right tap lands at `round((1116+23)·rate/44100)` = 1240
+     where the left lands at 1215.
+   - **Limiting is stereo-linked.** Giving each channel its own gain
+     curve — the thing the shared curve exists to prevent, since limiting
+     must not wander the image — passed.
+   - **`mix` blends.** Every reverb property ran at `mix: 1`, so a
+     renderer that ignored the parameter passed. Both coefficients need
+     asserting, and a first attempt that pinned only the dry one was
+     caught in review: the first wet tap is a whole comb away, so sample
+     0 is exactly `1 − mix` — which leaves `wet · (mix === 0 ? 0 : 1)`
+     passing, blending dry correctly while running fully wet at every
+     nonzero mix. Since the probe is a lone impulse, everything after
+     sample 0 is wet only, so the `mix: 1` render is the reference: the
+     first tap scales as `mix` and the wet signal carries `mix²` of the
+     energy. Both hold exactly, and together they also reject an
+     equal-*power* blend, which is the plausible wrong reading of a
+     dry/wet control.
+   - **`release_ms` is honoured.** Hard-coding 100 ms passed; only the
+     attack side had been measured.
+
+   With those, the harness catches **21 of 22** deliberate mutations,
+   run as one matrix against the head it describes rather than tallied
+   across rounds. The one survivor perturbs untouched gain by 1e-9 dB,
+   which no float32 can represent — the same mutation at 1e-6 dB is
+   caught.
+
+   The method is worth keeping for chunks 2 and 3, where the renderer
+   actually changes hands: mutating the implementation and re-running is
+   what found every gap above, and none of them were visible from reading
+   the assertions.
 
 4. **The three shipped effects keep their algorithms and are ported by
    hand.** The claim "ours is better" holds unevenly, and the honest
@@ -273,7 +349,12 @@ most memory-bound of the three effects.
 1. **Property tests against the current TypeScript renderer.** Every
    assertion in decision 3, passing today. Cheap, valuable immediately,
    and any that fails is a real bug found before the port. These are the
-   migration harness and they never change hands.
+   migration harness and they never change hands. In review (#50):
+   fifteen properties in `src/generators/effect-properties.test.ts`, all
+   built and measured through the build rules so nothing imports
+   `src/audio/` except `wav.ts`. None of decision 3's stated assertions
+   failed; seven were *missing*, and decision 3 above records them and
+   how each was found.
 2. **`juce_dsp` linked, insert chain ported**: the three effects
    hand-written in C++ behind the existing schemas, the same tests green
    against the daemon.
