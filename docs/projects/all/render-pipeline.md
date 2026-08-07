@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunk 1 shipped (#50); chunk 2 in review, carrying most of
-chunk 6 with it; chunks 3–5 not started. Written after
+**Status:** Chunks 1–2 shipped (#50, #53), chunk 2 carrying most of
+chunk 6 with it; chunk 3 in review; chunks 4–5 not started. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -452,14 +452,32 @@ most memory-bound of the three effects.
    sizing, JUCE's allpass, no stereo spread, no lookahead — fails exactly
    the properties it failed in TypeScript. The harness did what it was
    built for: it did not change hands.
-3. **Rendering moves to the daemon** — `track-render` and `mix` call it.
-   **No `rule_version` bump, and no re-render**: the C++ is
-   byte-identical to the TypeScript it replaces, verified across 40
-   randomised chains, so every cached artifact stays valid. That was
-   written expecting the opposite, and the cost it priced — bloom
-   re-rendering and being re-verified by ear — is simply not incurred.
-   If a future change to the DSP does move bytes, the golden in
-   `render-daemon.test.ts` fails first and the bump goes with it.
+3. **Rendering moves to the daemon** — in review. `track-render` and
+   `mix` call it, so the plan grows an `op` discriminant (`effects`,
+   `stem`, `mix`) and `RENDER_PLAN_VERSION` goes to 2. Summing lives in
+   `native/audiod/src/dsp/mixdown.cpp`: placed clips into a stem, stems
+   through faders into a mix, then master gain, master chain and the
+   declared length in that order.
+
+   **No `rule_version` bump, and no re-render.** Byte-identical again,
+   including the awkward paths — clip fades, negative read offsets, reads
+   past a source's end, mono content on a stereo stem, constant-power
+   pan, and loop folding past the declared length. That was written
+   expecting the opposite, and the cost it priced — bloom re-rendering
+   and being re-verified by ear — is not incurred. Stem and mix goldens
+   join the effects one, so a future DSP change fails there first and the
+   bump goes with it.
+
+   **What did not move: the rate and channel-count checks.** They stay in
+   the control plane, reading WAV headers rather than decoding, because
+   the messages they produce are user-facing diagnostics and belong with
+   every other diagnostic rather than duplicated into C++ where they
+   would drift. The daemon does arithmetic; the control plane does
+   explaining.
+
+   After this, `src/audio/insert-chain.ts` and the DSP beneath it are
+   executors of nothing — dead code with passing tests, which is exactly
+   the state chunk 4 exists to clear.
 4. **The TypeScript DSP is deleted.** `src/audio/` minus `wav.ts`. The
    tests stay.
 5. **Sample-rate conversion in the built-in tier**, replacing

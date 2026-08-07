@@ -79,6 +79,7 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, fixture());
 
     await renderInsertChain({
+     op: 'effects',
       input,
       output,
       inserts: [
@@ -96,9 +97,67 @@ describe.skipIf(!binary)('render subprocess', () => {
     expect(digest).toBe('f9fbcb23670e4c92000fdd2bd05e385c7877300f8c409a10ea281c3ab6525dcd');
   });
 
+  // Stems and mixes get their own locks (chunk 3). The summing paths are
+  // new arithmetic — clip fades, constant-power pan, loop folding — and
+  // the effects golden says nothing about any of it.
+  it('renders a stem to the same bytes on every platform', async () => {
+    const stereo = join(dir, 'a.wav');
+    const mono = join(dir, 'b.wav');
+    writeWavFloat32(stereo, RATE, fixture());
+    writeWavFloat32(mono, RATE, [fixture()[0]!.subarray(0, 12000)]);
+
+    const output = join(dir, 'stem.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [stereo, mono],
+      // Deliberately awkward: a negative read offset, a clip running past
+      // its source, mono content on a stereo stem, overlapping windows,
+      // and fades short enough to be a single-sample ramp.
+      clips: [
+        { input: 0, start: 0, duration: 8000, read_offset: -500, gain_db: -3, fade_in: 1000, fade_out: 2000 },
+        { input: 1, start: 4000, duration: 9000, read_offset: 2000, gain_db: 2.5, fade_in: 333, fade_out: 777 },
+        { input: 0, start: 11000, duration: 15000, read_offset: 9000, gain_db: 0, fade_in: 0, fade_out: 0 },
+        { input: 1, start: 15000, duration: 6000, read_offset: 11000, gain_db: -6, fade_in: 2, fade_out: 3 },
+      ],
+      inserts: [{ effect: 'limit', ceiling_db: -1.5, lookahead_ms: 6, release_ms: 120 }],
+    });
+
+    expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('ed46895161b919ffc51be663f43a400003f5f4924928160e18f3f86444afce58');
+  });
+
+  it('renders a mix to the same bytes on every platform', async () => {
+    const one = join(dir, 's1.wav');
+    const two = join(dir, 's2.wav');
+    writeWavFloat32(one, RATE, fixture());
+    writeWavFloat32(two, RATE, [fixture()[1]!.subarray(0, 15000)]);
+
+    const output = join(dir, 'mix.wav');
+    await renderInsertChain({
+      op: 'mix',
+      output,
+      sample_rate: RATE,
+      inputs: [one, two],
+      // Pan is the new transcendental here (constant-power cosine), and
+      // loop folding is the one path that reads past the declared end.
+      faders: [
+        { gain_db: -2, pan: -0.6 },
+        { gain_db: 1.5, pan: 0.35 },
+      ],
+      gain_db: -1.5,
+      master: [{ effect: 'limit', ceiling_db: -2, lookahead_ms: 4, release_ms: 90 }],
+      length_samples: 18000,
+      loop: true,
+    });
+
+    expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('5db5d230ea9f55016dad4d135d5d0d93b58203d92f2a321e14a0d0fe1793d262');
+  });
+
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
     await expect(
       renderInsertChain({
+       op: 'effects',
         input: join(dir, 'missing.wav'),
         output: join(dir, 'out.wav'),
         inserts: [],
@@ -119,6 +178,7 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, [new Float32Array(256)]);
     await expect(
       renderInsertChain({
+        op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         inserts: [
@@ -142,6 +202,7 @@ describe.skipIf(!binary)('render subprocess', () => {
       planPath,
       JSON.stringify({
         version: RENDER_PLAN_VERSION + 1,
+        op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         inserts: [],
@@ -159,6 +220,7 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, [new Float32Array(256)]);
     await expect(
       renderInsertChain({
+       op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         inserts: [{ effect: 'limit', ceiling_db: -1 } as unknown as never],
@@ -174,6 +236,7 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, [new Float32Array(128)]);
     await expect(
       renderInsertChain({
+       op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         // Version skew is the real case: a control plane newer than the

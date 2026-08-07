@@ -2,6 +2,7 @@
 
 #include "dsp/biquad.h"
 #include "dsp/limiter.h"
+#include "dsp/mixdown.h"
 #include "dsp/reverb.h"
 #include "dsp/wavfile.h"
 
@@ -20,7 +21,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 1;
+constexpr int renderPlanVersion = 2;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -34,10 +35,38 @@ double requireNumber (const juce::var& object, const char* key, const char* what
     return (double) value;
 }
 
+std::string requireString (const juce::var& object, const char* key, const char* what)
+{
+    const auto value = object.getProperty (key, juce::var());
+    if (value.isVoid())
+        throw std::runtime_error (std::string (what) + " is missing \"" + key + "\"");
+    return value.toString().toStdString();
+}
+
+// Read every input named by the plan. The control plane has already
+// checked rates and channel counts against the project (that is where the
+// user-facing diagnostics live), so anything wrong here is a bug rather
+// than a mistake, and it surfaces as one.
+std::vector<std::vector<std::vector<float>>> readInputs (const juce::var& plan)
+{
+    const auto* inputs = plan.getProperty ("inputs", juce::var()).getArray();
+    if (inputs == nullptr)
+        throw std::runtime_error ("plan is missing \"inputs\"");
+    std::vector<std::vector<std::vector<float>>> result;
+    for (const auto& entry : *inputs)
+        result.push_back (dsp::readWav (entry.toString().toStdString()).channels);
+    return result;
+}
+
 // One insert chain, applied in series. The mirror of applyInsertChain in
 // src/audio/insert-chain.ts, and it stays a mirror until chunk 4 deletes
 // that file: eq and limit work in place, reverb returns longer buffers
 // (its tail), and the order is the order the user declared.
+void applyChain (const juce::var& plan,
+                 const char* key,
+                 std::vector<std::vector<float>>& channels,
+                 double sampleRate);
+
 void applyInsert (const juce::var& insert,
                   std::vector<std::vector<float>>& channels,
                   double sampleRate)
@@ -107,6 +136,87 @@ void applyInsert (const juce::var& insert,
         throw std::runtime_error ("unknown insert effect \"" + effect.toStdString() + "\"");
     }
 }
+void applyChain (const juce::var& plan,
+                 const char* key,
+                 std::vector<std::vector<float>>& channels,
+                 double sampleRate)
+{
+    if (const auto* inserts = plan.getProperty (key, juce::var()).getArray())
+        for (const auto& insert : *inserts)
+            applyInsert (insert, channels, sampleRate);
+}
+
+// stem: placed clips summed over their sources, then the track's inserts
+// baked in (effects.md §5 — inserts are content, so an insert edit
+// re-renders the stem). Clip placement arrived already resolved to
+// samples; see mixdown.h on why musical time is not here.
+void renderStem (const juce::var& plan, const std::string& output, double sampleRate)
+{
+    const auto sources = readInputs (plan);
+
+    std::vector<dsp::PlacedClip> clips;
+    if (const auto* entries = plan.getProperty ("clips", juce::var()).getArray())
+    {
+        for (const auto& entry : *entries)
+        {
+            dsp::PlacedClip clip;
+            clip.input = (int) requireNumber (entry, "input", "clip");
+            clip.start = (long) requireNumber (entry, "start", "clip");
+            clip.duration = (long) requireNumber (entry, "duration", "clip");
+            clip.readOffset = (long) requireNumber (entry, "read_offset", "clip");
+            clip.gainDb = requireNumber (entry, "gain_db", "clip");
+            clip.fadeIn = requireNumber (entry, "fade_in", "clip");
+            clip.fadeOut = requireNumber (entry, "fade_out", "clip");
+            clips.push_back (clip);
+        }
+    }
+
+    auto channels = dsp::sumClips (sources, clips);
+    applyChain (plan, "inserts", channels, sampleRate);
+    dsp::writeWavFloat32 (output, sampleRate, channels);
+}
+
+// mix: stems summed through their faders, then the master gain, then the
+// master chain, then the declared length. That order is the decision in
+// effects.md §5 — gain drives *into* the limiter, and the length applies
+// after the chain so a tail the chain grew still respects the bar line.
+void renderMix (const juce::var& plan, const std::string& output, double sampleRate)
+{
+    const auto stems = readInputs (plan);
+
+    std::vector<dsp::Fader> faders;
+    if (const auto* entries = plan.getProperty ("faders", juce::var()).getArray())
+    {
+        for (const auto& entry : *entries)
+        {
+            dsp::Fader fader;
+            fader.gainDb = requireNumber (entry, "gain_db", "fader");
+            fader.pan = requireNumber (entry, "pan", "fader");
+            faders.push_back (fader);
+        }
+    }
+    if (faders.size() != stems.size())
+        throw std::runtime_error ("mix has " + std::to_string (stems.size()) + " inputs but "
+                                  + std::to_string (faders.size()) + " faders");
+
+    auto channels = dsp::sumStems (stems, faders);
+
+    const double masterGain = std::pow (10.0, requireNumber (plan, "gain_db", "mix") / 20.0);
+    if (masterGain != 1.0)
+        for (auto& channel : channels)
+            for (auto& sample : channel)
+                sample = (float) ((double) sample * masterGain);
+
+    applyChain (plan, "master", channels, sampleRate);
+
+    const auto declared = plan.getProperty ("length_samples", juce::var());
+    if (! declared.isVoid())
+        dsp::applyDeclaredLength (channels,
+                                  (long) (double) declared,
+                                  (bool) plan.getProperty ("loop", juce::var (false)));
+
+    dsp::writeWavFloat32 (output, sampleRate, channels);
+}
 } // namespace
 
 std::string runRender (const std::string& planPath)
@@ -127,20 +237,32 @@ std::string runRender (const std::string& planPath)
                    + " but this field-audiod speaks " + std::to_string (renderPlanVersion)
                    + " — rebuild the daemon (pnpm build:native)";
 
-        const auto input = plan.getProperty ("input", juce::var()).toString().toStdString();
-        const auto output = plan.getProperty ("output", juce::var()).toString().toStdString();
-        if (input.empty() || output.empty())
-            return planPath + ": render plan needs both input and output";
+        const auto op = requireString (plan, "op", "render plan");
+        const auto output = requireString (plan, "output", "render plan");
 
-        auto wav = dsp::readWav (input);
-        const double sampleRate = wav.sampleRate;
-        auto channels = std::move (wav.channels);
-
-        if (const auto* inserts = plan.getProperty ("inserts", juce::var()).getArray())
-            for (const auto& insert : *inserts)
-                applyInsert (insert, channels, sampleRate);
-
-        dsp::writeWavFloat32 (output, sampleRate, channels);
+        if (op == "effects")
+        {
+            // One input, its own rate: effects are rate-agnostic DSP and
+            // process at the file's rate (single-input.ts says so).
+            auto wav = dsp::readWav (requireString (plan, "input", "render plan"));
+            auto channels = std::move (wav.channels);
+            applyChain (plan, "inserts", channels, wav.sampleRate);
+            dsp::writeWavFloat32 (output, wav.sampleRate, channels);
+        }
+        else if (op == "stem")
+        {
+            renderStem (plan, output, requireNumber (plan, "sample_rate", "render plan"));
+        }
+        else if (op == "mix")
+        {
+            renderMix (plan, output, requireNumber (plan, "sample_rate", "render plan"));
+        }
+        else
+        {
+            // Same rule as an unknown effect or band type: refuse rather
+            // than render something plausible.
+            return planPath + ": unknown render op \"" + op + "\"";
+        }
         return {};
     }
     catch (const std::exception& e)

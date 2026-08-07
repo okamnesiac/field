@@ -20,42 +20,76 @@ const FORMAT_EXTENSIBLE = 0xfffe;
 // walk, cheap enough for validate to call on every load (clip-looping.md
 // §1.3: loops without `every` need source lengths, and "check is the
 // gate" means validate must be able to afford the answer).
-export function wavFrameCount(path: string): number {
+export interface WavHeader {
+  sampleRate: number;
+  channels: number;
+  frames: number;
+}
+
+// Header only — no decode. The render path needs a file's rate and
+// channel count to diagnose a mismatch before handing the work to the
+// daemon, and decoding a whole stem to learn two integers would be
+// absurd. Keeping that check in the control plane is deliberate: the
+// messages it produces are user-facing diagnostics, and those belong
+// where every other diagnostic lives rather than duplicated into C++.
+export function readWavHeader(path: string): WavHeader {
   const fd = openSync(path, 'r');
   try {
-    const fileSize = fstatSync(fd).size;
-    const header = Buffer.alloc(12);
-    if (
-      readSync(fd, header, 0, 12, 0) !== 12 ||
-      header.toString('ascii', 0, 4) !== 'RIFF' ||
-      header.toString('ascii', 8, 12) !== 'WAVE'
-    ) {
-      throw new Error(`${path}: not a RIFF/WAVE file`);
-    }
-    let bytesPerFrame: number | undefined;
-    let dataBytes: number | undefined;
-    const chunk = Buffer.alloc(8);
-    const fmt = Buffer.alloc(16);
-    let offset = 12;
-    while (offset + 8 <= fileSize) {
-      if (readSync(fd, chunk, 0, 8, offset) !== 8) break;
-      const id = chunk.toString('ascii', 0, 4);
-      const size = chunk.readUInt32LE(4);
-      const body = offset + 8;
-      if (id === 'fmt ' && size >= 16 && readSync(fd, fmt, 0, 16, body) === 16) {
-        bytesPerFrame = (fmt.readUInt16LE(14) / 8) * fmt.readUInt16LE(2);
-      } else if (id === 'data') {
-        dataBytes = Math.min(size, Math.max(0, fileSize - body));
-      }
-      offset = body + size + (size % 2); // chunks are word-aligned
-    }
-    if (!bytesPerFrame || dataBytes === undefined) {
-      throw new Error(`${path}: missing fmt or data chunk`);
-    }
-    return Math.floor(dataBytes / bytesPerFrame);
+    return readHeaderFrom(fd, path);
   } finally {
     closeSync(fd);
   }
+}
+
+export function wavFrameCount(path: string): number {
+  return readWavHeader(path).frames;
+}
+
+// One chunk walk, shared. Seek-based and cheap enough for validate to
+// call on every load (clip-looping.md §1.3: loops without `every` need
+// source lengths, and "check is the gate" means validate must be able to
+// afford the answer).
+function readHeaderFrom(fd: number, path: string): WavHeader {
+  const fileSize = fstatSync(fd).size;
+  const header = Buffer.alloc(12);
+  if (
+    readSync(fd, header, 0, 12, 0) !== 12 ||
+    header.toString('ascii', 0, 4) !== 'RIFF' ||
+    header.toString('ascii', 8, 12) !== 'WAVE'
+  ) {
+    throw new Error(`${path}: not a RIFF/WAVE file`);
+  }
+  let fmt: { sampleRate: number; channels: number; bytesPerFrame: number } | undefined;
+  let dataBytes: number | undefined;
+  const chunk = Buffer.alloc(8);
+  const body16 = Buffer.alloc(16);
+  let offset = 12;
+  while (offset + 8 <= fileSize) {
+    if (readSync(fd, chunk, 0, 8, offset) !== 8) break;
+    const id = chunk.toString('ascii', 0, 4);
+    const size = chunk.readUInt32LE(4);
+    const body = offset + 8;
+    // Rate, channels and bit depth sit at the same offsets in a plain and
+    // an extensible fmt chunk, so sixteen bytes is enough for both.
+    if (id === 'fmt ' && size >= 16 && readSync(fd, body16, 0, 16, body) === 16) {
+      fmt = {
+        channels: body16.readUInt16LE(2),
+        sampleRate: body16.readUInt32LE(4),
+        bytesPerFrame: (body16.readUInt16LE(14) / 8) * body16.readUInt16LE(2),
+      };
+    } else if (id === 'data') {
+      dataBytes = Math.min(size, Math.max(0, fileSize - body));
+    }
+    offset = body + size + (size % 2); // chunks are word-aligned
+  }
+  if (!fmt || !fmt.bytesPerFrame || dataBytes === undefined) {
+    throw new Error(`${path}: missing fmt or data chunk`);
+  }
+  return {
+    sampleRate: fmt.sampleRate,
+    channels: fmt.channels,
+    frames: Math.floor(dataBytes / fmt.bytesPerFrame),
+  };
 }
 
 export function readWav(path: string): WavData {

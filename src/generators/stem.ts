@@ -1,5 +1,5 @@
-import { applyInsertChain } from '../audio/insert-chain.js';
-import { readWav, writeWavFloat32 } from '../audio/wav.js';
+import { renderInsertChain } from '../audio/render-daemon.js';
+import { readWavHeader } from '../audio/wav.js';
 import type { Clip, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
@@ -199,45 +199,32 @@ export const stemGenerator: Generator<StemSpec> = {
   },
 
   async execute(spec, inputPaths, outputPath, ctx) {
-    const sources = spec.sources.map((name, i) => {
-      const wav = readWav(inputPaths[i]!);
-      if (wav.sampleRate !== ctx.sampleRate) {
+    // Rates and channel counts are checked here, from headers alone, and
+    // the daemon does the summing (render-pipeline.md chunk 3). The split
+    // is deliberate: these two messages are user-facing diagnostics, and
+    // diagnostics belong in the control plane with all the others rather
+    // than duplicated into C++ where they would drift.
+    spec.sources.forEach((name, i) => {
+      const header = readWavHeader(inputPaths[i]!);
+      if (header.sampleRate !== ctx.sampleRate) {
         throw new Error(
-          `input "${name}" is ${wav.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
+          `input "${name}" is ${header.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
             `Field never resamples implicitly; render or convert it at the project rate ` +
             `(a normalize target at ${ctx.sampleRate}, or afconvert and re-import)`,
         );
       }
-      if (wav.channels.length > 2) {
-        throw new Error(`input "${name}" has ${wav.channels.length} channels; mono or stereo only`);
+      if (header.channels > 2) {
+        throw new Error(`input "${name}" has ${header.channels} channels; mono or stereo only`);
       }
-      return wav;
     });
 
-    const length = spec.clips.reduce((n, c) => Math.max(n, c.start + c.duration), 0);
-    const left = new Float32Array(length);
-    const right = new Float32Array(length);
-    for (const clip of spec.clips) {
-      const src = sources[clip.input]!;
-      const srcL = src.channels[0]!;
-      const srcR = src.channels[1] ?? srcL; // mono content on both stem channels
-      const gain = Math.pow(10, clip.gain_db / 20);
-      for (let i = 0; i < clip.duration; i++) {
-        const s = clip.read_offset + i;
-        if (s < 0 || s >= srcL.length) continue;
-        let g = gain;
-        if (i < clip.fade_in) g *= i / clip.fade_in;
-        const fromEnd = clip.duration - 1 - i;
-        if (fromEnd < clip.fade_out) g *= fromEnd / clip.fade_out;
-        const at = clip.start + i;
-        left[at] = left[at]! + srcL[s]! * g;
-        right[at] = right[at]! + srcR[s]! * g;
-      }
-    }
-    let channels: Float32Array[] = [left, right];
-    if (spec.inserts !== undefined) {
-      channels = applyInsertChain(channels, spec.inserts, ctx.sampleRate);
-    }
-    writeWavFloat32(outputPath, ctx.sampleRate, channels);
-  },
+    await renderInsertChain({
+      op: 'stem',
+      output: outputPath,
+      sample_rate: ctx.sampleRate,
+      inputs: inputPaths,
+      clips: spec.clips,
+      ...(spec.inserts !== undefined ? { inserts: spec.inserts } : {}),
+    });
+  }
 };
