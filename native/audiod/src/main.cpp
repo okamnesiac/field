@@ -47,6 +47,22 @@ public:
     {
         server.sweepClosedConnections();
 
+        // Where Core Audio's property listeners do not exist, the only way
+        // to notice a device arriving or vanishing is to look. Once a
+        // second rather than every tick: a rescan enumerates the whole
+        // device list, which is far too expensive at 250 ms and buys
+        // nothing, because hot-plug is a human-timescale event. The
+        // rescan lands before status() below, so a change still reaches
+        // the socket on the same tick it is noticed.
+        if constexpr (! Player::hardwareListenersAvailable)
+        {
+            if (++ticksSinceRescan >= 4)
+            {
+                ticksSinceRescan = 0;
+                player.refreshAudioDevice();
+            }
+        }
+
         if (player.streamFinished())
             player.stop();
 
@@ -100,6 +116,7 @@ private:
     const juce::int64 idleMs;
     juce::String lastKnownState;
     juce::String lastKnownDevice;
+    int ticksSinceRescan = 0;
 };
 } // namespace
 

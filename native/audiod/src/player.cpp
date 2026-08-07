@@ -1,9 +1,12 @@
 #include "player.h"
 
+#if JUCE_MAC
 #include <CoreAudio/CoreAudio.h>
+#endif
 
 #include <utility>
 
+#if JUCE_MAC
 namespace
 {
 // Core Audio calls property listeners on its own thread; the handler
@@ -29,6 +32,7 @@ constexpr AudioObjectPropertyAddress kDeviceListAddress {
     kAudioObjectPropertyElementMain,
 };
 } // namespace
+#endif
 
 namespace
 {
@@ -54,8 +58,12 @@ Player::~Player()
     transport.setSource (nullptr);
 }
 
+// Core Audio is the only backend that will tell us. Everywhere else these
+// are no-ops and the heartbeat polls instead — see
+// `hardwareListenersAvailable` in player.h.
 void Player::registerHardwareListeners()
 {
+#if JUCE_MAC
     if (nullMode || hardwareListenersRegistered)
         return;
     AudioObjectAddPropertyListener (kAudioObjectSystemObject, &kDefaultOutputAddress,
@@ -63,10 +71,12 @@ void Player::registerHardwareListeners()
     AudioObjectAddPropertyListener (kAudioObjectSystemObject, &kDeviceListAddress,
                                     hardwareChanged, this);
     hardwareListenersRegistered = true;
+#endif
 }
 
 void Player::removeHardwareListeners()
 {
+#if JUCE_MAC
     if (! hardwareListenersRegistered)
         return;
     AudioObjectRemovePropertyListener (kAudioObjectSystemObject, &kDefaultOutputAddress,
@@ -74,6 +84,7 @@ void Player::removeHardwareListeners()
     AudioObjectRemovePropertyListener (kAudioObjectSystemObject, &kDeviceListAddress,
                                        hardwareChanged, this);
     hardwareListenersRegistered = false;
+#endif
 }
 
 void Player::refreshAudioDevice()

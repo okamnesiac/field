@@ -31,12 +31,25 @@ public:
     juce::var deviceList();
     juce::String selectDevice (const juce::String& name);
 
-    // Re-reads Core Audio's world after a hot-plug or default-output
-    // change (message thread; marshalled from the Core Audio listener).
-    // The daemon follows the system default live unless the user
-    // explicitly selected a device; a selection whose device vanishes
-    // resets to the default. This is what keeps a long-lived daemon's
-    // output honest against the `*` in `field devices` (#16).
+    // Whether the platform will *tell* us the hardware moved. Only Core
+    // Audio does (the property listeners in player.cpp, #16); everywhere
+    // else the heartbeat has to look, so main.cpp reads this instead of
+    // branching on the preprocessor itself
+    // (linux-portability.md decision 2).
+    static constexpr bool hardwareListenersAvailable =
+#if JUCE_MAC
+        true;
+#else
+        false;
+#endif
+
+    // Re-reads the audio world after a hot-plug or default-output change
+    // (message thread; marshalled from the Core Audio listener on macOS,
+    // polled from the heartbeat elsewhere). The daemon follows the system
+    // default live unless the user explicitly selected a device; a
+    // selection whose device vanishes resets to the default. This is what
+    // keeps a long-lived daemon's output honest against the `*` in
+    // `field devices` (#16).
     void refreshAudioDevice();
 
     // Returns {error} or {samples, sample_rate, channels}. With loop the
@@ -101,7 +114,9 @@ private:
     const bool nullMode;
     // True once device.select succeeds; cleared if that device vanishes.
     bool explicitSelection = false;
+#if JUCE_MAC
     bool hardwareListenersRegistered = false;
+#endif
     juce::AudioDeviceManager deviceManager;
     juce::AudioFormatManager formatManager;
     juce::TimeSliceThread readThread { "audiod file reader" };

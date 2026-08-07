@@ -1,7 +1,7 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
-**Status:** Chunk 1 shipped (#49); chunk 4 not started, and now on
-the critical path — see the note under chunk 4. Chunks 2–3
+**Status:** Chunk 1 shipped (#49); chunk 4 in review. Chunks 2–3
+**withdrawn** — see below. Chunks 2–3
 **withdrawn** to [render-pipeline.md](render-pipeline.md), which puts
 sample-rate conversion in the daemon's built-in tier rather than in
 TypeScript; §1.1 below records what that replaced and why.
@@ -73,7 +73,9 @@ second supported product.
    project-layout.md took for the `sc-render` → `supercollider` rename.
 
 2. **The daemon ports behind `#if JUCE_MAC`, not behind an
-   abstraction.** Exactly two things in `player.cpp` are macOS-only:
+   abstraction.** Two things in `player.cpp` are macOS-only — and a
+   third, which this decision missed, in `server.cpp`; see the
+   amendment at the end of this item. In `player.cpp`:
    the `AudioObjectAddPropertyListener` registrations for
    "default output device changed" and "device list changed" (#16).
    Everything else already runs through JUCE's `AudioDeviceManager`,
@@ -87,6 +89,31 @@ second supported product.
    fallback is the honest description of what other platforms can do
    today — the seam can appear later if a real Linux hot-plug path
    (udev) is ever wanted.
+
+   **Amended on implementation.** "Exactly two things" was wrong: the
+   first Linux build also stopped on `SO_NOSIGPIPE` in `server.cpp`,
+   which is a BSD socket option with no Linux equivalent. The count was
+   taken by reading `player.cpp`, which is where hot-plug lives, and
+   nobody grepped the rest of the daemon.
+
+   It is guarded on `#if defined(SO_NOSIGPIPE)` rather than `JUCE_MAC`,
+   which is a deliberate departure from this decision's wording: whether
+   a socket option exists is a capability question, and writing it as a
+   platform question would be a guess that happens to be right today.
+   Linux says the same thing per write instead — `MSG_NOSIGNAL` on
+   `send()` — so the daemon now asks for whichever the platform has.
+   `main.cpp`'s process-wide `SIGPIPE` ignore was already the belt under
+   both, and on Linux it is what actually carries the guarantee.
+
+   Where the *fallback* landed is worth recording too, because §2 below
+   was loose about it. The rescan runs on `main.cpp`'s `Heartbeat`, the
+   250 ms timer that is always running — not on `Player`'s timer, which
+   only runs while a reload is pending and would have polled almost
+   never. It fires every fourth tick: a rescan enumerates the whole
+   device list, which is far too expensive at 250 ms and buys nothing,
+   since hot-plug is a human-timescale event. `main.cpp` reads a
+   `Player::hardwareListenersAvailable` constant rather than branching on
+   the preprocessor itself, so the `#if` stays in one place.
 
 3. **`say` does not port, and is not made to.** It is macOS
    text-to-speech by definition. It is already isolated in one
@@ -162,10 +189,15 @@ second supported product.
   is macOS-only anyway, and pretending otherwise would be the two-answer
   problem decision 1 rejects.
 - **The daemon.** `#if JUCE_MAC` around the listeners, a rescan fallback
-  elsewhere, and Linux build dependencies in CI (`libasound2-dev` at
-  minimum; JUCE 8 console apps typically want a small X11/freetype set
-  even headless — to be discovered on the first red build, not guessed
-  at here).
+  elsewhere, and Linux build dependencies in CI. Discovered on the first
+  red build, as intended, and the guess was right about the shape:
+  JUCE's build helper `juceaide` links `juce_gui_basics` whatever the app
+  links, so a headless console daemon still needs X and freetype headers.
+  The verified list on ubuntu:24.04, beyond the `build-essential`,
+  `cmake` and `pkg-config` a runner already has: `libasound2-dev`,
+  `libfreetype-dev`, `libfontconfig1-dev`, `libx11-dev`, `libxext-dev`,
+  `libxrandr-dev`, `libxinerama-dev`, `libxcursor-dev`,
+  `libxcomposite-dev`, `libxrender-dev`, `libglu1-mesa-dev`.
 - **CI.** Two jobs, `concurrency: cancel-in-progress` so a superseded
   push stops paying, and the native build cache keyed as it is today.
 
@@ -205,9 +237,14 @@ built-in tier, and no project using an `au:` insert can make it.
 2. ~~**The resampler and format conversion**~~ — withdrawn to
    [render-pipeline.md](render-pipeline.md) §6, chunk 5.
 3. ~~**`normalize` swaps implementation**~~ — withdrawn with chunk 2.
-4. **The daemon on Linux**: `#if JUCE_MAC`, rescan fallback, Linux CI
-   build, protocol tests green in null-output mode. Restores
-   `pnpm build:native`, which #46 also dropped.
+4. **The daemon on Linux** — in review. `#if JUCE_MAC`, rescan fallback,
+   Linux CI build, protocol tests green in null-output mode. Restores
+   `pnpm build:native`, which #46 also dropped, on both jobs. Verified in
+   an `ubuntu:24.04` container before opening: the daemon builds with no
+   warnings in our own sources, and the whole suite runs **325 passed, 10
+   skipped, 0 failed** — the 16 daemon protocol tests among the passes,
+   and the skips being the nine platform-bound cases plus `sclang`, which
+   the container does not have.
 
 Chunk 4 is what remains, and it is no longer only about Linux.
 [render-pipeline.md](render-pipeline.md) decision 6 makes
