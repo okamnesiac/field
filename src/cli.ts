@@ -33,7 +33,7 @@ const program = new Command();
 function requireRoot(): string {
   const root = findProjectRoot(process.cwd());
   if (!root) {
-    process.stderr.write('not inside a Bloom project (no bloom.yaml found)\n');
+    process.stderr.write('not inside a Field project (no field.yaml found)\n');
     process.exit(1);
   }
   return root;
@@ -45,19 +45,19 @@ function fail(err: unknown): never {
 }
 
 program
-  .name('bloom')
+  .name('field')
   .description('Git-native, agent-operable music production')
   .version('0.1.0');
 
 program
   .command('init')
-  .description('initialize a Bloom project in the current directory')
+  .description('initialize a Field project in the current directory')
   .option('--name <slug>', 'project name (defaults to the directory name)')
   .option('--sample-rate <hz>', 'project sample rate', (v) => Number(v))
   .action((opts: { name?: string; sampleRate?: number }) => {
     try {
       const root = init({ dir: process.cwd(), ...opts });
-      process.stdout.write(`initialized Bloom project at ${root}\n`);
+      process.stdout.write(`initialized Field project at ${root}\n`);
     } catch (err) {
       fail(err);
     }
@@ -83,7 +83,7 @@ sc.command('render <program>')
         sampleRate,
       });
       if (!existsSync(output)) {
-        throw new Error('sc program exited without writing BLOOM_OUTPUT');
+        throw new Error('sc program exited without writing FIELD_OUTPUT');
       }
       process.stdout.write(`rendered ${output} (seed ${opts.seed}, ${opts.duration}s @ ${sampleRate} Hz)\n`);
     } catch (err) {
@@ -140,8 +140,8 @@ program
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: bloom play ${opts.song}/sound:${name}-1\n` +
-          `choose:   bloom choose ${name} --song ${opts.song} --variant <n>\n`,
+        `audition: field play ${opts.song}/sound:${name}-1\n` +
+          `choose:   field choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
       fail(err);
@@ -322,7 +322,7 @@ program
   .command('play <patterns...>')
   .description('build targets if needed, then audition them in order (ctrl-c stops)')
   .option('--from <position>', 'start at bar[.beat[.tick]] (single target only)')
-  .option('--device <name>', 'output device (bloom devices lists them)')
+  .option('--device <name>', 'output device (field devices lists them)')
   .option('--loop', 'replay the queue until ctrl-c')
   .option('--click', 'overlay a metronome (rendered CLI-side; loops with the file)')
   .option('--watch', 'rebuild on project changes, swap the loop at the wrap (needs --loop, one label)')
@@ -333,9 +333,9 @@ program
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
-          throw new Error('--from, --device, --loop, --click, and --watch need bloom-audiod (pnpm build:native)');
+          throw new Error('--from, --device, --loop, --click, and --watch need field-audiod (pnpm build:native)');
         }
-        process.stderr.write('bloom-audiod is not built; using afplay (pnpm build:native)\n');
+        process.stderr.write('field-audiod is not built; using afplay (pnpm build:native)\n');
         await playWithAfplay(items);
         return;
       }
@@ -419,8 +419,8 @@ program
           if (major === 0 && minor < 4) {
             reloadClient.close();
             throw new Error(
-              `bloom-audiod ${reloadClient.daemonVersion} predates --watch — ` +
-                'bloom transport quit, then play again (it respawns on the new build)',
+              `field-audiod ${reloadClient.daemonVersion} predates --watch — ` +
+                'field transport quit, then play again (it respawns on the new build)',
             );
           }
         }
@@ -540,7 +540,7 @@ program
 
 const transport = program
   .command('transport')
-  .description('control the running daemon (bloom play starts it)');
+  .description('control the running daemon (field play starts it)');
 transport
   .command('status')
   .description('state, position, file, and device')
@@ -584,7 +584,7 @@ for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
 
 program
   .command('devices')
-  .description('list output devices via bloom-audiod (spawns it if needed)')
+  .description('list output devices via field-audiod (spawns it if needed)')
   .action(async () => {
     try {
       const { AudiodClient } = await import('./audiod/client.js');
@@ -658,7 +658,7 @@ program
       process.stdout.write(`${d.file}: ${d.message}\n`);
     }
     for (const f of result.unformatted) {
-      process.stdout.write(`${f}: not canonically formatted (run bloom fmt)\n`);
+      process.stdout.write(`${f}: not canonically formatted (run field fmt)\n`);
     }
     if (result.ok) process.stdout.write('ok\n');
     process.exit(result.ok ? 0 : 1);
@@ -694,7 +694,7 @@ program
       );
     }
     if (project.diagnostics.length > 0) {
-      process.stdout.write(`${project.diagnostics.length} problems (run bloom check)\n`);
+      process.stdout.write(`${project.diagnostics.length} problems (run field check)\n`);
     }
   });
 

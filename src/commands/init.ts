@@ -10,7 +10,7 @@ import { stringifyCanonical } from '../yaml/emit.js';
 // (project-model.md "Assets").
 const LFS_PATTERNS = ['*.wav', '*.aif', '*.aiff', '*.flac', '*.mp3', '*.m4a', '*.caf'];
 
-const IGNORE_ENTRIES = ['.bloom/', '.DS_Store'];
+const IGNORE_ENTRIES = ['.field/', '.DS_Store'];
 
 export interface InitOptions {
   dir: string;
@@ -22,7 +22,7 @@ export function init(options: InitOptions): string {
   const root = resolve(options.dir);
   const manifestPath = join(root, PROJECT_MANIFEST);
   if (existsSync(manifestPath)) {
-    throw new Error(`already a Bloom project: ${manifestPath}`);
+    throw new Error(`already a Field project: ${manifestPath}`);
   }
 
   const name = options.name ?? basename(root);
@@ -31,7 +31,7 @@ export function init(options: InitOptions): string {
   }
 
   const manifest = projectSchema.parse({
-    bloom: 1,
+    field: 1,
     name,
     sample_rate: options.sampleRate ?? DEFAULT_SAMPLE_RATE,
   });

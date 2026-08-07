@@ -34,7 +34,7 @@ export function songDirOfPkg(pkg: string): string | undefined {
 }
 
 // Recover the song from an artifact or asset path: both live under a
-// songs/<song>/ segment (assets directly, outputs under .bloom/out/).
+// songs/<song>/ segment (assets directly, outputs under .field/out/).
 export function songDirOfPath(root: string, path: string): string | undefined {
   const rel = relative(resolve(root), resolve(path));
   const parts = rel.split(sep);
@@ -64,14 +64,14 @@ export function formatPosition(
   return `${ctx.meter.format(Math.round(ctx.tempo.samplesToTicks(sample)))} (${seconds})`;
 }
 
-// `bloom transport …`: reach the daemon a running `bloom play` (or a prior
+// `field transport …`: reach the daemon a running `field play` (or a prior
 // command) left behind. Never spawns — transport on a dead daemon is a
 // clear error, not a silent no-op player with nothing loaded.
 export async function connectTransport(root: string): Promise<AudiodClient> {
   try {
     return await AudiodClient.connect(root, { spawnIfNeeded: false });
   } catch {
-    throw new Error('bloom-audiod is not running (bloom play starts it)');
+    throw new Error('field-audiod is not running (field play starts it)');
   }
 }
 
@@ -97,7 +97,7 @@ export async function transportStatusLines(
       lines.push(`device: ${status.device.name} @ ${status.device.sample_rate} Hz${note}`);
     }
     // Answers "am I on the latest daemon?" without folklore.
-    lines.push(`daemon: bloom-audiod ${client.daemonVersion}`);
+    lines.push(`daemon: field-audiod ${client.daemonVersion}`);
     return lines;
   } finally {
     client.close();
@@ -112,7 +112,7 @@ export async function transportLocate(
   const client = await connectTransport(root);
   try {
     const status = await client.status();
-    if (status.path === null) throw new Error('nothing loaded (bloom play something first)');
+    if (status.path === null) throw new Error('nothing loaded (field play something first)');
     const ctx = musicalContext(project, songDirOfPath(root, status.path));
     if (!ctx) {
       throw new Error(`cannot derive a tempo map for ${status.path}; locate needs a song artifact`);

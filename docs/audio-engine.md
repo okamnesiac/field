@@ -1,6 +1,6 @@
 # Audio engine
 
-The real-time engine, `bloom-audiod`, is future work — deferred until the
+The real-time engine, `field-audiod`, is future work — deferred until the
 playback phase because the generation-first milestones need no real-time code.
 This document records the decisions already settled so the phases that build
 it start from agreement, not from scratch. Language and framework decisions
@@ -31,16 +31,16 @@ During recording, three related but distinct paths run simultaneously:
 
 ## Monitoring: host vs. Apollo direct
 
-- **Host monitoring** — input through Bloom's engine and effects, out to the
+- **Host monitoring** — input through Field's engine and effects, out to the
   interface. Fully project-visible and controllable; costs buffer + plugin
   latency.
 - **Apollo direct** — input monitored in the Apollo's DSP (Console) at
-  near-zero latency while Bloom handles playback and capture.
+  near-zero latency while Field handles playback and capture.
 
 **Decision — Console is configured manually in V1.** Console is the mixer in
 the Apollo's DSP and matters only on the input side (preamp gain, Unison,
 direct monitoring, cue mixes); for playback and mixing the Apollo is just an
-output device. UA publishes no Console API, so Bloom references an expected
+output device. UA publishes no Console API, so Field references an expected
 Console preset (`monitoring.mode: apollo-direct`, `console_preset:
 vocal-tracking`) and does not promise automation.
 
@@ -55,8 +55,8 @@ mode are clearly reported.
 
 ## Crash-safe recording
 
-Recording is transactional: a `.bloom/recording/<transaction-id>/` directory
+Recording is transactional: a `.field/recording/<transaction-id>/` directory
 holds a manifest, journal, and audio written continuously in recoverable
 chunks. Normal stop finalizes the asset and writes a take manifest (timeline
 placement, device, latency, monitoring context, session metadata); after a
-crash, Bloom recovers any valid audio from the transaction.
+crash, Field recovers any valid audio from the transaction.

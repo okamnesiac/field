@@ -13,13 +13,13 @@ import { sayGenerator } from './say.js';
 // These run the real `say` and `afconvert` — macOS-only, like the sclang
 // integration tests. Samantha ships with macOS.
 const target = (over: Record<string, unknown> = {}) =>
-  saySoundSchema.parse({ name: 'scratch', type: 'say', text: 'bloom', voice: 'Samantha', ...over });
+  saySoundSchema.parse({ name: 'scratch', type: 'say', text: 'field', voice: 'Samantha', ...over });
 
 describe('sayGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bloom-say-test-'));
+    dir = mkdtempSync(join(tmpdir(), 'field-say-test-'));
   });
 
   afterEach(() => {
@@ -79,7 +79,7 @@ describe('say sounds in the build graph', () => {
   let root: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'bloom-say-graph-'));
+    root = mkdtempSync(join(tmpdir(), 'field-say-graph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'opener');
     mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });

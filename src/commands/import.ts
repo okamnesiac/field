@@ -65,7 +65,7 @@ export async function importAsset(
   }
   const existing = assetsFileSchema.safeParse(doc.toJS());
   if (!existing.success) {
-    throw new Error(`assets.yaml is invalid; fix it before importing (bloom check)`);
+    throw new Error(`assets.yaml is invalid; fix it before importing (field check)`);
   }
   // The declaration in assets.yaml is the existence marker, and it is
   // written last. A file is an orphan of a failed import only if no

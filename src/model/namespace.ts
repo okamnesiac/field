@@ -9,7 +9,7 @@ import { assetsFileSchema, soundSchema } from '../schema/index.js';
 // introduce a name (import, generate) check here so a collision is an
 // upfront error instead of a check-red project after the work — and the
 // model-minutes — are already spent. Unparseable files contribute their
-// filename only: pre-flight must never crash on a file bloom check owns
+// filename only: pre-flight must never crash on a file field check owns
 // diagnosing.
 export function takenSongNames(songDir: string): Set<string> {
   const taken = new Set<string>();

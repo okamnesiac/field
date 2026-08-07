@@ -4,7 +4,7 @@ import { samples, slug, ticks } from './common.js';
 
 // songs/<song>/takes/<track>/<take-id>.yaml — one performance, referencing
 // an immutable asset. Takes store both time representations but declare the
-// anchor; the derived one is verified by `bloom check` (project-core.md §3.1).
+// anchor; the derived one is verified by `field check` (project-core.md §3.1).
 export const takeSchema = z.strictObject({
   id: z.string().regex(/^take-\d{8}-\d{6}$/, 'take ids are take-YYYYMMDD-HHMMSS'),
   track: slug,

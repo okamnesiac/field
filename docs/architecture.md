@@ -1,6 +1,6 @@
 # Architecture
 
-Bloom is divided into layers with a hard rule about where each language is
+Field is divided into layers with a hard rule about where each language is
 allowed: **TypeScript for everything with a keyboard, C++ for everything with a
 deadline, Python only as a model-runner.**
 
@@ -8,14 +8,14 @@ deadline, Python only as a model-runner.**
 CLI / MCP / Recording Widget
             |
             v
-    Bloom Control Plane          TypeScript
+    Field Control Plane          TypeScript
             |
      +------+----------+
      v                 v
 Native Audio Daemon   Worker subprocesses
-(bloom-audiod)         |         |
+(field-audiod)         |         |
  C++ / JUCE       SuperCollider  Python model-runners
-     |            (sclang/scsynth,  (bloom-modeld:
+     |            (sclang/scsynth,  (field-modeld:
  Core Audio        driven over OSC)  ACE, analysis, ML)
  Audio Units
  Apollo
@@ -36,7 +36,7 @@ is real, so we pick once. TypeScript wins on MCP SDK maturity, schema
 validation (zod), and long-running-process ergonomics. The canonical project
 format remains language-neutral regardless.
 
-## Native audio daemon (C++ / JUCE) — `bloom-audiod`
+## Native audio daemon (C++ / JUCE) — `field-audiod`
 
 All latency-sensitive and hardware-facing work: device I/O, transport,
 playback, recording, monitoring, AU hosting, plugin state, delay compensation,
@@ -53,10 +53,10 @@ depends on TypeScript or Python — GC pauses and JIT are disqualifying when a
   must not kill the daemon), plugin editor window hosting, state-serialization
   quirks across badly-behaved plugins, delay-compensation bookkeeping, and
   glitch-free dynamic graph rebuilds. UAD plugins exercise exactly these edges.
-- *Tracktion Engine.* A full open-source DAW engine — too much of Bloom
-  already built, at the wrong altitude: it owns its project model, and Bloom's
+- *Tracktion Engine.* A full open-source DAW engine — too much of Field
+  already built, at the wrong altitude: it owns its project model, and Field's
   entire thesis is owning the model. We would spend our lives mapping canonical
-  files onto its internal state, which is the hidden-state problem Bloom exists
+  files onto its internal state, which is the hidden-state problem Field exists
   to kill.
 - *Rust.* Better real-time discipline than C++ in principle, but there is no
   mature AU-hosting story in Rust, and JUCE is a C++ framework you inherit
@@ -64,7 +64,7 @@ depends on TypeScript or Python — GC pauses and JIT are disqualifying when a
   over a deeply object-oriented API and debugging real-time threading bugs at
   the FFI boundary. Not worth borrow checking in ~30% of one contained process.
 
-**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial. Bloom uses AGPL
+**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial. Field uses AGPL
 while personal/open-source; if productized closed-source, a commercial license
 (~$130/month Pro tier, or perpetual) resolves it. JUCE stays **quarantined
 inside the daemon** — it never leaks into other components, so licensing
@@ -87,7 +87,7 @@ UDP, which TS handles fine. Two modes:
 
 SC source is tracked in Git and treated as code.
 
-## Python model-runners — `bloom-modeld`
+## Python model-runners — `field-modeld`
 
 Python survives only where the ML ecosystem forces it: ACE-Step generation,
 source separation, transcription, analysis, embeddings, take ranking. Workers

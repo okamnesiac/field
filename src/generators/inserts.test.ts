@@ -40,11 +40,11 @@ const eqInsert = (gain: number) => [
 ];
 
 beforeEach(async () => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-inserts-'));
+  root = mkdtempSync(join(tmpdir(), 'field-inserts-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
   createTrack(root, 'creek', 'drums', 'audio');
-  const src = join(root, '..', `bloom-inserts-src-${Math.random()}.wav`);
+  const src = join(root, '..', `field-inserts-src-${Math.random()}.wav`);
   const tone = new Float32Array(48000);
   for (let i = 0; i < tone.length; i++) tone[i] = 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000);
   writeWavFloat32(src, 48000, [tone]);

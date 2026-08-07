@@ -22,7 +22,7 @@ import { findProjectRoot, loadProject } from './project.js';
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-test-'));
+  root = mkdtempSync(join(tmpdir(), 'field-test-'));
   init({ dir: root, name: 'test-album' });
 });
 
@@ -32,7 +32,7 @@ afterEach(() => {
 
 // A source file to import, created outside the project.
 function sourceFile(content = 'not really audio'): string {
-  const path = join(root, '..', `bloom-test-src-${Date.now()}-${Math.random()}.wav`);
+  const path = join(root, '..', `field-test-src-${Date.now()}-${Math.random()}.wav`);
   writeFileSync(path, content);
   return path;
 }
@@ -139,7 +139,7 @@ describe('import', () => {
     createSong(root, 'opener');
     const src = sourceFile();
     const result = await importAsset(root, 'opener', src);
-    expect(result.name).toMatch(/^bloom-test-src-/);
+    expect(result.name).toMatch(/^field-test-src-/);
     rmSync(src);
   });
 
@@ -269,7 +269,7 @@ describe('check', () => {
   it('diagnoses loop sources exhausted by their read offset — check, not a graph crash', async () => {
     createSong(root, 'opener');
     // A real one-second wav, so validate can learn its true frame count.
-    const wavPath = join(root, '..', `bloom-test-loop-${Date.now()}.wav`);
+    const wavPath = join(root, '..', `field-test-loop-${Date.now()}.wav`);
     writeWavFloat32(wavPath, 48000, [new Float32Array(48000)]);
     await importAsset(root, 'opener', wavPath, 'hit');
     rmSync(wavPath);
@@ -297,7 +297,7 @@ describe('check', () => {
 
   it('diagnoses loop fades that outgrow their slots', async () => {
     createSong(root, 'opener');
-    const wavPath = join(root, '..', `bloom-test-slot-${Date.now()}.wav`);
+    const wavPath = join(root, '..', `field-test-slot-${Date.now()}.wav`);
     writeWavFloat32(wavPath, 48000, [new Float32Array(48000)]);
     await importAsset(root, 'opener', wavPath, 'hit');
     rmSync(wavPath);
@@ -550,7 +550,7 @@ describe('musical time (musical-time.md)', () => {
     await importHit();
     const musical = loadProject(root);
 
-    const other = mkdtempSync(join(tmpdir(), 'bloom-test-ticks-'));
+    const other = mkdtempSync(join(tmpdir(), 'field-test-ticks-'));
     try {
       init({ dir: other, name: 'test-album' });
       createSong(other, 'opener');

@@ -7,7 +7,7 @@ readability, explicit IDs, and explicit dependencies.
 
 **Decision — a native format, not DAWproject.** DAWproject is
 interchange-oriented XML: poor for diffs and merges, and it models a DAW's
-concepts rather than Bloom's (no takes-as-manifests, no build targets, no
+concepts rather than Field's (no takes-as-manifests, no build targets, no
 generation recipes). A DAWproject *exporter* is a possible later feature.
 
 ## Projects contain songs
@@ -39,8 +39,8 @@ own song's names plus `//shared/asset:` pins, and nothing else.
 
 ```text
 project/
-├── bloom.yaml            # project manifest: name, engine versions
-├── bloom.lock            # locked environment: plugin versions, model versions
+├── field.yaml            # project manifest: name, engine versions
+├── field.lock            # locked environment: plugin versions, model versions
 ├── shared/               # material reused across songs, by contract
 │   ├── instruments/      # definitions that make sound (.scd, model defs, AU)
 │   ├── samples/          # committed sound that just is
@@ -68,7 +68,7 @@ project/
 │   └── states/           # serialized AU state blobs
 ├── hardware/
 │   └── apollo.yaml
-└── .bloom/               # unversioned: cache, recording transactions, sockets
+└── .field/               # unversioned: cache, recording transactions, sockets
 ```
 
 Exact schemas are designed in [projects/all/project-core.md](projects/all/project-core.md);
@@ -82,7 +82,7 @@ song's one namespace (assets and sounds together), a
 `supercollider`, a program file (a bare filename resolves in
 `shared/instruments/`). Automatic types are generated in-graph and
 cached; the `generative` type is deliberate — its variants are committed
-under `audio/<sound>/` and `bloom choose` repoints which one the
+under `audio/<sound>/` and `field choose` repoints which one the
 sound's label means.
 
 ## Timeline and tempo
@@ -105,7 +105,7 @@ advanced from the field's anchor so meter changes mean what a musician
 means (`loop.every` resolves once, at the clip's position, and repeats as
 that fixed interval thereafter). Arrays are resolved to ticks at load:
 either spelling produces the
-same build, and `bloom fmt` preserves whichever notation the author wrote,
+same build, and `field fmt` preserves whichever notation the author wrote,
 keeping arrays single-line.
 
 ## Clips are metadata; audio is immutable
@@ -138,14 +138,14 @@ decisions never invalidate rendered stems (see
 
 ## Identity: names, not UUIDs
 
-Nothing in a Bloom project carries an opaque ID. Identity comes in three
+Nothing in a Field project carries an opaque ID. Identity comes in three
 tiers, by how a thing gets it:
 
 - **Humans name it → the slug is the ID.** Tracks (`lead-vocal`), songs
   (directory name), sounds, assets. Filenames are keys, and a song's
   asset and sound names share one namespace — `source: pad` must mean
-  exactly one thing (project-layout.md §4.3), enforced by `bloom check`.
-  Renaming is a repo-wide, tool-assisted refactor (`bloom track rename`
+  exactly one thing (project-layout.md §4.3), enforced by `field check`.
+  Renaming is a repo-wide, tool-assisted refactor (`field track rename`
   rewrites every reference atomically), exactly as renaming a function
   is in code.
 - **Content is the identity → SHA-256.** Assets and cached outputs.
@@ -156,8 +156,8 @@ tiers, by how a thing gets it:
 
 The industry-standard alternative (opaque ID + display name, as in DAWproject
 and every DAW format) was deliberately rejected: it makes every diff a join
-table, which attacks Bloom's central thesis, while its supposed advantages
-mostly don't survive scrutiny. `bloom check` validates referential integrity
+table, which attacks Field's central thesis, while its supposed advantages
+mostly don't survive scrutiny. `field check` validates referential integrity
 (in CI, and after merges — cross-branch dangling references merge cleanly
 under *any* ID scheme). The full argument is preserved in
 [projects/all/project-core.md](projects/all/project-core.md) §6 — read it
@@ -202,12 +202,12 @@ the artifact. (For SuperCollider the "recipe" is the program plus an
 explicit seed, and it *is* reproducible, which is why `supercollider` is
 an automatic type instead.)
 
-Concretely: `bloom generate <name> --song <song> --prompt …` runs the
+Concretely: `field generate <name> --song <song> --prompt …` runs the
 model through its worker and writes `songs/<song>/sounds/<name>.yaml`
 plus numbered variant WAVs under `audio/<name>/`. The sound is a
-schema-validated project file — `bloom check` verifies variant hashes,
-`bloom fmt` covers it — and each variant auditions as
-`//songs/<song>/sound:<name>-<n>` via `bloom play`. `bloom choose
+schema-validated project file — `field check` verifies variant hashes,
+`field fmt` covers it — and each variant auditions as
+`//songs/<song>/sound:<name>-<n>` via `field play`. `field choose
 <name> --variant <n>` records `chosen:`, and from then on the sound's
 own label resolves to that variant — clips say
 `source: <name>` and follow every re-choose, a one-line diff. Nothing

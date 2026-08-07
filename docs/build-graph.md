@@ -1,26 +1,26 @@
 # Build graph
 
-Bloom treats a project as an explicit dependency graph, Bazel-style:
+Field treats a project as an explicit dependency graph, Bazel-style:
 labels, dependencies, content-addressed outputs, incremental rebuilds,
 cached outputs, queries, and tests — without Bazel syntax or its
 vocabulary (project-layout.md §4: the format speaks sounds, types, and
 sources; the engine speaks nodes, generators, and action keys).
 
 ```bash
-bloom build //songs/opener/mix:main
-bloom build //songs/opener/stems/...
-bloom export //songs/opener/mix:main
-bloom test //...
-bloom query 'deps(//songs/opener/mix:main)'
-bloom explain //songs/opener/mix:main
+field build //songs/opener/mix:main
+field build //songs/opener/stems/...
+field export //songs/opener/mix:main
+field test //...
+field query 'deps(//songs/opener/mix:main)'
+field explain //songs/opener/mix:main
 ```
 
 Labels address songs and shared material alike: a clip in one song
 plays `//shared/asset:rain` exactly as it plays the song's own sounds.
 
 The absolute form is canonical, but the CLI accepts songs-relative shorthand
-for all of the above — `bloom build opener/mix:main`, `bloom explain
-opener/...` — and a bare song name plays its main mix: `bloom play opener`
+for all of the above — `field build opener/mix:main`, `field explain
+opener/...` — and a bare song name plays its main mix: `field play opener`
 (project-core.md §3.4; `main` is a convention, and a song that names its
 mixes otherwise gets a no-such-label error). `//shared/...` material
 uses the full form.
@@ -41,24 +41,24 @@ overwrites an old render — it produces a new artifact and moves a pointer.
 ### Watch mode
 
 The cache is what makes watching cheap
-([watch.md](projects/all/watch.md)): `bloom build --watch <label>`
+([watch.md](projects/all/watch.md)): `field build --watch <label>`
 rebuilds on every settled change and answers "did anything audible
 change" as an output-hash question — a fader move re-runs one sum, a
-comment edit or `bloom fmt` pass is all cache hits and reports silence.
+comment edit or `field fmt` pass is all cache hits and reports silence.
 `check` gates every rebuild, so a red project (a half-saved file
 mid-edit — the common case) keeps its last good outputs and retries on
-the next change. `bloom play <song> --loop --watch` composes the same
+the next change. `field play <song> --loop --watch` composes the same
 loop with playback: when the playing label's hash moves, the daemon
 finishes the current pass and the next wrap starts the new file. Watch
 runs `build`, and build never generates a generative sound — but a
-`chosen:` repoint is just a YAML edit, so `bloom choose` against a
+`chosen:` repoint is just a YAML edit, so `field choose` against a
 running watch is live variant A/B-ing inside the loop.
 
 ### Getting a file out
 
 Outputs live under their content hash, materialized at
-`.bloom/out/<label>.wav` — addresses for the engine, not names anyone
-wants in a Finder window or an email. `bloom export <patterns>` builds
+`.field/out/<label>.wav` — addresses for the engine, not names anyone
+wants in a Finder window or an email. `field export <patterns>` builds
 and then copies the result to `~/Desktop` (or `--to <dir>`) under the
 label with its punctuation flattened, minus the `songs/` prefix:
 `//songs/creek/mix:main` becomes `creek-mix-main-v1.wav`, and shared
@@ -87,7 +87,7 @@ v1, change something, export v2, change it back — it reports `reverted`
 and names both numbers, because the newest file in the directory is then
 no longer what you just built.
 
-Nothing Bloom does removes or overwrites a file in the destination,
+Nothing Field does removes or overwrites a file in the destination,
 including files it did not write. The copy lands on a temp name and is
 linked into place, so an interrupted export leaves debris rather than a
 truncated version (which, since nothing overwrites, would be permanent),
@@ -105,7 +105,7 @@ How a node's output can be produced is a declared, per-node property:
 - **`offline`** — renderable faster than realtime. Native AUs, SC non-realtime
   mode, most UAD-2 plugins (UAD-2 supports faster-than-realtime bounce, capped
   by DSP headroom).
-- **`realtime-bounce`** — renderable only at 1×: Bloom plays through the graph
+- **`realtime-bounce`** — renderable only at 1×: Field plays through the graph
   and captures the result. The universal escape hatch — anything audible is
   freezable at 1×. Used for plugins that can't render offline and for external
   instruments (below).
@@ -120,7 +120,7 @@ How a node's output can be produced is a declared, per-node property:
 
 **External instruments** graduate from live-only to realtime-bounce by
 declaring an audio return path ("this device's output returns on Apollo inputs
-3–4"): Bloom plays the MIDI at 1×, captures the return, caches it like any
+3–4"): Field plays the MIDI at 1×, captures the return, caches it like any
 other render — and flags it nondeterministic, because knobs on hardware are
 outside the hash.
 
@@ -128,9 +128,9 @@ outside the hash.
 
 Every automatic type has a `Generator` in `src/generators/` — the code
 that generates it mechanically, in-graph, cached. The `generative` type
-has none: its generation is human-triggered (`bloom generate`), its
+has none: its generation is human-triggered (`field generate`), its
 variants are committed under `audio/<sound>/`, and its label resolves
-to the chosen variant (`bloom choose` repoints it; clips reference the
+to the chosen variant (`field choose` repoints it; clips reference the
 sound by name and follow).
 
 - **`normalize`** — sample-rate/bit-depth conversion via macOS
@@ -140,11 +140,11 @@ sound by name and follow).
   rendered offline via scsynth's NRT mode. `source:` names the program —
   a bare filename resolves in `shared/instruments/`, a slashed path is
   project-relative. The program is a plain `.scd` run through `sclang`
-  with `BLOOM_OUTPUT` / `BLOOM_SEED` / `BLOOM_DURATION` /
-  `BLOOM_SAMPLE_RATE` / `BLOOM_CHANNELS` in the environment; it writes
-  `BLOOM_OUTPUT` and exits. The program's *content hash* is a cache input,
+  with `FIELD_OUTPUT` / `FIELD_SEED` / `FIELD_DURATION` /
+  `FIELD_SAMPLE_RATE` / `FIELD_CHANNELS` in the environment; it writes
+  `FIELD_OUTPUT` and exits. The program's *content hash* is a cache input,
   so editing the code invalidates exactly its own renders; with a fixed
-  seed, renders are reproducible bit-for-bit. `bloom sc render` runs a
+  seed, renders are reproducible bit-for-bit. `field sc render` runs a
   program directly (uncached) for iteration. Full contract:
   [projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
   predates the §4 rename).
@@ -186,7 +186,7 @@ sound by name and follow).
   reordering clips in the file changes nothing, and track `gain_db`/`pan`
   are excluded entirely — they are mix-stage parameters, so a fader move
   never re-renders a stem. Assets must already be at the project sample
-  rate: Bloom never resamples implicitly (mix-assembly.md §4). A clip's
+  rate: Field never resamples implicitly (mix-assembly.md §4). A clip's
   `loop:` map tiles its source to fill the window
   ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
   repetitions expand into ordinary placement-plan entries — grid-locked
@@ -204,9 +204,9 @@ sound by name and follow).
   different sound. The same parameters run as
   track `inserts:` (baked into the stem) and in the mix `master:` chain
   (post-gain, so the limiter guards the true output). Cycles became
-  declarable with sound→sound edges, so `bloom check` names them.
+  declarable with sound→sound edges, so `field check` names them.
 - **`mix`** — declared one file per mix in `songs/<song>/mixes/`
-  (`//songs/<song>/mix:<name>`; `bloom song create` writes a default
+  (`//songs/<song>/mix:<name>`; `field song create` writes a default
   `main`). Sums track stems — the
   graph's first rule→rule edges — applying each track's `gain_db`/`pan`
   (constant-power balance) and a master gain while summing. Because inputs
@@ -239,12 +239,12 @@ regenerating mechanically.
 Nodes that can differ *audibly* between renders are flagged
 **nondeterministic**, in three tiers:
 
-1. Plugins with tempo-sync/retrigger LFO modes: Bloom prefers those modes and
+1. Plugins with tempo-sync/retrigger LFO modes: Field prefers those modes and
    stores phase/offset as an explicit parameter — deterministic.
 2. Free-running LFOs with an exposed rate/phase parameter: a per-plugin
    registry of known parameter mappings pins what's pinnable.
 3. Truly free-running (some vintage emulations, deliberately): flagged in
-   `bloom explain`; renders are handled as takes.
+   `field explain`; renders are handled as takes.
 
 **Renders of nondeterministic nodes are takes** (see
 [project-model.md](project-model.md)): numbered, auditioned, one active. A

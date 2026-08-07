@@ -16,14 +16,14 @@ import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 // Deliberate sounds as project citizens (project-layout.md §1.4, §4):
 // loaded from sounds/ beside the buildable types, validated,
-// hash-verified, every variant auditionable, and `bloom choose`
+// hash-verified, every variant auditionable, and `field choose`
 // repointing what the sound's own label resolves to — clips reference
 // the sound by name, so nothing is ever copied into a ledger.
 
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-choose-'));
+  root = mkdtempSync(join(tmpdir(), 'field-choose-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'opener');
   writeGenerateSound('keys', ['fake wav one', 'fake wav two']);
@@ -33,7 +33,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// The recipe a real `bloom generate` would leave behind, via the same
+// The recipe a real `field generate` would leave behind, via the same
 // schema+canonicalize path the command uses: variants in audio/<name>/,
 // the sound in sounds/<name>.yaml. No `chosen` yet — choosing is the
 // deliberate act under test.
@@ -128,7 +128,7 @@ describe('generative sounds in the project model', () => {
     writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('keys'));
     expect(
       loadProject(root).diagnostics.some((d) =>
-        d.message.includes('no chosen variant yet — bloom choose keys first'),
+        d.message.includes('no chosen variant yet — field choose keys first'),
       ),
     ).toBe(true);
   });
@@ -178,7 +178,7 @@ describe('generative sounds in the project model', () => {
   });
 });
 
-describe('bloom choose', () => {
+describe('field choose', () => {
   it('repoints the sound to a variant and annotates the recipe', async () => {
     const result = await chooseVariant(root, 'keys', { song: 'opener', variant: 1 });
     expect(result).toMatchObject({

@@ -43,10 +43,10 @@ const normalizeYaml = (rate: number) =>
   ['name: pad-normalized', 'type: normalize', 'source: pad', `sample_rate: ${rate}`, 'bit_depth: 16', ''].join('\n');
 
 beforeEach(async () => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-build-'));
+  root = mkdtempSync(join(tmpdir(), 'field-build-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  const src = join(root, '..', `bloom-build-src-${Math.random()}.wav`);
+  const src = join(root, '..', `field-build-src-${Math.random()}.wav`);
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
@@ -71,8 +71,8 @@ const countingRunner = () => {
 
 describe('projectRelative', () => {
   it('strips the project root, which is the same on every line', () => {
-    expect(projectRelative('/p', '/p/.bloom/out/songs/creek/mix/main.wav')).toBe(
-      '.bloom/out/songs/creek/mix/main.wav',
+    expect(projectRelative('/p', '/p/.field/out/songs/creek/mix/main.wav')).toBe(
+      '.field/out/songs/creek/mix/main.wav',
     );
     expect(projectRelative('/p', '/p/songs/creek/audio/pad.wav')).toBe('songs/creek/audio/pad.wav');
   });
@@ -139,7 +139,7 @@ describe('build', () => {
     const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     const rule = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(rule.committed).toBeUndefined();
-    expect(rule.outputPath!).toContain('.bloom/out'); // materialized, not committed
+    expect(rule.outputPath!).toContain('.field/out'); // materialized, not committed
   });
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
@@ -169,7 +169,7 @@ describe('build', () => {
   });
 
   it('reserves "all" as a name', async () => {
-    const src = join(root, '..', `bloom-build-all-${Math.random()}.wav`);
+    const src = join(root, '..', `field-build-all-${Math.random()}.wav`);
     writeWav(src);
     await expect(importAsset(root, 'creek', src, 'all')).rejects.toThrow('reserved');
     rmSync(src);
@@ -263,7 +263,7 @@ describe('build', () => {
     await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(1);
 
-    const actionsDir = join(root, '.bloom/cache/actions');
+    const actionsDir = join(root, '.field/cache/actions');
     const entry = readdirSync(actionsDir).find((f) => f.endsWith('.json'))!;
     writeFileSync(join(actionsDir, entry), '{"rule": "norm'); // crash mid-write
 
@@ -345,25 +345,25 @@ describe('supercollider', () => {
 });
 
 describe('runScProgram edges (no sclang needed)', () => {
-  const scratch = () => join(root, '.bloom');
+  const scratch = () => join(root, '.field');
   const params = { seed: 1, duration: 0.1, channels: 1 as const, sampleRate: 48000 };
 
   const withSclang = async (binary: string, fn: () => Promise<void>) => {
-    const prev = process.env['BLOOM_SCLANG'];
-    process.env['BLOOM_SCLANG'] = binary;
+    const prev = process.env['FIELD_SCLANG'];
+    process.env['FIELD_SCLANG'] = binary;
     try {
       await fn();
     } finally {
-      if (prev === undefined) delete process.env['BLOOM_SCLANG'];
-      else process.env['BLOOM_SCLANG'] = prev;
+      if (prev === undefined) delete process.env['FIELD_SCLANG'];
+      else process.env['FIELD_SCLANG'] = prev;
     }
   };
 
-  it('errors hard when BLOOM_SCLANG points at a missing binary', async () => {
+  it('errors hard when FIELD_SCLANG points at a missing binary', async () => {
     await withSclang('/nonexistent/sclang-determinism-wrapper', async () => {
       await expect(
         runScProgram(join(root, 'x.scd'), join(scratch(), 'out.wav'), params),
-      ).rejects.toThrow('BLOOM_SCLANG points at a missing binary');
+      ).rejects.toThrow('FIELD_SCLANG points at a missing binary');
     });
   });
 
@@ -413,20 +413,20 @@ const sclangPresent =
 
 describe.skipIf(!sclangPresent)('sc-render integration (requires sclang)', () => {
   const SC_PROGRAM = `(
-var seed = "BLOOM_SEED".getenv.asInteger;
-var dur = "BLOOM_DURATION".getenv.asFloat;
-var rate = "BLOOM_SAMPLE_RATE".getenv.asInteger;
-var out = "BLOOM_OUTPUT".getenv;
-var chans = "BLOOM_CHANNELS".getenv.asInteger;
+var seed = "FIELD_SEED".getenv.asInteger;
+var dur = "FIELD_DURATION".getenv.asFloat;
+var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
+var out = "FIELD_OUTPUT".getenv;
+var chans = "FIELD_CHANNELS".getenv.asInteger;
 var freq, score;
 thisThread.randSeed = seed;
 freq = rrand(200.0, 800.0);
-SynthDef(\\bloomTestTone, { |freq = 440|
+SynthDef(\\fieldTestTone, { |freq = 440|
 	var env = EnvGen.kr(Env.linen(0.01, dur - 0.02, 0.01), doneAction: 2);
 	Out.ar(0, (SinOsc.ar(freq) * 0.2 * env) ! chans);
 }).store;
 score = Score([
-	[0.0, Synth.basicNew(\\bloomTestTone).newMsg(args: [\\freq, freq])],
+	[0.0, Synth.basicNew(\\fieldTestTone).newMsg(args: [\\freq, freq])],
 	[dur, [0]]
 ]);
 score.recordNRT(
@@ -455,7 +455,7 @@ score.recordNRT(
     expect(again[0]!.cached).toBe(true);
 
     // Same seed, wiped cache: the render is reproducible bit-for-bit.
-    rmSync(join(root, '.bloom/cache'), { recursive: true, force: true });
+    rmSync(join(root, '.field/cache'), { recursive: true, force: true });
     const rebuilt = await buildLabels(root, [label]);
     expect(rebuilt[0]!.cached).toBe(false);
     expect(rebuilt[0]!.sha256).toBe(first[0]!.sha256);

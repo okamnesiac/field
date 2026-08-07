@@ -21,7 +21,7 @@ describe('song derivation', () => {
 
   it('finds the song in asset and artifact paths', () => {
     expect(songDirOfPath('/p', '/p/songs/creek/audio/kick.wav')).toBe('songs/creek');
-    expect(songDirOfPath('/p', '/p/.bloom/out/songs/creek/mix/main.wav')).toBe('songs/creek');
+    expect(songDirOfPath('/p', '/p/.field/out/songs/creek/mix/main.wav')).toBe('songs/creek');
     expect(songDirOfPath('/p', '/p/shared/thing.wav')).toBeUndefined();
   });
 });

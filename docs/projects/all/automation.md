@@ -32,7 +32,7 @@ modern generation:
 Conclusion: breakpoints are table stakes; first-class generators are
 where DAWs are heading, not an exotic detour. And the hard part of a
 universal modulation system — realtime routing and lane UI — is exactly
-the part Bloom's declarative model sidesteps.
+the part Field's declarative model sidesteps.
 
 ## 2 Decisions (DECIDED, 2026-08-05)
 
@@ -46,7 +46,7 @@ the part Bloom's declarative model sidesteps.
    are what every migration path (DAW import, recorded fader moves)
    produces.
 2. **Control rate only; audio-rate modulation is SuperCollider's job.**
-   Bloom automation modulates *parameters*, not samples. Anything that
+   Field automation modulates *parameters*, not samples. Anything that
    wants audio-rate modulation — FM, ring-mod textures, sample-rate
    signal routing — belongs in an `.scd` recipe on the sc-render path
    (or, later, live SC). This keeps the automation model small and puts

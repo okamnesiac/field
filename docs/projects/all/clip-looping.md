@@ -3,11 +3,11 @@
 **Status:** Complete. Clip looping shipped in #21; #23 extended looping
 to the song layer (`length` + `loop: true` in song.yaml — the mix folds
 the overhang onto the start, one seamless pass of the infinite
-performance) and the player (`bloom play --loop`, gapless in the daemon,
+performance) and the player (`field play --loop`, gapless in the daemon,
 with the `--click` metronome and phase-locked beat readout built to
-verify it). field's creek is the proof: one looped keys clip replaced
+verify it). bloom's creek is the proof: one looped keys clip replaced
 the four hand-tiled ones with a byte-identical placement plan, and the
-song loops at exactly 12 bars. Motivated by field's keys track — one
+song loops at exactly 12 bars. Motivated by bloom's keys track — one
 4-bar generation hand-tiled four times on the grid with click-guard
 micro-fades ([ace-generation.md](ace-generation.md) shipped the
 generation; the tiling hack shipped with it).
@@ -36,7 +36,7 @@ phrase tiles a section without hand-chained copies.
    without deleting its configuration.
 3. **`every` is in anchor units, like `position`/`duration`** — ticks on
    musical clips (repeats stay on the grid straight through tempo ramps,
-   which is what "on rhythm" means; field's keys are the proof), samples
+   which is what "on rhythm" means; bloom's keys are the proof), samples
    on absolute clips. Omitted, the repetition interval is the source's
    sample length — back-to-back tiling, the common constant-tempo case.
    Omitted `every` requires an asset source: a target's length is not
@@ -58,12 +58,12 @@ phrase tiles a section without hand-chained copies.
    expands a looped clip into the same resolved per-repetition entries
    equivalent hand-written clips would produce, so the render code and the
    action-key format do not change: clips without `loop` hash identically
-   to before (no cache invalidation), and a loop that reproduces field's
+   to before (no cache invalidation), and a loop that reproduces bloom's
    hand tiling produces the same placement plan.
 
 ## 2 Definition of done
 
-Field's four hand-tiled keys clips become one looped clip; `bloom check`
+Bloom's four hand-tiled keys clips become one looped clip; `field check`
 passes; the placement plan matches what the hand tiling produced (same
 seams, same fades expressible); truncate and overlay both render and are
 covered by tests.
@@ -72,4 +72,4 @@ covered by tests.
 
 1. Schema (`loop` map + KeyOrder), `planTrack` expansion, validation
    (anchor units, target-source needs `every`, fades fit slots), tests,
-   docs; field swaps the hack for the feature after merge.
+   docs; bloom swaps the hack for the feature after merge.

@@ -1,16 +1,16 @@
 # Plan: Watch mode — the loop follows the project
 
 **Status:** Implemented (2026-08-06). Chunk 1 — the daemon `reload` op
-(takeover at the wrap, daemon 0.4) and `bloom build --watch` — landed
-in #34; chunk 2 — `play --loop --watch`, the §3 walk run against field
+(takeover at the wrap, daemon 0.4) and `field build --watch` — landed
+in #34; chunk 2 — `play --loop --watch`, the §3 walk run against bloom
 (scripted, null output; every step behaved), and the docs paragraphs —
 is on the PR that carries this status line. §5's `status`-visibility
 question remains open. Written against the layout-migration vocabulary
 (project-layout.md §4, landed in #31).
 
-**Goal:** `bloom play <song> --loop --watch` keeps the loop playing
+**Goal:** `field play <song> --loop --watch` keeps the loop playing
 while the project changes underneath it: edit a clip, nudge a fader,
-rewrite an `.scd`, `bloom choose` a different variant — and the running
+rewrite an `.scd`, `field choose` a different variant — and the running
 loop picks it up without anyone stopping the transport. The dev-tool
 move (`tsc --watch`, hot reload) applied to music, and the core of the
 agent story: an agent edits YAML while a human just keeps listening.
@@ -42,7 +42,7 @@ agent story: an agent edits YAML while a human just keeps listening.
    comment edit or `fmt` pass is all cache hits) and correct by
    construction: hash moved ⇒ swap, hash same ⇒ silence. No debounce
    heuristics beyond a few hundred ms of write-burst coalescing.
-4. **`bloom build --watch <label>` is the underlying verb;
+4. **`field build --watch <label>` is the underlying verb;
    `play --watch` composes it.** The headless form is useful alone (an
    agent keeping a project green; a CI-like local loop), and the play
    form is exactly: watch-build, then reload-at-wrap on hash movement.
@@ -54,7 +54,7 @@ agent story: an agent edits YAML while a human just keeps listening.
    and build never generates a generative sound (project-layout.md
    §1.2), so no watcher event can burn model-minutes or replace chosen
    audio. But a `chosen:` repoint is just a YAML edit, so
-   `bloom choose` against a running watch is live A/B-ing of variants
+   `field choose` against a running watch is live A/B-ing of variants
    inside the loop — likely the single best demo of the system.
 6. **Slow rebuilds don't glitch.** Builds land atomically in the CAS;
    until the new artifact exists, the old mix keeps looping. An `.scd`
@@ -65,7 +65,7 @@ agent story: an agent edits YAML while a human just keeps listening.
 
 - **Watcher:** FSEvents via `fs.watch(root, { recursive: true })`
   (macOS-only by charter), filtered to the files the loader reads plus
-  program files and assets — in practice: everything except `.bloom/`
+  program files and assets — in practice: everything except `.field/`
   (watching build output would self-trigger forever) and `.git/`.
   Debounce ~300 ms to coalesce editor write-bursts and `fmt` rewrites.
 - **Loop body:** on a settled burst — `loadProject`; if diagnostics,
@@ -98,12 +98,12 @@ agent story: an agent edits YAML while a human just keeps listening.
 
 ## 3 Definition of done
 
-`bloom play creek --loop --watch`, then, without touching the
+`field play creek --loop --watch`, then, without touching the
 transport: edit a clip position (loop updates at the wrap), change a
 track fader (sum-only rebuild, updates), edit an `.scd` (render
 completes, updates one wrap later), break a YAML file (diagnostics
-print, loop keeps playing, fixing it recovers), `bloom fmt` (nothing
-rebuilds, nothing swaps), and `bloom choose <sound> --variant 2` from
+print, loop keeps playing, fixing it recovers), `field fmt` (nothing
+rebuilds, nothing swaps), and `field choose <sound> --variant 2` from
 another shell (the loop is A/B-ing variants live). Ctrl-C still ends
 the session cleanly.
 
@@ -111,7 +111,7 @@ the session cleanly.
 
 1. Daemon `reload` + protocol bump; CLI `build --watch` (watcher,
    debounce, coalescing, check-gate) with tests against a fake runner.
-2. `play --loop --watch` composing the two; field demo of the
+2. `play --loop --watch` composing the two; bloom demo of the
    definition-of-done walk; docs (build-graph.md gains the watch
    paragraph; playback.md note on reload).
 

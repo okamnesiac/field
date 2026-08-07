@@ -101,10 +101,10 @@ async function until<T>(get: () => T | undefined, ms = 8000): Promise<T> {
 }
 
 beforeEach(async () => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-watch-'));
+  root = mkdtempSync(join(tmpdir(), 'field-watch-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  const src = join(root, '..', `bloom-watch-src-${Math.random()}.wav`);
+  const src = join(root, '..', `field-watch-src-${Math.random()}.wav`);
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
@@ -244,7 +244,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     const base = first.outcomes.find((o) => o.label === '//songs/creek/sound:gen1')!;
     expect(base.outputPath!.endsWith('audio/gen1/1.wav')).toBe(true);
 
-    // bloom choose is exactly this YAML edit (watch.md §1.5): the label's
+    // field choose is exactly this YAML edit (watch.md §1.5): the label's
     // hash moves and the report carries the newly chosen committed file —
     // the path play --watch hands the daemon.
     writeGenerative(2);
@@ -306,7 +306,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
   });
 
   it('ignores its own output tree, and stays live for real edits', async () => {
-    // The build writes .bloom/ on every pass, so watching it would
+    // The build writes .field/ on every pass, so watching it would
     // self-trigger forever (§2). Nothing pinned that until now — and the
     // second half is what makes the first half mean anything: a watcher
     // that had simply died would also report no rebuild.
@@ -318,9 +318,9 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     await quiet(events);
 
     const before = events.length;
-    mkdirSync(join(root, '.bloom/out/songs/creek/sounds'), { recursive: true });
-    writeFileSync(join(root, '.bloom/out/songs/creek/sounds/probe.wav'), 'not a rebuild trigger');
-    writeFileSync(join(root, '.bloom/cache/probe.json'), '{}');
+    mkdirSync(join(root, '.field/out/songs/creek/sounds'), { recursive: true });
+    writeFileSync(join(root, '.field/out/songs/creek/sounds/probe.wav'), 'not a rebuild trigger');
+    writeFileSync(join(root, '.field/cache/probe.json'), '{}');
     await new Promise((r) => setTimeout(r, 400)); // 8× the debounce
     expect(events).toHaveLength(before);
 

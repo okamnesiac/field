@@ -10,5 +10,5 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
   here while §5's status-visibility question is open, per the line
   below's precedent.
 - [Project core](all/project-core.md) — all three chunks shipped (#4–#6);
-  stays here until real use (field, new phases) stops surfacing
+  stays here until real use (bloom, new phases) stops surfacing
   surprises.

@@ -4,7 +4,7 @@
 [playback.md](playback.md); inserted ahead of ACE deliberately — ACE stems
 want tone-shaping on arrival, and mixes have needed a real limiter since
 creek's sum first clipped (a master `gain_db` was hand-tuned as a stopgap
-in field).
+in bloom).
 
 **Goal:** three offline effects — `eq`, `limit`, `reverb` — as build
 rules, chainable with everything the graph already does, then usable as
@@ -17,7 +17,7 @@ for the mixer (mix-assembly.md §1): **the executor is the replaceable
 part; the contract is the durable part.** Schemas, parameter semantics,
 tests, and rendered artifacts survive the live-DSP era untouched — the
 daemon changes who executes, not what is declared. Offline rendering is
-permanent Bloom architecture (freezing is caching), so the TS
+permanent Field architecture (freezing is caching), so the TS
 implementations either remain the offline executors or become the
 bit-exact reference the native code is tested against. The alternative —
 deferring effects until the recording era — was rejected: it leaves every
@@ -43,7 +43,7 @@ Two obligations recorded up front:
   20 Hz–20 kHz (per-band dB summed, as Fyra does), mean power,
   `−10·log₁₀(meanEnergy)`, clamped ±12 dB, applied as one scalar — EQ
   moves change tone, not level. One divergence: Fyra pins the integral to
-  48 kHz so saved songs never shift; Bloom computes at the project rate,
+  48 kHz so saved songs never shift; Field computes at the project rate,
   because a rate change re-renders everything anyway and the action key
   sees it.
 - **`limit`** — offline lookahead peak limiter: `ceiling_db` (default −1),
@@ -63,7 +63,7 @@ Two obligations recorded up front:
 
 - Every single-input rule sources **exactly one of `asset:` or
   `target:`** — the clip pattern. `normalize` migrates from its old
-  `input:` field to the same shape (breaking; field is the only project
+  `input:` field to the same shape (breaking; bloom is the only project
   and updates in the same breath). This also closes the loop our
   rate-mismatch error promises: normalize *of a target* is now
   declarable.
@@ -71,7 +71,7 @@ Two obligations recorded up front:
   cached per link with early cutoff. Rule impls declare `targetDeps`
   alongside `assetDeps`; the graph wires both.
 - Target→target references make **cycles declarable** for the first time,
-  so `bloom check` grows a cycle detector with the cycle spelled out in
+  so `field check` grows a cycle detector with the cycle spelled out in
   the diagnostic — the engine's ordering guard must never be the first
   thing to notice.
 
@@ -93,5 +93,5 @@ a one-line-diff-sized edit that rebuilds exactly its own chain.
    the accepted cost model) and a `master:` chain on mixes, applied
    **after** the sum and the master gain so a final limiter's ceiling
    guards the true output (gain drives *into* the limiter; anything else
-   would defeat it). Same effect schemas in all three positions. field
+   would defeat it). Same effect schemas in all three positions. bloom
    demonstrates everything (§4).

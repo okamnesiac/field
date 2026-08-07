@@ -1,6 +1,6 @@
 # Plan: ACE generation
 
-**Status:** Complete (2026-08-05, #17 + #18). Both chunks shipped; field
+**Status:** Complete (2026-08-05, #17 + #18). Both chunks shipped; bloom
 demonstrates the full loop — generate, audition variants in the mix,
 `choose`, clip the promoted asset into creek. The goal's further verbs
 (`extend`, `repaint`, …) are future phases, not this plan. §5 has the
@@ -8,11 +8,11 @@ open follow-ups. Layout superseded 2026-08-06
 ([project-layout.md](project-layout.md) §1.4, §4): the `generation/`
 directory and `//songs/<s>/generation:` labels (§3.2, §4.2 below)
 migrate to deliberate `generate` sounds in `sounds/` with variants in
-`audio/`, chosen by repointing (`bloom choose`) rather than promotion
+`audio/`, chosen by repointing (`field choose`) rather than promotion
 into the ledger (§4.8); the committed-not-cached decision (§3.1)
 stands. The `ace` CLI prefix retired with §1.7.
 
-**Goal:** `bloom ace generate` (then `extend`, `repaint`, `variants`, …):
+**Goal:** `field ace generate` (then `extend`, `repaint`, `variants`, …):
 committed generation recipes produce audio assets through ACE-Step running in
 a Python worker, with full provenance.
 
@@ -25,7 +25,7 @@ a Python worker, with full provenance.
   phase reorder, the third rule is `track-render`, so the refactor moved to
   [mix-assembly.md](mix-assembly.md) §5 and lands there, not here.
 
-- The worker protocol comes first: a Python subprocess (`bloom-modeld`
+- The worker protocol comes first: a Python subprocess (`field-modeld`
   pattern) taking immutable inputs and a JSON job spec on stdio, emitting
   assets + structured metadata ([architecture.md](../../architecture.md)
   "Python model-runners"). ACE is the first client of the protocol, not a
@@ -54,7 +54,7 @@ as a reviewable diff.
 1. **ACE lives outside the build graph: outputs are committed, not
    cached.** The reproducibility caveat (§1) is structural — a fixed seed
    reproduces on the same machine, not across GPU/framework versions — so
-   `bloom ace generate` is a *generation workflow*, not a rule: it runs
+   `field ace generate` is a *generation workflow*, not a rule: it runs
    the model, lands variants, and the chosen one is imported as an
    ordinary committed asset with the recipe recorded as provenance beside
    it. The recipe serves deliberate regeneration and audit, never a cache
@@ -68,19 +68,19 @@ as a reviewable diff.
    requirements. Revisit then, not now. ACE's variants-as-takes UX
    (numbered, auditioned, one active) is a workflow convention in
    `generation/`, no graph support required.
-3. **`bloom-aced`: a resident worker with the audiod lifecycle.** Model
+3. **`field-aced`: a resident worker with the audiod lifecycle.** Model
    load costs tens of seconds and prompt iteration is the whole workflow,
    so the worker is a daemon: spawn-on-demand, flock-owned socket at
-   `.bloom/aced.sock`, versioned NDJSON with a `hello` handshake,
-   streaming `progress` events, idle-exit. One house style for Bloom
+   `.field/aced.sock`, versioned NDJSON with a `hello` handshake,
+   streaming `progress` events, idle-exit. One house style for Field
    daemons. The idle timeout is shorter-fused than audiod's (default
    10 min, tunable) because an idle model worker holds several GB of
    unified memory.
 4. **`uv` manages the Python side, and the Python is strictly typed.**
    `python/aced/` carries its own pinned, lockfiled environment; setup is
-   an explicit, loud `bloom ace setup` (environment + the multi-GB
+   an explicit, loud `field ace setup` (environment + the multi-GB
    HuggingFace weights download, consented, never a surprise), with a
-   `BLOOM_ACED_PYTHON` override mirroring `BLOOM_AUDIOD`. **Pyright in
+   `FIELD_ACED_PYTHON` override mirroring `FIELD_AUDIOD`. **Pyright in
    strict mode** gates the worker in CI (PyLance's engine, so the editor
    and the gate agree); every module is fully annotated, and the one
    untyped boundary — ACE-Step's own package — is quarantined behind a
@@ -92,16 +92,16 @@ as a reviewable diff.
 ## 4 Chunks
 
 1. **The worker** (shipped, #17) — `python/aced/` (uv project, ACE-Step
-   pinned), `bloom-aced` with the daemon-lite lifecycle and NDJSON
+   pinned), `field-aced` with the daemon-lite lifecycle and NDJSON
    protocol (`hello`, `generate`, streaming progress, `quit`),
-   `bloom ace setup` and `bloom ace generate` end to end: prompt → WAV
+   `field ace setup` and `field ace generate` end to end: prompt → WAV
    variants on disk + provenance YAML. First generation ran 2×12 s in
    ~15 s on the M3 Max after a one-time model load.
 2. **Variants as takes** (shipped, #18) — the `generation/` recipe schema,
-   numbered variants with hashes, audition via `bloom play`
-   (`//songs/<song>/generation:<name>-<n>`), and `bloom ace choose`
+   numbered variants with hashes, audition via `field play`
+   (`//songs/<song>/generation:<name>-<n>`), and `field ace choose`
    promoting the active variant to a committed asset wired for clips — in
-   place, no bytes copied, reversibly; field demonstrates with a generated
+   place, no bytes copied, reversibly; bloom demonstrates with a generated
    part in creek.
 
 ## 5 Follow-ups
@@ -115,4 +115,4 @@ as a reviewable diff.
   cancel could come with the recording era's job control.
 - ACE-Step writes `.cache/acestep/progress_estimates.json` into the
   daemon's cwd, i.e. the user's project. Redirect next to the weights in
-  `~/.bloom/models` if ACE-Step's env allows it.
+  `~/.field/models` if ACE-Step's env allows it.

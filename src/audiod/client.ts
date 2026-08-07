@@ -17,32 +17,32 @@ import {
   type AudiodEvent,
 } from './protocol.js';
 
-// Client for the per-project bloom-audiod daemon (playback.md §3): connects
-// to .bloom/audiod.sock, spawning the daemon on demand when nobody owns the
+// Client for the per-project field-audiod daemon (playback.md §3): connects
+// to .field/audiod.sock, spawning the daemon on demand when nobody owns the
 // socket — daemon-lite lifecycle. The daemon runs with its cwd at the
 // project root and a root-relative socket path, keeping the bound path
 // inside sun_path's 104 bytes regardless of how deep the project lives.
 
-const SOCKET_RELATIVE = '.bloom/audiod.sock';
+const SOCKET_RELATIVE = '.field/audiod.sock';
 
-// The built daemon binary, or undefined if it has not been built. BLOOM_AUDIOD
+// The built daemon binary, or undefined if it has not been built. FIELD_AUDIOD
 // overrides for wrappers and tests; the default is the CMake output inside
 // this package (dist/audiod/client.js → package root → native build dir).
 export function daemonBinary(): string | undefined {
-  const override = process.env['BLOOM_AUDIOD'];
+  const override = process.env['FIELD_AUDIOD'];
   if (override) {
     // Resolved now because the daemon spawns with its cwd at the project
     // root, where a relative override would no longer mean anything.
     const absolute = resolve(override);
     if (!existsSync(absolute)) {
-      throw new Error(`BLOOM_AUDIOD points at a missing binary: ${override}`);
+      throw new Error(`FIELD_AUDIOD points at a missing binary: ${override}`);
     }
     return absolute;
   }
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const built = join(
     packageRoot,
-    'native/audiod/build/bloom-audiod_artefacts/Release/bloom-audiod',
+    'native/audiod/build/field-audiod_artefacts/Release/field-audiod',
   );
   return existsSync(built) ? built : undefined;
 }
@@ -99,7 +99,7 @@ export class AudiodClient extends EventEmitter {
       // A dead daemon must surface as an error on every in-flight request,
       // never as a silent hang.
       for (const [, entry] of this.pending) {
-        entry.reject(new Error('bloom-audiod connection closed'));
+        entry.reject(new Error('field-audiod connection closed'));
       }
       this.pending.clear();
       this.emit('close');
@@ -111,24 +111,24 @@ export class AudiodClient extends EventEmitter {
     let socket = await tryConnect(path, 1000);
     if (!socket) {
       if (!(options.spawnIfNeeded ?? true)) {
-        throw new Error('bloom-audiod is not running');
+        throw new Error('field-audiod is not running');
       }
       const binary = daemonBinary();
       if (!binary) {
-        throw new Error('bloom-audiod is not built (pnpm build:native, or set BLOOM_AUDIOD)');
+        throw new Error('field-audiod is not built (pnpm build:native, or set FIELD_AUDIOD)');
       }
       const args = ['--socket', SOCKET_RELATIVE];
-      // BLOOM_AUDIOD_NULL covers spawns the caller doesn't parameterize
-      // (bloom play in CI or on a deviceless machine).
-      if (options.nullOutput ?? process.env['BLOOM_AUDIOD_NULL'] === '1') args.push('--null-output');
+      // FIELD_AUDIOD_NULL covers spawns the caller doesn't parameterize
+      // (field play in CI or on a deviceless machine).
+      if (options.nullOutput ?? process.env['FIELD_AUDIOD_NULL'] === '1') args.push('--null-output');
       if (options.idleSeconds !== undefined) args.push('--idle', String(options.idleSeconds));
-      // .bloom/ is otherwise created lazily by the build cache; a project
+      // .field/ is otherwise created lazily by the build cache; a project
       // that has never built must still be able to spawn the daemon
       // (which also binds its socket in there).
-      mkdirSync(join(root, '.bloom'), { recursive: true });
+      mkdirSync(join(root, '.field'), { recursive: true });
       // A detached daemon's stderr would otherwise vanish; the log is the
       // only witness when startup fails.
-      const log = openSync(join(root, '.bloom', 'audiod.log'), 'a');
+      const log = openSync(join(root, '.field', 'audiod.log'), 'a');
       const child = spawn(binary, args, { cwd: root, detached: true, stdio: ['ignore', 'ignore', log] });
       child.on('error', () => {}); // surfaced as the connect timeout below
       child.unref();
@@ -140,7 +140,7 @@ export class AudiodClient extends EventEmitter {
         await new Promise((r) => setTimeout(r, 50));
         socket = await tryConnect(path, 250);
       }
-      if (!socket) throw new Error('bloom-audiod did not start (spawned but never answered)');
+      if (!socket) throw new Error('field-audiod did not start (spawned but never answered)');
     }
 
     const client = new AudiodClient(socket, 'unknown');
@@ -148,7 +148,7 @@ export class AudiodClient extends EventEmitter {
     if (hello.protocol !== PROTOCOL_VERSION) {
       client.close();
       throw new Error(
-        `bloom-audiod speaks protocol ${hello.protocol}, this CLI speaks ${PROTOCOL_VERSION} — rebuild the daemon`,
+        `field-audiod speaks protocol ${hello.protocol}, this CLI speaks ${PROTOCOL_VERSION} — rebuild the daemon`,
       );
     }
     (client as { daemonVersion: string }).daemonVersion = hello.version;

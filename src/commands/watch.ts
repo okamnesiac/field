@@ -5,7 +5,7 @@ import { loadProject } from '../model/project.js';
 import { build, type BuildOutcome, type GeneratorRunner } from '../graph/build.js';
 import { buildGraph, expandPattern } from '../graph/graph.js';
 
-// bloom build --watch (watch.md §2): rebuild the given labels every time
+// field build --watch (watch.md §2): rebuild the given labels every time
 // the project changes, and say which outputs audibly moved. The loop body
 // never diffs files or reasons about what an edit meant — it check-gates,
 // rebuilds through the normal engine, and compares output hashes (§1.3):
@@ -40,11 +40,11 @@ export interface WatchOptions {
   baseline?: ReadonlyMap<string, string>;
 }
 
-// Everything except the build's own output and git's: watching .bloom/
+// Everything except the build's own output and git's: watching .field/
 // would self-trigger forever (§2), and .git/ churns on every command.
 function relevant(filename: string): boolean {
   const top = filename.split(sep, 1)[0];
-  return top !== '.bloom' && top !== '.git';
+  return top !== '.field' && top !== '.git';
 }
 
 // Watches root and rebuilds patterns until the signal aborts. The first

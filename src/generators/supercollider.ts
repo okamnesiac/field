@@ -10,9 +10,9 @@ const execFileAsync = promisify(execFile);
 
 // supercollider: a SuperCollider program defines the sound, rendered
 // offline (NRT). The contract (sc-render.md §2): the program is a plain
-// .scd run via sclang with BLOOM_OUTPUT / BLOOM_SEED / BLOOM_DURATION /
-// BLOOM_SAMPLE_RATE / BLOOM_CHANNELS in the environment; it writes
-// BLOOM_OUTPUT and exits. Determinism given the seed is the program's
+// .scd run via sclang with FIELD_OUTPUT / FIELD_SEED / FIELD_DURATION /
+// FIELD_SAMPLE_RATE / FIELD_CHANNELS in the environment; it writes
+// FIELD_OUTPUT and exits. Determinism given the seed is the program's
 // job; the program's content hash is a cache input, so editing the code
 // invalidates its own renders. `source:` names the program: a bare
 // filename resolves on the type's home shelf, shared/instruments/
@@ -53,7 +53,7 @@ export function programPath(sound: SupercolliderSound): string {
 }
 
 // Run an SC program under the supercollider contract. Used by the rule
-// and by `bloom sc render` (direct, uncached iteration).
+// and by `field sc render` (direct, uncached iteration).
 export async function runScProgram(
   programPath: string,
   outputPath: string,
@@ -67,18 +67,18 @@ export async function runScProgram(
 ): Promise<void> {
   const env = {
     ...process.env,
-    BLOOM_OUTPUT: outputPath,
-    BLOOM_SEED: String(params.seed),
-    BLOOM_DURATION: String(params.duration),
-    BLOOM_SAMPLE_RATE: String(params.sampleRate),
-    BLOOM_CHANNELS: String(params.channels),
+    FIELD_OUTPUT: outputPath,
+    FIELD_SEED: String(params.seed),
+    FIELD_DURATION: String(params.duration),
+    FIELD_SAMPLE_RATE: String(params.sampleRate),
+    FIELD_CHANNELS: String(params.channels),
   };
   // The ceiling scales with the render: NRT is usually faster than realtime,
   // but the schema admits hour-long renders, and the ceiling exists to catch
   // hangs, not to race legitimate work.
   const timeout = params.timeoutMs ?? Math.max(180_000, 60_000 + params.duration * 10_000);
   const options = { env, timeout };
-  const override = process.env['BLOOM_SCLANG'];
+  const override = process.env['FIELD_SCLANG'];
   try {
     await execFileAsync(override ?? 'sclang', [programPath], options);
   } catch (err) {
@@ -87,7 +87,7 @@ export async function runScProgram(
       if (override) {
         // The override is the determinism escape hatch (sc-render.md §2); a
         // typo'd wrapper must never silently render through the app bundle.
-        throw new Error(`BLOOM_SCLANG points at a missing binary: ${override}`);
+        throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
       }
       if (existsSync(SCLANG_APP_FALLBACK)) {
         try {
@@ -97,7 +97,7 @@ export async function runScProgram(
           throw formatScError(fallbackErr as ExecError, programPath, timeout);
         }
       }
-      throw new Error('sclang not found on PATH (install SuperCollider or set BLOOM_SCLANG)');
+      throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
     }
     throw formatScError(e, programPath, timeout);
   }
@@ -135,8 +135,8 @@ export const supercolliderGenerator: Generator<SupercolliderSound> = {
     });
     if (!existsSync(outputPath)) {
       throw new Error(
-        `sc program ${sound.source} exited without writing BLOOM_OUTPUT — ` +
-          `it must render to the path in BLOOM_OUTPUT and call 0.exit`,
+        `sc program ${sound.source} exited without writing FIELD_OUTPUT — ` +
+          `it must render to the path in FIELD_OUTPUT and call 0.exit`,
       );
     }
   },

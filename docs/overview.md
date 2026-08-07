@@ -1,6 +1,6 @@
-# Bloom
+# Field
 
-Bloom treats music production like software development. A song is a
+Field treats music production like software development. A song is a
 repository. Production state — arrangement, tempo, takes, plugin chains,
 synthesis programs, generation recipes, mixes — lives in structured,
 schema-validated, diffable files. Every meaningful action is a CLI command;
@@ -16,7 +16,7 @@ text diff, unreliably scriptable, and versioned only as an opaque binary blob.
 Audio generation tools live outside the production environment, and no
 operation is reproducible. A coding agent cannot meaningfully operate a DAW.
 
-Bloom inverts this. A Bloom project is buildable, inspectable, editable, and
+Field inverts this. A Field project is buildable, inspectable, editable, and
 recordable without opening a DAW — from a terminal, from an agent, or from a
 small native control surface, all driving the same engine and the same files.
 
@@ -34,7 +34,7 @@ small native control surface, all driving the same engine and the same files.
 - **Node** — a producer or processor in the dependency graph: a recorded track,
   a SuperCollider program, a generative sound, a plugin chain, a bus.
 - **Label** — the address of something buildable: a stem, a sound, a cue mix,
-  the main mix. `bloom build //songs/opener/mix:main`. See
+  the main mix. `field build //songs/opener/mix:main`. See
   [build-graph.md](build-graph.md).
 - **Take** — one performance of something. Recorded takes and renders of
   nondeterministic nodes use the same machinery: numbered, auditioned, one
@@ -59,8 +59,8 @@ surround/Atmos, and Apollo Console automation (no supported API exists — see
 ## Two workflows
 
 **CLI-first.** Create, configure, generate, play, record, process, and render a
-project from the command line: `bloom init`, `bloom sc render`, `bloom ace
-generate`, `bloom build //mix:main`, `bloom record --track lead-vocal --punch
+project from the command line: `field init`, `field sc render`, `field ace
+generate`, `field build //mix:main`, `field record --track lead-vocal --punch
 42.2.1..46.1.1`.
 
 **A minimal recording widget** (later). A compact native macOS control surface
@@ -70,7 +70,7 @@ holds no hidden state unavailable to the CLI.
 
 ## Sequencing philosophy
 
-Bloom is built generation-first, because offline generation delivers unique
+Field is built generation-first, because offline generation delivers unique
 value (prompt → recipe → committed, diffable, buildable music) with zero
 real-time code. The real-time daemon — the riskiest component — arrives only
 after the project model has been battle-tested by real use. The current build

@@ -16,7 +16,7 @@ import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 const execFileAsync = promisify(execFile);
 
-// bloom generate / bloom choose (project-layout.md §1.4, §1.7, §4): the
+// field generate / field choose (project-layout.md §1.4, §1.7, §4): the
 // deliberate-trigger verbs over the generator category. Generation lives
 // OUTSIDE the build graph — outputs are committed, not cached. `generate`
 // runs the model (the recipe's `model:` field says which generator) and
@@ -137,8 +137,8 @@ export async function generateVariants(
 
     // Provenance: everything needed to audit or deliberately regenerate.
     // Parsed through the schema before writing — this command must never
-    // emit a target `bloom check` would reject — and canonicalized so
-    // `bloom fmt` is a no-op on fresh recipes.
+    // emit a target `field check` would reject — and canonicalized so
+    // `field fmt` is a no-op on fresh recipes.
     const recipe = generativeSoundSchema.parse({
       name,
       type: 'generative',
@@ -215,7 +215,7 @@ export async function chooseVariant(
   }
   const recipe = soundSchema.safeParse(recipeDoc.toJS());
   if (!recipe.success) {
-    throw new Error(`sound ${name}.yaml is invalid; fix it before choosing (bloom check)`);
+    throw new Error(`sound ${name}.yaml is invalid; fix it before choosing (field check)`);
   }
   if (recipe.data.type !== 'generative') {
     throw new Error(
@@ -236,7 +236,7 @@ export async function chooseVariant(
   const sha256 = await sha256File(absolute);
   if (sha256 !== variant.sha256) {
     throw new Error(
-      `variant ${options.variant} does not match its recorded sha256 — refusing to choose (bloom check)`,
+      `variant ${options.variant} does not match its recorded sha256 — refusing to choose (field check)`,
     );
   }
   const bytes = statSync(absolute).size;
@@ -255,14 +255,14 @@ export async function chooseVariant(
 export async function setupWorker(onLine: (line: string) => void): Promise<void> {
   const { acedAvailable } = await import('../aced/client.js');
   const available = acedAvailable();
-  if (!available.ok) throw new Error(available.reason ?? 'bloom-aced unavailable');
+  if (!available.ok) throw new Error(available.reason ?? 'field-aced unavailable');
   const project = join(
     new URL('../../python/aced', import.meta.url).pathname,
   );
-  onLine('syncing the bloom-aced environment (uv)…');
+  onLine('syncing the field-aced environment (uv)…');
   const { stderr } = await execFileAsync('uv', ['sync', '--project', project], {
     maxBuffer: 10 * 1024 * 1024,
   });
   for (const line of stderr.split('\n').slice(-5)) if (line.trim()) onLine(line);
-  onLine('environment ready — the first `bloom generate` downloads ~10 GB of model weights');
+  onLine('environment ready — the first `field generate` downloads ~10 GB of model weights');
 }

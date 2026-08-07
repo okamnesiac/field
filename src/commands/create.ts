@@ -54,7 +54,7 @@ export function createTrack(
   }
   const songDir = join(root, 'songs', song);
   if (!existsSync(join(songDir, 'song.yaml'))) {
-    throw new Error(`song "${song}" does not exist (bloom song create ${song})`);
+    throw new Error(`song "${song}" does not exist (field song create ${song})`);
   }
   const path = join(songDir, 'tracks', `${name}.yaml`);
   if (existsSync(path)) throw new Error(`track "${name}" already exists in "${song}"`);

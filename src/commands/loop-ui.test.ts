@@ -275,7 +275,7 @@ describe('openingHash', () => {
   });
 
   it('keeps the snapshot when the path moved: a repoint left the old file loaded', () => {
-    // bloom choose repoints a generation label at a different committed
+    // field choose repoints a generation label at a different committed
     // file, so the load really did open the previous variant.
     expect(openingHash('/songs/creek/audio/gen1/1.wav', A, {
       outputPath: '/songs/creek/audio/gen1/2.wav',

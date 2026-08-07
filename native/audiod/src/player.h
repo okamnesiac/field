@@ -36,13 +36,13 @@ public:
     // The daemon follows the system default live unless the user
     // explicitly selected a device; a selection whose device vanishes
     // resets to the default. This is what keeps a long-lived daemon's
-    // output honest against the `*` in `bloom devices` (#16).
+    // output honest against the `*` in `field devices` (#16).
     void refreshAudioDevice();
 
     // Returns {error} or {samples, sample_rate, channels}. With loop the
     // reader wraps at end-of-file — gapless, sample-exact — and the
     // stream never finishes: stop is the only way out, which is exactly
-    // the blocking-play contract `bloom play --loop` wants.
+    // the blocking-play contract `field play --loop` wants.
     juce::var load (const juce::File& file, bool loop);
 
     // Queues a takeover of the looping stream (watch.md §1.1): the new

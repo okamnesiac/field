@@ -1,6 +1,6 @@
-"""The bloom-aced wire protocol: NDJSON over a unix socket.
+"""The field-aced wire protocol: NDJSON over a unix socket.
 
-Same family as bloom-audiod's (playback.md §3.3): request/response with
+Same family as field-audiod's (playback.md §3.3): request/response with
 client-chosen ids, broadcast events, a versioned hello. The TS side's zod
 schemas are the cross-language source of truth; this module is the typed
 Python mirror.
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 PROTOCOL_VERSION = 1
-DAEMON_NAME = "bloom-aced"
+DAEMON_NAME = "field-aced"
 DAEMON_VERSION = "0.1.0"
 
 JsonObject = dict[str, Any]

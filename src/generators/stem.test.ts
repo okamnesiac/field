@@ -219,7 +219,7 @@ describe('stemGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bloom-stem-'));
+    dir = mkdtempSync(join(tmpdir(), 'field-stem-'));
   });
 
   afterEach(() => {
@@ -337,11 +337,11 @@ describe('track stems in the build graph', () => {
   };
 
   beforeEach(async () => {
-    root = mkdtempSync(join(tmpdir(), 'bloom-trackgraph-'));
+    root = mkdtempSync(join(tmpdir(), 'field-trackgraph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
     createTrack(root, 'creek', 'drums', 'audio');
-    const src = join(root, '..', `bloom-track-src-${Math.random()}.wav`);
+    const src = join(root, '..', `field-track-src-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
     rmSync(src);
@@ -450,7 +450,7 @@ describe('track stems in the build graph', () => {
 
   it('survives an order-permuting asset rename as a cache hit (#9 review)', async () => {
     // A second asset so a rename can permute name order: apple < kick < snare.
-    const src = join(root, '..', `bloom-track-src2-${Math.random()}.wav`);
+    const src = join(root, '..', `field-track-src2-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [Float32Array.from([0.5, 0.5])]);
     await importAsset(root, 'creek', src, 'snare');
     rmSync(src);
@@ -501,11 +501,11 @@ describe('clips over rule outputs', () => {
   let root: string;
 
   beforeEach(async () => {
-    root = mkdtempSync(join(tmpdir(), 'bloom-clipsrc-'));
+    root = mkdtempSync(join(tmpdir(), 'field-clipsrc-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
     createTrack(root, 'creek', 'drums', 'audio');
-    const src = join(root, '..', `bloom-clipsrc-${Math.random()}.wav`);
+    const src = join(root, '..', `field-clipsrc-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
     rmSync(src);

@@ -204,7 +204,7 @@ export const stemGenerator: Generator<StemSpec> = {
       if (wav.sampleRate !== ctx.sampleRate) {
         throw new Error(
           `input "${name}" is ${wav.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
-            `Bloom never resamples implicitly; render or convert it at the project rate ` +
+            `Field never resamples implicitly; render or convert it at the project rate ` +
             `(a normalize target at ${ctx.sampleRate}, or afconvert and re-import)`,
         );
       }

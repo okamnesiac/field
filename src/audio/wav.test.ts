@@ -7,7 +7,7 @@ import { readWav, writeWavFloat32 } from './wav.js';
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'bloom-wav-'));
+  dir = mkdtempSync(join(tmpdir(), 'field-wav-'));
 });
 
 afterEach(() => {

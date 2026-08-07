@@ -46,7 +46,7 @@ export interface GeneratorNode {
 // content-addressed like an asset. The sound's own label
 // (//songs/<song>/sound:<name>) resolves to its *chosen* variant — that
 // node is what clips and rules consume — while every variant is
-// additionally auditionable as :<name>-<n>. `bloom choose` repoints
+// additionally auditionable as :<name>-<n>. `field choose` repoints
 // which variant the sound's label means; nothing is ever re-run.
 export interface GenerationNode {
   kind: 'generation';

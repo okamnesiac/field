@@ -10,7 +10,7 @@ import type { StemSpec } from './stem.js';
 // is not special; it is one programmable synth behind this interface,
 // and the mixer arrives the same way. A deliberate type (`generate`)
 // has no Generator here — its generation is human-triggered
-// (bloom generate), which is what BuildableSound encodes. A Generator's
+// (field generate), which is what BuildableSound encodes. A Generator's
 // spec is either a declared sound (sounds/<name>.yaml) or a spec
 // synthesized from the project model (stem from track files, mix from
 // mixes/). Each is typed against its own spec —
@@ -60,7 +60,7 @@ export interface Generator<T extends GeneratorSpec = GeneratorSpec> {
   // each into an asset, sound, or shared edge. Program files are not
   // here: they participate by content hash (extraInputs), not as nodes.
   sources(spec: T): string[];
-  // Rule-specific semantic validation, run by bloom check.
+  // Rule-specific semantic validation, run by field check.
   validate(spec: T, ctx: ValidateContext): void;
   // Inputs that participate in the action key by content hash without being
   // graph nodes (e.g. a SuperCollider program file).

@@ -22,20 +22,20 @@ const binary = (() => {
   }
 })();
 
-describe.skipIf(!binary)('bloom play through the daemon', () => {
+describe.skipIf(!binary)('field play through the daemon', () => {
   let root: string;
   let project: LoadedProject;
 
   async function importTone(name: string, samples: number): Promise<void> {
-    const src = join(root, '..', `bloom-play-${name}-${Math.random()}.wav`);
+    const src = join(root, '..', `field-play-${name}-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [new Float32Array(samples).fill(0.1)]);
     await importAsset(root, 'creek', src, name);
     rmSync(src);
   }
 
   beforeEach(async () => {
-    process.env['BLOOM_AUDIOD_NULL'] = '1';
-    root = mkdtempSync(join(tmpdir(), 'bloom-playd-'));
+    process.env['FIELD_AUDIOD_NULL'] = '1';
+    root = mkdtempSync(join(tmpdir(), 'field-playd-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek'); // 120 bpm 4/4: one beat = 24000 samples
     await importTone('blip', 12000); // 0.25 s
@@ -43,7 +43,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   });
 
   afterEach(async () => {
-    delete process.env['BLOOM_AUDIOD_NULL'];
+    delete process.env['FIELD_AUDIOD_NULL'];
     try {
       const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
       await client.quit();
@@ -443,11 +443,11 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
   });
 
   it('transport without a daemon is a clear error', async () => {
-    const bare = mkdtempSync(join(tmpdir(), 'bloom-notransport-'));
+    const bare = mkdtempSync(join(tmpdir(), 'field-notransport-'));
     try {
       init({ dir: bare, name: 'bare' });
       await expect(transportStatusLines(bare, loadProject(bare))).rejects.toThrow(
-        'bloom-audiod is not running',
+        'field-audiod is not running',
       );
     } finally {
       rmSync(bare, { recursive: true, force: true });

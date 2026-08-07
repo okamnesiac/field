@@ -1,6 +1,6 @@
 # Plan: Musical time arrays
 
-**Status:** In progress (started 2026-08-05). Motivated by field's creek:
+**Status:** In progress (started 2026-08-05). Motivated by bloom's creek:
 `length: 46080` and `every: 15360` are tick math a human authors by
 calculator — the project files should accept the numbers musicians think
 in.
@@ -18,7 +18,7 @@ what the build graph sees.
    different number. A shell argument is not YAML; `--from 9.2.1` keeps
    its dotted string form. Also rejected: parallel `*_musical` fields
    (two fields per position that can disagree — the exact failure the
-   take dual-representation needs `bloom check` to police).
+   take dual-representation needs `field check` to police).
 2. **Scalar means ticks, array means musical.** The distinction is
    structural — no unit suffix, no tag field, no heuristic. Every
    existing file keeps its exact meaning.
@@ -73,14 +73,14 @@ what the build graph sees.
 
 ## 2 Definition of done
 
-field's creek is authored in musical notation — `length: [12]`, the keys
+bloom's creek is authored in musical notation — `length: [12]`, the keys
 loop in bars — with every rebuild a cache hit against the tick spelling;
-`bloom fmt` is stable over arrays and keeps them single-line; range and
+`field fmt` is stable over arrays and keeps them single-line; range and
 anchor misuse produce named diagnostics; tests cover resolution through
 meter changes and odd meters.
 
 ## 3 Chunks
 
 1. Meter-map position/span resolution, schema unions + `flow` emission,
-   model-layer resolution and diagnostics, tests, docs; field converts
+   model-layer resolution and diagnostics, tests, docs; bloom converts
    to musical notation after merge.

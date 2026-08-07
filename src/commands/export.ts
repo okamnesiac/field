@@ -5,9 +5,9 @@ import { sha256File } from '../hash.js';
 import { resolvePlayables, type Playable } from './play.js';
 import type { GeneratorRunner } from '../graph/build.js';
 
-// bloom export: build a label and drop the result somewhere a human
+// field export: build a label and drop the result somewhere a human
 // works, under a name a human can read. The build's own outputs live at
-// `.bloom/out/<label path>.wav` (and committed sources under their song's
+// `.field/out/<label path>.wav` (and committed sources under their song's
 // audio/), which is right for the engine and useless in a Finder window
 // or an email — this is the one command whose product is a *file you
 // take somewhere else*.
@@ -20,7 +20,7 @@ import type { GeneratorRunner } from '../graph/build.js';
 // Exports are versioned, never overwritten: finishing a mix and putting
 // it somewhere is how people mark a version, and the previous one is
 // often the only copy of a decision that was later undone. So a Desktop
-// accumulates creek-mix-main-v1.wav, -v2, -v3, and nothing Bloom does
+// accumulates creek-mix-main-v1.wav, -v2, -v3, and nothing Field does
 // removes any of them.
 
 export interface ExportResult {
@@ -165,7 +165,7 @@ export async function exportLabels(
 ): Promise<ExportResult[]> {
   const dir = options.to ?? defaultExportDir();
   // A missing destination is a typo or a machine without a Desktop, and
-  // creating it would bury both: `bloom export --to ~/Desktps` should
+  // creating it would bury both: `field export --to ~/Desktps` should
   // say so, not silently mint a directory.
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {
     throw new Error(`no such directory: ${dir}`);
@@ -202,7 +202,7 @@ export async function exportLabels(
     if (item.committed && sha256 !== item.sha256) {
       throw new Error(
         `refusing to export: ${item.label} content does not match its declared sha256 ` +
-          `(bloom check, then re-import or restore the file)`,
+          `(field check, then re-import or restore the file)`,
       );
     }
     verified.push({ item, sha256 });
