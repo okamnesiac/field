@@ -64,14 +64,30 @@ describe('sayGenerator.execute', () => {
 
   it('voice: Siri renders with the system voice — the recorded escape hatch', { timeout: 30_000 }, async () => {
     // Siri voices are hidden from say -v, so "Siri" omits -v entirely and
-    // takes whatever the machine's Spoken Content voice is.
+    // takes whatever the machine's Spoken Content voice is. What this
+    // pins is the escape hatch: no -v, and audio comes out.
+    //
+    // It deliberately does not assert that two Siri renders are
+    // byte-identical. It used to, and that assertion failed twice on CI
+    // in two days (#31, #41) on changes that cannot touch audio, with
+    // genuinely different hashes — while passing every time on a machine
+    // where the voice is long installed. A system voice that may be
+    // fetched or warmed on first use is exactly the thing the design
+    // says it will not promise bytes for: `Siri` follows a Settings
+    // toggle by construction, which is the trade recorded for it in
+    // build-graph.md. Asserting stability anyway made a true statement
+    // about Samantha into a false one about Siri.
+    //
+    // The determinism contract itself is covered above, on a nameable
+    // voice, where it holds and has never flaked.
     const a = join(dir, 'siri-a.wav');
     const b = join(dir, 'siri-b.wav');
     const ctx = { root: dir, sampleRate: 48000 };
     await sayGenerator.execute(target({ voice: 'Siri' }), [], a, ctx);
     await sayGenerator.execute(target({ voice: 'Siri' }), [], b, ctx);
-    expect(readWav(a).channels[0]!.length).toBeGreaterThan(4800);
-    expect(await sha256File(a)).toBe(await sha256File(b)); // stable while Settings are
+    for (const rendered of [a, b]) {
+      expect(readWav(rendered).channels[0]!.length).toBeGreaterThan(4800);
+    }
   });
 });
 
