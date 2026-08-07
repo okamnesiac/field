@@ -171,9 +171,31 @@ describe('build', () => {
       'try //songs/creek/asset:pad',
     );
     // Only when the singular actually exists — no guessing at a package
-    // this project does not have.
+    // this project does not have. This fixture has no clip'd track, so
+    // buildGraph mints no mix node and there is no `mix` package to
+    // suggest.
     await expect(buildLabels(root, ['//songs/creek/mixes:main'])).rejects.toThrow(
       /matched no labels: \/\/songs\/creek\/mixes:main$/,
+    );
+  });
+
+  it('maps mixes: to mix:, the one package that was singular already', async () => {
+    // The negative case above cannot reach this mapping — it bails at the
+    // existence check first — so the branch the PR body singles out had
+    // no test behind it (#41 review). A clip'd track gives the song a mix
+    // node, and then the plural spelling has something to point at.
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/creek/tracks/pad-track.yaml'),
+      ['name: pad-track', 'type: audio', 'clips:', '  - id: c1', '    source: pad', '    position: [1]', '    duration: [1]', ''].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/creek/mixes/main.yaml'),
+      ['name: main', 'tracks:', '  - pad-track', ''].join('\n'),
+    );
+
+    await expect(buildLabels(root, ['//songs/creek/mixes:main'])).rejects.toThrow(
+      'try //songs/creek/mix:main',
     );
   });
 

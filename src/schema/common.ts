@@ -22,12 +22,21 @@ export const labelName = slug.refine((n) => n !== RESERVED_LABEL_NAME, {
 // there is (§1.5: where a file lives declares who may see it, and a
 // song sees exactly itself plus shared/). Existence checks live in the
 // model layer; the schema admits exactly the two spellings.
-export const sourceRef = z
-  .string()
-  .refine(
-    (ref) => SLUG_PATTERN.test(sharedAssetName(ref) ?? ref),
-    'must be a name in the song or //shared/asset:<name>',
-  );
+export const sourceRef = z.string().superRefine((ref, ctx) => {
+  if (SLUG_PATTERN.test(sharedAssetName(ref) ?? ref)) return;
+  // The old plural spelling sitting in a project file is the flag-day
+  // case, and the one a person actually hits — the pattern hint in
+  // graph.ts only catches a mistyped *command*. Name the substitution
+  // rather than the grammar (#41 review).
+  const stale = /^\/\/shared\/assets:(.+)$/.exec(ref);
+  ctx.addIssue({
+    code: 'custom',
+    message:
+      stale !== null
+        ? `packages are singular: //shared/assets: is now //shared/asset: (try //shared/asset:${stale[1]!})`
+        : 'must be a name in the song or //shared/asset:<name>',
+  });
+});
 
 export const ticks = z.number().int().min(0);
 export const samples = z.number().int().min(0);

@@ -6,8 +6,9 @@ import { eqParams, limitParams, reverbParams } from './effects.js';
 // songs/<song>/sounds/<name>.yaml — one defined sound per file, name
 // matching the filename like tracks and takes (project-core.md §3.4 as
 // amended by project-layout.md §1.3 and §4: the directory is the
-// package, so the label //songs/<song>/sound:<name> reads as directory
-// + filename). Audio is committed bytes; a sound is a definition — and a
+// package's *plural*, so sounds/<name>.yaml is
+// //songs/<song>/sound:<name> — the folder holds many, the label
+// addresses one). Audio is committed bytes; a sound is a definition — and a
 // sound wrapped in an effect is a different sound, so the algebra
 // closes. Fields are flat and strict, discriminated by `type:` (§4.2,
 // the format's discriminator convention). `source:` (§4.3) names what a

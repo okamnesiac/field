@@ -209,11 +209,11 @@ every existing citation stay stable.
    `type: mix`.
    **Amended 2026-08-06:** keeping `mix:` while the file moved to
    `mixes/<name>.yaml` left it the only package that did not equal its
-   directory, contradicting §1.1.3's "the directory is the package" —
+   directory, contradicting §1.3's "the directory is the package" —
    a tension this record created and did not notice. Resolved the other
    way: **every package is now the singular of its directory**
    (`sound:`, `track:`, `asset:`, `mix:`), because a label addresses one
-   thing and reads as such. §1.1.3's principle is amended to match: the
+   thing and reads as such. §1.3's principle is amended to match: the
    directory is the package's *plural*. Directories and the `assets:`
    ledger key keep their plurals — both hold many.
 6. **`shared/` lands on three shelves: `instruments/`, `samples/`,

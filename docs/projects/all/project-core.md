@@ -105,7 +105,7 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    `tracks:` made the rule you would infer from any other label wrong
    exactly once, and wrong on the label you type most. The rejected fix
    was pluralizing `mix:` to restore "the package is its directory"
-   (project-layout.md §1.1.3). Singular won on how it reads: a label
+   (project-layout.md §1.3). Singular won on how it reads: a label
    addresses one thing, so `//songs/creek/track:keys` is "the keys
    track", and the directory stays plural because a folder holds many.
    The ledger's `assets:` key stays plural for the same reason — it is a
