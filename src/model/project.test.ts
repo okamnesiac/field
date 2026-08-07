@@ -123,6 +123,18 @@ describe('import', () => {
     rmSync(src);
   });
 
+  it('pre-flights past an editor lock file in sounds/', async () => {
+    createSong(root, 'opener');
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
+    // The name-collision pre-flight reads every sounds/*.yaml, and a
+    // dangling `.#hum.yaml` made it throw ENOENT before it could parse —
+    // crashing the command it exists to protect (#38 review P2).
+    symlinkSync('justin@Mac.12345:1754500000', join(root, 'songs/opener/sounds/.#hum.yaml'));
+    const src = sourceFile('hello audio');
+    await expect(importAsset(root, 'opener', src, 'first-take')).resolves.toBeDefined();
+    rmSync(src);
+  });
+
   it('derives a slug name from the filename', async () => {
     createSong(root, 'opener');
     const src = sourceFile();

@@ -75,11 +75,17 @@ function startWatch(patterns: string[], extra: Partial<WatchOptions> = {}) {
 // Waits for the watch to stop emitting: two consecutive windows with no
 // new events. FSEvents delivers on its own schedule, so "nothing happened
 // because of what I just did" is only measurable from a quiet baseline.
-async function quiet(events: Recorded[], window = 300): Promise<void> {
+async function quiet(events: Recorded[], window = 300, deadlineMs = 6000): Promise<void> {
+  const start = Date.now();
   for (;;) {
     const before = events.length;
     await new Promise((r) => setTimeout(r, window));
     if (events.length === before) return;
+    // A watcher that never settles is a failure to report, not a reason
+    // to hang until vitest's timeout kills the whole file.
+    if (Date.now() - start > deadlineMs) {
+      throw new Error(`watch never settled: ${events.length} events and still arriving`);
+    }
   }
 }
 

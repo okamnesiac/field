@@ -27,6 +27,21 @@
 
 const short = (sha256: string): string => sha256.slice(0, 12);
 
+// Which version the session's first block opens with. A rebuild that
+// lands before the first load leaves the successor's bytes at the same
+// path — a rule target's materialized path is stable across rebuilds —
+// so what just opened IS the successor, not the snapshot the play's own
+// build took. A chosen-variant repoint moves the path instead, and then
+// the old variant really is what loaded. This is the path correlation
+// later passes have had since #37; the first pass never did (#38 review).
+export function openingHash(
+  loadedPath: string,
+  snapshot: string,
+  held?: { outputPath?: string | undefined; sha256: string },
+): string {
+  return held !== undefined && held.outputPath === loadedPath ? held.sha256 : snapshot;
+}
+
 // Positions arriving after a wrap while a takeover is pending belong to
 // the successor; they are held until the daemon's `reloaded` confirms
 // (normally the same heartbeat batch). If confirmation never comes —

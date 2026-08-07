@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LoopDisplay } from './loop-ui.js';
+import { LoopDisplay, openingHash } from './loop-ui.js';
 
 // The display is a pure function of its calls over an injected write, so
 // these assert the exact byte stream — ANSI included. \x1b[2K clears the
@@ -260,5 +260,58 @@ describe('LoopDisplay', () => {
     const pad = ' '.repeat(17);
     expect(text()).toContain('  [2] 1.1');
     expect(text()).toContain(`  [2] 1.3${pad}└f6e5d4c3b2a1`); // still queued
+  });
+});
+
+// A rebuild can finish before the session's own first load — the seeded
+// baseline exists to report exactly that. What opens then is whatever the
+// path holds, which is why the answer is a path comparison and not the
+// snapshot the play's build took (#38 review P2).
+describe('openingHash', () => {
+  const held = { outputPath: '/out/mix/main.wav', sha256: B };
+
+  it('takes the held hash when the rebuild landed at the path being loaded', () => {
+    expect(openingHash('/out/mix/main.wav', A, held)).toBe(B);
+  });
+
+  it('keeps the snapshot when the path moved: a repoint left the old file loaded', () => {
+    // bloom choose repoints a generation label at a different committed
+    // file, so the load really did open the previous variant.
+    expect(openingHash('/songs/creek/audio/gen1/1.wav', A, {
+      outputPath: '/songs/creek/audio/gen1/2.wav',
+      sha256: B,
+    })).toBe(A);
+  });
+
+  it('keeps the snapshot when nothing was held', () => {
+    expect(openingHash('/out/mix/main.wav', A, undefined)).toBe(A);
+  });
+});
+
+describe('a rebuild that beats the first load', () => {
+  it('opens on the successor, shows nothing pending, and never claims it went unheard', () => {
+    // The reviewer's session: the rebuild landed at the stable output
+    // path before the daemon opened it, so B is what sounds from beat
+    // one. The block must open on B — then the reload we still send is
+    // byte-identical to what plays, which renders as nothing pending,
+    // keeps the block open, and leaves no `never sounded` claim about
+    // the version that was audible the whole time (#38 review P2).
+    const { d, text } = harness();
+    d.start('//songs/creek/sounds:long-96k', openingHash('/out/long-96k.wav', A, {
+      outputPath: '/out/long-96k.wav',
+      sha256: B,
+    }), ' (Volt 476)');
+    d.position('1.1', 0);
+    d.queue(B, '/out/long-96k.wav');
+    d.swapped('/out/long-96k.wav');
+    d.position('1.2', 240);
+    d.end();
+
+    const t = text();
+    expect(t).toContain('playing //songs/creek/sounds:long-96k─f6e5d4c3b2a1 → (Volt 476)');
+    expect(t).not.toContain('a1b2c3d4e5f6'); // the stale snapshot never appears
+    expect(t).not.toContain('┬'); // nothing is pending: it is already playing
+    expect(t).not.toContain('played'); // no phantom block for a zero-sample pass
+    expect(t).not.toContain('never sounded');
   });
 });

@@ -23,7 +23,10 @@ export function takenSongNames(songDir: string): Set<string> {
   const soundsDir = join(songDir, 'sounds');
   if (existsSync(soundsDir)) {
     for (const file of readdirSync(soundsDir)) {
-      if (!file.endsWith('.yaml')) continue;
+      // Dotfiles are editor debris, not sounds — and a dangling one
+      // (Emacs' `.#hum.yaml`) would throw ENOENT on the read below,
+      // which is exactly the crash this pre-flight promises not to be.
+      if (!file.endsWith('.yaml') || file.startsWith('.')) continue;
       taken.add(basename(file, '.yaml'));
       const parsed = soundSchema.safeParse(
         parseDocument(readFileSync(join(soundsDir, file), 'utf8')).toJS(),

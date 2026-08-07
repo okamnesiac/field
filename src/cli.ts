@@ -356,18 +356,15 @@ program
       // On a tty, a watch session renders the live two-line block (header
       // + position, loop-ui.ts) with the queued takeover on the position
       // line; everywhere else — non-tty, or plain play — plain lines.
-      const display =
-        tty && opts.watch === true
-          ? new (await import('./commands/loop-ui.js')).LoopDisplay(
-              (chunk) => process.stdout.write(chunk),
-              {
-                // --from takes the requeue path: passes come from onItem,
-                // not from position regression.
-                requeue: opts.from !== undefined,
-                columns: () => process.stdout.columns ?? 120,
-              },
-            )
-          : undefined;
+      const loopUi = tty && opts.watch === true ? await import('./commands/loop-ui.js') : undefined;
+      const display = loopUi
+        ? new loopUi.LoopDisplay((chunk) => process.stdout.write(chunk), {
+            // --from takes the requeue path: passes come from onItem,
+            // not from position regression.
+            requeue: opts.from !== undefined,
+            columns: () => process.stdout.columns ?? 120,
+          })
+        : undefined;
       const say = (line: string): void => {
         if (display) {
           display.say(line);
@@ -474,8 +471,15 @@ program
               // block, with the hash correlated by path, never the
               // snapshot from before the session (#37 review P2).
               if (!display) say(`playing ${label}${note}`);
-              else if (first) display.start(label, items[0]!.sha256, note);
-              else display.pass(path);
+              else if (first) {
+                // What opened may already be the held rebuild's bytes —
+                // correlated by path, never assumed from the snapshot.
+                display.start(
+                  label,
+                  loopUi!.openingHash(path, items[0]!.sha256, heldForStart),
+                  note,
+                );
+              } else display.pass(path);
               // Now there is something to take over from: release the
               // rebuild that beat the first load, if one did.
               if (first && heldForStart !== undefined) {
