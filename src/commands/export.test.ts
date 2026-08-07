@@ -1,10 +1,24 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GeneratorRunner } from '../graph/build.js';
 import { createSong } from './create.js';
-import { exportBaseName, exportLabels, homeRelative, nextVersion } from './export.js';
+import {
+  exportBaseName,
+  exportLabels,
+  homeRelative,
+  nextVersion,
+  writeVersion,
+} from './export.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 
@@ -119,6 +133,39 @@ describe('nextVersion', () => {
     writeFileSync(join(dir, 'creek-mix-main-vX.wav'), 'd');
     writeFileSync(join(dir, 'my-creek-mix-main-v9.wav'), 'e');
     expect(nextVersion(dir, 'creek-mix-main', '.wav')).toBe(1);
+  });
+});
+
+describe('writeVersion', () => {
+  let dir: string;
+  let source: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'bloom-write-'));
+    source = join(dir, 'source.bin');
+    writeFileSync(source, 'ours');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('takes the next free number rather than overwriting an occupied one', () => {
+    writeFileSync(join(dir, 'creek-mix-main-v3.wav'), 'theirs');
+    const written = writeVersion(source, dir, 'creek-mix-main', 3, '.wav');
+    expect(written.version).toBe(4);
+    expect(readFileSync(join(dir, 'creek-mix-main-v3.wav'), 'utf8')).toBe('theirs');
+    expect(readFileSync(written.path, 'utf8')).toBe('ours');
+  });
+
+  it('leaves no temp file behind', () => {
+    writeVersion(source, dir, 'creek-mix-main', 1, '.wav');
+    expect(readdirSync(dir).filter((f) => f.includes('.part-'))).toEqual([]);
+  });
+
+  it('links into place, so a version is complete or absent', () => {
+    // The copy lands on a temp name first; nothing under the versioned
+    // name is ever half-written, which matters because a truncated
+    // version could never be replaced (nothing overwrites) and would
+    // stay "newest and different" forever.
+    const written = writeVersion(source, dir, 'creek-mix-main', 1, '.wav');
+    expect(statSync(written.path).size).toBe(statSync(source).size);
   });
 });
 
@@ -249,6 +296,47 @@ describe('exportLabels', () => {
       'creek-sounds-pad-normalized-v1.wav',
       'creek-sounds-pad-normalized-v2.wav',
     ]);
+  });
+
+  it('never writes through a name that differs only in case (#39 P1)', async () => {
+    // On APFS `Creek-Assets-Pad-v1.wav` and `creek-assets-pad-v1.wav`
+    // are one file, so copying to the lowercase name replaces their
+    // bytes *under their filename* — a directory listing does not even
+    // change. Their file must survive untouched.
+    const theirs = join(dest, 'Creek-Assets-Pad-v1.wav');
+    writeFileSync(theirs, 'a mix I bounced by hand');
+
+    const [result] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+
+    expect(readFileSync(theirs, 'utf8')).toBe('a mix I bounced by hand');
+    expect(result!.version).toBe(2); // their v1 counts, whatever its case
+    expect(result!.to).toBe(join(dest, 'creek-assets-pad-v2.wav'));
+  });
+
+  it('counts case-differing versions when numbering, so a new export is newest', async () => {
+    // Their v5, spelled differently. The link guard alone would still
+    // protect the file — v1 is free, so nothing collides — but we would
+    // write a "v1" that is newer in time than their v5, and every later
+    // comparison would read the family backwards.
+    writeFileSync(join(dest, 'Creek-Assets-Pad-v5.wav'), 'their fifth bounce');
+    const [result] = await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    expect(result!.version).toBe(6);
+    expect(readFileSync(join(dest, 'Creek-Assets-Pad-v5.wav'), 'utf8')).toBe('their fifth bounce');
+  });
+
+  it('refuses to export a committed source whose bytes drifted (#39 P2)', async () => {
+    await exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner });
+    // A bounce written over the asset without re-importing: the declared
+    // hash still describes the old bytes, and the build only verifies a
+    // committed file when it consumes it as an input. Exporting it as
+    // `current` would put different audio on the Desktop under a name
+    // that says it matches the project.
+    writeFileSync(join(root, 'songs/creek/audio/pad.wav'), 'different audio entirely');
+
+    await expect(
+      exportLabels(root, ['//songs/creek/assets:pad'], { to: dest, runner }),
+    ).rejects.toThrow('refusing to export');
+    expect(readdirSync(dest)).toHaveLength(1); // v1 stands, nothing minted
   });
 
   it('refuses a destination that does not exist rather than creating one', async () => {

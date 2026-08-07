@@ -70,6 +70,7 @@ describe('withClick', () => {
       pkg: 'songs/x/mix',
       path: src,
       sha256: 'deadbeef'.repeat(8), // withClick carries it through untouched
+      committed: false,
     });
 
     const wav = readWav(clicked.path);

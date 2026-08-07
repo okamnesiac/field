@@ -80,10 +80,23 @@ is often the only copy of a decision later undone — so a second export
 is `-v2`, numbered from the highest already there (a gap means someone
 threw that version away, and minting a second `-v2` would disagree with
 them). Re-exporting something that has not changed is a no-op: the bytes
-are compared against the newest version and the command reports
-`current`, naming the version that stands, rather than minting an
-identical one. Nothing Bloom does removes or overwrites a file in the
-destination — including files it did not write.
+are compared against *every* version present, newest first, and the
+command reports `current` naming the version that stands rather than
+minting an identical one. When the match is an older version — export
+v1, change something, export v2, change it back — it reports `reverted`
+and names both numbers, because the newest file in the directory is then
+no longer what you just built.
+
+Nothing Bloom does removes or overwrites a file in the destination,
+including files it did not write. The copy lands on a temp name and is
+linked into place, so an interrupted export leaves debris rather than a
+truncated version (which, since nothing overwrites, would be permanent),
+and a name that merely differs in case cannot be written through on a
+case-insensitive volume — the link fails and the next number is taken.
+A committed source whose bytes have drifted from their declared hash is
+refused outright — the same guard `build` applies before consuming an
+asset as an input. Export is the command whose product leaves the
+machine, so it must not ship audio the project does not describe.
 
 ## Render strategies
 

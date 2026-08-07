@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, linkSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
 import { sha256File } from '../hash.js';
@@ -80,13 +80,20 @@ export function exportBaseName(label: string): string {
 // first. Versions are `-v<n>` before the extension, so the family is a
 // filename question — no state, no manifest, nothing to get out of sync
 // with what is actually on the disk.
+//
+// Matched case-insensitively, because the destination usually is: on
+// APFS, `Creek-Mix-Main-v1.wav` and `creek-mix-main-v1.wav` are one
+// file, so a case-sensitive scan would miss v1 and then write *through*
+// their name into their bytes (#39 review P1). On a case-sensitive
+// volume the two really are different files, and skipping the number
+// only leaves a gap.
 export function existingVersions(
   dir: string,
   base: string,
   extension: string,
 ): { version: number; path: string }[] {
   const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^${escaped}-v(\\d+)${extension.replace(/\./g, '\\.')}$`);
+  const pattern = new RegExp(`^${escaped}-v(\\d+)${extension.replace(/\./g, '\\.')}$`, 'i');
   const found: { version: number; path: string }[] = [];
   for (const file of readdirSync(dir)) {
     const match = pattern.exec(file);
@@ -104,6 +111,51 @@ export function nextVersion(dir: string, base: string, extension: string): numbe
 
 export function versionedName(base: string, version: number, extension: string): string {
   return `${base}-v${version}${extension}`;
+}
+
+// Guard against writing a version number a scan somehow missed. Bounded
+// only so a pathological directory cannot spin forever.
+const MAX_VERSION_PROBES = 1000;
+
+// Writes `from` into the directory as the first free version at or after
+// `startVersion`, and returns the version it took. Two properties matter
+// more than the copy itself:
+//
+// Nothing is ever overwritten. `copyFileSync` onto an existing path
+// truncates it, and on a case-insensitive volume "existing" includes a
+// name that merely differs in case — so someone's hand bounce called
+// `Creek-Mix-Main-v1.wav` would silently become our bytes under their
+// filename, which a directory listing does not even show. `link` refuses
+// with EEXIST instead, and we take the next number.
+//
+// A version is complete or absent. The copy lands on a temp name in the
+// same directory and is linked into place, so an interrupt leaves debris
+// rather than a truncated `-v3.wav` — and since nothing overwrites,
+// a truncated version would be permanent and would poison every later
+// comparison against the family (#39 review).
+export function writeVersion(
+  from: string,
+  dir: string,
+  base: string,
+  startVersion: number,
+  extension: string,
+): { version: number; path: string } {
+  const temp = join(dir, `.${base}-v${startVersion}${extension}.part-${process.pid}`);
+  copyFileSync(from, temp);
+  try {
+    for (let version = startVersion; version < startVersion + MAX_VERSION_PROBES; version++) {
+      const path = join(dir, versionedName(base, version, extension));
+      try {
+        linkSync(temp, path);
+        return { version, path };
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+    }
+    throw new Error(`no free version for ${base} in ${dir} after ${MAX_VERSION_PROBES} tries`);
+  } finally {
+    unlinkSync(temp);
+  }
 }
 
 export async function exportLabels(
@@ -136,6 +188,20 @@ export async function exportLabels(
 
   const results: ExportResult[] = [];
   for (const item of items) {
+    // Hash what we are about to copy, rather than trusting what the
+    // build recorded. For a committed source that record is the
+    // *declared* hash, which the build deliberately does not verify
+    // unless it consumes the file as an input — so a bounce written over
+    // an asset without re-importing would otherwise export as `current`
+    // while the exported file is different audio (#39 review P2).
+    const sha256 = await sha256File(item.path);
+    if (item.committed && sha256 !== item.sha256) {
+      throw new Error(
+        `refusing to export: ${item.label} content does not match its declared sha256 ` +
+          `(bloom check, then re-import or restore the file)`,
+      );
+    }
+
     const base = exportBaseName(item.label);
     const extension = extname(item.path);
     const versions = existingVersions(dir, base, extension);
@@ -145,7 +211,7 @@ export async function exportLabels(
     // export v5, change it back — this is v4 again, and filing it as v6
     // would bury that. Newest first, so the common case (nothing changed
     // since the last export) matches on the first comparison.
-    const existing = await findIdentical(versions, item.path, item.sha256);
+    const existing = await findIdentical(versions, item.path, sha256);
     if (existing !== undefined) {
       results.push({
         label: item.label,
@@ -158,13 +224,12 @@ export async function exportLabels(
       continue;
     }
 
-    const to = join(dir, versionedName(base, newest + 1, extension));
-    copyFileSync(item.path, to);
+    const written = writeVersion(item.path, dir, base, newest + 1, extension);
     results.push({
       label: item.label,
       from: item.path,
-      to,
-      version: newest + 1,
+      to: written.path,
+      version: written.version,
       unchanged: false,
       newest,
     });

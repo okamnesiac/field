@@ -18,7 +18,15 @@ export interface Playable {
   label: string;
   pkg: string; // the label's package, for deriving the song's tempo map
   path: string; // absolute path to a playable file
-  sha256: string; // content hash of what path holds — watch's baseline seed
+  // Content hash of what path holds — watch's baseline seed. For a
+  // committed source this is the *declared* hash: the build trusts the
+  // declaration and only verifies bytes when it consumes them as an
+  // input, so a caller that hands this file to the outside world has to
+  // verify for itself (see `committed`).
+  sha256: string;
+  // The path names a committed source (an asset, a chosen variant), not
+  // a materialized build output.
+  committed: boolean;
 }
 
 // What `bloom play` plays: asset targets resolve to their files directly;
@@ -52,6 +60,7 @@ export async function resolvePlayables(
         pkg: node.label.pkg,
         path: join(project.root, node.scopeDir, node.asset.file),
         sha256: node.asset.sha256,
+        committed: true,
       };
     }
     if (node.kind === 'generation') {
@@ -62,11 +71,18 @@ export async function resolvePlayables(
         pkg: node.label.pkg,
         path: join(project.root, node.songDir, node.file),
         sha256: node.sha256,
+        committed: true,
       };
     }
     const outcome = outputs.get(label);
     if (!outcome?.outputPath) throw new Error(`no output for ${label}`);
-    return { label, pkg: node.label.pkg, path: outcome.outputPath, sha256: outcome.sha256 };
+    return {
+      label,
+      pkg: node.label.pkg,
+      path: outcome.outputPath,
+      sha256: outcome.sha256,
+      committed: false,
+    };
   });
 }
 
