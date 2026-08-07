@@ -82,7 +82,10 @@ export interface PlayOptions {
 }
 
 export interface PlayHooks {
-  onItem?: (label: string, note: string) => void;
+  // `path` is the file this pass actually loaded — the requeue path
+  // consults currentPath at every load, so the watch display correlates
+  // a pass against what it queued, never against a stale snapshot.
+  onItem?: (label: string, note: string, path: string) => void;
   // `at` locates the printed position on a per-pass monotonic axis (the
   // beat's tick under a tempo map, the raw sample without one): a value
   // moving backwards is the looping reader wrapping — what the watch
@@ -137,7 +140,8 @@ export async function playThroughDaemon(
     do {
       for (const item of items) {
         if (hooks.interrupted?.()) break;
-        await client.load(options.currentPath?.() ?? item.path, nativeLoop);
+        const loadedPath = options.currentPath?.() ?? item.path;
+        await client.load(loadedPath, nativeLoop);
         const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
@@ -148,7 +152,7 @@ export async function playThroughDaemon(
         const note = status.device
           ? ` (${status.device.name}${status.resampling ? ', resampling' : ''})`
           : '';
-        hooks.onItem?.(item.label, note);
+        hooks.onItem?.(item.label, note, loadedPath);
 
         // Ctrl-c can land while load/status were in flight: the handler's
         // stop() would hit a stopped transport and this play() would undo it
@@ -208,11 +212,21 @@ function beatScheduler(
   let anchor: { sample: number; at: number } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastLine = '';
+  let lastAt = Number.NEGATIVE_INFINITY;
   const emit = (line: string, at: number) => {
-    if (line !== lastLine) {
-      lastLine = line;
-      print(line, at);
-    }
+    // A duplicate is the same beat re-announced (the anchor emit and the
+    // scheduled print for one beat): same line, `at` not moving
+    // backwards. The same line with `at` regressing is a new pass — a
+    // sub-beat loop prints "1.1" every wrap and must keep printing, or
+    // the readout freezes (#37 review). The regression compares against
+    // the last *seen* value, updated even on skips: anchor ticks cycle
+    // modulo the loop length, and comparing against the last *emission*
+    // starves the moment the cycle lands at-or-above it.
+    const duplicate = line === lastLine && at >= lastAt;
+    lastAt = at;
+    if (duplicate) return;
+    lastLine = line;
+    print(line, at);
   };
   const barBeat = (tick: number): string => {
     const [bar, beat] = ctx!.meter.format(Math.max(0, tick)).split('.');

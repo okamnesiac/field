@@ -108,6 +108,32 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     },
   );
 
+  it('a sub-beat loop keeps the readout alive (#37 review: dedupe on movement, not text)', { timeout: 20_000 }, async () => {
+    await importTone('tick', 9600); // 0.2 s: shorter than a beat, so the line never changes
+    const items = await resolvePlayables(root, ['//songs/creek/assets:tick']);
+
+    // Every wrap re-announces "1.1" with a smaller `at`; a text-keyed
+    // dedupe froze this readout after one line. Event-driven: without
+    // the fix positions stays at 1 and the test times out.
+    const positions: string[] = [];
+    let interrupted = false;
+    await playThroughDaemon(root, project, items, { loop: true }, {
+      onPosition: (line) => {
+        positions.push(line);
+        if (positions.length >= 3 && !interrupted) {
+          interrupted = true;
+          void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
+            await c.stop();
+            c.close();
+          });
+        }
+      },
+      interrupted: () => interrupted,
+    });
+    expect(positions.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(positions)).toEqual(new Set(['1.1'])); // same beat, every pass
+  });
+
   it('reload takes over the looping stream at the wrap', { timeout: 15_000 }, async () => {
     await importTone('spin', 96000); // 2 s pass: room to observe the pre-wrap state
     await importTone('swap', 24000); // 0.5 s successor

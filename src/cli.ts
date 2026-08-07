@@ -350,8 +350,14 @@ program
       // line; everywhere else — non-tty, or plain play — plain lines.
       const display =
         tty && opts.watch === true
-          ? new (await import('./commands/loop-ui.js')).LoopDisplay((chunk) =>
-              process.stdout.write(chunk),
+          ? new (await import('./commands/loop-ui.js')).LoopDisplay(
+              (chunk) => process.stdout.write(chunk),
+              {
+                // --from takes the requeue path: passes come from onItem,
+                // not from position regression.
+                requeue: opts.from !== undefined,
+                columns: () => process.stdout.columns ?? 120,
+              },
             )
           : undefined;
       const say = (line: string): void => {
@@ -370,6 +376,7 @@ program
       // --from region loop just repoints what the next pass loads.
       let watchDone = Promise.resolve();
       let fresh: string | undefined;
+      let started = false; // first onItem opens the display block; later ones are passes
       if (opts.watch === true) {
         const item = items[0]!;
         const native = opts.from === undefined;
@@ -415,7 +422,8 @@ program
                 );
               } else {
                 fresh = moved.outputPath;
-                say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} next pass`);
+                if (display) display.queue(moved.sha256, moved.outputPath);
+                else say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} next pass`);
               }
             },
           },
@@ -429,10 +437,22 @@ program
           items,
           { ...opts, currentPath: opts.watch === true ? () => fresh : undefined },
           {
-            onItem: (label, note) =>
-              display
-                ? display.start(label, items[0]!.sha256, note)
-                : say(`playing ${label}${note}`),
+            onItem: (label, note, path) => {
+              if (!display) {
+                say(`playing ${label}${note}`);
+                return;
+              }
+              // The first pass opens the block; later ones (the requeue
+              // path reloads every pass) are pass boundaries — the pass
+              // that loads what the watch queued opens the successor's
+              // block, with the hash correlated by path, never the
+              // snapshot from before the session (#37 review P2).
+              if (started) display.pass(path);
+              else {
+                started = true;
+                display.start(label, items[0]!.sha256, note);
+              }
+            },
             onPosition: (line, at) => {
               if (display) {
                 display.position(line, at);

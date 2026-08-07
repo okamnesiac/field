@@ -9,9 +9,9 @@ import { LoopDisplay } from './loop-ui.js';
 const A = 'a1b2c3d4e5f6'.padEnd(64, '0');
 const B = 'f6e5d4c3b2a1'.padEnd(64, '0');
 
-function harness() {
+function harness(options: ConstructorParameters<typeof LoopDisplay>[1] = {}) {
   const out: string[] = [];
-  const d = new LoopDisplay((chunk) => out.push(chunk));
+  const d = new LoopDisplay((chunk) => out.push(chunk), options);
   return { d, out, text: () => out.join('') };
 }
 
@@ -143,6 +143,59 @@ describe('LoopDisplay', () => {
         '\r\x1b[1A\x1b[2Kplaying //songs/x/mix:main─a1b2c3d4e5f6\n\r\x1b[2K  [1] 1.1',
       ),
     ).toBe(true);
+  });
+
+  it('requeue: passes count from pass(), and the queued pass transitions with its own hash (#37 P2)', () => {
+    const { d, text } = harness({ requeue: true });
+    d.start('//songs/x/sounds:long', A, '');
+    d.position('11.1', 8000);
+    d.pass('/audio/long/orig.wav'); // plain requeue pass: same block, next iteration
+    d.position('11.1', 8000); // region restart — must NOT count as a wrap on top
+    d.pass('/audio/long/orig.wav');
+    d.queue(B, '/out/long.wav');
+    d.pass('/out/long.wav'); // this pass loads what we queued: the swap moment
+    d.position('11.1', 8000);
+    d.end();
+    const t = text();
+    expect(t).toContain('\r\x1b[2K  [2] 11.1'); // pass() counted it
+    expect(t).toContain('\r\x1b[2K  [3] 11.1'); // and only pass() — no double count
+    expect(t).toContain('played //songs/x/sounds:long─a1b2c3d4e5f6\n');
+    expect(t).toContain('playing //songs/x/sounds:long─f6e5d4c3b2a1\n'); // correlated, not stale
+    // exactly two playing headers ever: the start and the transition
+    expect(t.split('playing ').length).toBe(3 + 1); // +1: the ┬ repaint from queue()
+  });
+
+  it('requeue: a pass that is not the queued one keeps the pending notice up', () => {
+    const { d, text } = harness({ requeue: true });
+    d.start('//songs/x/sounds:long', A, '');
+    d.position('11.1', 8000);
+    d.queue(B, '/out/long.wav');
+    d.pass('/audio/long/orig.wav'); // built after this pass loaded: not ours yet
+    d.position('11.1', 8000);
+    expect(text()).toContain('└f6e5d4c3b2a1'); // still pending
+    expect(text()).not.toContain('played'); // no transition yet
+  });
+
+  it('a header too wide for the terminal is never rewritten in place (#37 P3)', () => {
+    const { d, text } = harness({ columns: () => 40 }); // header is ~57 chars
+    d.start('//songs/creek/mix:main', A, ' (Volt 476)');
+    d.position('1.1', 0);
+    d.queue(B, '/out/main.wav');
+    d.position('1.1', 0);
+    d.swapped('/out/main.wav');
+    expect(text()).not.toContain('\x1b[1A'); // one cursor-up would land mid-header
+    expect(text()).toContain('played //songs/creek/mix:main─a1b2c3d4e5f6\n'); // fresh lines instead
+  });
+
+  it('the position line truncates to the terminal instead of wrapping', () => {
+    const { d, out } = harness({ columns: () => 20 });
+    d.start('//songs/creek/mix:main', A, '');
+    d.queue(B, '/out/main.wav');
+    d.position('1.1', 0);
+    const positionChunks = out.filter((c) => c.startsWith('\r\x1b[2K'));
+    for (const c of positionChunks) {
+      expect(c.length - '\r\x1b[2K'.length).toBeLessThan(20);
+    }
   });
 
   it('held positions flush as a plain pass boundary when no confirmation comes', () => {

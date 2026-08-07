@@ -34,6 +34,25 @@ const short = (sha256: string): string => sha256.slice(0, 12);
 // pass boundary rather than freezing the display.
 const MAX_HELD_POSITIONS = 3;
 
+export interface LoopDisplayOptions {
+  // Gates the [N] iteration prefix: only a looping session has
+  // iterations to count. Watch implies --loop today, so the CLI always
+  // passes true; the flag keeps the renderer honest for any future
+  // non-loop use.
+  looping?: boolean;
+  // The --from region loop: passes come from pass() (the CLI reloads
+  // each one), never from position regression — a region's positions
+  // restart at the region start, not zero, so the wrap heuristic does
+  // not apply. Swaps land at pass boundaries, so there is no daemon
+  // `reloaded` to hold positions for either.
+  requeue?: boolean;
+  // Live terminal width. Cursor-up repaints assume the header occupies
+  // exactly one screen row; a header wider than the terminal wraps onto
+  // several, so repaints fall back to fresh lines (#37 review P3), and
+  // the position line is truncated rather than allowed to wrap.
+  columns?: () => number;
+}
+
 export class LoopDisplay {
   private label = '';
   private note = ''; // ' (Volt 476)' — the daemon-status suffix from onItem
@@ -44,26 +63,34 @@ export class LoopDisplay {
   // the new block with our hash would be confidently wrong about what
   // is playing).
   private pending: { sha256: string; path: string } | undefined;
-  private pass = 1;
+  private iteration = 1;
   private lastAt: number | undefined;
   private posText = ''; // last bar.beat text, without pass/pending suffixes
   private onPositionLine = false;
   private buried = false; // a said() line sits between header and position
+  private headerRewritable = false; // header fits one screen row
   private held: { line: string; at: number }[] = [];
+  private readonly looping: boolean;
+  private readonly requeue: boolean;
+  private readonly columns: () => number;
 
-  // `looping` gates the [N] iteration prefix: only a looping session has
-  // iterations to count. Watch implies --loop today, so the CLI always
-  // passes true; the flag keeps the renderer honest for any future
-  // non-loop use.
   constructor(
     private readonly write: (chunk: string) => void,
-    private readonly looping: boolean = true,
-  ) {}
+    options: LoopDisplayOptions = {},
+  ) {
+    this.looping = options.looping ?? true;
+    this.requeue = options.requeue ?? false;
+    this.columns = options.columns ?? (() => 200);
+  }
 
   start(label: string, sha256: string, note: string): void {
     this.label = label;
     this.note = note;
     this.hash = sha256;
+    if (this.onPositionLine) {
+      this.write('\n');
+      this.onPositionLine = false;
+    }
     this.openBlock();
   }
 
@@ -81,26 +108,36 @@ export class LoopDisplay {
   }
 
   private writeHeader(): void {
-    this.write(`${this.headerLine('playing', this.hash)}\n`);
+    const line = this.headerLine('playing', this.hash);
+    this.headerRewritable = line.length < this.columns();
+    this.write(`${line}\n`);
     this.buried = false;
     this.onPositionLine = false;
   }
 
+  // \x1b[1A moves one screen row, which reaches the header only when it
+  // occupies one — never when it wrapped, and never through said lines.
+  private canRewriteHeader(): boolean {
+    return !this.buried && this.headerRewritable;
+  }
+
   // Pending state changed: the header's separator and the position
-  // line's └ must move together. With the header buried under said
-  // lines, the └ line alone tells the story.
+  // line's └ must move together. With the header out of reach, the └
+  // line alone tells the story.
   private repaintBlock(): void {
-    if (this.buried) {
+    if (!this.canRewriteHeader()) {
       if (this.onPositionLine) this.render();
       return;
     }
-    this.write(`\r\x1b[1A\x1b[2K${this.headerLine('playing', this.hash)}\n`);
+    const line = this.headerLine('playing', this.hash);
+    this.headerRewritable = line.length < this.columns();
+    this.write(`\r\x1b[1A\x1b[2K${line}\n`);
     if (this.onPositionLine || this.posText !== '') this.render();
   }
 
   private openBlock(): void {
     this.writeHeader();
-    this.pass = 1;
+    this.iteration = 1;
     this.lastAt = undefined;
     this.posText = '';
   }
@@ -115,8 +152,8 @@ export class LoopDisplay {
     this.writeHeader();
   }
 
-  // A plain line (diagnostics, a device move): closes the position line
-  // and buries the header — the next swap opens a fresh block instead of
+  // A plain line (diagnostics, an error): closes the position line and
+  // buries the header — the next swap opens a fresh block instead of
   // rewriting history it can no longer reach.
   say(line: string): void {
     if (this.onPositionLine) {
@@ -133,7 +170,8 @@ export class LoopDisplay {
     // step the reported position slightly back, which must not count a
     // phantom pass. Half the last position is comfortably below any
     // ratio jitter and comfortably above a real wrap's landing point.
-    if (at !== undefined && this.lastAt !== undefined && at < this.lastAt / 2) {
+    // Requeue sessions count passes from pass(), never from here.
+    if (!this.requeue && at !== undefined && this.lastAt !== undefined && at < this.lastAt / 2) {
       if (this.pending !== undefined) {
         this.held.push({ line, at });
         // No confirmation after a few beats: it was the plain wrap it
@@ -141,7 +179,7 @@ export class LoopDisplay {
         if (this.held.length >= MAX_HELD_POSITIONS) this.flushHeldAsPassBoundary();
         return;
       }
-      this.pass++;
+      this.iteration++;
     }
     if (at !== undefined) this.lastAt = at;
     this.posText = line;
@@ -149,7 +187,7 @@ export class LoopDisplay {
   }
 
   private passPrefix(): string {
-    return this.looping ? `[${this.pass}] ` : '';
+    return this.looping ? `[${this.iteration}] ` : '';
   }
 
   private render(): void {
@@ -162,7 +200,9 @@ export class LoopDisplay {
       const column = 'playing '.length + this.label.length;
       pending = `${' '.repeat(Math.max(1, column - base.length))}└${short(this.pending.sha256)}`;
     }
-    this.write(`\r\x1b[2K${base}${pending}`);
+    // Truncated to one screen row: the \r rewrite only reaches the row
+    // the cursor is on.
+    this.write(`\r\x1b[2K${`${base}${pending}`.slice(0, this.columns() - 1)}`);
     this.onPositionLine = true;
   }
 
@@ -181,7 +221,7 @@ export class LoopDisplay {
     const flush = this.held;
     this.held = [];
     if (flush.length === 0) return;
-    this.pass++;
+    this.iteration++;
     this.lastAt = undefined;
     for (const p of flush) this.position(p.line, p.at);
   }
@@ -193,23 +233,11 @@ export class LoopDisplay {
     else this.repaintBlock();
   }
 
-  // The takeover sounded: close the old block as history, open the new.
-  // The daemon says which path took over; our queued hash is claimed
-  // only when it matches — otherwise someone else's reload won, and the
-  // header opens hashless rather than confidently wrong.
-  swapped(path: string): void {
-    const ours = this.pending?.path === path ? this.pending.sha256 : undefined;
-    this.pending = undefined;
-    if (ours !== undefined && ours === this.hash) {
-      // The edit was changed back before the wrap: the daemon swapped to
-      // byte-identical content. Audibly just another pass — the block
-      // stays open and the wrap counts as one.
-      this.flushHeldAsPassBoundary();
-      return;
-    }
+  // Close the current block as `played` history and open the successor's.
+  private transition(newHash: string): void {
     const old = this.hash;
-    this.hash = ours ?? '';
-    if (this.onPositionLine && !this.buried) {
+    this.hash = newHash;
+    if (this.onPositionLine && this.canRewriteHeader()) {
       // Rewrite the header one line up to `played`, freeze the position
       // line at the pass's final beat, and fall through to a new block.
       this.write(`\r\x1b[1A\x1b[2K${this.headerLine('played', old)}\n`);
@@ -220,6 +248,41 @@ export class LoopDisplay {
     }
     this.onPositionLine = false;
     this.openBlock();
+  }
+
+  // A requeue pass boundary (--from): the CLI reloads every pass, so the
+  // pass IS the swap moment. The pass that loads what we queued opens
+  // the successor's block; any other pass just counts (#37 review P2:
+  // the display must never restart the block with a stale hash).
+  pass(loadedPath: string): void {
+    if (this.pending !== undefined && this.pending.path === loadedPath) {
+      const ours = this.pending.sha256;
+      this.pending = undefined;
+      if (ours !== this.hash) {
+        this.transition(ours);
+        return;
+      }
+      // changed back: fall through — audibly just another pass
+    }
+    this.iteration++;
+    this.lastAt = undefined;
+  }
+
+  // The takeover sounded (native loop): close the old block as history,
+  // open the new. The daemon says which path took over; our queued hash
+  // is claimed only when it matches — otherwise someone else's reload
+  // won, and the header opens hashless rather than confidently wrong.
+  swapped(path: string): void {
+    const ours = this.pending?.path === path ? this.pending.sha256 : undefined;
+    this.pending = undefined;
+    if (ours !== undefined && ours === this.hash) {
+      // The edit was changed back before the wrap: the daemon swapped to
+      // byte-identical content. Audibly just another pass — the block
+      // stays open and the wrap counts as one.
+      this.flushHeldAsPassBoundary();
+      return;
+    }
+    this.transition(ours ?? '');
     const flush = this.held;
     this.held = [];
     for (const p of flush) this.position(p.line, p.at);
