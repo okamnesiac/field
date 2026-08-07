@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { daemonBinary } from '../audiod/client.js';
-import { renderInsertChain } from './render-daemon.js';
+import { RENDER_PLAN_VERSION, renderInsertChain } from './render-daemon.js';
 import { writeWavFloat32 } from './wav.js';
 
 // The render subprocess (render-pipeline.md decision 6), and the
@@ -35,6 +37,8 @@ const binary = (() => {
     return undefined;
   }
 })();
+
+const execFileAsync = promisify(execFile);
 
 const RATE = 48000;
 
@@ -100,6 +104,66 @@ describe.skipIf(!binary)('render subprocess', () => {
         inserts: [],
       }),
     ).rejects.toThrow('cannot open');
+  });
+
+  // Everything the binary does not understand must be an error, not a
+  // plausible render. `daemonBinary()` reuses whatever build already
+  // exists, so "control plane newer than binary" is the ordinary case;
+  // the failure it produces has to be loud, because the alternative is
+  // audio cached under an action key that describes a different chain.
+  it('refuses an eq band type it does not know', async () => {
+    // This one shipped broken: `design` returned an identity filter for
+    // an unfamiliar type, so a +12 dB band rendered as though it were not
+    // there and the output was byte-identical to the input (#53 review).
+    const input = join(dir, 'in.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    await expect(
+      renderInsertChain({
+        input,
+        output: join(dir, 'out.wav'),
+        inserts: [
+          {
+            effect: 'eq',
+            normalize: false,
+            bands: [
+              { type: 'future-band', frequency: 1000, gain_db: 12, bandwidth: 1 },
+            ],
+          } as unknown as never,
+        ],
+      }),
+    ).rejects.toThrow('unknown eq band type');
+  });
+
+  it('refuses a plan version it does not speak', async () => {
+    const input = join(dir, 'in.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const planPath = join(dir, 'plan.json');
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        version: RENDER_PLAN_VERSION + 1,
+        input,
+        output: join(dir, 'out.wav'),
+        inserts: [],
+      }),
+    );
+    await expect(execFileAsync(binary!, ['--render', planPath])).rejects.toThrow(
+      /render plan version .* but this field-audiod speaks/,
+    );
+  });
+
+  it('refuses an insert missing a field rather than defaulting it', async () => {
+    // The schema fills every field before serializing, so an absent one
+    // means the two sides disagree about the shape.
+    const input = join(dir, 'in.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    await expect(
+      renderInsertChain({
+        input,
+        output: join(dir, 'out.wav'),
+        inserts: [{ effect: 'limit', ceiling_db: -1 } as unknown as never],
+      }),
+    ).rejects.toThrow(/limit insert is missing/);
   });
 
   it('refuses an insert it does not know instead of dropping it', async () => {

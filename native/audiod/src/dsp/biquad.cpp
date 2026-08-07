@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace field::dsp
 {
@@ -20,6 +21,13 @@ Biquad design (const Band& band, double sampleRate)
     // domain rather than only in the analog prototype.
     const double alpha = sn * std::sinh (((std::log (2.0) / 2.0) * band.bandwidth * w) / sn);
 
+    // Deliberately uninitialised-looking: every branch below assigns all
+    // six, and an unknown type throws rather than falling through. It used
+    // to default to an identity filter, which meant a band type this
+    // binary had never heard of rendered as though it were not there —
+    // silently, and cached under an action key saying otherwise. That is
+    // the same version skew the unknown-effect check in render.cpp exists
+    // to prevent; it just was not applied one level down.
     double b0 = 1.0, b1 = 0.0, b2 = 0.0, a0 = 1.0, a1 = 0.0, a2 = 0.0;
 
     if (band.type == "bell")
@@ -68,6 +76,10 @@ Biquad design (const Band& band, double sampleRate)
         a0 = A + 1.0 - (A - 1.0) * cs + sa;
         a1 = 2.0 * (A - 1.0 - (A + 1.0) * cs);
         a2 = A + 1.0 - (A - 1.0) * cs - sa;
+    }
+    else
+    {
+        throw std::runtime_error ("unknown eq band type \"" + band.type + "\"");
     }
 
     return { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };

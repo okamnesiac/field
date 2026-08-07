@@ -13,10 +13,25 @@ namespace field
 {
 namespace
 {
-double numberOr (const juce::var& object, const char* key, double fallback)
+// The version this binary speaks. Bumped whenever the plan's meaning
+// changes — a new effect, a new band type, a field whose units move.
+// `daemonBinary()` deliberately reuses whatever build already exists, so
+// a control plane newer than the binary is the normal case rather than an
+// exotic one, and this is what makes that a clear error instead of a
+// quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
+// version different conversations and can move independently.
+constexpr int renderPlanVersion = 1;
+
+// Required, not defaulted. The schema fills every field before it is
+// serialized (zod applies the defaults), so an absent one means the two
+// sides disagree about the shape — which must not resolve to "render
+// something plausible".
+double requireNumber (const juce::var& object, const char* key, const char* what)
 {
     const auto value = object.getProperty (key, juce::var());
-    return value.isVoid() ? fallback : (double) value;
+    if (value.isVoid())
+        throw std::runtime_error (std::string (what) + " is missing \"" + key + "\"");
+    return (double) value;
 }
 
 // One insert chain, applied in series. The mirror of applyInsertChain in
@@ -40,9 +55,9 @@ void applyInsert (const juce::var& insert,
         {
             dsp::Band band;
             band.type = entry.getProperty ("type", juce::var()).toString().toStdString();
-            band.frequency = numberOr (entry, "frequency", 1000.0);
-            band.gainDb = numberOr (entry, "gain_db", 0.0);
-            band.bandwidth = numberOr (entry, "bandwidth", 2.0);
+            band.frequency = requireNumber (entry, "frequency", "eq band");
+            band.gainDb = requireNumber (entry, "gain_db", "eq band");
+            band.bandwidth = requireNumber (entry, "bandwidth", "eq band");
             bands.push_back (band);
         }
 
@@ -53,7 +68,10 @@ void applyInsert (const juce::var& insert,
                 dsp::processBiquad (channel.data(), (int) channel.size(), biquad);
         }
 
-        if (insert.getProperty ("normalize", juce::var (true)))
+        const auto normalize = insert.getProperty ("normalize", juce::var());
+        if (normalize.isVoid())
+            throw std::runtime_error ("eq insert is missing \"normalize\"");
+        if ((bool) normalize)
         {
             const double gain = std::pow (10.0, dsp::autoGainDb (bands, sampleRate) / 20.0);
             for (auto& channel : channels)
@@ -64,19 +82,19 @@ void applyInsert (const juce::var& insert,
     else if (effect == "limit")
     {
         dsp::LimiterSettings settings;
-        settings.ceilingDb = numberOr (insert, "ceiling_db", -1.0);
-        settings.lookaheadMs = numberOr (insert, "lookahead_ms", 5.0);
-        settings.releaseMs = numberOr (insert, "release_ms", 100.0);
+        settings.ceilingDb = requireNumber (insert, "ceiling_db", "limit insert");
+        settings.lookaheadMs = requireNumber (insert, "lookahead_ms", "limit insert");
+        settings.releaseMs = requireNumber (insert, "release_ms", "limit insert");
         settings.sampleRate = sampleRate;
         dsp::limit (channels, settings);
     }
     else if (effect == "reverb")
     {
         dsp::ReverbSettings settings;
-        settings.mix = numberOr (insert, "mix", 0.3);
-        settings.decaySeconds = numberOr (insert, "decay", 2.0);
-        settings.predelayMs = numberOr (insert, "predelay_ms", 0.0);
-        settings.damping = numberOr (insert, "damping", 0.5);
+        settings.mix = requireNumber (insert, "mix", "reverb insert");
+        settings.decaySeconds = requireNumber (insert, "decay", "reverb insert");
+        settings.predelayMs = requireNumber (insert, "predelay_ms", "reverb insert");
+        settings.damping = requireNumber (insert, "damping", "reverb insert");
         settings.sampleRate = sampleRate;
         channels = dsp::reverb (channels, settings);
     }
@@ -102,6 +120,12 @@ std::string runRender (const std::string& planPath)
         const auto plan = juce::JSON::parse (planFile.loadFileAsString());
         if (! plan.isObject())
             return planPath + ": render plan is not a JSON object";
+
+        const auto version = plan.getProperty ("version", juce::var());
+        if (version.isVoid() || (int) version != renderPlanVersion)
+            return planPath + ": render plan version " + version.toString().toStdString()
+                   + " but this field-audiod speaks " + std::to_string (renderPlanVersion)
+                   + " — rebuild the daemon (pnpm build:native)";
 
         const auto input = plan.getProperty ("input", juce::var()).toString().toStdString();
         const auto output = plan.getProperty ("output", juce::var()).toString().toStdString();

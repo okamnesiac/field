@@ -38,15 +38,18 @@ To remove the global command: `pnpm remove -g field`.
 pnpm build:native
 ```
 
-Build it before playing anything. Without it `field play` falls back to
-`afplay`, `field devices` fails, and the options that need a real-time
-transport — `--from`, `--device`, `--loop`, `--click`, `--watch` — refuse to
-run rather than pretending.
+Build it before playing **or building** anything. The daemon is also the
+renderer: `eq`, `limit` and `reverb` targets render by spawning it, so
+`field build` fails without it rather than falling back to anything.
+
+Without it `field play` falls back to `afplay`, `field devices` fails, and
+the options that need a real-time transport — `--from`, `--device`,
+`--loop`, `--click`, `--watch` — refuse to run rather than pretending.
 
 The CLI looks for the binary inside the checkout it was linked from, so one
 build serves every project directory. `FIELD_AUDIOD` overrides that path.
 
-This step is macOS-only (CoreAudio), which is why CI does not run it.
+It builds on macOS and Linux, and CI builds it on both.
 
 ## Documentation
 

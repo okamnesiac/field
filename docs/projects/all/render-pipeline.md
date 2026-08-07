@@ -293,6 +293,28 @@ argument for *when*.
    A second binding surface to maintain beside the protocol, for a path
    [mix-assembly.md](mix-assembly.md) §1 defines as having no deadline.
 
+   **Amended on implementation (chunk 2, from review).** A subprocess
+   boundary is a protocol, and this decision described the plan's *shape*
+   without saying what happens when the two sides disagree about it.
+   `daemonBinary()` reuses whatever build already exists, so "control
+   plane newer than binary" is the ordinary case, not an exotic one.
+
+   The plan therefore carries a **version** the binary must match exactly
+   (`RENDER_PLAN_VERSION`, mirrored in `render.cpp`), separate from the
+   socket's `PROTOCOL_VERSION` because they version different
+   conversations. And the binary **rejects every value it does not
+   understand** rather than rendering something plausible: unknown
+   effect, unknown eq band type, missing field.
+
+   The band type shipped broken and review caught it. `design()` returned
+   an identity filter for a type it had never heard of, so a plan with a
+   +12 dB band of a future type exited 0 and produced output byte-identical
+   to its input — cached under an action key describing a chain that never
+   ran. The unknown-*effect* check was already there with a comment
+   explaining exactly this hazard; it simply was not applied one level
+   down. Worth remembering as a shape: a discriminated union guards the
+   discriminant it names, and nothing else.
+
 7. **Musical time stays in TypeScript; the daemon is handed
    sample-accurate edit lists** (2026-08-07). The daemon is "artifacts
    only: it plays files the build produced and has no idea what a clip
@@ -489,16 +511,16 @@ and the mix master chain until then.
   daemon?**~~ **Answered** — decisions 6–8 above. It is a subprocess,
   musical time stays in the control plane, and standalone effect targets
   move first. SuperCollider's precedent held: one engine, two modes.
-- **`field build` will require the native toolchain, and that is a
-  scheduling fact rather than an open question now.** Decision 6 makes
-  the daemon binary a build dependency the moment chunk 3 lands: the
-  effect rules call it, and the Linux CI job runs those tests. So
-  [linux-portability.md](linux-portability.md) chunk 4 is a hard
-  prerequisite for chunk 3 here, not only for chunk 6 — without it the
-  Linux job either fails or skips the effect tests, and skipping is how
-  #46 lost the suite in the first place. What is still open is whether a
+- **`field build` requires the native toolchain as of chunk 2** — not
+  chunk 3, which is what this said while it was still a prediction. The
+  standalone `eq`/`limit`/`reverb` rules already spawn the daemon, so an
+  uncached build of one fails without `pnpm build:native`.
+  [linux-portability.md](linux-portability.md) chunk 4 was therefore a
+  hard prerequisite for *this* chunk, which is why it went first.
+  README's build section says so now too. What is still open is whether a
   `--no-native` subset is worth having for contributors who only touch
-  the control plane.
+  the control plane — a question chunk 3 sharpens, since it takes stems
+  and mixes across the same boundary.
 - **Resampler quality target**, inherited unresolved from
   [linux-portability.md](linux-portability.md) §5: taps, transition
   width, stopband attenuation, and whether JUCE's variable-rate

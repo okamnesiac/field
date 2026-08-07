@@ -22,6 +22,19 @@ const execFileAsync = promisify(execFile);
 // Musical time does not appear: decision 7 keeps bars, beats and clip
 // placement in the control plane, and this boundary carries file paths.
 
+// The version the daemon must agree to. Bump whenever the plan's meaning
+// changes — a new effect, a new band type, a field whose units move — and
+// the C++ constant in native/audiod/src/render.cpp moves with it.
+//
+// It exists because `daemonBinary()` reuses whatever build is already
+// there, so a control plane newer than the binary is ordinary rather than
+// exotic. Without it an older daemon accepts a plan it only partly
+// understands and renders something plausible, which then caches under an
+// action key claiming to be the declared chain. Separate from the
+// socket's PROTOCOL_VERSION: different conversations, independent
+// lifetimes.
+export const RENDER_PLAN_VERSION = 1;
+
 export class RenderUnavailableError extends Error {}
 
 export interface RenderPlan {
@@ -48,7 +61,7 @@ export async function renderInsertChain(plan: RenderPlan): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'field-render-'));
   const planPath = join(dir, 'plan.json');
   try {
-    writeFileSync(planPath, JSON.stringify(plan));
+    writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
     await execFileAsync(binary, ['--render', planPath]);
   } catch (error) {
     // The daemon writes the reason to stderr and exits non-zero; surface
