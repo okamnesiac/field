@@ -1,8 +1,27 @@
+import { relative, sep } from 'node:path';
 import { parseLabel, parsePattern } from '../labels.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
 import { build, explain, type BuildOutcome, type Explanation, type GeneratorRunner } from '../graph/build.js';
 import { buildGraph, deps, expandPattern, resolveLabel, type Graph } from '../graph/graph.js';
 import { formatLabel } from '../labels.js';
+
+// Output paths print relative to the project root. Every path a build
+// reports is inside the project, so the absolute prefix is the same on
+// every line and says nothing — while pushing the part that differs off
+// the edge of a terminal, which is also what swamped the status column's
+// alignment (#38 review). A path that somehow lands outside the root
+// stays absolute rather than being spelled in `../..`: it is the one
+// case where the prefix carries the information.
+export function projectRelative(root: string, path: string): string {
+  const rel = relative(root, path);
+  // "Outside the root" means `..` itself or a leading `..` *segment* —
+  // not any name that merely begins with two dots, which a bare
+  // startsWith would also catch (#42 review). Unreachable for build
+  // outputs, whose path parts are slugs by grammar, but the line should
+  // mean what it looks like it means.
+  const outside = rel === '..' || rel.startsWith(`..${sep}`);
+  return rel === '' || outside ? path : rel;
+}
 
 // Building trusts only a valid project: schema or reference errors fail
 // fast rather than producing artifacts from a model check would reject.

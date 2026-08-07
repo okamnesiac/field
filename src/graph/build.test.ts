@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import { buildLabels, explainLabel, queryDeps } from '../commands/build.js';
+import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
 import { runScProgram } from '../generators/supercollider.js';
 import type { GeneratorRunner } from './build.js';
@@ -68,6 +68,41 @@ const countingRunner = () => {
   };
   return { state, runner };
 };
+
+describe('projectRelative', () => {
+  it('strips the project root, which is the same on every line', () => {
+    expect(projectRelative('/p', '/p/.bloom/out/songs/creek/mix/main.wav')).toBe(
+      '.bloom/out/songs/creek/mix/main.wav',
+    );
+    expect(projectRelative('/p', '/p/songs/creek/audio/pad.wav')).toBe('songs/creek/audio/pad.wav');
+  });
+
+  it('keeps a path outside the project absolute rather than spelling it in ../..', () => {
+    // The one case where the prefix carries information: it says the
+    // file is not in this project.
+    expect(projectRelative('/p', '/elsewhere/pad.wav')).toBe('/elsewhere/pad.wav');
+    expect(projectRelative('/p/songs', '/p/shared/samples/water.wav')).toBe(
+      '/p/shared/samples/water.wav',
+    );
+  });
+
+  it('keeps the root itself absolute', () => {
+    expect(projectRelative('/p', '/p')).toBe('/p');
+  });
+
+  it('a sibling whose name merely extends the root is not inside it', () => {
+    // The case that makes `relative()` the right tool rather than a
+    // prefix test — the same trap homeRelative has, where /Users/justinx
+    // must not become ~x. Every other case in this block would still
+    // pass if someone "simplified" this into path.startsWith(root)
+    // (#42 review).
+    expect(projectRelative('/tmp/proj', '/tmp/projx/out.wav')).toBe('/tmp/projx/out.wav');
+  });
+
+  it('a name beginning with two dots is inside the root, not outside it', () => {
+    expect(projectRelative('/p', '/p/..hidden/out.wav')).toBe('..hidden/out.wav');
+  });
+});
 
 describe('build', () => {
   it('builds, caches, and rebuilds on parameter change', async () => {
