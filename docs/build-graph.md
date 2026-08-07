@@ -16,7 +16,7 @@ bloom explain //songs/opener/mix:main
 ```
 
 Labels address songs and shared material alike: a clip in one song
-plays `//shared/assets:rain` exactly as it plays the song's own sounds.
+plays `//shared/asset:rain` exactly as it plays the song's own sounds.
 
 The absolute form is canonical, but the CLI accepts songs-relative shorthand
 for all of the above — `bloom build opener/mix:main`, `bloom explain
@@ -62,7 +62,7 @@ wants in a Finder window or an email. `bloom export <patterns>` builds
 and then copies the result to `~/Desktop` (or `--to <dir>`) under the
 label with its punctuation flattened, minus the `songs/` prefix:
 `//songs/creek/mix:main` becomes `creek-mix-main-v1.wav`, and shared
-material keeps its shelf (`shared-assets-water-v1.wav`). It exports what
+material keeps its shelf (`shared-asset-water-v1.wav`). It exports what
 `play` would play, through the same resolver, and only the labels the
 patterns match — the dependencies a build prints are means, not
 products.
@@ -170,7 +170,7 @@ sound by name and follow).
   (cloned/sung voices, committed outputs) will be a deliberate
   generative sound on the other side of the determinism boundary.
 - **`stem`** — the first *implicit* type: every audio track with clips
-  is buildable as `//songs/<song>/tracks:<name>` without declaring
+  is buildable as `//songs/<song>/track:<name>` without declaring
   anything, because the track file **is** the declaration — a mix file
   defines a `mix`, a track file implies a `stem`. A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an

@@ -23,9 +23,9 @@ describe('labels', () => {
     expect(parseLabel('songs/mix:main')).toEqual({ pkg: 'songs/songs/mix', name: 'main' });
     expect(parseLabel('songs')).toEqual({ pkg: 'songs/songs/mix', name: 'main' });
     expect(parsePattern('creek/...')).toEqual({ kind: 'tree', pkg: 'songs/creek' });
-    expect(parsePattern('creek/tracks:all')).toEqual({
+    expect(parsePattern('creek/track:all')).toEqual({
       kind: 'package-all',
-      pkg: 'songs/creek/tracks',
+      pkg: 'songs/creek/track',
     });
     expect(parsePattern('...')).toEqual({ kind: 'tree', pkg: 'songs' });
   });

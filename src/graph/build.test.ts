@@ -73,24 +73,24 @@ describe('build', () => {
   it('builds, caches, and rebuilds on parameter change', async () => {
     const { state, runner } = countingRunner();
 
-    const first = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const first = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(1);
     const target = first.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
 
-    const second = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const second = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(1); // action-cache hit, nothing executed
     expect(second.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
 
     writeSound('pad-normalized', normalizeYaml(44100));
-    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
   it('committed outcomes name their file path (#35 review)', async () => {
     const { runner } = countingRunner();
-    const outcomes = await buildLabels(root, ['//songs/creek/assets:pad'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);
     // Every outcome names a playable path — watch hands any label's fresh
     // artifact to the daemon, including committed content.
     expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad.wav')).toBe(true);
@@ -101,7 +101,7 @@ describe('build', () => {
 
   it('a rule outcome is never marked committed', async () => {
     const { runner } = countingRunner();
-    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     const rule = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(rule.committed).toBeUndefined();
     expect(rule.outputPath!).toContain('.bloom/out'); // materialized, not committed
@@ -109,7 +109,7 @@ describe('build', () => {
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
     const { runner } = countingRunner();
-    const first = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const first = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     const out = first.find((o) => o.label.endsWith(':pad-normalized'))!.outputPath!;
     const before = statSync(out).ino;
 
@@ -117,7 +117,7 @@ describe('build', () => {
     // path; a rebuild must land on a fresh inode so an open reader keeps
     // its bytes — an in-place copy would truncate under it.
     writeSound('pad-normalized', normalizeYaml(44100));
-    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(statSync(out).ino).not.toBe(before);
   });
 
@@ -125,8 +125,8 @@ describe('build', () => {
     const { state, runner } = countingRunner();
     const outcomes = await buildLabels(root, ['//songs/...'], runner);
     expect(outcomes.map((o) => o.label).sort()).toEqual([
-      '//songs/creek/assets:pad',
-      '//songs/creek/sounds:pad-normalized',
+      '//songs/creek/asset:pad',
+      '//songs/creek/sound:pad-normalized',
     ]);
     expect(state.runs).toBe(1);
     const everything = await buildLabels(root, ['//...'], runner);
@@ -150,7 +150,23 @@ describe('build', () => {
 
   it('errors on unmatched patterns and unknown labels', async () => {
     await expect(buildLabels(root, ['//nowhere/...'])).rejects.toThrow('matched no labels');
-    expect(() => queryDeps(root, 'deps(//songs/creek/sounds:ghost)')).toThrow('no such label');
+    expect(() => queryDeps(root, 'deps(//songs/creek/sound:ghost)')).toThrow('no such label');
+  });
+
+  it('points at the singular when someone types the old plural package', async () => {
+    // Packages went singular; fingers and old docs still type the plural,
+    // and "no such label" is a bad way to find that out.
+    await expect(buildLabels(root, ['//songs/creek/sounds:pad-normalized'])).rejects.toThrow(
+      'packages are singular: try //songs/creek/sound:…',
+    );
+    expect(() => queryDeps(root, 'deps(//songs/creek/assets:pad)')).toThrow(
+      'try //songs/creek/asset:…',
+    );
+    // Only when the singular actually exists — no guessing at a package
+    // this project does not have.
+    await expect(buildLabels(root, ['//songs/creek/mixes:main'])).rejects.toThrow(
+      /matched no labels: \/\/songs\/creek\/mixes:main$/,
+    );
   });
 
   it('refuses to build when input bytes disagree with the declaration', async () => {
@@ -159,49 +175,49 @@ describe('build', () => {
     const original = readFileSync(assetPath);
     writeFileSync(assetPath, Buffer.concat([original, Buffer.from([0, 0])]));
     await expect(
-      buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner),
+      buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0); // nothing executed, nothing cached
 
     // Same-size tamper is caught by the hash, not the size.
     writeFileSync(assetPath, Buffer.from(original.map((b, i) => (i === 50 ? b ^ 0xff : b))));
     await expect(
-      buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner),
+      buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0);
 
     // Restore the declared bytes and the build proceeds.
     writeFileSync(assetPath, original);
-    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(1);
     expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
   });
 
   it('treats a corrupt action entry as a cache miss and repairs it', async () => {
     const { state, runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(1);
 
     const actionsDir = join(root, '.bloom/cache/actions');
     const entry = readdirSync(actionsDir).find((f) => f.endsWith('.json'))!;
     writeFileSync(join(actionsDir, entry), '{"rule": "norm'); // crash mid-write
 
-    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(2); // re-ran instead of crashing
     expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
 
-    const again = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const again = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
     expect(state.runs).toBe(2); // entry rewritten; cache healthy again
     expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
   });
 
   it('normalizes real audio through afconvert', async () => {
-    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized']);
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized']);
     const target = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
     // Second build is a cache hit even with the real runner.
-    const again = await buildLabels(root, ['//songs/creek/sounds:pad-normalized']);
+    const again = await buildLabels(root, ['//songs/creek/sound:pad-normalized']);
     expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
   });
 });
@@ -225,7 +241,7 @@ describe('supercollider', () => {
 
   it('builds, caches, and rebuilds when seed or program change', async () => {
     const { state, runner } = countingRunner();
-    const label = '//songs/creek/sounds:texture';
+    const label = '//songs/creek/sound:texture';
 
     const first = await buildLabels(root, [label], runner);
     expect(state.runs).toBe(1);
@@ -244,10 +260,10 @@ describe('supercollider', () => {
   });
 
   it('has no graph deps but shows the program as an explain input', async () => {
-    expect(queryDeps(root, 'deps(//songs/creek/sounds:texture)')).toEqual([
-      '//songs/creek/sounds:texture',
+    expect(queryDeps(root, 'deps(//songs/creek/sound:texture)')).toEqual([
+      '//songs/creek/sound:texture',
     ]);
-    const e = await explainLabel(root, '//songs/creek/sounds:texture');
+    const e = await explainLabel(root, '//songs/creek/sound:texture');
     expect(e.rule).toBe('supercollider');
     expect(e.inputs).toHaveLength(1);
     expect(e.inputs[0]!.label).toBe('shared/instruments/texture.scd');
@@ -316,12 +332,12 @@ describe('runScProgram edges (no sclang needed)', () => {
       writeFileSync(outputPath, 'audio');
     };
     await expect(
-      buildLabels(root, ['//songs/creek/sounds:texture'], midRenderEdit),
+      buildLabels(root, ['//songs/creek/sound:texture'], midRenderEdit),
     ).rejects.toThrow('changed during the render');
 
     // Nothing was cached: the next build executes again.
     const { state, runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sounds:texture'], runner);
+    await buildLabels(root, ['//songs/creek/sound:texture'], runner);
     expect(state.runs).toBe(1);
   });
 });
@@ -363,7 +379,7 @@ score.recordNRT(
   it('renders a seeded tone deterministically through real sclang', { timeout: 120_000 }, async () => {
     writeFileSync(join(root, 'shared/instruments/texture.scd'), SC_PROGRAM);
     writeSound('texture', scYaml(42));
-    const label = '//songs/creek/sounds:texture';
+    const label = '//songs/creek/sound:texture';
 
     const first = await buildLabels(root, [label]);
     expect(first[0]!.cached).toBe(false);
@@ -386,12 +402,12 @@ describe('play resolution', () => {
     const { state, runner } = countingRunner();
     const items = await resolvePlayables(
       root,
-      ['//songs/creek/assets:pad', '//songs/creek/sounds:pad-normalized', '//songs/creek/assets:pad'],
+      ['//songs/creek/asset:pad', '//songs/creek/sound:pad-normalized', '//songs/creek/asset:pad'],
       runner,
     );
     expect(items.map((i) => i.label)).toEqual([
-      '//songs/creek/assets:pad',
-      '//songs/creek/sounds:pad-normalized',
+      '//songs/creek/asset:pad',
+      '//songs/creek/sound:pad-normalized',
     ]);
     expect(items[0]!.path).toBe(join(root, 'songs/creek/audio/pad.wav'));
     expect(existsSync(items[1]!.path)).toBe(true);
@@ -401,26 +417,26 @@ describe('play resolution', () => {
 
 describe('query and explain', () => {
   it('lists deps in dependency order', () => {
-    expect(queryDeps(root, 'deps(//songs/creek/sounds:pad-normalized)')).toEqual([
-      '//songs/creek/assets:pad',
-      '//songs/creek/sounds:pad-normalized',
+    expect(queryDeps(root, 'deps(//songs/creek/sound:pad-normalized)')).toEqual([
+      '//songs/creek/asset:pad',
+      '//songs/creek/sound:pad-normalized',
     ]);
   });
 
   it('lists pattern matches', () => {
-    expect(queryDeps(root, '//songs/creek/assets:all')).toEqual(['//songs/creek/assets:pad']);
+    expect(queryDeps(root, '//songs/creek/asset:all')).toEqual(['//songs/creek/asset:pad']);
   });
 
   it('explains a rule target', async () => {
-    const before = await explainLabel(root, '//songs/creek/sounds:pad-normalized');
+    const before = await explainLabel(root, '//songs/creek/sound:pad-normalized');
     expect(before.rule).toBe('normalize');
     expect(before.cached).toBe(false);
     expect(before.parameters).toEqual({ sample_rate: 96000, bit_depth: 16 });
-    expect(before.inputs[0]!.label).toBe('//songs/creek/assets:pad');
+    expect(before.inputs[0]!.label).toBe('//songs/creek/asset:pad');
 
     const { runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
-    const after = await explainLabel(root, '//songs/creek/sounds:pad-normalized');
+    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    const after = await explainLabel(root, '//songs/creek/sound:pad-normalized');
     expect(after.cached).toBe(true);
     expect(after.actionKey).toBe(before.actionKey);
     expect(after.outputs).toHaveLength(1);

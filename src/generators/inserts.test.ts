@@ -71,12 +71,12 @@ describe('track inserts', () => {
       runs.push(node.label.name);
       writeFileSync(outputPath, 'out');
     };
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['drums']);
 
     // Adding an insert is a content edit: the stem re-renders.
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml(eqInsert(-6)));
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['drums', 'drums']);
 
     // A fader move on the same track is still mix-stage only.
@@ -84,13 +84,13 @@ describe('track inserts', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml(['gain_db: -6', ...eqInsert(-6)]),
     );
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['drums', 'drums']);
   });
 
   it('apply real DSP after clip summing', async () => {
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml(eqInsert(-6)));
-    const outcomes = await buildLabels(root, ['//songs/creek/tracks:drums']);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
     const stem = outcomes.find((o) => o.label.endsWith(':drums'))!;
     // −6 dB bell right on the tone ≈ half amplitude; the dry tone RMS is
     // 0.1/√2 ≈ 0.0707.
@@ -102,7 +102,7 @@ describe('track inserts', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       trackYaml(['inserts:', '  - effect: reverb', '    decay: 0.5']),
     );
-    const outcomes = await buildLabels(root, ['//songs/creek/tracks:drums']);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
     const stem = outcomes.find((o) => o.label.endsWith(':drums'))!;
     expect(readWav(stem.outputPath!).channels[0]!.length).toBe(48000 + 24000);
   });

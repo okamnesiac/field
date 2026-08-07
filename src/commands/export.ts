@@ -56,8 +56,8 @@ export function homeRelative(path: string, home = homedir()): string {
 
 // `//songs/creek/mix:main` → `creek-mix-main`: the whole label with the
 // punctuation flattened, minus the `songs/` prefix every song carries.
-// Shared material keeps its shelf (`//shared/assets:water` →
-// `shared-assets-water`), which is what makes the name say where the
+// Shared material keeps its shelf (`//shared/asset:water` →
+// `shared-asset-water`), which is what makes the name say where the
 // thing came from.
 //
 // Long on purpose. The short form (`creek-main`) reads better right up

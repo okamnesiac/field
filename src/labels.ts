@@ -1,11 +1,17 @@
 // Build labels (project-core.md §3.4): `//path:name`, with wildcards
 // `//path/...` (everything under path) and `//path:all` (everything in
 // one package). The project model is the build file — packages derive
-// from it by convention:
-//   entity file      songs/creek/tracks/drums.yaml   → //songs/creek/tracks:drums
-//                    songs/creek/sounds/kit-sc.yaml  → //songs/creek/sounds:kit-sc
-//   collection file  songs/creek/assets.yaml         → //songs/creek/assets:<entry>
-//                    shared/assets.yaml              → //shared/assets:<entry>
+// from it by convention, and a package is the *singular* of the
+// directory that holds it, because a label addresses one thing:
+// `//songs/creek/track:keys` reads "the keys track" (project-layout.md
+// §4.5, amended).
+//   entity file      songs/creek/tracks/drums.yaml   → //songs/creek/track:drums
+//                    songs/creek/sounds/kit-sc.yaml  → //songs/creek/sound:kit-sc
+//   collection file  songs/creek/assets.yaml         → //songs/creek/asset:<entry>
+//                    shared/assets.yaml              → //shared/asset:<entry>
+// The directories and the ledger's `assets:` key stay plural: a folder
+// and a list hold many, which is the distinction the singular package
+// draws attention to.
 // Canonical form is absolute; the CLI additionally accepts songs-relative
 // shorthand (`creek/mix:main` = `//songs/creek/mix:main`) because nearly
 // everything addressable lives under songs/, and a bare song name
@@ -31,12 +37,12 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 export const RESERVED_LABEL_NAME = 'all';
 
 // The shared ledger's package (project-layout.md §1.6): shared/assets.yaml
-// pins reusable committed audio, labeled //shared/assets:<name>.
-export const SHARED_ASSETS_PKG = 'shared/assets';
+// pins reusable committed audio, labeled //shared/asset:<name>.
+export const SHARED_ASSETS_PKG = 'shared/asset';
 
 // The one cross-scope reference a clip may make (project-layout.md §1.5):
 // a bare name resolves in the song's own ledger, the full
-// //shared/assets:<name> label crosses into the shared scope. Returns the
+// //shared/asset:<name> label crosses into the shared scope. Returns the
 // shared asset's name, or undefined for a bare (song-scoped) ref.
 export function sharedAssetName(ref: string): string | undefined {
   const prefix = `//${SHARED_ASSETS_PKG}:`;

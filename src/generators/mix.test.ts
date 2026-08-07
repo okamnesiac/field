@@ -200,10 +200,10 @@ describe('mix targets in the build graph', () => {
 
   it('builds the default mix end-to-end through rule→rule edges', async () => {
     expect(queryDeps(root, 'deps(//songs/creek/mix:main)')).toEqual([
-      '//songs/creek/assets:kick-src',
-      '//songs/creek/tracks:kick',
-      '//songs/creek/assets:snare-src',
-      '//songs/creek/tracks:snare',
+      '//songs/creek/asset:kick-src',
+      '//songs/creek/track:kick',
+      '//songs/creek/asset:snare-src',
+      '//songs/creek/track:snare',
       '//songs/creek/mix:main',
     ]);
 
@@ -237,7 +237,7 @@ describe('mix targets in the build graph', () => {
     };
 
     await buildLabels(root, ['//songs/creek/mix:main'], runner);
-    expect(runs).toEqual(['songs/creek/tracks:kick', 'songs/creek/tracks:snare', 'songs/creek/mix:main']);
+    expect(runs).toEqual(['songs/creek/track:kick', 'songs/creek/track:snare', 'songs/creek/mix:main']);
 
     runs.length = 0;
     writeFileSync(
@@ -263,7 +263,7 @@ describe('mix targets in the build graph', () => {
     // is a cache hit. Content-addressing gives early cutoff for free.
     writeFileSync(join(root, 'songs/creek/tracks/kick.yaml'), trackYaml('kick', 'kick-src', 7));
     await buildLabels(root, ['//songs/creek/mix:main'], runner);
-    expect(runs).toEqual(['songs/creek/tracks:kick']);
+    expect(runs).toEqual(['songs/creek/track:kick']);
   });
 
   it('diagnoses bad mix declarations; an empty mix has no node', async () => {

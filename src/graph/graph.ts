@@ -20,7 +20,7 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 // (project-core.md §3.4). Node kinds so far: source assets (song and
 // shared ledgers), defined sounds (sounds/), and implicit track stems —
 // every audio track with clips is buildable as
-// //songs/<song>/tracks:<name> (mix-assembly.md §3). "Node" and "rule"
+// //songs/<song>/track:<name> (mix-assembly.md §3). "Node" and "rule"
 // are deliberately the engine's words (project-layout.md §4): the
 // format speaks sounds and types, and this module realizes them.
 
@@ -44,7 +44,7 @@ export interface GeneratorNode {
 
 // A deliberate sound's committed audio (project-layout.md §1.4):
 // content-addressed like an asset. The sound's own label
-// (//songs/<song>/sounds:<name>) resolves to its *chosen* variant — that
+// (//songs/<song>/sound:<name>) resolves to its *chosen* variant — that
 // node is what clips and rules consume — while every variant is
 // additionally auditionable as :<name>-<n>. `bloom choose` repoints
 // which variant the sound's label means; nothing is ever re-run.
@@ -74,7 +74,7 @@ export function buildGraph(project: LoadedProject): Graph {
     refLabel: (ref: string) => Label,
   ) => {
     // Each rule declares its ordered sources; the classifier maps each
-    // ref — a name in the song's one namespace or a //shared/assets:
+    // ref — a name in the song's one namespace or a //shared/asset:
     // label — onto the node it means. Other inputs (like sc programs)
     // participate by content hash without being nodes.
     const impl = generatorFor(spec);
@@ -94,7 +94,7 @@ export function buildGraph(project: LoadedProject): Graph {
   for (const song of project.songs) {
     const pkgBase = song.dir;
     // Keyed by ref string — bare names in the song's namespace, full
-    // //shared/assets: labels for shared pins — matching what clips and
+    // //shared/asset: labels for shared pins — matching what clips and
     // sounds carry. Chosen generate variants are committed content, so
     // they join the map; a ref absent here is a buildable sound.
     const sha256BySource = new Map<string, string>();
@@ -104,7 +104,7 @@ export function buildGraph(project: LoadedProject): Graph {
     }
     if (song.assets) {
       for (const asset of song.assets.data.assets) {
-        const label: Label = { pkg: `${pkgBase}/assets`, name: asset.name };
+        const label: Label = { pkg: `${pkgBase}/asset`, name: asset.name };
         nodes.set(formatLabel(label), { kind: 'asset', label, scopeDir: song.dir, asset });
         sha256BySource.set(asset.name, asset.sha256);
         assetNames.add(asset.name);
@@ -124,8 +124,8 @@ export function buildGraph(project: LoadedProject): Graph {
     const refLabel = (ref: string): Label => {
       const shared = sharedAssetName(ref);
       if (shared !== undefined) return { pkg: SHARED_ASSETS_PKG, name: shared };
-      if (assetNames.has(ref)) return { pkg: `${pkgBase}/assets`, name: ref };
-      return { pkg: `${pkgBase}/sounds`, name: ref };
+      if (assetNames.has(ref)) return { pkg: `${pkgBase}/asset`, name: ref };
+      return { pkg: `${pkgBase}/sound`, name: ref };
     };
     for (const file of song.sounds) {
       const sound = file.data;
@@ -135,7 +135,7 @@ export function buildGraph(project: LoadedProject): Graph {
         // Its own label resolves to the chosen variant; every variant is
         // auditionable by number.
         sound.variants.forEach((variant, i) => {
-          const label: Label = { pkg: `${pkgBase}/sounds`, name: `${sound.name}-${i + 1}` };
+          const label: Label = { pkg: `${pkgBase}/sound`, name: `${sound.name}-${i + 1}` };
           nodes.set(formatLabel(label), {
             kind: 'generation',
             label,
@@ -146,7 +146,7 @@ export function buildGraph(project: LoadedProject): Graph {
         });
         if (sound.chosen !== undefined) {
           const variant = sound.variants[sound.chosen - 1]!;
-          const label: Label = { pkg: `${pkgBase}/sounds`, name: sound.name };
+          const label: Label = { pkg: `${pkgBase}/sound`, name: sound.name };
           nodes.set(formatLabel(label), {
             kind: 'generation',
             label,
@@ -158,7 +158,7 @@ export function buildGraph(project: LoadedProject): Graph {
           fileBySource.set(sound.name, { base: song.dir, file: variant.file });
         }
       } else {
-        addRule({ pkg: `${pkgBase}/sounds`, name: sound.name }, song.dir, sound, refLabel);
+        addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel);
       }
     }
     const mixable = song.tracks
@@ -186,7 +186,7 @@ export function buildGraph(project: LoadedProject): Graph {
         // MIDI tracks have no audio to render, and an empty stem is not a
         // useful artifact — implicit stems exist where there is content.
         addRule(
-          { pkg: `${pkgBase}/tracks`, name: track.name },
+          { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,
           planTrack(track, tempoMap, sha256BySource, framesBySource),
           refLabel,
@@ -205,7 +205,7 @@ export function buildGraph(project: LoadedProject): Graph {
         // the spec is synthesized rather than through assetDeps (which is
         // for asset-package edges).
         const label: Label = { pkg: `${pkgBase}/mix`, name: file.data.name };
-        const deps = spec.tracks.map((name): Label => ({ pkg: `${pkgBase}/tracks`, name }));
+        const deps = spec.tracks.map((name): Label => ({ pkg: `${pkgBase}/track`, name }));
         nodes.set(formatLabel(label), { kind: 'rule', label, songDir: song.dir, spec, deps });
       }
     }
@@ -213,9 +213,25 @@ export function buildGraph(project: LoadedProject): Graph {
   return { nodes };
 }
 
+// Packages went singular in the same change that made them read like
+// what they address ("the keys track"), and the plural is what fingers
+// and old docs still type. A bare "no such label" is a bad way to learn
+// that, so a pattern that would have matched under the old spelling says
+// so — for as long as anyone is still typing it.
+function singularHint(graph: Graph, pkg: string): string {
+  const singular = pkg.replace(/(sounds|tracks|assets|mixes)$/, (plural) =>
+    plural === 'mixes' ? 'mix' : plural.slice(0, -1),
+  );
+  if (singular === pkg) return '';
+  const exists = [...graph.nodes.values()].some((n) => n.label.pkg === singular);
+  return exists ? ` (packages are singular: try //${singular}:…)` : '';
+}
+
 export function resolveLabel(graph: Graph, label: Label): GraphNode {
   const node = graph.nodes.get(formatLabel(label));
-  if (!node) throw new Error(`no such label: ${formatLabel(label)}`);
+  if (!node) {
+    throw new Error(`no such label: ${formatLabel(label)}${singularHint(graph, label.pkg)}`);
+  }
   return node;
 }
 
@@ -232,7 +248,8 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
           : pattern.pkg === ''
             ? '//...'
             : `//${pattern.pkg}/...`;
-    throw new Error(`pattern matched no labels: ${expanded}`);
+    const pkg = pattern.kind === 'label' ? pattern.label.pkg : pattern.pkg;
+    throw new Error(`pattern matched no labels: ${expanded}${singularHint(graph, pkg)}`);
   }
   return matched;
 }

@@ -11,7 +11,7 @@ import { loadProject } from '../model/project.js';
 import type { GeneratorRunner } from '../graph/build.js';
 
 // The shared scope end to end (project-layout.md §1.5–1.6):
-// shared/assets.yaml pins committed material, //shared/assets:<name> is
+// shared/assets.yaml pins committed material, //shared/asset:<name> is
 // the one cross-scope reference clips may make, and visibility is
 // enforced — a bare name can only mean the song's own ledger.
 
@@ -106,13 +106,13 @@ describe('the shared ledger', () => {
 
 describe('cross-scope clip references', () => {
   it('a clip plays a shared asset through the full label, wired into the graph', async () => {
-    writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), clipTrack('//shared/assets:rain'));
+    writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), clipTrack('//shared/asset:rain'));
     const project = loadProject(root);
     expect(project.diagnostics).toEqual([]);
 
-    expect(queryDeps(root, 'deps(//songs/creek/tracks:drums)')).toEqual([
-      '//shared/assets:rain',
-      '//songs/creek/tracks:drums',
+    expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
+      '//shared/asset:rain',
+      '//songs/creek/track:drums',
     ]);
 
     const runs: string[] = [];
@@ -122,12 +122,12 @@ describe('cross-scope clip references', () => {
       expect(inputPaths[0]).toBe(join(root, 'shared/samples/rain.wav'));
       writeFileSync(outputPath, 'out');
     };
-    await buildLabels(root, ['//songs/creek/tracks:drums'], runner);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['drums']);
   });
 
   it('unknown shared assets are diagnosed by name', () => {
-    writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), clipTrack('//shared/assets:ghost'));
+    writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), clipTrack('//shared/asset:ghost'));
     expect(
       loadProject(root).diagnostics.some((d) =>
         d.message.includes('references unknown shared asset "ghost"'),
@@ -135,16 +135,16 @@ describe('cross-scope clip references', () => {
     ).toBe(true);
   });
 
-  it('no spelling reaches another song: only bare names and //shared/assets:', () => {
+  it('no spelling reaches another song: only bare names and //shared/asset:', () => {
     createSong(root, 'opener');
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      clipTrack('//songs/opener/assets:borrowed'),
+      clipTrack('//songs/opener/asset:borrowed'),
     );
     // Rejected at the schema layer — the ref shape admits exactly two scopes.
     expect(
       loadProject(root).diagnostics.some((d) =>
-        d.message.includes('must be a name in the song or //shared/assets:<name>'),
+        d.message.includes('must be a name in the song or //shared/asset:<name>'),
       ),
     ).toBe(true);
   });
@@ -158,7 +158,7 @@ describe('cross-scope clip references', () => {
         'type: audio',
         'clips:',
         '  - id: c1',
-        '    source: //shared/assets:rain',
+        '    source: //shared/asset:rain',
         '    anchor: absolute',
         '    position: 0',
         '    duration: 300',

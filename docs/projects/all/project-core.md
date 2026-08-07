@@ -79,7 +79,7 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
 4. **Label grammar (DECIDED).** The project model *is* the build file — no
    separate `BUILD` files, which would only re-declare structure the
    manifests already express. Targets derive by convention:
-   `songs/opener/tracks/lead-vocal.yaml` is `//songs/opener/tracks:lead-vocal`;
+   `songs/opener/tracks/lead-vocal.yaml` is `//songs/opener/track:lead-vocal`;
    mixes declared in a song's mix file become `//songs/opener/mix:main`.
    Grammar: `//path:name`, wildcards `//songs/opener/...` and `:all`.
    Amended 2026-08-05 (was: absolute-only in V1): the CLI also accepts
@@ -93,11 +93,25 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    Amended 2026-08-06: authored specs became per-file
    ([project-layout.md](project-layout.md) §1.3) — sounds and mixes
    derive like tracks (`songs/opener/sounds/pad.yaml` →
-   `//songs/opener/sounds:pad`), so "declared in a song's mix file"
+   `//songs/opener/sound:pad`), so "declared in a song's mix file"
    reads "declared in `mixes/<name>.yaml`"; project-layout §4 then
    renamed the shelf (`targets/` → `sounds/`) and retired "target" as a
    term — the addressable thing is a label. The grammar itself is
    unchanged.
+   Amended 2026-08-06 (**packages are singular**): `//songs/creek/sound:pad`,
+   `//songs/creek/track:keys`, `//songs/creek/asset:water`,
+   `//shared/asset:rain` — joining `mix:`, which was singular all along.
+   What forced the question was that inconsistency: `mix:` beside
+   `tracks:` made the rule you would infer from any other label wrong
+   exactly once, and wrong on the label you type most. The rejected fix
+   was pluralizing `mix:` to restore "the package is its directory"
+   (project-layout.md §1.1.3). Singular won on how it reads: a label
+   addresses one thing, so `//songs/creek/track:keys` is "the keys
+   track", and the directory stays plural because a folder holds many.
+   The ledger's `assets:` key stays plural for the same reason — it is a
+   list. Cache-neutral: the label is not in the action key (§3.5), so
+   nothing re-renders; only `.bloom/out/` paths move. Typing the old
+   plural gets a hint at the singular rather than a bare no-such-label.
 5. **Cache key definition (DECIDED).** SHA-256 everywhere, chosen so asset
    hash = Git LFS OID — store, pointer, and cache speak one identifier
    (BLAKE3 is faster but buys a second identity scheme). Key = hash of

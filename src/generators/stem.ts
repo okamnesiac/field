@@ -4,7 +4,7 @@ import type { Clip, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
 
-// stem: the implicit generator behind //songs/<song>/tracks:<name>
+// stem: the implicit generator behind //songs/<song>/track:<name>
 // (mix-assembly.md §3) — a mix file defines a mix, a track file implies
 // a stem. The spec is synthesized from the track file, never declared:
 // clip windows are projected through the tempo map
@@ -123,7 +123,7 @@ export function planTrack(
   track: Track,
   tempoMap: TempoMap,
   // Content hashes for committed sources, keyed by the exact ref string
-  // clips carry (bare name or //shared/assets: label); a ref absent here
+  // clips carry (bare name or //shared/asset: label); a ref absent here
   // is a buildable sound. Wiring order is content-hash order for the
   // committed ones (name tiebreak for determinism), so renaming cannot
   // permute the input list or the clip indices — names never reach the
