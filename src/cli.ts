@@ -268,6 +268,25 @@ program
     }
   });
 
+program
+  .command('export <patterns...>')
+  .description('build labels and copy the results to ~/Desktop under readable names')
+  .option('--to <dir>', 'destination directory instead of ~/Desktop (must exist)')
+  .action(async (patterns: string[], opts: { to?: string }) => {
+    try {
+      const { exportLabels, homeRelative } = await import('./commands/export.js');
+      const results = await exportLabels(requireRoot(), patterns, { to: opts.to });
+      for (const r of results) {
+        // `replaced` and `exported` are both 8 characters, so the labels
+        // line up whether or not the file was already there.
+        const status = r.replaced ? 'replaced' : 'exported';
+        process.stdout.write(`${status} ${r.label} → ${homeRelative(r.to)}\n`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 // The retiring fallback for machines without the built daemon: playback
 // through afplay, no transport, no --from.
 async function playWithAfplay(items: Playable[]): Promise<void> {

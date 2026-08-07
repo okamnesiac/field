@@ -9,6 +9,7 @@ sources; the engine speaks nodes, generators, and action keys).
 ```bash
 bloom build //songs/opener/mix:main
 bloom build //songs/opener/stems/...
+bloom export //songs/opener/mix:main
 bloom test //...
 bloom query 'deps(//songs/opener/mix:main)'
 bloom explain //songs/opener/mix:main
@@ -52,6 +53,21 @@ finishes the current pass and the next wrap starts the new file. Watch
 runs `build`, and build never generates a generative sound — but a
 `chosen:` repoint is just a YAML edit, so `bloom choose` against a
 running watch is live variant A/B-ing inside the loop.
+
+### Getting a file out
+
+Outputs live under their content hash, materialized at
+`.bloom/out/<label>.wav` — addresses for the engine, not names anyone
+wants in a Finder window or an email. `bloom export <patterns>` builds
+and then copies the result to `~/Desktop` (or `--to <dir>`) under the
+name you would say out loud: `//songs/creek/mix:main` becomes
+`creek-main.wav`, and shared material keeps its own name. It exports
+what `play` would play, through the same resolver, and only the labels
+the patterns match — the dependencies a build prints are means, not
+products. Labels are slugs by grammar, so those names need no
+sanitizing; where two labels in one run would land on the same file
+(a song's `tracks:pad` and `sounds:pad`), both take their package's
+scope into the name and everything else keeps its plain one.
 
 ## Render strategies
 
