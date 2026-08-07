@@ -1,6 +1,6 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunk 1 in review (#50); chunks 2–6 not started. Written
+**Status:** Chunk 1 shipped (#50); chunks 2–6 not started. Written
 after [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -272,6 +272,47 @@ argument for *when*.
    `target_link_libraries` is a one-line change; only
    `juce_audio_devices` and `juce_audio_formats` are linked today.
 
+6. **Render is a subprocess, not a verb on the running daemon**
+   (2026-08-07). `field-audiod --render` spawned by the build action,
+   exiting when the file is written. That is the shape
+   [architecture.md](../../architecture.md)'s IPC section already gives
+   the other executors — "JSON over stdio to worker subprocesses" — and
+   the shape the daemon's own flags already take (`--socket`,
+   `--null-output`, `--idle`).
+
+   Rejected: **a `render` command on the NDJSON control socket.** A build
+   action would contend with whatever the developer is listening to, one
+   process owning both the transport and the render queue, and two
+   `field build` runs could not proceed independently. Builds are
+   hermetic and parallel by construction; borrowing a long-lived
+   stateful process to do them gives that up for nothing, because an
+   offline render needs no device, no transport and no shared state.
+
+   Rejected: **rendering in-process in the CLI through a native addon.**
+   A second binding surface to maintain beside the protocol, for a path
+   [mix-assembly.md](mix-assembly.md) §1 defines as having no deadline.
+
+7. **Musical time stays in TypeScript; the daemon is handed
+   sample-accurate edit lists** (2026-08-07). The daemon is "artifacts
+   only: it plays files the build produced and has no idea what a clip
+   or a bar is" (`native/audiod/src/main.cpp`), and that sentence stays
+   true when it renders. Bars, beats, tempo maps and clip placement
+   resolve in the control plane exactly as they do now (`src/time/`);
+   what crosses the boundary is sample offsets and file paths.
+
+   Rejected: **giving the daemon the tempo map.** It duplicates
+   `TempoMap` in C++, puts musical semantics on both sides of a
+   versioned protocol, and retires the one-sentence description of the
+   daemon that has held since #12 — for no gain, since offline render
+   has already resolved every position before it starts.
+
+8. **Standalone effect targets move first, then `track-render` and
+   `mix`** (2026-08-07). The `eq`/`limit`/`reverb` rules take one input
+   and one set of parameters, so they exercise the whole new path —
+   spawn, plan, render, compare — with nothing else changing. Stems and
+   mixes add clip placement and summing on top of a boundary that is by
+   then already proven.
+
 ## 3 What JUCE does and does not supply
 
 Checked against the pinned JUCE 8.0.4 tree, not from memory.
@@ -349,7 +390,7 @@ most memory-bound of the three effects.
 1. **Property tests against the current TypeScript renderer.** Every
    assertion in decision 3, passing today. Cheap, valuable immediately,
    and any that fails is a real bug found before the port. These are the
-   migration harness and they never change hands. In review (#50):
+   migration harness and they never change hands. Shipped (#50):
    fifteen properties in `src/generators/effect-properties.test.ts`, all
    built and measured through the build rules so nothing imports
    `src/audio/` except `wav.ts`. None of decision 3's stated assertions
@@ -391,6 +432,11 @@ daemon build from [linux-portability.md](linux-portability.md) chunk 4,
 and it gates chunk 4 here: deleting `reverb.ts` before byte-identity is
 locked removes the only thing that would notice a regression.
 
+That Linux daemon build is also a prerequisite for **chunk 3**, which
+was not visible until decision 6 was written down: once the effect rules
+call `field-audiod --render`, the binary is a build dependency, and the
+Linux CI job runs those rules' tests. See §7.
+
 ## 7 Open questions
 
 - **When to start chunk 2.** Recommended: after chunk 1, and before AU
@@ -400,18 +446,20 @@ locked removes the only thing that would notice a regression.
   when AU hosting forces it, keeps the phase order in
   [docs/projects](../now.md) undisturbed but pays a larger migration.
   Justin's call; nothing else in this plan depends on it.
-- **Does offline render run in-process or as an NRT mode of the
-  daemon?** SuperCollider already resolves this shape the same way —
-  [architecture.md](../../architecture.md) records scsynth as offline
-  NRT by default and live as a graph node, one engine and two modes.
-  The daemon plausibly wants the same, but the IPC surface for "render
-  this graph node to a file" is not designed yet.
-- **Does `field build` now require the native toolchain?** Today 268 of
-  301 tests pass on Linux with no native build at all. If render lives
-  in the daemon, the Linux job needs a full JUCE build, which cuts
-  against [linux-portability.md](linux-portability.md) rather than with
-  it. A `--no-native` subset, or accepting the dependency, is
-  undecided.
+- ~~**Does offline render run in-process or as an NRT mode of the
+  daemon?**~~ **Answered** — decisions 6–8 above. It is a subprocess,
+  musical time stays in the control plane, and standalone effect targets
+  move first. SuperCollider's precedent held: one engine, two modes.
+- **`field build` will require the native toolchain, and that is a
+  scheduling fact rather than an open question now.** Decision 6 makes
+  the daemon binary a build dependency the moment chunk 3 lands: the
+  effect rules call it, and the Linux CI job runs those tests. So
+  [linux-portability.md](linux-portability.md) chunk 4 is a hard
+  prerequisite for chunk 3 here, not only for chunk 6 — without it the
+  Linux job either fails or skips the effect tests, and skipping is how
+  #46 lost the suite in the first place. What is still open is whether a
+  `--no-native` subset is worth having for contributors who only touch
+  the control plane.
 - **Resampler quality target**, inherited unresolved from
   [linux-portability.md](linux-portability.md) §5: taps, transition
   width, stopband attenuation, and whether JUCE's variable-rate

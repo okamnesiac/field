@@ -1,6 +1,7 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
-**Status:** Chunk 1 in review (#49); chunk 4 not started. Chunks 2–3
+**Status:** Chunk 1 shipped (#49); chunk 4 not started, and now on
+the critical path — see the note under chunk 4. Chunks 2–3
 **withdrawn** to [render-pipeline.md](render-pipeline.md), which puts
 sample-rate conversion in the daemon's built-in tier rather than in
 TypeScript; §1.1 below records what that replaced and why.
@@ -190,7 +191,7 @@ built-in tier, and no project using an `au:` insert can make it.
 
 ## 4 Chunks
 
-1. **CI split + concurrency** — in review (#49). Two jobs, per-test
+1. **CI split + concurrency** — shipped (#49). Two jobs, per-test
    guards on the nine platform-bound cases (decision 4) so the Linux job
    skips those and runs the other 63 tests in the same files, and
    `cancel-in-progress`. Verified both ways before opening: 320 passed
@@ -208,7 +209,13 @@ built-in tier, and no project using an `au:` insert can make it.
    build, protocol tests green in null-output mode. Restores
    `pnpm build:native`, which #46 also dropped.
 
-Chunks 1 and 4 are what remain, 4 depends on 1, and 1 is available now.
+Chunk 4 is what remains, and it is no longer only about Linux.
+[render-pipeline.md](render-pipeline.md) decision 6 makes
+`field-audiod --render` a build dependency the moment its chunk 3 lands,
+so a Linux job with no daemon build would fail or skip the effect tests
+— and skipping is exactly how #46 lost the suite. Chunk 4 therefore
+gates render chunks 3 and 6, which makes it the next thing here rather
+than a tidy-up after them.
 Note that [render-pipeline.md](render-pipeline.md) §7 raises a question
 this plan cannot answer alone: if rendering moves into the daemon,
 `field build` gains a native-toolchain dependency on Linux, which cuts
