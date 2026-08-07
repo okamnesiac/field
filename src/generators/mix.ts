@@ -91,7 +91,7 @@ export const mixGenerator: Generator<MixSpec> = {
       if (wav.sampleRate !== ctx.sampleRate) {
         throw new Error(
           `stem for track "${name}" is ${wav.sampleRate} Hz but the project is ` +
-            `${ctx.sampleRate} Hz — rebuild it (bloom build)`,
+            `${ctx.sampleRate} Hz — rebuild it (field build)`,
         );
       }
       return wav;

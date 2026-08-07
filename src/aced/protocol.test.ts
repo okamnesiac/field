@@ -16,7 +16,7 @@ describe('aced protocol schemas', () => {
       acedHelloResponseSchema.parse({
         ok: true,
         protocol: 1,
-        daemon: 'bloom-aced',
+        daemon: 'field-aced',
         version: '0.1.0',
         model_loaded: false,
       }).model_loaded,

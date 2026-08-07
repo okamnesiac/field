@@ -50,9 +50,9 @@ export const reverbSoundSchema = z.strictObject({
 export type ReverbSound = z.infer<typeof reverbSoundSchema>;
 
 // supercollider: the sound is defined by a SuperCollider program,
-// rendered offline (NRT). The program runs via sclang with BLOOM_OUTPUT /
-// BLOOM_SEED / BLOOM_DURATION / BLOOM_SAMPLE_RATE / BLOOM_CHANNELS in
-// the environment; it must write BLOOM_OUTPUT and exit. Determinism
+// rendered offline (NRT). The program runs via sclang with FIELD_OUTPUT /
+// FIELD_SEED / FIELD_DURATION / FIELD_SAMPLE_RATE / FIELD_CHANNELS in
+// the environment; it must write FIELD_OUTPUT and exit. Determinism
 // given the seed is the program's job; the program's content hash is the
 // cache input. `source:` is the program file — a bare filename resolves
 // on the type's home shelf, shared/instruments/ (§4); a slashed path is
@@ -90,10 +90,10 @@ export type SaySound = z.infer<typeof saySoundSchema>;
 
 // generative: deliberate generation (project-layout.md §1.2, §1.4) — a
 // sound with no in-graph Generator behind it: nothing may generate it
-// mechanically; you run it, with bloom generate. Model inference does not reproduce across GPU/framework
+// mechanically; you run it, with field generate. Model inference does not reproduce across GPU/framework
 // versions, so the outputs are committed (variants under audio/<name>/,
 // content-addressed like assets) and the file is provenance plus
-// promotion state: `bloom generate` writes it, `bloom choose` records
+// promotion state: `field generate` writes it, `field choose` records
 // `chosen`, and the sound's own label resolves to the chosen variant —
 // clips reference the sound by name, no ledger copy involved. Each
 // variant is additionally auditionable as

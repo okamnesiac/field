@@ -85,7 +85,7 @@ juce::String Server::start()
     if (lockFd < 0)
         return "cannot open lock file: " + juce::String (strerror (errno));
     if (::flock (lockFd, LOCK_EX | LOCK_NB) != 0)
-        return "another bloom-audiod already owns " + socketPath;
+        return "another field-audiod already owns " + socketPath;
     ::unlink (socketPath.toRawUTF8());
 
     listenFd = ::socket (AF_UNIX, SOCK_STREAM, 0);
@@ -209,7 +209,7 @@ juce::String Server::dispatch (const juce::var& request)
     if (op == "hello")
     {
         ok->setProperty ("protocol", protocolVersion);
-        ok->setProperty ("daemon", "bloom-audiod");
+        ok->setProperty ("daemon", "field-audiod");
         ok->setProperty ("version", "0.4.0"); // 0.4: reload (takeover at the loop wrap)
     }
     else if (op == "devices")

@@ -79,7 +79,7 @@ issue comments — Codex, Claude, and Bugbot attach them as inline review
 comments:
 
 ```
-gh api graphql -f query='query { repository(owner:"okamnesiac",name:"bloom"){
+gh api graphql -f query='query { repository(owner:"okamnesiac",name:"field"){
   pullRequest(number:<n>){ reviewThreads(first:60){ nodes{
     id isResolved path line comments(last:1){nodes{author{login} body}} } } } } }'
 ```

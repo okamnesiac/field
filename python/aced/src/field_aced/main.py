@@ -1,4 +1,4 @@
-"""bloom-aced: daemon-lite lifecycle, translated from bloom-audiod.
+"""field-aced: daemon-lite lifecycle, translated from field-audiod.
 
 Spawned by the CLI with its cwd at the project root; binds a root-relative
 socket (sun_path is 104 bytes), owns it via a lifetime flock, serves
@@ -202,7 +202,7 @@ class Server:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog=DAEMON_NAME)
-    parser.add_argument("--socket", default=".bloom/aced.sock")
+    parser.add_argument("--socket", default=".field/aced.sock")
     parser.add_argument("--idle", type=int, default=600)
     args = parser.parse_args()
     socket_path: str = args.socket

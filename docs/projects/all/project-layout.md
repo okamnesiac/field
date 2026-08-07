@@ -1,7 +1,7 @@
 # Plan: Project layout revision
 
 **Status:** Done (2026-08-06); the loader/CLI migration (§2.1) and the
-§4 vocabulary shipped in #31, and field migrated the same day (field
+§4 vocabulary shipped in #31, and bloom migrated the same day (bloom
 7fbdbc5, which also adds the first shared sample). This records a
 design conversation
 that amended three earlier DECIDED records; §4 records the vocabulary
@@ -101,13 +101,13 @@ or a scope boundary.
    **committed audio only**: programs are *keyed, not pinned* —
    sc-render hashes program content into the action key (drift
    re-renders, which is editing working normally), whereas a pin is a
-   verification promise (drift fails `bloom check`). Code's integrity
+   verification promise (drift fails `field check`). Code's integrity
    story is git; pinning programs would fail check on every legitimate
    edit. *Nuanced by §4.8: pin authority splits — imported/recorded
    audio pins in the ledger, generated variants pin in their sound spec
    (the per-variant sha256 check verifies). Every committed file is
    still pinned exactly once.*
-7. **The `ace` prefix retires.** `bloom generate` and `bloom choose`
+7. **The `ace` prefix retires.** `field generate` and `field choose`
    are verbs over the generator category — the recipe's `model:` field
    says which generator ran. Answers
    [voice-generation.md](voice-generation.md) §4's CLI-seam question
@@ -116,19 +116,19 @@ or a scope boundary.
 
 ## 2 Migration (queued, not started)
 
-One loader/CLI PR, then a field PR — flag-day is fine while field is the
+One loader/CLI PR, then a bloom PR — flag-day is fine while bloom is the
 only project:
 
 1. Loader reads `targets/` and `mixes/` directories (the `tracks/`
    pattern), name-matches-filename diagnostics; generation recipes load
    as deliberate targets; `shared/assets.yaml` + the cross-scope clip
-   reference (spelling decided here — see §3); `bloom generate`/`choose`
+   reference (spelling decided here — see §3); `field generate`/`choose`
    rename with back-compat aliases removed in the same breath.
-2. field migrates: split `targets.yaml`/`mix.yaml`, `.scd` programs →
+2. bloom migrates: split `targets.yaml`/`mix.yaml`, `.scd` programs →
    `shared/generators/`, still-water-keys recipe → `targets/`, variants
    → `audio/still-water-keys/`, `loops/` dir retires. Expected to be
    cache-neutral except the relabeled generation nodes.
-3. field gains **one shared sample** exercising the whole shared story
+3. bloom gains **one shared sample** exercising the whole shared story
    end-to-end: a file in `shared/samples/`, pinned in
    `shared/assets.yaml`, clipped into a song across the scope boundary —
    the demo that forces the reference spelling to exist and proves the
@@ -203,7 +203,7 @@ every existing citation stay stable.
    re-render of SuperCollider nodes — free inside the flag-day that
    relabels them anyway.
 5. **"Target" retires as a term.** The addressable thing is a *label*;
-   `bloom build` builds labels, and things that never had spec files
+   `field build` builds labels, and things that never had spec files
    (track stems, mixes) were never comfortably "targets" anyway. Mix
    labels keep their `mix:` package; a mix file's `rule: mix` becomes
    `type: mix`.
@@ -235,7 +235,7 @@ every existing citation stay stable.
    category — "a generator produces audio from a spec" — so the code
    speaks the record's language: `Generator<T>` implementations in
    `src/generators/`, one per automatic type; a deliberate type has no
-   in-graph Generator — *you* generate it, with `bloom generate`. The
+   in-graph Generator — *you* generate it, with `field generate`. The
    poles were never generate-vs-something-else; they were always
    automatic-vs-deliberate generation. Rejected: keeping `RuleImpl`
    ("rule" was only ever true engine-side, and §1.2's own noun is
@@ -249,7 +249,7 @@ every existing citation stay stable.
    sound would self-collide, so §1.4's recorded follow-on lands inside
    the migration rather than after it. A generative sound's own label
    resolves to its chosen variant; clips reference the sound by name
-   (`source: still-water-keys`), `bloom choose` rewrites only `chosen:`
+   (`source: still-water-keys`), `field choose` rewrites only `chosen:`
    — a one-line diff every reference follows — and the sound spec pins
    its variants (per-variant sha256, verified by check). `--as` retires
    with the ledger step; the reference is scope-stable, since it names
@@ -257,7 +257,7 @@ every existing citation stay stable.
 9. **The deliberate type spells `generative`.** The `type:` slot answers
    "what kind of sound is this," and the kind has a musicians' name —
    generative music — so the adjective wins over the verb: a *generative
-   sound*, produced by `bloom generate` (the verb stays the act, §1.7).
+   sound*, produced by `field generate` (the verb stays the act, §1.7).
    Rejected: `type: generate` (the verb in the type slot — initially
    ratified for verb symmetry, but "a generate sound" never parsed, and
    the symmetry survives through the shared root). Decided after §4.8

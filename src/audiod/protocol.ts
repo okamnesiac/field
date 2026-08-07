@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-// The bloom-audiod control protocol (playback.md §3.3): NDJSON over a unix
-// socket at .bloom/audiod.sock. These zod schemas are the source of truth;
+// The field-audiod control protocol (playback.md §3.3): NDJSON over a unix
+// socket at .field/audiod.sock. These zod schemas are the source of truth;
 // the C++ side (native/audiod) mirrors them by hand — the protocol is kept
 // small enough that drift would fail the protocol tests immediately.
 

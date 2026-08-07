@@ -28,7 +28,7 @@ export function checkSource(ref: string, what: string, ctx: ValidateContext): vo
   if (ctx.names.unchosen.has(ref)) {
     ctx.push(
       `${what} sources "${ref}", which has no chosen variant yet — ` +
-        `bloom choose ${ref} first`,
+        `field choose ${ref} first`,
     );
     return;
   }

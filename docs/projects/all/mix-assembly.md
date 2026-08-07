@@ -3,11 +3,11 @@
 **Status:** Shipped (#9–#11, merged 2026-08-05). Follows
 [sc-render.md](sc-render.md) — the phase order was re-decided after #8: mix
 assembly, then playback, then ACE, because a listenable arrangement makes
-every later phase testable by ear. field's creek demonstrates all of it:
+every later phase testable by ear. bloom's creek demonstrates all of it:
 stems, faders, crossfades-as-clips, and clips sourcing SC recipes with no
 committed audio.
 
-**Goal:** `bloom build //songs/<song>/mix:main` renders an actual arrangement:
+**Goal:** `field build //songs/<song>/mix:main` renders an actual arrangement:
 clips placed on the timeline (position, source offset, slip), summed with
 gain, pan, and fades, out to a mix asset.
 
@@ -83,7 +83,7 @@ with no per-track stems (any clip edit re-renders the whole song).
 - **Out-of-range reads are silence**: a window that starts before the
   asset's first sample (slip > source_offset) or runs past its last plays
   silence there — slipping never errors, exactly like a DAW.
-- **Takes are not mixed** in this phase; they are auditioned via `bloom
+- **Takes are not mixed** in this phase; they are auditioned via `field
   play`. Comping a take into a clip is the recording phase's concern.
 
 ## 5 Chunks
@@ -94,7 +94,7 @@ with no per-track stems (any clip edit re-renders the whole song).
    plus multi-input rule contract, WAV read/write in TS, placement math,
    the `track-render` rule, and track `gain_db`/`pan` schema fields.
 2. **The mix** (shipped, #10) — `mix.yaml`, the `mix` rule, rule→rule
-   dependencies in the engine, and field's songs mixed and playable.
+   dependencies in the engine, and bloom's songs mixed and playable.
 3. **Clips over rule outputs** (shipped, #11) — let a clip source a target's output
    (e.g. the SC pad render) instead of only a committed asset, completing
    recipes-over-samples: mix → stem → sc-render with no committed audio.

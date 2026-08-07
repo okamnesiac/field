@@ -61,7 +61,7 @@ describe('mixGenerator.execute', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bloom-mix-'));
+    dir = mkdtempSync(join(tmpdir(), 'field-mix-'));
   });
 
   afterEach(() => {
@@ -176,7 +176,7 @@ describe('mix targets in the build graph', () => {
     ].join('\n');
 
   beforeEach(async () => {
-    root = mkdtempSync(join(tmpdir(), 'bloom-mixgraph-'));
+    root = mkdtempSync(join(tmpdir(), 'field-mixgraph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
     createTrack(root, 'creek', 'kick', 'audio');
@@ -185,7 +185,7 @@ describe('mix targets in the build graph', () => {
       ['kick-src', [1, 0.5]],
       ['snare-src', [0.25, 0.25]],
     ] as const) {
-      const src = join(root, '..', `bloom-mix-src-${Math.random()}.wav`);
+      const src = join(root, '..', `field-mix-src-${Math.random()}.wav`);
       writeWavFloat32(src, 48000, [Float32Array.from(samples)]);
       await importAsset(root, 'creek', src, name);
       rmSync(src);

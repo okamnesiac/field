@@ -5,10 +5,10 @@ first CLI commands shipped in #4; the asset store in #5; the build graph
 (labels, action cache, `build`/`query`/`explain`, the normalize rule, and
 §7's normalized-path enforcement) is the third and final chunk. The §4
 definition-of-done flow has been run end to end. The phase finishes when
-the build-graph PR merges and real use (field, then sc-render) stops
+the build-graph PR merges and real use (bloom, then sc-render) stops
 surfacing surprises.
 
-**Goal:** A `bloom` CLI that can initialize a multi-song project, validate its
+**Goal:** A `field` CLI that can initialize a multi-song project, validate its
 schemas, hash and store assets content-addressably, and build trivial targets
 through a real dependency graph with caching — so the next phase
 ([sc-render.md](sc-render.md)) only has to add a build rule, not a build
@@ -16,22 +16,22 @@ system.
 
 ## 1 Scope
 
-- `bloom init` — create a project: `bloom.yaml`, `shared/`, `songs/`,
-  `.bloom/` (unversioned), Git + LFS setup.
+- `field init` — create a project: `field.yaml`, `shared/`, `songs/`,
+  `.field/` (unversioned), Git + LFS setup.
 - Schemas and validation for the initial file set: project manifest, song
   manifest, tempo map, arrangement, tracks, clips, takes. Zod schemas are the
-  single source of truth; `bloom check` validates the whole tree.
+  single source of truth; `field check` validates the whole tree.
 - Content-addressed asset store: import an audio file, hash it, reference it
   from manifests by hash; LFS holds the bytes
   ([project-model.md](../../project-model.md) "Assets").
 - Build graph core: labels (`//songs/<song>/...`, `//shared/...`), target
-  resolution, dependency traversal, input hashing, a cache under `.bloom/`,
+  resolution, dependency traversal, input hashing, a cache under `.field/`,
   and cache-hit detection.
 - First (trivial) build rules to prove the machinery: import/copy, and audio
   file normalization (sample-rate/bit-depth conversion) — mechanical rules
   with real inputs and cacheable outputs.
-- `bloom build <target>`, `bloom query 'deps(<target>)'`, `bloom explain
-  <target>`, `bloom status`.
+- `field build <target>`, `field query 'deps(<target>)'`, `field explain
+  <target>`, `field status`.
 
 ## 2 Non-goals
 
@@ -53,7 +53,7 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    `anchor`: `musical` (ticks stored, samples derived — moves with tempo
    edits) or `absolute` (samples stored, ticks derived — stays put). Default
    `musical`. Manifests may store both values but declare the anchor; the
-   derived one is verified by `bloom check`, so they can never disagree. A
+   derived one is verified by `field check`, so they can never disagree. A
    musically-anchored clip *moves* under tempo edits but does not
    *time-stretch* — stretching is a separate explicit operation, out of scope.
    Loops (possibly with their own internal timeline, e.g. polyrhythmic loops
@@ -85,7 +85,7 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    Amended 2026-08-05 (was: absolute-only in V1): the CLI also accepts
    songs-relative shorthand — `opener/mix:main` means
    `//songs/opener/mix:main` — since nearly everything addressable lives
-   under `songs/`, and a bare song name (`bloom play opener`) means the
+   under `songs/`, and a bare song name (`field play opener`) means the
    song's main mix. `main` is a convention, not a requirement: a song
    whose mixes are named otherwise gets a no-such-target error, not a
    guess. The canonical form everywhere else (files, output, docs)
@@ -110,7 +110,7 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    track", and the directory stays plural because a folder holds many.
    The ledger's `assets:` key stays plural for the same reason — it is a
    list. Cache-neutral: the label is not in the action key (§3.5), so
-   nothing re-renders; only `.bloom/out/` paths move. Typing the old
+   nothing re-renders; only `.field/out/` paths move. Typing the old
    plural gets a hint at the singular rather than a bare no-such-label.
 5. **Cache key definition (DECIDED).** SHA-256 everywhere, chosen so asset
    hash = Git LFS OID — store, pointer, and cache speak one identifier
@@ -119,22 +119,22 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    plugin id+version+state hash (later), sample rate, render-relevant
    settings}`. Rules carry an explicit `rule_version` bumped to invalidate —
    we do not hash our own source, which would invalidate the world on every
-   refactor. Layout: `.bloom/cache/cas/<hash>` plus an action index, shared
+   refactor. Layout: `.field/cache/cas/<hash>` plus an action index, shared
    across songs. `deterministic: false` flows into take handling per
    [build-graph.md](../../build-graph.md).
 6. **Deterministic YAML emission (DECIDED).** Schema-defined key order
    (semantic, `id`/`name` first — not alphabetical), 2-space indent, block
    style, no anchors/aliases, minimal quoting, stable numbers, trailing
-   newline. `bloom fmt` writes it; `bloom check` enforces it. **Comments must
+   newline. `field fmt` writes it; `field check` enforces it. **Comments must
    survive programmatic edits** — the npm `yaml` package's document/CST API
    (comment-preserving) is used from day one; a format-then-lose-annotations
    tool is unacceptable for a Git-native system.
 
 ## 4 Definition of done
 
-From an empty directory: `bloom init`, import an audio file into a song,
-define a normalize target, `bloom build` it, see a cache hit on rebuild and a
-rebuild on parameter change, and `bloom query`/`explain` answer honestly —
+From an empty directory: `field init`, import an audio file into a song,
+define a normalize target, `field build` it, see a cache hit on rebuild and a
+rebuild on parameter change, and `field query`/`explain` answer honestly —
 with the whole project state readable as diffable YAML in Git.
 
 ## 5 Stack (DECIDED)
@@ -180,29 +180,29 @@ In the same order:
 
 1. Rename-as-refactor is exactly how **code** works — renaming a function
    touches every call site — and we accept it because the tool does it
-   atomically (`bloom track rename` rewrites all references in one commit)
+   atomically (`field track rename` rewrites all references in one commit)
    and the result is greppable and reviewable, which UUID indirection never
    is. The cross-branch hazard is real but **not solved by UUIDs**: branch B
    referencing a UUID that branch A deleted merges just as cleanly and
    dangles just as silently. The true defense is identical in both worlds —
-   referential validation in `bloom check`, run in CI.
+   referential validation in `field check`, run in CI.
 2. The layers where identity reuse would do real damage are already immune:
    takes are timestamped, assets and cached artifacts are content-hashed. At
    the track level, a human reusing a name usually *means* "the new verse
    guitar" — continuity, not corruption.
-3. Typo risk is the price of readability, and `bloom check` catches it.
+3. Typo risk is the price of readability, and `field check` catches it.
 
 The asymmetry that decides it: **UUID cost is paid on every diff read,
 forever** — diffs become join tables (`id: trk-7f3a2` where it should say
-`lead-vocal`), unreviewable without tooling, which attacks Bloom's central
+`lead-vocal`), unreviewable without tooling, which attacks Field's central
 thesis. **Slug cost is paid rarely, at rename time, by a tool built for it.**
 
 ### Operational commitments this decision creates
 
-- `bloom track rename` (and its siblings) exist from early on and rewrite all
+- `field track rename` (and its siblings) exist from early on and rewrite all
   references atomically.
-- `bloom check` validates referential integrity and runs in CI.
-- Merges may need a post-merge `bloom check` to catch cross-branch dangles —
+- `field check` validates referential integrity and runs in CI.
+- Merges may need a post-merge `field check` to catch cross-branch dangles —
   accepted, because the UUID alternative has the same failure mode with less
   readable evidence.
 

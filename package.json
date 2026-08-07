@@ -1,10 +1,10 @@
 {
-  "name": "bloom",
+  "name": "field",
   "version": "0.1.0",
   "description": "Git-native, agent-operable music production system",
   "type": "module",
   "bin": {
-    "bloom": "./dist/cli.js"
+    "field": "./dist/cli.js"
   },
   "engines": {
     "node": ">=24"
@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepare": "pnpm build",
-    "bloom": "tsx src/cli.ts",
+    "field": "tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build -j"

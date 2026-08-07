@@ -8,7 +8,7 @@ import { generatorFor, type ExtraInput, type RunContext } from '../generators/in
 import { deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
-// store under .bloom/cache/cas/<sha256>; the action index maps an action
+// store under .field/cache/cas/<sha256>; the action index maps an action
 // key — the hash of canonical JSON of {rule, rule_version, input hashes,
 // parameters, project sample rate} — to its output hashes. Same key, no
 // work. Rule behavior lives in src/generators/; this engine only knows that
@@ -22,7 +22,7 @@ export interface ActionEntry {
 export interface BuildOutcome {
   label: string;
   cached: boolean; // action-cache hit, nothing executed
-  // Where the output lives: the materialized .bloom/out path for rule
+  // Where the output lives: the materialized .field/out path for rule
   // targets, the committed file for assets and generation labels — every
   // outcome names a playable path, so watch can hand any label's fresh
   // artifact to the daemon (#35 review: a chosen-variant repoint is
@@ -61,7 +61,7 @@ export const defaultRunner: GeneratorRunner = (node, inputPaths, outputPath, ctx
   generatorFor(node.spec).execute(node.spec, inputPaths, outputPath, ctx);
 
 function cacheDir(project: LoadedProject): string {
-  return join(project.root, '.bloom', 'cache');
+  return join(project.root, '.field', 'cache');
 }
 
 function casPath(project: LoadedProject, sha256: string): string {
@@ -145,10 +145,10 @@ function sourceFilePath(project: LoadedProject, node: GraphNode): string {
   throw new Error(`not a committed source node: ${formatLabel(node.label)}`);
 }
 
-// Materialized outputs land under .bloom/out mirroring the label path, so
+// Materialized outputs land under .field/out mirroring the label path, so
 // humans can play what they built without digging in the CAS.
 function outPath(project: LoadedProject, node: GeneratorNode): string {
-  return join(project.root, '.bloom', 'out', node.label.pkg, `${node.label.name}.wav`);
+  return join(project.root, '.field', 'out', node.label.pkg, `${node.label.name}.wav`);
 }
 
 async function buildNode(
@@ -236,14 +236,14 @@ async function buildNode(
       if (size !== input.asset.bytes) {
         throw new Error(
           `refusing to build: input ${formatLabel(input.label)} is ${size} bytes on disk but ` +
-            `${input.asset.bytes} declared (bloom check, then re-import or restore the file)`,
+            `${input.asset.bytes} declared (field check, then re-import or restore the file)`,
         );
       }
       const actual = await sha256File(path);
       if (actual !== input.asset.sha256) {
         throw new Error(
           `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
-            `declared sha256 (bloom check, then re-import or restore the file)`,
+            `declared sha256 (field check, then re-import or restore the file)`,
         );
       }
     } else if (input.kind === 'generation') {
@@ -252,7 +252,7 @@ async function buildNode(
       if (actual !== input.sha256) {
         throw new Error(
           `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
-            `recorded sha256 (bloom check)`,
+            `recorded sha256 (field check)`,
         );
       }
     }

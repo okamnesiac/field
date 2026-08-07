@@ -29,7 +29,7 @@ export function loadValid(root: string): { project: LoadedProject; graph: Graph 
   const project = loadProject(root);
   if (project.diagnostics.length > 0) {
     const lines = project.diagnostics.map((d) => `${d.file}: ${d.message}`).join('\n');
-    throw new Error(`project has errors (bloom check):\n${lines}`);
+    throw new Error(`project has errors (field check):\n${lines}`);
   }
   return { project, graph: buildGraph(project) };
 }

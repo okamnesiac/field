@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-// The bloom-aced control protocol (ace-generation.md §3.3): NDJSON over
-// .bloom/aced.sock, same family as bloom-audiod's. These schemas are the
-// cross-language source of truth; python/aced/src/bloom_aced/protocol.py
+// The field-aced control protocol (ace-generation.md §3.3): NDJSON over
+// .field/aced.sock, same family as field-audiod's. These schemas are the
+// cross-language source of truth; python/aced/src/field_aced/protocol.py
 // mirrors them.
 
 export const ACED_PROTOCOL_VERSION = 1;

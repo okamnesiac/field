@@ -56,7 +56,7 @@ function sha256OfBytes(bytes: Buffer): string {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-shared-'));
+  root = mkdtempSync(join(tmpdir(), 'field-shared-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
   createTrack(root, 'creek', 'drums', 'audio');

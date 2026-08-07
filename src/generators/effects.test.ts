@@ -37,10 +37,10 @@ const eqLines = (source: string, gain: number, extra: string[] = []) => [
 ];
 
 beforeEach(async () => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-effects-'));
+  root = mkdtempSync(join(tmpdir(), 'field-effects-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  const src = join(root, '..', `bloom-effects-src-${Math.random()}.wav`);
+  const src = join(root, '..', `field-effects-src-${Math.random()}.wav`);
   // One second of 1 kHz sine at 0.1 — sits right on the test EQ's bell.
   const tone = new Float32Array(48000);
   for (let i = 0; i < tone.length; i++) tone[i] = 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000);

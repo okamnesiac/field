@@ -85,7 +85,7 @@ export const sayGenerator: Generator<SaySound> = {
     }
     // The text goes through a file (-f): text is data, never argv — a
     // line starting with "-" must not become a flag.
-    const dir = mkdtempSync(join(tmpdir(), 'bloom-say-'));
+    const dir = mkdtempSync(join(tmpdir(), 'field-say-'));
     try {
       const textPath = join(dir, 'text.txt');
       const aiffPath = join(dir, 'say.aiff');
@@ -107,7 +107,7 @@ export const sayGenerator: Generator<SaySound> = {
         throw formatSayError(err as ExecError, `say (voice "${sound.voice}")`);
       }
       // say renders at the voice's native rate; the graph expects the
-      // project rate and Bloom never resamples implicitly downstream, so
+      // project rate and Field never resamples implicitly downstream, so
       // the rule hands over a WAV at the project rate, like normalize.
       try {
         await execFileAsync('afconvert', [

@@ -29,7 +29,7 @@ export interface Playable {
   committed: boolean;
 }
 
-// What `bloom play` plays: asset targets resolve to their files directly;
+// What `field play` plays: asset targets resolve to their files directly;
 // rule targets are built (cache-aware) and resolve to their materialized
 // outputs. This is the audition path until the real-time engine exists —
 // playback.md owns transport, mixing, and the daemon.
@@ -148,8 +148,8 @@ export async function playThroughDaemon(
       const [major = 0, minor = 0] = client.daemonVersion.split('.').map(Number);
       if (major === 0 && minor < 3) {
         throw new Error(
-          `bloom-audiod ${client.daemonVersion} predates --loop — ` +
-            'bloom transport quit, then play again (it respawns on the new build)',
+          `field-audiod ${client.daemonVersion} predates --loop — ` +
+            'field transport quit, then play again (it respawns on the new build)',
         );
       }
     }
@@ -358,7 +358,7 @@ function waitForStop(
       if (e.event === 'reloaded' && e.path !== undefined) onReloaded?.(e.path);
       if (e.event === 'state' && e.state === 'stopped') finish();
     };
-    const onClose = () => finish(new Error('bloom-audiod connection closed'));
+    const onClose = () => finish(new Error('field-audiod connection closed'));
     client.on('event', onEvent);
     client.once('close', onClose);
     // Events cover the normal path; the poll covers the race where a
@@ -368,7 +368,7 @@ function waitForStop(
         (s) => {
           if (s.state === 'stopped') finish();
         },
-        () => finish(new Error('bloom-audiod connection closed')),
+        () => finish(new Error('field-audiod connection closed')),
       );
     }, 500);
   });

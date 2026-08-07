@@ -10,9 +10,9 @@ as repointing (§4.8). The other side of the determinism boundary from
 the `say` rule (#27), kept separate by design — "got to keep them
 separated."
 
-**Goal:** `bloom voice generate`: text (and a voice) produce committed,
+**Goal:** `field voice generate`: text (and a voice) produce committed,
 provenance-carrying vocal audio through a local model, auditioned and
-promoted with the same variant machinery ACE established. field's creek
+promoted with the same variant machinery ACE established. bloom's creek
 trades its spoken `say` line for a generated voice worth listening to.
 
 ## 1 Decisions (DECIDED, 2026-08-06)
@@ -35,9 +35,9 @@ trades its spoken `say` line for a generated voice worth listening to.
    provenance than a vendor's opaque voice ID, and it makes "sing it in
    my voice" a recording, not an integration.
 4. **A second worker on the established protocol, not a second model in
-   bloom-aced.** ace-generation.md built the worker protocol so ACE would
+   field-aced.** ace-generation.md built the worker protocol so ACE would
    be "the first client, not a special case" — voice is the second
-   client: `bloom-voiced`, same pyright-strict daemon-lite shape (spawn
+   client: `field-voiced`, same pyright-strict daemon-lite shape (spawn
    on demand, flock-owned, idle-exit, NDJSON), its own process so model
    memory and lifecycle stay independent.
 5. **Chatterbox first.** MIT-licensed, English, zero-shot cloning from a
@@ -47,7 +47,7 @@ trades its spoken `say` line for a generated voice worth listening to.
 6. **Recipes reuse the generation shape.** `generation/<name>.yaml` with
    the existing schema growing optional voice fields (`text`,
    `voice_ref` naming a committed asset) — variants, `chosen`, hashes,
-   and `bloom ace choose`-style promotion work unchanged. Rejected: a
+   and `field ace choose`-style promotion work unchanged. Rejected: a
    parallel recipe kind — two files that differ only in which model
    family wrote them would split the variant tooling for no reason.
    The subtractions are the real schema change (#29 review): `prompt`
@@ -66,24 +66,24 @@ creek's lead vocal is a generated voice: a committed reference asset, a
 recipe with ≥2 variants, one chosen, clipped where the `say` line sits
 today (the `say` target stays as the scratch tier). Worker start-to-audio
 on the M3 Max in seconds-not-minutes; recipe hashes verified by
-`bloom check`.
+`field check`.
 
 ## 3 Chunks
 
-1. `bloom-voiced` worker (Chatterbox behind the job-spec protocol) +
-   `bloom voice generate` CLI + recipe/schema growth + tests.
-2. field: record/pick a reference voice, generate creek's line, choose,
+1. `field-voiced` worker (Chatterbox behind the job-spec protocol) +
+   `field voice generate` CLI + recipe/schema growth + tests.
+2. bloom: record/pick a reference voice, generate creek's line, choose,
    clip; vault the milestone.
 
 ## 4 Open questions
 
 - Reference voice for creek: whose? (A 3–10 s clean recording is all it
   takes — deferred to chunk 2, does not block the worker.)
-- CLI naming: `bloom voice generate` vs folding into a general
-  `bloom generate` once two generators exist — decide at the CLI seam.
-  Schema reuse sharpens this (#29 review): `bloom ace choose` promotes
+- CLI naming: `field voice generate` vs folding into a general
+  `field generate` once two generators exist — decide at the CLI seam.
+  Schema reuse sharpens this (#29 review): `field ace choose` promotes
   voice recipes on day one, making the `ace` prefix a misnomer-in-waiting
   — the same seam decision should cover `choose`, not just `generate`.
   Answered 2026-08-06 ([project-layout.md](project-layout.md) §1.7):
-  `bloom generate` and `bloom choose` are verbs over the generator
+  `field generate` and `field choose` are verbs over the generator
   category; the `ace` prefix retires with the layout migration.

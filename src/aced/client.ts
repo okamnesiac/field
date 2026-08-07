@@ -16,42 +16,42 @@ import {
   type AcedEvent,
 } from './protocol.js';
 
-// Client for the per-project bloom-aced daemon (ace-generation.md §3):
+// Client for the per-project field-aced daemon (ace-generation.md §3):
 // daemon-lite like audiod's client, but the daemon is a uv-run Python
 // process. The deliberate duplication with audiod/client.ts is small and
 // tolerated until a third daemon argues for a shared base.
 
-const SOCKET_RELATIVE = '.bloom/aced.sock';
+const SOCKET_RELATIVE = '.field/aced.sock';
 
 function acedProject(): string {
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   return join(packageRoot, 'python', 'aced');
 }
 
-// BLOOM_ACED_PYTHON mirrors BLOOM_AUDIOD (ace-generation.md §3.4): an
-// interpreter that can import bloom_aced replaces the uv-managed
+// FIELD_ACED_PYTHON mirrors FIELD_AUDIOD (ace-generation.md §3.4): an
+// interpreter that can import field_aced replaces the uv-managed
 // environment — wrappers, alternate venvs, and daemon tests without the
 // model environment (PYTHONPATH=python/aced/src is enough).
 function daemonCommand(): { command: string; args: string[] } {
-  const override = process.env['BLOOM_ACED_PYTHON'];
+  const override = process.env['FIELD_ACED_PYTHON'];
   if (override) {
     // Resolved now because the daemon spawns with its cwd at the project
     // root, where a relative override would no longer mean anything.
     const absolute = resolve(override);
     if (!existsSync(absolute)) {
-      throw new Error(`BLOOM_ACED_PYTHON points at a missing interpreter: ${override}`);
+      throw new Error(`FIELD_ACED_PYTHON points at a missing interpreter: ${override}`);
     }
-    return { command: absolute, args: ['-m', 'bloom_aced', '--socket', SOCKET_RELATIVE] };
+    return { command: absolute, args: ['-m', 'field_aced', '--socket', SOCKET_RELATIVE] };
   }
   return {
     command: 'uv',
-    args: ['run', '--project', acedProject(), 'bloom-aced', '--socket', SOCKET_RELATIVE],
+    args: ['run', '--project', acedProject(), 'field-aced', '--socket', SOCKET_RELATIVE],
   };
 }
 
 export function acedAvailable(): { ok: boolean; reason?: string } {
   if (!existsSync(join(acedProject(), 'pyproject.toml'))) {
-    return { ok: false, reason: 'python/aced missing from the bloom checkout' };
+    return { ok: false, reason: 'python/aced missing from the field checkout' };
   }
   return { ok: true };
 }
@@ -98,7 +98,7 @@ export class AcedClient extends EventEmitter {
     socket.on('error', () => {});
     socket.on('close', () => {
       for (const [, entry] of this.pending) {
-        entry.reject(new Error('bloom-aced connection closed'));
+        entry.reject(new Error('field-aced connection closed'));
       }
       this.pending.clear();
       this.emit('close');
@@ -110,9 +110,9 @@ export class AcedClient extends EventEmitter {
     let socket = await tryConnect(path, 1000);
     if (!socket) {
       const available = acedAvailable();
-      if (!available.ok) throw new Error(`bloom-aced unavailable: ${available.reason}`);
-      mkdirSync(join(root, '.bloom'), { recursive: true });
-      const log = openSync(join(root, '.bloom', 'aced.log'), 'a');
+      if (!available.ok) throw new Error(`field-aced unavailable: ${available.reason}`);
+      mkdirSync(join(root, '.field'), { recursive: true });
+      const log = openSync(join(root, '.field', 'aced.log'), 'a');
       // uv resolves the environment; --project keeps the daemon's cwd at
       // the project root (the socket path is root-relative — sun_path).
       const { command, args } = daemonCommand();
@@ -131,7 +131,7 @@ export class AcedClient extends EventEmitter {
       }
       if (!socket) {
         throw new Error(
-          'bloom-aced did not start — is uv installed (brew install uv)? See .bloom/aced.log',
+          'field-aced did not start — is uv installed (brew install uv)? See .field/aced.log',
         );
       }
     }
@@ -141,7 +141,7 @@ export class AcedClient extends EventEmitter {
     if (hello.protocol !== ACED_PROTOCOL_VERSION) {
       probe.close();
       throw new Error(
-        `bloom-aced speaks protocol ${hello.protocol}, this CLI speaks ${ACED_PROTOCOL_VERSION}`,
+        `field-aced speaks protocol ${hello.protocol}, this CLI speaks ${ACED_PROTOCOL_VERSION}`,
       );
     }
     (probe as { daemonVersion: string }).daemonVersion = hello.version;
@@ -185,7 +185,7 @@ export class AcedClient extends EventEmitter {
     const raw = await new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`bloom-aced ${op}: no response after ${Math.round(timeoutMs / 1000)}s`));
+        reject(new Error(`field-aced ${op}: no response after ${Math.round(timeoutMs / 1000)}s`));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => {

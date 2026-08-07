@@ -69,12 +69,12 @@ const runner: GeneratorRunner = async (node, inputPaths, outputPath) => {
 };
 
 beforeEach(async () => {
-  root = mkdtempSync(join(tmpdir(), 'bloom-export-'));
+  root = mkdtempSync(join(tmpdir(), 'field-export-'));
   // Never the real Desktop: every test passes an explicit --to.
-  dest = mkdtempSync(join(tmpdir(), 'bloom-export-dest-'));
+  dest = mkdtempSync(join(tmpdir(), 'field-export-dest-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  const src = join(root, '..', `bloom-export-src-${Math.random()}.wav`);
+  const src = join(root, '..', `field-export-src-${Math.random()}.wav`);
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
@@ -112,7 +112,7 @@ describe('exportBaseName', () => {
 describe('nextVersion', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bloom-version-'));
+    dir = mkdtempSync(join(tmpdir(), 'field-version-'));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -140,7 +140,7 @@ describe('writeVersion', () => {
   let dir: string;
   let source: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'bloom-write-'));
+    dir = mkdtempSync(join(tmpdir(), 'field-write-'));
     source = join(dir, 'source.bin');
     writeFileSync(source, 'ours');
   });
@@ -195,7 +195,7 @@ describe('exportLabels', () => {
   });
 
   it('exports what was asked for, not what the build had to make', async () => {
-    // The rule depends on the asset, so `bloom build` prints two labels.
+    // The rule depends on the asset, so `field build` prints two labels.
     // Exporting must still put exactly one file on the Desktop.
     await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
     expect(readdirSync(dest)).toEqual(['creek-sound-pad-normalized-v1.wav']);
@@ -346,7 +346,7 @@ describe('exportLabels', () => {
     // error on screen, so what you can see disagrees with what you were
     // told. Both labels are committed sources, and `aaa` sorts first so
     // the good one is genuinely reached first.
-    const src = join(root, '..', `bloom-export-two-${Math.random()}.wav`);
+    const src = join(root, '..', `field-export-two-${Math.random()}.wav`);
     writeWav(src);
     await importAsset(root, 'creek', src, 'aaa-first');
     rmSync(src);

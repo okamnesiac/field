@@ -1,5 +1,5 @@
 .DS_Store
-.bloom/
+.field/
 node_modules/
 dist/
 native/audiod/build/

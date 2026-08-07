@@ -8,7 +8,7 @@ import { AcedClient } from './client.js';
 import { acedHelloResponseSchema, acedOkResponseSchema } from './protocol.js';
 
 // Live protocol tests against the real Python daemon, spawned through the
-// BLOOM_ACED_PYTHON override. No model environment required: the daemon's
+// FIELD_ACED_PYTHON override. No model environment required: the daemon's
 // ACE-Step imports are lazy, so spawn, handshake, request validation, and
 // quit all work from a bare >=3.11 interpreter with the sources on
 // PYTHONPATH — which is exactly the wrapper/test use case the override
@@ -31,16 +31,16 @@ function findInterpreter(): string | undefined {
 
 const interpreter = findInterpreter();
 
-describe.skipIf(!interpreter)('bloom-aced protocol (live daemon)', () => {
+describe.skipIf(!interpreter)('field-aced protocol (live daemon)', () => {
   let root: string;
   let client: AcedClient;
   let savedPythonPath: string | undefined;
 
   beforeEach(async () => {
-    process.env['BLOOM_ACED_PYTHON'] = interpreter;
+    process.env['FIELD_ACED_PYTHON'] = interpreter;
     savedPythonPath = process.env['PYTHONPATH'];
     process.env['PYTHONPATH'] = acedSrc;
-    root = mkdtempSync(join(tmpdir(), 'bloom-aced-'));
+    root = mkdtempSync(join(tmpdir(), 'field-aced-'));
     client = await AcedClient.connect(root);
   });
 
@@ -51,7 +51,7 @@ describe.skipIf(!interpreter)('bloom-aced protocol (live daemon)', () => {
       // the test may have quit already; a dead daemon is the goal state
     }
     client.close();
-    delete process.env['BLOOM_ACED_PYTHON'];
+    delete process.env['FIELD_ACED_PYTHON'];
     if (savedPythonPath === undefined) delete process.env['PYTHONPATH'];
     else process.env['PYTHONPATH'] = savedPythonPath;
     rmSync(root, { recursive: true, force: true });

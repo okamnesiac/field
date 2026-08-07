@@ -27,14 +27,14 @@ describe('event schema', () => {
   });
 });
 
-describe.skipIf(!binary)('bloom-audiod protocol', () => {
+describe.skipIf(!binary)('field-audiod protocol', () => {
   let root: string;
   let client: AudiodClient;
 
   beforeEach(async () => {
-    // No .bloom/ pre-created: a project that has never built must still
+    // No .field/ pre-created: a project that has never built must still
     // spawn the daemon (#12 review P3) — the client owns the mkdir.
-    root = mkdtempSync(join(tmpdir(), 'bloom-audiod-'));
+    root = mkdtempSync(join(tmpdir(), 'field-audiod-'));
     client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
   });
 
@@ -117,7 +117,7 @@ describe.skipIf(!binary)('bloom-audiod protocol', () => {
     await client.load(wav);
     await client.play();
 
-    // The "bloom transport from another terminal" scenario (§3.6).
+    // The "field transport from another terminal" scenario (§3.6).
     const second = await AudiodClient.connect(root, { spawnIfNeeded: false });
     const status = await second.status();
     expect(status.state).toBe('playing');
@@ -165,7 +165,7 @@ describe.skipIf(!binary)('bloom-audiod protocol', () => {
     // Several CLIs racing to spawn the daemon on a fresh project: the
     // flock decides a single winner, losers exit, and every client ends
     // up served by the survivor.
-    const fresh = mkdtempSync(join(tmpdir(), 'bloom-audiod-race-'));
+    const fresh = mkdtempSync(join(tmpdir(), 'field-audiod-race-'));
     try {
       const clients = await Promise.all(
         Array.from({ length: 6 }, () =>

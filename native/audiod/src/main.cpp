@@ -5,9 +5,9 @@
 
 #include <csignal>
 
-// bloom-audiod: the playback daemon (playback.md). Spawned on demand by the
+// field-audiod: the playback daemon (playback.md). Spawned on demand by the
 // CLI with its working directory at the project root, serves the NDJSON
-// control socket at .bloom/audiod.sock, and exits on its own after an idle
+// control socket at .field/audiod.sock, and exits on its own after an idle
 // timeout — daemon-lite (§3.1). Artifacts only: it plays files the build
 // produced and has no idea what a clip or a bar is.
 
@@ -105,7 +105,7 @@ private:
 
 int main (int argc, char* argv[])
 {
-    juce::String socketPath = ".bloom/audiod.sock";
+    juce::String socketPath = ".field/audiod.sock";
     bool nullOutput = false;
     int idleSeconds = 300;
 
@@ -121,7 +121,7 @@ int main (int argc, char* argv[])
         else
         {
             std::fprintf (stderr,
-                          "usage: bloom-audiod [--socket <path>] [--null-output] [--idle <seconds>]\n");
+                          "usage: field-audiod [--socket <path>] [--null-output] [--idle <seconds>]\n");
             return 2;
         }
     }
@@ -135,14 +135,14 @@ int main (int argc, char* argv[])
     Player player (nullOutput);
     if (auto error = player.initialise(); error.isNotEmpty())
     {
-        std::fprintf (stderr, "bloom-audiod: audio init failed: %s\n", error.toRawUTF8());
+        std::fprintf (stderr, "field-audiod: audio init failed: %s\n", error.toRawUTF8());
         return 1;
     }
 
     Server server (player, socketPath);
     if (auto error = server.start(); error.isNotEmpty())
     {
-        std::fprintf (stderr, "bloom-audiod: %s\n", error.toRawUTF8());
+        std::fprintf (stderr, "field-audiod: %s\n", error.toRawUTF8());
         return 1;
     }
 

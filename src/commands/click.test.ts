@@ -57,7 +57,7 @@ describe('withClick', () => {
   let root: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'bloom-click-'));
+    root = mkdtempSync(join(tmpdir(), 'field-click-'));
   });
 
   afterEach(() => {

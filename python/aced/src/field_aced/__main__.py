@@ -1,4 +1,4 @@
-"""`python -m bloom_aced` — the BLOOM_ACED_PYTHON spawn path.
+"""`python -m field_aced` — the FIELD_ACED_PYTHON spawn path.
 
 The [project.scripts] entry point needs the package installed; this needs
 only an interpreter that can import it (PYTHONPATH suffices), which is how

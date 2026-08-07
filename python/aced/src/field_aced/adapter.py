@@ -1,7 +1,7 @@
 # pyright: basic, reportMissingImports=false
 """The one non-strict module: ACE-Step's untyped package, quarantined.
 
-Everything else in bloom-aced is pyright-strict; this module owns the
+Everything else in field-aced is pyright-strict; this module owns the
 boundary (ace-generation.md §3.4). File-level `# pyright: basic` rather
 than scattered ignores, so the quarantine is one visible line. Imports
 are lazy so the daemon starts fast and `hello` answers before any model
@@ -31,8 +31,8 @@ CONFIG_PATH = "acestep-v15-turbo"
 
 def models_root() -> Path:
     """Machine-global weights home: ~10 GB must never duplicate per project."""
-    override = os.environ.get("BLOOM_ACE_MODELS")
-    root = Path(override) if override else Path.home() / ".bloom" / "models" / "acestep"
+    override = os.environ.get("FIELD_ACE_MODELS")
+    root = Path(override) if override else Path.home() / ".field" / "models" / "acestep"
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -1,6 +1,6 @@
-# Bloom
+# Field
 
-Bloom is a Mac-first, Git-native music production system designed to make an
+Field is a Mac-first, Git-native music production system designed to make an
 entire music project operable by coding agents. The repository is the source of
 truth, every meaningful action is a CLI command, agent-facing functionality is
 exposed through MCP, and audio outputs are produced through an explicit
