@@ -60,14 +60,30 @@ Outputs live under their content hash, materialized at
 `.bloom/out/<label>.wav` — addresses for the engine, not names anyone
 wants in a Finder window or an email. `bloom export <patterns>` builds
 and then copies the result to `~/Desktop` (or `--to <dir>`) under the
-name you would say out loud: `//songs/creek/mix:main` becomes
-`creek-main.wav`, and shared material keeps its own name. It exports
-what `play` would play, through the same resolver, and only the labels
-the patterns match — the dependencies a build prints are means, not
-products. Labels are slugs by grammar, so those names need no
-sanitizing; where two labels in one run would land on the same file
-(a song's `tracks:pad` and `sounds:pad`), both take their package's
-scope into the name and everything else keeps its plain one.
+label with its punctuation flattened, minus the `songs/` prefix:
+`//songs/creek/mix:main` becomes `creek-mix-main-v1.wav`, and shared
+material keeps its shelf (`shared-assets-water-v1.wav`). It exports what
+`play` would play, through the same resolver, and only the labels the
+patterns match — the dependencies a build prints are means, not
+products.
+
+The name is long deliberately. A short form (`creek-main`) reads better
+until a song has a track and a sound of the same name — legal, since the
+one-namespace rule (project-layout.md §4.3) covers sounds and assets,
+and natural when a track plays one sound — at which point two different
+files want one name. A name that is sometimes scoped is worse than one
+that always is: you cannot predict the file you are about to get.
+
+**Exports are versioned, never overwritten.** Finishing something and
+putting it somewhere is how people mark a version, and the previous one
+is often the only copy of a decision later undone — so a second export
+is `-v2`, numbered from the highest already there (a gap means someone
+threw that version away, and minting a second `-v2` would disagree with
+them). Re-exporting something that has not changed is a no-op: the bytes
+are compared against the newest version and the command reports
+`current`, naming the version that stands, rather than minting an
+identical one. Nothing Bloom does removes or overwrites a file in the
+destination — including files it did not write.
 
 ## Render strategies
 

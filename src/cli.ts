@@ -270,17 +270,22 @@ program
 
 program
   .command('export <patterns...>')
-  .description('build labels and copy the results to ~/Desktop under readable names')
+  .description('build labels and copy the results to ~/Desktop as numbered versions')
   .option('--to <dir>', 'destination directory instead of ~/Desktop (must exist)')
   .action(async (patterns: string[], opts: { to?: string }) => {
     try {
       const { exportLabels, homeRelative } = await import('./commands/export.js');
       const results = await exportLabels(requireRoot(), patterns, { to: opts.to });
       for (const r of results) {
-        // `replaced` and `exported` are both 8 characters, so the labels
-        // line up whether or not the file was already there.
-        const status = r.replaced ? 'replaced' : 'exported';
-        process.stdout.write(`${status} ${r.label} → ${homeRelative(r.to)}\n`);
+        // Three outcomes, one column: a new version, nothing to do, and
+        // the one worth stopping on — these bytes are an *older* version,
+        // so a change was undone and the newest export is not what you
+        // just built. All three words are 8 characters, so the labels
+        // line up down the column.
+        const reverted = r.unchanged && r.version < r.newest;
+        const status = reverted ? 'reverted' : r.unchanged ? 'current ' : 'exported';
+        const note = reverted ? ` (v${r.newest} is newer and different)` : '';
+        process.stdout.write(`${status} ${r.label} → ${homeRelative(r.to)}${note}\n`);
       }
     } catch (err) {
       fail(err);
