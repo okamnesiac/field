@@ -1,9 +1,11 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
-**Status:** Chunk 1 shipped (#49); chunk 4 in review. Chunks 2–3
-**withdrawn** to [render-pipeline.md](render-pipeline.md), which puts
-sample-rate conversion in the daemon's built-in tier rather than in
-TypeScript; §1.1 below records what that replaced and why.
+**Status:** Complete. Chunk 1 shipped (#49), chunk 4 shipped (#52);
+chunks 2–3 **withdrawn** to
+[render-pipeline.md](render-pipeline.md), which puts sample-rate
+conversion in the daemon's built-in tier rather than in TypeScript;
+§1.1 below records what that replaced and why. §5's open questions
+outlive the plan and are still open.
 
 Chunk 1 became the urgent one after #46 moved the single CI job to
 `ubuntu-latest` by **removing** `pnpm test` and `pnpm build:native`, so
@@ -255,7 +257,7 @@ built-in tier, and no project using an `au:` insert can make it.
 2. ~~**The resampler and format conversion**~~ — withdrawn to
    [render-pipeline.md](render-pipeline.md) §6, chunk 5.
 3. ~~**`normalize` swaps implementation**~~ — withdrawn with chunk 2.
-4. **The daemon on Linux** — in review. `#if JUCE_MAC`, rescan fallback,
+4. **The daemon on Linux** — shipped (#52). `#if JUCE_MAC`, rescan fallback,
    Linux CI build, protocol tests green in null-output mode. Restores
    `pnpm build:native`, which #46 also dropped, on both jobs. Verified in
    an `ubuntu:24.04` container before opening: the daemon builds with no

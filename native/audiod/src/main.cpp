@@ -1,4 +1,5 @@
 #include "player.h"
+#include "render.h"
 #include "server.h"
 
 #include <juce_events/juce_events.h>
@@ -123,6 +124,7 @@ private:
 int main (int argc, char* argv[])
 {
     juce::String socketPath = ".field/audiod.sock";
+    juce::String renderPlan;
     bool nullOutput = false;
     int idleSeconds = 300;
 
@@ -131,6 +133,8 @@ int main (int argc, char* argv[])
         juce::String arg (argv[i]);
         if (arg == "--socket" && i + 1 < argc)
             socketPath = argv[++i];
+        else if (arg == "--render" && i + 1 < argc)
+            renderPlan = argv[++i];
         else if (arg == "--null-output")
             nullOutput = true;
         else if (arg == "--idle" && i + 1 < argc)
@@ -138,9 +142,26 @@ int main (int argc, char* argv[])
         else
         {
             std::fprintf (stderr,
-                          "usage: field-audiod [--socket <path>] [--null-output] [--idle <seconds>]\n");
+                          "usage: field-audiod [--socket <path>] [--null-output] "
+                          "[--idle <seconds>]\n"
+                          "       field-audiod --render <plan.json>\n");
             return 2;
         }
+    }
+
+    // Render is a subprocess, not a mode of the running daemon
+    // (render-pipeline.md decision 6): it returns before any socket,
+    // device or message loop exists, so a build action never contends
+    // with a playback session and two builds never contend with each
+    // other. Nothing below this point runs.
+    if (renderPlan.isNotEmpty())
+    {
+        if (auto error = field::runRender (renderPlan.toStdString()); ! error.empty())
+        {
+            std::fprintf (stderr, "field-audiod: render failed: %s\n", error.c_str());
+            return 1;
+        }
+        return 0;
     }
 
     // A write to a dying client must be an error return, never a
