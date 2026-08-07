@@ -232,11 +232,32 @@ function formatPattern(pattern: LabelPattern): string {
 // answered with a tree pattern, `:all` with `:all`, a label with that
 // same label. Correcting the package but not the shape would hand back
 // something that also does not work (#41 review).
+// `targets` is the exception that is not a plural at all: it is the
+// package that became `sounds` in the layout migration (#31), one PR
+// before packages went singular. It had no hint of any kind, so the
+// spelling every doc and finger from that era produces was a flat dead
+// end — worse than the plural it sits beside here. It corrects straight
+// to `sound`, and says why in its own words rather than borrowing the
+// grammar lesson, which would be false for it.
+// `why` carries its own punctuation: the two lead-ins do not share a
+// shape, and gluing a colon on in the template gave `targets:` two.
+const PACKAGE_HINTS: Record<string, { to: string; why: string }> = {
+  sounds: { to: 'sound', why: 'packages are singular:' },
+  tracks: { to: 'track', why: 'packages are singular:' },
+  assets: { to: 'asset', why: 'packages are singular:' },
+  mixes: { to: 'mix', why: 'packages are singular:' },
+  targets: { to: 'sound', why: 'targets: is now sound:' },
+};
+
 function singularHint(graph: Graph, pattern: LabelPattern): string {
   const pkg = pattern.kind === 'label' ? pattern.label.pkg : pattern.pkg;
-  const singular = pkg.replace(/(sounds|tracks|assets|mixes)$/, (plural) =>
-    plural === 'mixes' ? 'mix' : plural.slice(0, -1),
-  );
+  let why = '';
+  const singular = pkg.replace(/[^/]+$/, (last) => {
+    const hint = PACKAGE_HINTS[last];
+    if (hint === undefined) return last;
+    why = hint.why;
+    return hint.to;
+  });
   if (singular === pkg) return '';
   // Only when that package really exists here: no guessing at a package
   // this project does not have.
@@ -245,7 +266,7 @@ function singularHint(graph: Graph, pattern: LabelPattern): string {
     pattern.kind === 'label'
       ? { kind: 'label', label: { ...pattern.label, pkg: singular } }
       : { ...pattern, pkg: singular };
-  return ` (packages are singular: try ${formatPattern(corrected)})`;
+  return ` (${why} try ${formatPattern(corrected)})`;
 }
 
 export function resolveLabel(graph: Graph, label: Label): GraphNode {
