@@ -339,6 +339,28 @@ describe('exportLabels', () => {
     expect(readdirSync(dest)).toHaveLength(1); // v1 stands, nothing minted
   });
 
+  it('a refusal anywhere in the run writes nothing at all (#39 P3)', async () => {
+    // The first label is fine and the second has drifted. If the check
+    // ran per item inside the write loop, the first file would land and
+    // then the run would throw — a file on the Desktop with only an
+    // error on screen, so what you can see disagrees with what you were
+    // told. Both labels are committed sources, and `aaa` sorts first so
+    // the good one is genuinely reached first.
+    const src = join(root, '..', `bloom-export-two-${Math.random()}.wav`);
+    writeWav(src);
+    await importAsset(root, 'creek', src, 'aaa-first');
+    rmSync(src);
+    writeFileSync(join(root, 'songs/creek/audio/pad.wav'), 'drifted after import');
+
+    await expect(
+      exportLabels(root, ['//songs/creek/assets:aaa-first', '//songs/creek/assets:pad'], {
+        to: dest,
+        runner,
+      }),
+    ).rejects.toThrow('refusing to export');
+    expect(readdirSync(dest)).toEqual([]);
+  });
+
   it('refuses a destination that does not exist rather than creating one', async () => {
     await expect(
       exportLabels(root, ['//songs/creek/assets:pad'], { to: join(dest, 'Desktps'), runner }),

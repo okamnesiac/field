@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, linkSync, readdirSync, statSync, unlinkSync }
 import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
 import { sha256File } from '../hash.js';
-import { resolvePlayables } from './play.js';
+import { resolvePlayables, type Playable } from './play.js';
 import type { GeneratorRunner } from '../graph/build.js';
 
 // bloom export: build a label and drop the result somewhere a human
@@ -172,22 +172,26 @@ export async function exportLabels(
   }
   const items = await resolvePlayables(root, patterns, options.runner);
 
-  // Two labels flattening to one name would version each other — v1 and
-  // v2 of "the same thing" that are different things. The naming makes
-  // this all but unreachable; if it ever happens, say so rather than
-  // produce a plausible lie.
+  // Everything that can refuse the run happens before anything is
+  // written. Both checks below reject the *request*, not one item of it,
+  // and a run that half-happened before saying no is the worst outcome:
+  // a file appears on the Desktop with only an error on screen, so the
+  // one thing you can see disagrees with the one thing you were told
+  // (#39 review P3).
   const bases = new Map<string, string>();
+  const verified: { item: Playable; sha256: string }[] = [];
   for (const item of items) {
+    // Two labels flattening to one name would version each other — v1
+    // and v2 of "the same thing" that are different things. The naming
+    // makes this all but unreachable; if it ever happens, say so rather
+    // than produce a plausible lie.
     const base = exportBaseName(item.label);
     const first = bases.get(base);
     if (first !== undefined) {
       throw new Error(`${first} and ${item.label} would both export as ${base} — export them separately`);
     }
     bases.set(base, item.label);
-  }
 
-  const results: ExportResult[] = [];
-  for (const item of items) {
     // Hash what we are about to copy, rather than trusting what the
     // build recorded. For a committed source that record is the
     // *declared* hash, which the build deliberately does not verify
@@ -201,7 +205,11 @@ export async function exportLabels(
           `(bloom check, then re-import or restore the file)`,
       );
     }
+    verified.push({ item, sha256 });
+  }
 
+  const results: ExportResult[] = [];
+  for (const { item, sha256 } of verified) {
     const base = exportBaseName(item.label);
     const extension = extname(item.path);
     const versions = existingVersions(dir, base, extension);
