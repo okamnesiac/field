@@ -8,8 +8,8 @@ begins, or down to [later](later.md) if it turns out bigger than expected. See
 - **[One rendering pipeline](all/render-pipeline.md)** — the daemon becomes
   the single executor for rendered audio, because an insert chain holding an
   `au:` plugin cannot be rendered by TypeScript.
-- **[Linux portability](all/linux-portability.md)** — the daemon behind
-  `#if JUCE_MAC`; the CI split shipped (#46) and the rest of the plan moved
-  to render-pipeline.
+- **[Linux portability](all/linux-portability.md)** — the CI split with
+  platform guards (urgent: #46 left CI not running tests at all), then the
+  daemon behind `#if JUCE_MAC`.
 - **MCP surface** — expose the CLI's verbs as MCP tools once project core
   gives them stable shapes; agents are a first-class user from early on.

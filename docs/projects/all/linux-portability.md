@@ -1,10 +1,15 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
-**Status:** Chunk 1 shipped (#46). Chunks 2–3 **withdrawn** to
+**Status:** Not started. Chunks 2–3 **withdrawn** to
 [render-pipeline.md](render-pipeline.md), which puts sample-rate
 conversion in the daemon's built-in tier rather than in TypeScript;
-§1.1 below records what that replaced and why. Chunk 4 is what remains
-of this plan.
+§1.1 below records what that replaced and why. Chunks 1 and 4 remain,
+and chunk 1 is now more urgent than when this was written: #46 moved
+the single CI job to `ubuntu-latest` by **removing** `pnpm test` and
+`pnpm build:native`, so green CI currently does not mean the tests ran.
+#46 said that would be restored when this plan converted `normalize` to
+TypeScript — which is exactly what has been withdrawn. Restoring test
+coverage on CI is now chunk 1's platform guards and nothing else.
 
 Written after measuring what actually binds to macOS: the whole suite
 was run on Linux in a container at `3e03322`, and **9 tests of 301
@@ -91,7 +96,10 @@ second supported product.
 
 4. **CI splits by what a test needs, not by platform loyalty** — and it
    splits *before* any of this work, because it can. 268 of 301 tests
-   already pass on Linux at `3e03322`. A `ubuntu-latest` job runs
+   already pass on Linux at `3e03322`. (#46 has since moved the single
+   job to `ubuntu-latest` by dropping `pnpm test` and
+   `pnpm build:native` outright; that is a stopgap this decision
+   replaces, not an instance of it.) A `ubuntu-latest` job runs
    typecheck, build, the Python `pyright` gate, and everything except
    the four platform-bound files; a `macos-latest` job runs `say`, the
    three `afconvert` tests, and the daemon. Both jobs together keep
@@ -144,21 +152,30 @@ built-in tier, and no project using an `au:` insert can make it.
 
 ## 4 Chunks
 
-1. **CI split + concurrency** — *shipped (#46)*. No source changes;
-   paid for the rest. The four platform-bound files are guarded so the
-   Linux job skips rather than fails.
+1. **CI split + concurrency** — *not started, and now the most urgent
+   thing here*. Two jobs, platform guards on the four platform-bound
+   files so the Linux job skips rather than fails, and
+   `cancel-in-progress`. **#46 is not this chunk**: it moved the one
+   job to `ubuntu-latest` by deleting `pnpm test` and
+   `pnpm build:native`, and says so in a workflow comment — a temporary
+   runner move that reduced coverage, not the split. Restoring
+   `pnpm test` on CI is this chunk's guards, since #46's stated route
+   (converting `normalize` to TypeScript) was withdrawn.
 2. ~~**The resampler and format conversion**~~ — withdrawn to
    [render-pipeline.md](render-pipeline.md) §6, chunk 5.
 3. ~~**`normalize` swaps implementation**~~ — withdrawn with chunk 2.
 4. **The daemon on Linux**: `#if JUCE_MAC`, rescan fallback, Linux CI
-   build, protocol tests green in null-output mode.
+   build, protocol tests green in null-output mode. Restores
+   `pnpm build:native`, which #46 also dropped.
 
-Chunk 4 is all that is left here, and it depends only on 1, which has
-shipped — so it is available now. Note that
-[render-pipeline.md](render-pipeline.md) §7 raises a question this plan
-cannot answer alone: if rendering moves into the daemon, `field build`
-gains a native-toolchain dependency on Linux, which cuts against this
-plan rather than with it.
+Chunks 1 and 4 are what remain, 4 depends on 1, and 1 is available now.
+Note that [render-pipeline.md](render-pipeline.md) §7 raises a question
+this plan cannot answer alone: if rendering moves into the daemon,
+`field build` gains a native-toolchain dependency on Linux, which cuts
+against this plan rather than with it. Chunk 4 is also a prerequisite
+for [render-pipeline.md](render-pipeline.md) chunk 6, whose
+cross-platform byte comparison needs a Linux daemon build to run
+against.
 
 ## 5 Open questions
 

@@ -4,7 +4,7 @@
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
-Supersedes part of [effects.md](effects.md) §1 — see §7 there.
+Supersedes part of [effects.md](effects.md) §1 — see §6 there.
 
 **Goal:** One executor for rendered audio. A render is implemented
 once, plugins work offline, and what the daemon monitors is what the
@@ -89,8 +89,12 @@ argument for *when*.
    - **EQ** — a bell at `f0` with bandwidth `B` octaves has half-gain
      points whose ratio is `2^B`; broadband noise through a
      `normalize: true` curve comes out at the RMS it went in at.
-   - **Reverb** — an impulse decays to −60 dB in `decay` seconds; the
-     first wet sample lands at `predelay_ms`.
+   - **Reverb** — an impulse decays to −60 dB in `decay` seconds; no wet
+     output appears *before* `predelay_ms`, and the first tap lands at
+     predelay plus the shortest comb. (Not "the first wet sample lands
+     at `predelay_ms`": predelay gates the input to a network that adds
+     its own latency, so at 48 kHz with 100 ms predelay the onset is
+     sample 6015, not 4800. `reverb.test.ts:33` already records this.)
    - **Limiter** — no sample ever exceeds `ceiling_db` on adversarial
      transients; untouched audio passes at exactly unity.
 
@@ -110,21 +114,39 @@ argument for *when*.
    hand.** The claim "ours is better" holds unevenly, and the honest
    ranking is worth recording because it decides what to defend later:
 
-   - **`limit` — genuinely better, and not close.** `juce::dsp::Limiter`
-     exposes only `setThreshold` and `setRelease` — no lookahead — and
-     is internally a two-stage compressor with ballistics, so it
-     overshoots transients. field's computes the exact per-sample gain
-     pinning every peak to the ceiling, then slews it backward (attack)
-     and forward (release), making the ceiling a hard guarantee. That
-     construction is only available offline, which is the right thing to
-     exploit here.
-   - **`reverb` — better parameterised, same algorithm.**
-     `juce::Reverb` is Freeverb with byte-identical tunings to
-     `reverb.ts`, but applies one `roomSize`-derived feedback to all
-     eight combs, so each decays at a different real rate and the knob
-     means nothing measurable. field derives feedback per comb from its
-     own length, which is what makes `decay` mean T60 and makes the test
-     in decision 3 possible. field also has predelay; JUCE has none. Be
+   - **`limit` — genuinely better, but for a narrower reason than
+     "guarantees a ceiling."** `juce::dsp::Limiter` is, in its own
+     words, "two compressors and a hard clipper at 0 dB"
+     (`juce_Limiter.h:40`), and it does clip every output sample to
+     `[-1, 1]` (`:94`), so it *does* guarantee 0 dBFS — by clipping.
+     What it does not offer is an arbitrary ceiling, lookahead, or a
+     route to the ceiling that isn't hard-clipping the transients that
+     reach it; it exposes only `setThreshold` and `setRelease`. field's
+     computes the exact per-sample gain pinning every peak to
+     `ceiling_db`, then slews it backward (attack) and forward
+     (release), so the ceiling is reached by gain reduction rather than
+     by clipping, and the slew is click-free by construction. That is
+     only available offline, which is the right thing to exploit here.
+   - **`reverb` — better parameterised, and not quite the same
+     algorithm.** `juce::Reverb` is Freeverb with byte-identical comb
+     and allpass *tunings* to `reverb.ts`, but applies one
+     `roomSize`-derived feedback to all eight combs, so each decays at a
+     different real rate and the knob means nothing measurable. field
+     derives feedback per comb from its own length, which is what makes
+     `decay` mean T60 and makes the test in decision 3 possible. field
+     also has predelay; JUCE has none.
+
+     The allpass sections differ too, which matters more than a
+     parameterisation gap because it survives into the port. field
+     stores `x + 0.5·read` and returns `read − 0.5·(x + 0.5·read)` — the
+     canonical Schroeder allpass. JUCE stores the same value but returns
+     `read − x` (`juce_Reverb.h`, `AllPassFilter::process`), reproducing
+     Jezar's Freeverb variant, which is not a true allpass. field's is
+     the more defensible of the two, but it is a real divergence: the
+     port must carry field's form deliberately, and a golden or
+     property has to lock it before `reverb.ts` is deleted, because
+     after that there is nothing left to notice a silent swap to JUCE's
+     equation. Be
      clear-eyed all the same: Freeverb is the canonical *teaching*
      reverb, and when reverb quality actually matters the answer is
      neither — it is convolution/IR or a plugin, from the specialized
@@ -183,7 +205,9 @@ than solving it, and the goal has to be scoped before it is claimed.
   substituted; in JavaScript there is no remedy at all. JUCE builds
   with `-O3` and no `-ffast-math`, so basic arithmetic is safe, but
   `-ffp-contract=off` is needed to stop FMA contraction from varying by
-  compiler.
+  compiler. **This is chunk 6, not an assumption** — everything in this
+  section is work to be done, and the property tests in §2.3 assert
+  tolerances that a last-ulp divergence passes straight through.
 - **OS-versioned binaries inside cache keys are the permanent
   condition, not an anomaly.** `afconvert` is the first instance, not a
   special case: a UAD plugin version bump changes output bytes under a
@@ -230,9 +254,21 @@ most memory-bound of the three effects.
    `afconvert` in `normalize` — the work
    [linux-portability.md](linux-portability.md) §4.2–4.3 described,
    relocated and no longer blocking Linux.
+6. **Byte-identity established rather than asserted.**
+   `-ffp-contract=off` in the daemon's compile options; transcendentals
+   removed from coefficient and table setup in favour of polynomials
+   field controls; and a test that renders the same input on macOS and
+   Linux and compares bytes, running in CI rather than by hand. Without
+   this, §4's claim is a hope: the property tests in chunk 1 assert
+   tolerances and will not catch a last-ulp divergence.
 
 Chunk 1 is independent and available today. 2 depends on 1; 3 on 2; 4
-on 3; 5 on 2 and is otherwise unordered.
+on 3 **and 6**; 5 on 2. Chunk 6 runs alongside 2 — the compile flags
+and the polynomial substitutions are part of writing the C++, not a
+later pass over it — but its cross-platform comparison needs the Linux
+daemon build from [linux-portability.md](linux-portability.md) chunk 4,
+and it gates chunk 4 here: deleting `reverb.ts` before byte-identity is
+locked removes the only thing that would notice a regression.
 
 ## 7 Open questions
 
