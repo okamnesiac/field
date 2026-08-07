@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Planned (2026-08-07), not started. Written after
-[linux-portability.md](linux-portability.md) proposed a fourth
+**Status:** Chunk 1 in review (#50); chunks 2–6 not started. Written
+after [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
 Supersedes part of [effects.md](effects.md) §1 — see §6 there.
@@ -159,9 +159,32 @@ argument for *when*.
    reads about 18 dB shallow, because the start of an impulse response is
    the sparse tap burst rather than the steady envelope.
 
-   The harness catches 13 of 14 deliberate mutations across the three
-   effects. The survivor perturbs untouched gain by 1e-9 dB, which no
-   float32 can represent — the same mutation at 1e-6 dB is caught.
+   **A second round, from review.** The first ten properties were still
+   not deletion-safe, because every fixture was mono and every read kept
+   only channel 0. Five more contracts — all of them live in
+   [effects.md](effects.md) §2, and all of them covered today only by the
+   direct tests chunk 4 deletes — survived their own mutation:
+
+   - **The band types are discriminated.** Making `highpass`, `lowpass`
+     and `lowshelf` identity filters passed everything, because only
+     `bell` and `highshelf` were ever rendered.
+   - **The right channel is spread.** Removing the 23-sample offset left
+     the channels identical, which a mono harness cannot see. It is
+     exact: the right tap lands at `round((1116+23)·rate/44100)` = 1240
+     where the left lands at 1215.
+   - **Limiting is stereo-linked.** Giving each channel its own gain
+     curve — the thing the shared curve exists to prevent, since limiting
+     must not wander the image — passed.
+   - **`mix` blends.** Every reverb property ran at `mix: 1`, so a
+     renderer that ignored the parameter passed. The blend law is exactly
+     assertable: the first wet tap is a whole comb away, so sample 0 is
+     exactly `1 − mix`.
+   - **`release_ms` is honoured.** Hard-coding 100 ms passed; only the
+     attack side had been measured.
+
+   With those, the harness catches **18 of 19** deliberate mutations. The
+   one survivor perturbs untouched gain by 1e-9 dB, which no float32 can
+   represent — the same mutation at 1e-6 dB is caught.
 
 4. **The three shipped effects keep their algorithms and are ported by
    hand.** The claim "ours is better" holds unevenly, and the honest
@@ -311,11 +334,12 @@ most memory-bound of the three effects.
 1. **Property tests against the current TypeScript renderer.** Every
    assertion in decision 3, passing today. Cheap, valuable immediately,
    and any that fails is a real bug found before the port. These are the
-   migration harness and they never change hands. In review: ten
-   properties in `src/generators/effect-properties.test.ts`, all of them
+   migration harness and they never change hands. In review (#50):
+   fifteen properties in `src/generators/effect-properties.test.ts`, all
    built and measured through the build rules so nothing imports
-   `src/audio/` except `wav.ts`. None failed; two were missing, and
-   decision 3 above records what they were.
+   `src/audio/` except `wav.ts`. None of decision 3's stated assertions
+   failed; seven were *missing*, and decision 3 above records them and
+   how each was found.
 2. **`juce_dsp` linked, insert chain ported**: the three effects
    hand-written in C++ behind the existing schemas, the same tests green
    against the daemon.

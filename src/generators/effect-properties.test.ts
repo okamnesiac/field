@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import { buildLabels } from '../commands/build.js';
 import { createSong } from '../commands/create.js';
@@ -26,7 +26,22 @@ import { init } from '../commands/init.js';
 // orthogonal: no window function, no leakage, and no tolerance spent on
 // measurement error rather than on the property.
 
+// These are measurements, not latency assertions: each one builds through
+// the graph and then runs a few million trig operations. A loaded runner
+// must not be able to turn one into a timeout — the same reason
+// `say.test.ts` sets its own — so the ceiling is generous and file-wide.
+vi.setConfig({ testTimeout: 30_000 });
+
 const RATE = 48000;
+
+// Probe geometry. The source runs two seconds and the measurement window
+// is the second of them, so the filter's startup transient is outside it
+// and every integer-Hz tone is still coherent over a whole second. Both
+// numbers are here rather than inline because they have to agree: a
+// window that is not a whole number of seconds silently reintroduces
+// leakage, and one that starts at zero measures the transient.
+const PROBE_SECONDS = 2;
+const WINDOW_SECONDS = 1;
 
 let root: string;
 
@@ -49,16 +64,20 @@ function writeSound(name: string, lines: string[]): void {
   );
 }
 
-async function importSource(name: string, samples: Float32Array): Promise<void> {
+async function importSource(name: string, ...channels: Float32Array[]): Promise<void> {
   const src = join(root, '..', `field-effect-props-src-${name}.wav`);
-  writeWavFloat32(src, RATE, [samples]);
+  writeWavFloat32(src, RATE, channels);
   await importAsset(root, 'creek', src, name);
   rmSync(src);
 }
 
-async function render(label: string): Promise<Float32Array> {
+async function renderChannels(label: string): Promise<Float32Array[]> {
   const outcomes = await buildLabels(root, [`//songs/creek/sound:${label}`]);
-  return readWav(outcomes.find((o) => o.label.endsWith(`:${label}`))!.outputPath!).channels[0]!;
+  return readWav(outcomes.find((o) => o.label.endsWith(`:${label}`))!.outputPath!).channels;
+}
+
+async function render(label: string): Promise<Float32Array> {
+  return (await renderChannels(label))[0]!;
 }
 
 // Amplitude at one frequency over a whole number of seconds. Coherent by
@@ -102,12 +121,16 @@ function multitone(frequencies: number[], seconds: number): Float32Array {
   return out;
 }
 
-// Response in dB at each probe, measured over seconds 1–3 so the filter's
-// startup transient is outside the window.
+// Response in dB at each probe, over the measurement window.
 function responseDb(rendered: Float32Array, source: Float32Array, probes: number[]) {
   return probes.map((f) => ({
     f,
-    db: 20 * Math.log10(magnitudeAt(rendered, f, RATE, 2) / magnitudeAt(source, f, RATE, 2)),
+    db:
+      20 *
+      Math.log10(
+        magnitudeAt(rendered, f, RATE, WINDOW_SECONDS) /
+          magnitudeAt(source, f, RATE, WINDOW_SECONDS),
+      ),
   }));
 }
 
@@ -125,8 +148,8 @@ describe('eq properties', () => {
     // the port feeds field's own coefficients to `dsp::IIR::Filter`
     // rather than adopting its designer (render-pipeline.md §3).
     const [f0, gainDb, bandwidth] = [1000, 12, 2];
-    const probes = logSpaced(250, 4000, 120);
-    const source = multitone(probes, 3);
+    const probes = logSpaced(250, 4000, 64);
+    const source = multitone(probes, PROBE_SECONDS);
     await importSource('probe', source);
     writeSound('bell', [
       'type: eq',
@@ -162,6 +185,53 @@ describe('eq properties', () => {
     expect(crossings[1]! / crossings[0]!).toBeCloseTo(Math.pow(2, bandwidth), 1);
   });
 
+  it('each band type shapes the curve the way its name says', async () => {
+    // The schema discriminates on five band types (effects.md §2) and the
+    // assertions around this one exercise two. A renderer that treated
+    // `highpass`, `lowpass` and `lowshelf` as identity — or that mapped
+    // one type onto another — would pass everything else in this file.
+    //
+    // The probes sit well outside each corner, so what is asserted is the
+    // shape the name promises rather than the exact corner behaviour,
+    // which the bandwidth property above already pins.
+    // Both probes have to be members of the tone set, or the DFT reads
+    // leakage instead of a tone: 48 Hz and 9591 Hz are the set's nearest
+    // entries to 50 Hz and 10 kHz.
+    const tones = logSpaced(20, 20000, 48);
+    const nearest = (target: number) =>
+      tones.reduce((best, f) => (Math.abs(f - target) < Math.abs(best - target) ? f : best));
+    const probes = [nearest(50), nearest(10000)];
+    const source = multitone(tones, PROBE_SECONDS);
+    await importSource('probe', source);
+
+    const cases: { type: string; frequency: number; gainDb: number; atLow: number[]; atHigh: number[] }[] =
+      [
+        { type: 'highpass', frequency: 500, gainDb: 0, atLow: [-100, -25], atHigh: [-1, 1] },
+        { type: 'lowpass', frequency: 2000, gainDb: 0, atLow: [-1, 1], atHigh: [-100, -25] },
+        { type: 'lowshelf', frequency: 500, gainDb: 6, atLow: [5, 7], atHigh: [-1, 1] },
+        { type: 'highshelf', frequency: 500, gainDb: 6, atLow: [-1, 1], atHigh: [5, 7] },
+        { type: 'bell', frequency: 1000, gainDb: 6, atLow: [-1, 1], atHigh: [-1, 1] },
+      ];
+
+    for (const { type, frequency, gainDb, atLow, atHigh } of cases) {
+      writeSound(type, [
+        'type: eq',
+        'source: probe',
+        'normalize: false',
+        'bands:',
+        `  - type: ${type}`,
+        `    frequency: ${frequency}`,
+        `    gain_db: ${gainDb}`,
+        '    bandwidth: 1',
+      ]);
+      const [low, high] = responseDb(await render(type), source, probes);
+      expect(low!.db, `${type} at ${probes[0]} Hz`).toBeGreaterThanOrEqual(atLow[0]!);
+      expect(low!.db, `${type} at ${probes[0]} Hz`).toBeLessThanOrEqual(atLow[1]!);
+      expect(high!.db, `${type} at ${probes[1]} Hz`).toBeGreaterThanOrEqual(atHigh[0]!);
+      expect(high!.db, `${type} at ${probes[1]} Hz`).toBeLessThanOrEqual(atHigh[1]!);
+    }
+  });
+
   it('normalize returns the level it was handed, weighted as autoGainDB defines level', async () => {
     // `autoGainDB` averages power at 48 log-spaced points from 20 Hz to
     // 20 kHz — equal energy per octave, which is pink weighting, and the
@@ -171,7 +241,7 @@ describe('eq properties', () => {
     // against rendered audio, so a renderer that stopped matching the
     // coefficient math fails without anyone thinking to look.
     const probes = logSpaced(20, 20000, 48);
-    const source = multitone(probes, 3);
+    const source = multitone(probes, PROBE_SECONDS);
     await importSource('probe', source);
     const shelf = [
       'bands:',
@@ -320,6 +390,49 @@ describe('reverb properties', () => {
     expect(10 * Math.log10(energy)).toBeCloseTo(10 * Math.log10(predicted), 1);
   });
 
+  it('spreads the right channel by the stereo offset', async () => {
+    // The right channel runs every delay line 23 samples longer at the
+    // Freeverb reference rate, scaled the same way as the tunings. That
+    // is the whole of the stereo image, and it is exact: the right tap
+    // lands at round((1116+23)·rate/44100) = 1240 where the left lands at
+    // 1215. Deleting the spread leaves both channels identical, which
+    // every mono assertion in this file is blind to.
+    await importSource('imp', impulse(1), impulse(1));
+    writeSound('wide', ['type: reverb', 'source: imp', 'decay: 0.5', 'mix: 1', 'damping: 0']);
+    const [left, right] = await renderChannels('wide');
+
+    const scaled = (tuning: number) => Math.max(1, Math.round((tuning * RATE) / 44100));
+    expect(left!.findIndex((v) => v !== 0)).toBe(scaled(1116));
+    expect(right!.findIndex((v) => v !== 0)).toBe(scaled(1116 + 23));
+    expect([...right!]).not.toEqual([...left!]);
+  });
+
+  it('mix blends dry against wet, and mix 0 is a dry passthrough', async () => {
+    // `mix` is equal-sum dry/wet (effects.md §2): out = dry·(1−mix) +
+    // wet·mix. The first wet tap is a whole comb away, so at sample 0 the
+    // wet contribution is exactly zero and the dry one is exactly
+    // (1 − mix) — which makes the blend law assertable to the sample
+    // rather than approximately.
+    await importSource('imp', impulse(1));
+    for (const mix of [0, 0.25, 0.5, 1]) {
+      const label = `mix${String(mix).replace('.', '')}`;
+      writeSound(label, [
+        'type: reverb',
+        'source: imp',
+        'decay: 0.5',
+        `mix: ${mix}`,
+        'damping: 0',
+      ]);
+      const rendered = await render(label);
+      expect(rendered[0]!).toBeCloseTo(1 - mix, 6);
+      // …and the wet tail scales with mix, so a renderer that ignored the
+      // parameter and always ran fully wet fails here too.
+      const tail = rms(rendered, RATE, rendered.length) ** 2 * (rendered.length - RATE);
+      if (mix === 0) expect(tail).toBe(0);
+      else expect(tail).toBeGreaterThan(0);
+    }
+  });
+
   it('damping only ever shortens the tail', async () => {
     await importSource('imp', impulse(1));
     for (const damping of [0, 0.5, 1]) {
@@ -394,7 +507,7 @@ describe('limit properties', () => {
     const ceilingDb = -1;
     const ceiling = Math.pow(10, ceilingDb / 20);
     const source = Float32Array.from(
-      { length: 3 * RATE },
+      { length: PROBE_SECONDS * RATE },
       (_, i) => 2 * Math.sin((2 * Math.PI * 1000 * i) / RATE),
     );
     await importSource('over', source);
@@ -402,8 +515,8 @@ describe('limit properties', () => {
     const rendered = await render('reduced');
 
     const thd = (buf: Float32Array) => {
-      const fundamental = magnitudeAt(buf, 1000, RATE, 2);
-      const harmonics = [3, 5, 7, 9].map((k) => magnitudeAt(buf, 1000 * k, RATE, 2));
+      const fundamental = magnitudeAt(buf, 1000, RATE, WINDOW_SECONDS);
+      const harmonics = [3, 5, 7, 9].map((k) => magnitudeAt(buf, 1000 * k, RATE, WINDOW_SECONDS));
       return Math.sqrt(harmonics.reduce((s, v) => s + v * v, 0)) / fundamental;
     };
     const clipped = Float32Array.from(source, (v) => Math.max(-ceiling, Math.min(ceiling, v)));
@@ -441,6 +554,55 @@ describe('limit properties', () => {
     for (const lookaheadMs of [1, 5, 20]) {
       expect(await rampMs(lookaheadMs)).toBeGreaterThan(lookaheadMs * 0.9);
       expect(await rampMs(lookaheadMs)).toBeLessThan(lookaheadMs * 1.15);
+    }
+  });
+
+  it('links the channels: a peak in one ducks the other by the same gain', async () => {
+    // The gain curve is shared across channels on purpose — limiting must
+    // not wander the image (effects.md §2). Limiting each channel on its
+    // own gain passes every mono assertion in this file, and the only
+    // thing that catches it today is `limiter.test.ts`, which chunk 4
+    // deletes.
+    const left = new Float32Array(4800).fill(0.1);
+    const right = new Float32Array(4800).fill(0.1);
+    left[2400] = 1;
+    await importSource('pair', left, right);
+    writeSound('linked', ['type: limit', 'source: pair', 'ceiling_db: -1']);
+    const [outL, outR] = await renderChannels('linked');
+
+    // The right channel never approached the ceiling, so anything that
+    // moved it came from the left.
+    expect(outR![2400]!).toBeLessThan(right[2400]! * 0.99);
+    expect(outR![2400]! / right[2400]!).toBeCloseTo(outL![2400]! / left[2400]!, 5);
+  });
+
+  it('the release ramp runs for release_ms after the peak', async () => {
+    // The mirror of the attack property: the forward pass caps how fast
+    // gain may recover, and the slope is scaled so the deepest reduction
+    // spans exactly `release_ms`. Without this, a renderer could hard-code
+    // one release and pass everything else.
+    const spikeAt = 2400;
+    const source = new Float32Array(48000).fill(0.1);
+    source[spikeAt] = 1000;
+    await importSource('burst', source);
+
+    const releaseMsOf = async (releaseMs: number) => {
+      writeSound(`rel${releaseMs}`, [
+        'type: limit',
+        'source: burst',
+        'ceiling_db: -1',
+        `release_ms: ${releaseMs}`,
+      ]);
+      const out = await render(`rel${releaseMs}`);
+      let last = spikeAt;
+      while (last < out.length - 1 && out[last + 1]! < source[last + 1]! * (1 - 1e-6)) last++;
+      return ((last - spikeAt) / RATE) * 1000;
+    };
+
+    for (const releaseMs of [20, 100, 400]) {
+      const measured = await releaseMsOf(releaseMs);
+      expect(measured).toBeGreaterThan(releaseMs * 0.9);
+      expect(measured).toBeLessThan(releaseMs * 1.15);
     }
   });
 
