@@ -100,11 +100,25 @@ second supported product.
    job to `ubuntu-latest` by dropping `pnpm test` and
    `pnpm build:native` outright; that is a stopgap this decision
    replaces, not an instance of it.) A `ubuntu-latest` job runs
-   typecheck, build, the Python `pyright` gate, and everything except
-   the four platform-bound files; a `macos-latest` job runs `say`, the
-   three `afconvert` tests, and the daemon. Both jobs together keep
-   today's coverage exactly, and most of the wall clock moves off the
-   10× meter.
+   typecheck, build, the Python `pyright` gate, and every test that does
+   not shell out to a macOS binary; a `macos-latest` job runs `say`, the
+   three `afconvert` tests, and the daemon.
+
+   **The guard is per test, not per file.** "By what a test needs" is
+   the whole decision, and excluding files breaks it. The nine
+   platform-bound cases live in four files holding 71 tests between them
+   at this head — `say.test.ts` 6, `stem.test.ts` 30,
+   `effects.test.ts` 5, `build.test.ts` 30 — so dropping the files would
+   take 62 platform-independent graph, stem and DSP tests off Linux,
+   which is the code the Linux job exists to exercise. Only
+   `say.test.ts` is wholly platform-bound. The other three contribute
+   one test each — `graph/build.test.ts:279` ("normalizes real audio
+   through afconvert"), `generators/stem.test.ts:581`, and
+   `generators/effects.test.ts:120` ("normalize accepts a target") — and
+   each gets its own guard or moves to a Darwin-only sibling file.
+
+   Both jobs together keep today's coverage exactly, and most of the
+   wall clock moves off the 10× meter.
 
    This is decision 4 and not an afterthought because it is what makes
    the rest affordable: the 3,000 included minutes are 300 macOS
@@ -153,9 +167,9 @@ built-in tier, and no project using an `au:` insert can make it.
 ## 4 Chunks
 
 1. **CI split + concurrency** — *not started, and now the most urgent
-   thing here*. Two jobs, platform guards on the four platform-bound
-   files so the Linux job skips rather than fails, and
-   `cancel-in-progress`. **#46 is not this chunk**: it moved the one
+   thing here*. Two jobs, per-test guards on the nine platform-bound
+   cases (decision 4) so the Linux job skips those and runs the other
+   62 tests in the same files, and `cancel-in-progress`. **#46 is not this chunk**: it moved the one
    job to `ubuntu-latest` by deleting `pnpm test` and
    `pnpm build:native`, and says so in a workflow comment — a temporary
    runner move that reduced coverage, not the split. Restoring

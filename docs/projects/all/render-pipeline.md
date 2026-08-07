@@ -87,14 +87,29 @@ argument for *when*.
    asserting is field's own semantics, not that a biquad is a biquad:
 
    - **EQ** — a bell at `f0` with bandwidth `B` octaves has half-gain
-     points whose ratio is `2^B`; broadband noise through a
-     `normalize: true` curve comes out at the RMS it went in at.
+     points whose ratio is `2^B`; a `normalize: true` curve returns the
+     level it was handed, *measured the way `autoGainDB` defines level*.
+     That qualifier is load-bearing. The compensation averages power at
+     48 log-spaced points, which is equal-energy-per-octave weighting,
+     and `biquad.ts:103` says as much. So the assertion renders tones at
+     those same 48 frequencies and checks the mean output power is
+     0 dB — tight, and it fails the moment rendered audio stops matching
+     the coefficients the compensation was computed from. Seeded pink
+     noise is the loose end-to-end version and wants a tolerance near
+     ±1 dB (measured against the current renderer: −0.59 dB through a
+     +6 dB/500 Hz high shelf, +0.91 dB through a +6 dB/200 Hz low
+     shelf). **Not white noise** — its energy sits in the top octaves,
+     so that same high shelf comes out **+1.91 dB** and the property is
+     not merely loose but false.
    - **Reverb** — an impulse decays to −60 dB in `decay` seconds; no wet
      output appears *before* `predelay_ms`, and the first tap lands at
      predelay plus the shortest comb. (Not "the first wet sample lands
      at `predelay_ms`": predelay gates the input to a network that adds
      its own latency, so at 48 kHz with 100 ms predelay the onset is
      sample 6015, not 4800. `reverb.test.ts:33` already records this.)
+     Asserted to the sample, that onset is also the cheapest guard on
+     the delay-line sizing in decision 4 — JUCE's integer scaling puts
+     it at 6014.
    - **Limiter** — no sample ever exceeds `ceiling_db` on adversarial
      transients; untouched audio passes at exactly unity.
 
@@ -128,8 +143,8 @@ argument for *when*.
      by clipping, and the slew is click-free by construction. That is
      only available offline, which is the right thing to exploit here.
    - **`reverb` — better parameterised, and not quite the same
-     algorithm.** `juce::Reverb` is Freeverb with byte-identical comb
-     and allpass *tunings* to `reverb.ts`, but applies one
+     algorithm.** `juce::Reverb` is Freeverb off the same base comb and
+     allpass *tables* as `reverb.ts`, but applies one
      `roomSize`-derived feedback to all eight combs, so each decays at a
      different real rate and the knob means nothing measurable. field
      derives feedback per comb from its own length, which is what makes
@@ -146,8 +161,20 @@ argument for *when*.
      port must carry field's form deliberately, and a golden or
      property has to lock it before `reverb.ts` is deleted, because
      after that there is nothing left to notice a silent swap to JUCE's
-     equation. Be
-     clear-eyed all the same: Freeverb is the canonical *teaching*
+     equation.
+
+     The delay *sizing* diverges too, everywhere except 44.1 kHz. field
+     rounds — `Math.round((tuning + spread) · rate / 44100)`, floored at
+     1 (`reverb.ts:23`); JUCE casts the rate to `int` and divides in
+     integers, which truncates (`juce_Reverb.h:111`). At 48 kHz that is
+     one sample short on seven of the twelve delay lines per channel:
+     the 1116 comb is 1215 in field and 1214 in JUCE, which is exactly
+     why the onset above is 6015 and not 6014. Taking JUCE's sizing
+     because the tables match would shift every tap, so this is the
+     second thing the port must carry deliberately, and the
+     sample-accurate onset property is what locks it.
+
+     Be clear-eyed all the same: Freeverb is the canonical *teaching*
      reverb, and when reverb quality actually matters the answer is
      neither — it is convolution/IR or a plugin, from the specialized
      tier.
@@ -178,8 +205,8 @@ Checked against the pinned JUCE 8.0.4 tree, not from memory.
 | Biquad coefficients | `dsp::IIR::ArrayCoefficients` — plain C++ RBJ, no Apple | No: Q-parameterised, fails the bandwidth test |
 | Biquad processing | `dsp::IIR::Filter`, transposed direct form II | Yes, fed field's coefficients |
 | EQ auto-gain | — | No equivalent exists |
-| Reverb | `juce::Reverb`, Freeverb, identical tunings | No: `roomSize` not T60, no predelay, float |
-| Limiter | `dsp::Limiter`, threshold + release only | No: no lookahead, cannot guarantee a ceiling |
+| Reverb | `juce::Reverb`, Freeverb, same base tables | No: `roomSize` not T60, no predelay, Jezar allpass, truncated rate scaling |
+| Limiter | `dsp::Limiter`, threshold + release only | No: no lookahead, and 0 dBFS by hard clip — no arbitrary ceiling by gain reduction |
 | Resampling | `Interpolators::WindowedSinc`, 100 crossings/side | Probably: variable-rate, not fixed-ratio polyphase |
 | Delay lines, chains, gain, oversampling | `juce_dsp` | Yes |
 
@@ -231,7 +258,11 @@ improve determinism and speed at once:
   curve is *exactly* 0 dB wherever audio was untouched, and
   `pow(10, 0/20)` is 1, so guarding the call skips the transcendental
   for most samples in typical material — exactly, not approximately.
-  That is both the speedup and most of the libm exposure from §4.
+  That is the speedup, and it removes §4's libm exposure on every sample
+  the limiter left alone. It does not remove it on the ones it touched:
+  a chain that actually limits still calls `pow` per reduced sample, and
+  byte identity there needs an evaluator field controls. That is chunk
+  6's problem, named there rather than left implied here.
 
 One inherited choice to make deliberately: `reverb.ts` uses `Float64Array`
 delay buffers where JUCE uses `float`, doubling memory traffic on the
@@ -256,14 +287,23 @@ most memory-bound of the three effects.
    relocated and no longer blocking Linux.
 6. **Byte-identity established rather than asserted.**
    `-ffp-contract=off` in the daemon's compile options; transcendentals
-   removed from coefficient and table setup in favour of polynomials
-   field controls; and a test that renders the same input on macOS and
-   Linux and compares bytes, running in CI rather than by hand. Without
+   replaced by polynomials field controls — in coefficient and table
+   setup, and also **on the per-sample path**, where the limiter's
+   dB→linear conversion is the one live case (§5). The zero-gain guard
+   there skips untouched samples exactly, so what is left to schedule is
+   a controlled evaluator for the reduced ones; and the cross-platform
+   fixture has to render material that actually limits, or it passes
+   without exercising the most likely divergence in the built-in tier.
+   Then a test that renders the same input on macOS and Linux and
+   compares bytes, running in CI rather than by hand. Without all of
    this, §4's claim is a hope: the property tests in chunk 1 assert
    tolerances and will not catch a last-ulp divergence.
 
-Chunk 1 is independent and available today. 2 depends on 1; 3 on 2; 4
-on 3 **and 6**; 5 on 2. Chunk 6 runs alongside 2 — the compile flags
+Chunk 1 is independent of everything else here, but
+[next.md](../next.md) puts [linux-portability.md](linux-portability.md)
+chunk 1 ahead of it: adding properties to a renderer while CI runs no
+tests is the wrong order. 2 depends on 1; 3 on 2; 4 on 3 **and 6**; 5
+on 2. Chunk 6 runs alongside 2 — the compile flags
 and the polynomial substitutions are part of writing the C++, not a
 later pass over it — but its cross-platform comparison needs the Linux
 daemon build from [linux-portability.md](linux-portability.md) chunk 4,
