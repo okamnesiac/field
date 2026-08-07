@@ -94,6 +94,17 @@ describe('build', () => {
     // Every outcome names a playable path — watch hands any label's fresh
     // artifact to the daemon, including committed content.
     expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad.wav')).toBe(true);
+    // ...and says the path is a source it never produced, which `cached`
+    // alone cannot distinguish from a cache hit.
+    expect(outcomes[0]!.committed).toBe(true);
+  });
+
+  it('a rule outcome is never marked committed', async () => {
+    const { runner } = countingRunner();
+    const outcomes = await buildLabels(root, ['//songs/creek/sounds:pad-normalized'], runner);
+    const rule = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
+    expect(rule.committed).toBeUndefined();
+    expect(rule.outputPath!).toContain('.bloom/out'); // materialized, not committed
   });
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {

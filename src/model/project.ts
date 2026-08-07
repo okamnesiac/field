@@ -135,10 +135,14 @@ function loadFile<T>(
   return { path, data: parsed.data, raw, order: spec.order };
 }
 
+// Dotfiles are editor debris, not project files: Emacs writes a dangling
+// symlink named `.#track.yaml` while a buffer is unsaved, which ends in
+// .yaml and would otherwise be loaded — under `build --watch` that turns
+// simply opening a file into a load error (#34 review footnote).
 function yamlFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.yaml'))
+    .filter((f) => f.endsWith('.yaml') && !f.startsWith('.'))
     .sort()
     .map((f) => join(dir, f));
 }

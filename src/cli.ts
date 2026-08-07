@@ -25,6 +25,7 @@ import { createSong, createTrack } from './commands/create.js';
 import { fmt } from './commands/fmt.js';
 import { importAsset } from './commands/import.js';
 import { init } from './commands/init.js';
+import type { BuildOutcome } from './graph/build.js';
 import { findProjectRoot, loadProject } from './model/project.js';
 
 const program = new Command();
@@ -213,6 +214,15 @@ program
     }
   });
 
+// What happened to a label, in one word: a committed source (an asset, a
+// chosen variant) was never built at all, so saying `cached` about it
+// claims a cache hit that never happened. Padded to a common width so the
+// labels line up down the column.
+function buildStatus(o: BuildOutcome): string {
+  const status = o.committed === true ? 'source' : o.cached ? 'cached' : 'built';
+  return status.padEnd(6);
+}
+
 program
   .command('build <patterns...>')
   .description('build labels (creek/sounds:pad-96k, creek/..., or a bare song for its main mix)')
@@ -223,9 +233,8 @@ program
       if (opts.watch !== true) {
         const outcomes = await buildLabels(root, patterns);
         for (const o of outcomes) {
-          const status = o.cached ? 'cached' : 'built';
           const where = o.outputPath ? ` → ${o.outputPath}` : '';
-          process.stdout.write(`${status}  ${o.label}${where}\n`);
+          process.stdout.write(`${buildStatus(o)}  ${o.label}${where}\n`);
         }
         return;
       }
@@ -246,8 +255,7 @@ program
             if (first) {
               first = false;
               for (const o of outcomes) {
-                const status = o.cached ? 'cached' : 'built';
-                process.stdout.write(`${status}  ${o.label}\n`);
+                process.stdout.write(`${buildStatus(o)}  ${o.label}\n`);
               }
               process.stdout.write('watching for changes (ctrl-c stops)\n');
               return;
@@ -348,18 +356,15 @@ program
       // On a tty, a watch session renders the live two-line block (header
       // + position, loop-ui.ts) with the queued takeover on the position
       // line; everywhere else — non-tty, or plain play — plain lines.
-      const display =
-        tty && opts.watch === true
-          ? new (await import('./commands/loop-ui.js')).LoopDisplay(
-              (chunk) => process.stdout.write(chunk),
-              {
-                // --from takes the requeue path: passes come from onItem,
-                // not from position regression.
-                requeue: opts.from !== undefined,
-                columns: () => process.stdout.columns ?? 120,
-              },
-            )
-          : undefined;
+      const loopUi = tty && opts.watch === true ? await import('./commands/loop-ui.js') : undefined;
+      const display = loopUi
+        ? new loopUi.LoopDisplay((chunk) => process.stdout.write(chunk), {
+            // --from takes the requeue path: passes come from onItem,
+            // not from position regression.
+            requeue: opts.from !== undefined,
+            columns: () => process.stdout.columns ?? 120,
+          })
+        : undefined;
       const say = (line: string): void => {
         if (display) {
           display.say(line);
@@ -377,6 +382,10 @@ program
       let watchDone = Promise.resolve();
       let fresh: string | undefined;
       let started = false; // first onItem opens the display block; later ones are passes
+      // A takeover reported before that first load, held until there is
+      // something to take over from.
+      let heldForStart: BuildOutcome | undefined;
+      let takeover: (moved: BuildOutcome) => void = () => {};
       if (opts.watch === true) {
         const item = items[0]!;
         const native = opts.from === undefined;
@@ -391,6 +400,30 @@ program
             );
           }
         }
+        // A rebuilt artifact takes over: the native loop asks the daemon to
+        // swap at the wrap, a --from region loop repoints what the next
+        // pass loads.
+        takeover = (moved: BuildOutcome): void => {
+          const path = moved.outputPath!;
+          if (reloadClient) {
+            void reloadClient.reload(path).then(
+              () =>
+                display
+                  ? display.queue(moved.sha256, path)
+                  : say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
+              // A ctrl-c racing an in-flight reload closes the socket
+              // under it; that is the session ending, not a failure.
+              (err: Error) => {
+                display?.dequeue();
+                if (!watchAbort.signal.aborted) say(`reload failed: ${err.message}`);
+              },
+            );
+          } else {
+            fresh = path;
+            if (display) display.queue(moved.sha256, path);
+            else say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} next pass`);
+          }
+        };
         const { watchBuild } = await import('./commands/watch.js');
         watchDone = watchBuild(
           root,
@@ -407,24 +440,16 @@ program
             onOutcomes: (_outcomes, changed) => {
               const moved = changed.find((o) => o.label === item.label);
               if (!moved?.outputPath) return;
-              if (reloadClient) {
-                void reloadClient.reload(moved.outputPath).then(
-                  () =>
-                    display
-                      ? display.queue(moved.sha256, moved.outputPath!)
-                      : say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
-                  // A ctrl-c racing an in-flight reload closes the socket
-                  // under it; that is the session ending, not a failure.
-                  (err: Error) => {
-                    display?.dequeue();
-                    if (!watchAbort.signal.aborted) say(`reload failed: ${err.message}`);
-                  },
-                );
-              } else {
-                fresh = moved.outputPath;
-                if (display) display.queue(moved.sha256, moved.outputPath);
-                else say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} next pass`);
+              // The seeded baseline can report drift before the play's own
+              // load has happened — a reload then has nothing to take over
+              // from and errors. Hold it for the first load, which the
+              // block opens on; the wrap's `reloaded` corrects the header
+              // if those bytes were already the new ones (#35 review).
+              if (!started) {
+                heldForStart = moved;
+                return;
               }
+              takeover(moved);
             },
           },
         ).finally(() => reloadClient?.close());
@@ -438,19 +463,29 @@ program
           { ...opts, currentPath: opts.watch === true ? () => fresh : undefined },
           {
             onItem: (label, note, path) => {
-              if (!display) {
-                say(`playing ${label}${note}`);
-                return;
-              }
+              const first = !started;
+              started = true;
               // The first pass opens the block; later ones (the requeue
               // path reloads every pass) are pass boundaries — the pass
               // that loads what the watch queued opens the successor's
               // block, with the hash correlated by path, never the
               // snapshot from before the session (#37 review P2).
-              if (started) display.pass(path);
-              else {
-                started = true;
-                display.start(label, items[0]!.sha256, note);
+              if (!display) say(`playing ${label}${note}`);
+              else if (first) {
+                // What opened may already be the held rebuild's bytes —
+                // correlated by path, never assumed from the snapshot.
+                display.start(
+                  label,
+                  loopUi!.openingHash(path, items[0]!.sha256, heldForStart),
+                  note,
+                );
+              } else display.pass(path);
+              // Now there is something to take over from: release the
+              // rebuild that beat the first load, if one did.
+              if (first && heldForStart !== undefined) {
+                const held = heldForStart;
+                heldForStart = undefined;
+                takeover(held);
               }
             },
             onPosition: (line, at) => {

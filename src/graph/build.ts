@@ -28,6 +28,11 @@ export interface BuildOutcome {
   // artifact to the daemon (#35 review: a chosen-variant repoint is
   // exactly a committed label whose path moved).
   outputPath?: string;
+  // The path names a committed source the build did not produce, not a
+  // materialized output. `cached` cannot carry this: assets and chosen
+  // variants report cached:true because nothing executed, which is not
+  // the same claim as "this came out of the cache" (#35 review).
+  committed?: boolean;
   sha256: string;
 }
 
@@ -130,9 +135,14 @@ function actionKey(node: GeneratorNode, inputHashes: string[], projectSampleRate
   );
 }
 
-function assetFilePath(project: LoadedProject, node: GraphNode): string {
-  if (node.kind !== 'asset') throw new Error('not an asset node');
-  return join(project.root, node.scopeDir, node.asset.file);
+// The committed file a source node names — an asset's path is relative to
+// its scope, a generation label's to its song. Three call sites need it
+// (the outcome, the tamper guard, the runner's inputs), so it lives in one
+// place: the two spellings were drifting apart by construction (#35 review).
+function sourceFilePath(project: LoadedProject, node: GraphNode): string {
+  if (node.kind === 'asset') return join(project.root, node.scopeDir, node.asset.file);
+  if (node.kind === 'generation') return join(project.root, node.songDir, node.file);
+  throw new Error(`not a committed source node: ${formatLabel(node.label)}`);
 }
 
 // Materialized outputs land under .bloom/out mirroring the label path, so
@@ -155,7 +165,8 @@ async function buildNode(
       label: formatLabel(node.label),
       cached: true,
       sha256: node.asset.sha256,
-      outputPath: assetFilePath(project, node),
+      outputPath: sourceFilePath(project, node),
+      committed: true,
     };
   }
   if (node.kind === 'generation') {
@@ -167,7 +178,8 @@ async function buildNode(
       label: formatLabel(node.label),
       cached: true,
       sha256: node.sha256,
-      outputPath: join(project.root, node.songDir, node.file),
+      outputPath: sourceFilePath(project, node),
+      committed: true,
     };
   }
 
@@ -219,7 +231,7 @@ async function buildNode(
   // state, unlike asset files a human can edit.
   for (const input of inputNodes) {
     if (input.kind === 'asset') {
-      const path = assetFilePath(project, input);
+      const path = sourceFilePath(project, input);
       const size = statSync(path).size;
       if (size !== input.asset.bytes) {
         throw new Error(
@@ -236,7 +248,7 @@ async function buildNode(
       }
     } else if (input.kind === 'generation') {
       // Committed variants are human-visible files too; same tamper guard.
-      const actual = await sha256File(join(project.root, input.songDir, input.file));
+      const actual = await sha256File(sourceFilePath(project, input));
       if (actual !== input.sha256) {
         throw new Error(
           `refusing to build: input ${formatLabel(input.label)} content does not match its ` +
@@ -246,11 +258,9 @@ async function buildNode(
     }
   }
 
-  const inputPaths = inputNodes.map((d) => {
-    if (d.kind === 'asset') return assetFilePath(project, d);
-    if (d.kind === 'generation') return join(project.root, d.songDir, d.file);
-    return built.get(formatLabel(d.label))!.outputPath!;
-  });
+  const inputPaths = inputNodes.map((d) =>
+    d.kind === 'rule' ? built.get(formatLabel(d.label))!.outputPath! : sourceFilePath(project, d),
+  );
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);

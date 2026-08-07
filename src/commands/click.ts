@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
+import { sha256FileSync } from '../hash.js';
 import { beatTicks } from '../time/tempo.js';
 import type { LoadedProject } from '../model/project.js';
 import { musicalContext, songDirOfPkg, type MusicalContext } from './transport.js';
@@ -63,7 +64,12 @@ export function withClick(root: string, ctx: MusicalContext, item: Playable): Pl
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `click-${item.label.split(':').pop() ?? 'target'}.wav`);
   writeWavFloat32(path, wav.sampleRate, [left, right]);
-  return { ...item, path };
+  // sha256 describes what `path` holds, and path now points at the clicked
+  // copy — carrying the source's hash through would quietly break that
+  // invariant for anything that trusts it (watch seeds its baseline from
+  // it). --click and --watch don't compose today; the field stays honest
+  // anyway, because the next composition is where it would bite (#35 review).
+  return { ...item, path, sha256: sha256FileSync(path) };
 }
 
 // Every playable gets its own song's grid; a playable outside any song
