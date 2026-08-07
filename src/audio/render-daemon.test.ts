@@ -195,6 +195,48 @@ describe.skipIf(!binary)('render subprocess', () => {
     expect(readFileSync(output).length).toBeGreaterThan(0);
   });
 
+  it('refuses a plan whose required arrays are absent or the wrong type', async () => {
+    // `clips`, `inputs` and `faders` are always serialized, so an absent
+    // one is a shape mismatch rather than a shorthand. Treating it as
+    // empty rendered a no-op stem under a track's action key (#54
+    // review). A non-array did the same, which the report did not cover.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const stem = { op: 'stem', output: join(dir, 'out.wav'), sample_rate: RATE, inputs: [input] };
+
+    await expect(render(stem)).rejects.toThrow(/stem plan needs "clips" to be an array/);
+    await expect(render({ ...stem, clips: 'nope' })).rejects.toThrow(
+      /stem plan needs "clips" to be an array/,
+    );
+    await expect(
+      render({ op: 'mix', output: join(dir, 'out.wav'), sample_rate: RATE, inputs: [], gain_db: 0 }),
+    ).rejects.toThrow(/mix plan needs "faders" to be an array/);
+  });
+
+  it('still renders a stem with an explicitly empty clip list', async () => {
+    // The other half of the same rule, and the reason the check is
+    // "present and an array" rather than "non-empty": a track with no
+    // clips is a legitimate stem of nothing, and the reference produced
+    // exactly this. Without this test, a later tightening would turn a
+    // valid state into an error and look like a fix.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const output = join(dir, 'empty.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      clips: [],
+    });
+    expect(readFileSync(output).length).toBeGreaterThan(0); // a valid, zero-frame WAV
+  });
+
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
     await expect(
       renderInsertChain({

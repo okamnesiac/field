@@ -43,17 +43,34 @@ std::string requireString (const juce::var& object, const char* key, const char*
     return value.toString().toStdString();
 }
 
+// A required array must be present and be an array. Empty is fine — an
+// empty clip list is a legitimate stem — but absent or the wrong type is
+// a shape mismatch, and treating it as empty renders a no-op under an
+// action key describing real work.
+//
+// The line this draws is schema optionality, not convenience: `inserts`
+// and `master` are genuinely omitted when they have no entries (so
+// insert-less stems keep their pre-inserts action keys), and those stay
+// conditional. `clips`, `inputs` and `faders` are always serialized.
+const juce::Array<juce::var>& requireArray (const juce::var& object,
+                                            const char* key,
+                                            const char* what)
+{
+    const auto* array = object.getProperty (key, juce::var()).getArray();
+    if (array == nullptr)
+        throw std::runtime_error (std::string (what) + " needs \"" + key
+                                  + "\" to be an array");
+    return *array;
+}
+
 // Read every input named by the plan. The control plane has already
 // checked rates and channel counts against the project (that is where the
 // user-facing diagnostics live), so anything wrong here is a bug rather
 // than a mistake, and it surfaces as one.
 std::vector<std::vector<std::vector<float>>> readInputs (const juce::var& plan)
 {
-    const auto* inputs = plan.getProperty ("inputs", juce::var()).getArray();
-    if (inputs == nullptr)
-        throw std::runtime_error ("plan is missing \"inputs\"");
     std::vector<std::vector<std::vector<float>>> result;
-    for (const auto& entry : *inputs)
+    for (const auto& entry : requireArray (plan, "inputs", "render plan"))
         result.push_back (dsp::readWav (entry.toString().toStdString()).channels);
     return result;
 }
@@ -155,9 +172,8 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
     const auto sources = readInputs (plan);
 
     std::vector<dsp::PlacedClip> clips;
-    if (const auto* entries = plan.getProperty ("clips", juce::var()).getArray())
     {
-        for (const auto& entry : *entries)
+        for (const auto& entry : requireArray (plan, "clips", "stem plan"))
         {
             dsp::PlacedClip clip;
             clip.input = (int) requireNumber (entry, "input", "clip");
@@ -185,9 +201,8 @@ void renderMix (const juce::var& plan, const std::string& output, double sampleR
     const auto stems = readInputs (plan);
 
     std::vector<dsp::Fader> faders;
-    if (const auto* entries = plan.getProperty ("faders", juce::var()).getArray())
     {
-        for (const auto& entry : *entries)
+        for (const auto& entry : requireArray (plan, "faders", "mix plan"))
         {
             dsp::Fader fader;
             fader.gainDb = requireNumber (entry, "gain_db", "fader");
