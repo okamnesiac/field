@@ -113,17 +113,6 @@ void Server::acceptLoop()
                 continue;
             break;
         }
-        // A client may vanish between our poll and our write (ctrl-c mid
-        // position stream); without this, that write is a fatal SIGPIPE.
-        // BSD says so once per socket and Linux once per write
-        // (MSG_NOSIGNAL, in send() below) — so this is a capability test
-        // rather than a platform one, which is what portable socket code
-        // wants. main.cpp's process-wide SIGPIPE ignore is the belt under
-        // both, and on Linux it is what actually carries the guarantee.
-#if defined(SO_NOSIGPIPE)
-        int noSigpipe = 1;
-        ::setsockopt (fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, sizeof (noSigpipe));
-#endif
         auto connection = std::make_shared<Connection>();
         connection->fd = fd;
         {
@@ -301,11 +290,11 @@ void Server::send (Connection& connection, const juce::String& line)
     auto remaining = strlen (utf8);
     while (remaining > 0 && connection.open)
     {
-#if defined(MSG_NOSIGNAL)
-        auto n = ::send (connection.fd, utf8, remaining, MSG_NOSIGNAL);
-#else
+        // A client may vanish between our poll and this write (ctrl-c mid
+        // position stream). SIGPIPE is ignored process-wide (main.cpp), so
+        // that write returns EPIPE and the loop below stops. There is
+        // deliberately no second mechanism — see the note there.
         auto n = ::write (connection.fd, utf8, remaining);
-#endif
         if (n <= 0)
             break;
         utf8 += n;

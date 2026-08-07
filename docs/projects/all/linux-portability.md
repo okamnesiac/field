@@ -1,7 +1,6 @@
 # Plan: Linux portability — the daemon, and CI that runs anywhere
 
 **Status:** Chunk 1 shipped (#49); chunk 4 in review. Chunks 2–3
-**withdrawn** — see below. Chunks 2–3
 **withdrawn** to [render-pipeline.md](render-pipeline.md), which puts
 sample-rate conversion in the daemon's built-in tier rather than in
 TypeScript; §1.1 below records what that replaced and why.
@@ -96,14 +95,33 @@ second supported product.
    taken by reading `player.cpp`, which is where hot-plug lives, and
    nobody grepped the rest of the daemon.
 
-   It is guarded on `#if defined(SO_NOSIGPIPE)` rather than `JUCE_MAC`,
-   which is a deliberate departure from this decision's wording: whether
-   a socket option exists is a capability question, and writing it as a
-   platform question would be a guess that happens to be right today.
-   Linux says the same thing per write instead — `MSG_NOSIGNAL` on
-   `send()` — so the daemon now asks for whichever the platform has.
-   `main.cpp`'s process-wide `SIGPIPE` ignore was already the belt under
-   both, and on Linux it is what actually carries the guarantee.
+   It was **deleted rather than ported**, and that is the more useful
+   half of the story. The first attempt did port it — guarded on
+   `#if defined(SO_NOSIGPIPE)`, with `MSG_NOSIGNAL` on `send()` as the
+   Linux spelling — described as belt and braces. It was redundant, and
+   checking why turned up nothing holding it up: `main.cpp` already
+   ignores `SIGPIPE` process-wide, so `write()` to a closed peer returns
+   `EPIPE` on both platforms; the daemon never forks or execs, so no
+   child inherits that disposition; nothing else here touches `SIGPIPE`;
+   and JUCE's only handler lives in `NamedPipe`, which the daemon never
+   constructs and which is an empty function regardless. JUCE's own
+   Linux socket code guards `SO_NOSIGPIPE` with `#if JUCE_MAC` and puts
+   nothing in its place.
+
+   So the one thing in the daemon that would not port to Linux was the
+   one thing that was not carrying its weight — which is a fair sign of
+   what redundant guards cost. `server.cpp` now has **no platform
+   branches at all**, and the guarantee is stated once, where the
+   mechanism is.
+
+   Not asserted by a test, though, and the attempt is worth recording so
+   nobody repeats it: 30 connect-and-vanish cycles during playback never
+   lost the race, and passed with `SIGPIPE` back at `SIG_DFL` — so it
+   proved nothing and was dropped. The window is a genuine cross-thread
+   race (`Server::send` reads `connection.open`; the reader thread
+   clears it), but the daemon is built to notice the close first, so
+   provoking it from outside means winning a race by luck, and a test
+   that hits it only sometimes is worse than none.
 
    Where the *fallback* landed is worth recording too, because §2 below
    was loose about it. The rescan runs on `main.cpp`'s `Heartbeat`, the
