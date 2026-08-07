@@ -1,7 +1,8 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunk 1 shipped (#50); chunks 2–6 not started. Written
-after [linux-portability.md](linux-portability.md) proposed a fourth
+**Status:** Chunk 1 shipped (#50); chunk 2 in review, carrying most of
+chunk 6 with it; chunks 3–5 not started. Written after
+[linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
 Supersedes part of [effects.md](effects.md) §1 — see §6 there.
@@ -292,6 +293,28 @@ argument for *when*.
    A second binding surface to maintain beside the protocol, for a path
    [mix-assembly.md](mix-assembly.md) §1 defines as having no deadline.
 
+   **Amended on implementation (chunk 2, from review).** A subprocess
+   boundary is a protocol, and this decision described the plan's *shape*
+   without saying what happens when the two sides disagree about it.
+   `daemonBinary()` reuses whatever build already exists, so "control
+   plane newer than binary" is the ordinary case, not an exotic one.
+
+   The plan therefore carries a **version** the binary must match exactly
+   (`RENDER_PLAN_VERSION`, mirrored in `render.cpp`), separate from the
+   socket's `PROTOCOL_VERSION` because they version different
+   conversations. And the binary **rejects every value it does not
+   understand** rather than rendering something plausible: unknown
+   effect, unknown eq band type, missing field.
+
+   The band type shipped broken and review caught it. `design()` returned
+   an identity filter for a type it had never heard of, so a plan with a
+   +12 dB band of a future type exited 0 and produced output byte-identical
+   to its input — cached under an action key describing a chain that never
+   ran. The unknown-*effect* check was already there with a comment
+   explaining exactly this hazard; it simply was not applied one level
+   down. Worth remembering as a shape: a discriminated union guards the
+   discriminant it names, and nothing else.
+
 7. **Musical time stays in TypeScript; the daemon is handed
    sample-accurate edit lists** (2026-08-07). The daemon is "artifacts
    only: it plays files the build produced and has no idea what a clip
@@ -343,15 +366,23 @@ than solving it, and the goal has to be scoped before it is claimed.
 
 - **Any project with an `au:` insert can never render byte-identically
   off macOS.** Byte-identity is a claim about the built-in tier only.
-- **Transcendentals are the exposure, in either language.** libm's
+- **Transcendentals were expected to be the exposure. Measured, they
+  are not** (2026-08-07, chunk 2). The reasoning here was that libm's
   `sin`/`cos`/`sinh`/`pow` differ in the last ulp between Apple's and
-  glibc's. The advantage of C++ is that a polynomial you control can be
-  substituted; in JavaScript there is no remedy at all. JUCE builds
-  with `-O3` and no `-ffast-math`, so basic arithmetic is safe, but
-  `-ffp-contract=off` is needed to stop FMA contraction from varying by
-  compiler. **This is chunk 6, not an assumption** — everything in this
-  section is work to be done, and the property tests in §2.3 assert
-  tolerances that a last-ulp divergence passes straight through.
+  glibc's, so chunk 6 scheduled replacing them with polynomials field
+  controls. With `-O3`, no `-ffast-math` and **`-ffp-contract=off`**, the
+  built-in tier renders **byte-identically** on macOS arm64 (Apple
+  libm), Linux arm64 (glibc) and Linux x86-64 (glibc) — 40 randomised
+  chains across three sample rates and both channel counts on the first
+  pair, and the golden fixture on all three. No polynomial substitution
+  was needed.
+
+  Two things that claim does *not* say. It is four platform/architecture
+  combinations and one libm pair, not a proof; a different glibc, a
+  different compiler, or a new libm release could still move, which is
+  exactly why the golden hash is a CI test rather than a paragraph. And
+  it says nothing about `-ffast-math` builds or about the specialized
+  tier. What retires is the *scheduled work*, not the vigilance.
 - **OS-versioned binaries inside cache keys are the permanent
   condition, not an anomaly.** `afconvert` is the first instance, not a
   special case: a UAD plugin version bump changes output bytes under a
@@ -369,17 +400,20 @@ improve determinism and speed at once:
 - **`reverb.ts` uses `%` for its circular buffers**, twelve times per
   sample per channel. Integer division where JUCE uses compare-and-reset
   (`if (++i >= size) i = 0`); likely the largest single gap against
-  JUCE's reverb, and mechanical to fix.
+  JUCE's reverb, and mechanical to fix. **Done in chunk 2** — and it is
+  an identity, not an approximation, since the index is only ever
+  incremented by one.
 - **`limiter.ts` calls `Math.pow` per sample per channel,
   unconditionally** — ~17M calls on a three-minute stereo mix. The gain
   curve is *exactly* 0 dB wherever audio was untouched, and
   `pow(10, 0/20)` is 1, so guarding the call skips the transcendental
   for most samples in typical material — exactly, not approximately.
   That is the speedup, and it removes §4's libm exposure on every sample
-  the limiter left alone. It does not remove it on the ones it touched:
-  a chain that actually limits still calls `pow` per reduced sample, and
-  byte identity there needs an evaluator field controls. That is chunk
-  6's problem, named there rather than left implied here.
+  the limiter left alone. **Done in chunk 2.** It does not remove the
+  exposure on the samples it touched — a chain that actually limits still
+  calls `pow` per reduced sample — but §4's measurement says those calls
+  agree across platforms today, so what guards them is the golden
+  fixture, which limits on purpose, rather than an evaluator we write.
 
 One inherited choice to make deliberately: `reverb.ts` uses `Float64Array`
 delay buffers where JUCE uses `float`, doubling memory traffic on the
@@ -396,46 +430,73 @@ most memory-bound of the three effects.
    `src/audio/` except `wav.ts`. None of decision 3's stated assertions
    failed; seven were *missing*, and decision 3 above records them and
    how each was found.
-2. **`juce_dsp` linked, insert chain ported**: the three effects
-   hand-written in C++ behind the existing schemas, the same tests green
-   against the daemon.
-3. **Rendering moves to the daemon** — `track-render` and `mix` call it;
-   `rule_version` bumps once, bloom re-renders and is re-verified by ear.
+2. **The insert chain ported to C++, behind the existing schemas** — in
+   review. The three effects in `native/audiod/src/dsp/`, a
+   `field-audiod --render <plan.json>` subprocess (decision 6), and the
+   standalone `eq`/`limit`/`reverb` rules calling it (decision 8). Track
+   inserts and the mix master chain still run the TypeScript until chunk
+   3, which is why `src/audio/insert-chain.ts` is still here.
+
+   **`juce_dsp` was not linked after all**, which is a departure from
+   decision 5 worth stating rather than burying. The three effects need
+   biquad state (a five-line loop), circular delay lines, and nothing
+   else; `dsp::IIR::Filter` would have replaced the five lines with a
+   template whose internals we would then be pinning by hope, against a
+   byte-identity requirement (§4) that decision 5 predates. Hand-written
+   is both smaller here and the only version we can hold still. If
+   oversampling arrives for true-peak limiting, that is the moment to
+   revisit.
+
+   Chunk 1's fifteen properties pass unchanged against the C++, and
+   mutating the C++ — Q-form alpha, auto-gain off, truncated delay
+   sizing, JUCE's allpass, no stereo spread, no lookahead — fails exactly
+   the properties it failed in TypeScript. The harness did what it was
+   built for: it did not change hands.
+3. **Rendering moves to the daemon** — `track-render` and `mix` call it.
+   **No `rule_version` bump, and no re-render**: the C++ is
+   byte-identical to the TypeScript it replaces, verified across 40
+   randomised chains, so every cached artifact stays valid. That was
+   written expecting the opposite, and the cost it priced — bloom
+   re-rendering and being re-verified by ear — is simply not incurred.
+   If a future change to the DSP does move bytes, the golden in
+   `render-daemon.test.ts` fails first and the bump goes with it.
 4. **The TypeScript DSP is deleted.** `src/audio/` minus `wav.ts`. The
    tests stay.
 5. **Sample-rate conversion in the built-in tier**, replacing
    `afconvert` in `normalize` — the work
    [linux-portability.md](linux-portability.md) §4.2–4.3 described,
    relocated and no longer blocking Linux.
-6. **Byte-identity established rather than asserted.**
-   `-ffp-contract=off` in the daemon's compile options; transcendentals
-   replaced by polynomials field controls — in coefficient and table
-   setup, and also **on the per-sample path**, where the limiter's
-   dB→linear conversion is the one live case (§5). The zero-gain guard
-   there skips untouched samples exactly, so what is left to schedule is
-   a controlled evaluator for the reduced ones; and the cross-platform
-   fixture has to render material that actually limits, or it passes
-   without exercising the most likely divergence in the built-in tier.
-   Then a test that renders the same input on macOS and Linux and
-   compares bytes, running in CI rather than by hand. Without all of
-   this, §4's claim is a hope: the property tests in chunk 1 assert
-   tolerances and will not catch a last-ulp divergence.
+6. **Byte-identity established rather than asserted** — mostly done in
+   chunk 2, and not the way this described. `-ffp-contract=off` is in the
+   daemon's compile options, and a golden fixture in
+   `src/audio/render-daemon.test.ts` renders a three-effect chain over
+   material that actually limits and asserts its SHA-256. Both CI jobs
+   check the same constant, so the platforms are compared through the
+   golden rather than against each other, and a divergence fails on
+   whichever one moved.
 
-Chunk 1 is independent of everything else here, but
-[next.md](../next.md) puts [linux-portability.md](linux-portability.md)
-chunk 1 ahead of it: adding properties to a renderer while CI runs no
-tests is the wrong order. 2 depends on 1; 3 on 2; 4 on 3 **and 6**; 5
-on 2. Chunk 6 runs alongside 2 — the compile flags
-and the polynomial substitutions are part of writing the C++, not a
-later pass over it — but its cross-platform comparison needs the Linux
-daemon build from [linux-portability.md](linux-portability.md) chunk 4,
-and it gates chunk 4 here: deleting `reverb.ts` before byte-identity is
-locked removes the only thing that would notice a regression.
+   The transcendental substitution this chunk was mostly about **was not
+   needed**: measured, Apple's libm and glibc agree bit-for-bit on the
+   values the built-in tier feeds them (§4). That was the expensive half
+   of the chunk and it is retired, not deferred. What remains here is
+   narrow: the limiter's per-sample `pow` is still a libm call on any
+   chain that actually limits, and while it agrees today, it is the one
+   place a future libm release could move a rendered artifact. The
+   golden covers it — deliberately, on limiting material — so the
+   question is now "does CI still pass" rather than "is this safe".
 
-That Linux daemon build is also a prerequisite for **chunk 3**, which
-was not visible until decision 6 was written down: once the effect rules
-call `field-audiod --render`, the binary is a build dependency, and the
-Linux CI job runs those rules' tests. See §7.
+Ordering, as it actually went: 1, then
+[linux-portability.md](linux-portability.md) chunks 1 and 4, then 2 with
+6 folded in. Adding properties to a renderer while CI ran no tests was
+the wrong order, and once the effect rules call `field-audiod --render`
+the binary is a *build* dependency, so the Linux daemon build had to
+land before this chunk rather than after it.
+
+What remains: 3 depends on 2; 5 on 2; 4 on 3. Chunk 4 no longer waits on
+6 — the byte-identity lock exists now, so deleting `reverb.ts` no longer
+removes the only thing that would notice a regression. It waits on 3
+alone, because `insert-chain.ts` is still the executor for track inserts
+and the mix master chain until then.
 
 ## 7 Open questions
 
@@ -450,16 +511,16 @@ Linux CI job runs those rules' tests. See §7.
   daemon?**~~ **Answered** — decisions 6–8 above. It is a subprocess,
   musical time stays in the control plane, and standalone effect targets
   move first. SuperCollider's precedent held: one engine, two modes.
-- **`field build` will require the native toolchain, and that is a
-  scheduling fact rather than an open question now.** Decision 6 makes
-  the daemon binary a build dependency the moment chunk 3 lands: the
-  effect rules call it, and the Linux CI job runs those tests. So
-  [linux-portability.md](linux-portability.md) chunk 4 is a hard
-  prerequisite for chunk 3 here, not only for chunk 6 — without it the
-  Linux job either fails or skips the effect tests, and skipping is how
-  #46 lost the suite in the first place. What is still open is whether a
+- **`field build` requires the native toolchain as of chunk 2** — not
+  chunk 3, which is what this said while it was still a prediction. The
+  standalone `eq`/`limit`/`reverb` rules already spawn the daemon, so an
+  uncached build of one fails without `pnpm build:native`.
+  [linux-portability.md](linux-portability.md) chunk 4 was therefore a
+  hard prerequisite for *this* chunk, which is why it went first.
+  README's build section says so now too. What is still open is whether a
   `--no-native` subset is worth having for contributors who only touch
-  the control plane.
+  the control plane — a question chunk 3 sharpens, since it takes stems
+  and mixes across the same boundary.
 - **Resampler quality target**, inherited unresolved from
   [linux-portability.md](linux-portability.md) §5: taps, transition
   width, stopband attenuation, and whether JUCE's variable-rate
