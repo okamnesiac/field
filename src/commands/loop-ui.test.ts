@@ -198,6 +198,27 @@ describe('LoopDisplay', () => {
     }
   });
 
+  it('a sizeless pty (columns=0) never truncates — an 11-char hash greps as nothing (#37 P3)', () => {
+    const { d, text } = harness({ columns: () => 0 });
+    d.start('//songs/creek/mix:main', A, ' (Volt 476)');
+    d.position('1.1', 0);
+    d.queue(B, '/out/main.wav');
+    d.position('1.1', 0);
+    d.swapped('/out/main.wav');
+    const t = text();
+    expect(t).toContain('└f6e5d4c3b2a1'); // full 12 characters
+    expect(t).toContain('played //songs/creek/mix:main─a1b2c3d4e5f6\n');
+    expect(t).toContain('\x1b[1A'); // width unknown is not width zero: rewrites stay on
+  });
+
+  it('alignment yields before information: a narrow row packs └ to one space (#37 P3)', () => {
+    const { d, text } = harness({ columns: () => 40 }); // ┬ column is 30; 30+13 > 39
+    d.start('//songs/creek/mix:main', A, '');
+    d.position('1.1', 0);
+    d.queue(B, '/out/main.wav');
+    expect(text()).toContain('  [1] 1.1 └f6e5d4c3b2a1'); // compact, hash whole
+  });
+
   it('held positions flush as a plain pass boundary when no confirmation comes', () => {
     const { d, text } = harness();
     d.start('//songs/x/mix:main', A, '');

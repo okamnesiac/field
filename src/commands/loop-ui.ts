@@ -83,6 +83,15 @@ export class LoopDisplay {
     this.columns = options.columns ?? (() => 200);
   }
 
+  // The getter is not trusted: a pty with no window size reports
+  // isTTY=true and columns=0 (the expect-harness family), and 0 would
+  // make slice(0, -1) eat the last character of every row — an
+  // 11-character hash matches nothing you could grep for (#37 review).
+  private width(): number {
+    const cols = this.columns();
+    return Number.isFinite(cols) && cols > 0 ? cols : 200;
+  }
+
   start(label: string, sha256: string, note: string): void {
     this.label = label;
     this.note = note;
@@ -109,7 +118,7 @@ export class LoopDisplay {
 
   private writeHeader(): void {
     const line = this.headerLine('playing', this.hash);
-    this.headerRewritable = line.length < this.columns();
+    this.headerRewritable = line.length < this.width();
     this.write(`${line}\n`);
     this.buried = false;
     this.onPositionLine = false;
@@ -130,7 +139,7 @@ export class LoopDisplay {
       return;
     }
     const line = this.headerLine('playing', this.hash);
-    this.headerRewritable = line.length < this.columns();
+    this.headerRewritable = line.length < this.width();
     this.write(`\r\x1b[1A\x1b[2K${line}\n`);
     if (this.onPositionLine || this.posText !== '') this.render();
   }
@@ -171,6 +180,10 @@ export class LoopDisplay {
     // phantom pass. Half the last position is comfortably below any
     // ratio jitter and comfortably above a real wrap's landing point.
     // Requeue sessions count passes from pass(), never from here.
+    // [N] is approximate below ~2 heartbeats by construction (#37 review
+    // footnote): positions sample every 250 ms, so wraps landing between
+    // samples are invisible — a 0.2 s loop wraps ~35 times in 7 s and
+    // shows a handful. Not a counting bug; there is nothing to count from.
     if (!this.requeue && at !== undefined && this.lastAt !== undefined && at < this.lastAt / 2) {
       if (this.pending !== undefined) {
         this.held.push({ line, at });
@@ -197,12 +210,19 @@ export class LoopDisplay {
       // └<hash> hangs directly under the header's ┬<hash> — right where
       // the successor will land. A pending hash equal to the playing one
       // is an edit changed back: nothing new is coming, show nothing.
+      // Alignment yields before information does: when the aligned column
+      // would push the hash past the row, the marker packs down to a
+      // single space instead — the compact form fits long after the
+      // pretty one doesn't (#37 review).
       const column = 'playing '.length + this.label.length;
-      pending = `${' '.repeat(Math.max(1, column - base.length))}└${short(this.pending.sha256)}`;
+      const marker = `└${short(this.pending.sha256)}`;
+      const aligned = Math.max(1, column - base.length);
+      const pad = base.length + aligned + marker.length < this.width() ? aligned : 1;
+      pending = `${' '.repeat(pad)}${marker}`;
     }
     // Truncated to one screen row: the \r rewrite only reaches the row
     // the cursor is on.
-    this.write(`\r\x1b[2K${`${base}${pending}`.slice(0, this.columns() - 1)}`);
+    this.write(`\r\x1b[2K${`${base}${pending}`.slice(0, this.width() - 1)}`);
     this.onPositionLine = true;
   }
 
