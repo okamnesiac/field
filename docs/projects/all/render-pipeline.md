@@ -125,6 +125,44 @@ argument for *when*.
    exists to remove. Properties and golden hashes survive deleting
    `reverb.ts`; a cross-implementation diff does not.
 
+   **Amended on implementation (chunk 1).** The list above was the spec,
+   and it was short by two. Both gaps were found by mutating the renderer
+   and re-running — a property that survives its own mutation is not a
+   property — and neither is a bug in the shipped effects: they are
+   assertions this decision should have asked for and did not.
+
+   - **The diffusion chain is allpass.** Swapping field's Schroeder
+     allpass for JUCE's `read − x` left *every* assertion above green,
+     which is exactly the silent swap §2.4 says nothing would notice once
+     `reverb.ts` is deleted. It turns out to be measurable, and exactly:
+     a true allpass has unit magnitude at every frequency, so the wet
+     tail carries precisely the comb bank's energy, `Σ 1/(1−g_k²) / 64`.
+     That is derived rather than transcribed — nothing in `reverb.ts`
+     computes it — and it matches the render to 0.0000 dB, while Jezar's
+     variant misses by 14.7 dB. It locks the per-comb T60 feedback, the
+     scaled delay lengths and the ⅛ average in passing.
+   - **The attack ramp reaches back by `lookahead_ms`.** Deleting the
+     backward pass outright also left everything green, so the harness
+     could not defend the half of §2.4's limiter claim that is about
+     lookahead — and `limiter.test.ts`, which does cover it, is deleted
+     by chunk 4. Driving a spike 60 dB over the ceiling makes the window
+     itself measurable, since the slope is scaled so the deepest
+     reduction spans exactly it.
+
+   Three of the stated properties also needed sharpening once measured.
+   The ceiling holds to within **one float32 ulp**, not exactly: the
+   arithmetic pins each peak in double precision and the store to float32
+   rounds, by up to half an ulp. "Untouched audio passes at unity" is
+   genuinely bit-exact, and detects a leak from 1e-6 dB up — which is
+   where float32 begins to see one at all. And T60 has to be read as an
+   envelope *slope*: measured as a ratio against the first samples it
+   reads about 18 dB shallow, because the start of an impulse response is
+   the sparse tap burst rather than the steady envelope.
+
+   The harness catches 13 of 14 deliberate mutations across the three
+   effects. The survivor perturbs untouched gain by 1e-9 dB, which no
+   float32 can represent — the same mutation at 1e-6 dB is caught.
+
 4. **The three shipped effects keep their algorithms and are ported by
    hand.** The claim "ours is better" holds unevenly, and the honest
    ranking is worth recording because it decides what to defend later:
@@ -273,7 +311,11 @@ most memory-bound of the three effects.
 1. **Property tests against the current TypeScript renderer.** Every
    assertion in decision 3, passing today. Cheap, valuable immediately,
    and any that fails is a real bug found before the port. These are the
-   migration harness and they never change hands.
+   migration harness and they never change hands. In review: ten
+   properties in `src/generators/effect-properties.test.ts`, all of them
+   built and measured through the build rules so nothing imports
+   `src/audio/` except `wav.ts`. None failed; two were missing, and
+   decision 3 above records what they were.
 2. **`juce_dsp` linked, insert chain ported**: the three effects
    hand-written in C++ behind the existing schemas, the same tests green
    against the daemon.
