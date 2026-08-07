@@ -7,5 +7,11 @@
     "declaration": true,
     "sourceMap": true
   },
-  "exclude": ["src/**/*.test.ts"]
+  // Test-only code stays out of the shipped build. Note what this is:
+  // `exclude` filters the *root file set*, not emission — a file pulled
+  // in by an import from shipped code is compiled and emitted anyway, so
+  // this keeps src/testing/ out of dist/ only for as long as nothing in
+  // src/ imports it (#40 review). Nothing does, and nothing should: it
+  // exists to build fixtures.
+  "exclude": ["src/**/*.test.ts", "src/testing/**"]
 }
