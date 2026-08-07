@@ -12,7 +12,7 @@ import {
   parseVariantNumber,
   parseVariants,
 } from './cliParsers.js';
-import { buildLabels, explainLabel, queryDeps } from './commands/build.js';
+import { buildLabels, explainLabel, projectRelative, queryDeps } from './commands/build.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
 import {
   transportCommand,
@@ -233,7 +233,7 @@ program
       if (opts.watch !== true) {
         const outcomes = await buildLabels(root, patterns);
         for (const o of outcomes) {
-          const where = o.outputPath ? ` → ${o.outputPath}` : '';
+          const where = o.outputPath ? ` → ${projectRelative(root, o.outputPath)}` : '';
           process.stdout.write(`${buildStatus(o)}  ${o.label}${where}\n`);
         }
         return;

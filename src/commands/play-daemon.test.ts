@@ -114,14 +114,15 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
 
     // Every wrap re-announces "1.1" with a smaller `at`; a text-keyed
     // dedupe froze this readout after one line. Event-driven: without
-    // the fix the count stays at 1 and the test times out. The
-    // assertion is the fix's guarantee — 1.1 recurring — and no more:
-    // the scheduler's print for beat 2 sits permanently 300-500 ms out
-    // (the loop's positions never reach it), kept unfired only by each
-    // anchor's clearTimeout, so an anchor >50 ms late lets a stray
-    // "1.2" through on a loaded runner (#37 review — the honest fix,
-    // beat prints bounded by the loop length, is a scheduler change
-    // for another PR).
+    // the dedupe fix the count stays at 1 and the test times out.
+    //
+    // "1.1" is now also the *only* line this loop can produce. Beat 2
+    // sits 300-500 ms past a 0.2 s file, so the scheduler declines to
+    // schedule it at all; before the bound it stayed permanently
+    // pending, unfired only because each anchor cleared the timer, and
+    // an anchor >50 ms late let a phantom "1.2" through on a loaded
+    // runner (#37 review, which recorded this assertion as more than
+    // the code then guaranteed — the bound is what earns it).
     const positions: string[] = [];
     const recurrences = () => positions.filter((p) => p === '1.1').length;
     let interrupted = false;
@@ -139,6 +140,7 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
       interrupted: () => interrupted,
     });
     expect(recurrences()).toBeGreaterThanOrEqual(3);
+    expect([...new Set(positions)]).toEqual(['1.1']); // no beat the file never reaches
   });
 
   it('reload takes over the looping stream at the wrap', { timeout: 15_000 }, async () => {

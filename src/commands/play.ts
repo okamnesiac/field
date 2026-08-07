@@ -157,7 +157,10 @@ export async function playThroughDaemon(
       for (const item of items) {
         if (hooks.interrupted?.()) break;
         const loadedPath = options.currentPath?.() ?? item.path;
-        await client.load(loadedPath, nativeLoop);
+        // The load answers with the file's length, which is where the
+        // readout has to stop: no beat past it ever sounds, whether the
+        // stream wraps there or the transport stops there.
+        const loaded = await client.load(loadedPath, nativeLoop);
         const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
@@ -185,7 +188,12 @@ export async function playThroughDaemon(
         // scheduled with a timer at the moment the beat actually sounds,
         // drift-corrected by every fresh anchor. The daemon stays
         // musically ignorant; musical time never crosses the socket.
-        const readout = beatScheduler(sampleRate, ctx, (line, at) => hooks.onPosition?.(line, at));
+        const readout = beatScheduler(
+          sampleRate,
+          ctx,
+          (line, at) => hooks.onPosition?.(line, at),
+          loaded.samples,
+        );
         try {
           await waitForStop(
             client,
@@ -220,10 +228,22 @@ function nextBeatTick(meter: MusicalContext['meter'], tick: number): number {
 // print for each beat fires on a timer at the beat itself. A paused
 // transport (anchor not advancing) suspends the timers. Targets without a
 // tempo map fall back to whole seconds, printed as anchors arrive.
-function beatScheduler(
+// Exported for its own tests: the interesting behaviour is what it
+// declines to schedule, which a daemon-driven test can only observe by
+// waiting and hoping — the phantom beat it prevents was timing-dependent
+// enough to be recorded as a flake before it was understood (#37).
+export function beatScheduler(
   sampleRate: number,
   ctx: MusicalContext | undefined,
   print: (line: string, at: number) => void,
+  // The loaded file's length. Beats are scheduled ahead of the audio, so
+  // without this the readout announces beats the file never reaches: a
+  // loop shorter than a beat leaves beat 2 permanently pending, unfired
+  // only because each anchor clears the timer, and an anchor arriving
+  // late lets a phantom through (#37 review). Bounding is the honest fix
+  // — a beat past the end does not sound, whether the stream wraps there
+  // or the transport stops there.
+  endSample?: number,
 ): { onSample: (sample: number) => void; cancel: () => void } {
   let anchor: { sample: number; at: number } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -252,7 +272,11 @@ function beatScheduler(
     if (!anchor || !ctx) return;
     const nowSample = anchor.sample + ((Date.now() - anchor.at) / 1000) * sampleRate;
     const beat = nextBeatTick(ctx.meter, ctx.tempo.samplesToTicks(nowSample));
-    const ms = ((ctx.tempo.ticksToSamples(beat) - nowSample) / sampleRate) * 1000;
+    const beatSample = ctx.tempo.ticksToSamples(beat);
+    // The file ends first: nothing to announce. A wrap re-anchors and
+    // the readout starts the next pass from its first beat.
+    if (endSample !== undefined && beatSample >= endSample) return;
+    const ms = ((beatSample - nowSample) / sampleRate) * 1000;
     timer = setTimeout(() => {
       emit(barBeat(beat), beat);
       schedule();

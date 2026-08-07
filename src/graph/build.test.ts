@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import { buildLabels, explainLabel, queryDeps } from '../commands/build.js';
+import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
 import { runScProgram } from '../generators/supercollider.js';
 import type { GeneratorRunner } from './build.js';
@@ -68,6 +68,28 @@ const countingRunner = () => {
   };
   return { state, runner };
 };
+
+describe('projectRelative', () => {
+  it('strips the project root, which is the same on every line', () => {
+    expect(projectRelative('/p', '/p/.bloom/out/songs/creek/mix/main.wav')).toBe(
+      '.bloom/out/songs/creek/mix/main.wav',
+    );
+    expect(projectRelative('/p', '/p/songs/creek/audio/pad.wav')).toBe('songs/creek/audio/pad.wav');
+  });
+
+  it('keeps a path outside the project absolute rather than spelling it in ../..', () => {
+    // The one case where the prefix carries information: it says the
+    // file is not in this project.
+    expect(projectRelative('/p', '/elsewhere/pad.wav')).toBe('/elsewhere/pad.wav');
+    expect(projectRelative('/p/songs', '/p/shared/samples/water.wav')).toBe(
+      '/p/shared/samples/water.wav',
+    );
+  });
+
+  it('keeps the root itself absolute', () => {
+    expect(projectRelative('/p', '/p')).toBe('/p');
+  });
+});
 
 describe('build', () => {
   it('builds, caches, and rebuilds on parameter change', async () => {
