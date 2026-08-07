@@ -214,6 +214,28 @@ describe('build', () => {
     );
   });
 
+  it('points targets: at sound:, the package the layout migration renamed', async () => {
+    // `targets` is not a plural, so it fell through the singular mapping
+    // and got no hint at all — a flat dead end for every command in the
+    // sample project's README, which described the pre-#31 layout. It is
+    // the spelling most likely to be typed from old docs, so it earns the
+    // same treatment, worded for what actually happened to it.
+    await expect(buildLabels(root, ['//songs/creek/targets:pad-normalized'])).rejects.toThrow(
+      '(targets: is now sound: try //songs/creek/sound:pad-normalized)',
+    );
+    await expect(buildLabels(root, ['//songs/creek/targets/...'])).rejects.toThrow(
+      'try //songs/creek/sound/...',
+    );
+    await expect(buildLabels(root, ['//songs/creek/targets:all'])).rejects.toThrow(
+      'try //songs/creek/sound:all',
+    );
+    // The plural keeps its own wording: the grammar lesson is true of it
+    // and false of `targets`.
+    await expect(buildLabels(root, ['//songs/creek/sounds:pad-normalized'])).rejects.toThrow(
+      'packages are singular: try //songs/creek/sound:pad-normalized',
+    );
+  });
+
   it('maps mixes: to mix:, the one package that was singular already', async () => {
     // The negative case above cannot reach this mapping — it bails at the
     // existence check first — so the branch the PR body singles out had
