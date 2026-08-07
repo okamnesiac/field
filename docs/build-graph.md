@@ -9,6 +9,7 @@ sources; the engine speaks nodes, generators, and action keys).
 ```bash
 bloom build //songs/opener/mix:main
 bloom build //songs/opener/stems/...
+bloom export //songs/opener/mix:main
 bloom test //...
 bloom query 'deps(//songs/opener/mix:main)'
 bloom explain //songs/opener/mix:main
@@ -52,6 +53,50 @@ finishes the current pass and the next wrap starts the new file. Watch
 runs `build`, and build never generates a generative sound — but a
 `chosen:` repoint is just a YAML edit, so `bloom choose` against a
 running watch is live variant A/B-ing inside the loop.
+
+### Getting a file out
+
+Outputs live under their content hash, materialized at
+`.bloom/out/<label>.wav` — addresses for the engine, not names anyone
+wants in a Finder window or an email. `bloom export <patterns>` builds
+and then copies the result to `~/Desktop` (or `--to <dir>`) under the
+label with its punctuation flattened, minus the `songs/` prefix:
+`//songs/creek/mix:main` becomes `creek-mix-main-v1.wav`, and shared
+material keeps its shelf (`shared-assets-water-v1.wav`). It exports what
+`play` would play, through the same resolver, and only the labels the
+patterns match — the dependencies a build prints are means, not
+products.
+
+The name is long deliberately. A short form (`creek-main`) reads better
+until a song has a track and a sound of the same name — legal, since the
+one-namespace rule (project-layout.md §4.3) covers sounds and assets,
+and natural when a track plays one sound — at which point two different
+files want one name. A name that is sometimes scoped is worse than one
+that always is: you cannot predict the file you are about to get.
+
+**Exports are versioned, never overwritten.** Finishing something and
+putting it somewhere is how people mark a version, and the previous one
+is often the only copy of a decision later undone — so a second export
+is `-v2`, numbered from the highest already there (a gap means someone
+threw that version away, and minting a second `-v2` would disagree with
+them). Re-exporting something that has not changed is a no-op: the bytes
+are compared against *every* version present, newest first, and the
+command reports `current` naming the version that stands rather than
+minting an identical one. When the match is an older version — export
+v1, change something, export v2, change it back — it reports `reverted`
+and names both numbers, because the newest file in the directory is then
+no longer what you just built.
+
+Nothing Bloom does removes or overwrites a file in the destination,
+including files it did not write. The copy lands on a temp name and is
+linked into place, so an interrupted export leaves debris rather than a
+truncated version (which, since nothing overwrites, would be permanent),
+and a name that merely differs in case cannot be written through on a
+case-insensitive volume — the link fails and the next number is taken.
+A committed source whose bytes have drifted from their declared hash is
+refused outright — the same guard `build` applies before consuming an
+asset as an input. Export is the command whose product leaves the
+machine, so it must not ship audio the project does not describe.
 
 ## Render strategies
 

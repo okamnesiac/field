@@ -71,6 +71,7 @@ describe('withClick', () => {
       pkg: 'songs/x/mix',
       path: src,
       sha256: 'deadbeef'.repeat(8),
+      committed: false,
     });
 
     const wav = readWav(clicked.path);
@@ -88,6 +89,7 @@ describe('withClick', () => {
       pkg: 'songs/x/mix',
       path: src,
       sha256: sha256FileSync(src),
+      committed: false,
     });
 
     // The invariant the field carries — "the hash of what path holds" —
