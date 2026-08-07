@@ -407,14 +407,20 @@ describe('reverb properties', () => {
     expect([...right!]).not.toEqual([...left!]);
   });
 
-  it('mix blends dry against wet, and mix 0 is a dry passthrough', async () => {
+  it('mix blends dry against wet by both stated coefficients', async () => {
     // `mix` is equal-sum dry/wet (effects.md §2): out = dry·(1−mix) +
-    // wet·mix. The first wet tap is a whole comb away, so at sample 0 the
-    // wet contribution is exactly zero and the dry one is exactly
-    // (1 − mix) — which makes the blend law assertable to the sample
-    // rather than approximately.
+    // wet·mix, and both coefficients need asserting. The first wet tap is
+    // a whole comb away, so sample 0 pins the *dry* one exactly — but on
+    // its own that leaves `wet · (mix === 0 ? 0 : 1)` passing, which
+    // blends the dry correctly while running fully wet at every nonzero
+    // mix.
+    //
+    // The source is a lone impulse, so every sample after the first is
+    // wet only. Referenced against the `mix: 1` render, that pins the wet
+    // coefficient twice over: the first tap scales as `mix`, and the
+    // whole wet signal carries `mix²` of the energy. Both hold exactly.
     await importSource('imp', impulse(1));
-    for (const mix of [0, 0.25, 0.5, 1]) {
+    const renderAtMix = (mix: number) => {
       const label = `mix${String(mix).replace('.', '')}`;
       writeSound(label, [
         'type: reverb',
@@ -423,13 +429,23 @@ describe('reverb properties', () => {
         `mix: ${mix}`,
         'damping: 0',
       ]);
-      const rendered = await render(label);
-      expect(rendered[0]!).toBeCloseTo(1 - mix, 6);
-      // …and the wet tail scales with mix, so a renderer that ignored the
-      // parameter and always ran fully wet fails here too.
-      const tail = rms(rendered, RATE, rendered.length) ** 2 * (rendered.length - RATE);
-      if (mix === 0) expect(tail).toBe(0);
-      else expect(tail).toBeGreaterThan(0);
+      return render(label);
+    };
+    const wetEnergy = (buffer: Float32Array) => {
+      let energy = 0;
+      for (let i = 1; i < buffer.length; i++) energy += buffer[i]! * buffer[i]!;
+      return energy;
+    };
+
+    const fullyWet = await renderAtMix(1);
+    const tap = fullyWet.findIndex((v) => v !== 0);
+    const reference = wetEnergy(fullyWet);
+
+    for (const mix of [0, 0.25, 0.5, 1]) {
+      const rendered = await renderAtMix(mix);
+      expect(rendered[0]!, `dry at mix ${mix}`).toBeCloseTo(1 - mix, 6);
+      expect(rendered[tap]! / fullyWet[tap]!, `wet tap at mix ${mix}`).toBeCloseTo(mix, 6);
+      expect(wetEnergy(rendered) / reference, `wet energy at mix ${mix}`).toBeCloseTo(mix * mix, 6);
     }
   });
 

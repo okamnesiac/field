@@ -176,15 +176,30 @@ argument for *when*.
      curve — the thing the shared curve exists to prevent, since limiting
      must not wander the image — passed.
    - **`mix` blends.** Every reverb property ran at `mix: 1`, so a
-     renderer that ignored the parameter passed. The blend law is exactly
-     assertable: the first wet tap is a whole comb away, so sample 0 is
-     exactly `1 − mix`.
+     renderer that ignored the parameter passed. Both coefficients need
+     asserting, and a first attempt that pinned only the dry one was
+     caught in review: the first wet tap is a whole comb away, so sample
+     0 is exactly `1 − mix` — which leaves `wet · (mix === 0 ? 0 : 1)`
+     passing, blending dry correctly while running fully wet at every
+     nonzero mix. Since the probe is a lone impulse, everything after
+     sample 0 is wet only, so the `mix: 1` render is the reference: the
+     first tap scales as `mix` and the wet signal carries `mix²` of the
+     energy. Both hold exactly, and together they also reject an
+     equal-*power* blend, which is the plausible wrong reading of a
+     dry/wet control.
    - **`release_ms` is honoured.** Hard-coding 100 ms passed; only the
      attack side had been measured.
 
-   With those, the harness catches **18 of 19** deliberate mutations. The
-   one survivor perturbs untouched gain by 1e-9 dB, which no float32 can
-   represent — the same mutation at 1e-6 dB is caught.
+   With those, the harness catches **21 of 22** deliberate mutations,
+   run as one matrix against the head it describes rather than tallied
+   across rounds. The one survivor perturbs untouched gain by 1e-9 dB,
+   which no float32 can represent — the same mutation at 1e-6 dB is
+   caught.
+
+   The method is worth keeping for chunks 2 and 3, where the renderer
+   actually changes hands: mutating the implementation and re-running is
+   what found every gap above, and none of them were visible from reading
+   the assertions.
 
 4. **The three shipped effects keep their algorithms and are ported by
    hand.** The claim "ours is better" holds unevenly, and the honest
