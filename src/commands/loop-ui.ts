@@ -10,7 +10,7 @@
 // at the wrap, the old block closes as history — `played …─old` with
 // its final position — and a fresh block opens for the successor:
 //
-//   played //songs/creek/mix:main─45a7b1c2d853
+//   played  //songs/creek/mix:main─45a7b1c2d853
 //     [10] 12.4
 //   playing //songs/creek/mix:main─fa105f281f9b → (Volt 476)
 //     [1] 1.1
@@ -26,6 +26,21 @@
 // sequential lines instead.
 
 const short = (sha256: string): string => sha256.slice(0, 12);
+
+// Which version the session's first block opens with. A rebuild that
+// lands before the first load leaves the successor's bytes at the same
+// path — a rule target's materialized path is stable across rebuilds —
+// so what just opened IS the successor, not the snapshot the play's own
+// build took. A chosen-variant repoint moves the path instead, and then
+// the old variant really is what loaded. This is the path correlation
+// later passes have had since #37; the first pass never did (#38 review).
+export function openingHash(
+  loadedPath: string,
+  snapshot: string,
+  held?: { outputPath?: string | undefined; sha256: string },
+): string {
+  return held !== undefined && held.outputPath === loadedPath ? held.sha256 : snapshot;
+}
 
 // Positions arriving after a wrap while a takeover is pending belong to
 // the successor; they are held until the daemon's `reloaded` confirms
@@ -311,11 +326,19 @@ export class LoopDisplay {
     for (const p of flush) this.position(p.line, p.at);
   }
 
-  // Session over: leave the cursor on a fresh line.
+  // Session over: leave the cursor on a fresh line. A takeover still
+  // pending is the one thing the frozen block states ambiguously — the
+  // └hash sits there looking like it is about to happen, when ctrl-c
+  // means it never will. Say so, so quitting before the wrap still leaves
+  // evidence the edit built (#34 review footnote).
   end(): void {
     if (this.onPositionLine) {
       this.write('\n');
       this.onPositionLine = false;
+    }
+    if (this.pending !== undefined && this.pending.sha256 !== this.hash) {
+      this.write(`  ${short(this.pending.sha256)} built, never sounded (stopped before the wrap)\n`);
+      this.pending = undefined;
     }
   }
 }

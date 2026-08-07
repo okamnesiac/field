@@ -81,8 +81,11 @@ agent story: an agent edits YAML while a human just keeps listening.
   renders as nothing pending and just another pass. Device moves
   repeat the header with the new route. A `--from` region loop still
   announces `↻ … next pass` at queue time — its swap moment is the
-  pass boundary, not a wrap. Non-tty output stays plain sequential
-  lines (`↻ … at the next wrap`, `↻ swapped at the wrap`).
+  pass boundary, not a wrap. Quitting with a takeover still pending
+  says so on teardown (`<shortHash> built, never sounded (stopped
+  before the wrap)`) — otherwise the frozen `└` reads as about to
+  happen when ctrl-c means it never will. Non-tty output stays plain
+  sequential lines (`↻ … at the next wrap`, `↻ swapped at the wrap`).
 - **Coalescing:** a change arriving mid-build marks the build stale;
   its artifact still lands in the CAS (warm for later), but its swap is
   skipped and the loop body re-runs. Only ever one build in flight.

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
+import { sha256FileSync } from '../hash.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { beatGrid, withClick } from './click.js';
 
@@ -69,7 +70,7 @@ describe('withClick', () => {
       label: '//songs/x/mix:main',
       pkg: 'songs/x/mix',
       path: src,
-      sha256: 'deadbeef'.repeat(8), // withClick carries it through untouched
+      sha256: 'deadbeef'.repeat(8),
       committed: false,
     });
 
@@ -78,5 +79,23 @@ describe('withClick', () => {
     expect(Math.abs(wav.channels[0]![24001]!)).toBeGreaterThan(0.01); // beat 2 clicks
     expect(Math.abs(wav.channels[0]![23000]!)).toBe(0); // between beats: silence
     expect(clicked.path).not.toBe(src); // the artifact itself is never touched
+  });
+
+  it('re-hashes: sha256 describes the clicked file, not the source', () => {
+    const src = join(root, 'silent.wav');
+    writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
+    const clicked = withClick(root, ctx44, {
+      label: '//songs/x/mix:main',
+      pkg: 'songs/x/mix',
+      path: src,
+      sha256: sha256FileSync(src),
+      committed: false,
+    });
+
+    // The invariant the field carries — "the hash of what path holds" —
+    // is what watch seeds its baseline from, so the click must not leave
+    // a hash describing a different file (#35 review).
+    expect(clicked.sha256).toBe(sha256FileSync(clicked.path));
+    expect(clicked.sha256).not.toBe(sha256FileSync(src));
   });
 });
