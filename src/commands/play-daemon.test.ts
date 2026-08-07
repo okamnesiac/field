@@ -108,6 +108,39 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     },
   );
 
+  it('a sub-beat loop keeps the readout alive (#37 review: dedupe on movement, not text)', { timeout: 20_000 }, async () => {
+    await importTone('tick', 9600); // 0.2 s: shorter than a beat, so the line never changes
+    const items = await resolvePlayables(root, ['//songs/creek/assets:tick']);
+
+    // Every wrap re-announces "1.1" with a smaller `at`; a text-keyed
+    // dedupe froze this readout after one line. Event-driven: without
+    // the fix the count stays at 1 and the test times out. The
+    // assertion is the fix's guarantee — 1.1 recurring — and no more:
+    // the scheduler's print for beat 2 sits permanently 300-500 ms out
+    // (the loop's positions never reach it), kept unfired only by each
+    // anchor's clearTimeout, so an anchor >50 ms late lets a stray
+    // "1.2" through on a loaded runner (#37 review — the honest fix,
+    // beat prints bounded by the loop length, is a scheduler change
+    // for another PR).
+    const positions: string[] = [];
+    const recurrences = () => positions.filter((p) => p === '1.1').length;
+    let interrupted = false;
+    await playThroughDaemon(root, project, items, { loop: true }, {
+      onPosition: (line) => {
+        positions.push(line);
+        if (recurrences() >= 3 && !interrupted) {
+          interrupted = true;
+          void AudiodClient.connect(root, { spawnIfNeeded: false }).then(async (c) => {
+            await c.stop();
+            c.close();
+          });
+        }
+      },
+      interrupted: () => interrupted,
+    });
+    expect(recurrences()).toBeGreaterThanOrEqual(3);
+  });
+
   it('reload takes over the looping stream at the wrap', { timeout: 15_000 }, async () => {
     await importTone('spin', 96000); // 2 s pass: room to observe the pre-wrap state
     await importTone('swap', 24000); // 0.5 s successor
@@ -225,7 +258,10 @@ describe.skipIf(!binary)('bloom play through the daemon', () => {
     expect(reloadedPaths).toEqual([next.path]);
   });
 
-  it('--watch requeue path: currentPath repoints what the next pass loads', async () => {
+  // 20 s like its neighbours: locally ~1.7 s, but a slow CI daemon spawn
+  // blew vitest's 5 s default once (#37 review) — the budget was the
+  // outlier here, not the test.
+  it('--watch requeue path: currentPath repoints what the next pass loads', { timeout: 20_000 }, async () => {
     await importTone('one', 24000); // 0.5 s passes keep the requeue quick
     await importTone('two', 24000);
     const one = (await resolvePlayables(root, ['//songs/creek/assets:one']))[0]!;

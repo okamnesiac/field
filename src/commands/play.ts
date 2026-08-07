@@ -82,8 +82,15 @@ export interface PlayOptions {
 }
 
 export interface PlayHooks {
-  onItem?: (label: string, note: string) => void;
-  onPosition?: (line: string) => void;
+  // `path` is the file this pass actually loaded — the requeue path
+  // consults currentPath at every load, so the watch display correlates
+  // a pass against what it queued, never against a stale snapshot.
+  onItem?: (label: string, note: string, path: string) => void;
+  // `at` locates the printed position on a per-pass monotonic axis (the
+  // beat's tick under a tempo map, the raw sample without one): a value
+  // moving backwards is the looping reader wrapping — what the watch
+  // display uses to close one pass's block and open the next.
+  onPosition?: (line: string, at?: number) => void;
   // The output moved mid-play (default-follow or a vanished device).
   onDevice?: (name: string) => void;
   // A queued reload took over at the loop wrap (daemon >= 0.4) — fires
@@ -133,7 +140,8 @@ export async function playThroughDaemon(
     do {
       for (const item of items) {
         if (hooks.interrupted?.()) break;
-        await client.load(options.currentPath?.() ?? item.path, nativeLoop);
+        const loadedPath = options.currentPath?.() ?? item.path;
+        await client.load(loadedPath, nativeLoop);
         const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
@@ -144,7 +152,7 @@ export async function playThroughDaemon(
         const note = status.device
           ? ` (${status.device.name}${status.resampling ? ', resampling' : ''})`
           : '';
-        hooks.onItem?.(item.label, note);
+        hooks.onItem?.(item.label, note, loadedPath);
 
         // Ctrl-c can land while load/status were in flight: the handler's
         // stop() would hit a stopped transport and this play() would undo it
@@ -161,7 +169,7 @@ export async function playThroughDaemon(
         // scheduled with a timer at the moment the beat actually sounds,
         // drift-corrected by every fresh anchor. The daemon stays
         // musically ignorant; musical time never crosses the socket.
-        const readout = beatScheduler(sampleRate, ctx, (line) => hooks.onPosition?.(line));
+        const readout = beatScheduler(sampleRate, ctx, (line, at) => hooks.onPosition?.(line, at));
         try {
           await waitForStop(
             client,
@@ -199,16 +207,26 @@ function nextBeatTick(meter: MusicalContext['meter'], tick: number): number {
 function beatScheduler(
   sampleRate: number,
   ctx: MusicalContext | undefined,
-  print: (line: string) => void,
+  print: (line: string, at: number) => void,
 ): { onSample: (sample: number) => void; cancel: () => void } {
   let anchor: { sample: number; at: number } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastLine = '';
-  const emit = (line: string) => {
-    if (line !== lastLine) {
-      lastLine = line;
-      print(line);
-    }
+  let lastAt = Number.NEGATIVE_INFINITY;
+  const emit = (line: string, at: number) => {
+    // A duplicate is the same beat re-announced (the anchor emit and the
+    // scheduled print for one beat): same line, `at` not moving
+    // backwards. The same line with `at` regressing is a new pass — a
+    // sub-beat loop prints "1.1" every wrap and must keep printing, or
+    // the readout freezes (#37 review). The regression compares against
+    // the last *seen* value, updated even on skips: anchor ticks cycle
+    // modulo the loop length, and comparing against the last *emission*
+    // starves the moment the cycle lands at-or-above it.
+    const duplicate = line === lastLine && at >= lastAt;
+    lastAt = at;
+    if (duplicate) return;
+    lastLine = line;
+    print(line, at);
   };
   const barBeat = (tick: number): string => {
     const [bar, beat] = ctx!.meter.format(Math.max(0, tick)).split('.');
@@ -220,21 +238,22 @@ function beatScheduler(
     const beat = nextBeatTick(ctx.meter, ctx.tempo.samplesToTicks(nowSample));
     const ms = ((ctx.tempo.ticksToSamples(beat) - nowSample) / sampleRate) * 1000;
     timer = setTimeout(() => {
-      emit(barBeat(beat));
+      emit(barBeat(beat), beat);
       schedule();
     }, Math.max(0, ms));
   };
   return {
     onSample: (sample) => {
       if (!ctx) {
-        emit(`0:${String(Math.floor(sample / sampleRate)).padStart(2, '0')}`);
+        emit(`0:${String(Math.floor(sample / sampleRate)).padStart(2, '0')}`, sample);
         return;
       }
       const stalled = anchor !== undefined && sample === anchor.sample;
       anchor = { sample, at: Date.now() };
       clearTimeout(timer);
       if (stalled) return; // paused: freeze the readout, resume on movement
-      emit(barBeat(Math.floor(ctx.tempo.samplesToTicks(sample))));
+      const tick = Math.floor(ctx.tempo.samplesToTicks(sample));
+      emit(barBeat(tick), tick);
       schedule();
     },
     cancel: () => clearTimeout(timer),
