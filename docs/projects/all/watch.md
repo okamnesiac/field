@@ -4,9 +4,12 @@
 (takeover at the wrap, daemon 0.4) and `field build --watch` — landed
 in #34; chunk 2 — `play --loop --watch`, the §3 walk run against bloom
 (scripted, null output; every step behaved), and the docs paragraphs —
-is on the PR that carries this status line. §5's `status`-visibility
-question remains open. Written against the layout-migration vocabulary
-(project-layout.md §4, landed in #31).
+landed in #35, since amended by #37, #38 and the #44 rename. Two things
+are open, and one of them is audible: §6 records the hiccup at every
+reload takeover, diagnosed and deliberately deferred because the
+real-time engine deletes the mechanism; §5's `status`-visibility
+question remains a design question. Written against the
+layout-migration vocabulary (project-layout.md §4, landed in #31).
 
 **Goal:** `field play <song> --loop --watch` keeps the loop playing
 while the project changes underneath it: edit a clip, nudge a fader,
