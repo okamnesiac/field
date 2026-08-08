@@ -327,11 +327,29 @@ argument for *when*.
    sizes, the domains where a bad value is unsafe rather than merely odd,
    and the one cross-field rule (`loop` needs a length to fold onto).
 
-   Two lines drawn deliberately. It does **not** mirror zod's user-input
-   ranges — `frequency` within 10–24000 is zod's job on the way in, and
-   duplicating every bound is exactly the drift this is meant to prevent.
-   And `read_offset` stays unbounded, because reads outside a source are
-   declared silence: that is what slip *is*.
+   One line drawn here was wrong, and review corrected it. The first
+   version enforced structure but delegated the numeric ranges back to
+   zod, on the grounds that a second copy would drift. The rebuttal is
+   decisive: the file already mirrored names, types, cardinalities and
+   *some* bounds, so a partial copy carried the same drift risk with none
+   of the coverage — and the omitted ranges were not merely odd values.
+   `bandwidth: 0` makes a bell an identity filter and `ceiling_db: 1`
+   leaves audio untouched; both rendered byte-identical to their input
+   under keys naming an EQ and a limiter, which is the exact failure the
+   validator exists to close.
+
+   So the bounds are **generated** rather than copied.
+   `scripts/gen-plan-limits.ts` emits `native/audiod/src/plan-limits.h`
+   from the zod schemas, and a test regenerates and compares, so a widened
+   range cannot land without the daemon following it. zod stays the single
+   source of truth project-core.md §5 already says it is. The drift
+   objection was real; generating was the answer to it, and omission was
+   not.
+
+   `read_offset` does stay unbounded, and that one is principled: reads
+   outside a source are declared silence — it is what slip *is*, and
+   bounding it would break a documented feature while looking like
+   rigour.
 
    The lesson underneath five findings: a boundary is not made safe by
    checking values where they are used. Four fixes at four use sites left
