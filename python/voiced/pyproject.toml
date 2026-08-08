@@ -26,7 +26,12 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-field-worker = { path = "../worker" }
+# editable: the lifecycle is *our* source, not a pinned release. As a
+# plain path dependency uv installs a copy, so editing
+# field_worker left every worker venv with a stale one — and the
+# failure lands in the importing module, blaming `field_voiced` for
+# a symbol `field_worker` had gained an hour earlier.
+field-worker = { path = "../worker", editable = true }
 
 [project.scripts]
 field-voiced = "field_voiced.main:main"

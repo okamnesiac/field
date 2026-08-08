@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ACED_SPEC } from '../aced/client.js';
 import { VOICED_SPEC } from '../voiced/client.js';
+import { SETUP_SPECS } from '../commands/generate.js';
 import {
   environmentVerdict,
   workerAvailable,
@@ -76,7 +76,7 @@ describe('starting a worker never installs its environment', () => {
     // The gate itself. Without this flag uv installs the environment as a
     // side effect of starting the daemon, and every other check here is
     // decoration.
-    for (const spec of [ACED_SPEC, VOICED_SPEC]) {
+    for (const spec of SETUP_SPECS) {
       const { command, args } = workerLaunchCommand(spec);
       expect(command).toBe('uv');
       expect(args[0]).toBe('run');
@@ -274,5 +274,33 @@ describe('an unusable environment is diagnosed, not spawned into', () => {
     writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');
     expect(existsSync(join(tempProject, '.venv'))).toBe(false);
     expect(workerPackagePresent(tempSpec).ok).toBe(true);
+  });
+});
+
+describe('the shared lifecycle is edited in place, not copied', () => {
+  // `field-worker` is our own source, not a pinned release. Declared as a
+  // plain path dependency, uv installs a *copy* into each worker's venv —
+  // so adding a symbol to `field_worker` left every worker importing a
+  // stale one, and the ImportError named the module that wanted it rather
+  // than the module that lacked it. It cost a failed generation on bloom
+  // to find, because nothing here could have.
+  //
+  // Asserted on the declaration rather than the installed layout: the
+  // venvs are ambient (CI has none during `pnpm test`), and the thing
+  // that was actually wrong is this line.
+  it('declares field-worker editable in every worker that depends on it', () => {
+    for (const spec of SETUP_SPECS) {
+      const pyproject = readFileSync(
+        join(packageRoot, 'python', spec.packageDir, 'pyproject.toml'),
+        'utf8',
+      );
+      const source = pyproject
+        .split('\n')
+        .find((line) => line.trimStart().startsWith('field-worker = '));
+      expect(source, `${spec.packageDir} declares no field-worker source`).toBeDefined();
+      expect(source, `${spec.packageDir} installs field-worker as a copy`).toContain(
+        'editable = true',
+      );
+    }
   });
 });

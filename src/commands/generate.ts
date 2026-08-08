@@ -465,7 +465,12 @@ export async function chooseVariant(
 // Explicit, loud environment setup (ace-generation.md §3.4): uv sync for
 // each worker env. The multi-GB weights download happens on the first
 // generate of that kind, announced by its progress events.
-const SETUP_SPECS: WorkerSpec[] = [ACED_SPEC, VOICED_SPEC];
+// Every generation worker, and the list a new one cannot be left out
+// of: `field setup <name>` resolves through it, so a worker missing
+// here is a worker nobody can install. Exported because that makes it
+// the canonical list, and anything else enumerating workers should
+// read it rather than keep a copy in step by hand (#67 review).
+export const SETUP_SPECS: WorkerSpec[] = [ACED_SPEC, VOICED_SPEC];
 
 export async function setupWorker(
   onLine: (line: string) => void,
