@@ -13,6 +13,7 @@ import {
   parseSeed,
   parseVariantNumber,
   parseVariants,
+  wantsVersion,
 } from './cliParsers.js';
 import { buildLabels, explainLabel, projectRelative, queryDeps } from './commands/build.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
@@ -49,7 +50,29 @@ function fail(err: unknown): never {
 program
   .name('field')
   .description('Git-native, agent-operable music production')
-  .version('0.1.0');
+  // Declared so it appears in `field --help`, not so commander acts on it —
+  // argv is intercepted below. Dropping `.version()` took the flag out of
+  // the help text, which left the only remaining way to ask undiscoverable:
+  // `field version` errors with no suggestion and `--help` did not mention
+  // the flag, so a change called "one way" shipped zero findable ones (#70
+  // review). The description earns its place too — `--version` printing a
+  // daemon report is not what the flag usually means.
+  .option('-V, --version', 'which build this is, and which build each daemon is running');
+
+// `field --version` is the only way to ask. It briefly printed the bare
+// number while a `field version` subcommand printed the report, which is
+// two commands differing by two dashes and a thing to remember for no
+// benefit — and the obvious one gave the least useful answer. `--version`
+// is the spelling every CLI has, so it is the one that stays; if a script
+// ever needs only the number, the first line still starts with it.
+//
+// Handled before parse because commander's `.version()` can only print a
+// static string, and this has to do real work.
+async function printVersion(): Promise<void> {
+  const { versionReport, formatVersionReport } = await import('./commands/version.js');
+  const root = findProjectRoot(process.cwd()) ?? process.cwd();
+  process.stdout.write(formatVersionReport(await versionReport(root), root) + '\n');
+}
 
 program
   .command('init')
@@ -716,4 +739,14 @@ program
     }
   });
 
-await program.parseAsync();
+// Positional: `argv[2]` is the only place this flag means the whole
+// program. `includes()` matched it anywhere, so `field build --version`
+// printed a version report and silently never built — a parser would have
+// rejected an unknown option on `build`, where this substituted a
+// different command (#70 review). Every other shape goes to commander,
+// which already knows how to complain about it.
+if (wantsVersion(process.argv)) {
+  await printVersion().catch(fail);
+} else {
+  await program.parseAsync();
+}

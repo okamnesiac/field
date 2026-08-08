@@ -7,6 +7,15 @@ import { z } from 'zod';
 
 export const PROTOCOL_VERSION = 1;
 
+// Who this daemon is and where it listens. Exported because two files
+// need them and only one had them: `field --version` declared its own
+// copies, so changing the socket path here would have left that command
+// probing the old one and reporting a running daemon as not running —
+// the answer nobody double-checks (#70 review). The workers get this from
+// their WorkerSpec; audiod is the one daemon that had no such record.
+export const DAEMON_NAME = 'field-audiod';
+export const SOCKET_RELATIVE = '.field/audiod.sock';
+
 export const helloResponseSchema = z.object({
   ok: z.literal(true),
   protocol: z.number().int(),
