@@ -171,7 +171,20 @@ class Pipeline:
                 # A fresh copy each time, not the stored one: `generate`
                 # may mutate what it is handed.
                 model.conds = clone_conds(self._builtin_conds)
-            wav = model.generate(job.text, audio_prompt_path=job.voice_ref)
+            # Only what was asked for. Passing Chatterbox's defaults
+            # explicitly would look identical today and silently pin them
+            # if the model's defaults ever moved — the recipe says what
+            # was requested, and absent means "whatever the model does".
+            #
+            # `conviction` is our name for `cfg_weight` (§8): the
+            # translation lives here because this module is the boundary
+            # where Chatterbox's vocabulary starts.
+            knobs = {}
+            if job.exaggeration is not None:
+                knobs["exaggeration"] = job.exaggeration
+            if job.conviction is not None:
+                knobs["cfg_weight"] = job.conviction
+            wav = model.generate(job.text, audio_prompt_path=job.voice_ref, **knobs)
             path = output_dir / f"{index + 1}.wav"
             torchaudio.save(str(path), wav, model.sr)
             paths.append(path)

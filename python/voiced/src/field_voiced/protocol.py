@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from field_worker.protocol import JsonObject, optional_str
+from field_worker.protocol import JsonObject, optional_number, optional_str
 from field_worker.protocol import required_int as _required_int
 from field_worker.protocol import required_str as _required_str
 
@@ -39,6 +39,13 @@ class VoiceJob:
     variants: int
     output_dir: str
     voice_ref: str | None = None
+    # Chatterbox's expressive knobs. `conviction` is its `cfg_weight`
+    # renamed for the recipe (voice-generation.md §8) and translated in
+    # adapter.py; the wire keeps our name so the protocol and the file
+    # agree. `None` means the model's default, which is not the same as
+    # a value we picked — the recipe records only what was asked for.
+    exaggeration: float | None = None
+    conviction: float | None = None
 
     @staticmethod
     def from_request(request: JsonObject) -> "VoiceJob":
@@ -48,4 +55,9 @@ class VoiceJob:
             variants=_required_int(request, "variants", "generate", 1, 8),
             output_dir=_required_str(request, "output_dir", "generate"),
             voice_ref=optional_str(request, "voice_ref"),
+            # Bounds match the schema's, which are narrower than the
+            # model's on purpose: a range can widen later without
+            # invalidating a committed recipe, and cannot narrow.
+            exaggeration=optional_number(request, "exaggeration", 0.25, 2.0),
+            conviction=optional_number(request, "conviction", 0.1, 1.0),
         )

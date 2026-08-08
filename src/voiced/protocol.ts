@@ -17,4 +17,10 @@ export interface VoiceGenerateJob {
   // than reading it as "no reference": those are different requests and
   // only one of them is what the caller meant (#60 review).
   voice_ref?: string | undefined;
+  // Chatterbox's expressive knobs. `conviction` is its `cfg_weight`
+  // under a name a musician can read (voice-generation.md §8); the
+  // adapter does the translation, which is what an adapter is for.
+  // Omitted means the model's own defaults, not a value we chose.
+  exaggeration?: number | undefined;
+  conviction?: number | undefined;
 }

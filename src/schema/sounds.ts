@@ -113,6 +113,18 @@ export const generativeSoundSchema = z
       .string()
       .regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256')
       .optional(),
+    // Chatterbox's two expressive knobs, ours by name (voice-generation.md
+    // §8). `conviction` is its `cfg_weight`: classifier-free guidance,
+    // which each step blends as `cond + w * (cond - uncond)` — how far
+    // past the on-text reading to push. Higher commits harder and hurries;
+    // lower lingers. Named for what it does rather than for the technique,
+    // and left in Chatterbox's direction so a value copied from its docs
+    // means the same thing here.
+    //
+    // Bounds are deliberately narrower than the model's: widening a range
+    // later keeps every existing recipe valid, narrowing one does not.
+    exaggeration: z.number().min(0.25).max(2).optional(),
+    conviction: z.number().min(0.1).max(1).optional(),
     lyrics: z.string().optional(),
     bpm: z.number().int().min(30).max(300).optional(),
     duration_seconds: z.number().positive().optional(),
@@ -140,7 +152,7 @@ export const generativeSoundSchema = z
       return;
     }
     const musicOnly = ['lyrics', 'bpm', 'bars', 'duration_seconds'] as const;
-    const voiceOnly = ['voice_ref', 'voice_ref_sha256'] as const;
+    const voiceOnly = ['voice_ref', 'voice_ref_sha256', 'exaggeration', 'conviction'] as const;
     for (const key of isVoice ? musicOnly : voiceOnly) {
       if (sound[key] !== undefined) {
         ctx.addIssue({
@@ -192,6 +204,8 @@ export const soundOrder: KeyOrder = {
     'text',
     'voice_ref',
     'voice_ref_sha256',
+    'exaggeration',
+    'conviction',
     'lyrics',
     'bpm',
     'seed',

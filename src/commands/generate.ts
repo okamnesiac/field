@@ -64,6 +64,12 @@ export interface GenerateOptions {
   // the model's own voice, a first-class case (§6).
   text?: string | undefined;
   voiceRef?: string | undefined;
+  // How the line is delivered. `conviction` is Chatterbox's `cfg_weight`
+  // under a name that says what it does (voice-generation.md §8); the
+  // worker's adapter translates. Absent means the model's own default,
+  // and the recipe records the absence rather than inventing a number.
+  exaggeration?: number | undefined;
+  conviction?: number | undefined;
   onProgress?: ((stage: string) => void) | undefined;
 }
 
@@ -90,7 +96,11 @@ const MUSIC_ONLY: [keyof GenerateOptions, string][] = [
   ['lyrics', '--lyrics'],
   ['bpm', '--bpm'],
 ];
-const VOICE_ONLY: [keyof GenerateOptions, string][] = [['voiceRef', '--voice-ref']];
+const VOICE_ONLY: [keyof GenerateOptions, string][] = [
+  ['voiceRef', '--voice-ref'],
+  ['exaggeration', '--exaggeration'],
+  ['conviction', '--conviction'],
+];
 
 export type GenerationKind = 'music' | 'voice';
 
@@ -289,6 +299,10 @@ export async function generateVariants(
               // Omitted, never empty: "" and absent are different requests
               // and only one of them means the model's own voice (#60).
               ...(reference !== undefined ? { voice_ref: reference.path } : {}),
+              ...(options.exaggeration !== undefined
+                ? { exaggeration: options.exaggeration }
+                : {}),
+              ...(options.conviction !== undefined ? { conviction: options.conviction } : {}),
             })
           : await client.generate({
               prompt: options.prompt!,
@@ -329,6 +343,10 @@ export async function generateVariants(
               ...(reference !== undefined
                 ? { voice_ref: options.voiceRef, voice_ref_sha256: reference.sha256 }
                 : {}),
+              ...(options.exaggeration !== undefined
+                ? { exaggeration: options.exaggeration }
+                : {}),
+              ...(options.conviction !== undefined ? { conviction: options.conviction } : {}),
             }
           : {
               prompt: options.prompt,

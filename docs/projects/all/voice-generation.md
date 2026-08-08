@@ -257,3 +257,63 @@ Chatterbox. Everything that can be verified without weights is, and what
 remains — that the model produces audio, at 24 kHz, needing a
 `normalize` wrapper at the project rate — is chunk 2's first act rather
 than something this section can claim.
+
+## 8 The delivery knobs, and one rename (2026-08-08)
+
+creek's first take reads its line at a fixed pace, and §1 left no way to
+change that: the job spec was text, seed, variants and `voice_ref`, so
+the only lever was the words themselves. Chatterbox has six sampling
+parameters; two of them are exposed here and four are not, because every
+field added to the recipe is a permanent part of the committed format.
+
+**What was measured, before anything was named.** Same seed, same text,
+the committed line:
+
+| `cfg_weight` | `exaggeration` | speech | tokens |
+| --- | --- | --- | --- |
+| 0.5 (default) | 0.5 | 2.58 s | 72 |
+| 0.4 | 0.5 | 2.58 s | 72 |
+| 0.3 | 0.5 | 2.58 s | 72 |
+| 0.2 | 0.5 | 2.90 s | 82 |
+| 0.3 | 0.3 | 3.10 s | 85 |
+
+Duration is quantised by token count at about 40 ms each, and the extra
+length is speech rather than silence — leading and trailing silence stay
+within 0.12–0.20 s throughout. So the pacing effect is real, up to about
+20%, and `exaggeration` is the stronger lever: it is a conditioning
+input the model receives, where `cfg_weight` only reweights sampling.
+The three runs at 0.5, 0.4 and 0.3 produced *different audio* on the
+same token count, so the knob changes delivery continuously and pace
+only in steps.
+
+**A determinism result worth recording.** The 0.5/0.5 run reproduced the
+committed take byte for byte — the same sha256 the recipe pins. §1.1
+commits outputs because inference does not reproduce across GPU and
+framework versions, and that stands; within one fixed environment, the
+seed does exactly what the recipe implies it does.
+
+**`cfg_weight` is `conviction` here** (Justin's call). The wire, the
+schema and the CLI all say `conviction`; `adapter.py` translates to
+`cfg_weight` at the boundary where Chatterbox's vocabulary starts, which
+is what that module is for. The name is not decoration: `cfg_weight`
+leaks a technique into a musician's file, and the technique is
+classifier-free guidance, which each step computes as
+`logits = cond + w * (cond - uncond)` — the model predicts once knowing
+the text and voice and once deliberately ignorant of them, and `w` says
+how far past the informed prediction to push. So it is a conviction
+control, and pace is a side effect of it. Rejected: `speed` and `pace`,
+which promise what the measurement shows it does not deliver;
+`looseness`, which would invert the scale so a value copied from
+Chatterbox's own docs would mean its opposite. The direction is kept
+identical to Chatterbox's for exactly that reason.
+
+**Absent means the model's default, not a default we chose.** Neither
+field is written to a recipe unless it was asked for, and the adapter
+passes only what was given. Recording 0.5 explicitly would look
+identical today and silently pin it if Chatterbox's defaults ever moved.
+
+**The bounds are narrower than the model's**, `exaggeration` in
+[0.25, 2] and `conviction` in [0.1, 1], and enforced three times: the
+CLI parser before the model runs, the worker's own job spec, and the
+schema on the way to disk. Narrower on purpose — widening a range later
+leaves every committed recipe valid, and narrowing one does not.

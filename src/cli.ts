@@ -6,6 +6,8 @@ import { Command } from 'commander';
 import {
   parseBars,
   parseBpm,
+  parseConviction,
+  parseExaggeration,
   parseChannels,
   parseDurationSeconds,
   parseSeed,
@@ -118,9 +120,12 @@ program
   .option('--lyrics <text>', 'music: lyrics (omit for instrumental)')
   .option('--bpm <n>', 'music: override the tempo-map bpm hint', parseBpm)
   .option('--voice-ref <asset>', "voice: the committed recording that defines the voice (omit for the model's own)")
+  .option('--exaggeration <n>', 'voice: expressive intensity, 0.25-2 (lower is calmer and slower)', parseExaggeration)
+  .option('--conviction <n>', 'voice: how hard it commits to the on-text reading, 0.1-1 (lower lingers)', parseConviction)
   .action(async (name: string, opts: {
     song: string; prompt?: string; text?: string; seed: number; bars?: number; duration?: number;
     variants: number; lyrics?: string; bpm?: number; voiceRef?: string;
+    exaggeration?: number; conviction?: number;
   }) => {
     try {
       const { generateVariants } = await import('./commands/generate.js');
@@ -135,6 +140,8 @@ program
         lyrics: opts.lyrics,
         bpm: opts.bpm,
         voiceRef: opts.voiceRef,
+        exaggeration: opts.exaggeration,
+        conviction: opts.conviction,
         onProgress: (stage) => process.stdout.write(`… ${stage}\n`),
       });
       // A voice line has no requested length to report; what it has is

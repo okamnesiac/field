@@ -156,6 +156,31 @@ describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
     ).rejects.toThrow(/'variants' must be a whole number/);
   });
 
+  it('bounds the delivery knobs rather than clamping them', async () => {
+    // The worker validates its own job spec, not just the CLI — a
+    // clamped value would be recorded in the recipe as the number asked
+    // for while the audio came from a different one. Bounds match the
+    // schema's (voice-generation.md §8).
+    await expect(
+      client.generate({
+        text: 'a line',
+        seed: 1,
+        variants: 1,
+        output_dir: join(root, 'out'),
+        exaggeration: 5,
+      }),
+    ).rejects.toThrow(/'exaggeration' must be in/);
+    await expect(
+      client.generate({
+        text: 'a line',
+        seed: 1,
+        variants: 1,
+        output_dir: join(root, 'out'),
+        conviction: 0,
+      }),
+    ).rejects.toThrow(/'conviction' must be in/);
+  });
+
   it('does not treat an omitted voice_ref as the error', async () => {
     // Narrow on purpose, and named for what it actually shows. A job with
     // no reference and one genuinely bad field comes back complaining

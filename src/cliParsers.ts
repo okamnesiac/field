@@ -36,6 +36,27 @@ export function parseVariants(value: string): number {
   return n;
 }
 
+// The two voice knobs. Fractional on purpose — unlike bpm and variants,
+// these are continuous, and the useful moves are small ones (0.5 to 0.3
+// slowed creek's line by a fifth). Bounds match the recipe schema's, so
+// a value that would be rejected on the way to disk is rejected here,
+// before the model runs.
+export function parseExaggeration(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0.25 || n > 2) {
+    throw new InvalidArgumentError('exaggeration must be a number in [0.25, 2]');
+  }
+  return n;
+}
+
+export function parseConviction(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0.1 || n > 1) {
+    throw new InvalidArgumentError('conviction must be a number in [0.1, 1]');
+  }
+  return n;
+}
+
 export function parseBpm(value: string): number {
   const n = Number(value);
   // Integer, not merely in range: the recipe schema records integer bpm,
