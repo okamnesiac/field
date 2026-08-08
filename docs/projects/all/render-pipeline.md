@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunks 1–4 shipped (#50, #53, #54), chunk 2 carrying most of
-chunk 6 with it; chunk 5 is all that remains. Written after
+**Status:** Chunks 1–4 shipped (#50, #53, #54, #55), chunk 2 carrying
+most of chunk 6 with it; chunk 5 is all that remains. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -528,11 +528,12 @@ most memory-bound of the three effects.
    After this, `src/audio/insert-chain.ts` and the DSP beneath it are
    executors of nothing — dead code with passing tests, which is exactly
    the state chunk 4 exists to clear.
-4. **The TypeScript DSP is deleted.** Shipped: `biquad.ts`, `limiter.ts`,
-   `reverb.ts`, `insert-chain.ts` and the three unit-test files, 492
-   lines. Not "`src/audio/` minus `wav.ts`" as this said — chunk 3 put
-   `render-daemon.ts` in that directory, so what is left is the WAV codec
-   and the client that spawns the renderer, neither of which is DSP.
+4. **The TypeScript DSP is deleted.** Shipped (#55): `biquad.ts`,
+   `limiter.ts`, `reverb.ts`, `insert-chain.ts` and the three unit-test
+   files, 492 lines. Not "`src/audio/` minus `wav.ts`" as this said —
+   chunk 3 put `render-daemon.ts` in that directory, so what is left is
+   the WAV codec and the client that spawns the renderer, neither of
+   which is DSP.
 
    **Two properties had to be written before the delete was safe**, and
    finding them is the argument for checking rather than assuming. The
