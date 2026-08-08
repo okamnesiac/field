@@ -11,8 +11,10 @@ import type { Generator } from './types.js';
 // TypeScript (render-pipeline.md decision 8): one input and one set of
 // parameters exercised the whole new path — spawn, plan, render — with
 // nothing else changing. Chunk 3 took stems and mixes across the same
-// boundary, so `src/audio/insert-chain.ts` and the DSP under it are no
-// longer executors of anything; chunk 4 deletes them.
+// boundary and chunk 4 deleted `src/audio/insert-chain.ts` and the DSP
+// under it, so the daemon is now the only executor of rendered audio and
+// `src/generators/effect-properties.test.ts` is the surviving
+// specification of what it must do.
 //
 // The rule versions do not change. The C++ port is byte-identical to the
 // TypeScript it replaces — verified across 40 randomised chains and both

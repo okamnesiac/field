@@ -124,3 +124,17 @@ would have caught a substituted renderer on their own.
 Nothing in §2, §3 or §5 changes: same effects, same parameter
 semantics, same three homes, same shipped artifacts. Only the executor
 moves.
+
+**Done as of [render-pipeline.md](render-pipeline.md) chunk 4.** §5's
+chunk 1 above describes `src/audio/` as the DSP core, and it was, until
+the daemon took over in chunks 2–3 and the TypeScript was deleted. The
+directory now holds the WAV codec and the render client only.
+
+The auto-gain properties §5 lists — narrow bells cost almost nothing,
+wide shelves proportionally more, boost/cut symmetry — are now in
+`src/generators/effect-properties.test.ts`, but none of the three made
+the trip on its own. All three had to be written there, along with the
+±12 dB clamp, because the properties that replaced the unit tests all
+happened to use boosts at bandwidth 1 or wider. The move was sound; it
+was neither free nor automatic, and the narrow-vs-wide one was missed on
+the first pass and caught in review.

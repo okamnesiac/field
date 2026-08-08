@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunks 1–2 shipped (#50, #53), chunk 2 carrying most of
-chunk 6 with it; chunk 3 in review; chunks 4–5 not started. Written after
+**Status:** Chunks 1–4 shipped (#50, #53, #54, #55), chunk 2 carrying
+most of chunk 6 with it; chunk 5 is all that remains. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -528,8 +528,49 @@ most memory-bound of the three effects.
    After this, `src/audio/insert-chain.ts` and the DSP beneath it are
    executors of nothing — dead code with passing tests, which is exactly
    the state chunk 4 exists to clear.
-4. **The TypeScript DSP is deleted.** `src/audio/` minus `wav.ts`. The
-   tests stay.
+4. **The TypeScript DSP is deleted.** Shipped (#55): `biquad.ts`,
+   `limiter.ts`, `reverb.ts`, `insert-chain.ts` and the three unit-test
+   files, 492 lines. Not "`src/audio/` minus `wav.ts`" as this said —
+   chunk 3 put `render-daemon.ts` in that directory, so what is left is
+   the WAV codec and the client that spawns the renderer, neither of
+   which is DSP.
+
+   **Three properties had to be written before the delete was safe**, and
+   finding them is the argument for checking rather than assuming. The
+   claim "the tests stay" was true of twelve of the fifteen deleted
+   assertions — the ceiling, the ramps, the channel link, T60, predelay,
+   the stereo spread, the mix blend all have property equivalents, and
+   reverb's tail-length assertion is covered by the golden, whose digest
+   spans a file whose length would change. The three that did not were
+   all `autoGainDB`'s: **make-up for cuts**, the **±12 dB clamp**, and
+   **narrow-vs-wide proportionality**. Every normalize assertion in the
+   harness used a boost at bandwidth 1 or wider, and so does the golden's
+   +6.6 dB bell, so nothing looked at a cut, at the bound, or at a narrow
+   band.
+
+   Each gap was confirmed by mutation against the C++ before writing
+   anything. `min(0, compensation)` — pad boosts, ignore cuts — passed
+   353 of 353. Deleting the clamp outright passed 353 of 353. Widening
+   bands under 0.5 octaves to 2 octaves *while computing compensation
+   only*, so the rendered filter stays narrow, passed the 38 relevant
+   tests (#55 review). The three new properties kill all three, and the
+   fifteen pre-existing ones stay green under each, which is what says
+   the new tests carry weight rather than duplicate.
+
+   The third gap is the one worth remembering, because it was found by a
+   reviewer after the first two had been fixed and the accounting written
+   up as complete. "Twelve of fifteen are covered" is a claim about
+   absence, and the only way to hold one is to mutate for it — reading
+   the surviving tests and judging them sufficient is exactly what had
+   already produced the wrong answer twice.
+
+   The deeper point is that the deleted assertions had *already* stopped
+   testing anything at chunk 2, when the executor changed: they exercised
+   TypeScript functions that no longer ran. They were green, and they
+   were measuring dead code. Deleting them did not remove coverage so
+   much as stop the file from claiming coverage it had lost two chunks
+   earlier — which is the failure mode worth naming, because nothing goes
+   red when it happens.
 5. **Sample-rate conversion in the built-in tier**, replacing
    `afconvert` in `normalize` — the work
    [linux-portability.md](linux-portability.md) §4.2–4.3 described,
@@ -560,11 +601,9 @@ the wrong order, and once the effect rules call `field-audiod --render`
 the binary is a *build* dependency, so the Linux daemon build had to
 land before this chunk rather than after it.
 
-What remains: 3 depends on 2; 5 on 2; 4 on 3. Chunk 4 no longer waits on
-6 — the byte-identity lock exists now, so deleting `reverb.ts` no longer
-removes the only thing that would notice a regression. It waits on 3
-alone, because `insert-chain.ts` is still the executor for track inserts
-and the mix master chain until then.
+How it went: 3 depended on 2, 4 on 3, and 4 no longer waited on 6 once
+the byte-identity lock existed. Chunk 5 depends on 2 and is the only one
+left.
 
 ## 7 Open questions
 

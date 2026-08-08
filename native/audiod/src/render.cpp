@@ -76,10 +76,16 @@ std::vector<std::vector<std::vector<float>>> readInputs (const juce::var& plan)
     return result;
 }
 
-// One insert chain, applied in series. The mirror of applyInsertChain in
-// src/audio/insert-chain.ts, and it stays a mirror until chunk 4 deletes
-// that file: eq and limit work in place, reverb returns longer buffers
-// (its tail), and the order is the order the user declared.
+// One insert chain, applied in series: eq and limit work in place, reverb
+// returns longer buffers (its tail), and the order is the order the user
+// declared.
+//
+// This is now the only implementation. It began as a mirror of
+// applyInsertChain in src/audio/insert-chain.ts, which chunk 4 deleted —
+// so do not go looking for a reference version to check this against.
+// What pins the behaviour is src/generators/effect-properties.test.ts,
+// measured from rendered output, and the byte-identity goldens in
+// src/audio/render-daemon.test.ts.
 // `required` is the schema's own optionality, per operation: an effects
 // plan always serializes `inserts`, while a stem's `inserts` and a mix's
 // `master` are omitted when they have no entries — that omission is what
