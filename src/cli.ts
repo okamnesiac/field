@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
 import {
@@ -49,7 +49,27 @@ function fail(err: unknown): never {
 program
   .name('field')
   .description('Git-native, agent-operable music production')
-  .version('0.1.0');
+  .version(
+    // Read, not restated: this was a second copy of the literal in
+    // package.json and one edit from disagreeing with the package it
+    // ships in.
+    (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      version: string;
+    }).version,
+  );
+
+program
+  .command('version')
+  .description('which build of the CLI is running, and which build each daemon is running')
+  .action(async () => {
+    try {
+      const { versionReport, formatVersionReport } = await import('./commands/version.js');
+      const root = findProjectRoot(process.cwd()) ?? process.cwd();
+      process.stdout.write(formatVersionReport(await versionReport(root), root) + '\n');
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command('init')

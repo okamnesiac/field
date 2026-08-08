@@ -1,0 +1,111 @@
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { formatVersionReport, versionReport } from './version.js';
+import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
+
+// `field version` answers two questions, and the second is the one that
+// bites: which build is each *daemon* running. A daemon outlives the CLI
+// that spawned it by design, so the process answering can predate the
+// code asking — which is how `--exaggeration` reached a worker that
+// silently dropped it.
+
+let root: string;
+const servers: Server[] = [];
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'field-version-'));
+  mkdirSync(join(root, '.field'), { recursive: true });
+});
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  rmSync(root, { recursive: true, force: true });
+});
+
+// A daemon that answers `hello` and nothing else, which is all this
+// command asks of one.
+function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Promise<void> {
+  return new Promise((resolve) => {
+    const server = createServer((socket) => {
+      socket.on('data', () => socket.write(JSON.stringify({ id: 1, ok: true, ...hello }) + '\n'));
+    });
+    servers.push(server);
+    server.listen(join(root, socketRelative), () => resolve());
+  });
+}
+
+describe('field version', () => {
+  it('reports a build identity, not just a release number', async () => {
+    // "0.1.0" is true of every build this project has ever produced. The
+    // commit is what distinguishes the one running from the one that was
+    // running twenty minutes ago, which is the actual question.
+    const report = await versionReport(root);
+    expect(report.cli.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(report.cli.commit).toMatch(/^[0-9a-f]{7,}$/);
+    expect(report.workerProtocol).toBe(WORKER_PROTOCOL_VERSION);
+  });
+
+  it('says which daemons are not running rather than starting them', async () => {
+    // Asking a model worker its version is not worth loading a model, so
+    // this path must never spawn. Nothing is listening here and the
+    // report still returns — a spawn would hang or download weights.
+    const report = await versionReport(root);
+    expect(report.daemons.map((d) => d.name)).toEqual([
+      'field-audiod',
+      'field-aced',
+      'field-voiced',
+    ]);
+    expect(report.daemons.every((d) => !d.running)).toBe(true);
+    expect(formatVersionReport(report, root)).toContain('field-voiced  not running');
+  });
+
+  it('reports what a running daemon says about itself', async () => {
+    await fakeDaemon('.field/voiced.sock', {
+      protocol: WORKER_PROTOCOL_VERSION,
+      daemon: 'field-voiced',
+      version: '9.9.9',
+      model_loaded: false,
+    });
+    const voiced = (await versionReport(root)).daemons.find((d) => d.name === 'field-voiced')!;
+    expect(voiced.running).toBe(true);
+    // Reported, not assumed: a daemon's own answer is the only evidence
+    // of what code it loaded, and 9.9.9 is nothing this repo declares.
+    expect(voiced.version).toBe('9.9.9');
+    expect(voiced.note).toBeUndefined();
+  });
+
+  it('flags a daemon whose protocol predates this build', async () => {
+    // The reason the command exists. A worker started before a protocol
+    // change answers hello perfectly well and will then refuse — or,
+    // before the bump that made this visible, quietly do the wrong
+    // thing. Saying so here turns a puzzle into a line of output.
+    await fakeDaemon('.field/voiced.sock', {
+      protocol: WORKER_PROTOCOL_VERSION - 1,
+      daemon: 'field-voiced',
+      version: '0.1.0',
+      model_loaded: false,
+    });
+    const report = await versionReport(root);
+    const voiced = report.daemons.find((d) => d.name === 'field-voiced')!;
+    expect(voiced.protocol).toBe(WORKER_PROTOCOL_VERSION - 1);
+    expect(voiced.note).toContain('predates this build');
+    expect(formatVersionReport(report, root)).toContain('!');
+  });
+
+  it('does not flag a daemon that agrees', async () => {
+    // The negative half: a warning that fires on a current daemon is a
+    // warning nobody reads.
+    await fakeDaemon('.field/aced.sock', {
+      protocol: WORKER_PROTOCOL_VERSION,
+      daemon: 'field-aced',
+      version: '0.1.0',
+      model_loaded: false,
+    });
+    const report = await versionReport(root);
+    expect(report.daemons.find((d) => d.name === 'field-aced')!.note).toBeUndefined();
+    expect(formatVersionReport(report, root)).not.toContain('!');
+  });
+});
