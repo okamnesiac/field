@@ -365,6 +365,76 @@ describe('check', () => {
     rmSync(src);
   });
 
+  it('flags a voice recipe whose reference recording is missing or drifted', async () => {
+    // The hash has to be a *pin*, not a field. Both of these parsed fine
+    // and left `field check` green (#58 review): the schema pairs
+    // `voice_ref` with its sha, but nothing resolved the name or compared
+    // the bytes, so the recording could be absent or swapped under a
+    // recipe still claiming to describe it — which is exactly the
+    // provenance guarantee §1.3 offers in place of a vendor's voice ID.
+    createSong(root, 'opener');
+    const src = sourceFile('reference recording');
+    await importAsset(root, 'opener', src, 'ref-voice');
+    rmSync(src);
+
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
+    const recipe = (lines: string[]) =>
+      writeFileSync(
+        join(root, 'songs/opener/sounds/line.yaml'),
+        [
+          'name: line',
+          'type: generative',
+          'model: chatterbox',
+          'text: I walked the fence line',
+          ...lines,
+          'seed: 1',
+          'variants:',
+          '  - file: audio/line/1.wav',
+          '    seed: 1',
+          `    sha256: ${'a'.repeat(64)}`,
+          'generated_at: 2026-08-07T12:00:00Z',
+          '',
+        ].join('\n'),
+      );
+
+    recipe([`voice_ref: ghost`, `voice_ref_sha256: ${'b'.repeat(64)}`]);
+    const missing = await check(root);
+    expect(missing.diagnostics.map((d) => d.message).join()).toContain(
+      'voice_ref references unknown asset "ghost"',
+    );
+
+    recipe([`voice_ref: ref-voice`, `voice_ref_sha256: ${'b'.repeat(64)}`]);
+    const drifted = await check(root);
+    expect(drifted.diagnostics.map((d) => d.message).join()).toContain(
+      'the reference recording changed under the recipe',
+    );
+  });
+
+  it('accepts a voice recipe with no reference — the default voice', async () => {
+    // The other half of the same rule: absent is legal and must stay so,
+    // or bloom's current configuration becomes a diagnostic.
+    createSong(root, 'opener');
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/opener/sounds/line.yaml'),
+      [
+        'name: line',
+        'type: generative',
+        'model: chatterbox',
+        'text: I walked the fence line',
+        'seed: 1',
+        'variants:',
+        '  - file: audio/line/1.wav',
+        '    seed: 1',
+        `    sha256: ${'a'.repeat(64)}`,
+        'generated_at: 2026-08-07T12:00:00Z',
+        '',
+      ].join('\n'),
+    );
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).not.toContain('voice_ref');
+  });
+
   it('flags absolute and project-escaping asset file paths', async () => {
     createSong(root, 'opener');
     const entry = (file: string) =>

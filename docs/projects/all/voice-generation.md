@@ -1,8 +1,9 @@
 # Plan: Voice generation
 
-**Status:** Planned, deferred (2026-08-06). The design was settled and
-recorded ahead of the build, then deliberately queued behind other work —
-nothing here is started. Written before
+**Status:** In flight (2026-08-07). Designed and recorded ahead of the
+build (2026-08-06), then queued behind other work until `say`'s removal
+made it the thing bloom needs. Chunk 1's schema slice has shipped; the
+worker and the CLI are next, and chunk 2 is unstarted. Written before
 [project-layout.md](project-layout.md) §4: where this plan says
 `generation/<name>.yaml` and recipe fields, read a `generate` sound in
 `sounds/<name>.yaml` (`type:`/`source:` spellings, §4.3), with choosing
@@ -10,7 +11,8 @@ as repointing (§4.8). The other side of the determinism boundary from
 the `say` rule (#27), kept separate by design — "got to keep them
 separated."
 
-**Goal:** `field voice generate`: text (and a voice) produce committed,
+**Goal:** `field generate` over a voice recipe: text (and optionally a
+voice) produce committed,
 provenance-carrying vocal audio through a local model, auditioned and
 promoted with the same variant machinery ACE established. bloom's creek
 trades its spoken `say` line for a generated voice worth listening to.
@@ -71,7 +73,10 @@ on the M3 Max in seconds-not-minutes; recipe hashes verified by
 ## 3 Chunks
 
 1. `field-voiced` worker (Chatterbox behind the job-spec protocol) +
-   `field voice generate` CLI + recipe/schema growth + tests.
+   `field generate` support + recipe/schema growth + tests. The CLI name
+   is §4's settled one, not the `field voice generate` this said before
+   that question was answered. **Schema slice shipped (#58)**; the worker
+   lifecycle it builds on shipped separately (#59).
 2. bloom: record/pick a reference voice, generate creek's line, choose,
    clip; vault the milestone.
 
@@ -105,7 +110,8 @@ macOS-only rule, or keeping `afconvert` for that rule alone and with it
 the macOS dependency the whole exercise exists to remove. Neither is
 worth a scratch-vocal placeholder.
 
-**What it costs, honestly.** This plan is *deferred and not started*, so
+**What it costs, honestly.** This plan was *deferred and not started*
+when `say` went, and is only now in flight, so
 there is now a gap rather than a handover: bloom's creek has a
 `lead-vocal` track with two clips sourcing `scratch-vocal`, plus a
 `vocal-96k` normalize derived from it, and all three stop resolving until
