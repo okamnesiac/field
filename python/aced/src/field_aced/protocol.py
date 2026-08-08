@@ -9,13 +9,14 @@ Python mirror.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-PROTOCOL_VERSION = 1
+from field_worker.protocol import JsonObject
+from field_worker.protocol import required_number as _required_number
+from field_worker.protocol import required_str as _required_str
+
 DAEMON_NAME = "field-aced"
 DAEMON_VERSION = "0.1.0"
-
-JsonObject = dict[str, Any]
+SOCKET_DEFAULT = ".field/aced.sock"
 
 
 @dataclass(frozen=True)
@@ -38,18 +39,10 @@ class GenerateJob:
     @staticmethod
     def from_request(request: JsonObject) -> "GenerateJob":
         def required_str(key: str) -> str:
-            value = request.get(key)
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"generate needs a non-empty string {key!r}")
-            return value
+            return _required_str(request, key, "generate")
 
         def required_number(key: str, minimum: float, maximum: float) -> float:
-            value = request.get(key)
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise ValueError(f"generate needs a number {key!r}")
-            if not minimum <= float(value) <= maximum:
-                raise ValueError(f"{key!r} must be in [{minimum}, {maximum}]")
-            return float(value)
+            return _required_number(request, key, "generate", minimum, maximum)
 
         lyrics = request.get("lyrics")
         if lyrics is not None and not isinstance(lyrics, str):
@@ -66,19 +59,3 @@ class GenerateJob:
             lyrics=lyrics,
             bpm=bpm,
         )
-
-
-def ok_response(request_id: object, extra: JsonObject | None = None) -> JsonObject:
-    response: JsonObject = {"ok": True}
-    if request_id is not None:
-        response["id"] = request_id
-    if extra:
-        response.update(extra)
-    return response
-
-
-def error_response(request_id: object, message: str) -> JsonObject:
-    response: JsonObject = {"ok": False, "error": message}
-    if request_id is not None:
-        response["id"] = request_id
-    return response

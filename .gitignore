@@ -7,5 +7,5 @@ native/audiod/build/
 # Machine-local editor state, and its content-derived filenames churn on
 # every reindex.
 native/audiod/.cache/
-python/aced/.venv/
+python/*/.venv/
 __pycache__/

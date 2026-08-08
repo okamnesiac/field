@@ -31,7 +31,8 @@ function acedProject(): string {
 // FIELD_ACED_PYTHON mirrors FIELD_AUDIOD (ace-generation.md §3.4): an
 // interpreter that can import field_aced replaces the uv-managed
 // environment — wrappers, alternate venvs, and daemon tests without the
-// model environment (PYTHONPATH=python/aced/src is enough).
+// model environment (PYTHONPATH=python/worker/src:python/aced/src is
+// enough — the lifecycle package plus the worker's own).
 function daemonCommand(): { command: string; args: string[] } {
   const override = process.env['FIELD_ACED_PYTHON'];
   if (override) {

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AcedClient } from './client.js';
@@ -15,7 +15,15 @@ import { acedHelloResponseSchema, acedOkResponseSchema } from './protocol.js';
 // exists for (ace-generation.md §3.4).
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const acedSrc = join(packageRoot, 'python', 'aced', 'src');
+// Both source roots: the lifecycle lives in `field_worker` and is shared
+// with field-voiced (voice-generation.md §1.4), so a bare interpreter
+// needs it on the path alongside the worker's own package. These live
+// protocol tests are what proved the extraction preserved behaviour —
+// they spawn the real daemon, so a lifecycle regression fails here.
+const acedSrc = [
+  join(packageRoot, 'python', 'worker', 'src'),
+  join(packageRoot, 'python', 'aced', 'src'),
+].join(delimiter);
 
 function findInterpreter(): string | undefined {
   const venv = join(packageRoot, 'python', 'aced', '.venv', 'bin', 'python');

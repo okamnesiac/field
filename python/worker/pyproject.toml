@@ -1,0 +1,30 @@
+# field-worker — the daemon-lite lifecycle both generation workers share
+# (ace-generation.md §3 built the protocol so ACE would be "the first
+# client, not a special case"; voice-generation.md §1.4 is the second
+# client cashing that in).
+#
+# Deliberately dependency-free. It is socket, framing and lifetime and
+# nothing else, so it installs into any worker's environment without
+# dragging a model stack behind it — which is also what lets the protocol
+# tests run on a bare interpreter.
+[project]
+name = "field-worker"
+version = "0.1.0"
+description = "Field's shared generation-worker lifecycle: NDJSON over a unix socket"
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["pyright==1.1.411"]
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/field_worker"]
