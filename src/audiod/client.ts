@@ -25,8 +25,6 @@ import {
 // project root and a root-relative socket path, keeping the bound path
 // inside sun_path's 104 bytes regardless of how deep the project lives.
 
-
-
 // The built daemon binary, or undefined if it has not been built. FIELD_AUDIOD
 // overrides for wrappers and tests; the default is the CMake output inside
 // this package (dist/audiod/client.js → package root → native build dir).
