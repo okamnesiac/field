@@ -45,6 +45,11 @@ jobs:
           path: native/audiod/build
           key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
       - run: pnpm build:native
+      # Before `pnpm test`, not after: src/workers/lockfile.test.ts asks
+      # real uv how `--locked` differs from `--frozen`, and skips without
+      # it. With setup-uv below the tests, that skip was unconditional in
+      # CI and the test only ever ran on the author's machine.
+      - uses: astral-sh/setup-uv@v5
       # Nine tests skip here — `say` (6) and `afconvert` (3) — on the
       # capability probes in src/testing/platform.ts, not by excluding
       # their files. Those four files hold 72 tests between them, and the
@@ -63,7 +68,6 @@ jobs:
       # nothing enforced it when it was added, which is a gate that exists
       # only in its own pyproject (#59 review). It has no production
       # dependencies at all, so its sync is trivial.
-      - uses: astral-sh/setup-uv@v5
       - run: cd python/worker && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
@@ -87,6 +91,10 @@ jobs:
           path: native/audiod/build
           key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
       - run: pnpm build:native
+      # uv for src/workers/lockfile.test.ts, which asks real uv about
+      # `--locked` and skips without it. This lane runs the whole suite,
+      # so it needs everything the whole suite needs.
+      - uses: astral-sh/setup-uv@v5
       # The whole suite, not the nine alone. macOS is the product platform
       # (overview.md "V1 platform scope"), so it is the wrong one to give
       # partial coverage — and the suite measures ~13s against a job

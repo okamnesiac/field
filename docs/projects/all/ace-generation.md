@@ -153,8 +153,20 @@ a 24 MB interpreter install on its way to reporting that the worker was
 not installed. It now detects uv with `--version` — a question that names
 no project, so nothing can resolve — asks uv about the project only when
 the answer is not already decided, and passes `--no-python-downloads`
-and `--frozen` when it does, so the probe can neither install an
+and `--locked` when it does, so the probe can neither install an
 interpreter nor rewrite `uv.lock`.
+
+That flag was `--frozen` when this shipped, and the difference matters
+(#61 follow-up, 2026-08-08). `--frozen` means "sync without updating the
+lock" — permission to proceed on a stale one. `--locked` means "assert
+`uv.lock` will remain unchanged" — a check that it is current. Both keep
+the probe from writing, which is why `--frozen` looked sufficient; only
+`--locked` also notices that pyproject has moved past the lock, so a
+worker whose environment matches an outdated lockfile is refused here
+rather than launched with `--no-sync` and left to fail on the dependency
+it never got. This section previously recorded a cost for that choice —
+staleness measured against the lockfile rather than against pyproject —
+which was not a cost of the goal but of the wrong flag.
 
 The lesson is in where the tests were. The verdict had been made a pure
 function precisely so it could be tested exhaustively, and it was: every
