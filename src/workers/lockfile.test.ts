@@ -26,12 +26,23 @@ const tempDir = `.test-lock-${process.pid}`;
 const tempSpec: WorkerSpec = { ...VOICED_SPEC, packageDir: tempDir };
 const tempProject = join(packageRoot, 'python', tempDir);
 
+// Both halves of "can this machine run the test", asked together so an
+// unusable one produces a visible skip. setup-uv installs uv, not an
+// interpreter, and the sync below passes --no-python-downloads on
+// purpose — so uv being present says nothing about whether this can run
+// (#62 review).
 function uvUsable(): boolean {
-  return spawnSync('uv', ['--version'], { stdio: 'ignore' }).status === 0;
+  if (spawnSync('uv', ['--version'], { stdio: 'ignore' }).status !== 0) return false;
+  return (
+    spawnSync('uv', ['python', 'find', MIN_PYTHON, '--no-python-downloads'], { stdio: 'ignore' })
+      .status === 0
+  );
 }
 
 // No dependencies and no network: the divergence is about the lockfile's
 // agreement with pyproject, not about resolving anything.
+const MIN_PYTHON = '>=3.11';
+const WIDER_PYTHON = '>=3.10';
 const PYPROJECT = (requiresPython: string) =>
   `[project]\nname = "demo-worker"\nversion = "0.1.0"\n` +
   `requires-python = "${requiresPython}"\ndependencies = []\n` +
@@ -44,13 +55,16 @@ afterEach(() => {
 describe.skipIf(!uvUsable())('a lockfile that has fallen behind pyproject', () => {
   it('is refused rather than launched into', () => {
     mkdirSync(tempProject, { recursive: true });
-    writeFileSync(join(tempProject, 'pyproject.toml'), PYPROJECT('>=3.11'));
+    writeFileSync(join(tempProject, 'pyproject.toml'), PYPROJECT(MIN_PYTHON));
     const sync = spawnSync('uv', ['sync', '--no-python-downloads', '--project', tempProject], {
       stdio: 'ignore',
     });
-    // A machine with uv but no suitable interpreter cannot set this up,
-    // and downloading one is the exact thing the probe refuses to do.
-    if (sync.status !== 0) return;
+    // Loud, not skipped. `uvUsable` has already established uv and an
+    // interpreter, so a failure here is a real one — and returning early
+    // instead would report a green pass with nothing asserted, which is
+    // precisely the silent non-coverage this file's CI change exists to
+    // remove (#62 review).
+    expect(sync.status).toBe(0);
 
     // `package = false` keeps uv from reinstalling the project itself on
     // every pyproject edit — which is what masks this divergence in a
@@ -66,9 +80,19 @@ describe.skipIf(!uvUsable())('a lockfile that has fallen behind pyproject', () =
 
     // pyproject moves; the lockfile does not; the environment is still
     // exactly what the lockfile describes.
+    //
+    // *Widened*, never narrowed. Narrowing (>=3.11 to >=3.12) is a
+    // lock/pyproject divergence and an interpreter demand at once, so on
+    // a machine with only 3.11 the second probe fails because uv cannot
+    // find an interpreter — `synced` is false, the assertion below
+    // passes, and the test proves nothing about the flag. Verified: with
+    // a constraint nothing satisfies, `--frozen` and `--locked` both exit
+    // 2, identically. Widening cannot do that — anything that satisfied
+    // the lock satisfies the wider constraint — while leaving the
+    // lockfile just as out of date (#62 review).
     const lockPath = join(tempProject, 'uv.lock');
     const lockBefore = readFileSync(lockPath, 'utf8');
-    writeFileSync(join(tempProject, 'pyproject.toml'), PYPROJECT('>=3.12'));
+    writeFileSync(join(tempProject, 'pyproject.toml'), PYPROJECT(WIDER_PYTHON));
 
     expect(probeEnvironment(tempSpec).synced).toBe(false);
     // …and asking did not repair it. A probe that rewrites the repo to

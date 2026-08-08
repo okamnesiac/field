@@ -99,10 +99,13 @@ export interface EnvironmentProbe {
   synced: boolean | undefined;
 }
 
-// Pure so it can be exercised for every combination on a machine with no
-// uv and no environments — which is what CI is when `pnpm test` runs,
-// since setup-uv comes after it. Deciding from ambient state instead
-// would make these assertions pass or fail by accident of the checkout.
+// Pure so it can be exercised for every combination, on any machine,
+// whatever happens to be installed on it. Deciding from ambient state
+// instead would make these assertions pass or fail by accident of the
+// checkout — which is how the two defects before this one survived: a
+// dev-only `.venv` reading as installed, and every combination of the
+// three facts below being tested while the code producing them was
+// downloading a Python interpreter.
 export function environmentVerdict(
   spec: WorkerSpec,
   probe: EnvironmentProbe,
