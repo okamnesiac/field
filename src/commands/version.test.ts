@@ -12,7 +12,7 @@ import {
   SOCKET_RELATIVE as AUDIOD_SOCKET,
 } from '../audiod/protocol.js';
 
-// `field version` answers two questions, and the second is the one that
+// `field --version` answers two questions, and the second is the one that
 // bites: which build is each *daemon* running. A daemon outlives the CLI
 // that spawned it by design, so the process answering can predate the
 // code asking — which is how `--exaggeration` reached a worker that
@@ -45,7 +45,7 @@ function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Pro
   });
 }
 
-describe('field version', () => {
+describe('field --version', () => {
   it('reports a build identity, not just a release number', async () => {
     // "0.1.0" is true of every build this project has ever produced. The
     // commit is what distinguishes the one running from the one that was

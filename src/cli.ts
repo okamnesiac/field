@@ -29,7 +29,6 @@ import { importAsset } from './commands/import.js';
 import { init } from './commands/init.js';
 import type { BuildOutcome } from './graph/build.js';
 import { findProjectRoot, loadProject } from './model/project.js';
-import { packageVersion } from './packageVersion.js';
 
 const program = new Command();
 
@@ -47,23 +46,22 @@ function fail(err: unknown): never {
   process.exit(1);
 }
 
-program
-  .name('field')
-  .description('Git-native, agent-operable music production')
-  .version(packageVersion());
+program.name('field').description('Git-native, agent-operable music production');
 
-program
-  .command('version')
-  .description('which build of the CLI is running, and which build each daemon is running')
-  .action(async () => {
-    try {
-      const { versionReport, formatVersionReport } = await import('./commands/version.js');
-      const root = findProjectRoot(process.cwd()) ?? process.cwd();
-      process.stdout.write(formatVersionReport(await versionReport(root), root) + '\n');
-    } catch (err) {
-      fail(err);
-    }
-  });
+// `field --version` is the only way to ask. It briefly printed the bare
+// number while a `field version` subcommand printed the report, which is
+// two commands differing by two dashes and a thing to remember for no
+// benefit — and the obvious one gave the least useful answer. `--version`
+// is the spelling every CLI has, so it is the one that stays; if a script
+// ever needs only the number, the first line still starts with it.
+//
+// Handled before parse because commander's `.version()` can only print a
+// static string, and this has to do real work.
+async function printVersion(): Promise<void> {
+  const { versionReport, formatVersionReport } = await import('./commands/version.js');
+  const root = findProjectRoot(process.cwd()) ?? process.cwd();
+  process.stdout.write(formatVersionReport(await versionReport(root), root) + '\n');
+}
 
 program
   .command('init')
@@ -730,4 +728,8 @@ program
     }
   });
 
-await program.parseAsync();
+if (process.argv.includes('--version') || process.argv.includes('-V')) {
+  await printVersion().catch(fail);
+} else {
+  await program.parseAsync();
+}

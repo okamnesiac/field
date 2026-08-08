@@ -13,7 +13,7 @@ import {
 import { SETUP_SPECS } from './generate.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 
-// `field version`: which build is running, and which build each daemon is
+// `field --version`: which build is running, and which build each daemon is
 // running. Those are different questions and the second one is the one
 // that bites — a daemon outlives the CLI that spawned it by design, so
 // the process answering may predate the code asking by hours.
