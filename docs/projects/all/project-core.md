@@ -59,7 +59,11 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    Loops (possibly with their own internal timeline, e.g. polyrhythmic loops
    against a different meter) are explicitly deferred; nothing in the tick
    scheme precludes a loop carrying a local timeline mapped at its
-   instantiation point.
+   instantiation point. **Taken up by
+   [nested-tracks.md](nested-tracks.md) §1.5 (2026-08-08)**, which makes
+   that local timeline a property of every track rather than a feature of
+   loops: a polymetric loop is a track carrying its own meter, mapped into
+   its parent at the reference's `at`.
 2. **Clip offsets (DECIDED).** A clip is a *window* (`position`, `duration`,
    in anchor units) on *content* (`asset`, `source_offset` in samples, `slip`
    in samples, default 0; effective read offset = `source_offset − slip`, so

@@ -84,10 +84,10 @@ point of this is that it no longer has to.
    container). It is a number that can silently disagree with the
    content: lengthen the vocal, forget the overhang, and the tail
    truncates with no error. The same argument that makes `bar.beat.tick`
-   a display projection rather than stored (§3.1). *Rejected:
-   boundary truncation*, which would add a second place audio gets cut
-   beside the clip window (§3.2) — two places to check when something is
-   short.
+   a display projection rather than stored ([project-core.md](project-core.md)
+   §3.1). *Rejected: boundary truncation*, which would add a second place
+   audio gets cut beside the clip window (project-core.md §3.2) — two
+   places to check when something is short.
 
    Negative local positions are allowed, and are how a pickup works: an
    anacrusis belongs to the chorus that follows it, not to the tail of
