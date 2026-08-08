@@ -145,7 +145,12 @@ of truth with JSON Schema generated from them — that is what keeps the
 canonical format honestly language-neutral for the future Swift widget and C++
 daemon. CLI: commander. Tests: vitest. Audio conversion for the normalize
 rule: macOS built-in `afconvert` (excellent SRC, zero dependencies, macOS-only
-by charter); ffmpeg only if a need appears that afconvert can't meet. Bun was
+by charter); ffmpeg only if a need appears that afconvert can't meet.
+**Superseded 2026-08-07** — the charter stopped being macOS-only, so
+"macOS-only by charter" stopped being free. `normalize` renders in
+field-audiod's own polyphase resampler as of
+[render-pipeline.md](render-pipeline.md) chunk 5; ffmpeg was never
+needed. Bun was
 considered and rejected: boring wins for a decade-scale tool. Work lands as
 squash-merged PRs (the ruleset requires it), roughly one per coherent chunk.
 

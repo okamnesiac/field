@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { eqBandSchema, eqParams, limitParams, reverbParams } from '../src/schema/effects.js';
 import { sampleRate } from '../src/schema/common.js';
+import { normalizeSoundSchema } from '../src/schema/sounds.js';
 
 // Emits native/audiod/src/plan-limits.h from the zod schemas.
 //
@@ -75,6 +76,13 @@ const rates = (z.toJSONSchema(sampleRate) as { anyOf: { const: number }[] }).any
   (entry) => entry.const,
 );
 lines.push(`constexpr int sampleRates[] = { ${rates.join(', ')} };`);
+
+// normalize's bit depths, read the same way. An enumerated set rather
+// than a range, so the daemon needs the members and not bounds.
+const depths = (
+  z.toJSONSchema(normalizeSoundSchema.shape.bit_depth) as { anyOf: { const: number }[] }
+).anyOf.map((entry) => entry.const);
+lines.push(`constexpr int bitDepths[] = { ${depths.join(', ')} };`);
 
 const header = `#pragma once
 

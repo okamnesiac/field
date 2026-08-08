@@ -38,4 +38,13 @@ void writeWavFloat32 (const std::string& path,
                       double sampleRate,
                       const std::vector<std::vector<float>>& channels);
 
+// Integer PCM, 16 or 24 bit — what `normalize` emits for those targets.
+// Expects samples already on the quantization grid (dsp::ditherTo), so
+// the conversion here is exact and the dither stays visible in the DSP
+// rather than hidden in the file writer.
+void writeWavInt (const std::string& path,
+                  double sampleRate,
+                  const std::vector<std::vector<float>>& channels,
+                  int bitDepth);
+
 } // namespace field::dsp

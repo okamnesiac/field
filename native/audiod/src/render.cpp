@@ -3,6 +3,7 @@
 #include "dsp/biquad.h"
 #include "dsp/limiter.h"
 #include "dsp/mixdown.h"
+#include "dsp/resample.h"
 #include "dsp/reverb.h"
 #include "dsp/wavfile.h"
 #include "plan.h"
@@ -22,7 +23,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 2;
+constexpr int renderPlanVersion = 3;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -311,6 +312,25 @@ std::string runRender (const std::string& planPath)
         else if (op == "mix")
         {
             renderMix (plan, output, requireNumber (plan, "sample_rate", "render plan"));
+        }
+        else if (op == "normalize")
+        {
+            // normalize: rate and bit depth, and nothing else. The order
+            // matters and is the conventional one — resample in full
+            // precision, then quantize once, at the end. Quantizing first
+            // would put the dither through the resampler's filter, which
+            // both colours it and defeats the point of dithering at all.
+            auto wav = dsp::readWav (requireString (plan, "input", "render plan"));
+            const double rate = requireNumber (plan, "sample_rate", "render plan");
+            const int bitDepth = (int) requireNumber (plan, "bit_depth", "render plan");
+
+            auto channels = dsp::resample (wav.channels, wav.sampleRate, rate);
+            dsp::ditherTo (channels, bitDepth);
+
+            if (bitDepth == 32)
+                dsp::writeWavFloat32 (output, rate, channels);
+            else
+                dsp::writeWavInt (output, rate, channels, bitDepth);
         }
         else
         {

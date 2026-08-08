@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunks 1–4 shipped (#50, #53, #54, #55), chunk 2 carrying
-most of chunk 6 with it; chunk 5 is all that remains. Written after
+**Status:** Shipped, chunks 1–6 (#50, #53, #54, #55 and chunk 5 here),
+chunk 2 having carried most of chunk 6 with it. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -638,6 +638,28 @@ most memory-bound of the three effects.
    three a resampler alone would have freed. It also leaves bloom's
    `lead-vocal` without a source until the generated-voice tier ships;
    that gap is recorded rather than glossed.
+
+   **Shipped.** `normalize` renders through `op: "normalize"`; the probe
+   file `src/testing/platform.ts` is gone along with both capability
+   checks, and nothing in the build shells out to a macOS binary any
+   more. `RENDER_PLAN_VERSION` is 3.
+
+   **This is the one rule whose output is not byte-identical to what it
+   replaced**, and the difference is structural rather than incidental:
+   every other chunk transliterated a TypeScript reference and could
+   prove equality against it, while this one displaced a macOS binary
+   there was never any way to diff against. So `normalize`'s
+   `rule_version` goes to 2 and its artifacts re-render once — the cost
+   chunks 2 and 3 priced and did not incur, arriving here instead.
+
+   With no oracle, the properties are the whole specification, so they
+   were mutation-tested before being believed. Filtering at the input
+   Nyquist instead of the lower of the two — the JUCE failure mode from
+   decision 9 — folds a 30 kHz tone into a 44.1 kHz file at 14.1 kHz and
+   **0 dB**, which the aliasing property catches and nothing else does.
+   Removing the dither leaves a sub-LSB signal quantizing to digital
+   black, which one other property catches and nothing else does. Both
+   times the remaining five stayed green.
 6. **Byte-identity established rather than asserted** — mostly done in
    chunk 2, and not the way this described. `-ffp-contract=off` is in the
    daemon's compile options, and a golden fixture in

@@ -133,9 +133,11 @@ variants are committed under `audio/<sound>/`, and its label resolves
 to the chosen variant (`field choose` repoints it; clips reference the
 sound by name and follow).
 
-- **`normalize`** — sample-rate/bit-depth conversion via macOS
-  `afconvert`. `source:` is any committed or buildable name (verified
-  against its declaration before the generator executes).
+- **`normalize`** — sample-rate/bit-depth conversion in the daemon's
+  built-in tier: a fixed-ratio polyphase resampler and TPDF dither
+  (projects/all/render-pipeline.md decisions 9 and 10), replacing macOS
+  `afconvert` in chunk 5. `source:` is any committed or buildable name
+  (verified against its declaration before the generator executes).
 - **`supercollider`** — a SuperCollider program defines the sound,
   rendered offline via scsynth's NRT mode. `source:` names the program —
   a bare filename resolves in `shared/instruments/`, a slashed path is

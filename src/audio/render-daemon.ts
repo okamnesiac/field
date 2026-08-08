@@ -35,11 +35,11 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 2;
+export const RENDER_PLAN_VERSION = 3;
 
 export class RenderUnavailableError extends Error {}
 
-// The three shapes the daemon renders, discriminated on `op` exactly as
+// The four shapes the daemon renders, discriminated on `op` exactly as
 // the rules are. Each carries the schema's own objects verbatim — inserts,
 // placed clips, faders — so `src/schema/` and `stem.ts`'s `PlacedClip`
 // stay the wire format and there is no translation layer to drift.
@@ -76,7 +76,19 @@ export interface MixPlan {
   loop?: boolean;
 }
 
-export type RenderPlan = EffectsPlan | StemPlan | MixPlan;
+// normalize is the odd one out: it converts rather than processes, so it
+// carries no chain and takes its rate from the plan instead of from the
+// input file. Both are enforced in the validator rather than only here
+// (render-pipeline.md decision 9).
+export interface NormalizePlan {
+  op: 'normalize';
+  input: string;
+  output: string;
+  sample_rate: number;
+  bit_depth: 16 | 24 | 32;
+}
+
+export type RenderPlan = EffectsPlan | StemPlan | MixPlan | NormalizePlan;
 
 // Resolved per call rather than cached: the binary can be built partway
 // through a session, and a stale "missing" answer would outlive it.

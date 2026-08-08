@@ -154,6 +154,36 @@ describe.skipIf(!binary)('render subprocess', () => {
     expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('5db5d230ea9f55016dad4d135d5d0d93b58203d92f2a321e14a0d0fe1793d262');
   });
 
+  it('renders a normalize to the same bytes on every platform', async () => {
+    // The resampler's cross-platform lock, and it is doing more work than
+    // the other goldens: designing the prototype calls libm `sin` several
+    // thousand times, and every one of those has to agree between Apple's
+    // libm and glibc or this digest moves on one job and not the other
+    // (§4). Downsampling on purpose — 96k to 44.1k is the direction with
+    // the anti-alias filter actually engaged — and 24-bit so the dither
+    // sequence is in the bytes too.
+    const input = join(dir, 'in96.wav');
+    const output = join(dir, 'norm.wav');
+    const n = 96000;
+    const left = new Float32Array(n);
+    const right = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      left[i] = 0.6 * Math.sin((2 * Math.PI * 997 * i) / 96000) + 0.2 * Math.sin((2 * Math.PI * 31000 * i) / 96000);
+      right[i] = 0.4 * Math.sin((2 * Math.PI * 1500 * i) / 96000);
+    }
+    writeWavFloat32(input, 96000, [left, right]);
+
+    await renderInsertChain({
+      op: 'normalize',
+      input,
+      output,
+      sample_rate: 44100,
+      bit_depth: 24,
+    });
+
+    expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('df49c4806bed239689092dee3cc07356f8095cbbed2f4bbe9ade837630a3b1c5');
+  });
+
   it('refuses a clip naming an input that is not there', async () => {
     // Shipped as a silent skip and caught in review (#54): the clip was
     // dropped, the render exited 0, and the result cached under an action
@@ -365,6 +395,14 @@ describe.skipIf(!binary)('render subprocess', () => {
       ['zero decay', fx([{ effect: 'reverb', mix: 0.3, decay: 0, predelay_ms: 0, damping: 0.5 }]), /decay: out of range/],
       ['nine bands', fx([{ effect: 'eq', normalize: true, bands: Array.from({ length: 9 }, () => band()) }]), /must hold 1–8 bands/],
       ['unsupported sample rate', { ...stem, sample_rate: 12345, clips: [clip()] }, /is not a rate this project supports/],
+      // normalize takes rate and depth and nothing else. The depth set is
+      // generated from zod like the rate set is (#54's rule: a partial
+      // copy of a schema is itself schema drift), and a chain here would
+      // describe processing this op does not do.
+      ['normalize depth off the set', { op: 'normalize', input, output, sample_rate: RATE, bit_depth: 20 }, /is not a depth normalize can write/],
+      ['normalize rate off the set', { op: 'normalize', input, output, sample_rate: 12345, bit_depth: 16 }, /is not a rate this project supports/],
+      ['normalize missing bit_depth', { op: 'normalize', input, output, sample_rate: RATE }, /bit_depth: is required/],
+      ['normalize carrying a chain', { op: 'normalize', input, output, sample_rate: RATE, bit_depth: 16, inserts: [] }, /inserts: is not a field this field-audiod knows/],
       ['zero-length clip', { ...stem, clips: [clip({ duration: 0 })] }, /duration: out of range/],
       ['fractional fade', { ...stem, clips: [clip({ fade_in: 1.5 })] }, /fade_in: expected an integer/],
       ['fades exceeding the clip', { ...stem, clips: [clip({ fade_in: 5, fade_out: 5 })] }, /fades total 10 samples/],

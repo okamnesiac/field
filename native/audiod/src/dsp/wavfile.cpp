@@ -1,9 +1,12 @@
 #include "wavfile.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 
 namespace field::dsp
 {
@@ -151,6 +154,79 @@ WavData readWav (const std::string& path)
     }
 
     return result;
+}
+
+// Integer PCM out, for `normalize`'s 16- and 24-bit targets. A plain
+// 16-byte fmt chunk with no fact chunk, which is what PCM wants and what
+// the reader above already accepts.
+//
+// Samples are expected to sit on the quantization grid already —
+// dsp::ditherTo puts them there — so the scale-and-round here is exact
+// rather than a second, undithered quantization. Rounding anyway (not
+// truncating) means a sample that arrives slightly off-grid lands on the
+// nearest step instead of drifting a whole LSB toward zero.
+void writeWavInt (const std::string& path,
+                  double sampleRate,
+                  const std::vector<std::vector<float>>& channels,
+                  int bitDepth)
+{
+    if (channels.empty())
+        throw std::runtime_error ("writeWavInt needs at least one channel");
+    if (bitDepth != 16 && bitDepth != 24)
+        throw std::runtime_error ("writeWavInt: unsupported bit depth "
+                                  + std::to_string (bitDepth));
+    const size_t frames = channels[0].size();
+    for (const auto& channel : channels)
+        if (channel.size() != frames)
+            throw std::runtime_error ("writeWavInt channels must have equal lengths");
+
+    const uint16_t count = (uint16_t) channels.size();
+    const uint32_t rate = (uint32_t) sampleRate;
+    const size_t width = (size_t) bitDepth / 8u;
+    const size_t dataSize = frames * count * width;
+
+    std::vector<uint8_t> buf (12 + 8 + 16 + 8 + dataSize, 0);
+    size_t at = 0;
+    putTag (buf, at, "RIFF");
+    putU32 (buf, at + 4, (uint32_t) (buf.size() - 8));
+    putTag (buf, at + 8, "WAVE");
+    at += 12;
+    putTag (buf, at, "fmt ");
+    putU32 (buf, at + 4, 16);
+    putU16 (buf, at + 8, formatPcm);
+    putU16 (buf, at + 10, count);
+    putU32 (buf, at + 12, rate);
+    putU32 (buf, at + 16, (uint32_t) (rate * count * width)); // byte rate
+    putU16 (buf, at + 20, (uint16_t) (count * width)); // block align
+    putU16 (buf, at + 22, (uint16_t) bitDepth);
+    at += 8 + 16;
+    putTag (buf, at, "data");
+    putU32 (buf, at + 4, (uint32_t) dataSize);
+    at += 8;
+
+    const double scale = std::pow (2.0, (double) (bitDepth - 1));
+    const double low = -scale;
+    const double high = scale - 1.0;
+
+    for (size_t frame = 0; frame < frames; ++frame)
+    {
+        for (uint16_t ch = 0; ch < count; ++ch)
+        {
+            const double v = (double) channels[ch][frame] * scale;
+            const long q = (long) std::max (low, std::min (high, std::floor (v + 0.5)));
+            const uint32_t raw = (uint32_t) (int32_t) q;
+            for (size_t b = 0; b < width; ++b)
+                buf[at + b] = (uint8_t) ((raw >> (8u * b)) & 0xffu);
+            at += width;
+        }
+    }
+
+    std::ofstream out (path, std::ios::binary | std::ios::trunc);
+    if (! out)
+        throw std::runtime_error (path + ": cannot open for writing");
+    out.write ((const char*) buf.data(), (std::streamsize) buf.size());
+    if (! out)
+        throw std::runtime_error (path + ": write failed");
 }
 
 void writeWavFloat32 (const std::string& path,

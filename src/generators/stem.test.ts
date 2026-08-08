@@ -11,7 +11,6 @@ import type { GeneratorRunner } from '../graph/build.js';
 import { loadProject } from '../model/project.js';
 import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
-import { hasAfconvert } from '../testing/platform.js';
 import { placedWindow, planTrack, stemGenerator, type PlacedClip } from './stem.js';
 
 // 120 bpm at 48 kHz: one beat = 960 ticks = 0.5 s = 24000 samples.
@@ -572,7 +571,7 @@ describe('clips over rule outputs', () => {
     );
   });
 
-  it.skipIf(!hasAfconvert)(
+  it(
     'builds the whole recipe chain: asset → target → stem, with real rules',
     async () => {
       expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
