@@ -204,7 +204,14 @@ an automatic type instead.)
 
 Concretely: `field generate <name> --song <song> --prompt …` runs the
 model through its worker and writes `songs/<song>/sounds/<name>.yaml`
-plus numbered variant WAVs under `audio/<name>/`. The sound is a
+plus numbered variant WAVs under `audio/<name>/`. One verb covers both
+generators: `--prompt` is music, through field-aced, and `--text` is a
+voice line, through field-voiced — the recipe's `model:` records which
+one ran, and its flags are the ones its kind takes (a voice line has no
+`--bars`, because its length follows from the text). A voice line may
+name the committed recording that defines its voice with `--voice-ref
+<asset>`, recorded as a name *and* the hash of the bytes read, or omit
+it for the model's own voice. The sound is a
 schema-validated project file — `field check` verifies variant hashes,
 `field fmt` covers it — and each variant auditions as
 `//songs/<song>/sound:<name>-<n>` via `field play`. `field choose

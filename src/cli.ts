@@ -95,12 +95,12 @@ sc.command('render <program>')
 // (project-layout.md §1.7): the recipe's model field says which generator
 // ran, so the verbs carry no model prefix.
 program
-  .command('setup')
+  .command('setup [worker]')
   .description('set up generation worker environments (uv; explicit, never automatic)')
-  .action(async () => {
+  .action(async (worker: string | undefined) => {
     try {
       const { setupWorker } = await import('./commands/generate.js');
-      await setupWorker((line) => process.stdout.write(`${line}\n`));
+      await setupWorker((line) => process.stdout.write(`${line}\n`), worker);
     } catch (err) {
       fail(err);
     }
@@ -108,34 +108,45 @@ program
 program
   .command('generate <name>')
   .description('run a deliberate generator: variants land in songs/<song>/audio/<name>/ with the recipe as a sound')
-  .requiredOption('--song <name>', 'song whose tempo map projects musical time')
-  .requiredOption('--prompt <text>', 'what to generate')
+  .requiredOption('--song <name>', 'song the sound belongs to (its tempo map projects --bars)')
+  .option('--prompt <text>', 'what to generate — music, through field-aced')
+  .option('--text <line>', 'the line to speak or sing — voice, through field-voiced')
   .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
-  .option('--bars <n>', 'length in bars at the song tempo (or use --duration)', parseBars)
-  .option('--duration <seconds>', 'length in seconds (or use --bars)', parseDurationSeconds)
+  .option('--bars <n>', 'music: length in bars at the song tempo (or use --duration)', parseBars)
+  .option('--duration <seconds>', 'music: length in seconds (or use --bars)', parseDurationSeconds)
   .option('--variants <n>', 'how many variants (1-8)', parseVariants, 2)
-  .option('--lyrics <text>', 'lyrics (omit for instrumental)')
-  .option('--bpm <n>', 'override the tempo-map bpm hint', parseBpm)
+  .option('--lyrics <text>', 'music: lyrics (omit for instrumental)')
+  .option('--bpm <n>', 'music: override the tempo-map bpm hint', parseBpm)
+  .option('--voice-ref <asset>', "voice: the committed recording that defines the voice (omit for the model's own)")
   .action(async (name: string, opts: {
-    song: string; prompt: string; seed: number; bars?: number; duration?: number;
-    variants: number; lyrics?: string; bpm?: number;
+    song: string; prompt?: string; text?: string; seed: number; bars?: number; duration?: number;
+    variants: number; lyrics?: string; bpm?: number; voiceRef?: string;
   }) => {
     try {
       const { generateVariants } = await import('./commands/generate.js');
       const result = await generateVariants(requireRoot(), name, {
         song: opts.song,
         prompt: opts.prompt,
+        text: opts.text,
         seed: opts.seed,
         bars: opts.bars,
         durationSeconds: opts.duration,
         variants: opts.variants,
         lyrics: opts.lyrics,
         bpm: opts.bpm,
+        voiceRef: opts.voiceRef,
         onProgress: (stage) => process.stdout.write(`… ${stage}\n`),
       });
+      // A voice line has no requested length to report; what it has is
+      // the voice it was generated in, which is either a committed
+      // recording or the model's own (voice-generation.md §6).
+      const detail =
+        result.durationSeconds !== undefined
+          ? `${result.durationSeconds.toFixed(1)}s` +
+            `${result.bpm !== undefined ? ` @ ${result.bpm} bpm` : ''}, `
+          : `voice: ${result.voiceRef ?? "the model's own"}, `;
       process.stdout.write(
-        `generated ${result.files.length} variants (${result.durationSeconds.toFixed(1)}s` +
-          `${result.bpm !== undefined ? ` @ ${result.bpm} bpm` : ''}, ${result.model})\n`,
+        `generated ${result.files.length} variants (${detail}${result.model})\n`,
       );
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);

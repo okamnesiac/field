@@ -2,8 +2,10 @@
 
 **Status:** In flight (2026-08-07). Designed and recorded ahead of the
 build (2026-08-06), then queued behind other work until `say`'s removal
-made it the thing bloom needs. Chunk 1's schema slice has shipped; the
-worker and the CLI are next, and chunk 2 is unstarted. Written before
+made it the thing bloom needs. Chunk 1 is complete — schema (#58),
+worker lifecycle (#59), `field-voiced` (#60), CLI seam (#61) — and
+nothing here has yet loaded the model: chunk 2 is the first real
+generation. Written before
 [project-layout.md](project-layout.md) §4: where this plan says
 `generation/<name>.yaml` and recipe fields, read a `generate` sound in
 `sounds/<name>.yaml` (`type:`/`source:` spellings, §4.3), with choosing
@@ -84,8 +86,9 @@ waiting on.
 1. `field-voiced` worker (Chatterbox behind the job-spec protocol) +
    `field generate` support + recipe/schema growth + tests. The CLI name
    is §4's settled one, not the `field voice generate` this said before
-   that question was answered. **Schema slice shipped (#58)**; the worker
-   lifecycle it builds on shipped separately (#59).
+   that question was answered. **Shipped** across four pull requests: the
+   schema (#58), the worker lifecycle it builds on (#59), the worker
+   itself (#60), and the CLI seam (#61, §7).
 2. bloom: record/pick a reference voice, generate creek's line, choose,
    clip; vault the milestone.
 
@@ -181,3 +184,49 @@ not reproduce.
 0.1.7 resolves from PyPI in about a second, 126 packages, pulling
 torch/torchaudio/transformers. §1.5's "Chatterbox first" stands on
 something better than a reading of its README now.
+
+## 7 The CLI seam as built (2026-08-07)
+
+§4 answered "which verb" and left the rest of the seam to whoever built
+it. Three things the building settled.
+
+**The kind split is checked before anything spawns.** The recipe schema
+already rejects a voice recipe carrying `duration_seconds` (§6), but it
+does so on the way to disk — after the model has run. `field generate`
+states the same rules in flag vocabulary (`--bars is a music option`)
+and states them first, alongside the namespace pre-flight that was
+already there for the same reason: a refusal that costs model minutes is
+a worse refusal.
+
+**`voice_ref` resolves through the project model's own lookup, not a
+copy of it.** Both #58 review findings were two readings of "which asset
+is this" disagreeing — a name resolved in the wrong namespace, and a
+hash that pinned nothing — so there is one reading now (`lookupAsset`),
+used by validate to diagnose a ref, by `verifyAssetHashes` to compare
+its hash, and by `generate` to turn it into the path the worker reads.
+The per-song scoping that #58 fixed on the verify side is the same
+function on the write side, rather than the same rule written twice.
+
+**A written hash is the hash of the bytes that were read.** This is the
+first code in field that writes a content hash into a committed file
+rather than checking one somebody else wrote, so the discipline is worth
+naming: `generate` hashes the recording it is about to hand the model,
+and refuses outright if that disagrees with the ledger. Recording the
+*ledger's* value instead would have been one line shorter and would have
+left a check-green recipe describing bytes the model never heard — the
+refusal `field choose` already makes about a drifted variant, for the
+same reason.
+
+**Tested through a stub worker** (`src/testing/stub-worker.mjs`), which
+the `FIELD_*_PYTHON` override lets stand in for a daemon: the real
+client, real socket, real framing, no model. It observes what `generate`
+*sends* and what it *writes*, while the live-daemon tests observe the
+protocol itself — so neither test is asserting against its own fixture.
+Every property above was checked by mutation; the one surviving mutant
+was equivalent (an explicit `undefined` that `JSON.stringify` drops).
+
+**Still unproven, and deliberately so:** none of this has loaded
+Chatterbox. Everything that can be verified without weights is, and what
+remains — that the model produces audio, at 24 kHz, needing a
+`normalize` wrapper at the project rate — is chunk 2's first act rather
+than something this section can claim.
