@@ -196,7 +196,25 @@ second supported product.
    tests move. The minutes argument above is untouched and still the
    reason for the split — it is the *native build* that costs, which is
    why the Linux job carries typecheck, `pyright` and the fast gate.
-   Running everything on macOS is also the right default for the
+   **Retired 2026-08-08.** There is no macOS job. The 3,000 included
+   minutes are 300 macOS minutes at the 10x rate, and the amendment
+   above had that job running a test set *identical* to Linux's — `say`
+   and `afconvert` retired in [render-pipeline.md](render-pipeline.md)
+   chunk 5 and took the last platform-bound cases with them, so the
+   split's original premise ("guard by what a test needs") no longer
+   selects anything. What remained was paying 10x to run the same tests
+   against a CoreAudio build of the daemon.
+
+   What that gives up, and it is real: nobody compiles `native/audiod`
+   against CoreAudio in CI, so a break in a `JUCE_MAC` branch — the Core
+   Audio property listeners in `player.cpp` are the only ones — reaches
+   main unnoticed. The cover is that development happens on macOS, so a
+   local `pnpm build:native` is the gate. That is weaker than a runner,
+   and it is the trade rather than an oversight. If it bites, the cheap
+   fix is a `workflow_dispatch`-only macOS job: zero minutes until
+   someone asks for it.
+
+   Running everything on macOS was also the right default for the
    platform the product ships on (overview.md "V1 platform scope"):
    giving the product platform partial coverage is the wrong way round.
 
@@ -244,10 +262,11 @@ null-output mode; and CI runs both jobs, with Linux carrying typecheck,
 builds and plays on macOS with the same audible result.
 
 Not "the macOS job runs only what needs macOS", which is what this
-section asked for before the job was built: decision 4's amendment runs
-the whole suite there, because the suite is 12.4s against a job
-dominated by the native build and macOS is the platform the product
-ships on.
+section asked for before the job was built: decision 4's amendment ran
+the whole suite there instead, and decision 4's retirement removed the
+job altogether once that suite became identical to Linux's. The
+portability claim it verified is now carried locally rather than by a
+runner.
 
 Byte-identical cross-platform rendering was part of this plan's
 definition of done and is now [render-pipeline.md](render-pipeline.md)
