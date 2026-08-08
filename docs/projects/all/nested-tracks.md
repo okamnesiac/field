@@ -253,11 +253,13 @@ point of this is that it no longer has to.
 14. **Tracks, not channels (2026-08-08).** *Rejected: renaming everything
     to `channel`*, which was seriously considered and lost on two counts.
 
-    `channel` is already taken: it means L/R throughout the audio layer —
-    37 sites in TypeScript and 105 in the daemon (`wav.channels[0]`,
-    "mono or stereo only"). The layers barely meet, so this is a cost
-    rather than a blocker, but it is a cost paid in exactly the place
-    error messages are read.
+    `channel` is already taken: it means L/R throughout the audio layer
+    (`wav.channels[0]`, "mono or stereo only"). Re-derive the scale rather
+    than trusting a figure written down once —
+    `git grep -cw -e channel -e channels -- src native/audiod/src` reported
+    141 lines under `src/` and 104 under the daemon when this was written.
+    The layers barely meet, so this is a cost rather than a blocker, but it
+    is a cost paid in exactly the place error messages are read.
 
     The argument *for* it was that `track` means something specific to
     producers, so "everything is a track" asks them to unlearn. That holds
