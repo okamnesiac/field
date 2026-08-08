@@ -69,10 +69,6 @@ export const clipOrder: KeyOrder = {
   },
 };
 
-// songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
-// is the identity (project-core.md §6). gain_db and pan are mix-stage
-// parameters: stems render pre-fader, the mix rule applies them while
-// summing (mix-assembly.md §3), so a fader nudge never rebuilds a stem.
 // A child track placed in this one (nested-tracks.md §1.3). The time
 // lives on the *reference*, not on the track, so one definition can be
 // placed more than once and in more than one parent — which is the whole
@@ -92,6 +88,10 @@ export const trackInputSchema = z.strictObject({
   // it — which is the placement truncating explicitly, never the parent
   // truncating implicitly (§1.6).
   duration: timeSpan.optional(),
+  // The placement's level, not the child's fader, and the two are applied
+  // in different places: this one is baked into the parent's stem while it
+  // sums, so nudging it *does* re-render the parent. The child's own
+  // gain_db is the mix-stage parameter that does not (see trackSchema).
   gain_db: z.number().default(0),
   fade_in: samples.default(0),
   fade_out: samples.default(0),
@@ -102,6 +102,10 @@ export type TrackInput = Omit<TrackInputFile, 'at' | 'duration'> & {
   duration?: number | undefined;
 };
 
+// songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
+// is the identity (project-core.md §6). gain_db and pan are mix-stage
+// parameters: stems render pre-fader, the mix rule applies them while
+// summing (mix-assembly.md §3), so a fader nudge never rebuilds a stem.
 export const trackSchema = z.strictObject({
   name: labelName,
   type: z.enum(['audio', 'midi']),
