@@ -13,11 +13,14 @@ on:
 #
 # What that gives up, stated plainly (linux-portability.md decision 4,
 # amended 2026-08-08): nobody compiles native/audiod against CoreAudio in
-# CI any more, so a break in a JUCE_MAC branch — the Core Audio property
-# listeners in player.cpp are the only ones — reaches main unnoticed. The
-# cover is that development happens on macOS, so `pnpm build:native`
-# locally is the real gate. That is a weaker guarantee than a runner and
-# it is the trade being made, not an oversight.
+# CI any more, so a break in a JUCE_MAC branch reaches main unnoticed.
+# There are six, in two files — the property listeners in player.cpp and
+# two declarations in player.h, one of which is
+# `hardwareListenersAvailable`, a platform-varying constant other code
+# branches on, so a break there can change behaviour rather than merely
+# fail to compile. The cover is that development happens on macOS, so
+# `pnpm build:native` locally is the real gate. That is a weaker
+# guarantee than a runner and it is the trade being made.
 #
 # `pnpm test` runs here — #46's stopgap dropped it entirely, and green
 # meaning "the tests ran" is the whole point.
