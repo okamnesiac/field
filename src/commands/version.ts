@@ -113,6 +113,36 @@ function helloIfRunning(
   });
 }
 
+// What is wrong with this daemon, in the order that matters: who it is,
+// then whether it answered, then whether it agrees. Identity first
+// because the other two are meaningless about a process that is not the
+// daemon we think — a worker on audiod's socket used to be reported as a
+// stale audiod, with `rebuild the daemon` as the remedy, which is
+// instruction rather than description and does not stop being printed
+// when someone follows it (#70 review).
+//
+// Shared rather than written per daemon: the worker loop and audiod had
+// drifted to different guards within one commit of each other.
+function daemonNote(
+  hello: Hello | undefined,
+  expected: { name: string; protocol: number; remedy: string },
+): string | undefined {
+  if (hello === undefined) return undefined;
+  if (hello.daemon !== undefined && hello.daemon !== expected.name) {
+    return (
+      `the process on this socket identifies as ${hello.daemon}, not ${expected.name} — ` +
+      `stale socket, or two daemons configured onto one path`
+    );
+  }
+  if (!hello.answered) return 'refused the hello';
+  if (hello.protocol !== undefined && hello.protocol !== expected.protocol) {
+    return (
+      `speaks protocol ${hello.protocol}, this CLI speaks ${expected.protocol} — ${expected.remedy}`
+    );
+  }
+  return undefined;
+}
+
 interface Hello {
   answered: boolean;
   version?: string | undefined;
@@ -132,18 +162,14 @@ export async function versionReport(root: string): Promise<VersionReport> {
     version: audiod?.version,
     protocol: audiod?.protocol,
     socket: AUDIOD_SOCKET,
-    // Compared against audiod's own number, never the workers'. They are
-    // unrelated counters — audiod is at 1 and the workers at 2 — and
-    // checking either against the other would invent a disagreement.
-    // Skipping audiod entirely was the alternative and the worse one:
-    // AudiodClient refuses a mismatch and `--watch` gates on the version
-    // separately, so a stale audiod is a real, enforced failure that
-    // printed here as a clean line (#70 review).
-    note:
-      audiod?.protocol !== undefined && audiod.protocol !== AUDIOD_PROTOCOL_VERSION
-        ? `speaks protocol ${audiod.protocol}, this CLI speaks ${AUDIOD_PROTOCOL_VERSION} — ` +
-          `rebuild the daemon (pnpm build:native)`
-        : undefined,
+    // Against audiod's own number, never the workers'. They are unrelated
+    // counters — audiod is at 1 and the workers at 2 — and checking
+    // either against the other would invent a disagreement.
+    note: daemonNote(audiod, {
+      name: 'field-audiod',
+      protocol: AUDIOD_PROTOCOL_VERSION,
+      remedy: 'rebuild the daemon (pnpm build:native)',
+    }),
   });
 
   // SETUP_SPECS, not a copy: #67 exported it to be the one list, and a
@@ -152,29 +178,18 @@ export async function versionReport(root: string): Promise<VersionReport> {
   // which is the one most likely to be skewed.
   for (const spec of SETUP_SPECS) {
     const hello = await helloIfRunning(socketPathFor(root, spec.socketRelative));
-    // Who answered, before what it said about itself. One socket
-    // convention across every worker means a stale or mis-pointed socket
-    // puts one worker's process under another's name — and a version
-    // report that mislabels the process is worse than one that says
-    // nothing (#70 review; the same check connectTo makes in #60).
-    const wrongDaemon =
-      hello?.daemon !== undefined && hello.daemon !== spec.name
-        ? `the process on this socket identifies as ${hello.daemon}, not ${spec.name} — ` +
-          `stale socket, or two workers configured onto one path`
-        : undefined;
-    const skewed =
-      hello?.protocol !== undefined && hello.protocol !== WORKER_PROTOCOL_VERSION
-        ? `speaks protocol ${hello.protocol}, this CLI speaks ${WORKER_PROTOCOL_VERSION} — ` +
-          `it predates this build and will refuse to be used`
-        : undefined;
-    const silent = hello !== undefined && !hello.answered ? 'refused the hello' : undefined;
+
     daemons.push({
       name: spec.name,
       running: hello !== undefined,
       version: hello?.version,
       protocol: hello?.protocol,
       socket: spec.socketRelative,
-      note: wrongDaemon ?? silent ?? skewed,
+      note: daemonNote(hello, {
+        name: spec.name,
+        protocol: WORKER_PROTOCOL_VERSION,
+        remedy: 'it predates this build and will refuse to be used',
+      }),
     });
   }
 

@@ -129,6 +129,29 @@ describe('field version', () => {
     expect(audiod.note).toBeUndefined();
   });
 
+  it('does not hand audiod a remedy for a process that is not audiod', async () => {
+    // The interaction, not the gap: put a worker on audiod's socket and
+    // the old code reported field-audiod at the worker's version, then
+    // measured the worker's protocol 2 against audiod's 1 and printed
+    // "rebuild the daemon (pnpm build:native)". Every part wrong, and
+    // instruction rather than description — someone rebuilds, nothing
+    // changes, and the report keeps saying it (#70 review).
+    await fakeDaemon('.field/audiod.sock', {
+      protocol: WORKER_PROTOCOL_VERSION,
+      daemon: 'field-voiced',
+      version: '0.1.0',
+    });
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    expect(audiod.note).toContain('identifies as field-voiced');
+    expect(audiod.note).not.toContain('rebuild the daemon');
+  });
+
+  it('does not report an audiod refusal as a healthy audiod', async () => {
+    await fakeDaemon('.field/audiod.sock', { ok: false, error: 'unknown op' });
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    expect(audiod.note).toContain('refused the hello');
+  });
+
   it('says when the wrong worker is on a socket', async () => {
     // One socket convention across every worker means a stale or
     // mis-pointed socket puts one worker's process under another's name.

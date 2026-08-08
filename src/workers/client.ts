@@ -2,9 +2,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
-import { dirname, join, relative, resolve } from 'node:path';
-import { socketPathFor as sharedSocketPath } from '../socketPath.js';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
   WORKER_PROTOCOL_VERSION,
