@@ -306,6 +306,38 @@ argument for *when*.
    understand** rather than rendering something plausible: unknown
    effect, unknown eq band type, missing field.
 
+   **Amended again (chunk 3, from an exhaustive audit).** Rejecting
+   unknown *values* was not enough, because the parser still failed open
+   on everything it had not been patched for: `juce::var` coerces freely,
+   so an object answered a number cast and `ceiling_db: {}` became a 0 dB
+   limiter; `version: 2.9` passed an exact gate by truncation; unknown
+   keys were ignored, which is the additive-field hazard this decision
+   names; an EQ with no bands rendered as a byte-identical no-op. An
+   audit of 263 mutations accepted 126 of them.
+
+   Worse, one was not a cache-integrity bug but a memory-safety one:
+   `start: -1` allocated for the clip's end and then indexed *before* the
+   output buffer, which AddressSanitizer confirms as a heap-buffer
+   overflow.
+
+   So the shape is now validated once, before dispatch
+   (`native/audiod/src/plan.cpp`), and the renderer downstream sees only a
+   plan already proven to match: types that reject coercion, allowed keys,
+   required and optional fields per `op` and per `effect`, collection
+   sizes, the domains where a bad value is unsafe rather than merely odd,
+   and the one cross-field rule (`loop` needs a length to fold onto).
+
+   Two lines drawn deliberately. It does **not** mirror zod's user-input
+   ranges — `frequency` within 10–24000 is zod's job on the way in, and
+   duplicating every bound is exactly the drift this is meant to prevent.
+   And `read_offset` stays unbounded, because reads outside a source are
+   declared silence: that is what slip *is*.
+
+   The lesson underneath five findings: a boundary is not made safe by
+   checking values where they are used. Four fixes at four use sites left
+   the fifth hole open, and the sixth was memory corruption. Validate the
+   shape once, at the edge, and let everything downstream assume it.
+
    The band type shipped broken and review caught it. `design()` returned
    an identity filter for a type it had never heard of, so a plan with a
    +12 dB band of a future type exited 0 and produced output byte-identical

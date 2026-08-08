@@ -5,6 +5,7 @@
 #include "dsp/mixdown.h"
 #include "dsp/reverb.h"
 #include "dsp/wavfile.h"
+#include "plan.h"
 
 #include <juce_core/juce_core.h>
 
@@ -267,8 +268,15 @@ std::string runRender (const std::string& planPath)
         if (! plan.isObject())
             return planPath + ": render plan is not a JSON object";
 
+        // Shape first, once, before anything reads a value (plan.h). The
+        // version check follows it so the message names a version rather
+        // than a type error, and `validatePlan` has already established
+        // that the field is a genuine integer — `version: 2.9` used to
+        // pass this gate by truncation.
+        validatePlan (plan);
+
         const auto version = plan.getProperty ("version", juce::var());
-        if (version.isVoid() || (int) version != renderPlanVersion)
+        if ((int) version != renderPlanVersion)
             return planPath + ": render plan version " + version.toString().toStdString()
                    + " but this field-audiod speaks " + std::to_string (renderPlanVersion)
                    + " — rebuild the daemon (pnpm build:native)";

@@ -46,6 +46,15 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
         if (sources[(size_t) clip.input].empty())
             throw std::runtime_error ("clip input " + std::to_string (clip.input)
                                       + " has no channels");
+        // Belt to the validator's braces, and unlike most such pairs this
+        // one earns its place: `start` and `duration` index the output
+        // buffer, so a negative reaching here is not a wrong render but a
+        // write outside the allocation. plan.cpp rejects it, and if a
+        // future parser change stops doing so, the consequence should be
+        // an error rather than memory corruption (#54 review, found with
+        // AddressSanitizer).
+        if (clip.start < 0 || clip.duration < 0)
+            throw std::runtime_error ("clip has negative start or duration");
         const auto& srcL = sources[(size_t) clip.input][0];
         const auto& srcR = rightOf (sources[(size_t) clip.input]);
         const double gain = std::pow (10.0, clip.gainDb / 20.0);

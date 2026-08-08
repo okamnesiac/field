@@ -173,7 +173,7 @@ describe.skipIf(!binary)('render subprocess', () => {
           { input: 1, start: 0, duration: 3, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0 },
         ],
       }),
-    ).rejects.toThrow(/clip names input 1 but the plan has 1/);
+    ).rejects.toThrow(/plan\.clips\[0\]\.input: out of range/);
   });
 
   it('still treats reads outside a source as silence, which is not the same thing', async () => {
@@ -209,13 +209,13 @@ describe.skipIf(!binary)('render subprocess', () => {
     };
     const stem = { op: 'stem', output: join(dir, 'out.wav'), sample_rate: RATE, inputs: [input] };
 
-    await expect(render(stem)).rejects.toThrow(/stem plan needs "clips" to be an array/);
+    await expect(render(stem)).rejects.toThrow(/plan\.clips: is required/);
     await expect(render({ ...stem, clips: 'nope' })).rejects.toThrow(
-      /stem plan needs "clips" to be an array/,
+      /plan\.clips: expected an array/,
     );
     await expect(
       render({ op: 'mix', output: join(dir, 'out.wav'), sample_rate: RATE, inputs: [], gain_db: 0 }),
-    ).rejects.toThrow(/mix plan needs "faders" to be an array/);
+    ).rejects.toThrow(/plan\.faders: is required/);
   });
 
   it('still renders a stem with an explicitly empty clip list', async () => {
@@ -263,23 +263,69 @@ describe.skipIf(!binary)('render subprocess', () => {
 
     // effects: `inserts` is required, so absent is already wrong.
     await expect(render({ op: 'effects', input, output })).rejects.toThrow(
-      /effects plan needs "inserts" to be an array/,
+      /plan\.inserts: is required/,
     );
     await expect(render({ op: 'effects', input, output, inserts: 'nope' })).rejects.toThrow(
-      /effects plan needs "inserts" to be an array/,
+      /plan\.inserts: expected an array/,
     );
     // stem and mix: optional, so present-but-wrong is the failure.
     await expect(render({ ...stem, inserts: 5 })).rejects.toThrow(
-      /stem plan needs "inserts" to be an array/,
+      /plan\.inserts: expected an array/,
     );
     await expect(render({ ...mix, master: { effect: 'limit' } })).rejects.toThrow(
-      /mix plan needs "master" to be an array/,
+      /plan\.master: expected an array/,
     );
 
     // …and omitting an optional chain entirely still renders, which is
     // what keeps insert-less stems on their pre-inserts action keys.
     await render(stem);
     await render(mix);
+  });
+
+  it('rejects the whole malformed-plan matrix before rendering anything', async () => {
+    // The audit that found this class ran 263 mutations and 126 were
+    // accepted (#54 review). These are the shapes it named, and they all
+    // now fail in `plan.cpp` before a value is read — which is the point
+    // of validating once rather than at each use site.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(64)]);
+    const output = join(dir, 'out.wav');
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const clip = (over: Record<string, unknown> = {}) => ({
+      input: 0, start: 0, duration: 4, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0, ...over,
+    });
+    const stem = { op: 'stem', output, sample_rate: RATE, inputs: [input] };
+    const mix = {
+      op: 'mix', output, sample_rate: RATE, inputs: [input],
+      faders: [{ gain_db: 0, pan: 0 }], gain_db: 0,
+    };
+
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      // Memory safety: a negative start indexed before the allocation.
+      ['negative start', { ...stem, clips: [clip({ start: -1, duration: 5 })] }, /start: out of range/],
+      ['negative duration', { ...stem, clips: [clip({ duration: -4 })] }, /duration: out of range/],
+      // Truncation past an "exact" version gate.
+      ['fractional version', { ...stem, version: 2.9, clips: [] }, /version: expected an integer/],
+      // juce::var coercion: objects, strings and bools answering casts.
+      ['object as number', { ...stem, clips: [clip({ duration: {} })] }, /duration: expected an integer/],
+      ['object as rate', { ...stem, sample_rate: {}, clips: [] }, /sample_rate: expected an integer/],
+      ['numeric string', { ...stem, clips: [clip({ gain_db: '3' })] }, /gain_db: expected a number/],
+      // Additive fields the binary does not know.
+      ['unknown plan field', { ...stem, clips: [clip()], future_mode: true }, /future_mode: is not a field/],
+      // Cardinality and cross-field state.
+      ['empty eq bands', { op: 'effects', input, output, inserts: [{ effect: 'eq', normalize: true, bands: [] }] }, /bands: must have at least one band/],
+      ['negative length', { ...mix, length_samples: -1 }, /length_samples: out of range/],
+      ['loop without length', { ...mix, loop: true }, /loop: needs "length_samples"/],
+      ['clip input out of range', { ...stem, clips: [clip({ input: 1 })] }, /input: out of range/],
+    ];
+
+    for (const [name, plan, expected] of cases) {
+      await expect(render(plan), name).rejects.toThrow(expected);
+    }
   });
 
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
@@ -319,7 +365,7 @@ describe.skipIf(!binary)('render subprocess', () => {
           } as unknown as never,
         ],
       }),
-    ).rejects.toThrow('unknown eq band type');
+    ).rejects.toThrow(/plan\.inserts\[0\]\.bands\[0\]\.type: unknown band type/);
   });
 
   it('refuses a plan version it does not speak', async () => {
@@ -353,7 +399,7 @@ describe.skipIf(!binary)('render subprocess', () => {
         output: join(dir, 'out.wav'),
         inserts: [{ effect: 'limit', ceiling_db: -1 } as unknown as never],
       }),
-    ).rejects.toThrow(/limit insert is missing/);
+    ).rejects.toThrow(/plan\.inserts\[0\]\.lookahead_ms: is required/);
   });
 
   it('refuses an insert it does not know instead of dropping it', async () => {
@@ -371,6 +417,6 @@ describe.skipIf(!binary)('render subprocess', () => {
         // binary. Cast because the schema cannot express one.
         inserts: [{ effect: 'chorus' } as unknown as never],
       }),
-    ).rejects.toThrow('unknown insert effect');
+    ).rejects.toThrow(/plan\.inserts\[0\]\.effect: unknown insert effect/);
   });
 });
