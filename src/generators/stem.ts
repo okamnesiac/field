@@ -1,6 +1,6 @@
 import { renderInsertChain } from '../audio/render-daemon.js';
 import { readWavHeader } from '../audio/wav.js';
-import type { Clip, Insert, Track } from '../schema/index.js';
+import type { Clip, Insert, Track, TrackInput } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
 
@@ -17,7 +17,18 @@ import type { Generator } from './types.js';
 export interface PlacedClip {
   input: number; // index into spec.sources
   start: number; // stem sample where the clip window begins
-  duration: number; // window length in samples
+  // Window length in samples. Absent means "as long as the input is" —
+  // the placement plays its whole source and truncates nothing
+  // (nested-tracks.md §1.6: a container never truncates, a placement may,
+  // and an omitted duration is the placement declining to). Only a placed
+  // track can omit it: a clip's source is committed content whose length
+  // validate can read, while a child track's render length is unknowable
+  // at plan time — a reverb insert grows a stem past its last clip end.
+  // execute() resolves it from the rendered input, after the child is
+  // built and before the daemon sees a plan. Staying out of the action
+  // key is correct rather than convenient: the child's content hash is
+  // already an input, so "the whole of it" re-keys when its length moves.
+  duration?: number;
   // Sample of the asset playing at the window start (source_offset − slip,
   // project-core.md §3.2). May be negative or run past the asset's end:
   // out-of-range reads are silence — slipping never errors.
@@ -25,6 +36,37 @@ export interface PlacedClip {
   gain_db: number;
   fade_in: number; // samples, linear, from the window start
   fade_out: number; // samples, linear, to the window end
+}
+
+// What the daemon renders: every window resolved to a length. The two
+// types are deliberately distinct — `duration?` is a fact about a *plan*,
+// and letting it reach the wire would make the daemon's job conditional
+// on something the control plane is supposed to have already decided.
+export type RenderedClip = Omit<PlacedClip, 'duration'> & { duration: number };
+
+// A track implies a stem where it has audio to render (mix-assembly.md
+// §3). Clips were the only content until tracks could contain tracks, so
+// a track with children and no clips of its own is now just as renderable
+// — a bus, in the vocabulary nested-tracks.md §1.1 declines to make a
+// type. One predicate, because validate and the graph asking this
+// question differently is how a check-clean project fails to build.
+export function renderableTrack(track: Track): boolean {
+  return track.type === 'audio' && (track.clips.length > 0 || track.inputs.length > 0);
+}
+
+// How a placed track is spelled in `sources`. Tracks are not in the
+// song's one namespace (project-layout.md §4.3) — a track and a sound may
+// share a name — so a bare slug would be ambiguous exactly where wiring
+// must not be. The prefix cannot collide with a source ref: bare refs are
+// slugs, which have no colon, and the only other spelling is
+// //shared/asset:. Nothing here reaches an action key — `sources` is
+// wiring, so the spelling is free and only the resulting order matters.
+const TRACK_REF_PREFIX = 'track:';
+export function trackRef(name: string): string {
+  return `${TRACK_REF_PREFIX}${name}`;
+}
+export function trackRefName(ref: string): string | undefined {
+  return ref.startsWith(TRACK_REF_PREFIX) ? ref.slice(TRACK_REF_PREFIX.length) : undefined;
 }
 
 export interface StemSpec {
@@ -56,6 +98,24 @@ export function placedWindow(clip: Clip, tempoMap: TempoMap): { start: number; d
   return { start, duration: tempoMap.ticksToSamples(clip.position + clip.duration) - start };
 }
 
+// A placed track's window, projected the same way — the child's origin
+// lands at `at`, and a declared duration measures from there so a
+// placement spanning a tempo ramp gets its true sample length. An omitted
+// duration stays omitted all the way to execute(); see PlacedClip.
+export function placedInput(
+  input: TrackInput,
+  tempoMap: TempoMap,
+): { start: number; duration?: number } {
+  if (input.anchor === 'absolute') {
+    return input.duration === undefined
+      ? { start: input.at }
+      : { start: input.at, duration: input.duration };
+  }
+  const start = tempoMap.ticksToSamples(input.at);
+  if (input.duration === undefined) return { start };
+  return { start, duration: tempoMap.ticksToSamples(input.at + input.duration) - start };
+}
+
 // Loop expansion (clip-looping.md §1.6): a looped clip becomes the same
 // resolved per-repetition entries equivalent hand-written clips would
 // produce — the renderer and the action-key format don't know loops exist.
@@ -68,7 +128,9 @@ export function expandLoop(
   loop: NonNullable<Clip['loop']>,
   tempoMap: TempoMap,
   sourceFrames: number | undefined,
-): Omit<PlacedClip, 'input'>[] {
+  // Every repetition has a concrete window: a loop tiles a clip, and a
+  // clip's own duration is required. Only a placed track leaves one open.
+): Omit<RenderedClip, 'input'>[] {
   const { start, duration } = placedWindow(clip, tempoMap);
   const windowEnd = start + duration;
   const readOffset = clip.source_offset - clip.slip;
@@ -131,7 +193,15 @@ export function planTrack(
   sha256BySource: Map<string, string>,
   framesBySource: Map<string, number> = new Map(),
 ): StemSpec {
-  const refs = [...new Set(track.clips.map((c) => c.source))];
+  // Clips and placed tracks share one source list, because they are one
+  // thing wearing two spellings (nested-tracks.md §1.11: a clip is a
+  // placement, and a placement is a stem at a time). A placed track is
+  // never in sha256BySource — its bytes do not exist until it renders —
+  // so it sorts with the buildable sounds, by name, for the same reason
+  // they do.
+  const refs = [
+    ...new Set([...track.clips.map((c) => c.source), ...track.inputs.map((i) => trackRef(i.track))]),
+  ];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
     .sort((a, b) => {
@@ -142,6 +212,21 @@ export function planTrack(
   const buildable = refs.filter((r) => !sha256BySource.has(r)).sort();
   const sources = [...committed, ...buildable];
   const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
+  const placements = track.inputs.map((input): PlacedClip => {
+    const { start, duration } = placedInput(input, tempoMap);
+    return {
+      input: inputIndex.get(trackRef(input.track))!,
+      start,
+      ...(duration !== undefined ? { duration } : {}),
+      // A placement reads its child from the child's own origin. Slip is
+      // a clip's way of moving content under a fixed window; a placement
+      // moves the window instead, which is what `at` is.
+      read_offset: 0,
+      gain_db: input.gain_db,
+      fade_in: input.fade_in,
+      fade_out: input.fade_out,
+    };
+  });
   const clips = track.clips.flatMap((clip): PlacedClip[] => {
     const input = inputIndex.get(clip.source)!;
     const loop = clip.loop?.enabled ? clip.loop : undefined;
@@ -163,13 +248,17 @@ export function planTrack(
     ];
   });
   // Canonical order: summing is commutative, so the action key must not
-  // depend on YAML clip order.
-  clips.sort(
+  // depend on YAML clip order — nor on whether a placement was written
+  // among the clips or after them, which is why the two lists sort as
+  // one. An absent duration sorts as -1: no real window is shorter, and
+  // the comparator's job is to be total and stable, not meaningful.
+  const placed = [...clips, ...placements];
+  placed.sort(
     (a, b) =>
       a.start - b.start ||
       a.input - b.input ||
       a.read_offset - b.read_offset ||
-      a.duration - b.duration ||
+      (a.duration ?? -1) - (b.duration ?? -1) ||
       a.gain_db - b.gain_db ||
       a.fade_in - b.fade_in ||
       a.fade_out - b.fade_out,
@@ -178,7 +267,7 @@ export function planTrack(
     name: track.name,
     type: 'stem',
     sources,
-    clips,
+    clips: placed,
     ...(track.inserts.length > 0 ? { inserts: track.inserts } : {}),
   };
 }
@@ -204,7 +293,7 @@ export const stemGenerator: Generator<StemSpec> = {
     // is deliberate: these two messages are user-facing diagnostics, and
     // diagnostics belong in the control plane with all the others rather
     // than duplicated into C++ where they would drift.
-    spec.sources.forEach((name, i) => {
+    const frames = spec.sources.map((name, i) => {
       const header = readWavHeader(inputPaths[i]!);
       if (header.sampleRate !== ctx.sampleRate) {
         throw new Error(
@@ -216,14 +305,25 @@ export const stemGenerator: Generator<StemSpec> = {
       if (header.channels > 2) {
         throw new Error(`input "${name}" has ${header.channels} channels; mono or stereo only`);
       }
+      return header.frames;
     });
+
+    // Where a plan-time length was unknowable, the rendered input answers
+    // it: the build walks dependencies first, so a placed track's stem is
+    // already on disk here. This is the only place the two lengths can be
+    // reconciled — earlier the child does not exist, later the daemon has
+    // no notion of "as long as the input is".
+    const clips = spec.clips.map((clip): RenderedClip => ({
+      ...clip,
+      duration: clip.duration ?? Math.max(0, frames[clip.input]! - clip.read_offset),
+    }));
 
     await renderInsertChain({
       op: 'stem',
       output: outputPath,
       sample_rate: ctx.sampleRate,
       inputs: inputPaths,
-      clips: spec.clips,
+      clips,
       ...(spec.inserts !== undefined ? { inserts: spec.inserts } : {}),
     });
   }

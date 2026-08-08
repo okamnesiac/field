@@ -169,10 +169,13 @@ sound by name and follow).
   gap is where the trouble lives: `voice: Siri` followed a Settings
   toggle the cache key could not see, and two consecutive CI renders of
   it were observed to differ.
-- **`stem`** — the first *implicit* type: every audio track with clips
+- **`stem`** — the first *implicit* type: every audio track with content
   is buildable as `//songs/<song>/track:<name>` without declaring
   anything, because the track file **is** the declaration — a mix file
-  defines a `mix`, a track file implies a `stem`. A clip's
+  defines a `mix`, a track file implies a `stem`. Content means clips,
+  placed tracks (`inputs:`), or both: a placed track is one more source
+  in the same list, so a track→track edge is an ordinary graph edge and
+  a track placed three times is one render placed three times. A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an
   automatic sound pulls its whole definition into the stem's subgraph,
   so the arrangement can play audio nothing ever committed, and editing

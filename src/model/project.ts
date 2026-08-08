@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { wavFrameCount } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
-import { expandLoop, placedWindow } from '../generators/stem.js';
+import { expandLoop, placedInput, placedWindow, renderableTrack } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
@@ -599,13 +599,16 @@ function validate(project: LoadedProject): void {
       }
       return undefined;
     };
-    const trackNames = new Set<string>();
+    // Names first, in full, like sounds: a track may place a track
+    // declared in any file, and a forward reference is fine.
+    const trackByName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
+    const trackPathByName = new Map(song.tracks.map((t) => [t.data.name, t.path]));
+    const trackNames = new Set(trackByName.keys());
     for (const track of song.tracks) {
       const expected = basename(track.path, '.yaml');
       if (track.data.name !== expected) {
         push(track.path, `name "${track.data.name}" must match filename "${expected}"`);
       }
-      trackNames.add(track.data.name);
 
       const trackCtx = {
         root: project.root,
@@ -722,7 +725,112 @@ function validate(project: LoadedProject): void {
           }
         }
       }
+
+      // Placed tracks (nested-tracks.md §1.3). A placement is a clip in
+      // every respect except what it plays, so it is checked like one:
+      // the reference resolves to something renderable, the time
+      // resolves, and a declared window holds its fades. Placements have
+      // no IDs yet (§6), so they are named by position.
+      if (track.data.inputs.length > 0 && track.data.type !== 'audio') {
+        push(track.path, `a midi track cannot place tracks — only an audio track sums audio`);
+      }
+      track.data.inputs.forEach((input, i) => {
+        const what = `placement ${i + 1} ("${input.track}")`;
+        if (input.track === track.data.name) {
+          // A cycle, but the locally decidable one, and the same reason
+          // §1.7 gives a send that reaches into itself its own message:
+          // "cycle: a → a" describes the mistake less well than naming it.
+          push(track.path, `${what} places this track inside itself`);
+          return;
+        }
+        const child = trackByName.get(input.track);
+        if (child === undefined) {
+          push(track.path, `${what} references unknown track "${input.track}"`);
+          return;
+        }
+        if (child.type !== 'audio') {
+          push(track.path, `${what} places a midi track, which renders no audio`);
+        } else if (!renderableTrack(child)) {
+          push(track.path, `${what} places a track with no clips and no tracks of its own`);
+        }
+        // A child's fader is applied by its parent while summing
+        // (§1.10) — inside the parent's render, outside the child's.
+        // That is the nested mix, chunk 3, and nothing here applies it
+        // yet: honouring the placement's own gain while quietly dropping
+        // the child's would be a wrong mix rather than a missing feature.
+        if (child.gain_db !== 0 || child.pan !== 0) {
+          push(
+            track.path,
+            `${what} places a track with a fader set (gain_db ${child.gain_db}, pan ${child.pan}) — ` +
+              `a child's gain and pan are applied by its parent, which lands with the nested mix ` +
+              `(nested-tracks.md §7 chunk 3); until then leave them at 0 and put the level on the ` +
+              `placement's own gain_db`,
+          );
+        }
+        if (
+          input.anchor === 'absolute' &&
+          [input.at, input.duration].some((v) => Array.isArray(v))
+        ) {
+          push(
+            track.path,
+            `${what} uses musical time on an absolute placement — ` +
+              `musical arrays need anchor: musical`,
+          );
+          return;
+        }
+        const at = positionTicks(track.path, `${what} at`, input.at);
+        if (at === undefined) return;
+        input.at = at;
+        if (input.duration !== undefined) {
+          const dur = spanTicks(track.path, `${what} duration`, input.duration, at);
+          if (dur === undefined) return;
+          if (dur <= 0) {
+            push(track.path, `${what} duration resolves to zero ticks`);
+            return;
+          }
+          input.duration = dur;
+        }
+        // Fades live inside the window, same as a clip's. An omitted
+        // duration has no window until the child renders, so the daemon
+        // is the only place that check can happen — it rejects
+        // fade_in + fade_out > duration, which is the backstop for the
+        // one case check cannot reach.
+        if (tempoMap) {
+          const { duration } = placedInput(input, tempoMap);
+          if (duration !== undefined && input.fade_in + input.fade_out > duration) {
+            push(
+              track.path,
+              `${what} fades (${input.fade_in} + ${input.fade_out} samples) ` +
+                `exceed its ${duration}-sample window`,
+            );
+          }
+        }
+      });
     }
+
+    // Containment cycles. Sound sources already made cycles declarable
+    // (effects.md §3) and this is the same detector for the same reason:
+    // check is the gate, so it must name the cycle before the build
+    // walker trips over it and reports something about its own ordering.
+    // Direct self-placement is diagnosed above and skipped here, so its
+    // clearer message is the only one that appears.
+    const containmentState = new Map<string, 'visiting' | 'done'>();
+    const visitTrack = (name: string, path: string[]): void => {
+      if (containmentState.get(name) === 'done') return;
+      if (containmentState.get(name) === 'visiting') {
+        const cycle = [...path.slice(path.indexOf(name)), name].join(' → ');
+        push(trackPathByName.get(name)!, `track containment cycle: ${cycle}`);
+        return;
+      }
+      containmentState.set(name, 'visiting');
+      for (const input of trackByName.get(name)?.inputs ?? []) {
+        if (input.track !== name && trackByName.has(input.track)) {
+          visitTrack(input.track, [...path, name]);
+        }
+      }
+      containmentState.set(name, 'done');
+    };
+    for (const track of song.tracks) visitTrack(track.data.name, []);
 
     // Mixes reference tracks that can actually produce stems: audio, with
     // clips (mix-assembly.md §3). Omitted `tracks` means all of them, which
@@ -731,9 +839,7 @@ function validate(project: LoadedProject): void {
     // check; the name must match the filename like everything else.
     if (song.mixes.length > 0) {
       const mixable = new Set(
-        song.tracks
-          .filter((t) => t.data.type === 'audio' && t.data.clips.length > 0)
-          .map((t) => t.data.name),
+        song.tracks.filter((t) => renderableTrack(t.data)).map((t) => t.data.name),
       );
       for (const file of song.mixes) {
         const mix = file.data;

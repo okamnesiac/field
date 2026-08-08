@@ -69,6 +69,39 @@ export const clipOrder: KeyOrder = {
   },
 };
 
+// A child track placed in this one (nested-tracks.md §1.3). The time
+// lives on the *reference*, not on the track, so one definition can be
+// placed more than once and in more than one parent — which is the whole
+// reason to nest.
+//
+// This is a clip in every respect except what it plays: a clip places a
+// sound or asset, this places a track, and both resolve to a rendered
+// source dropped on the parent's timeline at an offset (§1.11, "a clip is
+// a placement, and a placement is a stem at a time"). The two lists merge
+// once sounds fold into tracks; until then they sit side by side rather
+// than pretending to be one thing prematurely.
+export const trackInputSchema = z.strictObject({
+  track: slug, // a track in this song
+  anchor: z.enum(['musical', 'absolute']).default('musical'),
+  at: timePosition, // ticks when musical, samples when absolute
+  // Omitted means the child's whole render. Declared means a window on
+  // it — which is the placement truncating explicitly, never the parent
+  // truncating implicitly (§1.6).
+  duration: timeSpan.optional(),
+  // The placement's level, not the child's fader, and the two are applied
+  // in different places: this one is baked into the parent's stem while it
+  // sums, so nudging it *does* re-render the parent. The child's own
+  // gain_db is the mix-stage parameter that does not (see trackSchema).
+  gain_db: z.number().default(0),
+  fade_in: samples.default(0),
+  fade_out: samples.default(0),
+});
+type TrackInputFile = z.infer<typeof trackInputSchema>;
+export type TrackInput = Omit<TrackInputFile, 'at' | 'duration'> & {
+  at: number;
+  duration?: number | undefined;
+};
+
 // songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
 // is the identity (project-core.md §6). gain_db and pan are mix-stage
 // parameters: stems render pre-fader, the mix rule applies them while
@@ -82,10 +115,23 @@ export const trackSchema = z.strictObject({
   // an insert edit re-renders it — the accepted cost model (effects.md §5).
   inserts: z.array(insertSchema).default([]),
   clips: z.array(clipSchema).default([]),
+  inputs: z.array(trackInputSchema).default([]),
 });
 type TrackFile = z.infer<typeof trackSchema>;
-export type Track = Omit<TrackFile, 'clips'> & { clips: Clip[] };
+export type Track = Omit<TrackFile, 'clips' | 'inputs'> & {
+  clips: Clip[];
+  inputs: TrackInput[];
+};
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'type', 'gain_db', 'pan', 'inserts', 'clips'],
-  children: { inserts: { items: insertOrder }, clips: { items: clipOrder } },
+  keys: ['name', 'type', 'gain_db', 'pan', 'inserts', 'inputs', 'clips'],
+  children: {
+    inserts: { items: insertOrder },
+    clips: { items: clipOrder },
+    inputs: {
+      items: {
+        keys: ['track', 'anchor', 'at', 'duration', 'gain_db', 'fade_in', 'fade_out'],
+        children: { at: { flow: true }, duration: { flow: true } },
+      },
+    },
+  },
 };

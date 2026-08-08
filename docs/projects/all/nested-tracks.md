@@ -1,7 +1,9 @@
 # Plan: Nested tracks — one primitive for structure, time and mix
 
-**Status:** Designed, not started (2026-08-08). Written from a design
-conversation; no code exists. Sequenced deliberately **before** the
+**Status:** In progress (2026-08-08). Nesting renders — a track can
+contain a track, `check` gates it, and the stem places the child's render
+at the placement's offset. The chunk order changed on the way in; §9
+records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
 changes the model the engine renders — doing it afterwards means
 changing the schema *and* the engine.
@@ -286,3 +288,41 @@ sections, a shared reverb fed by sends from two different depths, and a
 mix that renders to the same audio as the flat version did — or better,
 with a written reason for any difference. `field check` catches a send
 that reaches into itself and names it.
+
+## 9 Sequencing, revised (2026-08-08)
+
+§7's chunk 1 is the migration — express creek as it is today, at depth
+one — and its argument is that it is the cheapest falsifiable step. It is
+certainly the cheapest. It is not the falsifiable one: renaming
+`mixes/main.yaml` to a root track and giving every child `at: 0` is a
+rename plus a level, and nothing about it can teach us whether the design
+holds. The question that can fail is whether a track containing a track
+*renders* — right offsets, right length, the pre-fader boundary intact.
+
+So nesting landed first, additively: `inputs:` alongside `clips:`, every
+existing track parsing unchanged, creek untouched and every one of its
+action keys still hitting the cache. The migration follows as its own
+step, against a renderer that already does the thing it will depend on.
+The chunk numbers in §7 stay as written — they are cited — and this is
+the order they run in:
+
+1. **Nesting renders** (§7 chunk 1's schema and check, plus the render).
+   A child track is a placed source in its parent's stem.
+2. **§7 chunk 1's migration.** `mixes/` and `arrangement.yaml` retire;
+   creek's tracks become children of a root track at `at: 0`.
+3. §7 chunks 2–6 unchanged.
+
+Three things are deferred out of step 1 rather than dropped, each because
+half of it would be worse than none:
+
+- **A child's own `gain_db`/`pan`.** §1.10 puts them outside the child's
+  render and applies them in the parent's sum, which is the nested mix —
+  §7 chunk 3. Gain would fold in trivially (dB add) and pan would not,
+  since the daemon's stem op sums clips with a gain and no pan. Applying
+  the half that is easy would silently drop the half that is not, so
+  `check` refuses a placed track with either set and names the chunk.
+- **Negative `at`.** §1.6 allows it for pickups; `timePosition` is
+  non-negative today, for clips as much as for placements, so allowing it
+  is a change to the time primitive rather than to nesting.
+- **Placement identity.** §6's open question. Placements are named by
+  position in diagnostics until it is answered.

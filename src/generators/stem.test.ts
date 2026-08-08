@@ -215,6 +215,87 @@ describe('planTrack', () => {
   });
 });
 
+describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => {
+  const nested = (inputs: unknown[], clips: unknown[] = []): Track =>
+    trackSchema.parse({ name: 'outer', type: 'audio', clips, inputs }) as Track;
+  const place = (over: Record<string, unknown> = {}) => ({ track: 'verse', at: 960, ...over });
+
+  it('places the child as a source, at its own origin', () => {
+    const spec = planTrack(nested([place()]), map120, hashes);
+    expect(spec.sources).toEqual(['track:verse']);
+    expect(spec.clips).toEqual([
+      {
+        input: 0,
+        start: 24000, // one beat at 120 bpm
+        read_offset: 0, // a placement moves the window, never the content
+        gain_db: 0,
+        fade_in: 0,
+        fade_out: 0,
+      },
+    ]);
+  });
+
+  it('leaves an omitted duration open, and projects a declared one', () => {
+    const [open] = planTrack(nested([place()]), map120, hashes).clips;
+    expect(open!.duration).toBeUndefined();
+    const [windowed] = planTrack(nested([place({ duration: 960 })]), map120, hashes).clips;
+    // Both edges through the tempo map, exactly as a clip's window is.
+    expect(windowed!.duration).toBe(24000);
+  });
+
+  it('passes an absolute placement through untouched', () => {
+    const spec = planTrack(
+      nested([place({ anchor: 'absolute', at: 100, duration: 50 })]),
+      map120,
+      hashes,
+    );
+    expect(spec.clips[0]).toMatchObject({ start: 100, duration: 50 });
+  });
+
+  it('places one definition twice: one source, one render, two placements', () => {
+    const spec = planTrack(nested([place({ at: 0 }), place({ at: 960 })]), map120, hashes);
+    expect(spec.sources).toEqual(['track:verse']); // the caching win of §4
+    expect(spec.clips.map((c) => c.start)).toEqual([0, 24000]);
+    expect(spec.clips.every((c) => c.input === 0)).toBe(true);
+  });
+
+  it('sorts placements and clips as one list, so YAML order cannot reach the key', () => {
+    const a = planTrack(nested([place({ at: 0 })], [clip({ position: 960 })]), map120, hashes);
+    const b = planTrack(nested([place({ at: 0 })], [clip({ position: 960 })]), map120, hashes);
+    expect(a).toEqual(b);
+    // The placement is earlier, so it sorts first even though `clips`
+    // comes first in the file.
+    expect(a.clips.map((c) => c.start)).toEqual([0, 24000]);
+  });
+
+  it('keys a placed track as buildable: no hash exists until it renders', () => {
+    const spec = planTrack(
+      nested([place({ track: 'aaa' })], [clip({ source: 'kick' })]),
+      map120,
+      hashes,
+    );
+    // kick is committed and sorts first; the placed track joins the
+    // buildable tail even though its name would sort before it.
+    expect(spec.sources).toEqual(['kick', 'track:aaa']);
+  });
+
+  it('leaves a track without placements byte-identical to before nesting', () => {
+    const spec = planTrack(track([clip()]), map120, hashes);
+    expect(spec.sources).toEqual(['kick']);
+    expect(spec.clips[0]).toHaveProperty('duration', 24000);
+    // `duration` present, no stray keys: existing action keys must not move.
+    expect(Object.keys(spec.clips[0]!).sort()).toEqual([
+      'duration',
+      'fade_in',
+      'fade_out',
+      'gain_db',
+      'input',
+      'read_offset',
+      'start',
+    ]);
+  });
+});
+
 describe('stemGenerator.execute', () => {
   let dir: string;
 
@@ -612,5 +693,186 @@ describe('clips over rule outputs', () => {
     writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
+  });
+});
+
+// The falsifiable half of nesting: not that the schema accepts a child,
+// but that the audio comes out where the placement says. Real assets,
+// real daemon, no runner stub.
+describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
+  let root: string;
+
+  // Four samples of content, so a placement's offset is legible as an
+  // index rather than as a number that has to be trusted.
+  const KICK = [1, 0.5, 0.25, 0];
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'field-nest-'));
+    init({ dir: root, name: 'test-album' });
+    createSong(root, 'creek');
+    const src = join(root, '..', `field-nest-${Math.random()}.wav`);
+    writeWavFloat32(src, 48000, [Float32Array.from(KICK)]);
+    await importAsset(root, 'creek', src, 'kick');
+    rmSync(src);
+    // The child: silence, then the kick at sample 3. Seven samples long.
+    writeTrack('inner', [
+      'clips:',
+      '  - id: kick-1',
+      '    source: kick',
+      '    anchor: absolute',
+      '    position: 3',
+      '    duration: 4',
+    ]);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeTrack(name: string, body: string[]): void {
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, `songs/creek/tracks/${name}.yaml`),
+      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+    );
+  }
+
+  async function renderOuter(): Promise<Float32Array> {
+    const outcomes = await buildLabels(root, ['//songs/creek/track:outer']);
+    return readWav(outcomes.find((o) => o.label === '//songs/creek/track:outer')!.outputPath!)
+      .channels[0]!;
+  }
+
+  it('wires the child as a dependency of its parent', () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    expect(queryDeps(root, 'deps(//songs/creek/track:outer)')).toEqual([
+      '//songs/creek/asset:kick',
+      '//songs/creek/track:inner',
+      '//songs/creek/track:outer',
+    ]);
+  });
+
+  it('sounds the child at the placement offset, whole, without a declared duration', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);
+    const out = await renderOuter();
+    // 10 + the child's own 7 = 17. An omitted duration truncated nothing,
+    // which is §1.6: only a placement truncates, and this one declined.
+    expect(out).toHaveLength(17);
+    expect(out[13]).toBeCloseTo(1, 4); // 10 + the child's internal 3
+    expect(out[14]).toBeCloseTo(0.5, 4);
+    expect(out[0]).toBe(0);
+    expect(out[12]).toBe(0);
+
+    const again = await buildLabels(root, ['//songs/creek/track:outer']);
+    expect(again.every((o) => o.cached)).toBe(true);
+  });
+
+  it('places one definition twice, from one render', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 10',
+    ]);
+    const out = await renderOuter();
+    expect(out).toHaveLength(17);
+    expect(out[3]).toBeCloseTo(1, 4);
+    expect(out[13]).toBeCloseTo(1, 4);
+  });
+
+  it('truncates where the placement says to, and only there', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 5',
+    ]);
+    const out = await renderOuter();
+    expect(out).toHaveLength(5); // 7 without the window
+    expect(out[3]).toBeCloseTo(1, 4);
+    expect(out[4]).toBeCloseTo(0.5, 4);
+  });
+
+  it('applies the placement gain, leaving the child render untouched', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '    gain_db: -6',
+    ]);
+    const out = await renderOuter();
+    expect(out[3]).toBeCloseTo(0.501, 3);
+    // The child's own stem is pre-fader and unscaled (§1.10): the parent
+    // baked the level in while summing, and nothing reached down.
+    const inner = await buildLabels(root, ['//songs/creek/track:inner']);
+    const innerWav = readWav(inner.find((o) => o.label === '//songs/creek/track:inner')!.outputPath!);
+    expect(innerWav.channels[0]![3]).toBeCloseTo(1, 4);
+  });
+
+  it('renders a parent that holds tracks and clips of its own', async () => {
+    writeTrack('outer', [
+      'clips:',
+      '  - id: kick-direct',
+      '    source: kick',
+      '    anchor: absolute',
+      '    position: 0',
+      '    duration: 4',
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 10',
+    ]);
+    const out = await renderOuter();
+    expect(out).toHaveLength(17);
+    expect(out[0]).toBeCloseTo(1, 4); // the parent's own clip
+    expect(out[13]).toBeCloseTo(1, 4); // the child, at its placement
+  });
+
+  it('keeps a placed child out of the default mix, so it is not summed twice', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);
+    mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\n');
+    // `inner` reaches the mix through `outer`; listing it as a channel of
+    // its own would sum it twice.
+    expect(queryDeps(root, 'deps(//songs/creek/mix:main)')).toEqual([
+      '//songs/creek/asset:kick',
+      '//songs/creek/track:inner',
+      '//songs/creek/track:outer',
+      '//songs/creek/mix:main',
+    ]);
+    const mix = await buildLabels(root, ['//songs/creek/mix:main']);
+    const wav = readWav(mix.find((o) => o.label === '//songs/creek/mix:main')!.outputPath!);
+    // Once, at the placement — not also at the child's own origin.
+    expect(wav.channels[0]![13]).toBeCloseTo(1, 4);
+    expect(wav.channels[0]![3]).toBe(0);
+  });
+
+  it('rebuilds the parent when the child changes, and not otherwise', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);
+    const runs: string[] = [];
+    const runner: GeneratorRunner = async (node, inputPaths, outputPath) => {
+      runs.push(node.label.name);
+      writeFileSync(outputPath, JSON.stringify({ spec: node.spec, inputs: inputPaths.length }));
+    };
+    await buildLabels(root, ['//songs/creek/track:outer'], runner);
+    expect(runs).toEqual(['inner', 'outer']);
+
+    runs.length = 0;
+    writeTrack('inner', [
+      'clips:',
+      '  - id: kick-1',
+      '    source: kick',
+      '    anchor: absolute',
+      '    position: 5', // moved
+      '    duration: 4',
+    ]);
+    await buildLabels(root, ['//songs/creek/track:outer'], runner);
+    expect(runs).toEqual(['inner', 'outer']);
   });
 });
