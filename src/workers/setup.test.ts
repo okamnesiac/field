@@ -10,7 +10,9 @@ import {
   workerLaunchCommand,
   workerPackagePresent,
   workerScriptInstalled,
+  probeEnvironment,
   type EnvironmentProbe,
+  type ProbeRun,
 } from './client.js';
 import type { WorkerSpec } from './protocol.js';
 
@@ -37,6 +39,37 @@ afterEach(() => {
   rmSync(tempProject, { recursive: true, force: true });
   delete process.env[tempSpec.pythonOverrideEnv];
 });
+
+// The two layouts that matter: a worker uv has installed, and the
+// `uv sync --only-group dev` environment CI builds for pyright.
+function devOnlyWorker(): string {
+  const binDir = join(tempProject, '.venv', 'bin');
+  rmSync(tempProject, { recursive: true, force: true });
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');
+  writeFileSync(join(binDir, 'pyright'), '');
+  writeFileSync(join(binDir, 'python3'), '');
+  return binDir;
+}
+
+function installedWorker(): string {
+  const binDir = devOnlyWorker();
+  writeFileSync(join(binDir, tempSpec.script), '');
+  return binDir;
+}
+
+// Records what the probe asks, and answers with whatever the test says.
+function recorder(results: ReturnType<ProbeRun>[]): { calls: string[][]; run: ProbeRun } {
+  const calls: string[][] = [];
+  let next = 0;
+  return {
+    calls,
+    run: (command, args) => {
+      calls.push([command, ...args]);
+      return results[next++] ?? { status: 0 };
+    },
+  };
+}
 
 describe('starting a worker never installs its environment', () => {
   it('runs uv with --no-sync', () => {
@@ -88,6 +121,17 @@ describe('an unusable environment is diagnosed, not spawned into', () => {
     expect(environmentVerdict(VOICED_SPEC, probe())).toEqual({ ok: true });
   });
 
+  it('refuses an environment it never managed to check', () => {
+    // The probe cannot produce this today — it runs the check exactly
+    // when uv is present and the worker is installed. Pinned anyway,
+    // because "unreachable" is a claim about the caller: if the probe and
+    // this function ever disagree about when the check runs, an unchecked
+    // environment must read as a refusal rather than as a pass.
+    const verdict = environmentVerdict(VOICED_SPEC, probe({ synced: undefined }));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('could not be verified');
+  });
+
   it('names the setup command when the worker is not installed', () => {
     // Before the gate this spawned, uv installed, and it worked; after
     // the gate it would spawn, uv would refuse, and the caller would wait
@@ -137,11 +181,7 @@ describe('an unusable environment is diagnosed, not spawned into', () => {
     // checkout has — creates `.venv` with pyright in it and no worker.
     // A directory named `.venv` was the whole test before, so both
     // workers passed the gate here and could not launch (#61 review).
-    const binDir = join(tempProject, '.venv', 'bin');
-    mkdirSync(binDir, { recursive: true });
-    writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');
-    writeFileSync(join(binDir, 'pyright'), '');
-    writeFileSync(join(binDir, 'python3'), '');
+    const binDir = devOnlyWorker();
     expect(existsSync(join(tempProject, '.venv'))).toBe(true);
     expect(workerScriptInstalled(tempSpec)).toBe(false);
 
@@ -149,6 +189,68 @@ describe('an unusable environment is diagnosed, not spawned into', () => {
     // what a full `uv sync` writes and `--only-group dev` does not.
     writeFileSync(join(binDir, tempSpec.script), '');
     expect(workerScriptInstalled(tempSpec)).toBe(true);
+  });
+
+  it('installs nothing while deciding whether anything is installed', () => {
+    // The probe asked `uv sync --check` before looking at anything else,
+    // and uv downloads a CPython when it cannot find one — 24 MB, and it
+    // completed rather than merely attempting. So on a fresh machine the
+    // gate against automatic installation performed one on its way to
+    // reporting that nothing was installed (#61 review).
+    //
+    // Asserted on the commands, not on the booleans they return: the
+    // three booleans were exhaustively covered while this was happening,
+    // and no assertion about a return value could have seen it.
+    installedWorker();
+    const { calls, run } = recorder([{ status: 0 }, { status: 0 }]);
+    expect(probeEnvironment(tempSpec, run)).toMatchObject({ uvPresent: true, synced: true });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(['uv', '--version']);
+    const check = calls[1]!;
+    expect(check.slice(0, 5)).toEqual([
+      'uv',
+      'sync',
+      '--check',
+      '--frozen',
+      '--no-python-downloads',
+    ]);
+    expect(check.at(-1)).toContain(tempDir);
+  });
+
+  it('never asks uv about a project without disabling downloads', () => {
+    // The invariant rather than the instance: any future probe command
+    // that names a project can resolve, and resolving is what triggers
+    // the interpreter download.
+    for (const layout of [installedWorker, devOnlyWorker]) {
+      layout();
+      const { calls, run } = recorder([{ status: 0 }, { status: 0 }]);
+      probeEnvironment(tempSpec, run);
+      for (const call of calls) {
+        if (call.includes('--project')) expect(call).toContain('--no-python-downloads');
+      }
+    }
+  });
+
+  it('asks uv nothing about the project when the answer is already known', () => {
+    // A subprocess whose result nobody reads, and — before the
+    // short-circuit — the one that could install an interpreter.
+    devOnlyWorker();
+    const absent = recorder([{ status: 0 }]);
+    expect(probeEnvironment(tempSpec, absent.run).scriptInstalled).toBe(false);
+    expect(absent.calls).toEqual([['uv', '--version']]);
+
+    // Same when uv itself is missing: nothing to ask, nothing asked.
+    installedWorker();
+    const noUv = recorder([{ status: null, error: new Error('ENOENT') }]);
+    expect(probeEnvironment(tempSpec, noUv.run).uvPresent).toBe(false);
+    expect(noUv.calls).toEqual([['uv', '--version']]);
+  });
+
+  it('reads a failed check as stale rather than as fine', () => {
+    installedWorker();
+    const { run } = recorder([{ status: 0 }, { status: 1 }]);
+    expect(probeEnvironment(tempSpec, run).synced).toBe(false);
   });
 
   it('still reports a missing package differently from a missing environment', () => {

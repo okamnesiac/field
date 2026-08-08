@@ -121,6 +121,13 @@ export function environmentVerdict(
   if (probe.synced === false) {
     return { ok: false, reason: `its environment is out of date — ${setup}` };
   }
+  if (probe.synced === undefined) {
+    // Unreachable by construction — the probe runs the check exactly when
+    // uv is present and the worker is installed, which is exactly here.
+    // Fail closed anyway: if the two ever disagree about when the check
+    // runs, the wrong answer must be a refusal rather than a launch.
+    return { ok: false, reason: `its environment could not be verified — ${setup}` };
+  }
   return { ok: true };
 }
 
@@ -134,18 +141,52 @@ export function workerScriptInstalled(spec: WorkerSpec): boolean {
   return existsSync(join(workerProject(spec), '.venv', binDir, spec.script));
 }
 
-function probeEnvironment(spec: WorkerSpec): EnvironmentProbe {
-  // One process, two facts: whether uv is here at all, and whether it
-  // considers the environment current.
-  const check = spawnSync('uv', ['sync', '--check', '--project', workerProject(spec)], {
-    stdio: 'ignore',
-  });
-  const uvPresent = !check.error;
-  return {
-    uvPresent,
-    scriptInstalled: workerScriptInstalled(spec),
-    synced: uvPresent ? check.status === 0 : undefined,
-  };
+// How the probe runs a command. Injectable so a test can assert on the
+// commands themselves rather than on the booleans they produce — the
+// booleans were fully covered while the probe was quietly installing a
+// Python interpreter, and no assertion about a return value could have
+// noticed (#61 review).
+export interface ProbeRun {
+  (command: string, args: string[]): { status: number | null; error?: Error | undefined };
+}
+
+function spawnProbe(command: string, args: string[]): ReturnType<ProbeRun> {
+  const result = spawnSync(command, args, { stdio: 'ignore' });
+  return { status: result.status, error: result.error };
+}
+
+// Everything uv is asked here has to be free of side effects, because
+// this runs on the way to refusing — the whole point is that nothing gets
+// installed without `field setup`.
+//
+//   --version    asks whether uv exists without naming a project, so it
+//                cannot resolve, download or build anything.
+//   --check      reports whether the environment matches the lockfile and
+//                will not modify it ("Would replace project environment").
+//   --frozen     keeps it from rewriting uv.lock when pyproject has moved.
+//                The cost, stated plainly: staleness is then measured
+//                against the lockfile rather than against pyproject, so a
+//                lock that is itself behind reads as current. `field
+//                setup` re-locks; a probe that writes to the repo to find
+//                out whether it may run is a worse trade.
+//   --no-python-downloads
+//                uv installs a compatible CPython when it cannot find
+//                one — a 24 MB download, completed, not attempted. So on
+//                a fresh machine the gate against automatic installation
+//                was itself an automatic installation (#61 review).
+const PROBE_CHECK_ARGS = ['sync', '--check', '--frozen', '--no-python-downloads', '--project'];
+
+export function probeEnvironment(spec: WorkerSpec, run: ProbeRun = spawnProbe): EnvironmentProbe {
+  const version = run('uv', ['--version']);
+  const uvPresent = !version.error && version.status === 0;
+  const scriptInstalled = workerScriptInstalled(spec);
+  // Short-circuit: with uv missing or the worker not installed the
+  // verdict is already decided, so asking uv anything is a subprocess
+  // whose answer nobody reads — and, before this, a subprocess that
+  // could install an interpreter on the way to saying "not installed".
+  if (!uvPresent || !scriptInstalled) return { uvPresent, scriptInstalled, synced: undefined };
+  const check = run('uv', [...PROBE_CHECK_ARGS, workerProject(spec)]);
+  return { uvPresent, scriptInstalled, synced: check.status === 0 };
 }
 
 // Can this worker be started right now — the question `connectTo` asks.

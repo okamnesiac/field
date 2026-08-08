@@ -145,6 +145,26 @@ uv installs with the project (`.venv/bin/<script>`, which is what
 `uv sync --check`, since installed is not the same as current. Both
 markers were verified against uv rather than reasoned about.
 
+And then a third pass, because the check that enforces "never automatic"
+was itself installing software. `uv sync --check` does not modify the
+project environment, but uv downloads a compatible CPython when it cannot
+find one, and on a machine without a suitable Python the probe completed
+a 24 MB interpreter install on its way to reporting that the worker was
+not installed. It now detects uv with `--version` — a question that names
+no project, so nothing can resolve — asks uv about the project only when
+the answer is not already decided, and passes `--no-python-downloads`
+and `--frozen` when it does, so the probe can neither install an
+interpreter nor rewrite `uv.lock`.
+
+The lesson is in where the tests were. The verdict had been made a pure
+function precisely so it could be tested exhaustively, and it was: every
+combination of the three facts it reads. The defect was in the two lines
+that produce those facts, where a subprocess with a side effect returns
+a perfectly correct boolean. Purity moved the logic somewhere testable
+and moved the danger somewhere untested, so the probe now takes its
+runner as a parameter and the tests assert on the commands themselves —
+which arguments, in which order, and which are not issued at all.
+
 The interpreter override (`FIELD_ACED_PYTHON`, `FIELD_VOICED_PYTHON`)
 skips both, as it always skipped uv: it names an interpreter that already
 has what it needs, which is what makes the daemon tests possible without
