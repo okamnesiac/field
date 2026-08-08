@@ -14,11 +14,12 @@ import { init } from '../commands/init.js';
 // This is the migration harness, and its one structural rule is that
 // everything goes through the build rules — write a recipe, build the
 // target, read the WAV. Nothing here imports `src/audio/` except
-// `wav.ts`, which chunk 4 keeps. So when the daemon becomes the single
-// executor and the TypeScript DSP is deleted, this file does not change
-// hands: it asserts field's own semantics rather than that a biquad is a
-// biquad, and it would fail on a renderer that quietly stopped matching
-// the coefficient math.
+// `wav.ts`. That rule is what let chunk 4 delete the TypeScript DSP
+// without this file changing hands: it asserts field's own semantics
+// rather than that a biquad is a biquad, and it fails on a renderer that
+// quietly stops matching the coefficient math. It is now the only thing
+// that does — the daemon is the sole executor, so every assertion below
+// is measured from C++ output.
 //
 // The measurement is a coherent multi-tone probe. Every probe frequency
 // is an integer number of Hz and every window is a whole number of
@@ -140,6 +141,16 @@ function rms(samples: Float32Array, start: number, end: number): number {
   return Math.sqrt(sum / (Math.min(end, samples.length) - start));
 }
 
+// Level, as `autoGainDB` defines it: mean power across the probe set,
+// which is equal energy per octave because the probes are log-spaced.
+// Shared by the three normalize properties below, all of which are
+// comparisons of this quantity before and after compensation.
+function meanPowerDb(curve: { db: number }[]): number {
+  return (
+    10 * Math.log10(curve.reduce((sum, p) => sum + Math.pow(10, p.db / 10), 0) / curve.length)
+  );
+}
+
 describe('eq properties', () => {
   it('a bell of bandwidth B octaves has half-gain points 2^B apart', async () => {
     // The parity-proven parameterization: bandwidth in octaves via the
@@ -253,12 +264,6 @@ describe('eq properties', () => {
     writeSound('norm', ['type: eq', 'source: probe', 'normalize: true', ...shelf]);
     writeSound('raw', ['type: eq', 'source: probe', 'normalize: false', ...shelf]);
 
-    const meanPowerDb = (curve: { db: number }[]) =>
-      10 *
-      Math.log10(
-        curve.reduce((sum, p) => sum + Math.pow(10, p.db / 10), 0) / curve.length,
-      );
-
     const normalized = responseDb(await render('norm'), source, probes);
     const raw = responseDb(await render('raw'), source, probes);
 
@@ -281,6 +286,82 @@ describe('eq properties', () => {
           probes.reduce((sum, f) => sum + f, 0),
       );
     expect(perHz).toBeGreaterThan(1);
+  });
+
+  it('normalize makes up a cut, not only pads a boost', async () => {
+    // The compensation is signed, because a cut moves the level as surely
+    // as a boost does and the rule is that EQ moves change tone, not
+    // level. Every other normalize assertion here uses a boost, and so
+    // does the byte-identity golden (a +6.6 dB bell), so a renderer that
+    // clamped the compensation to negative — padding boosts, leaving cuts
+    // alone — passed the entire suite. That is not a hypothetical: it is
+    // the mutation that motivated this test, run against the C++ while
+    // chunk 4 was deleting the TypeScript that used to assert it.
+    const probes = logSpaced(20, 20000, 48);
+    const source = multitone(probes, PROBE_SECONDS);
+    await importSource('probe', source);
+    const shelf = [
+      'bands:',
+      '  - type: highshelf',
+      '    frequency: 500',
+      '    gain_db: -6',
+      '    bandwidth: 2',
+    ];
+    writeSound('cutnorm', ['type: eq', 'source: probe', 'normalize: true', ...shelf]);
+    writeSound('cutraw', ['type: eq', 'source: probe', 'normalize: false', ...shelf]);
+
+    const normalized = meanPowerDb(responseDb(await render('cutnorm'), source, probes));
+    const raw = meanPowerDb(responseDb(await render('cutraw'), source, probes));
+
+    expect(normalized).toBeCloseTo(0, 1);
+    // …and it got there by adding gain, not by the cut happening to be
+    // level already: unnormalized, the same curve sits measurably down.
+    expect(raw).toBeLessThan(-2);
+  });
+
+  it('the compensation saturates at ±12 dB rather than chasing the curve', async () => {
+    // The make-up is bounded (biquad.ts, Fyra parity). Past the bound
+    // normalize deliberately stops tracking, so an extreme EQ stays loud
+    // instead of being hauled back to level by twenty-odd dB of gain the
+    // user never asked for. Removing the clamp outright also survived the
+    // whole suite before this existed.
+    //
+    // Both numbers here are measured rather than restated from the
+    // implementation: `raw` is what the curve demands, and the difference
+    // is what was actually spent. So the assertion reads "the demand
+    // exceeded the bound, and exactly the bound was applied" without
+    // re-deriving autoGainDB's arithmetic — which would make it a
+    // transcription instead of a property.
+    const probes = logSpaced(20, 20000, 48);
+    const source = multitone(probes, PROBE_SECONDS);
+    await importSource('probe', source);
+
+    for (const [label, gainDb, clamp] of [
+      ['hot', 24, -12],
+      ['cold', -24, 12],
+    ] as const) {
+      const shelf = [
+        'bands:',
+        '  - type: lowshelf',
+        '    frequency: 20000',
+        `    gain_db: ${gainDb}`,
+        '    bandwidth: 1',
+      ];
+      writeSound(`${label}norm`, ['type: eq', 'source: probe', 'normalize: true', ...shelf]);
+      writeSound(`${label}raw`, ['type: eq', 'source: probe', 'normalize: false', ...shelf]);
+
+      const normalized = meanPowerDb(responseDb(await render(`${label}norm`), source, probes));
+      const raw = meanPowerDb(responseDb(await render(`${label}raw`), source, probes));
+
+      // The curve asks for more than the bound allows…
+      expect(Math.abs(raw), `${label}: demand`).toBeGreaterThan(12);
+      // …exactly the bound is spent…
+      expect(normalized - raw, `${label}: applied`).toBeCloseTo(clamp, 2);
+      // …and the render is left off level on purpose, which is the whole
+      // reason for bounding it. Without this line the test would still
+      // pass on a renderer that clamped at some much larger value.
+      expect(Math.abs(normalized), `${label}: residual`).toBeGreaterThan(5);
+    }
   });
 });
 
@@ -366,8 +447,8 @@ describe('reverb properties', () => {
     // do. JUCE's `AllPassFilter::process` returns `read − x` — Jezar's
     // Freeverb variant, which is not a true allpass. Swapping field's
     // equation for it leaves every other assertion in this file green and
-    // moves this one by 14.7 dB (render-pipeline.md §2.4). Chunk 4
-    // deletes `reverb.ts`; this is what would notice.
+    // moves this one by 14.7 dB (render-pipeline.md §2.4). `reverb.ts` is
+    // gone as of chunk 4; this is what notices.
     //
     // It locks the rest of the bank in passing: the per-comb feedback
     // derived from T60, the scaled delay lengths, and the ⅛ average all
@@ -540,10 +621,10 @@ describe('limit properties', () => {
   });
 
   it('the attack ramp reaches back by lookahead_ms', async () => {
-    // Lookahead is the other half of §2.4's claim, and it is the half
-    // with no coverage anywhere else once chunk 4 deletes
-    // `limiter.test.ts`: removing the backward pass entirely leaves every
-    // other assertion in this file green.
+    // Lookahead is the other half of §2.4's claim, and since chunk 4
+    // deleted `limiter.test.ts` it is the half with no coverage anywhere
+    // else: removing the backward pass entirely leaves every other
+    // assertion in this file green.
     //
     // The slope is scaled so the deepest plausible reduction spans
     // exactly the configured window, so a spike 60 dB over the ceiling
@@ -576,9 +657,9 @@ describe('limit properties', () => {
   it('links the channels: a peak in one ducks the other by the same gain', async () => {
     // The gain curve is shared across channels on purpose — limiting must
     // not wander the image (effects.md §2). Limiting each channel on its
-    // own gain passes every mono assertion in this file, and the only
-    // thing that catches it today is `limiter.test.ts`, which chunk 4
-    // deletes.
+    // own gain passes every mono assertion in this file; `limiter.test.ts`
+    // used to be the other thing that caught it, and chunk 4 deleted it,
+    // so this is now the only one.
     const left = new Float32Array(4800).fill(0.1);
     const right = new Float32Array(4800).fill(0.1);
     left[2400] = 1;
