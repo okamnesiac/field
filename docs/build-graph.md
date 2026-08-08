@@ -178,12 +178,10 @@ sound by name and follow).
   a track placed three times is one render placed three times. A track can
   also be a song's *output* — the one named `main` — in which case it
   carries the song's declared `length` and `loop` and renders exactly that
-  long, the way the `mix` rule does. It shares the *name* a bare song
-  reference uses and not yet the resolution: `creek` still means
-  `//songs/creek/mix:main` specifically, so a song with an output track and
-  no mix file has to be addressed as `creek/track:main` until `mixes/`
-  retires (nested-tracks.md §7 chunk 2), which is when the bare name moves
-  with it. A clip's
+  long, the way the `mix` rule does. A bare song reference resolves to it:
+  `creek` means `//songs/creek/track:main`. `mixes/` still loads and still
+  renders, but nothing points at one by default any more, and it retires
+  next (nested-tracks.md §7 chunk 2). A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an
   automatic sound pulls its whole definition into the stem's subgraph,
   so the arrangement can play audio nothing ever committed, and editing

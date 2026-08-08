@@ -1041,6 +1041,7 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
     const out = await messages();
     expect(out).toContain('song has two outputs');
     expect(out).toContain('delete one');
+    expect(out).toContain('a bare song name reaches the track');
   });
 
   it('accepts the output track once the mix is gone', async () => {
