@@ -4,7 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ACED_SPEC } from '../aced/client.js';
 import { VOICED_SPEC } from '../voiced/client.js';
-import { workerAvailable, workerLaunchCommand, workerPackagePresent } from './client.js';
+import {
+  environmentVerdict,
+  workerAvailable,
+  workerLaunchCommand,
+  workerPackagePresent,
+  workerScriptInstalled,
+  type EnvironmentProbe,
+} from './client.js';
 import type { WorkerSpec } from './protocol.js';
 
 // `field setup` is meant to be the only thing that installs a worker
@@ -53,11 +60,11 @@ describe('starting a worker never installs its environment', () => {
     expect(command).toBe(process.execPath);
     expect(args).not.toContain('--no-sync');
 
-    // And the availability gate lets it past with no .venv anywhere.
-    // Asserted here rather than left to the harness: every worker package
-    // in this checkout happens to be synced, so a gate that wrongly
-    // caught the override would pass locally and strand CI — where
-    // nothing runs `uv sync` for the workers at all.
+    // And the availability gate lets it past with no .venv anywhere,
+    // without paying for the uv subprocess. Asserted here rather than
+    // left to the harness: a gate that wrongly caught the override would
+    // take every stub and live daemon test with it, and would do so
+    // differently depending on what happened to be installed.
     mkdirSync(tempProject, { recursive: true });
     writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');
     expect(existsSync(join(tempProject, '.venv'))).toBe(false);
@@ -65,25 +72,83 @@ describe('starting a worker never installs its environment', () => {
   });
 });
 
-describe('an uninstalled environment is diagnosed, not spawned into', () => {
-  it('names the setup command that fixes it', () => {
-    // A package with no .venv is exactly a fresh checkout. Before the
-    // gate this spawned, uv installed, and it worked; after the gate it
-    // would spawn, uv would refuse, and the caller would wait out a
-    // sixty-second connect timeout to be told "did not start". Neither is
-    // an answer, so the answer comes from here.
-    mkdirSync(tempProject, { recursive: true });
+describe('an unusable environment is diagnosed, not spawned into', () => {
+  // Every combination, decided from a probe rather than from the
+  // checkout. `pnpm test` runs before setup-uv in CI, so ambient state
+  // there is "no uv, no environments" — assertions that read it would
+  // pass or fail by accident of where they ran.
+  const probe = (over: Partial<EnvironmentProbe> = {}): EnvironmentProbe => ({
+    uvPresent: true,
+    scriptInstalled: true,
+    synced: true,
+    ...over,
+  });
+
+  it('accepts only an installed, current environment', () => {
+    expect(environmentVerdict(VOICED_SPEC, probe())).toEqual({ ok: true });
+  });
+
+  it('names the setup command when the worker is not installed', () => {
+    // Before the gate this spawned, uv installed, and it worked; after
+    // the gate it would spawn, uv would refuse, and the caller would wait
+    // out a sixty-second connect timeout to be told "did not start".
+    // Neither is an answer, so the answer comes from here.
+    const verdict = environmentVerdict(VOICED_SPEC, probe({ scriptInstalled: false }));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('not installed');
+    expect(verdict.reason).toContain('field setup voiced');
+  });
+
+  it('names it again when the environment is installed but stale', () => {
+    // Installed is not current. A worker whose lockfile moved underneath
+    // it launches and then dies on an import, which is the same
+    // sixty-second silence by a different route.
+    const verdict = environmentVerdict(VOICED_SPEC, probe({ synced: false }));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('out of date');
+    expect(verdict.reason).toContain('field setup voiced');
+  });
+
+  it('does not tell anyone to run setup when uv is missing', () => {
+    // `field setup` runs `uv sync`, so recommending it without uv is
+    // advice that cannot work — and uv is also the launcher, so this is
+    // fatal either way.
+    const verdict = environmentVerdict(VOICED_SPEC, probe({ uvPresent: false, synced: undefined }));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('brew install uv');
+    expect(verdict.reason).not.toContain('field setup');
+
+    // Both missing at once is the state of a fresh clone — and of CI,
+    // where `pnpm test` runs before setup-uv — so it is the combination
+    // most likely to be met and the one that fixes the ordering: with
+    // the environment checked first, this says "run field setup" and
+    // sends someone to a command that cannot run.
+    const fresh = environmentVerdict(
+      VOICED_SPEC,
+      probe({ uvPresent: false, scriptInstalled: false, synced: undefined }),
+    );
+    expect(fresh.reason).toContain('brew install uv');
+    expect(fresh.reason).not.toContain('field setup');
+  });
+
+  it('reads a dev-only .venv as uninstalled, which is what the probe sees', () => {
+    // The false positive that started this: `uv sync --only-group dev` —
+    // what CI builds for the pyright gate, and therefore what a dev
+    // checkout has — creates `.venv` with pyright in it and no worker.
+    // A directory named `.venv` was the whole test before, so both
+    // workers passed the gate here and could not launch (#61 review).
+    const binDir = join(tempProject, '.venv', 'bin');
+    mkdirSync(binDir, { recursive: true });
     writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');
-    expect(workerPackagePresent(tempSpec).ok).toBe(true);
+    writeFileSync(join(binDir, 'pyright'), '');
+    writeFileSync(join(binDir, 'python3'), '');
+    expect(existsSync(join(tempProject, '.venv'))).toBe(true);
+    expect(workerScriptInstalled(tempSpec)).toBe(false);
 
-    const available = workerAvailable(tempSpec);
-    expect(available.ok).toBe(false);
-    expect(available.reason).toContain(`field setup ${tempDir}`);
-
-    // Installed is the whole difference: nothing else about the checkout
-    // changes between these two assertions.
-    mkdirSync(join(tempProject, '.venv'));
-    expect(workerAvailable(tempSpec).ok).toBe(true);
+    // …and the console script appearing is the whole difference, which is
+    // what a full `uv sync` writes and `--only-group dev` does not.
+    writeFileSync(join(binDir, tempSpec.script), '');
+    expect(workerScriptInstalled(tempSpec)).toBe(true);
   });
 
   it('still reports a missing package differently from a missing environment', () => {

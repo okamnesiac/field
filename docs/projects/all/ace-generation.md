@@ -117,7 +117,7 @@ as a reviewable diff.
   daemon's cwd, i.e. the user's project. Redirect next to the weights in
   `~/.field/models` if ACE-Step's env allows it.
 
-## 8 §3.4's setup contract was a description, not a mechanism (2026-08-07)
+## 6 §3.4's setup contract was a description, not a mechanism (2026-08-07)
 
 "Setup is an explicit, loud `field ace setup` … consented, never a
 surprise" was true of the command and false of everything else. The
@@ -131,9 +131,19 @@ voice seam, where the automatic install is a couple of gigabytes.
 Fixed by making the mechanism match the sentence: `uv run --no-sync`, so
 starting a daemon can only ever *use* an environment, plus a check
 before the spawn that says `field setup <worker>` when there is nothing
-installed. Without that check the refusal is real but useless — uv exits
+usable. Without that check the refusal is real but useless — uv exits
 immediately, the daemon never binds, and the caller waits out a
 sixty-second connect timeout to be told "did not start".
+
+What "usable" means took a second pass. The first check asked whether
+`.venv` existed, which is a directory `uv sync --only-group dev` also
+creates — the pyright gate above builds exactly that, so both workers in
+a normal checkout passed a gate neither could launch through, restoring
+the timeout the gate exists to remove. It now asks for the console script
+uv installs with the project (`.venv/bin/<script>`, which is what
+`uv run` spawns and what `--only-group dev` omits) and then for
+`uv sync --check`, since installed is not the same as current. Both
+markers were verified against uv rather than reasoned about.
 
 The interpreter override (`FIELD_ACED_PYTHON`, `FIELD_VOICED_PYTHON`)
 skips both, as it always skipped uv: it names an interpreter that already

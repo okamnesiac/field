@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
@@ -85,24 +85,81 @@ export function workerPackagePresent(spec: WorkerSpec): { ok: boolean; reason?: 
   return { ok: true };
 }
 
+// What can be learned about a worker's environment without launching it.
+export interface EnvironmentProbe {
+  uvPresent: boolean;
+  // `.venv/bin/<script>` — the console script `uv run` spawns, which
+  // exists only once uv has installed the project itself. A directory
+  // called `.venv` proves nothing: `uv sync --only-group dev` builds one
+  // with pyright in it and no worker, which is what CI builds for the
+  // pyright gate and what a dev checkout therefore has (#61 review).
+  scriptInstalled: boolean;
+  // `uv sync --check`: installed is not the same as current. undefined
+  // when uv is absent and the question cannot be asked.
+  synced: boolean | undefined;
+}
+
+// Pure so it can be exercised for every combination on a machine with no
+// uv and no environments — which is what CI is when `pnpm test` runs,
+// since setup-uv comes after it. Deciding from ambient state instead
+// would make these assertions pass or fail by accident of the checkout.
+export function environmentVerdict(
+  spec: WorkerSpec,
+  probe: EnvironmentProbe,
+): { ok: boolean; reason?: string } {
+  const setup =
+    `run \`field setup ${spec.packageDir}\` ` +
+    `(setup is explicit and never automatic: ace-generation.md §3.4)`;
+  // uv first: it is the launcher *and* what setup runs, so telling
+  // someone to run setup when uv is missing is advice that cannot work.
+  if (!probe.uvPresent) {
+    return { ok: false, reason: 'uv is not installed (brew install uv)' };
+  }
+  if (!probe.scriptInstalled) {
+    return { ok: false, reason: `its environment is not installed — ${setup}` };
+  }
+  if (probe.synced === false) {
+    return { ok: false, reason: `its environment is out of date — ${setup}` };
+  }
+  return { ok: true };
+}
+
+// Its own function because it is the fact that was wrong: the gate used
+// to ask whether `.venv` existed, which a dev-only sync satisfies without
+// installing any worker. Verified against uv rather than assumed — a full
+// sync of a project with a `[project.scripts]` entry writes it, and
+// `--only-group dev` does not.
+export function workerScriptInstalled(spec: WorkerSpec): boolean {
+  const binDir = process.platform === 'win32' ? 'Scripts' : 'bin';
+  return existsSync(join(workerProject(spec), '.venv', binDir, spec.script));
+}
+
+function probeEnvironment(spec: WorkerSpec): EnvironmentProbe {
+  // One process, two facts: whether uv is here at all, and whether it
+  // considers the environment current.
+  const check = spawnSync('uv', ['sync', '--check', '--project', workerProject(spec)], {
+    stdio: 'ignore',
+  });
+  const uvPresent = !check.error;
+  return {
+    uvPresent,
+    scriptInstalled: workerScriptInstalled(spec),
+    synced: uvPresent ? check.status === 0 : undefined,
+  };
+}
+
 // Can this worker be started right now — the question `connectTo` asks.
-// Since --no-sync means the daemon will not install anything, an unsynced
+// Since --no-sync means the daemon will not install anything, an unusable
 // environment is a diagnosis to make here rather than a spawn that fails
 // silently into a log and surfaces sixty seconds later as a connect
 // timeout (#61 review). An interpreter override supplies its own
-// environment, so it skips this the way it skips uv.
+// environment, so it skips this the way it skips uv — and skips the
+// subprocess with it, which is what keeps the stub tests fast.
 export function workerAvailable(spec: WorkerSpec): { ok: boolean; reason?: string } {
   const present = workerPackagePresent(spec);
   if (!present.ok) return present;
-  if (!process.env[spec.pythonOverrideEnv] && !existsSync(join(workerProject(spec), '.venv'))) {
-    return {
-      ok: false,
-      reason:
-        `its environment is not installed — run \`field setup ${spec.packageDir}\` ` +
-        `(setup is explicit and never automatic: ace-generation.md §3.4)`,
-    };
-  }
-  return { ok: true };
+  if (process.env[spec.pythonOverrideEnv]) return { ok: true };
+  return environmentVerdict(spec, probeEnvironment(spec));
 }
 
 function socketPathFor(root: string, spec: WorkerSpec): string {
