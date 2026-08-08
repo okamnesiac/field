@@ -151,6 +151,17 @@ recipe that still claims to describe it. So `voice_ref_sha256` sits
 beside it and the two are required together — the same treatment a
 variant gets, for the same reason.
 
+**The reference recording is optional, and bloom starts without one**
+(2026-08-07, Justin's call). `voice_ref` is paired with its hash but not
+required, so a recipe carrying `text` alone means the model's own default
+voice. That unblocks §2's definition of done — creek's line can be
+generated before anyone records a reference — and it changes what §4's
+open question is: not "whose voice blocks this" but "whose voice improves
+it", answerable whenever a recording exists. With no reference the voice
+is defined by `model:` and nothing else, which is honest rather than
+lossy: §1.1 already commits the output precisely because inference does
+not reproduce.
+
 **Backend feasibility, checked rather than assumed**: `chatterbox-tts`
 0.1.7 resolves from PyPI in about a second, 126 packages, pulling
 torch/torchaudio/transformers. §1.5's "Chatterbox first" stands on

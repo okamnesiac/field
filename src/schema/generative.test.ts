@@ -78,6 +78,23 @@ describe('generative recipes', () => {
     }
   });
 
+  it('accepts a voice recipe with no reference at all — the default voice', () => {
+    // `voice_ref` is optional, not merely paired: a recipe with `text`
+    // alone means the model's own default voice, which is what bloom
+    // uses until a reference recording exists. The voice is then defined
+    // by `model:` and nothing else, and that is honest rather than
+    // lossy — inference is not reproducible anyway, which is why §1.1
+    // commits the output instead of regenerating it.
+    //
+    // Pinned because a later tightening that made `voice_ref` required
+    // would look like a correctness fix and would break the only
+    // configuration currently in use.
+    const { voice_ref, voice_ref_sha256, ...noReference } = voice;
+    void voice_ref;
+    void voice_ref_sha256;
+    expect(generativeSoundSchema.safeParse(noReference).success).toBe(true);
+  });
+
   it('requires the reference recording and its hash together', () => {
     // The recording *is* the voice (§1.3), so the recipe pins its bytes
     // the way it pins a variant's. A name without a hash would let the
