@@ -16,7 +16,10 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-PROTOCOL_VERSION = 1
+# 2: unrecognised job fields are refused rather than stripped. Bumped
+# with that change so the handshake can tell the two behaviours apart —
+# see src/workers/protocol.ts for why silence was the alternative.
+PROTOCOL_VERSION = 2
 
 JsonObject = dict[str, Any]
 
@@ -111,7 +114,7 @@ def reject_unknown(request: JsonObject, job: type, op: str) -> None:
     extra = sorted(set(request) - known)
     if extra:
         raise ValueError(
-            f"{op}: unrecognised field(s) {', '.join(repr(e) for e in extra)} — "
+            f"unrecognised field(s) {', '.join(repr(e) for e in extra)} — "
             f"this worker does not understand them, and running anyway would "
             f"produce output that does not match what was asked for"
         )

@@ -88,7 +88,7 @@ describe.skipIf(!interpreter)('field-aced protocol (live daemon)', () => {
     ).rejects.toThrow(/unrecognised field\(s\) 'guidance_scale'/);
   });
 
-  it('pawns and handshakes with the model unloaded', () => {
+  it('spawns and handshakes with the model unloaded', () => {
     expect(client.daemonVersion).not.toBe('unknown');
     expect(client.modelLoaded).toBe(false);
   });

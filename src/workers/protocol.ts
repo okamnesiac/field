@@ -9,7 +9,13 @@ import { z } from 'zod';
 // were made with, and the model that made them is what a recipe records,
 // whichever model that was.
 
-export const WORKER_PROTOCOL_VERSION = 1;
+// 2: a job carrying a field the worker does not declare is refused
+// rather than silently stripped (ace-generation.md §7). That changed what
+// the wire accepts, so it changed the number — otherwise a daemon that
+// fails closed and one that quietly drops fields answer `hello`
+// identically, and the skew check standing in front of exactly this
+// failure could never fire (#69 review).
+export const WORKER_PROTOCOL_VERSION = 2;
 
 export const workerHelloResponseSchema = z.object({
   ok: z.literal(true),

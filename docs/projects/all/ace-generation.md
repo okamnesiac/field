@@ -210,7 +210,19 @@ forgotten here, and this check can never become the reason a valid
 request is refused. Both workers get it from the shared lifecycle, which
 is the third thing #59's extraction has paid for.
 
-What it does not fix, and cannot: a daemon predating this change still
-ignores what it does not know, because the code that would refuse is the
-code it does not have. This protects every field added from here on,
-which is the useful half — the half that was going to bite us again.
+**A daemon predating this change still ignores what it does not know**,
+because the code that would refuse is the code it lacks. That much is
+nature. What is not nature is whether anyone can *tell*: the handshake
+has always compared `protocol` and refused a mismatch, so the check
+standing in front of this exact failure was already there — and shipping
+a change to what the wire accepts without moving the number would have
+left a fail-closed daemon and a silently-stripping one answering `hello`
+identically, forever (#69 review). So `PROTOCOL_VERSION` is 2, and the
+mismatch message says what to do about it, the way cli.ts already tells
+someone their `field-audiod` predates `--watch`.
+
+That is the general rule this section is really about, and it is worth
+stating separately from the bug that produced it: **a change to what the
+wire accepts is a change to the protocol version.** Not to the daemon
+version, which is prose, and not to nothing, which is what happened
+here until it was caught.
