@@ -128,6 +128,23 @@ point of this is that it no longer has to.
    declarable and `field check` already names them
    ([effects.md](effects.md) §3).
 
+   *Rejected: no sends at all — place the track in both parents instead*
+   (2026-08-08). Attractive because it deletes a decision and a chunk, and
+   exactly right for siblings: a placement carries a level, the graph is
+   already a DAG, and the cycle detection is already written. It fails the
+   moment the source is nested or repeated. `snare` inside `verse`, with
+   `verse` placed at bars 5 and 13, has no single `at` a plate could place
+   it at — there are two, both hand-computed from where `verse` sits, and
+   moving `verse` leaves the plate reverberating at the old spot with no
+   error. That is the second structure to maintain that decision 4 exists
+   to eliminate. The escape — putting the plate *inside* `verse` so it
+   moves with its parent — works and costs the sharing: a plate per
+   placement, unfeedable from `chorus`, when a shared reverb fed from two
+   depths is §8's definition of done. What the level-only edge buys, and a
+   placement cannot, is inheriting the target's time mapping instead of
+   declaring its own — a placement's whole nature is that it declares a
+   time.
+
 8. **Children and sends are both inputs; they differ in what the edge
    carries.** A child arrives with an **offset**; a send arrives with a
    **level**. Neither carries the other's.
@@ -160,7 +177,17 @@ point of this is that it no longer has to.
     new one — `stem.ts` renders pre-fader precisely so that "mixing
     decisions never invalidate rendered stems"
     ([project-model.md](../../project-model.md)) — and nesting keeps it:
-    nudging a fader six levels down re-sums and re-renders nothing.
+    nudging a fader six levels down never re-renders the content below it.
+
+    That promise was first written as "re-sums and re-renders nothing",
+    which is too strong (2026-08-08). A parent's stem *is* its sum plus
+    its own inserts, so a gain change re-runs the insert chain of every
+    ancestor above it — those chains are non-linear and sit downstream of
+    the gain. Nothing below re-renders, which is the expensive half and
+    the half worth promising. This is not a cost of decision 13; it is
+    true of any model once a parent has both inserts and children, and the
+    original promise only held because the mix was the sole consumer and
+    had no chain ahead of its faders.
 
     "Stem" survives as the word for a track's render. Which stems get
     sent for mastering is a choice at export time, not a kind of object.
@@ -184,6 +211,71 @@ point of this is that it no longer has to.
     exists, and folding them in is a layout change
     ([project-layout.md](project-layout.md)) that deserves its own step
     and its own chance to be wrong.
+
+13. **One gain, and it lives on the edge (2026-08-08).** A placement
+    carries a level; nothing else does. What a console calls a channel's
+    *fader* and what it calls a bus's *input trim* are one gain stage seen
+    from two directions — the fader sets how much of a track reaches its
+    parent, which is precisely the parent's level for that input. So there
+    is one field, `inputs[].gain_db`, and it already sits at the right
+    point in the path: a child's stem arrives fully rendered through its
+    own inserts, and the gain is applied while the parent sums.
+
+    A console says the same thing by omission: trim lives on a *mic*
+    input, where the incoming level is unknown and has to be staged before
+    anything downstream can be set. A line input fed from another channel
+    has no trim, because the sending channel's fader already is one. Every
+    edge in this graph is a line input.
+
+    Another gain stage means another level, not another field. Driving a
+    limiter harder without disturbing the balance of the three things
+    feeding it is a sub-track holding the three, placed at its own gain.
+    Master volume is the same move: a `master` track whose single input is
+    the mix, placed at `gain_db`, with the master chain as its inserts.
+
+    Today's mix rule already *is* this, which is the strongest evidence it
+    is right. `renderMix` does `sumStems(faders)` → `mix.gain_db` → master
+    chain; a track render does `sumClips(gains)` → inserts. `mix.gain_db`
+    already sits where a placement gain sits, driving into the chain the
+    way [effects.md](effects.md) §5 says it should. So the migration is a
+    simplification rather than a re-encoding, and `track.gain_db`/`pan`
+    retire into the root track's placements — bit-identically, because the
+    stage does not move.
+
+    *Rejected: a separate track-level trim* before the inserts. Real as a
+    stage, redundant as a field, since a level expresses it.
+
+    Consequence for chunk 3: `pan` is the same stage as gain, so it moves
+    to the edge too — and the daemon's stem op sums clips with a gain and
+    **no pan**. Per-clip pan in `sumClips` is the prerequisite, and the
+    reason `check` refuses a placed track whose pan is set.
+
+14. **Tracks, not channels (2026-08-08).** *Rejected: renaming everything
+    to `channel`*, which was seriously considered and lost on two counts.
+
+    `channel` is already taken: it means L/R throughout the audio layer —
+    37 sites in TypeScript and 105 in the daemon (`wav.channels[0]`,
+    "mono or stereo only"). The layers barely meet, so this is a cost
+    rather than a blocker, but it is a cost paid in exactly the place
+    error messages are read.
+
+    The argument *for* it was that `track` means something specific to
+    producers, so "everything is a track" asks them to unlearn. That holds
+    against Logic and Pro Tools and not against Ableton, which already
+    says what decision 1 says: Return Tracks are buses, Group Tracks
+    contain other tracks and nest inside each other, and the root is the
+    Master Track. Bitwig likewise. The stretching `track` needed is
+    therefore already done by the DAWs closest to this design, and the two
+    sentences that matter most read better under it — "a track placed at
+    bar 5", `//songs/creek/track:drums`.
+
+    `pattern` strains under both nouns equally and so decides nothing.
+
+    **`channel` survives as the mixer view's word.** One object; when you
+    are looking at the mixer you call it a channel, which is where "a bus
+    is a channel" and "master channel" come from without a rename. That is
+    decision 9's split — static graph, dynamic view — applied to
+    vocabulary.
 
 ## 2 What this is, in one paragraph
 
@@ -315,12 +407,14 @@ the order they run in:
 Three things are deferred out of step 1 rather than dropped, each because
 half of it would be worse than none:
 
-- **A child's own `gain_db`/`pan`.** §1.10 puts them outside the child's
-  render and applies them in the parent's sum, which is the nested mix —
-  §7 chunk 3. Gain would fold in trivially (dB add) and pan would not,
-  since the daemon's stem op sums clips with a gain and no pan. Applying
-  the half that is easy would silently drop the half that is not, so
-  `check` refuses a placed track with either set and names the chunk.
+- **A child's own `gain_db`/`pan`.** `check` refuses a placed track with
+  either set, and names §7 chunk 3. Decision 13 has since sharpened what
+  that refusal is waiting for: the fields are not becoming supported on a
+  placed track, they are **retiring**, with the level moving onto the
+  placement where it can differ per parent. So the refusal is a migration
+  stance rather than a missing feature, and the thing chunk 3 must
+  actually build is per-clip pan in the daemon's `sumClips` — the one
+  piece that is not moving fields around.
 - **Negative `at`.** §1.6 allows it for pickups; `timePosition` is
   non-negative today, for clips as much as for placements, so allowing it
   is a change to the time primitive rather than to nesting.
