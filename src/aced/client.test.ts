@@ -5,7 +5,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AcedClient } from './client.js';
-import { acedHelloResponseSchema, acedOkResponseSchema } from './protocol.js';
+import { workerHelloResponseSchema, workerOkResponseSchema } from '../workers/protocol.js';
 
 // Live protocol tests against the real Python daemon, spawned through the
 // FIELD_ACED_PYTHON override. No model environment required: the daemon's
@@ -71,10 +71,10 @@ describe.skipIf(!interpreter)('field-aced protocol (live daemon)', () => {
   });
 
   it('answers unknown ops with a protocol error and keeps serving', async () => {
-    await expect(client.request('mystery', {}, acedOkResponseSchema, 5000)).rejects.toThrow(
+    await expect(client.request('mystery', {}, workerOkResponseSchema, 5000)).rejects.toThrow(
       /unknown op/,
     );
-    const hello = await client.request('hello', {}, acedHelloResponseSchema, 5000);
+    const hello = await client.request('hello', {}, workerHelloResponseSchema, 5000);
     expect(hello.model_loaded).toBe(false);
   });
 

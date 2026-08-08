@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from field_worker.protocol import JsonObject
+from field_worker.protocol import required_int as _required_int
 from field_worker.protocol import required_number as _required_number
 from field_worker.protocol import required_str as _required_str
 
@@ -49,12 +50,12 @@ class GenerateJob:
             raise ValueError("'lyrics' must be a string when present")
         bpm: int | None = None
         if request.get("bpm") is not None:
-            bpm = int(required_number("bpm", 30, 300))
+            bpm = _required_int(request, "bpm", "generate", 30, 300)
         return GenerateJob(
             prompt=required_str("prompt"),
             duration_seconds=required_number("duration_seconds", 10, 600),
-            seed=int(required_number("seed", 0, 2**31 - 1)),
-            variants=int(required_number("variants", 1, 8)),
+            seed=_required_int(request, "seed", "generate", 0, 2**31 - 1),
+            variants=_required_int(request, "variants", "generate", 1, 8),
             output_dir=required_str("output_dir"),
             lyrics=lyrics,
             bpm=bpm,

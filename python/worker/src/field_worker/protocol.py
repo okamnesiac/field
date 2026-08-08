@@ -67,10 +67,34 @@ def required_number(request: JsonObject, key: str, op: str, minimum: float, maxi
     return float(value)
 
 
+def required_int(request: JsonObject, key: str, op: str, minimum: int, maximum: int) -> int:
+    """A whole number, refused rather than truncated when it is not one.
+
+    `int(float(...))` silently accepted `variants: 2.7` as 2 and
+    `seed: 1.5` as 1 (#60 review) — a recipe would then record a seed the
+    caller never asked for, which is the provenance lying about its own
+    inputs in miniature.
+    """
+    value = request.get(key)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{op} needs a number {key!r}")
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{key!r} must be a whole number, not {value}")
+    whole = int(value)
+    if not minimum <= whole <= maximum:
+        raise ValueError(f"{key!r} must be in [{minimum}, {maximum}]")
+    return whole
+
+
 def optional_str(request: JsonObject, key: str) -> str | None:
+    """Absent or a non-empty string. Empty is neither, and saying so is
+    the difference between "no reference recording" and "a reference
+    recording at the empty path" (#60 review)."""
     value = request.get(key)
     if value is None:
         return None
     if not isinstance(value, str):
         raise ValueError(f"{key!r} must be a string when present")
+    if not value:
+        raise ValueError(f"{key!r} must be a non-empty string when present")
     return value

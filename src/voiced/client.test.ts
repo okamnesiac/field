@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +65,39 @@ describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('refuses a daemon that identifies as a different worker', async () => {
+    // Every worker shares one protocol and one socket convention, so a
+    // stale or misconfigured socket lets field-aced satisfy a
+    // VoicedClient's handshake — reproduced by starting aced on voice's
+    // socket path (#60 review). A voice job would then be rejected as a
+    // malformed ACE job three seconds later, or worse, understood as one.
+    await client.quit();
+    client.close();
+    rmSync(join(root, '.field'), { recursive: true, force: true });
+
+    const acedSrc = [
+      join(packageRoot, 'python', 'worker', 'src'),
+      join(packageRoot, 'python', 'aced', 'src'),
+    ].join(delimiter);
+    mkdirSync(join(root, '.field'), { recursive: true });
+    const impostor = spawn(interpreter!, ['-m', 'field_aced', '--socket', '.field/voiced.sock'], {
+      cwd: root,
+      env: { ...process.env, PYTHONPATH: acedSrc },
+      stdio: 'ignore',
+    });
+    try {
+      // Wait for it to bind, then connect as voice.
+      for (let i = 0; i < 40 && !existsSync(join(root, '.field/voiced.sock')); i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      await expect(VoicedClient.connect(root)).rejects.toThrow(/identifies as field-aced/);
+    } finally {
+      impostor.kill();
+    }
+    // The afterEach quits `client`, which this test already closed.
+    client = await VoicedClient.connect(root).catch(() => client);
+  });
+
   it('spawns and handshakes with the model unloaded', () => {
     expect(client.daemonVersion).not.toBe('unknown');
     expect(client.modelLoaded).toBe(false);
@@ -94,6 +127,33 @@ describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
     // …and it is still serving afterwards.
     const hello = await client.request('hello', {}, workerHelloResponseSchema, 5000);
     expect(hello.model_loaded).toBe(false);
+  });
+
+  it('refuses an empty voice_ref rather than reading it as absent', async () => {
+    // "" and omitted are different requests: one asks for a reference
+    // recording at no path, the other asks for the model's own voice.
+    // Reading the first as the second would generate in the wrong voice
+    // and commit it (#60 review, Bugbot).
+    await expect(
+      client.generate({
+        text: 'a line',
+        seed: 1,
+        variants: 1,
+        output_dir: join(root, 'out'),
+        voice_ref: '',
+      }),
+    ).rejects.toThrow(/'voice_ref' must be a non-empty string/);
+  });
+
+  it('refuses a fractional seed or variant count rather than truncating', async () => {
+    // `int(float(...))` took 2.7 variants as 2 and seed 1.5 as 1, so the
+    // recipe would record inputs the caller never gave (#60 review).
+    await expect(
+      client.generate({ text: 'a line', seed: 1.5, variants: 1, output_dir: join(root, 'out') }),
+    ).rejects.toThrow(/'seed' must be a whole number/);
+    await expect(
+      client.generate({ text: 'a line', seed: 1, variants: 2.7, output_dir: join(root, 'out') }),
+    ).rejects.toThrow(/'variants' must be a whole number/);
   });
 
   it('does not treat an omitted voice_ref as the error', async () => {

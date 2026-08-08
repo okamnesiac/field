@@ -21,6 +21,15 @@ than from its README:
   - `conds.pt` is among the downloaded files and is loaded as a builtin
     voice, which is what makes `audio_prompt_path=None` a real default
     voice rather than an error path (voice-generation.md §6).
+  - **`generate` stores the conditionals it derives.** With a reference,
+    `prepare_conditionals` assigns `self.conds`; without one it merely
+    asserts `self.conds is not None` and reuses whatever is there. The
+    model outliving a single job — which is the entire point of the
+    daemon-lite lifecycle — therefore means one referenced job leaks its
+    voice into every later default-voice job in the session. The recipe
+    would say default and the committed audio would be someone else's
+    voice: provenance that lies, which §1.1 exists to prevent (#60
+    review).
   - `model.sr` is 24000 (`S3GEN_SR`). **Generated audio is 24 kHz**, so a
     voice variant is not at any project rate: creek will wrap it in a
     `normalize` sound, which is the rule render-pipeline.md chunk 5 just
@@ -29,6 +38,7 @@ than from its README:
 
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 
@@ -54,6 +64,7 @@ class Pipeline:
 
     def __init__(self) -> None:
         self._model = None
+        self._builtin_conds = None
 
     @property
     def loaded(self) -> bool:
@@ -70,7 +81,13 @@ class Pipeline:
 
         progress(0.0, "downloading/verifying Chatterbox weights (first run pulls ~2 GB)")
         progress(0.05, "loading model")
-        self._model = ChatterboxTTS.from_pretrained(device=device_preference())
+        model = ChatterboxTTS.from_pretrained(device=device_preference())
+        # The pristine builtin voice, kept aside before any job can
+        # replace it. Deep-copied because `generate` mutates `conds.t3`
+        # in place when exaggeration differs, so a shared reference would
+        # not stay pristine for long.
+        self._builtin_conds = copy.deepcopy(model.conds)
+        self._model = model
 
     def generate(self, job: VoiceJob, progress: ProgressCallback) -> GenerationOutput:
         self.ensure_loaded(progress)
@@ -96,6 +113,11 @@ class Pipeline:
         for index, seed in enumerate(seeds):
             progress(0.1 + 0.85 * (index / job.variants), f"generating variant {index + 1}")
             torch.manual_seed(seed)
+            if job.voice_ref is None:
+                # Restore the builtin before every unreferenced variant.
+                # A fresh copy each time, not the stored one: `generate`
+                # may mutate what it is handed.
+                model.conds = copy.deepcopy(self._builtin_conds)
             wav = model.generate(job.text, audio_prompt_path=job.voice_ref)
             path = output_dir / f"{index + 1}.wav"
             torchaudio.save(str(path), wav, model.sr)

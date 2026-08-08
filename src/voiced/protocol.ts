@@ -13,5 +13,8 @@ export interface VoiceGenerateJob {
   seed: number;
   variants: number;
   output_dir: string;
+  // Omitted, or a real path. The worker refuses an empty string rather
+  // than reading it as "no reference": those are different requests and
+  // only one of them is what the caller meant (#60 review).
   voice_ref?: string | undefined;
 }

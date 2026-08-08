@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from field_worker.protocol import JsonObject, optional_str
-from field_worker.protocol import required_number as _required_number
+from field_worker.protocol import required_int as _required_int
 from field_worker.protocol import required_str as _required_str
 
 DAEMON_NAME = "field-voiced"
@@ -44,8 +44,8 @@ class VoiceJob:
     def from_request(request: JsonObject) -> "VoiceJob":
         return VoiceJob(
             text=_required_str(request, "text", "generate"),
-            seed=int(_required_number(request, "seed", "generate", 0, 2**31 - 1)),
-            variants=int(_required_number(request, "variants", "generate", 1, 8)),
+            seed=_required_int(request, "seed", "generate", 0, 2**31 - 1),
+            variants=_required_int(request, "variants", "generate", 1, 8),
             output_dir=_required_str(request, "output_dir", "generate"),
             voice_ref=optional_str(request, "voice_ref"),
         )

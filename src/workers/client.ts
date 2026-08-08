@@ -165,6 +165,19 @@ export class WorkerClient extends EventEmitter {
 
     const probe = new make(spec, socket, 'unknown', false);
     const hello = await probe.request('hello', {}, workerHelloResponseSchema, 30_000);
+    // Who answered, not just what it speaks. Every worker now shares one
+    // protocol and one socket convention, so a stale or misconfigured
+    // socket lets one worker's daemon satisfy another's client — a voice
+    // job reaching field-aced would be rejected as a malformed ACE job at
+    // best, and the handshake is where that should be caught rather than
+    // three seconds later in a confusing error (#60 review).
+    if (hello.daemon !== spec.name) {
+      probe.close();
+      throw new Error(
+        `${spec.name}: the daemon at ${path} identifies as ${hello.daemon} — ` +
+          `stale socket, or two workers configured onto one path`,
+      );
+    }
     if (hello.protocol !== WORKER_PROTOCOL_VERSION) {
       probe.close();
       throw new Error(
