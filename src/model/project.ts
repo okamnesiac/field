@@ -875,7 +875,14 @@ function validate(project: LoadedProject): void {
     // which is what the migration does. Comparing the old render against
     // the new does not need both to exist at once — build the mix, keep
     // its hash, then migrate.
-    if (trackNames.has(SONG_OUTPUT_NAME)) {
+    // Renderable, not merely named: only a track the graph builds a stem
+    // for ever claims the extent (renderableTrack), so a midi or empty
+    // track called `main` is not a second output and saying it carries the
+    // song's length would be false.
+    const outputTrack = song.tracks.find(
+      (t) => t.data.name === SONG_OUTPUT_NAME && renderableTrack(t.data),
+    );
+    if (outputTrack) {
       const mix = song.mixes.find((m) => m.data.name === SONG_OUTPUT_NAME);
       if (mix) {
         push(

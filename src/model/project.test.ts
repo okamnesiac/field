@@ -1053,6 +1053,23 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
     expect(await messages()).toBe('');
   });
 
+  it('says nothing about a midi or empty track named main', async () => {
+    // Only a renderable track ever claims the song's extent, so neither of
+    // these is a second output — claiming they carry the length would be
+    // false about tracks the graph never builds a stem for.
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      'name: main\ntype: midi\nclips: []\n',
+    );
+    expect(await messages()).toBe('');
+
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      'name: main\ntype: audio\nclips: []\n',
+    );
+    expect(await messages()).toBe('');
+  });
+
   it('says nothing about a non-output track sharing the song with a mix', async () => {
     writeFileSync(
       join(root, 'songs/opener/tracks/bridge.yaml'),
