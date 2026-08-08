@@ -41,6 +41,7 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
+from typing import Any
 
 from field_worker.protocol import GenerationOutput, JsonObject
 from field_worker.server import ProgressCallback
@@ -53,6 +54,38 @@ MODEL_NAME = "chatterbox-0.1.7"
 def device_preference() -> str:
     """Apple Silicon by default; `from_pretrained` falls back to CPU itself."""
     return os.environ.get("FIELD_VOICE_DEVICE", "mps")
+
+
+def _detached(value: Any) -> Any:
+    import torch
+
+    if torch.is_tensor(value):
+        # detach before clone: some of these carry grad history, which is
+        # exactly what `copy.deepcopy` refuses to walk.
+        return value.detach().clone()
+    return copy.deepcopy(value)
+
+
+def clone_conds(conds: Any) -> Any:
+    """An independent copy of a `Conditionals`, safe to hand to `generate`.
+
+    `copy.deepcopy` looks like the obvious way to do this and fails on a
+    real model: "Only Tensors created explicitly by the user (graph
+    leaves) support the deepcopy protocol". Some of these tensors come
+    out of a forward pass, so torch refuses to copy them — and the whole
+    #60 leak fix ran through that deepcopy, which meant the fix worked
+    perfectly against a reading of the source and not at all against the
+    model. Nothing caught it because nothing had loaded the model.
+
+    Field-by-field instead, detaching each tensor, which is the same
+    shape Chatterbox's own `save`/`load` round-trip uses: `T3Cond` is
+    rebuilt from its `__dict__`, and `gen` is a plain dict.
+    """
+    t3 = getattr(conds, "t3")
+    gen = getattr(conds, "gen")
+    rebuilt_t3 = type(t3)(**{k: _detached(v) for k, v in vars(t3).items()})
+    rebuilt_gen = {k: _detached(v) for k, v in gen.items()}
+    return type(conds)(rebuilt_t3, rebuilt_gen)
 
 
 class Pipeline:
@@ -83,10 +116,10 @@ class Pipeline:
         progress(0.05, "loading model")
         model = ChatterboxTTS.from_pretrained(device=device_preference())
         # The pristine builtin voice, kept aside before any job can
-        # replace it. Deep-copied because `generate` mutates `conds.t3`
-        # in place when exaggeration differs, so a shared reference would
-        # not stay pristine for long.
-        self._builtin_conds = copy.deepcopy(model.conds)
+        # replace it. Copied rather than referenced because `generate`
+        # mutates `conds.t3` in place when exaggeration differs, so a
+        # shared reference would not stay pristine for long.
+        self._builtin_conds = clone_conds(model.conds)
         self._model = model
 
     def generate(self, job: VoiceJob, progress: ProgressCallback) -> GenerationOutput:
@@ -117,7 +150,7 @@ class Pipeline:
                 # Restore the builtin before every unreferenced variant.
                 # A fresh copy each time, not the stored one: `generate`
                 # may mutate what it is handed.
-                model.conds = copy.deepcopy(self._builtin_conds)
+                model.conds = clone_conds(self._builtin_conds)
             wav = model.generate(job.text, audio_prompt_path=job.voice_ref)
             path = output_dir / f"{index + 1}.wav"
             torchaudio.save(str(path), wav, model.sr)

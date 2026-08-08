@@ -28,6 +28,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 from types import FrameType
 from typing import IO, Callable, Generic, Protocol, TypeVar, cast
 
@@ -38,6 +39,21 @@ from .protocol import (
     error_response,
     ok_response,
 )
+
+def _log_exception(context: str) -> None:
+    """Put the traceback where the daemon's stderr goes — its log file.
+
+    The protocol carries one line, which is right for a wire format and
+    useless for a diagnosis: the first real Chatterbox run failed with
+    `'NoneType' object is not callable` and nothing else anywhere, and
+    finding that perth had swallowed an ImportError meant reproducing the
+    whole load by hand outside the daemon. The client still receives the
+    one-line error; the log now also has the stack that explains it.
+    """
+    print(f"--- {context} failed ---", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
+
 
 ProgressCallback = Callable[[float, str], None]
 """(fraction 0..1, human-readable stage) — forwarded to socket clients."""
@@ -172,6 +188,7 @@ class Server(Generic[JobT]):
             request_id = request.get("id")
             self._dispatch(connection, request, request_id)
         except Exception as err:  # noqa: BLE001 — every failure becomes a protocol error
+            _log_exception("request")
             self._send(connection, error_response(request_id, str(err)))
 
     def _dispatch(self, connection: socket.socket, request: JsonObject, request_id: object) -> None:
@@ -222,6 +239,7 @@ class Server(Generic[JobT]):
                 ),
             )
         except Exception as err:  # noqa: BLE001
+            _log_exception("generation")
             self._send(connection, error_response(request_id, str(err)))
         finally:
             self._generation_gate.release()
