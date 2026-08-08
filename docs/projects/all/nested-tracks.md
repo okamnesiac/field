@@ -255,9 +255,14 @@ point of this is that it no longer has to.
 
     `channel` is already taken: it means L/R throughout the audio layer
     (`wav.channels[0]`, "mono or stereo only"). Re-derive the scale rather
-    than trusting a figure written down once —
-    `git grep -cw -e channel -e channels -- src native/audiod/src` reported
-    141 lines under `src/` and 104 under the daemon when this was written.
+    than trusting a figure written down once — each of these prints its
+    own number, 141 and 104 when this was written:
+
+    ```
+    git grep -w -e channel -e channels -- src | wc -l
+    git grep -w -e channel -e channels -- native/audiod/src | wc -l
+    ```
+
     The layers barely meet, so this is a cost rather than a blocker, but it
     is a cost paid in exactly the place error messages are read.
 
