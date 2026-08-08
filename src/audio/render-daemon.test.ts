@@ -317,10 +317,56 @@ describe.skipIf(!binary)('render subprocess', () => {
       // Additive fields the binary does not know.
       ['unknown plan field', { ...stem, clips: [clip()], future_mode: true }, /future_mode: is not a field/],
       // Cardinality and cross-field state.
-      ['empty eq bands', { op: 'effects', input, output, inserts: [{ effect: 'eq', normalize: true, bands: [] }] }, /bands: must have at least one band/],
+      ['empty eq bands', { op: 'effects', input, output, inserts: [{ effect: 'eq', normalize: true, bands: [] }] }, /must hold 1–8 bands/],
       ['negative length', { ...mix, length_samples: -1 }, /length_samples: out of range/],
       ['loop without length', { ...mix, loop: true }, /loop: needs "length_samples"/],
       ['clip input out of range', { ...stem, clips: [clip({ input: 1 })] }, /input: out of range/],
+    ];
+
+    for (const [name, plan, expected] of cases) {
+      await expect(render(plan), name).rejects.toThrow(expected);
+    }
+  });
+
+  it('enforces the schema domains, not just the types', async () => {
+    // The second half of the audit (#54 review): 23 plans that were type-
+    // correct and still described work the binary would not do.
+    // `bandwidth: 0` is an identity filter and `ceiling_db: 1` leaves
+    // audio untouched — both produced output byte-identical to the input
+    // under keys naming an EQ and a limiter.
+    //
+    // The bounds come from `plan-limits.h`, generated from the same zod
+    // schemas the control plane validates against, so this is one
+    // contract rather than two copies of one.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(64)]);
+    const output = join(dir, 'out.wav');
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const band = (over: Record<string, unknown> = {}) => ({
+      type: 'bell', frequency: 1000, gain_db: 3, bandwidth: 1, ...over,
+    });
+    const fx = (inserts: unknown[]) => ({ op: 'effects', input, output, inserts });
+    const clip = (over: Record<string, unknown> = {}) => ({
+      input: 0, start: 0, duration: 8, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0, ...over,
+    });
+    const stem = { op: 'stem', output, sample_rate: RATE, inputs: [input] };
+
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      ['bandwidth 0 (identity filter)', fx([{ effect: 'eq', normalize: true, bands: [band({ bandwidth: 0 })] }]), /bandwidth: out of range/],
+      ['frequency 0', fx([{ effect: 'eq', normalize: true, bands: [band({ frequency: 0 })] }]), /frequency: out of range/],
+      ['gain beyond ±24', fx([{ effect: 'eq', normalize: true, bands: [band({ gain_db: 99 })] }]), /gain_db: out of range/],
+      ['ceiling above 0 dB (no-op limiter)', fx([{ effect: 'limit', ceiling_db: 1, lookahead_ms: 5, release_ms: 100 }]), /ceiling_db: out of range/],
+      ['zero lookahead', fx([{ effect: 'limit', ceiling_db: -1, lookahead_ms: 0, release_ms: 100 }]), /lookahead_ms: out of range/],
+      ['zero decay', fx([{ effect: 'reverb', mix: 0.3, decay: 0, predelay_ms: 0, damping: 0.5 }]), /decay: out of range/],
+      ['nine bands', fx([{ effect: 'eq', normalize: true, bands: Array.from({ length: 9 }, () => band()) }]), /must hold 1–8 bands/],
+      ['unsupported sample rate', { ...stem, sample_rate: 12345, clips: [clip()] }, /is not a rate this project supports/],
+      ['zero-length clip', { ...stem, clips: [clip({ duration: 0 })] }, /duration: out of range/],
+      ['fractional fade', { ...stem, clips: [clip({ fade_in: 1.5 })] }, /fade_in: expected an integer/],
+      ['fades exceeding the clip', { ...stem, clips: [clip({ fade_in: 5, fade_out: 5 })] }, /fades total 10 samples/],
     ];
 
     for (const [name, plan, expected] of cases) {

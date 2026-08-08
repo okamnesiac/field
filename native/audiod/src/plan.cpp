@@ -1,4 +1,5 @@
 #include "plan.h"
+#include "plan-limits.h"
 
 #include <cmath>
 #include <initializer_list>
@@ -146,9 +147,9 @@ void validateBand (const juce::var& band, const std::string& path)
     checkObject (band,
                  path,
                  { { "type", Kind::string, true },
-                   { "frequency", Kind::number, true },
-                   { "gain_db", Kind::number, true },
-                   { "bandwidth", Kind::number, true } });
+                   { "frequency", Kind::number, true, limits::eqFrequencyMin, limits::eqFrequencyMax },
+                   { "gain_db", Kind::number, true, limits::eqGainDbMin, limits::eqGainDbMax },
+                   { "bandwidth", Kind::number, true, limits::eqBandwidthMin, limits::eqBandwidthMax } });
     // The type is checked here as well as in design(), so an unknown band
     // is refused before any allocation rather than partway through one.
     const auto type = band.getProperty ("type", juce::var()).toString();
@@ -173,8 +174,11 @@ void validateInsert (const juce::var& insert, const std::string& path)
         const auto& bands = arrayAt (insert, "bands");
         // An eq with no bands is a byte-identical no-op, which is a chain
         // that does nothing under a key that says it does something.
-        if (bands.isEmpty())
-            fail (path + ".bands", "must have at least one band");
+        if (bands.size() < limits::eqBandsMin || bands.size() > limits::eqBandsMax)
+            fail (path + ".bands",
+                  "must hold " + std::to_string (limits::eqBandsMin) + "–"
+                      + std::to_string (limits::eqBandsMax) + " bands, not "
+                      + std::to_string (bands.size()));
         for (int i = 0; i < bands.size(); ++i)
             validateBand (bands[i], path + ".bands[" + std::to_string (i) + "]");
     }
@@ -183,19 +187,19 @@ void validateInsert (const juce::var& insert, const std::string& path)
         checkObject (insert,
                      path,
                      { { "effect", Kind::string, true },
-                       { "ceiling_db", Kind::number, true },
-                       { "lookahead_ms", Kind::number, true, 0.0 },
-                       { "release_ms", Kind::number, true, 0.0 } });
+                       { "ceiling_db", Kind::number, true, limits::limitCeilingDbMin, limits::limitCeilingDbMax },
+                       { "lookahead_ms", Kind::number, true, limits::limitLookaheadMsMin, limits::limitLookaheadMsMax },
+                       { "release_ms", Kind::number, true, limits::limitReleaseMsMin, limits::limitReleaseMsMax } });
     }
     else if (effect == "reverb")
     {
         checkObject (insert,
                      path,
                      { { "effect", Kind::string, true },
-                       { "mix", Kind::number, true, 0.0, 1.0 },
-                       { "decay", Kind::number, true, 0.0 },
-                       { "predelay_ms", Kind::number, true, 0.0 },
-                       { "damping", Kind::number, true, 0.0, 1.0 } });
+                       { "mix", Kind::number, true, limits::reverbMixMin, limits::reverbMixMax },
+                       { "decay", Kind::number, true, limits::reverbDecayMin, limits::reverbDecayMax },
+                       { "predelay_ms", Kind::number, true, limits::reverbPredelayMsMin, limits::reverbPredelayMsMax },
+                       { "damping", Kind::number, true, limits::reverbDampingMin, limits::reverbDampingMax } });
     }
     else
     {
@@ -221,6 +225,16 @@ void validateChain (const juce::var& plan,
     const auto& inserts = *value.getArray();
     for (int i = 0; i < inserts.size(); ++i)
         validateInsert (inserts[i], path + "." + key + "[" + std::to_string (i) + "]");
+}
+
+void validateSampleRate (const juce::var& plan, const std::string& path)
+{
+    const double rate = (double) plan.getProperty ("sample_rate", juce::var());
+    for (const int supported : limits::sampleRates)
+        if (rate == (double) supported)
+            return;
+    fail (path + ".sample_rate",
+          "is not a rate this project supports (" + std::to_string ((long) rate) + ")");
 }
 
 void validateInputs (const juce::var& plan, const std::string& path)
@@ -263,6 +277,7 @@ void validatePlan (const juce::var& plan)
                        { "inputs", Kind::array, true },
                        { "clips", Kind::array, true },
                        { "inserts", Kind::array, false } });
+        validateSampleRate (plan, path);
         validateInputs (plan, path);
         const auto& clips = arrayAt (plan, "clips");
         const auto inputCount = (double) arrayAt (plan, "inputs").size();
@@ -280,11 +295,24 @@ void validatePlan (const juce::var& plan)
                          // silence, which is what slip is.
                          { { "input", Kind::integer, true, 0.0, inputCount - 1.0 },
                            { "start", Kind::integer, true, 0.0 },
-                           { "duration", Kind::integer, true, 0.0 },
+                           // A zero-length clip contributes nothing while
+                           // the key says it does; `samples` is int ≥ 0 in
+                           // the schema, so fades are integers too.
+                           { "duration", Kind::integer, true, 1.0 },
                            { "read_offset", Kind::integer, true },
                            { "gain_db", Kind::number, true },
-                           { "fade_in", Kind::number, true, 0.0 },
-                           { "fade_out", Kind::number, true, 0.0 } });
+                           { "fade_in", Kind::integer, true, 0.0 },
+                           { "fade_out", Kind::integer, true, 0.0 } });
+            // The same fit the control plane checks on the way in
+            // (model/project.ts): fades that overlap would each be
+            // scaling the other's samples.
+            const auto fadeIn = (double) clips[i].getProperty ("fade_in", juce::var());
+            const auto fadeOut = (double) clips[i].getProperty ("fade_out", juce::var());
+            const auto duration = (double) clips[i].getProperty ("duration", juce::var());
+            if (fadeIn + fadeOut > duration)
+                fail (clipPath, "fades total " + std::to_string ((long) (fadeIn + fadeOut))
+                                    + " samples but the clip is only "
+                                    + std::to_string ((long) duration));
         }
         validateChain (plan, "inserts", path, false);
     }
@@ -300,8 +328,9 @@ void validatePlan (const juce::var& plan)
                        { "faders", Kind::array, true },
                        { "gain_db", Kind::number, true },
                        { "master", Kind::array, false },
-                       { "length_samples", Kind::integer, false, 0.0 },
+                       { "length_samples", Kind::integer, false, 1.0 },
                        { "loop", Kind::boolean, false } });
+        validateSampleRate (plan, path);
         validateInputs (plan, path);
         const auto& faders = arrayAt (plan, "faders");
         for (int i = 0; i < faders.size(); ++i)
