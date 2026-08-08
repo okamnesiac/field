@@ -52,10 +52,19 @@ jobs:
       # exercise. The daemon's protocol tests are no longer among the
       # skips: they run here too, in null-output mode.
       - run: pnpm test
-      # Python worker: pyright strict is the gate (ace-generation.md §3.4).
+      # Python workers: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
-      # is far too heavy for CI.
+      # is far too heavy for CI — so production dependencies are absent
+      # and `field_worker` is resolved by `extraPaths` rather than by
+      # install (#59 review: adding it as a real dependency broke this
+      # step, because --only-group excludes every production dependency).
+      #
+      # Both packages are checked. field-worker declares strict typing and
+      # nothing enforced it when it was added, which is a gate that exists
+      # only in its own pyproject (#59 review). It has no production
+      # dependencies at all, so its sync is trivial.
       - uses: astral-sh/setup-uv@v5
+      - run: cd python/worker && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
 
   macos:
