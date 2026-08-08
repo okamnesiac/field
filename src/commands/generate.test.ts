@@ -121,6 +121,15 @@ describe('field generate: which generator, decided before anything spawns', () =
     await expect(
       generateVariants(root, 'pad', { ...music, voiceRef: 'ref-voice' }),
     ).rejects.toThrow('--voice-ref is a voice option');
+    // The delivery knobs are voice-only for the same reason a music
+    // recipe may not carry `voice_ref`: a field its generator ignores is
+    // a recipe describing something that did not happen.
+    await expect(
+      generateVariants(root, 'pad', { ...music, exaggeration: 0.3 }),
+    ).rejects.toThrow('--exaggeration is a voice option');
+    await expect(
+      generateVariants(root, 'pad', { ...music, conviction: 0.3 }),
+    ).rejects.toThrow('--conviction is a voice option');
   });
 
   it('still asks music for exactly one length, and asks voice for none', async () => {
@@ -406,6 +415,36 @@ describe('field generate: what lands on disk', () => {
     expect(pad.prompt).toBe('warm keys');
     expect(pad.duration_seconds).toBeGreaterThan(0);
     expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('sends the delivery knobs and records them, translating only at the worker', async () => {
+    // `conviction` is our name end to end — schema, protocol and wire —
+    // and becomes `cfg_weight` inside the adapter, which is the boundary
+    // where Chatterbox's vocabulary starts (voice-generation.md §8).
+    await generateVariants(root, 'line', { ...voice, exaggeration: 0.3, conviction: 0.3 });
+    const job = stubRequests().find((r) => r['op'] === 'generate')!;
+    expect(job['exaggeration']).toBe(0.3);
+    expect(job['conviction']).toBe(0.3);
+    expect('cfg_weight' in job).toBe(false);
+
+    const written = recipe('line');
+    expect(written.exaggeration).toBe(0.3);
+    expect(written.conviction).toBe(0.3);
+    expect((await check(root)).diagnostics).toEqual([]);
+    expect((await check(root)).unformatted).toEqual([]);
+  });
+
+  it('omits them entirely when unset, rather than pinning a default', async () => {
+    // Absent means "whatever the model does", which is not the same as
+    // the number the model happens to default to today. Writing 0.5 down
+    // would silently pin it if Chatterbox ever moved.
+    await generateVariants(root, 'line', voice);
+    const job = stubRequests().find((r) => r['op'] === 'generate')!;
+    expect('exaggeration' in job).toBe(false);
+    expect('conviction' in job).toBe(false);
+    const raw = readFileSync(join(root, 'songs/creek/sounds/line.yaml'), 'utf8');
+    expect(raw).not.toContain('exaggeration');
+    expect(raw).not.toContain('conviction');
   });
 
   it('reports progress from the worker', async () => {

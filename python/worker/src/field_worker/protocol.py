@@ -86,6 +86,25 @@ def required_int(request: JsonObject, key: str, op: str, minimum: int, maximum: 
     return whole
 
 
+def optional_number(
+    request: JsonObject, key: str, minimum: float, maximum: float
+) -> float | None:
+    """Absent, or a number inside the range. Never silently clamped.
+
+    A clamped value would be recorded in the recipe as the number the
+    caller gave while the audio came from a different one — the same
+    provenance-that-lies failure `required_int` refuses truncation for.
+    """
+    value = request.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{key!r} must be a number when present")
+    if not minimum <= float(value) <= maximum:
+        raise ValueError(f"{key!r} must be in [{minimum}, {maximum}]")
+    return float(value)
+
+
 def optional_str(request: JsonObject, key: str) -> str | None:
     """Absent or a non-empty string. Empty is neither, and saying so is
     the difference between "no reference recording" and "a reference

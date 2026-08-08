@@ -69,8 +69,18 @@ describe('generative recipes', () => {
   });
 
   it('keeps voice-only fields off music recipes', () => {
-    for (const field of ['voice_ref', 'voice_ref_sha256'] as const) {
-      const value = field === 'voice_ref' ? 'justin-ref' : 'c'.repeat(64);
+    for (const field of [
+      'voice_ref',
+      'voice_ref_sha256',
+      'exaggeration',
+      'conviction',
+    ] as const) {
+      const value =
+        field === 'voice_ref'
+          ? 'justin-ref'
+          : field === 'voice_ref_sha256'
+            ? 'c'.repeat(64)
+            : 0.3;
       const parsed = generativeSoundSchema.safeParse({ ...music, [field]: value });
       expect(parsed.success, `${field} on a music recipe`).toBe(false);
       expect(parsed.error?.issues[0]?.path).toEqual([field]);
@@ -113,5 +123,32 @@ describe('generative recipes', () => {
     // The refine sits on a strict object; adding one must not have
     // loosened the other.
     expect(generativeSoundSchema.safeParse({ ...voice, tempo: 120 }).success).toBe(false);
+  });
+});
+
+describe('the voice delivery knobs', () => {
+  // Bounds narrower than Chatterbox's, on purpose: widening a range
+  // later leaves every committed recipe valid, narrowing one does not
+  // (voice-generation.md §8).
+  it('accepts a voice recipe carrying either or both', () => {
+    expect(generativeSoundSchema.safeParse({ ...voice, exaggeration: 0.3 }).success).toBe(true);
+    expect(generativeSoundSchema.safeParse({ ...voice, conviction: 0.3 }).success).toBe(true);
+    const both = generativeSoundSchema.safeParse({
+      ...voice,
+      exaggeration: 2,
+      conviction: 1,
+    });
+    expect(both.success).toBe(true);
+  });
+
+  it('refuses values outside the range rather than clamping them', () => {
+    // A clamped value would be recorded as the number asked for while
+    // the audio came from a different one.
+    for (const bad of [{ exaggeration: 0.2 }, { exaggeration: 2.1 }]) {
+      expect(generativeSoundSchema.safeParse({ ...voice, ...bad }).success).toBe(false);
+    }
+    for (const bad of [{ conviction: 0.05 }, { conviction: 1.1 }]) {
+      expect(generativeSoundSchema.safeParse({ ...voice, ...bad }).success).toBe(false);
+    }
   });
 });
