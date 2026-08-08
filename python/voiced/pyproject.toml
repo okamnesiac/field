@@ -10,6 +10,19 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "field-worker",
     "chatterbox-tts==0.1.7",
+    # Chatterbox watermarks every generation through `perth`, whose
+    # `perth_net/__init__.py` imports `pkg_resources` — a setuptools
+    # module that Python 3.12 no longer ships and uv does not install
+    # unasked. perth catches that ImportError and sets
+    # `PerthImplicitWatermarker = None`, so the failure surfaces one
+    # layer up as `'NoneType' object is not callable` from Chatterbox's
+    # constructor, naming neither perth nor setuptools. Declared here
+    # because it is genuinely required at runtime and nothing in the
+    # dependency graph asks for it.
+    # Pinned below 81: setuptools removed `pkg_resources` itself, so the
+    # newest release satisfies the dependency and still leaves perth
+    # unable to import (verified — 83.0.0 ships no pkg_resources at all).
+    "setuptools>=70,<81",
 ]
 
 [tool.uv.sources]

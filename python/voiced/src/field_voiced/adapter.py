@@ -41,6 +41,7 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
+from typing import Any
 
 from field_worker.protocol import GenerationOutput, JsonObject
 from field_worker.server import ProgressCallback
@@ -53,6 +54,58 @@ MODEL_NAME = "chatterbox-0.1.7"
 def device_preference() -> str:
     """Apple Silicon by default; `from_pretrained` falls back to CPU itself."""
     return os.environ.get("FIELD_VOICE_DEVICE", "mps")
+
+
+def _detached(value: Any) -> Any:
+    import torch
+
+    if torch.is_tensor(value):
+        # detach before clone: a device copy of a `requires_grad` tensor
+        # is not a leaf, which is exactly what `copy.deepcopy` refuses.
+        return value.detach().clone()
+    return copy.deepcopy(value)
+
+
+def clone_conds(conds: Any) -> Any:
+    """An independent copy of a `Conditionals`, safe to hand to `generate`.
+
+    `copy.deepcopy` looks like the obvious way to do this and fails
+    on the product's default path: "Only Tensors created explicitly by
+    the user (graph leaves) support the deepcopy protocol". The whole #60
+    leak fix ran through that deepcopy, so it worked against a reading of
+    the source and not at all against a loaded model.
+
+    **The cause is the device transfer, and saying so matters.**
+    `gen.embedding` is stored in `conds.pt` with `requires_grad=True` but
+    arrives a leaf; `from_local` then finishes with `.to(device)`, and
+    `Conditionals.to` calls `v.to(device=…)`, whose result carries a
+    `grad_fn` — no longer a leaf, which is what deepcopy refuses. So the
+    failure is conditional on the device (#64 review, verified against
+    the cached `conds.pt`):
+
+        as loaded          non-leaf: none            deepcopy: OK
+        after .to('cpu')   non-leaf: none            deepcopy: OK
+        after .to('mps')   non-leaf: [gen.embedding] deepcopy: RuntimeError
+
+    `.to('cpu')` is a no-op on tensors already there, so they stay leaves
+    and the old code passes — on CPU, and on any CI runner without MPS.
+    `device_preference()` defaults to `"mps"`, so the default path is the
+    broken one, which is why the first real run on a Mac found this and
+    nothing before it could have. It also means no test here can guard
+    it: a regression test would pass on the runners we have. This
+    paragraph is the guard, so leave it pointing at the device rather
+    than at forward passes — the wrong cause sends the next reader to
+    `FIELD_VOICE_DEVICE=cpu`, where reverting to deepcopy looks fine.
+
+    Field-by-field instead, detaching each tensor, which is the same
+    shape Chatterbox's own `save`/`load` round-trip uses: `T3Cond` is
+    rebuilt from its `__dict__`, and `gen` is a plain dict.
+    """
+    t3 = getattr(conds, "t3")
+    gen = getattr(conds, "gen")
+    rebuilt_t3 = type(t3)(**{k: _detached(v) for k, v in vars(t3).items()})
+    rebuilt_gen = {k: _detached(v) for k, v in gen.items()}
+    return type(conds)(rebuilt_t3, rebuilt_gen)
 
 
 class Pipeline:
@@ -83,10 +136,10 @@ class Pipeline:
         progress(0.05, "loading model")
         model = ChatterboxTTS.from_pretrained(device=device_preference())
         # The pristine builtin voice, kept aside before any job can
-        # replace it. Deep-copied because `generate` mutates `conds.t3`
-        # in place when exaggeration differs, so a shared reference would
-        # not stay pristine for long.
-        self._builtin_conds = copy.deepcopy(model.conds)
+        # replace it. Copied rather than referenced because `generate`
+        # mutates `conds.t3` in place when exaggeration differs, so a
+        # shared reference would not stay pristine for long.
+        self._builtin_conds = clone_conds(model.conds)
         self._model = model
 
     def generate(self, job: VoiceJob, progress: ProgressCallback) -> GenerationOutput:
@@ -117,7 +170,7 @@ class Pipeline:
                 # Restore the builtin before every unreferenced variant.
                 # A fresh copy each time, not the stored one: `generate`
                 # may mutate what it is handed.
-                model.conds = copy.deepcopy(self._builtin_conds)
+                model.conds = clone_conds(self._builtin_conds)
             wav = model.generate(job.text, audio_prompt_path=job.voice_ref)
             path = output_dir / f"{index + 1}.wav"
             torchaudio.save(str(path), wav, model.sr)

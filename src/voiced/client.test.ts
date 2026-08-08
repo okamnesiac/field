@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,5 +168,75 @@ describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
     await expect(
       client.generate({ text: 'a line', seed: 1, variants: 0, output_dir: join(root, 'out') }),
     ).rejects.toThrow(/'variants' must be in/);
+  });
+});
+
+// A separate harness with its own interpreter, deliberately. The block
+// above prefers python/voiced/.venv when it exists, which after a real
+// `field setup voiced` contains Chatterbox — so a test that wants the
+// backend to fail on import would instead load a 2 GB model there and
+// pass or hang depending on whether anyone had run setup. That is the
+// same ambient-state trap the environment gate hit twice in #61/#62, so
+// the precondition is stated here instead of inherited.
+function findBareInterpreter(): string | undefined {
+  const probe = spawnSync(
+    'python3',
+    ['-c', 'import sys; print(sys.executable if sys.version_info >= (3, 11) else "")'],
+    { encoding: 'utf8' },
+  );
+  const found = probe.status === 0 ? probe.stdout.trim() : '';
+  if (!found) return undefined;
+  // Must NOT be able to import chatterbox: the failure is the fixture.
+  const hasModel = spawnSync(found, ['-c', 'import chatterbox'], { stdio: 'ignore' }).status === 0;
+  return hasModel ? undefined : found;
+}
+
+const bare = findBareInterpreter();
+
+describe.skipIf(!bare)('a backend failure reaches the log', () => {
+  let root: string;
+  let client: VoicedClient;
+  let savedPythonPath: string | undefined;
+
+  beforeEach(async () => {
+    process.env['FIELD_VOICED_PYTHON'] = bare;
+    savedPythonPath = process.env['PYTHONPATH'];
+    process.env['PYTHONPATH'] = voicedSrc;
+    root = mkdtempSync(join(tmpdir(), 'field-voiced-fail-'));
+    client = await VoicedClient.connect(root);
+  });
+
+  afterEach(async () => {
+    try {
+      await client.quit();
+    } catch {
+      // already gone is the goal state
+    }
+    client.close();
+    delete process.env['FIELD_VOICED_PYTHON'];
+    if (savedPythonPath === undefined) delete process.env['PYTHONPATH'];
+    else process.env['PYTHONPATH'] = savedPythonPath;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('logs the traceback, not just the sentence it puts on the wire', async () => {
+    // A well-formed job gets past `parse_job` into the adapter, which
+    // fails here at `from chatterbox.tts import …`. Every model-side
+    // failure has that shape: the protocol carries one sentence, which
+    // is right for a wire format and useless for a diagnosis.
+    //
+    // Not hypothetical. creek's first real generation returned
+    // `'NoneType' object is not callable` and nothing else existed
+    // anywhere; finding the cause — perth swallowing an ImportError for
+    // `pkg_resources` three layers down — meant rebuilding the whole
+    // model load by hand outside the daemon. The stack was always there.
+    await expect(
+      client.generate({ text: 'a line', seed: 1, variants: 1, output_dir: join(root, 'out') }),
+    ).rejects.toThrow();
+    const log = readFileSync(join(root, '.field/voiced.log'), 'utf8');
+    expect(log).toContain('generation failed');
+    expect(log).toContain('Traceback');
+    // Names the module that actually failed, which is the whole point.
+    expect(log).toContain('chatterbox');
   });
 });
