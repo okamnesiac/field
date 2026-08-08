@@ -35,7 +35,7 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 4;
+export const RENDER_PLAN_VERSION = 5;
 
 export class RenderUnavailableError extends Error {}
 
@@ -64,6 +64,8 @@ export interface StemPlan {
   inputs: readonly string[];
   clips: readonly RenderedClip[];
   inserts?: readonly Insert[];
+  length_samples?: number;
+  loop?: boolean;
 }
 
 export interface MixPlan {

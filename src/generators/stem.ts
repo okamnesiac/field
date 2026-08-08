@@ -90,6 +90,13 @@ export interface StemSpec {
   // insert edit re-renders it. Omitted entirely when the track has none,
   // so insert-less stems keep their pre-inserts action keys.
   inserts?: Insert[];
+  // The song's declared extent, present only on the track that is the
+  // song's output (labels.ts SONG_OUTPUT_NAME). The mix carried these
+  // until a track could be a song's output; the fields, the meaning and
+  // the daemon's rule about them are the mix's, unchanged. Omitted
+  // otherwise, so every other stem keeps its key.
+  length_samples?: number;
+  loop?: boolean;
 }
 
 // A clip's window on the stem timeline, in samples. Musical clips project
@@ -198,6 +205,8 @@ export function planTrack(
   // action key at all (#9 review) — and name order for buildable sounds.
   sha256BySource: Map<string, string>,
   framesBySource: Map<string, number> = new Map(),
+  // Set only for a song's output track; see StemSpec.
+  extent: { lengthSamples?: number | undefined; loop?: boolean | undefined } = {},
 ): StemSpec {
   // Clips and placed tracks share one source list, because they are one
   // thing wearing two spellings (nested-tracks.md §1.11: a clip is a
@@ -277,6 +286,10 @@ export function planTrack(
     sources,
     clips: placed,
     ...(track.inserts.length > 0 ? { inserts: track.inserts } : {}),
+    ...(extent.lengthSamples !== undefined ? { length_samples: extent.lengthSamples } : {}),
+    // `loop` only travels with a length to fold onto — the daemon refuses
+    // the pair otherwise, and planMix has always paired them this way.
+    ...(extent.loop === true && extent.lengthSamples !== undefined ? { loop: true } : {}),
   };
 }
 
@@ -333,6 +346,8 @@ export const stemGenerator: Generator<StemSpec> = {
       inputs: inputPaths,
       clips,
       ...(spec.inserts !== undefined ? { inserts: spec.inserts } : {}),
+      ...(spec.length_samples !== undefined ? { length_samples: spec.length_samples } : {}),
+      ...(spec.loop !== undefined ? { loop: spec.loop } : {}),
     });
   }
 };

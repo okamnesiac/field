@@ -23,7 +23,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 4;
+constexpr int renderPlanVersion = 5;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -222,6 +222,16 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
 
     auto channels = dsp::sumClips (sources, clips);
     applyChain (plan, "inserts", "stem plan", ChainPresence::optional, channels, sampleRate);
+
+    // After the chain, for the reason renderMix gives: a tail the chain
+    // grew still has to respect the bar line. Present only when this track
+    // is a song's output.
+    const auto declared = plan.getProperty ("length_samples", juce::var());
+    if (! declared.isVoid())
+        dsp::applyDeclaredLength (channels,
+                                  (long) (double) declared,
+                                  (bool) plan.getProperty ("loop", juce::var (false)));
+
     dsp::writeWavFloat32 (output, sampleRate, channels);
 }
 

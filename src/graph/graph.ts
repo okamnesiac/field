@@ -5,6 +5,7 @@ import {
   matchesPattern,
   sharedAssetName,
   SHARED_ASSETS_PKG,
+  SONG_OUTPUT_NAME,
   type Label,
   type LabelPattern,
 } from '../labels.js';
@@ -185,24 +186,33 @@ export function buildGraph(project: LoadedProject): Graph {
           }
         }
       }
+      // A declared song length projects to samples here, where the tempo
+      // map lives; whatever renders the song renders exactly that long.
+      const lengthSamples =
+        song.song?.data.length !== undefined
+          ? tempoMap.ticksToSamples(song.song.data.length)
+          : undefined;
       for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
         // useful artifact — implicit stems exist where there is content
         // (renderableTrack). A track that only contains tracks has
         // content: its children's, summed at their placements.
+        //
+        // The song's output track carries the song's extent, the way the
+        // mix does. Which track that is, is the same convention a bare
+        // song name resolves through, read from the same constant rather
+        // than spelled twice (nested-tracks.md §1.2).
+        const extent =
+          track.name === SONG_OUTPUT_NAME
+            ? { lengthSamples, loop: song.song?.data.loop }
+            : {};
         addRule(
           { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,
-          planTrack(track, tempoMap, sha256BySource, framesBySource),
+          planTrack(track, tempoMap, sha256BySource, framesBySource, extent),
           refLabel,
         );
       }
-      // A declared song length projects to samples here, where the tempo
-      // map lives; the mix renders exactly that long.
-      const lengthSamples =
-        song.song?.data.length !== undefined
-          ? tempoMap.ticksToSamples(song.song.data.length)
-          : undefined;
       for (const file of song.mixes) {
         const spec = planMix(file.data, mixable, lengthSamples, song.song?.data.loop);
         if (spec.tracks.length === 0) continue; // nothing to mix yet

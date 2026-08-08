@@ -175,7 +175,11 @@ sound by name and follow).
   defines a `mix`, a track file implies a `stem`. Content means clips,
   placed tracks (`inputs:`), or both: a placed track is one more source
   in the same list, so a track→track edge is an ordinary graph edge and
-  a track placed three times is one render placed three times. A clip's
+  a track placed three times is one render placed three times. A track can
+  also be a song's *output* — the one named `main`, the same convention a
+  bare song name resolves through — in which case it carries the song's
+  declared `length` and `loop` and renders exactly that long, the way the
+  `mix` rule does. A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an
   automatic sound pulls its whole definition into the stem's subgraph,
   so the arrangement can play audio nothing ever committed, and editing

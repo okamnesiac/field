@@ -286,6 +286,22 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     expect(panned.pan).toBe(-0.5);
   });
 
+  it('never emits loop without a length to fold onto', () => {
+    // `check` already refuses this in a song file (model/project.ts), so
+    // this pins planTrack's own contract rather than the only defence:
+    // the daemon rejects the pair, and a caller reaching this function
+    // directly should not be able to build a plan it will refuse.
+    const orphan = planTrack(nested([place()]), map120, hashes, new Map(), { loop: true });
+    expect(orphan).not.toHaveProperty('loop');
+    expect(orphan).not.toHaveProperty('length_samples');
+    const paired = planTrack(nested([place()]), map120, hashes, new Map(), {
+      loop: true,
+      lengthSamples: 48000,
+    });
+    expect(paired.loop).toBe(true);
+    expect(paired.length_samples).toBe(48000);
+  });
+
   it('leaves a track without placements byte-identical to before nesting', () => {
     const spec = planTrack(track([clip()]), map120, hashes);
     expect(spec.sources).toEqual(['kick']);
@@ -917,5 +933,109 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     ]);
     await buildLabels(root, ['//songs/creek/track:outer'], runner);
     expect(runs).toEqual(['inner', 'outer']);
+  });
+});
+
+// A track can be a song's output, which means carrying the song's
+// declared extent — the two fields the mix has always had, on the track
+// that the bare song name resolves through.
+describe('a track as the song output (nested-tracks.md §7 chunk 2)', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'field-songout-'));
+    init({ dir: root, name: 'test-album' });
+    createSong(root, 'creek');
+    const src = join(root, '..', `field-songout-${Math.random()}.wav`);
+    writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
+    await importAsset(root, 'creek', src, 'kick');
+    rmSync(src);
+    // Seven samples of content: silence, then the kick at sample 3.
+    writeTrack('inner', [
+      'clips:',
+      '  - id: k',
+      '    source: kick',
+      '    anchor: absolute',
+      '    position: 3',
+      '    duration: 4',
+    ]);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeTrack(name: string, body: string[]): void {
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, `songs/creek/tracks/${name}.yaml`),
+      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+    );
+  }
+
+  // 120 bpm, 4/4, 48 kHz: one beat = 960 ticks = 24000 samples, so
+  // 1920 ticks is exactly one second.
+  function declareSong(fields: string[]): void {
+    writeFileSync(
+      join(root, 'songs/creek/song.yaml'),
+      ['name: creek', ...fields, ''].join('\n'),
+    );
+  }
+
+  // Placed one second in, so the stem overruns a one-second song by
+  // exactly the child's own seven samples — enough to tell truncation
+  // from padding, and to see where a fold lands.
+  const placeInnerLate = (name: string) =>
+    writeTrack(name, ['inputs:', '  - track: inner', '    at: 1920']);
+
+  async function render(label: string): Promise<Float32Array> {
+    const outcomes = await buildLabels(root, [label]);
+    return readWav(outcomes.find((o) => o.label === label)!.outputPath!).channels[0]!;
+  }
+
+  it('renders exactly the declared length, truncating the overhang', async () => {
+    declareSong(['length: 1920']);
+    placeInnerLate('main');
+    const out = await render('//songs/creek/track:main');
+    expect(out).toHaveLength(48000); // 48007 without the declared length
+    expect(out[48000 - 1 + 4]).toBeUndefined();
+  });
+
+  it('folds the overhang back onto the start when the song loops', async () => {
+    declareSong(['length: 1920', 'loop: true']);
+    placeInnerLate('main');
+    const out = await render('//songs/creek/track:main');
+    expect(out).toHaveLength(48000);
+    // The kick sat at 48003, three samples past the bar line; looping
+    // wraps it to sample 3 rather than cutting it.
+    expect(out[3]).toBeCloseTo(1, 4);
+    expect(out[4]).toBeCloseTo(0.5, 4);
+  });
+
+  it('pads a song longer than its content, so the extent is authored', async () => {
+    declareSong(['length: 3840']); // two seconds
+    placeInnerLate('main');
+    const out = await render('//songs/creek/track:main');
+    expect(out).toHaveLength(96000);
+    expect(out[48003]).toBeCloseTo(1, 4); // content still where it was
+  });
+
+  it('leaves every other track alone: only the output track claims the extent', async () => {
+    declareSong(['length: 1920']);
+    placeInnerLate('main');
+    placeInnerLate('other');
+    const other = await render('//songs/creek/track:other');
+    expect(other).toHaveLength(48007); // its own content, unbounded
+    const main = await render('//songs/creek/track:main');
+    expect(main).toHaveLength(48000);
+  });
+
+  it('adds nothing to the plan when the song declares no length', async () => {
+    declareSong([]);
+    placeInnerLate('main');
+    const out = await render('//songs/creek/track:main');
+    // No length, no padding, no truncation — and no key movement for
+    // every project that has never declared one.
+    expect(out).toHaveLength(48007);
   });
 });

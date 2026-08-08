@@ -158,6 +158,22 @@ void validateBand (const juce::var& band, const std::string& path)
         fail (path + ".type", "unknown band type \"" + type.toStdString() + "\"");
 }
 
+// Cross-field: looping folds the overhang back onto the declared length,
+// so without one there is nothing to fold onto and the flag would be
+// silently ignored. Shared because `stem` and `mix` both declare a length
+// now — a second copy is how the two ops would drift into disagreeing
+// about what a loop without a length means.
+void validateDeclaredLength (const juce::var& plan, const std::string& path)
+{
+    auto* object = plan.getDynamicObject();
+    if (! object->hasProperty ("loop") || ! (bool) object->getProperty ("loop"))
+        return;
+    if (! object->hasProperty ("length_samples"))
+        fail (path + ".loop", "needs \"length_samples\" to fold onto");
+    if ((double) object->getProperty ("length_samples") <= 0.0)
+        fail (path + ".loop", "needs a positive \"length_samples\" to fold onto");
+}
+
 void validateInsert (const juce::var& insert, const std::string& path)
 {
     if (insert.getDynamicObject() == nullptr)
@@ -289,9 +305,15 @@ void validatePlan (const juce::var& plan)
                        { "sample_rate", Kind::integer, true, 1.0 },
                        { "inputs", Kind::array, true },
                        { "clips", Kind::array, true },
-                       { "inserts", Kind::array, false } });
+                       { "inserts", Kind::array, false },
+                       // A track can be a song's output, so it carries the
+                       // song's declared extent — same two fields, same
+                       // meaning, same rule as the mix's.
+                       { "length_samples", Kind::integer, false, 0.0 },
+                       { "loop", Kind::boolean, false } });
         validateSampleRate (plan, path);
         validateInputs (plan, path);
+        validateDeclaredLength (plan, path);
         const auto& clips = arrayAt (plan, "clips");
         const auto inputCount = (double) arrayAt (plan, "inputs").size();
         for (int i = 0; i < clips.size(); ++i)
@@ -364,17 +386,7 @@ void validatePlan (const juce::var& plan)
             fail (path + ".faders",
                   "has " + std::to_string (faders.size()) + " entries for "
                       + std::to_string (arrayAt (plan, "inputs").size()) + " inputs");
-        // Cross-field: looping folds the overhang back onto the declared
-        // length, so without one there is nothing to fold onto and the
-        // flag would be silently ignored.
-        auto* object = plan.getDynamicObject();
-        if (object->hasProperty ("loop") && (bool) object->getProperty ("loop"))
-        {
-            if (! object->hasProperty ("length_samples"))
-                fail (path + ".loop", "needs \"length_samples\" to fold onto");
-            if ((double) object->getProperty ("length_samples") <= 0.0)
-                fail (path + ".loop", "needs a positive \"length_samples\" to fold onto");
-        }
+        validateDeclaredLength (plan, path);
         validateChain (plan, "master", path, false);
     }
     else if (op == "normalize")
