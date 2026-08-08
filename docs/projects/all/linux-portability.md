@@ -196,7 +196,34 @@ second supported product.
    tests move. The minutes argument above is untouched and still the
    reason for the split — it is the *native build* that costs, which is
    why the Linux job carries typecheck, `pyright` and the fast gate.
-   Running everything on macOS is also the right default for the
+   **Retired 2026-08-08.** There is no macOS job. The 3,000 included
+   minutes are 300 macOS minutes at the 10x rate, and the amendment
+   above had that job running a test set *identical* to Linux's — `say`
+   and `afconvert` retired in [render-pipeline.md](render-pipeline.md)
+   chunk 5 and took the last platform-bound cases with them, so the
+   split's original premise ("guard by what a test needs") no longer
+   selects anything. What remained was paying 10x to run the same tests
+   against a CoreAudio build of the daemon.
+
+   What that gives up, and it is real: nobody compiles `native/audiod`
+   against CoreAudio in CI, so a break in a `JUCE_MAC` branch reaches
+   main unnoticed. `grep -rn JUCE_MAC native/audiod/src/` finds six, in
+   two files: four in `player.cpp` (the property listeners) and two in
+   `player.h`, of which `hardwareListenersAvailable` is a
+   platform-varying constant other code branches on — so a break there
+   can change *behaviour* rather than only fail to compile. The first
+   draft of this paragraph said `player.cpp` was the only file, which is
+   §1.2's amendment happening a second time in the same document: the
+   count was taken by reading the file the author had been working in,
+   and nobody grepped the rest of the daemon.
+
+   The cover is that development happens on macOS, so a local
+   `pnpm build:native` is the gate. That is weaker than a runner, and it
+   is the trade rather than an oversight. If it bites, the cheap fix is a
+   `workflow_dispatch`-only macOS job: zero minutes until someone asks
+   for it.
+
+   Running everything on macOS was also the right default for the
    platform the product ships on (overview.md "V1 platform scope"):
    giving the product platform partial coverage is the wrong way round.
 
@@ -221,7 +248,8 @@ second supported product.
   that step was the reason `afconvert` could not be deleted, so the rule
   went instead ([voice-generation.md](voice-generation.md) §5). Nothing
   in the build shells out to a macOS binary now.
-- **The daemon.** `#if JUCE_MAC` around the listeners, a rescan fallback
+- **The daemon.** `#if JUCE_MAC` around the listeners and the two
+  declarations in `player.h` that go with them, a rescan fallback
   elsewhere, and Linux build dependencies in CI. Discovered on the first
   red build, as intended, and the guess was right about the shape:
   JUCE's build helper `juceaide` links `juce_gui_basics` whatever the app
@@ -231,23 +259,28 @@ second supported product.
   `libfreetype-dev`, `libfontconfig1-dev`, `libx11-dev`, `libxext-dev`,
   `libxrandr-dev`, `libxinerama-dev`, `libxcursor-dev`,
   `libxcomposite-dev`, `libxrender-dev`, `libglu1-mesa-dev`.
-- **CI.** Two jobs, `concurrency: cancel-in-progress` so a superseded
-  push stops paying, and the native build cache keyed as it is today.
+- **CI.** One job on Linux (two until decision 4's retirement,
+  2026-08-08), `concurrency: cancel-in-progress` so a superseded push
+  stops paying, and the native build cache keyed as it is today.
 
 ## 3 Definition of done
 
-`pnpm typecheck`, `pnpm build` and `pnpm test` pass on Linux with the
-`say` and `afconvert` tests skipped by platform guard rather than
-failing; the daemon builds on Linux and its protocol tests pass in
-null-output mode; and CI runs both jobs, with Linux carrying typecheck,
-`pyright` and everything that does not need a macOS binary. bloom still
-builds and plays on macOS with the same audible result.
+`pnpm typecheck`, `pnpm build` and `pnpm test` pass on Linux; the daemon
+builds on Linux and its protocol tests pass in null-output mode; and CI
+runs on Linux, carrying typecheck, `pyright` and the whole suite. bloom
+still builds and plays on macOS with the same audible result.
+
+The `say` and `afconvert` guards this originally required are gone —
+not because they stopped being needed but because the rules did
+([render-pipeline.md](render-pipeline.md) chunk 5 retired both), which
+is also why decision 4's split had nothing left to select.
 
 Not "the macOS job runs only what needs macOS", which is what this
-section asked for before the job was built: decision 4's amendment runs
-the whole suite there, because the suite is 12.4s against a job
-dominated by the native build and macOS is the platform the product
-ships on.
+section asked for before the job was built: decision 4's amendment ran
+the whole suite there instead, and decision 4's retirement removed the
+job altogether once that suite became identical to Linux's. The
+portability claim it verified is now carried locally rather than by a
+runner.
 
 Byte-identical cross-platform rendering was part of this plan's
 definition of done and is now [render-pipeline.md](render-pipeline.md)

@@ -5,16 +5,25 @@ on:
     branches: [main]
   pull_request:
 
-# Two jobs, split by what a test needs rather than by platform loyalty
-# (linux-portability.md decision 4). The Linux job is the fast gate: it
-# carries typecheck, the Python pyright gate, and the daemon, which builds
-# on both platforms since chunk 4. Nothing in the suite needs a macOS
-# binary any more, so the two jobs now run the same tests — which is the
-# point of the split rather than a redundancy in it, because macOS is the
-# platform the product ships on (overview.md "V1 platform scope") and the
-# daemon it exercises there is the CoreAudio build. Both run `pnpm test` —
-# #46's stopgap dropped it entirely, and green meaning "the tests ran" is
-# the whole point.
+# One job, on Linux. The macOS job is gone for cost: the 3,000 included
+# minutes are only 300 macOS minutes at the 10x rate, and it was spending
+# them to run a test set identical to this one — `say` and `afconvert`
+# retired in render-pipeline.md chunk 5 and took the last platform-bound
+# cases with them, so nothing in the suite needs a macOS binary.
+#
+# What that gives up, stated plainly (linux-portability.md decision 4,
+# amended 2026-08-08): nobody compiles native/audiod against CoreAudio in
+# CI any more, so a break in a JUCE_MAC branch reaches main unnoticed.
+# There are six, in two files — the property listeners in player.cpp and
+# two declarations in player.h, one of which is
+# `hardwareListenersAvailable`, a platform-varying constant other code
+# branches on, so a break there can change behaviour rather than merely
+# fail to compile. The cover is that development happens on macOS, so
+# `pnpm build:native` locally is the real gate. That is a weaker
+# guarantee than a runner and it is the trade being made.
+#
+# `pnpm test` runs here — #46's stopgap dropped it entirely, and green
+# meaning "the tests ran" is the whole point.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -60,8 +69,9 @@ jobs:
       # render-pipeline.md §6 chunk 5 and took their guards with them, so
       # nothing in the suite shells out to a macOS binary any more. Nor
       # is that one skip a Linux limit: sclang runs on Linux, it just is
-      # not installed on either runner, so the macOS job skips the same
-      # test. The daemon's protocol tests run here, in null-output mode.
+      # not installed on the runner, and it skipped on macOS for the same
+      # reason back when there was a macOS runner to skip on. The
+      # daemon's protocol tests run here, in null-output mode.
       - run: pnpm test
       # Python workers: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
@@ -78,33 +88,3 @@ jobs:
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
 
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # The native daemon: cached on the CMakeLists hash so a JUCE recompile
-      # only happens when the pin or the build itself changes. The daemon
-      # protocol tests in pnpm test find the built binary and run against it
-      # in null-output mode (no audio device on runners).
-      - uses: actions/cache@v4
-        with:
-          path: native/audiod/build
-          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
-      - run: pnpm build:native
-      # uv for src/workers/lockfile.test.ts, which asks real uv about
-      # `--locked` and skips without it. This lane runs the whole suite,
-      # so it needs everything the whole suite needs.
-      - uses: astral-sh/setup-uv@v5
-      # The whole suite, not a macOS-only subset (linux-portability.md
-      # decision 4's amendment). macOS is the product platform
-      # (overview.md "V1 platform scope"), so it is the wrong one to give
-      # partial coverage — and the suite measures ~13s against a job
-      # dominated by install and the native build, so narrowing it would
-      # save seconds and cost a file list that silently drifts.
-      - run: pnpm test
