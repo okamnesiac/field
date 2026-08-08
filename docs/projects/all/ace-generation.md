@@ -116,3 +116,26 @@ as a reviewable diff.
 - ACE-Step writes `.cache/acestep/progress_estimates.json` into the
   daemon's cwd, i.e. the user's project. Redirect next to the weights in
   `~/.field/models` if ACE-Step's env allows it.
+
+## 8 §3.4's setup contract was a description, not a mechanism (2026-08-07)
+
+"Setup is an explicit, loud `field ace setup` … consented, never a
+surprise" was true of the command and false of everything else. The
+shared client started workers with `uv run --project …`, and `uv run`
+syncs the project environment before running it — so on a fresh checkout
+the first `field generate` installed torch and Chatterbox on its own,
+with no consent step and no output saying what it was doing. Setup was a
+label on a door that was never locked; the #61 review found it at the
+voice seam, where the automatic install is a couple of gigabytes.
+
+Fixed by making the mechanism match the sentence: `uv run --no-sync`, so
+starting a daemon can only ever *use* an environment, plus a check
+before the spawn that says `field setup <worker>` when there is nothing
+installed. Without that check the refusal is real but useless — uv exits
+immediately, the daemon never binds, and the caller waits out a
+sixty-second connect timeout to be told "did not start".
+
+The interpreter override (`FIELD_ACED_PYTHON`, `FIELD_VOICED_PYTHON`)
+skips both, as it always skipped uv: it names an interpreter that already
+has what it needs, which is what makes the daemon tests possible without
+a model environment.

@@ -1,12 +1,23 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Document, parseDocument } from 'yaml';
 import { AcedClient, ACED_SPEC } from '../aced/client.js';
 import { VoicedClient, VOICED_SPEC } from '../voiced/client.js';
-import { workerAvailable } from '../workers/client.js';
+import { workerPackagePresent } from '../workers/client.js';
 import type { WorkerSpec } from '../workers/protocol.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
@@ -143,10 +154,21 @@ function songTime(project: LoadedProject, songName: string): SongTime {
 //     leave the recipe check-green while describing bytes the model
 //     never heard, which is the one thing a recipe must never do —
 //     the refusal `field choose` already makes about a drifted variant.
-async function resolveVoiceRef(
+//
+// The last of those needs the *bytes*, not the file, or it is a promise
+// about one instant: hashing the recording and then handing the worker
+// its path leaves minutes of model load between the two, and a recording
+// edited in that window is generated from while the recipe pins what it
+// used to be. Re-hashing afterwards does not close it — an edit that is
+// undone before the run ends compares equal at both ends and passes.
+// So the window is removed rather than checked: the reference is copied
+// first, and the copy is what gets hashed and what the worker reads.
+// Hashed and heard are then the same bytes by construction.
+async function snapshotVoiceRef(
   project: LoadedProject,
   song: string,
   ref: string,
+  into: string,
 ): Promise<{ path: string; sha256: string }> {
   const found = lookupAsset(project, song, ref);
   if (!found) {
@@ -155,17 +177,33 @@ async function resolveVoiceRef(
         `an asset (field import), not a sound (voice-generation.md §1.3)`,
     );
   }
+  // An ambiguous name is not a name. Two ledger rows called `ref-voice`
+  // make the project check-red already, but generation does not read
+  // diagnostics, so without this it spends model minutes on whichever
+  // recording sorted first and then writes that arbitrary choice down as
+  // provenance (#61 review).
+  if (found.matches > 1) {
+    throw new Error(
+      `voice_ref "${ref}" matches ${found.matches} rows in the ${
+        found.base === 'shared' ? 'shared' : song
+      } ledger — the name has no single meaning; fix the duplicate (field check)`,
+    );
+  }
   if (found.path === undefined) {
     throw new Error(`voice_ref "${ref}" ${found.problem}`);
   }
-  const sha256 = await sha256File(found.path);
+  // Copy, then hash the copy. Hashing the original first and copying
+  // after would leave the same window one step smaller.
+  const path = join(into, `voice-ref${extname(found.asset.file)}`);
+  copyFileSync(found.path, path);
+  const sha256 = await sha256File(path);
   if (sha256 !== found.asset.sha256) {
     throw new Error(
       `voice_ref "${ref}" does not match its recorded sha256 — the reference recording ` +
         `changed under its ledger entry; refusing to generate from it (field check)`,
     );
   }
-  return { path: found.path, sha256 };
+  return { path, sha256 };
 }
 
 export async function generateVariants(
@@ -217,104 +255,117 @@ export async function generateVariants(
         `(pick a new name)`,
     );
   }
-  // The reference recording, resolved before the worker starts: a name in
-  // the song's namespace becomes the path the model reads and the hash
-  // the recipe records. Both are refusals rather than repairs, because a
-  // voice generate that guesses is one that commits audio in a voice
-  // nobody asked for.
-  const reference = options.voiceRef === undefined
-    ? undefined
-    : await resolveVoiceRef(project, options.song, options.voiceRef);
-  mkdirSync(outputDir, { recursive: true });
-
-  const client =
-    kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);
+  // The reference recording, snapshotted before the worker starts: a
+  // name in the song's namespace becomes the bytes the model reads and
+  // the hash the recipe records — the same bytes, which is the point of
+  // taking a copy. Everything here is a refusal rather than a repair,
+  // because a voice generate that guesses is one that commits audio in a
+  // voice nobody asked for.
+  //
+  // Outside the project deliberately: the snapshot is scaffolding for one
+  // run, and a stray copy under songs/ would be a file `field check` has
+  // opinions about and a person would have to delete.
+  const scratch = options.voiceRef === undefined ? undefined : mkdtempSync(join(tmpdir(), 'field-voice-ref-'));
   try {
-    client.on('event', (e: { event: string; stage?: string }) => {
-      if (e.event === 'progress' && e.stage) options.onProgress?.(e.stage);
-    });
-    const response =
-      client instanceof VoicedClient
-        ? await client.generate({
-            text: options.text!,
-            seed: options.seed,
-            variants: options.variants,
-            output_dir: outputDir,
-            // Omitted, never empty: "" and absent are different requests
-            // and only one of them means the model's own voice (#60).
-            ...(reference !== undefined ? { voice_ref: reference.path } : {}),
-          })
-        : await client.generate({
-            prompt: options.prompt!,
-            duration_seconds: durationSeconds!,
-            seed: options.seed,
-            variants: options.variants,
-            output_dir: outputDir,
-            lyrics: options.lyrics,
-            bpm,
-          });
+    const reference =
+      options.voiceRef === undefined
+        ? undefined
+        : await snapshotVoiceRef(project, options.song, options.voiceRef, scratch!);
+    mkdirSync(outputDir, { recursive: true });
 
-    // The worker writes uuid names; variants get deterministic, seed-order
-    // names. The directory carries the identity, so the filename is just
-    // the number (project-layout.md §3, decided at migration).
-    const files: string[] = [];
-    const hashes: string[] = [];
-    for (let i = 0; i < response.paths.length; i++) {
-      const target = join(outputDir, `${i + 1}.wav`);
-      renameSync(response.paths[i]!, target);
-      files.push(join('songs', options.song, 'audio', name, `${i + 1}.wav`));
-      hashes.push(await sha256File(target));
+    const client =
+      kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);
+    try {
+      client.on('event', (e: { event: string; stage?: string }) => {
+        if (e.event === 'progress' && e.stage) options.onProgress?.(e.stage);
+      });
+      const response =
+        client instanceof VoicedClient
+          ? await client.generate({
+              text: options.text!,
+              seed: options.seed,
+              variants: options.variants,
+              output_dir: outputDir,
+              // Omitted, never empty: "" and absent are different requests
+              // and only one of them means the model's own voice (#60).
+              ...(reference !== undefined ? { voice_ref: reference.path } : {}),
+            })
+          : await client.generate({
+              prompt: options.prompt!,
+              duration_seconds: durationSeconds!,
+              seed: options.seed,
+              variants: options.variants,
+              output_dir: outputDir,
+              lyrics: options.lyrics,
+              bpm,
+            });
+
+      // The worker writes uuid names; variants get deterministic, seed-order
+      // names. The directory carries the identity, so the filename is just
+      // the number (project-layout.md §3, decided at migration).
+      const files: string[] = [];
+      const hashes: string[] = [];
+      for (let i = 0; i < response.paths.length; i++) {
+        const target = join(outputDir, `${i + 1}.wav`);
+        renameSync(response.paths[i]!, target);
+        files.push(join('songs', options.song, 'audio', name, `${i + 1}.wav`));
+        hashes.push(await sha256File(target));
+      }
+
+      // Provenance: everything needed to audit or deliberately regenerate.
+      // Parsed through the schema before writing — this command must never
+      // emit a target `field check` would reject — and canonicalized so
+      // `field fmt` is a no-op on fresh recipes.
+      const recipe = generativeSoundSchema.parse({
+        name,
+        type: 'generative',
+        model: response.model,
+        // The kind split, written out: whichever half this run is not, its
+        // fields are absent rather than undefined-valued, because a strict
+        // schema counts a present key.
+        ...(kind === 'voice'
+          ? {
+              text: options.text,
+              ...(reference !== undefined
+                ? { voice_ref: options.voiceRef, voice_ref_sha256: reference.sha256 }
+                : {}),
+            }
+          : {
+              prompt: options.prompt,
+              ...(options.lyrics !== undefined ? { lyrics: options.lyrics } : {}),
+              bpm,
+              duration_seconds: Number(durationSeconds!.toFixed(3)),
+              ...(options.bars !== undefined ? { bars: options.bars } : {}),
+            }),
+        seed: options.seed,
+        variants: files.map((_, i) => ({
+          file: `audio/${name}/${i + 1}.wav`,
+          seed: response.seeds[i]!, // schema guarantees paths/seeds align
+          sha256: hashes[i]!,
+        })),
+        generated_at: new Date().toISOString(),
+      });
+      mkdirSync(join(songDir, 'sounds'), { recursive: true });
+      const doc = new Document(recipe);
+      canonicalizeDocument(doc, soundOrder);
+      writeFileSync(recipeAbsolute, stringifyDocument(doc));
+
+      return {
+        recipePath: join('songs', options.song, 'sounds', `${name}.yaml`),
+        files,
+        seeds: response.seeds,
+        model: response.model,
+        durationSeconds,
+        bpm,
+        voiceRef: options.voiceRef,
+      };
+    } finally {
+      client.close();
     }
-
-    // Provenance: everything needed to audit or deliberately regenerate.
-    // Parsed through the schema before writing — this command must never
-    // emit a target `field check` would reject — and canonicalized so
-    // `field fmt` is a no-op on fresh recipes.
-    const recipe = generativeSoundSchema.parse({
-      name,
-      type: 'generative',
-      model: response.model,
-      // The kind split, written out: whichever half this run is not, its
-      // fields are absent rather than undefined-valued, because a strict
-      // schema counts a present key.
-      ...(kind === 'voice'
-        ? {
-            text: options.text,
-            ...(reference !== undefined
-              ? { voice_ref: options.voiceRef, voice_ref_sha256: reference.sha256 }
-              : {}),
-          }
-        : {
-            prompt: options.prompt,
-            ...(options.lyrics !== undefined ? { lyrics: options.lyrics } : {}),
-            bpm,
-            duration_seconds: Number(durationSeconds!.toFixed(3)),
-            ...(options.bars !== undefined ? { bars: options.bars } : {}),
-          }),
-      seed: options.seed,
-      variants: files.map((_, i) => ({
-        file: `audio/${name}/${i + 1}.wav`,
-        seed: response.seeds[i]!, // schema guarantees paths/seeds align
-        sha256: hashes[i]!,
-      })),
-      generated_at: new Date().toISOString(),
-    });
-    mkdirSync(join(songDir, 'sounds'), { recursive: true });
-    const doc = new Document(recipe);
-    canonicalizeDocument(doc, soundOrder);
-    writeFileSync(recipeAbsolute, stringifyDocument(doc));
-
-    return {
-      recipePath: join('songs', options.song, 'sounds', `${name}.yaml`),
-      files,
-      seeds: response.seeds,
-      model: response.model,
-      durationSeconds,
-      bpm,
-      voiceRef: options.voiceRef,
-    };
   } finally {
-    client.close();
+    // The snapshot is scaffolding for one run, and the recipe now
+    // carries its hash — so nothing downstream needs the copy.
+    if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
   }
 }
 
@@ -412,8 +463,11 @@ export async function setupWorker(
     );
   }
   for (const spec of specs) {
-    const available = workerAvailable(spec);
-    if (!available.ok) throw new Error(available.reason ?? `${spec.name} unavailable`);
+    // The package, not the environment: creating the environment is what
+    // this command is for, so asking whether it exists first would make
+    // setup impossible to run once.
+    const present = workerPackagePresent(spec);
+    if (!present.ok) throw new Error(present.reason ?? `${spec.name} unavailable`);
     // fileURLToPath, not URL.pathname: the latter hands back a
     // percent-encoded path, so a checkout under a directory with a space
     // in it pointed uv at somewhere that does not exist.

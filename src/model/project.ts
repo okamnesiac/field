@@ -836,6 +836,15 @@ export interface AssetLookup {
   base: string; // scope dir, project-relative — what `asset.file` is relative to
   path?: string | undefined; // absolute, when the file resolves
   problem?: string | undefined; // why it does not, in resolveAssetFile's words
+  // How many ledger rows carry this name. A schema-valid ledger can hold
+  // two rows called `ref-voice` pointing at different recordings, and
+  // validate diagnoses that separately — but `find` would still hand back
+  // the first one, so a caller that never looked at diagnostics would act
+  // on an arbitrary answer to a question that has none. Being the single
+  // reading means reporting that, not resolving it (#61 review): a
+  // *lookup* can only say the name is ambiguous, and whether that is
+  // fatal is the caller's to decide.
+  matches: number;
 }
 
 export function lookupAsset(
@@ -849,9 +858,15 @@ export function lookupAsset(
     shared !== undefined
       ? { name: shared, base: 'shared', ledger: project.shared?.data.assets }
       : { name: ref, base: song?.dir ?? '', ledger: song?.assets?.data.assets };
-  const asset = scope.ledger?.find((a) => a.name === scope.name);
+  const matched = scope.ledger?.filter((a) => a.name === scope.name) ?? [];
+  const asset = matched[0];
   if (!asset) return undefined;
-  return { asset, base: scope.base, ...resolveAssetFile(project.root, scope.base, asset.file) };
+  return {
+    asset,
+    base: scope.base,
+    matches: matched.length,
+    ...resolveAssetFile(project.root, scope.base, asset.file),
+  };
 }
 
 // Files whose formatting differs from canonical (project-core.md §3.6).

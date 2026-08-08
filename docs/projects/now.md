@@ -7,9 +7,7 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
 - [Voice generation](all/voice-generation.md) — committed vocals from
-  text. Chunk 1 shipped (#58–#61) without ever loading the model; chunk 2
-  is the first real generation, and bloom's creek has no vocal source
-  until it lands.
+  text; bloom's creek has no vocal source until chunk 2 lands.
 - [Watch mode](all/watch.md) — both chunks shipped (#34, #35); stays
   here while §5's status-visibility question is open, per the line
   below's precedent.

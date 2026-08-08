@@ -217,13 +217,40 @@ left a check-green recipe describing bytes the model never heard — the
 refusal `field choose` already makes about a drifted variant, for the
 same reason.
 
+**A hash pins bytes, not a filename.** The first version hashed the
+recording and handed the worker its path, which is a promise about one
+instant: the worker reads minutes later, after daemon start and a
+weights download, and a recording edited inside that window is generated
+from while the recipe records what it used to be. Re-hashing afterwards
+does not close it — an edit that is undone before the run ends compares
+equal at both ends and passes, which is exactly how the #61 review
+reproduced it, ending check-green with audio from other bytes. So the
+window is removed rather than watched: the reference is copied first,
+and the copy is what gets hashed and what the worker reads. Hashed and
+heard are the same bytes by construction.
+
+**An ambiguous name is not a name.** An asset ledger is schema-valid
+with two rows called `ref-voice`; validate diagnoses that, but
+generation does not read diagnostics, so it spent model minutes on
+whichever row came first and wrote that arbitrary choice down as
+provenance (#61 review). `lookupAsset` reports how many rows answer to
+the name — a lookup can only say a name is ambiguous, not resolve it —
+and generation refuses. Which is the shape of every fix in this section:
+the resolver's job is to be honest about what it found, and the caller's
+job is to decide that "arbitrary" is not good enough for something about
+to be committed.
+
 **Tested through a stub worker** (`src/testing/stub-worker.mjs`), which
 the `FIELD_*_PYTHON` override lets stand in for a daemon: the real
 client, real socket, real framing, no model. It observes what `generate`
 *sends* and what it *writes*, while the live-daemon tests observe the
 protocol itself — so neither test is asserting against its own fixture.
-Every property above was checked by mutation; the one surviving mutant
-was equivalent (an explicit `undefined` that `JSON.stringify` drops).
+Every property above was checked by mutation, including against the fix
+that looks right and is not: replacing the snapshot with a
+post-generation re-hash still fails, because the test observes the bytes
+the worker read rather than the file's state afterwards. The one
+surviving mutant was equivalent (an explicit `undefined` that
+`JSON.stringify` drops).
 
 **Still unproven, and deliberately so:** none of this has loaded
 Chatterbox. Everything that can be verified without weights is, and what

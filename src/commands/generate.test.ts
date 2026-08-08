@@ -1,4 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -170,6 +178,44 @@ describe('field generate: resolving the voice a line is generated in', () => {
     ).rejects.toThrow('is not a committed asset in creek');
   });
 
+  it('refuses a name that two ledger rows answer to', async () => {
+    // A ledger with two `ref-voice` rows is schema-valid and check-red,
+    // but generation never reads diagnostics — so before this it took
+    // whichever row sorted first and wrote that arbitrary choice down as
+    // provenance (#61 review). Different bytes per row, so "the first
+    // one" is a genuinely different recording, not a tie.
+    const other = 'a different voice entirely\n';
+    writeFileSync(join(root, 'songs/creek/audio/a.wav'), REF_BYTES);
+    writeFileSync(join(root, 'songs/creek/audio/b.wav'), other);
+    writeFileSync(
+      join(root, 'songs/creek/assets.yaml'),
+      `assets:\n  - name: ref-voice\n    file: audio/a.wav\n` +
+        `    sha256: ${sha256Text(REF_BYTES)}\n    bytes: ${REF_BYTES.length}\n` +
+        `  - name: ref-voice\n    file: audio/b.wav\n` +
+        `    sha256: ${sha256Text(other)}\n    bytes: ${other.length}\n`,
+    );
+    await expect(
+      generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' }),
+    ).rejects.toThrow('matches 2 rows in the creek ledger');
+  });
+
+  it('refuses an ambiguous shared name too', async () => {
+    mkdirSync(join(root, 'shared/audio'), { recursive: true });
+    const other = 'a different voice entirely\n';
+    writeFileSync(join(root, 'shared/audio/a.wav'), REF_BYTES);
+    writeFileSync(join(root, 'shared/audio/b.wav'), other);
+    writeFileSync(
+      join(root, 'shared/assets.yaml'),
+      `assets:\n  - name: justin\n    file: audio/a.wav\n` +
+        `    sha256: ${sha256Text(REF_BYTES)}\n    bytes: ${REF_BYTES.length}\n` +
+        `  - name: justin\n    file: audio/b.wav\n` +
+        `    sha256: ${sha256Text(other)}\n    bytes: ${other.length}\n`,
+    );
+    await expect(
+      generateVariants(root, 'line', { ...voice, voiceRef: '//shared/asset:justin' }),
+    ).rejects.toThrow('matches 2 rows in the shared ledger');
+  });
+
   it('refuses an empty --voice-ref rather than reading it as absent', async () => {
     // The CLI end of the distinction the worker enforces (#60): "" is a
     // request for a reference recording at no name, not a request for the
@@ -191,6 +237,61 @@ describe('field generate: resolving the voice a line is generated in', () => {
     ).rejects.toThrow('does not match its recorded sha256');
   });
 
+  it('generates from the bytes it pins, even if the recording changes mid-run', async () => {
+    // The window is real: the CLI resolves the reference, then the worker
+    // reads it minutes later, after daemon start and a weights download.
+    // Edit the recording inside that window and put it back afterwards
+    // and every after-the-fact check compares equal — the project ends
+    // check-green describing bytes the model never heard (#61 review).
+    // So the test edits *inside* the window, with the stub holding at the
+    // read, and asserts on what the worker actually hashed.
+    const path = await importReference();
+    const hold = join(root, 'hold');
+    process.env['FIELD_STUB_HOLD'] = hold;
+    const reach = async (mark: string) => {
+      for (let i = 0; i < 400 && !existsSync(`${hold}.${mark}`); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(existsSync(`${hold}.${mark}`)).toBe(true);
+    };
+    try {
+      const running = generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
+      const other = 'a completely different voice\n';
+      // Swap the recording under the worker, let it read…
+      await reach('ready');
+      writeFileSync(path, other);
+      writeFileSync(`${hold}.go`, '');
+      // …and put it back before generate returns, which is what makes a
+      // post-generation re-hash useless as a defence: by the time
+      // anything could compare, the file is the original again and every
+      // comparison passes. Only the bytes the worker read tell the truth.
+      await reach('read');
+      writeFileSync(path, REF_BYTES);
+      writeFileSync(`${hold}.resume`, '');
+      await running;
+
+      const heard = stubRequests().find((r) => r['op'] === 'read')!;
+      expect(heard['voice_ref_sha256']).toBe(sha256Text(REF_BYTES));
+      expect(heard['voice_ref_sha256']).not.toBe(sha256Text(other));
+      expect(recipe('line').voice_ref_sha256).toBe(heard['voice_ref_sha256']);
+      // And the path handed over was never the asset itself — that is
+      // what made the swap a no-op rather than something to detect.
+      const job = stubRequests().find((r) => r['op'] === 'generate')!;
+      expect(job['voice_ref']).not.toBe(path);
+      expect((await check(root)).diagnostics).toEqual([]);
+    } finally {
+      delete process.env['FIELD_STUB_HOLD'];
+    }
+  });
+
+  it('leaves no snapshot behind', async () => {
+    await importReference();
+    const before = readdirSync(tmpdir()).filter((e) => e.startsWith('field-voice-ref-'));
+    await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
+    const after = readdirSync(tmpdir()).filter((e) => e.startsWith('field-voice-ref-'));
+    expect(after).toEqual(before);
+  });
+
   it('pins the reference by name and hash, and hands the worker a path', async () => {
     const path = await importReference();
     const result = await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
@@ -204,9 +305,16 @@ describe('field generate: resolving the voice a line is generated in', () => {
     expect(written.voice_ref_sha256).toBe(await sha256File(path));
 
     // The worker is handed a path, never an asset name: it has no project
-    // to resolve one against (voice-generation.md §1.4).
+    // to resolve one against (voice-generation.md §1.4). A snapshot of
+    // the recording rather than the recording itself, and so outside the
+    // project entirely — but carrying the bytes the recipe pins.
     const job = stubRequests().find((r) => r['op'] === 'generate')!;
-    expect(job['voice_ref']).toBe(path);
+    expect(typeof job['voice_ref']).toBe('string');
+    expect(job['voice_ref']).not.toBe(path);
+    expect(job['voice_ref'] as string).not.toContain(root);
+    expect(stubRequests().find((r) => r['op'] === 'read')!['voice_ref_sha256']).toBe(
+      written.voice_ref_sha256,
+    );
     expect(job['text']).toBe(voice.text);
     expect(result.voiceRef).toBe('ref-voice');
 
@@ -226,8 +334,13 @@ describe('field generate: resolving the voice a line is generated in', () => {
 
     expect(recipe('line').voice_ref).toBe('//shared/asset:justin');
     expect(recipe('line').voice_ref_sha256).toBe(sha256Text(REF_BYTES));
+    // Snapshotted like a song-scoped one, and of the shared recording's
+    // bytes rather than some same-named song asset's.
     const job = stubRequests().find((r) => r['op'] === 'generate')!;
-    expect(job['voice_ref']).toBe(join(root, 'shared/audio/justin.wav'));
+    expect(job['voice_ref'] as string).not.toContain(root);
+    expect(stubRequests().find((r) => r['op'] === 'read')!['voice_ref_sha256']).toBe(
+      sha256Text(REF_BYTES),
+    );
     expect((await check(root)).diagnostics).toEqual([]);
   });
 

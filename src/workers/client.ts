@@ -44,7 +44,7 @@ function workerProject(spec: WorkerSpec): string {
 // environment — wrappers, alternate venvs, and daemon tests without the
 // model environment (PYTHONPATH=python/worker/src:python/<pkg>/src is
 // enough — the lifecycle package plus the worker's own).
-function daemonCommand(spec: WorkerSpec): { command: string; args: string[] } {
+export function workerLaunchCommand(spec: WorkerSpec): { command: string; args: string[] } {
   const override = process.env[spec.pythonOverrideEnv];
   if (override) {
     // Resolved now because the daemon spawns with its cwd at the project
@@ -55,15 +55,52 @@ function daemonCommand(spec: WorkerSpec): { command: string; args: string[] } {
     }
     return { command: absolute, args: ['-m', spec.module, '--socket', spec.socketRelative] };
   }
+  // --no-sync is what makes `field setup` a gate rather than a label.
+  // uv run's default is to sync the project environment first, so without
+  // it the first `field generate` quietly installs torch and friends —
+  // and "explicit, never automatic" (ace-generation.md §3.4) described
+  // the intent rather than the behaviour (#61 review). With it, an
+  // unsynced environment fails fast and connectTo says which command
+  // fixes it.
   return {
     command: 'uv',
-    args: ['run', '--project', workerProject(spec), spec.script, '--socket', spec.socketRelative],
+    args: [
+      'run',
+      '--no-sync',
+      '--project',
+      workerProject(spec),
+      spec.script,
+      '--socket',
+      spec.socketRelative,
+    ],
   };
 }
 
-export function workerAvailable(spec: WorkerSpec): { ok: boolean; reason?: string } {
+// Is the worker's source here at all — the question `field setup` asks,
+// since setup is what creates the environment the next function wants.
+export function workerPackagePresent(spec: WorkerSpec): { ok: boolean; reason?: string } {
   if (!existsSync(join(workerProject(spec), 'pyproject.toml'))) {
     return { ok: false, reason: `python/${spec.packageDir} missing from the field checkout` };
+  }
+  return { ok: true };
+}
+
+// Can this worker be started right now — the question `connectTo` asks.
+// Since --no-sync means the daemon will not install anything, an unsynced
+// environment is a diagnosis to make here rather than a spawn that fails
+// silently into a log and surfaces sixty seconds later as a connect
+// timeout (#61 review). An interpreter override supplies its own
+// environment, so it skips this the way it skips uv.
+export function workerAvailable(spec: WorkerSpec): { ok: boolean; reason?: string } {
+  const present = workerPackagePresent(spec);
+  if (!present.ok) return present;
+  if (!process.env[spec.pythonOverrideEnv] && !existsSync(join(workerProject(spec), '.venv'))) {
+    return {
+      ok: false,
+      reason:
+        `its environment is not installed — run \`field setup ${spec.packageDir}\` ` +
+        `(setup is explicit and never automatic: ace-generation.md §3.4)`,
+    };
   }
   return { ok: true };
 }
@@ -139,9 +176,12 @@ export class WorkerClient extends EventEmitter {
       if (!available.ok) throw new Error(`${spec.name} unavailable: ${available.reason}`);
       mkdirSync(join(root, '.field'), { recursive: true });
       const log = openSync(join(root, spec.logRelative), 'a');
-      // uv resolves the environment; --project keeps the daemon's cwd at
-      // the project root (the socket path is root-relative — sun_path).
-      const { command, args } = daemonCommand(spec);
+      // --project points uv at the worker's environment without moving
+      // the daemon's cwd off the field project root (the socket path is
+      // root-relative — sun_path). It resolves nothing: --no-sync means
+      // an environment `field setup` has not built is an error, which
+      // workerAvailable has already diagnosed above.
+      const { command, args } = workerLaunchCommand(spec);
       const child = spawn(command, args, {
         cwd: root,
         detached: true,
@@ -150,15 +190,16 @@ export class WorkerClient extends EventEmitter {
       child.on('error', () => {}); // surfaced as the connect timeout below
       child.unref();
       closeSync(log);
-      // First spawn may resolve the uv environment; be patient.
+      // Patient anyway: the environment is already installed, but a cold
+      // interpreter with torch on the path is not instant.
       for (let attempt = 0; attempt < 240 && !socket; attempt++) {
         await new Promise((r) => setTimeout(r, 250));
         socket = await tryConnect(path, 250);
       }
       if (!socket) {
         throw new Error(
-          `${spec.name} did not start — is uv installed (brew install uv)? ` +
-            `See ${spec.logRelative}`,
+          `${spec.name} did not start — run \`field setup ${spec.packageDir}\` to install its ` +
+            `environment (and check uv is installed: brew install uv). See ${spec.logRelative}`,
         );
       }
     }

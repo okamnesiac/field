@@ -17,7 +17,8 @@
 // socket, which is how a test sees that voice_ref arrived as a resolved
 // path rather than an asset name.
 
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 
@@ -65,6 +66,19 @@ const server = createServer((socket) => {
   });
 });
 
+// Announce that we have reached `at`, then block until the test says go.
+// Blocking on purpose: it stands in for work that would occupy the worker
+// anyway, and it keeps the ordering the test asserts on.
+function waitAt(hold, at, until) {
+  if (!hold) return;
+  writeFileSync(`${hold}.${at}`, '');
+  const idle = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(`${hold}.${until}`) && Date.now() < deadline) {
+    Atomics.wait(idle, 0, 0, 20);
+  }
+}
+
 function handle(request, send) {
   const { id, op } = request;
   if (op === 'hello') {
@@ -81,6 +95,25 @@ function handle(request, send) {
     return;
   }
   send({ event: 'progress', fraction: 0.5, stage: 'stubbing' });
+  // A real worker reads the reference here — after startup, after the
+  // model loads — not when the CLI resolved it. FIELD_STUB_HOLD lets a
+  // test open that window on purpose and edit the recording inside it:
+  // the stub announces it has reached the read and waits for a go-ahead.
+  const hold = process.env.FIELD_STUB_HOLD;
+  // Two hold points, because one is not enough to tell a real fix from a
+  // plausible one. Pausing *before* the read lets a test swap the
+  // recording under the worker; pausing *after* it lets the test put the
+  // recording back before generate returns. Only the second one exposes
+  // change-and-restore, where every after-the-fact comparison sees the
+  // original and passes while the audio came from something else.
+  waitAt(hold, 'ready', 'go');
+  // What the worker actually heard, which is the only thing that makes
+  // "the recipe pins the bytes the model read" checkable (#61 review).
+  const heard = request.voice_ref
+    ? createHash('sha256').update(readFileSync(request.voice_ref)).digest('hex')
+    : null;
+  waitAt(hold, 'read', 'resume');
+  appendFileSync(requestLog, JSON.stringify({ op: 'read', voice_ref_sha256: heard }) + '\n');
   const count = request.variants;
   const paths = [];
   const seeds = [];
