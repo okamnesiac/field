@@ -34,6 +34,12 @@ export interface PlacedClip {
   // out-of-range reads are silence — slipping never errors.
   read_offset: number;
   gain_db: number;
+  // Constant-power balance for this placement, -1 left … 1 right.
+  // **Omitted when centred**, which is not a micro-optimisation: `clips`
+  // reaches the action key, so serializing `pan: 0` on every clip would
+  // re-key every stem in every project for a field none of them set. Same
+  // rule `inserts` follows (nested-tracks.md §1.13).
+  pan?: number;
   fade_in: number; // samples, linear, from the window start
   fade_out: number; // samples, linear, to the window end
 }
@@ -223,6 +229,7 @@ export function planTrack(
       // moves the window instead, which is what `at` is.
       read_offset: 0,
       gain_db: input.gain_db,
+      ...(input.pan !== 0 ? { pan: input.pan } : {}),
       fade_in: input.fade_in,
       fade_out: input.fade_out,
     };
@@ -260,6 +267,7 @@ export function planTrack(
       a.read_offset - b.read_offset ||
       (a.duration ?? -1) - (b.duration ?? -1) ||
       a.gain_db - b.gain_db ||
+      (a.pan ?? 0) - (b.pan ?? 0) ||
       a.fade_in - b.fade_in ||
       a.fade_out - b.fade_out,
   );

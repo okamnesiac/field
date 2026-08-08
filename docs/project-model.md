@@ -140,11 +140,18 @@ A track's content is its clips, its `inputs:` — other tracks placed in it
 — or both. A placement carries a time and an optional window, so one
 track can be placed in more than one parent and more than once in the
 same one, from a single render
-([projects/all/nested-tracks.md](projects/all/nested-tracks.md)). The
-child's own fader stays outside its render and is applied by the parent
-while summing, which is why nesting keeps the pre-fader property rather
-than diluting it; until the nested mix lands, `check` refuses to place a
-track whose fader is set rather than quietly ignoring it.
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md)).
+
+A placement also carries the level — `gain_db` and `pan` — and that is
+where a level lives, rather than on the track. The two are one gain stage
+seen from two directions: what a console calls a channel's fader is the
+same thing its bus calls an input level, and a track with two parents
+cannot hold one value for both. So the placement carries it, applied by
+the parent while summing and therefore outside the child's own render,
+which is how nesting keeps the pre-fader property rather than diluting
+it. A track's own `gain_db`/`pan` are retiring into placements with the
+mix; `check` refuses to place a track that still sets them rather than
+quietly ignoring them.
 
 ## Identity: names, not UUIDs
 

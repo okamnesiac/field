@@ -23,7 +23,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 3;
+constexpr int renderPlanVersion = 4;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -210,6 +210,10 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
             clip.duration = (long) requireNumber (entry, "duration", "clip");
             clip.readOffset = (long) requireNumber (entry, "read_offset", "clip");
             clip.gainDb = requireNumber (entry, "gain_db", "clip");
+            // Absent means centred. validatePlan has already bounded it if
+            // it is here at all, so this reads a value it can trust.
+            const auto pan = entry.getProperty ("pan", juce::var());
+            clip.pan = pan.isVoid() ? 0.0 : (double) pan;
             clip.fadeIn = requireNumber (entry, "fade_in", "clip");
             clip.fadeOut = requireNumber (entry, "fade_out", "clip");
             clips.push_back (clip);

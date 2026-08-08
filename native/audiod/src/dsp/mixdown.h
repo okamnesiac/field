@@ -27,6 +27,10 @@ struct PlacedClip
     // errors.
     long readOffset = 0;
     double gainDb = 0.0;
+    // Constant-power balance for this clip, -1 left … 1 right. Absent from
+    // a plan means centred: the control plane omits it when zero so that
+    // adding pan did not re-key every stem ever rendered.
+    double pan = 0.0;
     // Kept as doubles because they are divisors in the fade ramps, and the
     // reference computes those in floating point. Integer division here
     // would quietly floor every partial ramp to zero.

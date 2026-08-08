@@ -947,7 +947,7 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toContain('a midi track cannot place tracks');
   });
 
-  it('refuses a child whose fader is set, until the nested mix applies it', async () => {
+  it('refuses a child whose fader is set, pointing at the placement that replaces it', async () => {
     writeFileSync(
       join(root, 'songs/opener/tracks/inner.yaml'),
       readFileSync(join(root, 'songs/opener/tracks/inner.yaml'), 'utf8').replace(
@@ -958,7 +958,10 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
     const out = await messages();
     expect(out).toContain('places a track with a fader set (gain_db -3, pan 0)');
-    expect(out).toContain('chunk 3');
+    // The field is retiring, not pending: the message must say where the
+    // level goes, not which chunk to wait for (nested-tracks.md §1.13).
+    expect(out).toContain("move them to this placement's gain_db and pan");
+    expect(out).not.toContain('chunk');
   });
 
   it('refuses musical time on an absolute placement', async () => {

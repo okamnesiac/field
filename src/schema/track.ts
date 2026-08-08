@@ -93,6 +93,10 @@ export const trackInputSchema = z.strictObject({
   // sums, so nudging it *does* re-render the parent. The child's own
   // gain_db is the mix-stage parameter that does not (see trackSchema).
   gain_db: z.number().default(0),
+  // Pan is the same gain stage as gain_db and lives in the same place —
+  // on the edge, where it can differ per placement (nested-tracks.md
+  // §1.13). A track's own `pan` is the one that retires.
+  pan: z.number().min(-1).max(1).default(0),
   fade_in: samples.default(0),
   fade_out: samples.default(0),
 });
@@ -129,7 +133,7 @@ export const trackOrder: KeyOrder = {
     clips: { items: clipOrder },
     inputs: {
       items: {
-        keys: ['track', 'anchor', 'at', 'duration', 'gain_db', 'fade_in', 'fade_out'],
+        keys: ['track', 'anchor', 'at', 'duration', 'gain_db', 'pan', 'fade_in', 'fade_out'],
         children: { at: { flow: true }, duration: { flow: true } },
       },
     },

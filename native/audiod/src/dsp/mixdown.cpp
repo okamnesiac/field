@@ -58,6 +58,10 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
         const auto& srcL = sources[(size_t) clip.input][0];
         const auto& srcR = rightOf (sources[(size_t) clip.input]);
         const double gain = std::pow (10.0, clip.gainDb / 20.0);
+        // Same law the mix faders use, one function, so a placement and a
+        // fader cannot drift into two different centres.
+        double balanceL = 1.0, balanceR = 1.0;
+        balanceGains (clip.pan, balanceL, balanceR);
 
         for (long i = 0; i < clip.duration; ++i)
         {
@@ -74,8 +78,8 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
             if (fromEnd < clip.fadeOut)
                 g *= fromEnd / clip.fadeOut;
             const size_t at = (size_t) (clip.start + i);
-            left[at] = (float) ((double) left[at] + (double) srcL[(size_t) s] * g);
-            right[at] = (float) ((double) right[at] + (double) srcR[(size_t) s] * g);
+            left[at] = (float) ((double) left[at] + (double) srcL[(size_t) s] * g * balanceL);
+            right[at] = (float) ((double) right[at] + (double) srcR[(size_t) s] * g * balanceR);
         }
     }
 

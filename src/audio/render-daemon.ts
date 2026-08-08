@@ -35,7 +35,7 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 3;
+export const RENDER_PLAN_VERSION = 4;
 
 export class RenderUnavailableError extends Error {}
 

@@ -314,6 +314,10 @@ void validatePlan (const juce::var& plan)
                            { "duration", Kind::integer, true, 1.0 },
                            { "read_offset", Kind::integer, true },
                            { "gain_db", Kind::number, true },
+                           // Optional because the control plane omits it
+                           // when centred; a plan that names it must still
+                           // name a real balance.
+                           { "pan", Kind::number, false, -1.0, 1.0 },
                            { "fade_in", Kind::integer, true, 0.0 },
                            { "fade_out", Kind::integer, true, 0.0 } });
             // The same fit the control plane checks on the way in

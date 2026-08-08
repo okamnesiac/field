@@ -279,6 +279,13 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     expect(spec.sources).toEqual(['kick', 'track:aaa']);
   });
 
+  it('omits pan when centred and carries it when not', () => {
+    const centred = planTrack(nested([place()]), map120, hashes).clips[0]!;
+    expect(centred).not.toHaveProperty('pan');
+    const panned = planTrack(nested([place({ pan: -0.5 })]), map120, hashes).clips[0]!;
+    expect(panned.pan).toBe(-0.5);
+  });
+
   it('leaves a track without placements byte-identical to before nesting', () => {
     const spec = planTrack(track([clip()]), map120, hashes);
     expect(spec.sources).toEqual(['kick']);
@@ -832,6 +839,42 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     expect(out).toHaveLength(17);
     expect(out[0]).toBeCloseTo(1, 4); // the parent's own clip
     expect(out[13]).toBeCloseTo(1, 4); // the child, at its placement
+  });
+
+  it('pans a placement, by the same constant-power law the mix faders use', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '    pan: -1',
+    ]);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:outer']);
+    const wav = readWav(outcomes.find((o) => o.label === '//songs/creek/track:outer')!.outputPath!);
+    // Hard left: unity on the left, the cosine taper takes the right to
+    // zero. cos(pi/2) = 0, so the right channel is silent, not merely low.
+    expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
+    expect(wav.channels[1]![3]).toBeCloseTo(0, 6);
+  });
+
+  it('centres by default, and a centred placement never reaches the action key', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 0']);
+    const centred = await buildLabels(root, ['//songs/creek/track:outer']);
+    const wav = readWav(centred.find((o) => o.label === '//songs/creek/track:outer')!.outputPath!);
+    expect(wav.channels[0]![3]).toBeCloseTo(1, 4);
+    expect(wav.channels[1]![3]).toBeCloseTo(1, 4);
+
+    // pan: 0 written out explicitly must produce the identical action —
+    // otherwise adding the field would have re-keyed every stem alive.
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '    pan: 0',
+    ]);
+    const explicit = await buildLabels(root, ['//songs/creek/track:outer']);
+    expect(explicit.every((o) => o.cached)).toBe(true);
   });
 
   it('keeps a placed child out of the default mix, so it is not summed twice', async () => {
