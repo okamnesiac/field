@@ -946,6 +946,9 @@ describe('a track as the song output (nested-tracks.md §7 chunk 2)', () => {
     root = mkdtempSync(join(tmpdir(), 'field-songout-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
+    // createSong scaffolds mixes/main.yaml, and a song may not have two
+    // outputs (model/project.ts). These songs' output is the track.
+    rmSync(join(root, 'songs/creek/mixes'), { recursive: true, force: true });
     const src = join(root, '..', `field-songout-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');

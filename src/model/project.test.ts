@@ -1009,3 +1009,55 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toBe('');
   });
 });
+
+describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
+  beforeEach(async () => {
+    createSong(root, 'opener');
+    const wavPath = join(root, '..', `field-out-${Date.now()}-${Math.random()}.wav`);
+    writeWavFloat32(wavPath, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
+    await importAsset(root, 'opener', wavPath, 'hit');
+    rmSync(wavPath);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/verse.yaml'),
+      'name: verse\ntype: audio\nclips:\n  - id: c\n    source: hit\n    anchor: absolute\n    position: 0\n    duration: 4\n',
+    );
+  });
+
+  const messages = async (): Promise<string> =>
+    (await check(root)).diagnostics.map((d) => d.message).join('\n');
+
+  function writeOutputTrack(): void {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      'name: main\ntype: audio\ninputs:\n  - track: verse\n    at: 0\n',
+    );
+  }
+
+  it('refuses a song with both an output track and an output mix', async () => {
+    // createSong scaffolds mixes/main.yaml, so adding the track is all it
+    // takes — which is the migration's first step, and the point.
+    expect(existsSync(join(root, 'songs/opener/mixes/main.yaml'))).toBe(true);
+    writeOutputTrack();
+    const out = await messages();
+    expect(out).toContain('song has two outputs');
+    expect(out).toContain('delete one');
+  });
+
+  it('accepts the output track once the mix is gone', async () => {
+    writeOutputTrack();
+    rmSync(join(root, 'songs/opener/mixes'), { recursive: true });
+    expect(await messages()).toBe('');
+  });
+
+  it('says nothing about a song that still has only a mix', async () => {
+    expect(await messages()).toBe('');
+  });
+
+  it('says nothing about a non-output track sharing the song with a mix', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/bridge.yaml'),
+      'name: bridge\ntype: audio\ninputs:\n  - track: verse\n    at: 0\n',
+    );
+    expect(await messages()).toBe('');
+  });
+});

@@ -63,8 +63,13 @@ export function parseLabel(text: string): Label {
 
 // The name a song's output goes by. A convention rather than a type
 // (nested-tracks.md §1.2: role lives in the name), and the one place it is
-// spelled — a bare song name resolves through it, and it is how a track
+// spelled: a bare song name resolves through it, and it is how a track
 // claims the song's declared length.
+//
+// The *kind* is still the mix's. `creek` expands to `mix:main`, not to
+// whichever of the two exists, because a fallback would be two ways to
+// resolve one name for the length of a single PR — mixes retire next and
+// this becomes `track:${SONG_OUTPUT_NAME}` outright.
 export const SONG_OUTPUT_NAME = 'main';
 
 export function parsePattern(text: string): LabelPattern {
