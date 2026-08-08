@@ -6,10 +6,10 @@ import { Command } from 'commander';
 import {
   parseBars,
   parseBpm,
-  parseConviction,
-  parseExaggeration,
   parseChannels,
+  parseConviction,
   parseDurationSeconds,
+  parseExaggeration,
   parseSeed,
   parseVariantNumber,
   parseVariants,
