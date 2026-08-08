@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ACED_SPEC } from '../aced/client.js';
 import { VOICED_SPEC } from '../voiced/client.js';
+import { SETUP_SPECS } from '../commands/generate.js';
 import {
   environmentVerdict,
   workerAvailable,
@@ -76,7 +76,7 @@ describe('starting a worker never installs its environment', () => {
     // The gate itself. Without this flag uv installs the environment as a
     // side effect of starting the daemon, and every other check here is
     // decoration.
-    for (const spec of [ACED_SPEC, VOICED_SPEC]) {
+    for (const spec of SETUP_SPECS) {
       const { command, args } = workerLaunchCommand(spec);
       expect(command).toBe('uv');
       expect(args[0]).toBe('run');
@@ -289,7 +289,7 @@ describe('the shared lifecycle is edited in place, not copied', () => {
   // venvs are ambient (CI has none during `pnpm test`), and the thing
   // that was actually wrong is this line.
   it('declares field-worker editable in every worker that depends on it', () => {
-    for (const spec of [ACED_SPEC, VOICED_SPEC]) {
+    for (const spec of SETUP_SPECS) {
       const pyproject = readFileSync(
         join(packageRoot, 'python', spec.packageDir, 'pyproject.toml'),
         'utf8',
