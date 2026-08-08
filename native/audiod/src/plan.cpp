@@ -328,7 +328,12 @@ void validatePlan (const juce::var& plan)
                        { "faders", Kind::array, true },
                        { "gain_db", Kind::number, true },
                        { "master", Kind::array, false },
-                       { "length_samples", Kind::integer, false, 1.0 },
+                       // Zero is a legitimate declared length: it means
+                       // an empty bounce, which is what the reference
+                       // produced and what this renders. Only *looping*
+                       // needs it positive — see the cross-field rule
+                       // below, where the stride would otherwise be zero.
+                       { "length_samples", Kind::integer, false, 0.0 },
                        { "loop", Kind::boolean, false } });
         validateSampleRate (plan, path);
         validateInputs (plan, path);
@@ -346,9 +351,13 @@ void validatePlan (const juce::var& plan)
         // length, so without one there is nothing to fold onto and the
         // flag would be silently ignored.
         auto* object = plan.getDynamicObject();
-        if (object->hasProperty ("loop") && (bool) object->getProperty ("loop")
-            && ! object->hasProperty ("length_samples"))
-            fail (path + ".loop", "needs \"length_samples\" to fold onto");
+        if (object->hasProperty ("loop") && (bool) object->getProperty ("loop"))
+        {
+            if (! object->hasProperty ("length_samples"))
+                fail (path + ".loop", "needs \"length_samples\" to fold onto");
+            if ((double) object->getProperty ("length_samples") <= 0.0)
+                fail (path + ".loop", "needs a positive \"length_samples\" to fold onto");
+        }
         validateChain (plan, "master", path, false);
     }
     else

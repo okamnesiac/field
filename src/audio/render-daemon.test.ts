@@ -320,6 +320,7 @@ describe.skipIf(!binary)('render subprocess', () => {
       ['empty eq bands', { op: 'effects', input, output, inserts: [{ effect: 'eq', normalize: true, bands: [] }] }, /must hold 1–8 bands/],
       ['negative length', { ...mix, length_samples: -1 }, /length_samples: out of range/],
       ['loop without length', { ...mix, loop: true }, /loop: needs "length_samples"/],
+      ['loop at zero length', { ...mix, loop: true, length_samples: 0 }, /needs a positive "length_samples"/],
       ['clip input out of range', { ...stem, clips: [clip({ input: 1 })] }, /input: out of range/],
     ];
 
@@ -372,6 +373,27 @@ describe.skipIf(!binary)('render subprocess', () => {
     for (const [name, plan, expected] of cases) {
       await expect(render(plan), name).rejects.toThrow(expected);
     }
+  });
+
+  it('still renders a zero-length mix when it is not looping', async () => {
+    // The valid side of the same rule (#54 review). A declared length of
+    // zero is an empty bounce — the reference produced exactly that — so
+    // only *looping* needs it positive, because that is where the fold
+    // stride would be zero. Rejecting both narrowed behaviour while
+    // looking like rigour.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(64)]);
+    const output = join(dir, 'out.wav');
+    await renderInsertChain({
+      op: 'mix',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      faders: [{ gain_db: 0, pan: 0 }],
+      gain_db: 0,
+      length_samples: 0,
+    });
+    expect(readFileSync(output).length).toBeGreaterThan(0); // a valid, zero-frame WAV
   });
 
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
