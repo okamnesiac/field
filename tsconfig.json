@@ -7,6 +7,12 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+    // A dead import is invisible here otherwise: there is no ESLint, and
+    // `pnpm typecheck` was green over two of them left by moving a
+    // function to a shared module (#70 review). Cheap to hold — enabling
+    // it cost two unused test imports.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,

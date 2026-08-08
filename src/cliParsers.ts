@@ -28,6 +28,16 @@ export function parseBars(value: string): number {
   return n;
 }
 
+// Whether this invocation is asking for the version, by position.
+// `argv.includes('--version')` matched the flag anywhere, so
+// `field build --version` printed a version report and silently never
+// built — substituting a different command where a parser would have
+// complained (#70 review). argv[2] is the only position where this flag
+// means the whole program; every other shape belongs to commander.
+export function wantsVersion(argv: string[]): boolean {
+  return argv[2] === '--version' || argv[2] === '-V';
+}
+
 export function parseVariants(value: string): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1 || n > 8) {

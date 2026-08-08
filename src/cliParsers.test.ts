@@ -7,6 +7,7 @@ import {
   parseSeed,
   parseVariantNumber,
   parseVariants,
+  wantsVersion,
 } from './cliParsers.js';
 
 describe('cli parsers', () => {
@@ -44,5 +45,31 @@ describe('cli parsers', () => {
     expect(() => parseBpm('500')).toThrow('[30, 300]');
     expect(parseVariantNumber('1')).toBe(1);
     expect(() => parseVariantNumber('0')).toThrow('positive integer');
+  });
+});
+
+describe('wantsVersion', () => {
+  // `field --version` is the one way to ask, so the check has to be exact
+  // about which invocations mean it.
+  it('recognises both spellings in the only position that means the program', () => {
+    expect(wantsVersion(['node', 'field', '--version'])).toBe(true);
+    expect(wantsVersion(['node', 'field', '-V'])).toBe(true);
+  });
+
+  it('leaves the flag to commander anywhere else', () => {
+    // `argv.includes('--version')` matched anywhere, so `field build
+    // --version` printed a version report and never built — a different
+    // command substituted silently, where a parser would have complained
+    // (#70 review).
+    expect(wantsVersion(['node', 'field', 'build', '--version'])).toBe(false);
+    expect(wantsVersion(['node', 'field', 'build', '//songs/...', '--version'])).toBe(false);
+    // And a value that happens to equal the flag is a value, not a request.
+    expect(
+      wantsVersion(['node', 'field', 'generate', 'line', '--text', '--version']),
+    ).toBe(false);
+  });
+
+  it('is false for no arguments at all', () => {
+    expect(wantsVersion(['node', 'field'])).toBe(false);
   });
 });

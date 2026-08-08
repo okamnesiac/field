@@ -2,8 +2,9 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
   devicesResponseSchema,
@@ -13,6 +14,7 @@ import {
   loadResponseSchema,
   okResponseSchema,
   PROTOCOL_VERSION,
+  SOCKET_RELATIVE,
   statusResponseSchema,
   type AudiodEvent,
 } from './protocol.js';
@@ -22,8 +24,6 @@ import {
 // socket — daemon-lite lifecycle. The daemon runs with its cwd at the
 // project root and a root-relative socket path, keeping the bound path
 // inside sun_path's 104 bytes regardless of how deep the project lives.
-
-const SOCKET_RELATIVE = '.field/audiod.sock';
 
 // The built daemon binary, or undefined if it has not been built. FIELD_AUDIOD
 // overrides for wrappers and tests; the default is the CMake output inside
@@ -48,12 +48,7 @@ export function daemonBinary(): string | undefined {
 }
 
 function socketPathFor(root: string): string {
-  // Node's connect() is subject to the same sun_path limit as bind(); a
-  // cwd-relative path keeps it short whenever the CLI runs inside the
-  // project, which it always does (requireRoot found the manifest upward).
-  const absolute = join(root, SOCKET_RELATIVE);
-  const rel = relative(process.cwd(), absolute);
-  return rel.length < absolute.length ? rel : absolute;
+  return sharedSocketPath(root, SOCKET_RELATIVE);
 }
 
 function tryConnect(path: string, timeoutMs: number): Promise<Socket | undefined> {
