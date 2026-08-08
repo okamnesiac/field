@@ -6,6 +6,8 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [Voice generation](all/voice-generation.md) — committed vocals from
+  text; bloom's creek has no vocal source until it ships.
 - [Watch mode](all/watch.md) — both chunks shipped (#34, #35); stays
   here while §5's status-visibility question is open, per the line
   below's precedent.

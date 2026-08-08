@@ -482,6 +482,24 @@ function validate(project: LoadedProject): void {
       ),
       shared: sharedNames,
     };
+    // A voice recipe's reference recording must resolve, and to a
+    // *committed asset* rather than to any visible name: §1.3's argument
+    // for a recording over a vendor's voice ID is provenance, and a
+    // generated sound cannot carry that. Absent `voice_ref` is the
+    // default-voice case and is deliberately fine (§6).
+    for (const { path, sound } of generateSounds) {
+      if (sound.voice_ref === undefined) continue;
+      const shared = sharedAssetName(sound.voice_ref);
+      const known =
+        shared !== undefined ? sharedNames.has(shared) : assetNames.has(sound.voice_ref);
+      if (!known) {
+        push(
+          path,
+          `sound "${sound.name}" voice_ref references unknown asset "${sound.voice_ref}" — ` +
+            `a reference recording is a committed asset (voice-generation.md §1.3)`,
+        );
+      }
+    }
     for (const { path, sound } of buildableSounds) {
       // Rule-specific semantics live with the rule (src/generators/).
       generatorFor(sound).validate(sound, {
@@ -841,6 +859,47 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
         diagnostics.push({
           file: ledger.path,
           message: `asset "${asset.name}" content does not match its recorded sha256 (${asset.file} hashes to ${actual})`,
+        });
+      }
+    }
+  }
+  // A voice recipe's reference recording is pinned by hash for the same
+  // reason its variants are (voice-generation.md §1.3 and §6). Without
+  // this the hash is a field, not a pin: the recording could be swapped
+  // under a recipe that still claimed to describe it and the project
+  // stayed check-green (#58 review). Compared against the ledger's
+  // recorded sha rather than re-hashing, because the loop above has
+  // already proved recorded matches actual.
+  //
+  // Built per song rather than once: a bare asset name is scoped to its
+  // song (project-layout.md §4.3), so one global map lets a later song's
+  // `ref-voice` overwrite an earlier song's and a recipe then verifies
+  // against a recording from a different song entirely — false drift one
+  // way, a silent pass the other (#58 review). Shared assets keep their
+  // full label, which is already unique across the project.
+  const sharedSha = new Map<string, string>();
+  if (project.shared) {
+    for (const asset of project.shared.data.assets) {
+      sharedSha.set(`//shared/asset:${asset.name}`, asset.sha256);
+    }
+  }
+  for (const song of project.songs) {
+    const localSha = new Map(sharedSha);
+    for (const asset of song.assets?.data.assets ?? []) {
+      localSha.set(asset.name, asset.sha256);
+    }
+    for (const file of song.sounds) {
+      if (file.data.type !== 'generative') continue;
+      const { voice_ref: ref, voice_ref_sha256: declared } = file.data;
+      if (ref === undefined || declared === undefined) continue;
+      const recorded = localSha.get(ref);
+      if (recorded === undefined) continue; // already diagnosed by validate
+      if (recorded !== declared) {
+        diagnostics.push({
+          file: file.path,
+          message:
+            `voice_ref "${ref}" is recorded as ${recorded} but the recipe declares ` +
+            `${declared} — the reference recording changed under the recipe`,
         });
       }
     }

@@ -1,8 +1,9 @@
 # Plan: Voice generation
 
-**Status:** Planned, deferred (2026-08-06). The design was settled and
-recorded ahead of the build, then deliberately queued behind other work —
-nothing here is started. Written before
+**Status:** In flight (2026-08-07). Designed and recorded ahead of the
+build (2026-08-06), then queued behind other work until `say`'s removal
+made it the thing bloom needs. Chunk 1's schema slice has shipped; the
+worker and the CLI are next, and chunk 2 is unstarted. Written before
 [project-layout.md](project-layout.md) §4: where this plan says
 `generation/<name>.yaml` and recipe fields, read a `generate` sound in
 `sounds/<name>.yaml` (`type:`/`source:` spellings, §4.3), with choosing
@@ -10,7 +11,8 @@ as repointing (§4.8). The other side of the determinism boundary from
 the `say` rule (#27), kept separate by design — "got to keep them
 separated."
 
-**Goal:** `field voice generate`: text (and a voice) produce committed,
+**Goal:** `field generate` over a voice recipe: text (and optionally a
+voice) produce committed,
 provenance-carrying vocal audio through a local model, auditioned and
 promoted with the same variant machinery ACE established. bloom's creek
 trades its spoken `say` line for a generated voice worth listening to.
@@ -62,16 +64,28 @@ trades its spoken `say` line for a generated voice worth listening to.
 
 ## 2 Definition of done
 
-creek's lead vocal is a generated voice: a committed reference asset, a
-recipe with ≥2 variants, one chosen, clipped where the `say` line sits
-today (the `say` target stays as the scratch tier). Worker start-to-audio
+creek's lead vocal is a generated voice: a recipe with ≥2 variants, one
+chosen, clipped where the `say` line used to sit. Worker start-to-audio
 on the M3 Max in seconds-not-minutes; recipe hashes verified by
 `field check`.
+
+**Amended 2026-08-07**, twice over, and both amendments are in §5 and §6
+rather than being quietly absorbed here. This said "a committed reference
+asset" as a requirement — §6 makes the reference optional, so the default
+voice satisfies this and a recording only improves it. And it said "the
+`say` target stays as the scratch tier", which is no longer available to
+say: §5 records that the rule was deleted, so there is no scratch tier
+to fall back to and creek's clips have no source at all until this
+ships. That is why this moved from a nice-to-have to the thing bloom is
+waiting on.
 
 ## 3 Chunks
 
 1. `field-voiced` worker (Chatterbox behind the job-spec protocol) +
-   `field voice generate` CLI + recipe/schema growth + tests.
+   `field generate` support + recipe/schema growth + tests. The CLI name
+   is §4's settled one, not the `field voice generate` this said before
+   that question was answered. **Schema slice shipped (#58)**; the worker
+   lifecycle it builds on shipped separately (#59).
 2. bloom: record/pick a reference voice, generate creek's line, choose,
    clip; vault the milestone.
 
@@ -105,7 +119,8 @@ macOS-only rule, or keeping `afconvert` for that rule alone and with it
 the macOS dependency the whole exercise exists to remove. Neither is
 worth a scratch-vocal placeholder.
 
-**What it costs, honestly.** This plan is *deferred and not started*, so
+**What it costs, honestly.** This plan was *deferred and not started*
+when `say` went, and is only now in flight, so
 there is now a gap rather than a handover: bloom's creek has a
 `lead-vocal` track with two clips sourcing `scratch-vocal`, plus a
 `vocal-96k` normalize derived from it, and all three stop resolving until
@@ -124,3 +139,45 @@ only ever the *illustration* of the boundary, and a slightly false one:
 the cleanest example of a hermetic recipe was the rule whose bytes were
 not reliably reproducible. Its removal makes the boundary easier to state
 rather than harder.
+
+## 6 Schema growth as built (2026-08-07)
+
+§1.6 justified enforcing the kind split with a `refine` on the grounds
+that "the recipe schema is a single object, not a discriminated union."
+That parenthetical is now false — [project-layout.md](project-layout.md)
+§4 made the recipe a `generative` sound in `sounds/<name>.yaml`, and
+`soundSchema` is a discriminated union on `type:`. The conclusion
+survives anyway, which is why this is a note rather than a reopened
+decision: zod v4 accepts a refined member and still narrows on the
+discriminant, verified before the schema was written rather than assumed.
+
+Two things the writing settled that §1.6 left implicit.
+
+**The kind split is enforced in both directions, not just on
+`prompt`/`text`.** A voice recipe carrying `duration_seconds` is a recipe
+whose generator would ignore a field it declares, and a music recipe
+carrying `voice_ref` is the same defect mirrored. Both are rejected, with
+the offending key named in the issue path.
+
+**`voice_ref` is a name *and* a hash.** §1.3's argument for a committed
+recording over a vendor's opaque voice ID is provenance, and provenance
+needs the bytes pinned: a name alone lets the recording change under a
+recipe that still claims to describe it. So `voice_ref_sha256` sits
+beside it and the two are required together — the same treatment a
+variant gets, for the same reason.
+
+**The reference recording is optional, and bloom starts without one**
+(2026-08-07, Justin's call). `voice_ref` is paired with its hash but not
+required, so a recipe carrying `text` alone means the model's own default
+voice. That unblocks §2's definition of done — creek's line can be
+generated before anyone records a reference — and it changes what §4's
+open question is: not "whose voice blocks this" but "whose voice improves
+it", answerable whenever a recording exists. With no reference the voice
+is defined by `model:` and nothing else, which is honest rather than
+lossy: §1.1 already commits the output precisely because inference does
+not reproduce.
+
+**Backend feasibility, checked rather than assumed**: `chatterbox-tts`
+0.1.7 resolves from PyPI in about a second, 126 packages, pulling
+torch/torchaudio/transformers. §1.5's "Chatterbox first" stands on
+something better than a reading of its README now.
