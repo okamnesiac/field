@@ -29,9 +29,6 @@ costs nothing. See [README](README.md) for how these lists work.
   abstraction, when LFS costs hurt.
 - **Analysis workers** — separation, transcription, loudness, take ranking on
   the worker protocol [ace-generation.md](all/ace-generation.md) establishes.
-- **Loops with their own timeline** — polyrhythmic/polymetric loops against a
-  different meter, carrying a local timeline mapped at the instantiation point
-  ([project-core.md](all/project-core.md) §3.1 defers this deliberately).
 - **src/engine umbrella** — `graph/` + `generators/` (+ `audio/`?) under
   one engine module; discussed 2026-08-06, no flag-day pressure, land as
   a quiet cleanup whenever.
