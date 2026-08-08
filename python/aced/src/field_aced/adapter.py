@@ -17,14 +17,12 @@ outputs in `result.audios[i]["path"]`.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+
+from field_worker.protocol import GenerationOutput, JsonObject
+from field_worker.server import ProgressCallback
 
 from .protocol import GenerateJob
-
-ProgressCallback = Callable[[float, str], None]
-"""(fraction 0..1, human-readable stage) — forwarded to socket clients."""
 
 CONFIG_PATH = "acestep-v15-turbo"
 
@@ -35,13 +33,6 @@ def models_root() -> Path:
     root = Path(override) if override else Path.home() / ".field" / "models" / "acestep"
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-@dataclass(frozen=True)
-class GenerationOutput:
-    paths: list[Path]
-    seeds: list[int]  # aligned with paths: variant i used seeds[i]
-    model: str
 
 
 class Pipeline:
@@ -57,6 +48,10 @@ class Pipeline:
     @property
     def loaded(self) -> bool:
         return self._handler is not None
+
+    def parse_job(self, request: JsonObject) -> GenerateJob:
+        """The Backend half that is ACE's: what a generate request means."""
+        return GenerateJob.from_request(request)
 
     def ensure_loaded(self, progress: ProgressCallback) -> None:
         if self._handler is not None:
