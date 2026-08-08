@@ -6,6 +6,10 @@ Wanted, nobody has committed to it. One line each, linking a plan in
 line that never graduates can just be deleted; it cost nothing and losing it
 costs nothing. See [README](README.md) for how these lists work.
 
+- **Audible loop takeover** — every `--loop --watch` reload hiccups at
+  the seam, from poll lag and transport teardown together; deferred
+  because the real-time engine deletes the mechanism
+  ([watch.md](all/watch.md) §6 has the diagnosis).
 - **Automation** — breakpoint lanes + control-rate generators (LFO first),
   one compile target, realtime-evaluable by design; audio-rate stays SC's
   job ([automation.md](all/automation.md) records the decided shape).
