@@ -19,11 +19,11 @@ Labels address songs and shared material alike: a clip in one song
 plays `//shared/asset:rain` exactly as it plays the song's own sounds.
 
 The absolute form is canonical, but the CLI accepts songs-relative shorthand
-for all of the above — `field build opener/mix:main`, `field explain
-opener/...` — and a bare song name plays its main mix: `field play opener`
-(project-core.md §3.4; `main` is a convention, and a song that names its
-mixes otherwise gets a no-such-label error). `//shared/...` material
-uses the full form.
+for all of the above — `field build opener/track:main`, `field explain
+opener/...` — and a bare song name plays the song's output track: `field
+play opener` is `//songs/opener/track:main` (project-core.md §3.4, amended
+2026-08-08; `main` is a convention, and a song with no track by that name
+gets a no-such-label error). `//shared/...` material uses the full form.
 
 ## Caching, and freezing is caching
 

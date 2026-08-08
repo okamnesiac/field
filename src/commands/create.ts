@@ -1,10 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isSlug } from '../ids.js';
-import { RESERVED_LABEL_NAME } from '../labels.js';
+import { RESERVED_LABEL_NAME, SONG_OUTPUT_NAME } from '../labels.js';
 import {
-  mixOrder,
-  mixSchema,
   songOrder,
   songSchema,
   tempoFileOrder,
@@ -33,11 +31,29 @@ export function createSong(root: string, name: string): string {
     meter: [{ at: 0, numerator: 4, denominator: 4 }],
   });
   writeFileSync(join(dir, 'tempo.yaml'), stringifyCanonical(tempo, tempoFileOrder));
-  // Every song is mixable from birth: main mixes all audio tracks with
-  // clips, so //songs/<name>/mix:main exists as soon as there is content.
-  mkdirSync(join(dir, 'mixes'), { recursive: true });
-  const mix = mixSchema.parse({ name: 'main' });
-  writeFileSync(join(dir, 'mixes', 'main.yaml'), stringifyCanonical(mix, mixOrder));
+  // Every song has an output from birth, and it is a track now: the bare
+  // song name resolves to //songs/<name>/track:main (labels.ts
+  // SONG_OUTPUT_NAME), so the thing that label points at has to be what
+  // the tool creates. Scaffolding a mix here instead would leave every new
+  // song unreachable by its own name.
+  //
+  // It starts empty, and placing tracks in it is the author's step. A mix
+  // with `tracks:` omitted meant "all of them" implicitly; a track holds
+  // exactly what is placed in it, which is what lets one definition sit in
+  // more than one parent (nested-tracks.md §1.3) and is why membership is
+  // written down rather than inferred.
+  //
+  // `field track create` deliberately does *not* place the track it makes:
+  // a track with no clips has no stem and so no node, and a placement of
+  // one is refused. Placing at creation would mean every new song failed
+  // `check` until its first clip landed. Whether creating a track should
+  // place it — and therefore whether an empty track should render as
+  // silence — is open.
+  const main = trackSchema.parse({ name: SONG_OUTPUT_NAME, type: 'audio' });
+  writeFileSync(
+    join(dir, 'tracks', `${SONG_OUTPUT_NAME}.yaml`),
+    stringifyCanonical(main, trackOrder),
+  );
   writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
   return dir;
 }

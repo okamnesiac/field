@@ -106,7 +106,10 @@ describe('song and track creation', () => {
     );
     expect(() => loadProject(root)).not.toThrow();
     expect((await check(root)).ok).toBe(true);
-    expect(loadProject(root).songs[0]!.tracks).toHaveLength(1);
+    // The scaffolded output track plus lead-vocal — and not the dotfile,
+    // which is what this is about.
+    const names = loadProject(root).songs[0]!.tracks.map((t) => t.data.name).sort();
+    expect(names).toEqual(['lead-vocal', 'main']);
   });
 });
 
@@ -1034,9 +1037,12 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
   }
 
   it('refuses a song with both an output track and an output mix', async () => {
-    // createSong scaffolds mixes/main.yaml, so adding the track is all it
-    // takes — which is the migration's first step, and the point.
-    expect(existsSync(join(root, 'songs/opener/mixes/main.yaml'))).toBe(true);
+    // createSong writes the output track now, so a mix is what has to be
+    // added to produce the conflict — the shape a project mid-migration
+    // has, rather than the shape the tool produces.
+    expect(existsSync(join(root, 'songs/opener/tracks/main.yaml'))).toBe(true);
+    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\n');
     writeOutputTrack();
     const out = await messages();
     expect(out).toContain('song has two outputs');
@@ -1044,13 +1050,15 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
     expect(out).toContain('a bare song name reaches the track');
   });
 
-  it('accepts the output track once the mix is gone', async () => {
+  it('accepts the output track alone', async () => {
     writeOutputTrack();
-    rmSync(join(root, 'songs/opener/mixes'), { recursive: true });
     expect(await messages()).toBe('');
   });
 
-  it('says nothing about a song that still has only a mix', async () => {
+  it('says nothing about a song that has only a mix', async () => {
+    rmSync(join(root, 'songs/opener/tracks/main.yaml'), { force: true });
+    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\n');
     expect(await messages()).toBe('');
   });
 

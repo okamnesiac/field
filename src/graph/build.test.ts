@@ -46,6 +46,11 @@ beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'field-build-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
+  // createSong scaffolds an output *track* now, so the mix these
+  // cases are about is written here rather than inherited.
+  mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
+  writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
+  rmSync(join(root, 'songs/creek/tracks/main.yaml'), { force: true });
   const src = join(root, '..', `field-build-src-${Math.random()}.wav`);
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');

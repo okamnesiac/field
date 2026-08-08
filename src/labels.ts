@@ -13,10 +13,10 @@
 // and a list hold many, which is the distinction the singular package
 // draws attention to.
 // Canonical form is absolute; the CLI additionally accepts songs-relative
-// shorthand (`creek/mix:main` = `//songs/creek/mix:main`) because nearly
-// everything addressable lives under songs/, and a bare song name
-// (`creek`) means its main mix — `main` is a convention, not a
-// requirement, so a song that names its mixes otherwise gets a clean
+// shorthand (`creek/track:main` = `//songs/creek/track:main`) because
+// nearly everything addressable lives under songs/, and a bare song name
+// (`creek`) means its output track — `main` is a convention, not a
+// requirement, so a song with no track by that name gets a clean
 // no-such-label error. Other roots (`//shared/...`) keep the full form.
 
 export interface Label {
