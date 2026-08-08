@@ -333,7 +333,15 @@ export class WorkerClient extends EventEmitter {
         `${spec.name} speaks protocol ${hello.protocol}, this CLI speaks ` +
           `${WORKER_PROTOCOL_VERSION} — the running daemon predates this build. ` +
           `It exits when idle, or stop it and retry (it respawns): ` +
-          `pkill -f '${spec.module} --socket'`,
+          // `spec.script`, not `spec.module`: the uv branch launches the
+          // `[project.scripts]` entry point (`field-voiced`), and only the
+          // interpreter override — which exists for the daemon tests —
+          // launches `-m field_voiced`. Anyone reading this has run
+          // `field setup` and has no override, so a module-shaped pattern
+          // matches nothing. pkill is silent when it matches nothing, so
+          // the remedy would appear to work and change nothing (#69
+          // review).
+          `pkill -f '${spec.script} --socket'`,
       );
     }
     (probe as { daemonVersion: string }).daemonVersion = hello.version;
