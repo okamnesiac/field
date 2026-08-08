@@ -131,9 +131,10 @@ the daemon took over in chunks 2–3 and the TypeScript was deleted. The
 directory now holds the WAV codec and the render client only.
 
 The auto-gain properties §5 lists — narrow bells cost almost nothing,
-wide shelves proportionally more, boost/cut symmetry — moved to
-`src/generators/effect-properties.test.ts` with the rest, but not all of
-them survived the trip on their own: boost/cut symmetry and the ±12 dB
-clamp had to be written there before the delete, because the properties
-that replaced the unit tests all happened to use boosts. The move was
-sound; it just was not free, and it was not automatic.
+wide shelves proportionally more, boost/cut symmetry — are now in
+`src/generators/effect-properties.test.ts`, but none of the three made
+the trip on its own. All three had to be written there, along with the
+±12 dB clamp, because the properties that replaced the unit tests all
+happened to use boosts at bandwidth 1 or wider. The move was sound; it
+was neither free nor automatic, and the narrow-vs-wide one was missed on
+the first pass and caught in review.

@@ -319,6 +319,50 @@ describe('eq properties', () => {
     expect(raw).toBeLessThan(-2);
   });
 
+  it('a narrow bell costs almost nothing; a wide shelf proportionally more', async () => {
+    // The third of the Fyra auto-gain contracts (effects.md §5), and the
+    // one that says the compensation is computed from the *curve* rather
+    // than from the gain knob: a 0.3-octave bell at +6 dB barely moves
+    // the mean, while a shelf at the same gain lifts everything above its
+    // corner and costs several dB.
+    //
+    // Nothing else here renders a normalized band narrower than one
+    // octave, which is what let it go missing (#55 review). The mutation
+    // that found it widened narrow bands to 2 octaves *only* while
+    // computing compensation, leaving the rendered filter alone — 38
+    // relevant tests passed, this one fails.
+    const probes = logSpaced(20, 20000, 48);
+    const source = multitone(probes, PROBE_SECONDS);
+    await importSource('probe', source);
+
+    const applied = async (label: string, band: string[]) => {
+      writeSound(`${label}norm`, ['type: eq', 'source: probe', 'normalize: true', ...band]);
+      writeSound(`${label}raw`, ['type: eq', 'source: probe', 'normalize: false', ...band]);
+      const norm = meanPowerDb(responseDb(await render(`${label}norm`), source, probes));
+      const raw = meanPowerDb(responseDb(await render(`${label}raw`), source, probes));
+      return norm - raw;
+    };
+
+    const narrow = await applied('narrow', [
+      'bands:',
+      '  - type: bell',
+      '    frequency: 1000',
+      '    gain_db: 6',
+      '    bandwidth: 0.3',
+    ]);
+    const wide = await applied('wide', [
+      'bands:',
+      '  - type: highshelf',
+      '    frequency: 500',
+      '    gain_db: 6',
+      '    bandwidth: 2',
+    ]);
+
+    expect(Math.abs(narrow), 'narrow bell').toBeLessThan(1);
+    expect(wide, 'wide shelf').toBeLessThan(-2);
+    expect(Math.abs(wide), 'proportionality').toBeGreaterThan(Math.abs(narrow) * 3);
+  });
+
   it('the compensation saturates at ±12 dB rather than chasing the curve', async () => {
     // The make-up is bounded (biquad.ts, Fyra parity). Past the bound
     // normalize deliberately stops tracking, so an extreme EQ stays loud

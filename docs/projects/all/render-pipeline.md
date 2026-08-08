@@ -535,23 +535,34 @@ most memory-bound of the three effects.
    the WAV codec and the client that spawns the renderer, neither of
    which is DSP.
 
-   **Two properties had to be written before the delete was safe**, and
+   **Three properties had to be written before the delete was safe**, and
    finding them is the argument for checking rather than assuming. The
-   claim "the tests stay" was true of thirteen of the fifteen deleted
+   claim "the tests stay" was true of twelve of the fifteen deleted
    assertions — the ceiling, the ramps, the channel link, T60, predelay,
    the stereo spread, the mix blend all have property equivalents, and
    reverb's tail-length assertion is covered by the golden, whose digest
-   spans a file whose length would change. But `autoGainDB`'s **make-up
-   for cuts** and its **±12 dB clamp** had no equivalent anywhere: every
-   normalize assertion in the harness uses a boost, and so does the
-   golden's +6.6 dB bell.
+   spans a file whose length would change. The three that did not were
+   all `autoGainDB`'s: **make-up for cuts**, the **±12 dB clamp**, and
+   **narrow-vs-wide proportionality**. Every normalize assertion in the
+   harness used a boost at bandwidth 1 or wider, and so does the golden's
+   +6.6 dB bell, so nothing looked at a cut, at the bound, or at a narrow
+   band.
 
-   Both gaps were confirmed by mutation against the C++ before writing
+   Each gap was confirmed by mutation against the C++ before writing
    anything. `min(0, compensation)` — pad boosts, ignore cuts — passed
-   353 of 353. Deleting the clamp outright passed 353 of 353. The two new
-   properties kill both, and the fifteen pre-existing ones stay green
-   under each, which is what says the new tests are carrying the weight
-   rather than duplicating.
+   353 of 353. Deleting the clamp outright passed 353 of 353. Widening
+   bands under 0.5 octaves to 2 octaves *while computing compensation
+   only*, so the rendered filter stays narrow, passed the 38 relevant
+   tests (#55 review). The three new properties kill all three, and the
+   fifteen pre-existing ones stay green under each, which is what says
+   the new tests carry weight rather than duplicate.
+
+   The third gap is the one worth remembering, because it was found by a
+   reviewer after the first two had been fixed and the accounting written
+   up as complete. "Twelve of fifteen are covered" is a claim about
+   absence, and the only way to hold one is to mutate for it — reading
+   the surviving tests and judging them sufficient is exactly what had
+   already produced the wrong answer twice.
 
    The deeper point is that the deleted assertions had *already* stopped
    testing anything at chunk 2, when the executor changed: they exercised
