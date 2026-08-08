@@ -124,3 +124,34 @@ only ever the *illustration* of the boundary, and a slightly false one:
 the cleanest example of a hermetic recipe was the rule whose bytes were
 not reliably reproducible. Its removal makes the boundary easier to state
 rather than harder.
+
+## 6 Schema growth as built (2026-08-07)
+
+§1.6 justified enforcing the kind split with a `refine` on the grounds
+that "the recipe schema is a single object, not a discriminated union."
+That parenthetical is now false — [project-layout.md](project-layout.md)
+§4 made the recipe a `generative` sound in `sounds/<name>.yaml`, and
+`soundSchema` is a discriminated union on `type:`. The conclusion
+survives anyway, which is why this is a note rather than a reopened
+decision: zod v4 accepts a refined member and still narrows on the
+discriminant, verified before the schema was written rather than assumed.
+
+Two things the writing settled that §1.6 left implicit.
+
+**The kind split is enforced in both directions, not just on
+`prompt`/`text`.** A voice recipe carrying `duration_seconds` is a recipe
+whose generator would ignore a field it declares, and a music recipe
+carrying `voice_ref` is the same defect mirrored. Both are rejected, with
+the offending key named in the issue path.
+
+**`voice_ref` is a name *and* a hash.** §1.3's argument for a committed
+recording over a vendor's opaque voice ID is provenance, and provenance
+needs the bytes pinned: a name alone lets the recording change under a
+recipe that still claims to describe it. So `voice_ref_sha256` sits
+beside it and the two are required together — the same treatment a
+variant gets, for the same reason.
+
+**Backend feasibility, checked rather than assumed**: `chatterbox-tts`
+0.1.7 resolves from PyPI in about a second, 126 packages, pulling
+torch/torchaudio/transformers. §1.5's "Chatterbox first" stands on
+something better than a reading of its README now.

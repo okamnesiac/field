@@ -90,20 +90,79 @@ export const generativeVariantSchema = z.strictObject({
 });
 export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
 
-export const generativeSoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('generative'),
-  model: z.string().min(1),
-  prompt: z.string().min(1),
-  lyrics: z.string().optional(),
-  bpm: z.number().int().min(30).max(300).optional(),
-  duration_seconds: z.number().positive(),
-  bars: z.number().int().positive().optional(),
-  seed: z.number().int().min(0),
-  chosen: z.number().int().min(1).optional(), // 1-based variant number
-  variants: z.array(generativeVariantSchema).min(1),
-  generated_at: z.iso.datetime(),
-});
+// Two kinds of generation share this one shape, discriminated by which
+// of `prompt`/`text` is present rather than by a second `type:`
+// (voice-generation.md §1.6). Music recipes carry `prompt` and may carry
+// `lyrics`/`bpm`/`bars`/`duration_seconds`; voice recipes carry `text`
+// and a `voice_ref` naming the committed reference recording that
+// defines the voice (§1.3 — a recording, not a vendor's opaque ID). The
+// variant machinery, `chosen`, the hashes and `field choose` are
+// identical for both, which is the whole reason not to fork the schema.
+//
+// A voice line has no `duration_seconds`: its length follows from the
+// text, and the committed variant WAV is its own record of what came out.
+export const generativeSoundSchema = z
+  .strictObject({
+    name: labelName,
+    type: z.literal('generative'),
+    model: z.string().min(1),
+    prompt: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    voice_ref: sourceRef.optional(),
+    voice_ref_sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256')
+      .optional(),
+    lyrics: z.string().optional(),
+    bpm: z.number().int().min(30).max(300).optional(),
+    duration_seconds: z.number().positive().optional(),
+    bars: z.number().int().positive().optional(),
+    seed: z.number().int().min(0),
+    chosen: z.number().int().min(1).optional(), // 1-based variant number
+    variants: z.array(generativeVariantSchema).min(1),
+    generated_at: z.iso.datetime(),
+  })
+  // The kind split, enforced rather than documented. Without it a recipe
+  // can be a chimera of both kinds or neither, and the generator would
+  // have to guess which one it was looking at — the same failure the
+  // clip asset-vs-target precedent rules out.
+  .superRefine((sound, ctx) => {
+    const isMusic = sound.prompt !== undefined;
+    const isVoice = sound.text !== undefined;
+    if (isMusic === isVoice) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [isMusic ? 'text' : 'prompt'],
+        message: isMusic
+          ? 'a recipe carries either `prompt` (music) or `text` (voice), not both'
+          : 'a generative sound needs `prompt` (music) or `text` (voice)',
+      });
+      return;
+    }
+    const musicOnly = ['lyrics', 'bpm', 'bars', 'duration_seconds'] as const;
+    const voiceOnly = ['voice_ref', 'voice_ref_sha256'] as const;
+    for (const key of isVoice ? musicOnly : voiceOnly) {
+      if (sound[key] !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: isVoice
+            ? `\`${key}\` is music-only; a voice recipe carries \`text\` and \`voice_ref\``
+            : `\`${key}\` is voice-only; a music recipe carries \`prompt\``,
+        });
+      }
+    }
+    // The reference recording is the voice, so its identity is part of
+    // the recipe's provenance (§1.3): name alone would let the bytes
+    // change under a recipe that still claims to describe them.
+    if (isVoice && (sound.voice_ref === undefined) !== (sound.voice_ref_sha256 === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['voice_ref'],
+        message: '`voice_ref` and `voice_ref_sha256` go together — the recording and its hash',
+      });
+    }
+  });
 export type GenerativeSound = z.infer<typeof generativeSoundSchema>;
 
 export const soundSchema = z.discriminatedUnion('type', [
@@ -130,6 +189,9 @@ export const soundOrder: KeyOrder = {
     'source',
     'model',
     'prompt',
+    'text',
+    'voice_ref',
+    'voice_ref_sha256',
     'lyrics',
     'bpm',
     'seed',
