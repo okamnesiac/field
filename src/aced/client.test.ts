@@ -65,6 +65,29 @@ describe.skipIf(!interpreter)('field-aced protocol (live daemon)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('refuses a field it does not understand rather than dropping it', async () => {
+    // Same guarantee as field-voiced's, and it belongs to both: the
+    // shared lifecycle parses a job through the worker's own dataclass,
+    // so the allowed set is the spec rather than a list kept in step by
+    // hand. A daemon that quietly drops an unknown field succeeds and
+    // then the recipe records an input the model never received.
+    await expect(
+      client.request(
+        'generate',
+        {
+          prompt: 'warm keys',
+          duration_seconds: 4,
+          seed: 1,
+          variants: 1,
+          output_dir: '/tmp/none',
+          guidance_scale: 7.5,
+        },
+        workerOkResponseSchema,
+        5000,
+      ),
+    ).rejects.toThrow(/unrecognised field\(s\) 'guidance_scale'/);
+  });
+
   it('spawns and handshakes with the model unloaded', () => {
     expect(client.daemonVersion).not.toBe('unknown');
     expect(client.modelLoaded).toBe(false);

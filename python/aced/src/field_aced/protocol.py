@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from field_worker.protocol import JsonObject
+from field_worker.protocol import reject_unknown
 from field_worker.protocol import required_int as _required_int
 from field_worker.protocol import required_number as _required_number
 from field_worker.protocol import required_str as _required_str
@@ -39,6 +40,8 @@ class GenerateJob:
 
     @staticmethod
     def from_request(request: JsonObject) -> "GenerateJob":
+        reject_unknown(request, GenerateJob, "generate")
+
         def required_str(key: str) -> str:
             return _required_str(request, key, "generate")
 

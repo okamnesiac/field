@@ -12,11 +12,14 @@ and it is the only thing either worker has to write.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-PROTOCOL_VERSION = 1
+# 2: unrecognised job fields are refused rather than stripped. Bumped
+# with that change so the handshake can tell the two behaviours apart —
+# see src/workers/protocol.ts for why silence was the alternative.
+PROTOCOL_VERSION = 2
 
 JsonObject = dict[str, Any]
 
@@ -84,6 +87,37 @@ def required_int(request: JsonObject, key: str, op: str, minimum: int, maximum: 
     if not minimum <= whole <= maximum:
         raise ValueError(f"{key!r} must be in [{minimum}, {maximum}]")
     return whole
+
+
+def reject_unknown(request: JsonObject, job: type, op: str) -> None:
+    """Refuse a request carrying fields this job spec does not know.
+
+    Fail closed, the rule render-pipeline decision 6 already applies to
+    plans: reject what is not understood rather than proceeding on the
+    part that is. A worker that quietly drops an unrecognised field is
+    the worst kind of compatible — it succeeds, and the recipe written
+    afterwards records an input the model never received.
+
+    Not hypothetical. `--exaggeration 0.3` reached a daemon started
+    before #65 knew the field; the daemon had every reason to think the
+    job well-formed, and only a killed process stopped a take being
+    committed at default pacing under a recipe claiming 0.3. A long-lived
+    daemon is the whole point of the lifecycle, so "it was already
+    running" is the normal case rather than an edge one.
+
+    The allowed set is the job dataclass's own fields, which are the wire
+    keys — deriving it means a field added to the spec cannot be
+    forgotten here, and this check never becomes the reason a valid
+    request is refused.
+    """
+    known = {f.name for f in fields(job)} | {"id", "op"}
+    extra = sorted(set(request) - known)
+    if extra:
+        raise ValueError(
+            f"unrecognised field(s) {', '.join(repr(e) for e in extra)} — "
+            f"this worker does not understand them, and running anyway would "
+            f"produce output that does not match what was asked for"
+        )
 
 
 def optional_number(

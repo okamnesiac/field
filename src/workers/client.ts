@@ -323,8 +323,25 @@ export class WorkerClient extends EventEmitter {
     }
     if (hello.protocol !== WORKER_PROTOCOL_VERSION) {
       probe.close();
+      // Actionable, following the `field-audiod ... predates --watch`
+      // precedent in cli.ts: a version mismatch on a daemon the CLI
+      // spawns is almost always a *running* one that predates the
+      // build, and knowing that is the difference between a puzzle and
+      // a fix. It idle-exits on its own; saying so beats leaving
+      // someone to discover it.
       throw new Error(
-        `${spec.name} speaks protocol ${hello.protocol}, this CLI speaks ${WORKER_PROTOCOL_VERSION}`,
+        `${spec.name} speaks protocol ${hello.protocol}, this CLI speaks ` +
+          `${WORKER_PROTOCOL_VERSION} — the running daemon predates this build. ` +
+          `It exits when idle, or stop it and retry (it respawns): ` +
+          // `spec.script`, not `spec.module`: the uv branch launches the
+          // `[project.scripts]` entry point (`field-voiced`), and only the
+          // interpreter override — which exists for the daemon tests —
+          // launches `-m field_voiced`. Anyone reading this has run
+          // `field setup` and has no override, so a module-shaped pattern
+          // matches nothing. pkill is silent when it matches nothing, so
+          // the remedy would appear to work and change nothing (#69
+          // review).
+          `pkill -f '${spec.script} --socket'`,
       );
     }
     (probe as { daemonVersion: string }).daemonVersion = hello.version;

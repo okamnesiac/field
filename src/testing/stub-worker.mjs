@@ -21,6 +21,31 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// This stub impersonates a *current* worker, so its protocol number has
+// to be the current one — read from the source of truth rather than
+// restated here. Restating it means every future bump silently turns the
+// stub into a daemon the client refuses, and the failure lands in a
+// dozen unrelated `field generate` tests rather than saying "the stub is
+// stale" (#69: the bump to 2 did exactly that).
+const protocolSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'workers', 'protocol.ts'),
+  'utf8',
+);
+const protocolMatch = /WORKER_PROTOCOL_VERSION = (\d+)/.exec(protocolSource);
+if (!protocolMatch) {
+  // Checked because the unchecked version fails in the worst place: a
+  // TypeError inside a spawned stub, whose stderr goes to the daemon log
+  // rather than the test output, so the visible symptom is every stub
+  // test timing out on connect. That is the same confusing failure this
+  // whole read exists to prevent (#69 review).
+  process.stderr.write(
+    'stub-worker: could not read WORKER_PROTOCOL_VERSION from workers/protocol.ts\n',
+  );
+  process.exit(2);
+}
+const PROTOCOL = Number(protocolMatch[1]);
 
 const argv = process.argv.slice(2);
 const module = argv[argv.indexOf('-m') + 1] ?? 'field_aced';
@@ -82,7 +107,7 @@ function waitAt(hold, at, until) {
 function handle(request, send) {
   const { id, op } = request;
   if (op === 'hello') {
-    send({ id, ok: true, protocol: 1, daemon, version: 'stub', model_loaded: false });
+    send({ id, ok: true, protocol: PROTOCOL, daemon, version: 'stub', model_loaded: false });
     return;
   }
   if (op === 'quit') {

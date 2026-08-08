@@ -181,3 +181,48 @@ The interpreter override (`FIELD_ACED_PYTHON`, `FIELD_VOICED_PYTHON`)
 skips both, as it always skipped uv: it names an interpreter that already
 has what it needs, which is what makes the daemon tests possible without
 a model environment.
+
+## 7 A worker refuses what it does not understand (2026-08-08)
+
+§3's protocol parsed a job by reading the keys it knew, which means it
+ignored the rest. That is the friendliest possible failure and the wrong
+one here: a worker that drops an unrecognised field *succeeds*, and the
+recipe written afterwards records an input the model never received —
+provenance that lies, which §1's whole commit-the-output argument exists
+to prevent.
+
+**Found by living it.** `field generate --exaggeration 0.3` reached a
+field-voiced started before voice-generation.md §8 added the field. The
+daemon had every reason to think the job well-formed; it generated at
+default pacing, and only killing the process stopped a take being
+committed under a recipe claiming 0.3. The daemon-lite lifecycle exists
+so a model loads once and the process outlives many jobs, so "it was
+already running" is the normal case rather than an edge one — a
+long-lived daemon is by construction the one most likely to be older
+than the CLI talking to it.
+
+`reject_unknown` now refuses any request key the job spec does not
+declare, which is [render-pipeline.md](render-pipeline.md) decision 6's
+fail-closed rule applied to the wire rather than to plans. The allowed
+set is the job dataclass's own fields, not a list beside it: the field
+names *are* the wire keys, so a field added to the spec cannot be
+forgotten here, and this check can never become the reason a valid
+request is refused. Both workers get it from the shared lifecycle, which
+is the third thing #59's extraction has paid for.
+
+**A daemon predating this change still ignores what it does not know**,
+because the code that would refuse is the code it lacks. That much is
+nature. What is not nature is whether anyone can *tell*: the handshake
+has always compared `protocol` and refused a mismatch, so the check
+standing in front of this exact failure was already there — and shipping
+a change to what the wire accepts without moving the number would have
+left a fail-closed daemon and a silently-stripping one answering `hello`
+identically, forever (#69 review). So `PROTOCOL_VERSION` is 2, and the
+mismatch message says what to do about it, the way cli.ts already tells
+someone their `field-audiod` predates `--watch`.
+
+That is the general rule this section is really about, and it is worth
+stating separately from the bug that produced it: **a change to what the
+wire accepts is a change to the protocol version.** Not to the daemon
+version, which is prose, and not to nothing, which is what happened
+here until it was caught.
