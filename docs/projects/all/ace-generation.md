@@ -116,3 +116,56 @@ as a reviewable diff.
 - ACE-Step writes `.cache/acestep/progress_estimates.json` into the
   daemon's cwd, i.e. the user's project. Redirect next to the weights in
   `~/.field/models` if ACE-Step's env allows it.
+
+## 6 §3.4's setup contract was a description, not a mechanism (2026-08-07)
+
+"Setup is an explicit, loud `field ace setup` … consented, never a
+surprise" was true of the command and false of everything else. The
+shared client started workers with `uv run --project …`, and `uv run`
+syncs the project environment before running it — so on a fresh checkout
+the first `field generate` installed torch and Chatterbox on its own,
+with no consent step and no output saying what it was doing. Setup was a
+label on a door that was never locked; the #61 review found it at the
+voice seam, where the automatic install is a couple of gigabytes.
+
+Fixed by making the mechanism match the sentence: `uv run --no-sync`, so
+starting a daemon can only ever *use* an environment, plus a check
+before the spawn that says `field setup <worker>` when there is nothing
+usable. Without that check the refusal is real but useless — uv exits
+immediately, the daemon never binds, and the caller waits out a
+sixty-second connect timeout to be told "did not start".
+
+What "usable" means took a second pass. The first check asked whether
+`.venv` existed, which is a directory `uv sync --only-group dev` also
+creates — the pyright gate above builds exactly that, so both workers in
+a normal checkout passed a gate neither could launch through, restoring
+the timeout the gate exists to remove. It now asks for the console script
+uv installs with the project (`.venv/bin/<script>`, which is what
+`uv run` spawns and what `--only-group dev` omits) and then for
+`uv sync --check`, since installed is not the same as current. Both
+markers were verified against uv rather than reasoned about.
+
+And then a third pass, because the check that enforces "never automatic"
+was itself installing software. `uv sync --check` does not modify the
+project environment, but uv downloads a compatible CPython when it cannot
+find one, and on a machine without a suitable Python the probe completed
+a 24 MB interpreter install on its way to reporting that the worker was
+not installed. It now detects uv with `--version` — a question that names
+no project, so nothing can resolve — asks uv about the project only when
+the answer is not already decided, and passes `--no-python-downloads`
+and `--frozen` when it does, so the probe can neither install an
+interpreter nor rewrite `uv.lock`.
+
+The lesson is in where the tests were. The verdict had been made a pure
+function precisely so it could be tested exhaustively, and it was: every
+combination of the three facts it reads. The defect was in the two lines
+that produce those facts, where a subprocess with a side effect returns
+a perfectly correct boolean. Purity moved the logic somewhere testable
+and moved the danger somewhere untested, so the probe now takes its
+runner as a parameter and the tests assert on the commands themselves —
+which arguments, in which order, and which are not issued at all.
+
+The interpreter override (`FIELD_ACED_PYTHON`, `FIELD_VOICED_PYTHON`)
+skips both, as it always skipped uv: it names an interpreter that already
+has what it needs, which is what makes the daemon tests possible without
+a model environment.

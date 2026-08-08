@@ -32,6 +32,7 @@ import {
   trackOrder,
   trackSchema,
   type Arrangement,
+  type Asset,
   type AssetsFile,
   type BuildableSound,
   type GenerativeSound,
@@ -489,10 +490,12 @@ function validate(project: LoadedProject): void {
     // default-voice case and is deliberately fine (§6).
     for (const { path, sound } of generateSounds) {
       if (sound.voice_ref === undefined) continue;
-      const shared = sharedAssetName(sound.voice_ref);
-      const known =
-        shared !== undefined ? sharedNames.has(shared) : assetNames.has(sound.voice_ref);
-      if (!known) {
+      // Through lookupAsset, not the name sets, so this pass and `field
+      // generate` cannot answer "which asset is this" differently. An
+      // asset whose *file* is unresolvable is still found here — the
+      // ledger loop above already diagnosed that, and saying it twice
+      // would read as two problems.
+      if (lookupAsset(project, song.name, sound.voice_ref) === undefined) {
         push(
           path,
           `sound "${sound.name}" voice_ref references unknown asset "${sound.voice_ref}" — ` +
@@ -819,6 +822,53 @@ function resolveAssetFile(
   return { path };
 }
 
+// Resolving a ref that must name a *committed asset* — the rule
+// `voice_ref` follows (voice-generation.md §1.3). One function, because
+// two passes read it: validate diagnoses a ref that names nothing, and
+// `field generate` turns the same ref into the path it feeds the worker
+// and the hash it writes into the recipe. Both #58 review findings were
+// two readings of "which asset is this" disagreeing — a name resolved in
+// the wrong namespace, and a hash that pinned nothing — so the readings
+// are one reading now. Bare names are scoped to their song
+// (project-layout.md §4.3); `//shared/asset:<name>` crosses scope.
+export interface AssetLookup {
+  asset: Asset;
+  base: string; // scope dir, project-relative — what `asset.file` is relative to
+  path?: string | undefined; // absolute, when the file resolves
+  problem?: string | undefined; // why it does not, in resolveAssetFile's words
+  // How many ledger rows carry this name. A schema-valid ledger can hold
+  // two rows called `ref-voice` pointing at different recordings, and
+  // validate diagnoses that separately — but `find` would still hand back
+  // the first one, so a caller that never looked at diagnostics would act
+  // on an arbitrary answer to a question that has none. Being the single
+  // reading means reporting that, not resolving it (#61 review): a
+  // *lookup* can only say the name is ambiguous, and whether that is
+  // fatal is the caller's to decide.
+  matches: number;
+}
+
+export function lookupAsset(
+  project: LoadedProject,
+  songName: string,
+  ref: string,
+): AssetLookup | undefined {
+  const shared = sharedAssetName(ref);
+  const song = project.songs.find((s) => s.name === songName);
+  const scope =
+    shared !== undefined
+      ? { name: shared, base: 'shared', ledger: project.shared?.data.assets }
+      : { name: ref, base: song?.dir ?? '', ledger: song?.assets?.data.assets };
+  const matched = scope.ledger?.filter((a) => a.name === scope.name) ?? [];
+  const asset = matched[0];
+  if (!asset) return undefined;
+  return {
+    asset,
+    base: scope.base,
+    matches: matched.length,
+    ...resolveAssetFile(project.root, scope.base, asset.file),
+  };
+}
+
 // Files whose formatting differs from canonical (project-core.md §3.6).
 export function unformattedFiles(project: LoadedProject): string[] {
   return allFiles(project)
@@ -871,28 +921,18 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
   // recorded sha rather than re-hashing, because the loop above has
   // already proved recorded matches actual.
   //
-  // Built per song rather than once: a bare asset name is scoped to its
-  // song (project-layout.md §4.3), so one global map lets a later song's
-  // `ref-voice` overwrite an earlier song's and a recipe then verifies
+  // Resolved per song through lookupAsset, which is what makes a bare
+  // name mean its own song's asset (project-layout.md §4.3). The map this
+  // replaced was built once and keyed by bare name, so a later song's
+  // `ref-voice` overwrote an earlier song's and a recipe then verified
   // against a recording from a different song entirely — false drift one
-  // way, a silent pass the other (#58 review). Shared assets keep their
-  // full label, which is already unique across the project.
-  const sharedSha = new Map<string, string>();
-  if (project.shared) {
-    for (const asset of project.shared.data.assets) {
-      sharedSha.set(`//shared/asset:${asset.name}`, asset.sha256);
-    }
-  }
+  // way, a silent pass the other (#58 review).
   for (const song of project.songs) {
-    const localSha = new Map(sharedSha);
-    for (const asset of song.assets?.data.assets ?? []) {
-      localSha.set(asset.name, asset.sha256);
-    }
     for (const file of song.sounds) {
       if (file.data.type !== 'generative') continue;
       const { voice_ref: ref, voice_ref_sha256: declared } = file.data;
       if (ref === undefined || declared === undefined) continue;
-      const recorded = localSha.get(ref);
+      const recorded = lookupAsset(project, song.name, ref)?.asset.sha256;
       if (recorded === undefined) continue; // already diagnosed by validate
       if (recorded !== declared) {
         diagnostics.push({
