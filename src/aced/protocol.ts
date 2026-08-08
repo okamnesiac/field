@@ -1,42 +1,11 @@
-import { z } from 'zod';
-
-// The field-aced control protocol (ace-generation.md §3.3): NDJSON over
-// .field/aced.sock, same family as field-audiod's. These schemas are the
-// cross-language source of truth; python/aced/src/field_aced/protocol.py
-// mirrors them.
-
-export const ACED_PROTOCOL_VERSION = 1;
-
-export const acedHelloResponseSchema = z.object({
-  ok: z.literal(true),
-  protocol: z.number().int(),
-  daemon: z.string(),
-  version: z.string(),
-  model_loaded: z.boolean(),
-});
-
-export const acedGenerateResponseSchema = z
-  .object({
-    ok: z.literal(true),
-    paths: z.array(z.string()).min(1),
-    seeds: z.array(z.number().int()),
-    model: z.string(),
-  })
-  .refine((r) => r.paths.length === r.seeds.length, {
-    message: 'paths and seeds must align — the recipe pairs them by index',
-  });
-
-export const acedErrorResponseSchema = z.object({
-  ok: z.literal(false),
-  error: z.string(),
-});
-
-export const acedOkResponseSchema = z.object({ ok: z.literal(true) });
-
-export const acedEventSchema = z.discriminatedUnion('event', [
-  z.object({ event: z.literal('progress'), fraction: z.number(), stage: z.string() }),
-]);
-export type AcedEvent = z.infer<typeof acedEventSchema>;
+// field-aced's own half of the protocol: what an ACE job is. The shared
+// shapes — hello, ok/error, the generate response, progress events — are
+// src/workers/protocol.ts, mirrored in Python by field_worker.protocol.
+//
+// The per-worker copies of those schemas lived here until #60. They were
+// dead the moment the client moved to the shared ones, and their tests
+// went on passing against the copies — testing a schema nothing parsed
+// with while the schema everything parsed with had none (#60 review).
 
 export interface AceGenerateJob {
   prompt: string;
