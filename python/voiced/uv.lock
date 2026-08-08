@@ -352,7 +352,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "chatterbox-tts", specifier = "==0.1.7" },
-    { name = "field-worker", directory = "../worker" },
+    { name = "field-worker", editable = "../worker" },
     { name = "setuptools", specifier = ">=70,<81" },
 ]
 
@@ -362,7 +362,7 @@ dev = [{ name = "pyright", specifier = "==1.1.411" }]
 [[package]]
 name = "field-worker"
 version = "0.1.0"
-source = { directory = "../worker" }
+source = { editable = "../worker" }
 
 [package.metadata]
 

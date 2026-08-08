@@ -576,7 +576,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ace-step", git = "https://github.com/ace-step/ACE-Step-1.5.git?rev=6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0" },
-    { name = "field-worker", directory = "../worker" },
+    { name = "field-worker", editable = "../worker" },
 ]
 
 [package.metadata.requires-dev]
@@ -585,7 +585,7 @@ dev = [{ name = "pyright", specifier = "==1.1.411" }]
 [[package]]
 name = "field-worker"
 version = "0.1.0"
-source = { directory = "../worker" }
+source = { editable = "../worker" }
 
 [package.metadata]
 
