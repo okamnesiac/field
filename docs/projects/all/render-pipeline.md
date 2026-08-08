@@ -1,7 +1,9 @@
 # Plan: One rendering pipeline
 
 **Status:** Shipped, chunks 1–6 (#50, #53, #54, #55 and chunk 5 here),
-chunk 2 having carried most of chunk 6 with it. Written after
+chunk 2 having carried most of chunk 6 with it. One §7 question outlives
+the plan and is still open: whether `field build` wants a `--no-native`
+subset. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -718,9 +720,12 @@ left.
 
 ## 7 Open questions
 
-**All answered as of chunk 5 (2026-08-07).** The entries below are kept
-because the reasoning behind an answer is worth more than the answer, but
-none of them is open, and the status line at the top is the one to trust.
+**One still open as of chunk 5 (2026-08-07)**: whether a `--no-native`
+subset is worth having for contributors who only touch the control plane.
+That is contributor tooling rather than rendering, so shipping this plan
+does not dispose of it. Everything else below is answered, and the
+entries are kept because the reasoning behind an answer outlasts the
+answer.
 
 - ~~**When to start chunk 2.**~~ **Answered by doing it** — chunk 2
   shipped in #53, after chunk 1 and before AU hosting, on exactly the

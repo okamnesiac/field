@@ -38,10 +38,14 @@ void writeWavFloat32 (const std::string& path,
                       double sampleRate,
                       const std::vector<std::vector<float>>& channels);
 
-// Integer PCM, 16 or 24 bit — what `normalize` emits for those targets.
-// Expects samples already on the quantization grid (dsp::ditherTo), so
-// the conversion here is exact and the dither stays visible in the DSP
-// rather than hidden in the file writer.
+// Integer PCM at 16, 24 or 32 bit — what `normalize` emits at every
+// depth it accepts, `LEI<depth>` as afconvert produced before it.
+//
+// At 16 and 24 the samples arrive already on the quantization grid
+// (dsp::ditherTo), so the scale-and-round here is exact and the dither
+// stays visible in the DSP rather than hidden in the file writer. At 32
+// they do not: that depth is undithered by decision 10, so this is where
+// its quantization happens.
 void writeWavInt (const std::string& path,
                   double sampleRate,
                   const std::vector<std::vector<float>>& channels,

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readWav, writeWavFloat32 } from './wav.js';
+import { readWav, readWavHeader, writeWavFloat32 } from './wav.js';
 
 let dir: string;
 
@@ -83,6 +83,17 @@ describe('readWav', () => {
     const wav = readWav(path);
     expect(wav.sampleRate).toBe(44100);
     expect(wav.channels[0]![0]).toBeCloseTo(0.5, 4);
+
+    // The header-only path has to give the same answer. It reported the
+    // outer 0xfffe tag while `readWav` decoded the very same file as PCM
+    // — two readers in this module disagreeing about one set of bytes
+    // (#57 review). `format` is documented as the actual encoding, so
+    // resolving the SubFormat is part of that contract, not an extra.
+    const header = readWavHeader(path);
+    expect(header.format).toBe(1);
+    expect(header.bitsPerSample).toBe(24);
+    expect(header.sampleRate).toBe(44100);
+    expect(header.frames).toBe(1);
   });
 
   it('rejects unsupported encodings with the format named', () => {

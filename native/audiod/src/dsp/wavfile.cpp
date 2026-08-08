@@ -156,13 +156,14 @@ WavData readWav (const std::string& path)
     return result;
 }
 
-// Integer PCM out, for `normalize`'s 16- and 24-bit targets. A plain
+// Integer PCM out, for every `normalize` target — 16, 24 and 32. A plain
 // 16-byte fmt chunk with no fact chunk, which is what PCM wants and what
 // the reader above already accepts.
 //
-// Samples are expected to sit on the quantization grid already —
-// dsp::ditherTo puts them there — so the scale-and-round here is exact
-// rather than a second, undithered quantization. Rounding anyway (not
+// At 16 and 24 the samples already sit on the quantization grid, because
+// dsp::ditherTo put them there, so the scale-and-round below is exact
+// rather than a second, undithered quantization. At 32 it is the only
+// quantization, deliberately undithered (decision 10). Rounding (not
 // truncating) means a sample that arrives slightly off-grid lands on the
 // nearest step instead of drifting a whole LSB toward zero.
 void writeWavInt (const std::string& path,

@@ -77,7 +77,9 @@ function readHeaderFrom(fd: number, path: string): WavHeader {
     | undefined;
   let dataBytes: number | undefined;
   const chunk = Buffer.alloc(8);
-  const body16 = Buffer.alloc(16);
+  // 26 rather than 16: an extensible fmt chunk carries the real format
+  // tag in the first two bytes of its SubFormat GUID, at body + 24.
+  const body16 = Buffer.alloc(26);
   let offset = 12;
   while (offset + 8 <= fileSize) {
     if (readSync(fd, chunk, 0, 8, offset) !== 8) break;
@@ -85,15 +87,26 @@ function readHeaderFrom(fd: number, path: string): WavHeader {
     const size = chunk.readUInt32LE(4);
     const body = offset + 8;
     // Rate, channels and bit depth sit at the same offsets in a plain and
-    // an extensible fmt chunk, so sixteen bytes is enough for both.
-    if (id === 'fmt ' && size >= 16 && readSync(fd, body16, 0, 16, body) === 16) {
-      fmt = {
-        channels: body16.readUInt16LE(2),
-        sampleRate: body16.readUInt32LE(4),
-        bytesPerFrame: (body16.readUInt16LE(14) / 8) * body16.readUInt16LE(2),
-        format: body16.readUInt16LE(0),
-        bitsPerSample: body16.readUInt16LE(14),
-      };
+    // an extensible fmt chunk. The *format tag* does not: an extensible
+    // header says 0xfffe and puts the real one in its SubFormat GUID, so
+    // reporting the outer tag would answer 65534 for a file `readWav`
+    // decodes as plain PCM — two readers in this module disagreeing
+    // about the same bytes (#57 review).
+    if (id === 'fmt ' && size >= 16) {
+      const want = Math.min(size, 26);
+      if (readSync(fd, body16, 0, want, body) === want) {
+        let format = body16.readUInt16LE(0);
+        if (format === FORMAT_EXTENSIBLE && want >= 26) {
+          format = body16.readUInt16LE(24);
+        }
+        fmt = {
+          channels: body16.readUInt16LE(2),
+          sampleRate: body16.readUInt32LE(4),
+          bytesPerFrame: (body16.readUInt16LE(14) / 8) * body16.readUInt16LE(2),
+          format,
+          bitsPerSample: body16.readUInt16LE(14),
+        };
+      }
     } else if (id === 'data') {
       dataBytes = Math.min(size, Math.max(0, fileSize - body));
     }

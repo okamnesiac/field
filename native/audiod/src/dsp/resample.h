@@ -43,10 +43,14 @@ std::vector<std::vector<float>> resample (const std::vector<std::vector<float>>&
                                           double outRate);
 
 // Rounds every sample onto the quantization grid for `bitDepth`, with
-// 1-LSB TPDF dither applied first. 32 is a no-op: float output has no
-// grid to land on. The result is still float, exactly representable
-// because the grid is a power of two, so the WAV writer's scale-and-cast
-// is lossless.
+// 1-LSB TPDF dither applied first — at 16 and 24 only. All three depths
+// are written as integer PCM by writeWavInt; what differs is where the
+// quantization happens. At 16 and 24 it happens here, dithered, and the
+// writer's scale-and-round is then exact because the samples already sit
+// on a power-of-two grid. At 32 this returns untouched and the writer
+// does the quantization undithered, because that step is about 186 dB
+// down — finer than the float32 samples feeding it can resolve except at
+// the very bottom of the range (decision 10, #57 review).
 //
 // The dither sequence is a specified PRNG with a fixed seed (decision
 // 10). Not <random>: the pairing of std::mt19937 with
