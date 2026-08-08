@@ -66,6 +66,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: cd python/worker && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
+      - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
 
   macos:
     runs-on: macos-latest
