@@ -32,6 +32,13 @@ Two obligations recorded up front:
 - **Insert entries are discriminated on `effect:`** so the AU-hosting era
   adds an `au:` variant additively instead of reshaping track files.
 
+**Where these contracts end up (2026-08-08).**
+[nested-tracks.md](nested-tracks.md) §1.12 folds effect *sounds* into
+tracks — an `eq` sound becomes a track with one input and one insert.
+That does not reverse anything here: §1's argument is that the executor
+is replaceable and the contract durable, and the contracts survive
+untouched. What changes is where they attach.
+
 ## 2 The effects (DECIDED)
 
 - **`eq`** — RBJ audio-EQ-cookbook biquads ported from Fyra's `eq.cpp`

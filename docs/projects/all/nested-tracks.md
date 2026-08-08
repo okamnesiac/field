@@ -74,11 +74,18 @@ point of this is that it no longer has to.
    that "nothing in the tick scheme precludes a loop carrying a local
    timeline mapped at its instantiation point" is exactly this.
 
-6. **A track is an origin, not a window.** Content positioned at local
-   tick *T* for duration *D* sounds from `origin + T` to `origin + T + D`.
-   Nothing is clipped at a container boundary, so a vocal that runs past
-   the end of a section needs no special handling — and a phrase that
-   should span the song is simply a track at a level where it does.
+6. **A container never truncates; a placement may.** Content positioned
+   at local tick *T* for duration *D* sounds from `origin + T` to
+   `origin + T + D`. Nothing is clipped because a parent's extent ran
+   out, so a vocal that runs past the end of a section needs no special
+   handling, and a phrase that should span the song is simply a track at
+   a level where it does.
+
+   That is a rejection of *implicit* truncation, not of windows. A
+   placement declares its own window — `duration`, fades, `slip` — which
+   is exactly what a clip is today (project-core.md §3.2) and stays.
+   The distinction is who decides: the placement, explicitly, and never
+   the container it happens to sit in.
 
    *Rejected: declared overhang* (`overhang_before`/`overhang_after` on a
    container). It is a number that can silently disagree with the
@@ -145,6 +152,37 @@ point of this is that it no longer has to.
    instances as the playhead crosses a boundary, which is the one thing
    the audio thread cannot do.
 
+10. **A track's render is its stem, and it is pre-fader.** Inserts are
+    inside the cached render; gain and pan are outside it, applied by the
+    parent as it sums. This is today's property generalised rather than a
+    new one — `stem.ts` renders pre-fader precisely so that "mixing
+    decisions never invalidate rendered stems"
+    ([project-model.md](../../project-model.md)) — and nesting keeps it:
+    nudging a fader six levels down re-sums and re-renders nothing.
+
+    "Stem" survives as the word for a track's render. Which stems get
+    sent for mastering is a choice at export time, not a kind of object.
+
+11. **A clip is a placement, and a placement is a stem at a time.** A
+    track's inputs are placements of tracks; consuming a track means
+    consuming its stem. A clip is the case where the placed track is
+    already rendered — an asset, or a recipe that renders to one. One
+    list, one rule, no separate `clips:` and `inputs:`.
+
+12. **Sounds are simple tracks.** An `eq` sound is a track with one input
+    and one insert; `supercollider` is a leaf with a program; a
+    `generative` sound is a leaf with committed variants and a `chosen`
+    one. The effect *contracts* are untouched — parameter semantics,
+    schemas and rendered artifacts all survive, which is
+    [effects.md](effects.md) §1's own argument that the executor is the
+    replaceable part and the contract the durable one. What changes is
+    where they attach: to tracks, rather than to a separate kind.
+
+    Deliberately **not** chunk 1. Nesting can land while `sounds/` still
+    exists, and folding them in is a layout change
+    ([project-layout.md](project-layout.md)) that deserves its own step
+    and its own chance to be wrong.
+
 ## 2 What this is, in one paragraph
 
 A track has inputs, inserts, a fader and a pan. Its inputs are other
@@ -180,30 +218,52 @@ and in `mixes/` retiring as a directory.
   DAG is topologically ordered, which is the same shape of problem the
   build graph already solves.
 
-## 5 Open questions
+## 5 Settled since drafting (2026-08-08)
 
-- **`arrangement.yaml`'s `sections`.** They are markers today (a name and
-  a position, owning no content). Once structure is expressed by nested
-  tracks, do they retire, or stay as a display-only ruler? Two things
-  that both look like song structure is the risk.
-- **Stems.** Is a stem still a concept, or just "any track's render"? The
-  latter is tempting and would remove another noun.
-- **Effective gain.** Nested faders multiply. `-6 dB` on a parent and
-  `-6 dB` on a child is `-12 dB`, which is correct and invisible.
-  Something — `field check`, metering, `explain` — should be able to
-  report a track's effective gain without walking the tree by hand.
-- **Local tempo maps and re-placement.** If a track carries its own tempo
-  map and is placed twice, both placements share it. Is there a case for
-  a placement overriding the map, and does that break "one definition"?
-- **Depth in practice.** Unbounded nesting is often simpler to implement
-  than exactly-two. Worth confirming nothing in the model assumes a
+- **`arrangement.yaml` goes away entirely.** Its schema is only
+  `{sections: [{name, at}]}`, so removing sections removes the file. The
+  arrangement becomes *derived*: a command walks the root track's
+  placements and prints the structure, which cannot drift from reality
+  because it is not stored. Same argument as decision 6's.
+- **Effective gain lives in `explain`.** It already answers "why is this
+  what it is", and it is where someone goes when a number surprises them.
+  Not a `check` warning: multiplied faders are surprising, not wrong, and
+  warnings about non-errors get tuned out.
+- **No placement-level tempo override, for now.** A slower reprise is a
+  real want, and allowing it is coherent — the cache key would include
+  the effective tempo, so two placements at two tempos are two renders.
+  But that quietly makes "one definition, one render, placed N times"
+  conditional, and it can be added later without breaking anything where
+  it cannot be removed once projects rely on it. The same asymmetry that
+  decided sends.
+- **Depth is unbounded**, and neither the schema nor `check` may assume a
   bound.
 
-## 6 Chunks
+## 6 Open questions
+
+- **Placement identity.** Clips carry IDs (`chorus-vox-x7f3q`,
+  project-core.md §3.3) so automation can attach to them. Placements need
+  the same, which is additive — but a track placed twice now has two
+  placement IDs and one track name, and it is worth deciding which
+  automation binds to.
+- **Where sounds live once they are tracks.** `sounds/` and `tracks/` are
+  separate directories today. Decision 12 folds the kinds together but
+  not the layout; that is a project-layout.md question and should be
+  answered there rather than assumed here.
+- **What a leaf actually holds.** An asset reference, a recipe, and a
+  committed-variant set are three different leaf contents. Whether that
+  is one shape with a discriminant or three is the first schema question
+  chunk 1 hits.
+
+## 7 Chunks
 
 1. **Schema and check.** Tracks contain tracks; references carry `at`;
-   `mixes/` retires. No rendering change — prove the model expresses
-   creek exactly as it is today, at depth one, with `field check` green.
+   `clips:` and `inputs:` become one list of placements; `mixes/` and
+   `arrangement.yaml` retire. No rendering change — prove the model
+   expresses creek exactly as it is today, at depth one, with `field
+   check` green. Deliberately the cheapest falsifiable step: if the model
+   cannot say what field already says, it is wrong here rather than after
+   the mixer nests.
 2. **Placement and local time.** A child at a non-zero `at`; a track
    placed twice; local tempo and meter maps composing into song time.
 3. **Nested mix.** Faders, pans and inserts at every level; effective
@@ -212,8 +272,13 @@ and in `mixes/` retiring as a directory.
 5. **bloom.** Express creek with a `verse` placed twice and a vocal at
    the root, and see whether the structure reads better than the flat
    version. This is the chunk that decides whether the idea was right.
+6. **Sounds fold in** (decision 12). `sounds/` retires; an `eq` sound
+   becomes a track with one insert. Last on purpose — the contracts are
+   untouched, so this is a layout and namespace change rather than a
+   behavioural one, and it should not be able to break nesting on its way
+   in.
 
-## 7 Definition of done
+## 8 Definition of done
 
 creek is expressed with nested tracks: at least one definition placed in
 more than one position, at least one track spanning the song above the
