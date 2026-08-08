@@ -125,3 +125,53 @@ the session cleanly.
   already meant by "the multi-label form".
 - Whether `status` should show watch state (playing hash vs freshest
   hash) for agents polling the session.
+
+## 6 The takeover is audible, and deliberately not fixed (2026-08-08)
+
+§1.1 promised you always hear whole passes. You very nearly do, and the
+part that is missing is audible: every reload takeover has a hiccup at
+the seam. Plain loops never do — the wrap inside the reader is
+sample-exact — so this is the takeover alone.
+
+**Two causes, established by ear because reading gave the wrong
+emphasis.** The takeover is a 20 ms message-thread poll watching for the
+position to move backwards (`player.cpp`, `startTimer (20)`), which is
+the wrap having *already happened*; it then does `transport.stop()`,
+`setSource (nullptr)`, `setSource (new, 1 << 15, &readThread, rate)`,
+`setPosition (0)`, `start()`.
+
+Reading that, the poll lag looks like the whole story. It is not:
+
+- At **1 ms** the hiccup was still clearly there — so something under
+  the poll is contributing. That is the teardown: a fresh `setSource`
+  rebuilds the transport's buffering source, which starts empty and has
+  to be refilled by the read thread before audio flows.
+- At **200 ms** it was dramatically worse — so the poll lag is a real
+  contributor too, not a rounding error.
+
+Both, then. Neither experiment was predictable from the source, and the
+1 ms run may have been *worse* than 20 ms rather than better (reported,
+not measured — a 1 ms message-thread timer is aggressive enough to
+disturb things on its own), which is a second reason not to ship it as a
+mitigation.
+
+**Why it stays.** One change would remove both: swap the reader inside
+the audio callback at the exact wrap, underneath a transport source that
+is never torn down — no poll lag because the boundary *is* the swap
+point, no refill gap because `setSource` is never called again. That is
+lock-free handoff, lifetime management off the audio thread, a
+non-looping mode so `field play` can still detect end-of-stream, a
+daemon version bump, and four existing reload tests to keep green.
+
+It is also work with an expiry date. Reload-at-the-wrap exists because a
+mix is a rendered *file*; [audio-engine.md](../../audio-engine.md)
+describes the real-time engine this daemon is a placeholder for, where a
+fader move is heard live and nothing is rebuilt or swapped at all. The
+file-playback path survives that — auditioning assets, stems and chosen
+variants is core — but this mechanism does not. Justin's call
+(2026-08-08): bearable, and not worth building something to throw away.
+
+**If someone does fix it**, the design above is the one to build, and the
+two measurements are the acceptance test: 200 ms must not sound worse
+than 20 ms, because with the swap at the boundary the poll would be gone
+entirely.
