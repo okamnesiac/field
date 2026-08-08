@@ -212,10 +212,14 @@ describe('an unusable environment is diagnosed, not spawned into', () => {
       'uv',
       'sync',
       '--check',
-      '--frozen',
+      '--locked',
       '--no-python-downloads',
     ]);
     expect(check.at(-1)).toContain(tempDir);
+    // `--frozen` is the flag this must never drift back to: it means
+    // "sync without updating the lock", which is permission to proceed on
+    // a stale one rather than a check that it is current.
+    expect(check).not.toContain('--frozen');
   });
 
   it('never asks uv about a project without disabling downloads', () => {

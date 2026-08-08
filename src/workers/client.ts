@@ -99,10 +99,13 @@ export interface EnvironmentProbe {
   synced: boolean | undefined;
 }
 
-// Pure so it can be exercised for every combination on a machine with no
-// uv and no environments — which is what CI is when `pnpm test` runs,
-// since setup-uv comes after it. Deciding from ambient state instead
-// would make these assertions pass or fail by accident of the checkout.
+// Pure so it can be exercised for every combination, on any machine,
+// whatever happens to be installed on it. Deciding from ambient state
+// instead would make these assertions pass or fail by accident of the
+// checkout — which is how the two defects before this one survived: a
+// dev-only `.venv` reading as installed, and every combination of the
+// three facts below being tested while the code producing them was
+// downloading a Python interpreter.
 export function environmentVerdict(
   spec: WorkerSpec,
   probe: EnvironmentProbe,
@@ -163,18 +166,19 @@ function spawnProbe(command: string, args: string[]): ReturnType<ProbeRun> {
 //                cannot resolve, download or build anything.
 //   --check      reports whether the environment matches the lockfile and
 //                will not modify it ("Would replace project environment").
-//   --frozen     keeps it from rewriting uv.lock when pyproject has moved.
-//                The cost, stated plainly: staleness is then measured
-//                against the lockfile rather than against pyproject, so a
-//                lock that is itself behind reads as current. `field
-//                setup` re-locks; a probe that writes to the repo to find
-//                out whether it may run is a worse trade.
+//   --locked     asserts uv.lock will not change, so a lockfile that has
+//                fallen behind pyproject is an error rather than
+//                something to rewrite. This was `--frozen`, which only
+//                means "sync without updating the lock" — permission to
+//                proceed on a stale one, not a check (#61 follow-up
+//                review). Both keep the probe from writing to the repo;
+//                only this one also notices that the answer is stale.
 //   --no-python-downloads
 //                uv installs a compatible CPython when it cannot find
 //                one — a 24 MB download, completed, not attempted. So on
 //                a fresh machine the gate against automatic installation
 //                was itself an automatic installation (#61 review).
-const PROBE_CHECK_ARGS = ['sync', '--check', '--frozen', '--no-python-downloads', '--project'];
+const PROBE_CHECK_ARGS = ['sync', '--check', '--locked', '--no-python-downloads', '--project'];
 
 export function probeEnvironment(spec: WorkerSpec, run: ProbeRun = spawnProbe): EnvironmentProbe {
   const version = run('uv', ['--version']);
