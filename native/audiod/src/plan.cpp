@@ -227,14 +227,27 @@ void validateChain (const juce::var& plan,
         validateInsert (inserts[i], path + "." + key + "[" + std::to_string (i) + "]");
 }
 
+void validateBitDepth (const juce::var& plan, const std::string& path)
+{
+    // checkObject has already proved this is an integer, so compare as
+    // one: set membership is an exact question, and asking it in doubles
+    // is what -Wfloat-equal is warning about.
+    const long depth = (long) (double) plan.getProperty ("bit_depth", juce::var());
+    for (const int supported : limits::bitDepths)
+        if (depth == (long) supported)
+            return;
+    fail (path + ".bit_depth",
+          "is not a depth normalize can write (" + std::to_string (depth) + ")");
+}
+
 void validateSampleRate (const juce::var& plan, const std::string& path)
 {
-    const double rate = (double) plan.getProperty ("sample_rate", juce::var());
+    const long rate = (long) (double) plan.getProperty ("sample_rate", juce::var());
     for (const int supported : limits::sampleRates)
-        if (rate == (double) supported)
+        if (rate == (long) supported)
             return;
     fail (path + ".sample_rate",
-          "is not a rate this project supports (" + std::to_string ((long) rate) + ")");
+          "is not a rate this project supports (" + std::to_string (rate) + ")");
 }
 
 void validateInputs (const juce::var& plan, const std::string& path)
@@ -359,6 +372,23 @@ void validatePlan (const juce::var& plan)
                 fail (path + ".loop", "needs a positive \"length_samples\" to fold onto");
         }
         validateChain (plan, "master", path, false);
+    }
+    else if (op == "normalize")
+    {
+        // Rate and depth and nothing else. No chain: normalize converts,
+        // it does not process, so an `inserts` key here would be a plan
+        // describing work this op will not do — refused by checkObject
+        // along with every other unknown key.
+        checkObject (plan,
+                     path,
+                     { { "version", Kind::integer, true },
+                       { "op", Kind::string, true },
+                       { "input", Kind::string, true },
+                       { "output", Kind::string, true },
+                       { "sample_rate", Kind::integer, true, 1.0 },
+                       { "bit_depth", Kind::integer, true, 1.0 } });
+        validateSampleRate (plan, path);
+        validateBitDepth (plan, path);
     }
     else
     {

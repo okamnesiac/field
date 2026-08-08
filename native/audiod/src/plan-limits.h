@@ -30,5 +30,6 @@ constexpr double reverbDampingMax = 1;
 constexpr int eqBandsMin = 1;
 constexpr int eqBandsMax = 8;
 constexpr int sampleRates[] = { 44100, 48000, 88200, 96000, 176400, 192000 };
+constexpr int bitDepths[] = { 16, 24, 32 };
 
 } // namespace field::limits

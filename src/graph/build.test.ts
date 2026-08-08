@@ -8,7 +8,6 @@ import { init } from '../commands/init.js';
 import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
 import { runScProgram } from '../generators/supercollider.js';
-import { hasAfconvert } from '../testing/platform.js';
 import type { GeneratorRunner } from './build.js';
 
 let root: string;
@@ -299,7 +298,7 @@ describe('build', () => {
     expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
   });
 
-  it.skipIf(!hasAfconvert)('normalizes real audio through afconvert', async () => {
+  it('normalizes real audio through the daemon', async () => {
     const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized']);
     const target = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
     expect(target.cached).toBe(false);

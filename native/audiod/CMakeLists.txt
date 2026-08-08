@@ -30,6 +30,7 @@ target_sources(field-audiod PRIVATE
   src/dsp/biquad.cpp
   src/dsp/limiter.cpp
   src/dsp/mixdown.cpp
+  src/dsp/resample.cpp
   src/dsp/reverb.cpp
   src/dsp/wavfile.cpp
 )

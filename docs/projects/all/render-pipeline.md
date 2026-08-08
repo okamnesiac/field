@@ -1,7 +1,9 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunks 1–4 shipped (#50, #53, #54, #55), chunk 2 carrying
-most of chunk 6 with it; chunk 5 is all that remains. Written after
+**Status:** Shipped, chunks 1–6 (#50, #53, #54, #55 and chunk 5 here),
+chunk 2 having carried most of chunk 6 with it. One §7 question outlives
+the plan and is still open: whether `field build` wants a `--no-native`
+subset. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -385,6 +387,66 @@ argument for *when*.
    spawn, plan, render, compare — with nothing else changing. Stems and
    mixes add clip placement and summing on top of a boundary that is by
    then already proven.
+9. **Sample-rate conversion is a hand-written fixed-ratio polyphase
+   FIR** (2026-08-07, chunk 5). The six project rates are pairwise
+   rational with small denominators — 44100→48000 is exactly 160/147 —
+   so every conversion field supports is a fixed ratio, and a fixed ratio
+   admits precomputed per-phase coefficient rows. The prototype is a
+   Kaiser-windowed sinc; the stopband edge sits at the *lower* of the two
+   Nyquist frequencies, which is what makes the same code correct in both
+   directions.
+
+   Rejected: **`juce::Interpolators::WindowedSinc`**, and not on the
+   grounds §3's table first guessed. Reading
+   `juce_GenericInterpolator.h`, `interpolateImpl` advances `pos +=
+   speedRatio` against a kernel whose width never depends on
+   `speedRatio`; the sinc is not rescaled when the ratio is greater than
+   one. So downsampling — 96 kHz material into a 44.1 kHz project, which
+   the schema permits and `normalize` exists to perform — filters at the
+   *input* Nyquist and folds everything above the output Nyquist back
+   into the band. That is not a quality difference, it is aliasing, and
+   it disqualifies the option for half the conversions rather than making
+   it a cheaper alternative for all of them.
+
+   The cost of owning it is small and was measured before choosing:
+   scalar double with `-ffp-contract=off` runs 3 minutes of stereo
+   44.1→48 in 0.41 s at 64 taps per phase and 1.06 s at 128, against
+   `afconvert`'s 0.13 s including its I/O. `afconvert` wins by
+   vectorising with FMA, which is precisely what §4's byte-identity rule
+   forbids. It does not matter regardless: `normalize` is cached by
+   action key, so this is paid once per source at import, not once per
+   build. Fixed-order SIMD without FMA remains available later and would
+   not cost the guarantee.
+10. **Bit-depth reduction dithers, deterministically** (2026-08-07,
+    chunk 5). Every depth is written as **integer PCM** — `bit_depth: 32`
+    included, because that is what `afconvert -d LEI32` produced and what
+    [linux-portability.md](linux-portability.md) decision 1 says still
+    stands; writing IEEE float there would change the meaning of an
+    existing schema value under a version bump that only claims to change
+    the bytes (#57 review). 24- and 16-bit targets get 1-LSB TPDF dither
+    before rounding, because plain truncation leaves the quantization error
+    correlated with the signal — audible as distortion rather than noise
+    on exactly the quiet material a `normalize` target tends to carry.
+
+    The determinism is not a caveat but a requirement: same action key,
+    same bytes. So the generator is a specified integer PRNG with a fixed
+    seed, written out here rather than taken from `<random>`.
+    `std::uniform_real_distribution` and `std::mt19937`'s pairing are not
+    specified to produce identical sequences across libstdc++ and
+    libc++, so using them would make the dither — and therefore every
+    rendered artifact — platform-dependent, which is the one thing §4
+    exists to prevent.
+
+    32-bit is undithered: its step sits about 186 dB below full scale,
+    finer than the float32 samples feeding it can resolve except at the
+    very bottom of the range, so dither there would add noise without
+    masking anything measurable.
+
+    Rejected: **no dither**, which is simpler and equally deterministic
+    but wrong for the reason above. Rejected: **noise shaping**, which is
+    a real improvement on TPDF and a much larger decision (which curve,
+    and it makes the artifact depend on a psychoacoustic choice we have
+    not made). Flat TPDF is the conservative, well-understood floor.
 
 ## 3 What JUCE does and does not supply
 
@@ -397,7 +459,7 @@ Checked against the pinned JUCE 8.0.4 tree, not from memory.
 | EQ auto-gain | — | No equivalent exists |
 | Reverb | `juce::Reverb`, Freeverb, same base tables | No: `roomSize` not T60, no predelay, Jezar allpass, truncated rate scaling |
 | Limiter | `dsp::Limiter`, threshold + release only | No: no lookahead, and 0 dBFS by hard clip — no arbitrary ceiling by gain reduction |
-| Resampling | `Interpolators::WindowedSinc`, 100 crossings/side | Probably: variable-rate, not fixed-ratio polyphase |
+| Resampling | `Interpolators::WindowedSinc`, 100 crossings/side | No: kernel width ignores `speedRatio`, so downsampling aliases (decision 9) |
 | Delay lines, chains, gain, oversampling | `juce_dsp` | Yes |
 
 **The two places JUCE reaches for a platform library**, both outside
@@ -574,7 +636,58 @@ most memory-bound of the three effects.
 5. **Sample-rate conversion in the built-in tier**, replacing
    `afconvert` in `normalize` — the work
    [linux-portability.md](linux-portability.md) §4.2–4.3 described,
-   relocated and no longer blocking Linux.
+   relocated and no longer blocking Linux. Decisions 9 and 10 above
+   record the design: fixed-ratio polyphase, TPDF dither, and why JUCE's
+   interpolator was rejected on aliasing rather than on taste.
+
+   **`afconvert` had two callers, not one, and the second decided the
+   scope.** `say.ts` converted the AIFF that macOS `say` emits into a WAV
+   at the project rate. Keeping it meant teaching the daemon AIFF for one
+   macOS-only rule, or keeping `afconvert` for that rule alone — either
+   way the macOS dependency survives. So `say` is deleted instead
+   ([voice-generation.md](voice-generation.md) §5), which is why this
+   chunk retires **all nine** platform-guarded tests rather than the
+   three a resampler alone would have freed. It also leaves bloom's
+   `lead-vocal` without a source until the generated-voice tier ships;
+   that gap is recorded rather than glossed.
+
+   **Shipped.** `normalize` renders through `op: "normalize"`; the probe
+   file `src/testing/platform.ts` is gone along with both capability
+   checks, and nothing in the build shells out to a macOS binary any
+   more. `RENDER_PLAN_VERSION` is 3.
+
+   **This is the one rule whose output is not byte-identical to what it
+   replaced**, and the difference is structural rather than incidental:
+   every other chunk transliterated a TypeScript reference and could
+   prove equality against it, while this one displaced a macOS binary
+   there was never any way to diff against. So `normalize`'s
+   `rule_version` goes to 2 and its artifacts re-render once — the cost
+   chunks 2 and 3 priced and did not incur, arriving here instead.
+
+   **Six findings in review say how far that goes** (#57). Four were
+   coverage: routing 16-bit through the float writer, cutting
+   `tapsPerPhase` from 128 to 32, replacing the input with the dither,
+   and flooring the output length all left every property green. The
+   properties now pin the format tag and width, the passband at 10/15/19
+   kHz, the tone's magnitude against neighbouring bins, and a short
+   source's survival — each mutation now fails exactly one of them. Two
+   were the code itself: `bit_depth: 32` had regressed to IEEE float, and
+   an odd `data` chunk went unpadded while our own reader already
+   advanced past a pad byte.
+
+   The lesson is the same one chunk 4 recorded and is worth the
+   repetition: "with no oracle the properties are the specification" is a
+   claim about what the properties *catch*, and only mutation answers it.
+   Writing that sentence is not the same as earning it.
+
+   With no oracle, the properties are the whole specification, so they
+   were mutation-tested before being believed. Filtering at the input
+   Nyquist instead of the lower of the two — the JUCE failure mode from
+   decision 9 — folds a 30 kHz tone into a 44.1 kHz file at 14.1 kHz and
+   **0 dB**, which the aliasing property catches and nothing else does.
+   Removing the dither leaves a sub-LSB signal quantizing to digital
+   black, which one other property catches and nothing else does. Both
+   times the remaining five stayed green.
 6. **Byte-identity established rather than asserted** — mostly done in
    chunk 2, and not the way this described. `-ffp-contract=off` is in the
    daemon's compile options, and a golden fixture in
@@ -607,7 +720,16 @@ left.
 
 ## 7 Open questions
 
-- **When to start chunk 2.** Recommended: after chunk 1, and before AU
+**One still open as of chunk 5 (2026-08-07)**: whether a `--no-native`
+subset is worth having for contributors who only touch the control plane.
+That is contributor tooling rather than rendering, so shipping this plan
+does not dispose of it. Everything else below is answered, and the
+entries are kept because the reasoning behind an answer outlasts the
+answer.
+
+- ~~**When to start chunk 2.**~~ **Answered by doing it** — chunk 2
+  shipped in #53, after chunk 1 and before AU hosting, on exactly the
+  reasoning recorded here. Recommended: after chunk 1, and before AU
   hosting rather than during it — the port is cheap while there are
   three effects and no plugin variants, and the shipped algorithms
   transliterate nearly mechanically. The alternative, converging only
@@ -628,8 +750,13 @@ left.
   `--no-native` subset is worth having for contributors who only touch
   the control plane — a question chunk 3 sharpens, since it takes stems
   and mixes across the same boundary.
-- **Resampler quality target**, inherited unresolved from
+- ~~**Resampler quality target**~~, inherited unresolved from
   [linux-portability.md](linux-portability.md) §5: taps, transition
   width, stopband attenuation, and whether JUCE's variable-rate
   `WindowedSinc` clears the bar or a fixed-ratio polyphase design is
-  wanted. Dither on bit-depth reduction is still open there too.
+  wanted. Dither on bit-depth reduction was open there too.
+  **Answered by decisions 9 and 10**: fixed-ratio polyphase at 128 taps
+  per phase, 100 dB stopband, the transition placed against the lower
+  Nyquist, and 1-LSB TPDF dither at 16 and 24 bits. `WindowedSinc` does
+  not clear the bar and the reason is not quality but correctness — its
+  kernel width ignores the ratio, so it aliases when downsampling.
