@@ -385,6 +385,56 @@ argument for *when*.
    spawn, plan, render, compare — with nothing else changing. Stems and
    mixes add clip placement and summing on top of a boundary that is by
    then already proven.
+9. **Sample-rate conversion is a hand-written fixed-ratio polyphase
+   FIR** (2026-08-07, chunk 5). The six project rates are pairwise
+   rational with small denominators — 44100→48000 is exactly 160/147 —
+   so every conversion field supports is a fixed ratio, and a fixed ratio
+   admits precomputed per-phase coefficient rows. The prototype is a
+   Kaiser-windowed sinc; the stopband edge sits at the *lower* of the two
+   Nyquist frequencies, which is what makes the same code correct in both
+   directions.
+
+   Rejected: **`juce::Interpolators::WindowedSinc`**, and not on the
+   grounds §3's table first guessed. Reading
+   `juce_GenericInterpolator.h`, `interpolateImpl` advances `pos +=
+   speedRatio` against a kernel whose width never depends on
+   `speedRatio`; the sinc is not rescaled when the ratio is greater than
+   one. So downsampling — 96 kHz material into a 44.1 kHz project, which
+   the schema permits and `normalize` exists to perform — filters at the
+   *input* Nyquist and folds everything above the output Nyquist back
+   into the band. That is not a quality difference, it is aliasing, and
+   it disqualifies the option for half the conversions rather than making
+   it a cheaper alternative for all of them.
+
+   The cost of owning it is small and was measured before choosing:
+   scalar double with `-ffp-contract=off` runs 3 minutes of stereo
+   44.1→48 in 0.41 s at 64 taps per phase and 1.06 s at 128, against
+   `afconvert`'s 0.13 s including its I/O. `afconvert` wins by
+   vectorising with FMA, which is precisely what §4's byte-identity rule
+   forbids. It does not matter regardless: `normalize` is cached by
+   action key, so this is paid once per source at import, not once per
+   build. Fixed-order SIMD without FMA remains available later and would
+   not cost the guarantee.
+10. **Bit-depth reduction dithers, deterministically** (2026-08-07,
+    chunk 5). 24- and 16-bit targets get 1-LSB TPDF dither before
+    rounding, because plain truncation leaves the quantization error
+    correlated with the signal — audible as distortion rather than noise
+    on exactly the quiet material a `normalize` target tends to carry.
+
+    The determinism is not a caveat but a requirement: same action key,
+    same bytes. So the generator is a specified integer PRNG with a fixed
+    seed, written out here rather than taken from `<random>`.
+    `std::uniform_real_distribution` and `std::mt19937`'s pairing are not
+    specified to produce identical sequences across libstdc++ and
+    libc++, so using them would make the dither — and therefore every
+    rendered artifact — platform-dependent, which is the one thing §4
+    exists to prevent.
+
+    Rejected: **no dither**, which is simpler and equally deterministic
+    but wrong for the reason above. Rejected: **noise shaping**, which is
+    a real improvement on TPDF and a much larger decision (which curve,
+    and it makes the artifact depend on a psychoacoustic choice we have
+    not made). Flat TPDF is the conservative, well-understood floor.
 
 ## 3 What JUCE does and does not supply
 
@@ -397,7 +447,7 @@ Checked against the pinned JUCE 8.0.4 tree, not from memory.
 | EQ auto-gain | — | No equivalent exists |
 | Reverb | `juce::Reverb`, Freeverb, same base tables | No: `roomSize` not T60, no predelay, Jezar allpass, truncated rate scaling |
 | Limiter | `dsp::Limiter`, threshold + release only | No: no lookahead, and 0 dBFS by hard clip — no arbitrary ceiling by gain reduction |
-| Resampling | `Interpolators::WindowedSinc`, 100 crossings/side | Probably: variable-rate, not fixed-ratio polyphase |
+| Resampling | `Interpolators::WindowedSinc`, 100 crossings/side | No: kernel width ignores `speedRatio`, so downsampling aliases (decision 9) |
 | Delay lines, chains, gain, oversampling | `juce_dsp` | Yes |
 
 **The two places JUCE reaches for a platform library**, both outside
