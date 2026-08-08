@@ -148,32 +148,25 @@ sound by name and follow).
   program directly (uncached) for iteration. Full contract:
   [projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
   predates the §4 rename).
-- **`say`** — macOS text-to-speech as a recipe: `text`/`voice`/`rate` are
-  the whole action key, the output (a WAV at the project rate, via
-  `afconvert`) is cached and never committed. `voice` is required, and
-  the rule verifies it against the installed inventory before rendering —
-  `say` itself silently falls back to the user's default voice, which
-  would be an under-specified recipe lying under a stable key. The one
-  recorded exception is `voice: Siri`: the system-selected Siri voices
-  are not nameable via `say -v` (a few Siri-branded regional voices do
-  list, but the system US voices match no nameable entry, and nothing is
-  literally named "Siri" for the magic string to shadow), so `Siri`
-  selects the machine's Spoken Content voice — deliberately accepting
-  that those bytes follow a Settings toggle, because the alternative is
-  the best voices being unreachable by any recipe. Note the cache does
-  not watch Settings: after a toggle, existing `Siri` renders keep
-  serving pre-toggle bytes until `text`/`voice`/`rate` changes the key —
-  which is also the feature: a render you liked survives voice drift
-  until the recipe itself moves. Reproducibility is same-machine, like
-  supercollider's: an OS or voice-data update may change the bytes, and
-  the key deliberately does not chase OS versions. `Siri` is weaker than
-  that, and now on the record as such: two consecutive renders on a
-  machine that has not already warmed or fetched the system voice can
-  differ, observed twice on CI. The determinism claim is about nameable
-  voices; `Siri` buys the best voices at the price of not promising
-  their bytes. Voice *generation*
-  (cloned/sung voices, committed outputs) will be a deliberate
-  generative sound on the other side of the determinism boundary.
+- **`say`** — **removed** (render-pipeline.md chunk 5). macOS
+  text-to-speech was an in-graph recipe here: `text`/`voice`/`rate` as
+  the whole action key, output cached and never committed. It went for
+  two reasons that arrived together — it was the last rule shelling out
+  to a macOS binary, and the generated-voice tier replaces what it was
+  actually for.
+  [projects/all/voice-generation.md](projects/all/voice-generation.md) §5
+  records the decision and what it costs.
+
+  Worth keeping from it: `say` was this document's example of the
+  *hermetic* side of the determinism boundary, and the boundary itself is
+  unchanged — `supercollider`, `eq`, `limit`, `reverb`, `normalize` and
+  `stem` are all still recipes cached under an action key, while voice
+  generation will be a deliberate generative sound with committed
+  outputs on the other side. What `say` also demonstrated, less
+  comfortably, is that a recipe can be *nearly* hermetic and that the
+  gap is where the trouble lives: `voice: Siri` followed a Settings
+  toggle the cache key could not see, and two consecutive CI renders of
+  it were observed to differ.
 - **`stem`** — the first *implicit* type: every audio track with clips
   is buildable as `//songs/<song>/track:<name>` without declaring
   anything, because the track file **is** the declaration — a mix file

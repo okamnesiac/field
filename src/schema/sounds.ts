@@ -67,26 +67,10 @@ export const supercolliderSoundSchema = z.strictObject({
 });
 export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
 
-// say: macOS text-to-speech — the deterministic, keyless side of the
-// voice boundary (voice *generation* is a deliberate `generate` sound
-// with committed outputs; this is a recipe like supercollider). text/
-// voice/rate are the whole action key; output is cached, never
-// committed. `voice` is required because the system default voice is a
-// per-user setting — a recipe that renders differently on two Macs under
-// the same key would lie. The one recorded exception: `voice: Siri`
-// selects the machine's Spoken Content voice — the system-selected Siri
-// voices are not nameable via say -v (only a few Siri-branded regional
-// voices ever list), so the system default is the only way to reach
-// them; the caveat that the bytes follow a Settings toggle is accepted
-// deliberately (generators/say.ts).
-export const saySoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('say'),
-  text: z.string().min(1),
-  voice: z.string().min(1),
-  rate: z.number().int().min(60).max(720).optional(), // words per minute
-});
-export type SaySound = z.infer<typeof saySoundSchema>;
+// `say` was here — macOS text-to-speech as an in-graph recipe. Removed
+// in render-pipeline.md chunk 5; voice-generation.md §5 records why.
+// Short version: it was the last thing tying the build to `afconvert`
+// and to macOS, and the generated-voice tier replaces what it was for.
 
 // generative: deliberate generation (project-layout.md §1.2, §1.4) — a
 // sound with no in-graph Generator behind it: nothing may generate it
@@ -125,7 +109,6 @@ export type GenerativeSound = z.infer<typeof generativeSoundSchema>;
 export const soundSchema = z.discriminatedUnion('type', [
   normalizeSoundSchema,
   supercolliderSoundSchema,
-  saySoundSchema,
   generativeSoundSchema,
   eqSoundSchema,
   limitSoundSchema,
@@ -154,9 +137,6 @@ export const soundOrder: KeyOrder = {
     'duration_seconds',
     'bars',
     'channels',
-    'text',
-    'voice',
-    'rate',
     'sample_rate',
     'bit_depth',
     'bands',

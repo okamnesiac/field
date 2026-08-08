@@ -164,7 +164,7 @@ describe('generative sounds in the project model', () => {
     // label collides).
     writeFileSync(
       join(root, 'songs/opener/sounds/other-2.yaml'),
-      'name: other-2\ntype: say\ntext: hello\nvoice: Siri\n',
+      'name: other-2\ntype: reverb\nsource: keys\n',
     );
     await expect(
       generateVariants(root, 'other', {
@@ -239,7 +239,7 @@ describe('field choose', () => {
   it('refuses choosing on a buildable sound', async () => {
     writeFileSync(
       join(root, 'songs/opener/sounds/verse.yaml'),
-      'name: verse\ntype: say\ntext: hello\nvoice: Siri\n',
+      'name: verse\ntype: reverb\nsource: keys\n',
     );
     await expect(chooseVariant(root, 'verse', { song: 'opener', variant: 1 })).rejects.toThrow(
       'only deliberate generative sounds',

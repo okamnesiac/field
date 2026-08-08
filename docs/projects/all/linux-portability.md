@@ -143,6 +143,16 @@ second supported product.
    than growing a Linux branch — and a `say` recipe on Linux should fail
    with "this rule needs macOS", which it already does.
 
+   **Retired 2026-08-07**, in [render-pipeline.md](render-pipeline.md)
+   chunk 5, and earlier than the trigger this predicted: the rule went
+   *before* the voice library arrived rather than after. What forced it
+   was the other half of this plan — `say`'s AIFF→WAV step was the last
+   `afconvert` call that chunk 5 could not delete, so keeping the rule
+   meant keeping the macOS dependency this decision exists to remove.
+   Deleting it retires all nine platform-guarded tests rather than the
+   three the chunk expected. See [voice-generation.md](voice-generation.md)
+   §5 for what it costs in the meantime.
+
 4. **CI splits by what a test needs, not by platform loyalty** — and it
    splits *before* any of this work, because it can. 268 of 301 tests
    already pass on Linux at `3e03322`. (#46 has since moved the single

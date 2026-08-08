@@ -75,7 +75,7 @@ Exact schemas are designed in [projects/all/project-core.md](projects/all/projec
 the layout and its vocabulary are decided in
 [projects/all/project-layout.md](projects/all/project-layout.md).
 
-A sound file is discriminated by `type:` (`supercollider`, `say`, `eq`,
+A sound file is discriminated by `type:` (`supercollider`, `eq`,
 `generative`, …) and fed by `source:` — a bare name resolving in the
 song's one namespace (assets and sounds together), a
 `//shared/asset:<name>` label crossing into the shared scope, or, for

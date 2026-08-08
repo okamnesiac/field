@@ -87,3 +87,40 @@ on the M3 Max in seconds-not-minutes; recipe hashes verified by
   Answered 2026-08-06 ([project-layout.md](project-layout.md) §1.7):
   `field generate` and `field choose` are verbs over the generator
   category; the `ace` prefix retires with the layout migration.
+
+## 5 `say` removed before this shipped (2026-08-07)
+
+§1's first decision drew the determinism boundary with `say` on one side
+of it — "`say` stays the hermetic in-graph recipe; this is the
+keyed-quality tier." The rule is now gone, deleted in
+[render-pipeline.md](render-pipeline.md) chunk 5, and this section is
+what changed rather than a quiet divergence.
+
+**What forced it.** Chunk 5 replaces `afconvert` with a resampler in the
+daemon's built-in tier. `normalize` was the call everyone counted;
+`say.ts` had a second one, converting the AIFF that `say` emits into a
+WAV at the project rate. Our WAV reader does not read AIFF, so keeping
+`say` meant either teaching the daemon a second container format for one
+macOS-only rule, or keeping `afconvert` for that rule alone and with it
+the macOS dependency the whole exercise exists to remove. Neither is
+worth a scratch-vocal placeholder.
+
+**What it costs, honestly.** This plan is *deferred and not started*, so
+there is now a gap rather than a handover: bloom's creek has a
+`lead-vocal` track with two clips sourcing `scratch-vocal`, plus a
+`vocal-96k` normalize derived from it, and all three stop resolving until
+something replaces the source. The gap is the point of recording this —
+"the generated-voice tier replaces it" is true eventually and false
+today, and a plan that claimed otherwise would be the stale-status
+problem [README](../README.md) warns about. The stopgap available to a
+project in the meantime is an imported recording, which is what a scratch
+vocal is anyway.
+
+**What §1's boundary loses.** Nothing structural. The hermetic side still
+has `supercollider`, the effect rules, `normalize` and `stem`; the
+generative side is still committed outputs with provenance. `say` was
+only ever the *illustration* of the boundary, and a slightly false one:
+`voice: Siri` followed a Settings toggle the action key could not see, so
+the cleanest example of a hermetic recipe was the rule whose bytes were
+not reliably reproducible. Its removal makes the boundary easier to state
+rather than harder.

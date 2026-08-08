@@ -624,7 +624,20 @@ most memory-bound of the three effects.
 5. **Sample-rate conversion in the built-in tier**, replacing
    `afconvert` in `normalize` — the work
    [linux-portability.md](linux-portability.md) §4.2–4.3 described,
-   relocated and no longer blocking Linux.
+   relocated and no longer blocking Linux. Decisions 9 and 10 above
+   record the design: fixed-ratio polyphase, TPDF dither, and why JUCE's
+   interpolator was rejected on aliasing rather than on taste.
+
+   **`afconvert` had two callers, not one, and the second decided the
+   scope.** `say.ts` converted the AIFF that macOS `say` emits into a WAV
+   at the project rate. Keeping it meant teaching the daemon AIFF for one
+   macOS-only rule, or keeping `afconvert` for that rule alone — either
+   way the macOS dependency survives. So `say` is deleted instead
+   ([voice-generation.md](voice-generation.md) §5), which is why this
+   chunk retires **all nine** platform-guarded tests rather than the
+   three a resampler alone would have freed. It also leaves bloom's
+   `lead-vocal` without a source until the generated-voice tier ships;
+   that gap is recorded rather than glossed.
 6. **Byte-identity established rather than asserted** — mostly done in
    chunk 2, and not the way this described. `-ffp-contract=off` is in the
    daemon's compile options, and a golden fixture in

@@ -22,13 +22,12 @@ function onPath(binary: string): boolean {
     .some((dir) => dir !== '' && existsSync(join(dir, binary)));
 }
 
-// macOS text-to-speech. Permanent: `say` does not port and is not made to
-// (linux-portability.md decision 3) — it retires when a real voice library
-// arrives, rather than growing a Linux branch.
-export const hasSay = onPath('say');
+// `hasSay` was here. The `say` rule is gone (render-pipeline.md chunk 5,
+// voice-generation.md §5), and with it the only reason to probe for a
+// macOS-only binary that was never going to grow a Linux branch.
 
-// macOS audio conversion, used by `normalize` and by `say`'s AIFF→WAV
-// step. Temporary by decision: render-pipeline.md chunk 5 puts sample-rate
-// conversion in the daemon's built-in tier, and this probe retires with
-// the last `execFile('afconvert')`.
+// macOS audio conversion, used by `normalize`. Temporary by decision:
+// render-pipeline.md chunk 5 puts sample-rate conversion in the daemon's
+// built-in tier, and this probe retires with the last
+// `execFile('afconvert')`.
 export const hasAfconvert = onPath('afconvert');
