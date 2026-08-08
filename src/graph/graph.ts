@@ -11,7 +11,7 @@ import {
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import { planMix } from '../generators/mix.js';
-import { planTrack } from '../generators/stem.js';
+import { planTrack, renderableTrack, trackRefName } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -124,6 +124,11 @@ export function buildGraph(project: LoadedProject): Graph {
     const refLabel = (ref: string): Label => {
       const shared = sharedAssetName(ref);
       if (shared !== undefined) return { pkg: SHARED_ASSETS_PKG, name: shared };
+      // A placed track (nested-tracks.md §1.3) — the one ref that is not
+      // a name in the song's namespace, hence the one that carries its
+      // package with it.
+      const placed = trackRefName(ref);
+      if (placed !== undefined) return { pkg: `${pkgBase}/track`, name: placed };
       if (assetNames.has(ref)) return { pkg: `${pkgBase}/asset`, name: ref };
       return { pkg: `${pkgBase}/sound`, name: ref };
     };
@@ -161,9 +166,7 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel);
       }
     }
-    const mixable = song.tracks
-      .filter((t) => t.data.type === 'audio' && t.data.clips.length > 0)
-      .map((t) => t.data);
+    const mixable = song.tracks.filter((t) => renderableTrack(t.data)).map((t) => t.data);
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
       // Loops without `every` tile at the source's length, so the plan
@@ -184,7 +187,9 @@ export function buildGraph(project: LoadedProject): Graph {
       }
       for (const track of mixable) {
         // MIDI tracks have no audio to render, and an empty stem is not a
-        // useful artifact — implicit stems exist where there is content.
+        // useful artifact — implicit stems exist where there is content
+        // (renderableTrack). A track that only contains tracks has
+        // content: its children's, summed at their placements.
         addRule(
           { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,

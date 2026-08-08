@@ -45,7 +45,15 @@ export function planMix(
   loop?: boolean,
 ): MixSpec {
   const byName = new Map(mixableTracks.map((t) => [t.name, t]));
-  const names = [...(mix.tracks ?? byName.keys())].sort();
+  // An omitted `tracks:` means the song's channels, which is the tracks
+  // nothing else places — a child already reaches the mix through its
+  // parent, so summing it again alongside would double it
+  // (nested-tracks.md §1.4: containment is routing). An explicit list is
+  // still taken as written; declaring both a parent and its child is a
+  // strange thing to ask for but it is being asked for. Flat projects are
+  // untouched, placed being empty there.
+  const placed = new Set(mixableTracks.flatMap((t) => t.inputs.map((i) => i.track)));
+  const names = [...(mix.tracks ?? [...byName.keys()].filter((n) => !placed.has(n)))].sort();
   return {
     name: mix.name,
     type: 'mix',

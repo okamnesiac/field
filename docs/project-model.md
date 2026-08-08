@@ -131,10 +131,20 @@ arrangement. Tracks also carry `inserts:` (EQ, limiter, reverb — entries
 discriminated on `effect:` so hosted plugins can join later): inserts are
 *content*, baked into the stem, so editing one re-renders the stem where a
 fader move never does. The split matters to the build graph: every audio track with
-clips is implicitly buildable as `//songs/<song>/track:<name>`, a pre-fader
+content is implicitly buildable as `//songs/<song>/track:<name>`, a pre-fader
 stem whose cache key sees clip placement but not the track fader, so mixing
 decisions never invalidate rendered stems (see
 [build-graph.md](build-graph.md) "Rules so far").
+
+A track's content is its clips, its `inputs:` — other tracks placed in it
+— or both. A placement carries a time and an optional window, so one
+track can be placed in more than one parent and more than once in the
+same one, from a single render
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md)). The
+child's own fader stays outside its render and is applied by the parent
+while summing, which is why nesting keeps the pre-fader property rather
+than diluting it; until the nested mix lands, `check` refuses to place a
+track whose fader is set rather than quietly ignoring it.
 
 ## Identity: names, not UUIDs
 

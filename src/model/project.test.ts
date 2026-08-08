@@ -861,3 +861,148 @@ describe('fmt', () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 });
+
+describe('placed tracks (nested-tracks.md §1.3)', () => {
+  // A child worth placing, so every diagnosis below is about the
+  // placement rather than about the child being empty.
+  function writeInner(song = 'opener'): void {
+    writeFileSync(
+      join(root, `songs/${song}/tracks/inner.yaml`),
+      [
+        'name: inner',
+        'type: audio',
+        'clips:',
+        '  - id: c1',
+        '    source: hit',
+        '    anchor: absolute',
+        '    position: 0',
+        '    duration: 4',
+        '',
+      ].join('\n'),
+    );
+  }
+
+  function writeTrack(name: string, body: string[], song = 'opener'): void {
+    writeFileSync(
+      join(root, `songs/${song}/tracks/${name}.yaml`),
+      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+    );
+  }
+
+  const messages = async (): Promise<string> =>
+    (await check(root)).diagnostics.map((d) => d.message).join('\n');
+
+  beforeEach(async () => {
+    createSong(root, 'opener');
+    const wavPath = join(root, '..', `field-test-nest-${Date.now()}-${Math.random()}.wav`);
+    writeWavFloat32(wavPath, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
+    await importAsset(root, 'opener', wavPath, 'hit');
+    rmSync(wavPath);
+    writeInner();
+  });
+
+  it('accepts a placement, forward reference and all', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
+    expect(await messages()).toBe('');
+  });
+
+  it('names an unknown track', async () => {
+    writeTrack('outer', ['inputs:', '  - track: ghost', '    at: 0']);
+    expect(await messages()).toContain('placement 1 ("ghost") references unknown track "ghost"');
+  });
+
+  it('names a track placed inside itself, rather than reporting a cycle', async () => {
+    writeTrack('outer', ['inputs:', '  - track: outer', '    at: 0']);
+    const out = await messages();
+    expect(out).toContain('placement 1 ("outer") places this track inside itself');
+    expect(out).not.toContain('cycle');
+  });
+
+  it('names a containment cycle before the build walker can trip on it', async () => {
+    writeTrack('a', ['inputs:', '  - track: b', '    at: 0']);
+    writeTrack('b', ['inputs:', '  - track: a', '    at: 0']);
+    expect(await messages()).toContain('track containment cycle: a → b → a');
+  });
+
+  it('refuses a placed track with nothing in it', async () => {
+    writeTrack('empty', ['clips: []']);
+    writeTrack('outer', ['inputs:', '  - track: empty', '    at: 0']);
+    expect(await messages()).toContain(
+      'placement 1 ("empty") places a track with no clips and no tracks of its own',
+    );
+  });
+
+  it('refuses a placed midi track, and a midi track that places', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      'name: keys\ntype: midi\nclips: []\n',
+    );
+    writeTrack('outer', ['inputs:', '  - track: keys', '    at: 0']);
+    expect(await messages()).toContain('places a midi track, which renders no audio');
+
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      'name: keys\ntype: midi\ninputs:\n  - track: inner\n    at: 0\n',
+    );
+    expect(await messages()).toContain('a midi track cannot place tracks');
+  });
+
+  it('refuses a child whose fader is set, until the nested mix applies it', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/inner.yaml'),
+      readFileSync(join(root, 'songs/opener/tracks/inner.yaml'), 'utf8').replace(
+        'type: audio\n',
+        'type: audio\ngain_db: -3\n',
+      ),
+    );
+    writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
+    const out = await messages();
+    expect(out).toContain('places a track with a fader set (gain_db -3, pan 0)');
+    expect(out).toContain('chunk 3');
+  });
+
+  it('refuses musical time on an absolute placement', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: [5]']);
+    expect(await messages()).toContain('musical arrays need anchor: musical');
+  });
+
+  it('resolves a musical placement through the meter map', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    at: [5]']);
+    expect(await messages()).toBe('');
+  });
+
+  it('catches fades that outgrow a declared window, and holds off without one', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 100',
+      '    fade_in: 80',
+      '    fade_out: 80',
+    ]);
+    expect(await messages()).toContain('fades (80 + 80 samples) exceed its 100-sample window');
+
+    // No declared window, nothing to measure against until the child
+    // renders — the daemon is the backstop, so check stays quiet.
+    writeTrack('outer', [
+      'inputs:',
+      '  - track: inner',
+      '    anchor: absolute',
+      '    at: 0',
+      '    fade_in: 80',
+      '    fade_out: 80',
+    ]);
+    expect(await messages()).toBe('');
+  });
+
+  it('lets a mix reference a track that only contains tracks', async () => {
+    writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
+    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/opener/mixes/main.yaml'),
+      'name: main\ntracks:\n  - outer\n',
+    );
+    expect(await messages()).toBe('');
+  });
+});
