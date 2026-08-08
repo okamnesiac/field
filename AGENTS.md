@@ -2,16 +2,22 @@
 
 ## Docs
 
-This repo follows the global `docs/` and `docs/projects/` convention. Its docs
-are [overview](docs/overview.md), [architecture](docs/architecture.md),
-[project model](docs/project-model.md), [build graph](docs/build-graph.md),
-[audio engine](docs/audio-engine.md); the work itself is in
-[`docs/projects/`](docs/projects/README.md).
+`docs/` describes how the system works today, and is kept current when
+behaviour changes — a change that moves behaviour and leaves the docs behind
+is unfinished. The work itself lives in
+[`docs/projects/`](docs/projects/README.md), whose README carries the
+conventions: the three lists, plans cited by section so renumbering breaks
+references silently, and why a stale status line is worse than none.
 
-Unlike the other repos, these docs describe how the system is *designed* to
-work, and until code exists they are the source of truth. Read them before
-proposing design changes, because most obvious alternatives are already
-recorded there with the reason they lost.
+The docs are [overview](docs/overview.md),
+[architecture](docs/architecture.md),
+[project model](docs/project-model.md), [build graph](docs/build-graph.md),
+[audio engine](docs/audio-engine.md).
+
+Where code does not exist yet these describe how the system is *designed* to
+work and are the source of truth for it, which is less of the repo than it
+once was. Read them before proposing design changes either way, because most
+obvious alternatives are already recorded there with the reason they lost.
 
 Settled decisions are recorded `(DECIDED)` with the alternatives that lost and
 why. Do not reopen one casually — the ID scheme in particular has a full
