@@ -870,18 +870,29 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
   // stayed check-green (#58 review). Compared against the ledger's
   // recorded sha rather than re-hashing, because the loop above has
   // already proved recorded matches actual.
-  const assetShaByName = new Map<string, string>();
-  for (const { ledger, base } of ledgers) {
-    for (const asset of ledger.data.assets) {
-      assetShaByName.set(base === 'shared' ? `//shared/asset:${asset.name}` : asset.name, asset.sha256);
+  //
+  // Built per song rather than once: a bare asset name is scoped to its
+  // song (project-layout.md §4.3), so one global map lets a later song's
+  // `ref-voice` overwrite an earlier song's and a recipe then verifies
+  // against a recording from a different song entirely — false drift one
+  // way, a silent pass the other (#58 review). Shared assets keep their
+  // full label, which is already unique across the project.
+  const sharedSha = new Map<string, string>();
+  if (project.shared) {
+    for (const asset of project.shared.data.assets) {
+      sharedSha.set(`//shared/asset:${asset.name}`, asset.sha256);
     }
   }
   for (const song of project.songs) {
+    const localSha = new Map(sharedSha);
+    for (const asset of song.assets?.data.assets ?? []) {
+      localSha.set(asset.name, asset.sha256);
+    }
     for (const file of song.sounds) {
       if (file.data.type !== 'generative') continue;
       const { voice_ref: ref, voice_ref_sha256: declared } = file.data;
       if (ref === undefined || declared === undefined) continue;
-      const recorded = assetShaByName.get(ref);
+      const recorded = localSha.get(ref);
       if (recorded === undefined) continue; // already diagnosed by validate
       if (recorded !== declared) {
         diagnostics.push({

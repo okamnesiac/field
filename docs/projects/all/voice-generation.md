@@ -64,11 +64,20 @@ trades its spoken `say` line for a generated voice worth listening to.
 
 ## 2 Definition of done
 
-creek's lead vocal is a generated voice: a committed reference asset, a
-recipe with ≥2 variants, one chosen, clipped where the `say` line sits
-today (the `say` target stays as the scratch tier). Worker start-to-audio
+creek's lead vocal is a generated voice: a recipe with ≥2 variants, one
+chosen, clipped where the `say` line used to sit. Worker start-to-audio
 on the M3 Max in seconds-not-minutes; recipe hashes verified by
 `field check`.
+
+**Amended 2026-08-07**, twice over, and both amendments are in §5 and §6
+rather than being quietly absorbed here. This said "a committed reference
+asset" as a requirement — §6 makes the reference optional, so the default
+voice satisfies this and a recording only improves it. And it said "the
+`say` target stays as the scratch tier", which is no longer available to
+say: §5 records that the rule was deleted, so there is no scratch tier
+to fall back to and creek's clips have no source at all until this
+ships. That is why this moved from a nice-to-have to the thing bloom is
+waiting on.
 
 ## 3 Chunks
 

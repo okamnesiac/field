@@ -410,6 +410,57 @@ describe('check', () => {
     );
   });
 
+  it('scopes reference hashes to the song that owns the name', async () => {
+    // Bare asset names are per-song, so two songs may each have a
+    // `ref-voice` with different bytes. A single project-wide map lets
+    // the second overwrite the first — false drift for one recipe and a
+    // silent pass for the other, both from the same off-by-one-scope
+    // (#58 review). Correctly pinned recipes in both songs must produce
+    // no diagnostics at all.
+    for (const [song, contents] of [
+      ['opener', 'first reference'],
+      ['closer', 'second reference'],
+    ] as const) {
+      createSong(root, song);
+      const src = sourceFile(contents);
+      await importAsset(root, song, src, 'ref-voice');
+      rmSync(src);
+    }
+
+    const shaOf = (song: string): string => {
+      const ledger = readFileSync(join(root, `songs/${song}/assets.yaml`), 'utf8');
+      return /sha256:\s*([0-9a-f]{64})/.exec(ledger)![1]!;
+    };
+    // Different bytes must mean different hashes, or the test proves
+    // nothing about scoping.
+    expect(shaOf('opener')).not.toBe(shaOf('closer'));
+
+    for (const song of ['opener', 'closer']) {
+      mkdirSync(join(root, `songs/${song}/sounds`), { recursive: true });
+      writeFileSync(
+        join(root, `songs/${song}/sounds/line.yaml`),
+        [
+          'name: line',
+          'type: generative',
+          'model: chatterbox',
+          'text: I walked the fence line',
+          'voice_ref: ref-voice',
+          `voice_ref_sha256: ${shaOf(song)}`,
+          'seed: 1',
+          'variants:',
+          '  - file: audio/line/1.wav',
+          '    seed: 1',
+          `    sha256: ${'a'.repeat(64)}`,
+          'generated_at: 2026-08-07T12:00:00Z',
+          '',
+        ].join('\n'),
+      );
+    }
+
+    const result = await check(root);
+    expect(result.diagnostics.map((d) => d.message).join()).not.toContain('voice_ref');
+  });
+
   it('accepts a voice recipe with no reference — the default voice', async () => {
     // The other half of the same rule: absent is legal and must stay so,
     // or bloom's current configuration becomes a diagnostic.
