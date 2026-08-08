@@ -61,6 +61,17 @@ export function parseLabel(text: string): Label {
   return pattern.label;
 }
 
+// The name a song's output goes by. A convention rather than a type
+// (nested-tracks.md §1.2: role lives in the name), and the one place it is
+// spelled: a bare song name resolves through it, and it is how a track
+// claims the song's declared length.
+//
+// The *kind* is still the mix's. `creek` expands to `mix:main`, not to
+// whichever of the two exists, because a fallback would be two ways to
+// resolve one name for the length of a single PR — mixes retire next and
+// this becomes `track:${SONG_OUTPUT_NAME}` outright.
+export const SONG_OUTPUT_NAME = 'main';
+
 export function parsePattern(text: string): LabelPattern {
   if (!text.startsWith('//')) {
     if (text.startsWith('/')) {
@@ -68,7 +79,7 @@ export function parsePattern(text: string): LabelPattern {
     }
     // A bare song name is its main mix, the thing you almost always want.
     if (!text.includes('/') && !text.includes(':') && text !== '...') {
-      text = `${text}/mix:main`;
+      text = `${text}/mix:${SONG_OUTPUT_NAME}`;
     }
     // Uniformly: no special cases, so a song named "songs" stays
     // addressable like any other. The absolute form is the escape hatch.

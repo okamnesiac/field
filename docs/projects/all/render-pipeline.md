@@ -663,6 +663,13 @@ most memory-bound of the three effects.
    `validatePlan` refuses unknown keys and an older daemon must reject a
    plan describing work it will not do rather than render it centred.
 
+   And to 5 (2026-08-08): a `stem` plan may carry `length_samples` and
+   `loop`, the two fields `mix` already had, so a track can be a song's
+   output. The cross-field rule — looping needs a positive length to fold
+   onto — moved into a shared `validateDeclaredLength` rather than being
+   copied, since two ops disagreeing about what a loop without a length
+   means is exactly the drift this validator exists to prevent.
+
    **This is the one rule whose output is not byte-identical to what it
    replaced**, and the difference is structural rather than incidental:
    every other chunk transliterated a TypeScript reference and could

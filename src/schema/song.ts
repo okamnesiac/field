@@ -7,9 +7,12 @@ export const songSchema = z.strictObject({
   name: slug,
   title: z.string().optional(),
   // Declared song length — ticks, or a musical span from bar 1
-  // ([12] = twelve bars): the mix renders exactly this long — tails
-  // truncate, short content pads — so a song's extent is authored, not
-  // emergent from whichever stem happens to ring longest.
+  // ([12] = twelve bars): the song's output renders exactly this long —
+  // tails truncate, short content pads — so a song's extent is authored,
+  // not emergent from whichever stem happens to ring longest. The output
+  // is the mix, or the track named `main` (labels.ts SONG_OUTPUT_NAME)
+  // now that a track can be one; the extent belongs to the song either
+  // way, which is why it lives here rather than on whatever renders it.
   length: timeSpan.optional(),
   // The song is a loop: everything past `length` folds back onto the
   // start (bar 12's reverb tail rings into bar 1), so the render is
