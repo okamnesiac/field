@@ -867,18 +867,23 @@ function validate(project: LoadedProject): void {
     // to the declared length and both would loop, while a bare song name
     // silently reaches the mix — so the first news of the ambiguity would
     // be a render that came from the one you did not mean. `createSong`
-    // scaffolds a mix, so this fires on exactly the first step of the
-    // migration, which is when it is cheapest to hear about it.
+    // scaffolds a mix, so this fires as soon as the output track has
+    // content, which on the documented migration path is the step that
+    // creates it; an empty `tracks/main.yaml` filled in later trips it on
+    // the fill rather than the create.
     //
     // An error rather than a note because check has one severity and
     // because there is no lasting use for two: the fix is to delete one,
     // which is what the migration does. Comparing the old render against
     // the new does not need both to exist at once — build the mix, keep
     // its hash, then migrate.
+    //
     // Renderable, not merely named: only a track the graph builds a stem
-    // for ever claims the extent (renderableTrack), so a midi or empty
-    // track called `main` is not a second output and saying it carries the
-    // song's length would be false.
+    // for ever claims the extent — the same `renderableTrack` graph.ts
+    // filters `mixable` with, so check and the graph answer "is this an
+    // output" identically. A midi or contentless track called `main` is
+    // not a second output, and saying it carries the song's length would
+    // be false.
     const outputTrack = song.tracks.find(
       (t) => t.data.name === SONG_OUTPUT_NAME && renderableTrack(t.data),
     );
