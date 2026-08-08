@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
+import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import {
@@ -48,12 +49,7 @@ export function daemonBinary(): string | undefined {
 }
 
 function socketPathFor(root: string): string {
-  // Node's connect() is subject to the same sun_path limit as bind(); a
-  // cwd-relative path keeps it short whenever the CLI runs inside the
-  // project, which it always does (requireRoot found the manifest upward).
-  const absolute = join(root, SOCKET_RELATIVE);
-  const rel = relative(process.cwd(), absolute);
-  return rel.length < absolute.length ? rel : absolute;
+  return sharedSocketPath(root, SOCKET_RELATIVE);
 }
 
 function tryConnect(path: string, timeoutMs: number): Promise<Socket | undefined> {

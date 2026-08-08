@@ -1,11 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACED_SPEC } from '../aced/client.js';
-import { VOICED_SPEC } from '../voiced/client.js';
-import { WORKER_PROTOCOL_VERSION, type WorkerSpec } from '../workers/protocol.js';
+import { packageVersion } from '../packageVersion.js';
+import { socketPathFor } from '../socketPath.js';
+import { PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION } from '../audiod/protocol.js';
+import { SETUP_SPECS } from './generate.js';
+import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 
 // `field version`: which build is running, and which build each daemon is
 // running. Those are different questions and the second one is the one
@@ -43,20 +45,6 @@ function packageRoot(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
-// The version the package declares, read rather than restated. cli.ts
-// carried its own copy of the literal, which is one edit away from a
-// `field --version` that disagrees with the package it came from.
-function declaredVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as {
-      version?: string;
-    };
-    return pkg.version ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
 // Build identity, which is what "which version am I running" actually
 // means during development: a release number moves once a release, and
 // the thing that changed under you moved twenty minutes ago. Absent when
@@ -89,14 +77,12 @@ function buildIdentity(): {
 function helloIfRunning(
   socketPath: string,
   timeoutMs = 1500,
-): Promise<{ version?: string | undefined; protocol?: number | undefined } | undefined> {
+): Promise<Hello | undefined> {
   return new Promise((resolve) => {
     if (!existsSync(socketPath)) return resolve(undefined);
     const socket = createConnection(socketPath);
     let buffer = '';
-    const done = (
-      value: { version?: string | undefined; protocol?: number | undefined } | undefined,
-    ) => {
+    const done = (value: Hello | undefined) => {
       clearTimeout(timer);
       socket.destroy();
       resolve(value);
@@ -111,8 +97,14 @@ function helloIfRunning(
       try {
         const parsed = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>;
         done({
+          // Something answered, which is the honest meaning of "running"
+          // — but `ok: false` is a refusal, not a hello, and reporting
+          // it as a healthy daemon with an unknown version would be the
+          // command's own kind of lie (#70 review).
+          answered: parsed['ok'] !== false,
           version: typeof parsed['version'] === 'string' ? parsed['version'] : undefined,
           protocol: typeof parsed['protocol'] === 'number' ? parsed['protocol'] : undefined,
+          daemon: typeof parsed['daemon'] === 'string' ? parsed['daemon'] : undefined,
         });
       } catch {
         done(undefined);
@@ -121,38 +113,72 @@ function helloIfRunning(
   });
 }
 
+interface Hello {
+  answered: boolean;
+  version?: string | undefined;
+  protocol?: number | undefined;
+  daemon?: string | undefined;
+}
+
 const AUDIOD_SOCKET = '.field/audiod.sock';
 
 export async function versionReport(root: string): Promise<VersionReport> {
   const daemons: DaemonReport[] = [];
 
-  const audiod = await helloIfRunning(join(root, AUDIOD_SOCKET));
+  const audiod = await helloIfRunning(socketPathFor(root, AUDIOD_SOCKET));
   daemons.push({
     name: 'field-audiod',
     running: audiod !== undefined,
     version: audiod?.version,
     protocol: audiod?.protocol,
     socket: AUDIOD_SOCKET,
+    // Compared against audiod's own number, never the workers'. They are
+    // unrelated counters — audiod is at 1 and the workers at 2 — and
+    // checking either against the other would invent a disagreement.
+    // Skipping audiod entirely was the alternative and the worse one:
+    // AudiodClient refuses a mismatch and `--watch` gates on the version
+    // separately, so a stale audiod is a real, enforced failure that
+    // printed here as a clean line (#70 review).
+    note:
+      audiod?.protocol !== undefined && audiod.protocol !== AUDIOD_PROTOCOL_VERSION
+        ? `speaks protocol ${audiod.protocol}, this CLI speaks ${AUDIOD_PROTOCOL_VERSION} — ` +
+          `rebuild the daemon (pnpm build:native)`
+        : undefined,
   });
 
-  for (const spec of [ACED_SPEC, VOICED_SPEC] satisfies WorkerSpec[]) {
-    const hello = await helloIfRunning(join(root, spec.socketRelative));
+  // SETUP_SPECS, not a copy: #67 exported it to be the one list, and a
+  // worker missing *here* is missing from the command whose entire job is
+  // saying which daemons are running — silent about the newest worker,
+  // which is the one most likely to be skewed.
+  for (const spec of SETUP_SPECS) {
+    const hello = await helloIfRunning(socketPathFor(root, spec.socketRelative));
+    // Who answered, before what it said about itself. One socket
+    // convention across every worker means a stale or mis-pointed socket
+    // puts one worker's process under another's name — and a version
+    // report that mislabels the process is worse than one that says
+    // nothing (#70 review; the same check connectTo makes in #60).
+    const wrongDaemon =
+      hello?.daemon !== undefined && hello.daemon !== spec.name
+        ? `the process on this socket identifies as ${hello.daemon}, not ${spec.name} — ` +
+          `stale socket, or two workers configured onto one path`
+        : undefined;
     const skewed =
       hello?.protocol !== undefined && hello.protocol !== WORKER_PROTOCOL_VERSION
         ? `speaks protocol ${hello.protocol}, this CLI speaks ${WORKER_PROTOCOL_VERSION} — ` +
           `it predates this build and will refuse to be used`
         : undefined;
+    const silent = hello !== undefined && !hello.answered ? 'refused the hello' : undefined;
     daemons.push({
       name: spec.name,
       running: hello !== undefined,
       version: hello?.version,
       protocol: hello?.protocol,
       socket: spec.socketRelative,
-      note: skewed,
+      note: wrongDaemon ?? silent ?? skewed,
     });
   }
 
-  return { cli: { version: declaredVersion(), ...buildIdentity() }, workerProtocol: WORKER_PROTOCOL_VERSION, daemons };
+  return { cli: { version: packageVersion(), ...buildIdentity() }, workerProtocol: WORKER_PROTOCOL_VERSION, daemons };
 }
 
 export function formatVersionReport(report: VersionReport, root: string): string {

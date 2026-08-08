@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatVersionReport, versionReport } from './version.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
+import { SETUP_SPECS } from './generate.js';
+import { PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION } from '../audiod/protocol.js';
 
 // `field version` answers two questions, and the second is the one that
 // bites: which build is each *daemon* running. A daemon outlives the CLI
@@ -30,7 +32,9 @@ afterEach(async () => {
 function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Promise<void> {
   return new Promise((resolve) => {
     const server = createServer((socket) => {
-      socket.on('data', () => socket.write(JSON.stringify({ id: 1, ok: true, ...hello }) + '\n'));
+      socket.on('data', () =>
+        socket.write(JSON.stringify({ id: 1, ok: true, ...hello }) + '\n'),
+      );
     });
     servers.push(server);
     server.listen(join(root, socketRelative), () => resolve());
@@ -53,10 +57,12 @@ describe('field version', () => {
     // this path must never spawn. Nothing is listening here and the
     // report still returns — a spawn would hang or download weights.
     const report = await versionReport(root);
+    // Sourced from the canonical list rather than typed out, so adding a
+    // worker breaks this loudly instead of leaving the report quietly
+    // short by one (#70 review).
     expect(report.daemons.map((d) => d.name)).toEqual([
       'field-audiod',
-      'field-aced',
-      'field-voiced',
+      ...SETUP_SPECS.map((s) => s.name),
     ]);
     expect(report.daemons.every((d) => !d.running)).toBe(true);
     expect(formatVersionReport(report, root)).toContain('field-voiced  not running');
@@ -93,6 +99,56 @@ describe('field version', () => {
     expect(voiced.protocol).toBe(WORKER_PROTOCOL_VERSION - 1);
     expect(voiced.note).toContain('predates this build');
     expect(formatVersionReport(report, root)).toContain('!');
+  });
+
+  it('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
+    // audiod is at protocol 1 and the workers at 2; comparing either
+    // against the other invents a disagreement. Skipping audiod was the
+    // alternative and worse: AudiodClient refuses a mismatch and
+    // `--watch` gates on the version, so a stale audiod is an enforced
+    // failure that used to print here as a clean line (#70 review).
+    await fakeDaemon('.field/audiod.sock', {
+      protocol: AUDIOD_PROTOCOL_VERSION + 1,
+      daemon: 'field-audiod',
+      version: '9.9.9',
+    });
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    expect(audiod.note).toContain('rebuild the daemon');
+  });
+
+  it('does not flag a current audiod merely for differing from the workers', async () => {
+    // The invented-disagreement case: audiod at its own current protocol
+    // is fine even though that number is not the workers'.
+    await fakeDaemon('.field/audiod.sock', {
+      protocol: AUDIOD_PROTOCOL_VERSION,
+      daemon: 'field-audiod',
+      version: '0.4.0',
+    });
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    expect(AUDIOD_PROTOCOL_VERSION).not.toBe(WORKER_PROTOCOL_VERSION); // the trap is real
+    expect(audiod.note).toBeUndefined();
+  });
+
+  it('says when the wrong worker is on a socket', async () => {
+    // One socket convention across every worker means a stale or
+    // mis-pointed socket puts one worker's process under another's name.
+    // A version report that mislabels a process is worse than one that
+    // says nothing (#70 review).
+    await fakeDaemon('.field/voiced.sock', {
+      protocol: WORKER_PROTOCOL_VERSION,
+      daemon: 'field-aced',
+      version: '0.1.0',
+    });
+    const voiced = (await versionReport(root)).daemons.find((d) => d.name === 'field-voiced')!;
+    expect(voiced.note).toContain('identifies as field-aced');
+  });
+
+  it('does not report a refusal as a healthy daemon', async () => {
+    // `ok: false` is a refusal, not a hello. Reporting it as running with
+    // an unknown version is the command's own kind of lie.
+    await fakeDaemon('.field/voiced.sock', { ok: false, error: 'unknown op' });
+    const voiced = (await versionReport(root)).daemons.find((d) => d.name === 'field-voiced')!;
+    expect(voiced.note).toContain('refused the hello');
   });
 
   it('does not flag a daemon that agrees', async () => {

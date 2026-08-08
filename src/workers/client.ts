@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { dirname, join, relative, resolve } from 'node:path';
+import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import {
@@ -208,9 +209,7 @@ export function workerAvailable(spec: WorkerSpec): { ok: boolean; reason?: strin
 }
 
 function socketPathFor(root: string, spec: WorkerSpec): string {
-  const absolute = join(root, spec.socketRelative);
-  const rel = relative(process.cwd(), absolute);
-  return rel.length < absolute.length ? rel : absolute;
+  return sharedSocketPath(root, spec.socketRelative);
 }
 
 function tryConnect(path: string, timeoutMs: number): Promise<Socket | undefined> {
