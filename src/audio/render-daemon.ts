@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { daemonBinary } from '../audiod/client.js';
 import type { Insert } from '../schema/index.js';
+import type { Fader } from '../generators/mix.js';
+import type { PlacedClip } from '../generators/stem.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,15 +35,48 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 1;
+export const RENDER_PLAN_VERSION = 2;
 
 export class RenderUnavailableError extends Error {}
 
-export interface RenderPlan {
+// The three shapes the daemon renders, discriminated on `op` exactly as
+// the rules are. Each carries the schema's own objects verbatim — inserts,
+// placed clips, faders — so `src/schema/` and `stem.ts`'s `PlacedClip`
+// stay the wire format and there is no translation layer to drift.
+//
+// Musical time is absent by construction (decision 7): clips arrive as
+// sample offsets the control plane already resolved, which is what keeps
+// the daemon's one-sentence description true while it renders.
+
+export interface EffectsPlan {
+  op: 'effects';
   input: string;
   output: string;
   inserts: readonly Insert[];
 }
+
+export interface StemPlan {
+  op: 'stem';
+  output: string;
+  sample_rate: number;
+  inputs: readonly string[];
+  clips: readonly PlacedClip[];
+  inserts?: readonly Insert[];
+}
+
+export interface MixPlan {
+  op: 'mix';
+  output: string;
+  sample_rate: number;
+  inputs: readonly string[];
+  faders: readonly Fader[];
+  gain_db: number;
+  master?: readonly Insert[];
+  length_samples?: number;
+  loop?: boolean;
+}
+
+export type RenderPlan = EffectsPlan | StemPlan | MixPlan;
 
 // Resolved per call rather than cached: the binary can be built partway
 // through a session, and a stale "missing" answer would outlive it.

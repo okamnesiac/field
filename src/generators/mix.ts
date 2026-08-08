@@ -1,5 +1,5 @@
-import { applyInsertChain } from '../audio/insert-chain.js';
-import { readWav, writeWavFloat32 } from '../audio/wav.js';
+import { renderInsertChain } from '../audio/render-daemon.js';
+import { readWavHeader } from '../audio/wav.js';
 import type { Insert, Mix, Track } from '../schema/index.js';
 import type { Generator } from './types.js';
 
@@ -86,63 +86,28 @@ export const mixGenerator: Generator<MixSpec> = {
   },
 
   async execute(spec, inputPaths, outputPath, ctx) {
-    const stems = spec.tracks.map((name, i) => {
-      const wav = readWav(inputPaths[i]!);
-      if (wav.sampleRate !== ctx.sampleRate) {
+    // As in stem.ts: the rate check stays here, where its message can say
+    // something useful, and the daemon does the arithmetic.
+    spec.tracks.forEach((name, i) => {
+      const header = readWavHeader(inputPaths[i]!);
+      if (header.sampleRate !== ctx.sampleRate) {
         throw new Error(
-          `stem for track "${name}" is ${wav.sampleRate} Hz but the project is ` +
+          `stem for track "${name}" is ${header.sampleRate} Hz but the project is ` +
             `${ctx.sampleRate} Hz — rebuild it (field build)`,
         );
       }
-      return wav;
     });
 
-    const length = stems.reduce((n, s) => Math.max(n, s.channels[0]!.length), 0);
-    const left = new Float32Array(length);
-    const right = new Float32Array(length);
-    for (let i = 0; i < stems.length; i++) {
-      const stem = stems[i]!;
-      const fader = spec.faders[i]!;
-      const gain = Math.pow(10, fader.gain_db / 20);
-      const balance = balanceGains(fader.pan);
-      const srcL = stem.channels[0]!;
-      const srcR = stem.channels[1] ?? srcL;
-      const gL = gain * balance.left;
-      const gR = gain * balance.right;
-      for (let at = 0; at < srcL.length; at++) {
-        left[at] = left[at]! + srcL[at]! * gL;
-        right[at] = right[at]! + srcR[at]! * gR;
-      }
-    }
-    const master = Math.pow(10, spec.gain_db / 20);
-    if (master !== 1) {
-      for (let at = 0; at < length; at++) {
-        left[at] = left[at]! * master;
-        right[at] = right[at]! * master;
-      }
-    }
-    let channels: Float32Array[] = [left, right];
-    if (spec.master !== undefined) {
-      channels = applyInsertChain(channels, spec.master, ctx.sampleRate);
-    }
-    // The declared length is exact and applies last — after the master
-    // chain, so even tails the chain grew respect the bar line. loop
-    // folds the overhang back onto the start (the seamless-loop bounce:
-    // one pass of the infinite performance); otherwise it is cut.
-    const declared = spec.length_samples;
-    if (declared !== undefined) {
-      channels = channels.map((ch) => {
-        const out = new Float32Array(declared);
-        out.set(ch.subarray(0, declared));
-        if (spec.loop === true) {
-          for (let from = declared; from < ch.length; from += declared) {
-            const n = Math.min(declared, ch.length - from);
-            for (let i = 0; i < n; i++) out[i] = out[i]! + ch[from + i]!;
-          }
-        }
-        return out;
-      });
-    }
-    writeWavFloat32(outputPath, ctx.sampleRate, channels);
-  },
+    await renderInsertChain({
+      op: 'mix',
+      output: outputPath,
+      sample_rate: ctx.sampleRate,
+      inputs: inputPaths,
+      faders: spec.faders,
+      gain_db: spec.gain_db,
+      ...(spec.master !== undefined ? { master: spec.master } : {}),
+      ...(spec.length_samples !== undefined ? { length_samples: spec.length_samples } : {}),
+      ...(spec.loop === true ? { loop: true } : {}),
+    });
+  }
 };

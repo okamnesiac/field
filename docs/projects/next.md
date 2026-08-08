@@ -5,9 +5,11 @@ Coming up, not started, in rough order. One line each, linking a plan in
 begins, or down to [later](later.md) if it turns out bigger than expected. See
 [README](README.md) for how these lists work.
 
-- **[One rendering pipeline](all/render-pipeline.md) chunk 3** — track
-  inserts and the mix master chain move to the daemon too, retiring
-  `src/audio/insert-chain.ts` as an executor. No `rule_version` bump: the
-  C++ is byte-identical to the TypeScript, so nothing re-renders.
+- **[One rendering pipeline](all/render-pipeline.md) chunk 4** — delete
+  `src/audio/` minus `wav.ts`. After chunk 3 it executes nothing; the
+  properties and the three goldens are what stand in its place.
+- **[One rendering pipeline](all/render-pipeline.md) chunk 5** —
+  sample-rate conversion in the built-in tier, retiring the last
+  `afconvert` call and with it the nine platform-guarded tests.
 - **MCP surface** — expose the CLI's verbs as MCP tools once project core
   gives them stable shapes; agents are a first-class user from early on.

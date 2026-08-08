@@ -1,7 +1,7 @@
 # Plan: One rendering pipeline
 
-**Status:** Chunk 1 shipped (#50); chunk 2 in review, carrying most of
-chunk 6 with it; chunks 3–5 not started. Written after
+**Status:** Chunks 1–2 shipped (#50, #53), chunk 2 carrying most of
+chunk 6 with it; chunk 3 in review; chunks 4–5 not started. Written after
 [linux-portability.md](linux-portability.md) proposed a fourth
 TypeScript DSP module and the question "why is any of this in
 TypeScript?" turned out to have a better answer than the one on record.
@@ -306,6 +306,56 @@ argument for *when*.
    understand** rather than rendering something plausible: unknown
    effect, unknown eq band type, missing field.
 
+   **Amended again (chunk 3, from an exhaustive audit).** Rejecting
+   unknown *values* was not enough, because the parser still failed open
+   on everything it had not been patched for: `juce::var` coerces freely,
+   so an object answered a number cast and `ceiling_db: {}` became a 0 dB
+   limiter; `version: 2.9` passed an exact gate by truncation; unknown
+   keys were ignored, which is the additive-field hazard this decision
+   names; an EQ with no bands rendered as a byte-identical no-op. An
+   audit of 263 mutations accepted 126 of them.
+
+   Worse, one was not a cache-integrity bug but a memory-safety one:
+   `start: -1` allocated for the clip's end and then indexed *before* the
+   output buffer, which AddressSanitizer confirms as a heap-buffer
+   overflow.
+
+   So the shape is now validated once, before dispatch
+   (`native/audiod/src/plan.cpp`), and the renderer downstream sees only a
+   plan already proven to match: types that reject coercion, allowed keys,
+   required and optional fields per `op` and per `effect`, collection
+   sizes, the domains where a bad value is unsafe rather than merely odd,
+   and the one cross-field rule (`loop` needs a length to fold onto).
+
+   One line drawn here was wrong, and review corrected it. The first
+   version enforced structure but delegated the numeric ranges back to
+   zod, on the grounds that a second copy would drift. The rebuttal is
+   decisive: the file already mirrored names, types, cardinalities and
+   *some* bounds, so a partial copy carried the same drift risk with none
+   of the coverage — and the omitted ranges were not merely odd values.
+   `bandwidth: 0` makes a bell an identity filter and `ceiling_db: 1`
+   leaves audio untouched; both rendered byte-identical to their input
+   under keys naming an EQ and a limiter, which is the exact failure the
+   validator exists to close.
+
+   So the bounds are **generated** rather than copied.
+   `scripts/gen-plan-limits.ts` emits `native/audiod/src/plan-limits.h`
+   from the zod schemas, and a test regenerates and compares, so a widened
+   range cannot land without the daemon following it. zod stays the single
+   source of truth project-core.md §5 already says it is. The drift
+   objection was real; generating was the answer to it, and omission was
+   not.
+
+   `read_offset` does stay unbounded, and that one is principled: reads
+   outside a source are declared silence — it is what slip *is*, and
+   bounding it would break a documented feature while looking like
+   rigour.
+
+   The lesson underneath five findings: a boundary is not made safe by
+   checking values where they are used. Four fixes at four use sites left
+   the fifth hole open, and the sixth was memory corruption. Validate the
+   shape once, at the edge, and let everything downstream assume it.
+
    The band type shipped broken and review caught it. `design()` returned
    an identity filter for a type it had never heard of, so a plan with a
    +12 dB band of a future type exited 0 and produced output byte-identical
@@ -452,14 +502,32 @@ most memory-bound of the three effects.
    sizing, JUCE's allpass, no stereo spread, no lookahead — fails exactly
    the properties it failed in TypeScript. The harness did what it was
    built for: it did not change hands.
-3. **Rendering moves to the daemon** — `track-render` and `mix` call it.
-   **No `rule_version` bump, and no re-render**: the C++ is
-   byte-identical to the TypeScript it replaces, verified across 40
-   randomised chains, so every cached artifact stays valid. That was
-   written expecting the opposite, and the cost it priced — bloom
-   re-rendering and being re-verified by ear — is simply not incurred.
-   If a future change to the DSP does move bytes, the golden in
-   `render-daemon.test.ts` fails first and the bump goes with it.
+3. **Rendering moves to the daemon** — in review. `track-render` and
+   `mix` call it, so the plan grows an `op` discriminant (`effects`,
+   `stem`, `mix`) and `RENDER_PLAN_VERSION` goes to 2. Summing lives in
+   `native/audiod/src/dsp/mixdown.cpp`: placed clips into a stem, stems
+   through faders into a mix, then master gain, master chain and the
+   declared length in that order.
+
+   **No `rule_version` bump, and no re-render.** Byte-identical again,
+   including the awkward paths — clip fades, negative read offsets, reads
+   past a source's end, mono content on a stereo stem, constant-power
+   pan, and loop folding past the declared length. That was written
+   expecting the opposite, and the cost it priced — bloom re-rendering
+   and being re-verified by ear — is not incurred. Stem and mix goldens
+   join the effects one, so a future DSP change fails there first and the
+   bump goes with it.
+
+   **What did not move: the rate and channel-count checks.** They stay in
+   the control plane, reading WAV headers rather than decoding, because
+   the messages they produce are user-facing diagnostics and belong with
+   every other diagnostic rather than duplicated into C++ where they
+   would drift. The daemon does arithmetic; the control plane does
+   explaining.
+
+   After this, `src/audio/insert-chain.ts` and the DSP beneath it are
+   executors of nothing — dead code with passing tests, which is exactly
+   the state chunk 4 exists to clear.
 4. **The TypeScript DSP is deleted.** `src/audio/` minus `wav.ts`. The
    tests stay.
 5. **Sample-rate conversion in the built-in tier**, replacing

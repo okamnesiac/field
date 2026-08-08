@@ -79,6 +79,7 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, fixture());
 
     await renderInsertChain({
+     op: 'effects',
       input,
       output,
       inserts: [
@@ -96,9 +97,309 @@ describe.skipIf(!binary)('render subprocess', () => {
     expect(digest).toBe('f9fbcb23670e4c92000fdd2bd05e385c7877300f8c409a10ea281c3ab6525dcd');
   });
 
+  // Stems and mixes get their own locks (chunk 3). The summing paths are
+  // new arithmetic — clip fades, constant-power pan, loop folding — and
+  // the effects golden says nothing about any of it.
+  it('renders a stem to the same bytes on every platform', async () => {
+    const stereo = join(dir, 'a.wav');
+    const mono = join(dir, 'b.wav');
+    writeWavFloat32(stereo, RATE, fixture());
+    writeWavFloat32(mono, RATE, [fixture()[0]!.subarray(0, 12000)]);
+
+    const output = join(dir, 'stem.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [stereo, mono],
+      // Deliberately awkward: a negative read offset, a clip running past
+      // its source, mono content on a stereo stem, overlapping windows,
+      // and fades short enough to be a single-sample ramp.
+      clips: [
+        { input: 0, start: 0, duration: 8000, read_offset: -500, gain_db: -3, fade_in: 1000, fade_out: 2000 },
+        { input: 1, start: 4000, duration: 9000, read_offset: 2000, gain_db: 2.5, fade_in: 333, fade_out: 777 },
+        { input: 0, start: 11000, duration: 15000, read_offset: 9000, gain_db: 0, fade_in: 0, fade_out: 0 },
+        { input: 1, start: 15000, duration: 6000, read_offset: 11000, gain_db: -6, fade_in: 2, fade_out: 3 },
+      ],
+      inserts: [{ effect: 'limit', ceiling_db: -1.5, lookahead_ms: 6, release_ms: 120 }],
+    });
+
+    expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('ed46895161b919ffc51be663f43a400003f5f4924928160e18f3f86444afce58');
+  });
+
+  it('renders a mix to the same bytes on every platform', async () => {
+    const one = join(dir, 's1.wav');
+    const two = join(dir, 's2.wav');
+    writeWavFloat32(one, RATE, fixture());
+    writeWavFloat32(two, RATE, [fixture()[1]!.subarray(0, 15000)]);
+
+    const output = join(dir, 'mix.wav');
+    await renderInsertChain({
+      op: 'mix',
+      output,
+      sample_rate: RATE,
+      inputs: [one, two],
+      // Pan is the new transcendental here (constant-power cosine), and
+      // loop folding is the one path that reads past the declared end.
+      faders: [
+        { gain_db: -2, pan: -0.6 },
+        { gain_db: 1.5, pan: 0.35 },
+      ],
+      gain_db: -1.5,
+      master: [{ effect: 'limit', ceiling_db: -2, lookahead_ms: 4, release_ms: 90 }],
+      length_samples: 18000,
+      loop: true,
+    });
+
+    expect(createHash('sha256').update(readFileSync(output)).digest('hex')).toBe('5db5d230ea9f55016dad4d135d5d0d93b58203d92f2a321e14a0d0fe1793d262');
+  });
+
+  it('refuses a clip naming an input that is not there', async () => {
+    // Shipped as a silent skip and caught in review (#54): the clip was
+    // dropped, the render exited 0, and the result cached under an action
+    // key that still described the missing clip. The same fail-closed
+    // rule as the unknown effect and the unknown band type — this one had
+    // a legitimate `continue` three lines below it, which is what made it
+    // look ordinary.
+    const only = join(dir, 'a.wav');
+    writeWavFloat32(only, RATE, [new Float32Array(256)]);
+    await expect(
+      renderInsertChain({
+        op: 'stem',
+        output: join(dir, 'stem.wav'),
+        sample_rate: RATE,
+        inputs: [only],
+        clips: [
+          { input: 1, start: 0, duration: 3, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0 },
+        ],
+      }),
+    ).rejects.toThrow(/plan\.clips\[0\]\.input: out of range/);
+  });
+
+  it('still treats reads outside a source as silence, which is not the same thing', async () => {
+    // The distinction the bug above blurred: slip may run past either
+    // edge and that is declared behaviour, so this must render rather
+    // than throw (project-core.md §3.2).
+    const only = join(dir, 'a.wav');
+    writeWavFloat32(only, RATE, [Float32Array.from({ length: 64 }, () => 0.5)]);
+    const output = join(dir, 'stem.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [only],
+      clips: [
+        { input: 0, start: 0, duration: 128, read_offset: -32, gain_db: 0, fade_in: 0, fade_out: 0 },
+      ],
+    });
+    expect(readFileSync(output).length).toBeGreaterThan(0);
+  });
+
+  it('refuses a plan whose required arrays are absent or the wrong type', async () => {
+    // `clips`, `inputs` and `faders` are always serialized, so an absent
+    // one is a shape mismatch rather than a shorthand. Treating it as
+    // empty rendered a no-op stem under a track's action key (#54
+    // review). A non-array did the same, which the report did not cover.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const stem = { op: 'stem', output: join(dir, 'out.wav'), sample_rate: RATE, inputs: [input] };
+
+    await expect(render(stem)).rejects.toThrow(/plan\.clips: is required/);
+    await expect(render({ ...stem, clips: 'nope' })).rejects.toThrow(
+      /plan\.clips: expected an array/,
+    );
+    await expect(
+      render({ op: 'mix', output: join(dir, 'out.wav'), sample_rate: RATE, inputs: [], gain_db: 0 }),
+    ).rejects.toThrow(/plan\.faders: is required/);
+  });
+
+  it('still renders a stem with an explicitly empty clip list', async () => {
+    // The other half of the same rule, and the reason the check is
+    // "present and an array" rather than "non-empty": a track with no
+    // clips is a legitimate stem of nothing, and the reference produced
+    // exactly this. Without this test, a later tightening would turn a
+    // valid state into an error and look like a fix.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const output = join(dir, 'empty.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      clips: [],
+    });
+    expect(readFileSync(output).length).toBeGreaterThan(0); // a valid, zero-frame WAV
+  });
+
+  it('enforces the chain shape per operation, absent or malformed', async () => {
+    // The same required-vs-optional line as the arrays above, applied to
+    // the chains — and the one place it was still missing (#54 review).
+    // Optional means *absent* is allowed; present-but-not-an-array is a
+    // shape mismatch whichever op it is, and rendering as though the
+    // chain were not there caches audio under a key that still names it.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(256)]);
+    const output = join(dir, 'out.wav');
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const stem = { op: 'stem', output, sample_rate: RATE, inputs: [input], clips: [] };
+    const mix = {
+      op: 'mix',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      faders: [{ gain_db: 0, pan: 0 }],
+      gain_db: 0,
+    };
+
+    // effects: `inserts` is required, so absent is already wrong.
+    await expect(render({ op: 'effects', input, output })).rejects.toThrow(
+      /plan\.inserts: is required/,
+    );
+    await expect(render({ op: 'effects', input, output, inserts: 'nope' })).rejects.toThrow(
+      /plan\.inserts: expected an array/,
+    );
+    // stem and mix: optional, so present-but-wrong is the failure.
+    await expect(render({ ...stem, inserts: 5 })).rejects.toThrow(
+      /plan\.inserts: expected an array/,
+    );
+    await expect(render({ ...mix, master: { effect: 'limit' } })).rejects.toThrow(
+      /plan\.master: expected an array/,
+    );
+
+    // …and omitting an optional chain entirely still renders, which is
+    // what keeps insert-less stems on their pre-inserts action keys.
+    await render(stem);
+    await render(mix);
+  });
+
+  it('rejects the whole malformed-plan matrix before rendering anything', async () => {
+    // The audit that found this class ran 263 mutations and 126 were
+    // accepted (#54 review). These are the shapes it named, and they all
+    // now fail in `plan.cpp` before a value is read — which is the point
+    // of validating once rather than at each use site.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(64)]);
+    const output = join(dir, 'out.wav');
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const clip = (over: Record<string, unknown> = {}) => ({
+      input: 0, start: 0, duration: 4, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0, ...over,
+    });
+    const stem = { op: 'stem', output, sample_rate: RATE, inputs: [input] };
+    const mix = {
+      op: 'mix', output, sample_rate: RATE, inputs: [input],
+      faders: [{ gain_db: 0, pan: 0 }], gain_db: 0,
+    };
+
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      // Memory safety: a negative start indexed before the allocation.
+      ['negative start', { ...stem, clips: [clip({ start: -1, duration: 5 })] }, /start: out of range/],
+      ['negative duration', { ...stem, clips: [clip({ duration: -4 })] }, /duration: out of range/],
+      // Truncation past an "exact" version gate.
+      ['fractional version', { ...stem, version: 2.9, clips: [] }, /version: expected an integer/],
+      // juce::var coercion: objects, strings and bools answering casts.
+      ['object as number', { ...stem, clips: [clip({ duration: {} })] }, /duration: expected an integer/],
+      ['object as rate', { ...stem, sample_rate: {}, clips: [] }, /sample_rate: expected an integer/],
+      ['numeric string', { ...stem, clips: [clip({ gain_db: '3' })] }, /gain_db: expected a number/],
+      // Additive fields the binary does not know.
+      ['unknown plan field', { ...stem, clips: [clip()], future_mode: true }, /future_mode: is not a field/],
+      // Cardinality and cross-field state.
+      ['empty eq bands', { op: 'effects', input, output, inserts: [{ effect: 'eq', normalize: true, bands: [] }] }, /must hold 1–8 bands/],
+      ['negative length', { ...mix, length_samples: -1 }, /length_samples: out of range/],
+      ['loop without length', { ...mix, loop: true }, /loop: needs "length_samples"/],
+      ['loop at zero length', { ...mix, loop: true, length_samples: 0 }, /needs a positive "length_samples"/],
+      ['clip input out of range', { ...stem, clips: [clip({ input: 1 })] }, /input: out of range/],
+    ];
+
+    for (const [name, plan, expected] of cases) {
+      await expect(render(plan), name).rejects.toThrow(expected);
+    }
+  });
+
+  it('enforces the schema domains, not just the types', async () => {
+    // The second half of the audit (#54 review): 23 plans that were type-
+    // correct and still described work the binary would not do.
+    // `bandwidth: 0` is an identity filter and `ceiling_db: 1` leaves
+    // audio untouched — both produced output byte-identical to the input
+    // under keys naming an EQ and a limiter.
+    //
+    // The bounds come from `plan-limits.h`, generated from the same zod
+    // schemas the control plane validates against, so this is one
+    // contract rather than two copies of one.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(64)]);
+    const output = join(dir, 'out.wav');
+    const render = async (plan: Record<string, unknown>) => {
+      const planPath = join(dir, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
+      await execFileAsync(binary!, ['--render', planPath]);
+    };
+    const band = (over: Record<string, unknown> = {}) => ({
+      type: 'bell', frequency: 1000, gain_db: 3, bandwidth: 1, ...over,
+    });
+    const fx = (inserts: unknown[]) => ({ op: 'effects', input, output, inserts });
+    const clip = (over: Record<string, unknown> = {}) => ({
+      input: 0, start: 0, duration: 8, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0, ...over,
+    });
+    const stem = { op: 'stem', output, sample_rate: RATE, inputs: [input] };
+
+    const cases: [string, Record<string, unknown>, RegExp][] = [
+      ['bandwidth 0 (identity filter)', fx([{ effect: 'eq', normalize: true, bands: [band({ bandwidth: 0 })] }]), /bandwidth: out of range/],
+      ['frequency 0', fx([{ effect: 'eq', normalize: true, bands: [band({ frequency: 0 })] }]), /frequency: out of range/],
+      ['gain beyond ±24', fx([{ effect: 'eq', normalize: true, bands: [band({ gain_db: 99 })] }]), /gain_db: out of range/],
+      ['ceiling above 0 dB (no-op limiter)', fx([{ effect: 'limit', ceiling_db: 1, lookahead_ms: 5, release_ms: 100 }]), /ceiling_db: out of range/],
+      ['zero lookahead', fx([{ effect: 'limit', ceiling_db: -1, lookahead_ms: 0, release_ms: 100 }]), /lookahead_ms: out of range/],
+      ['zero decay', fx([{ effect: 'reverb', mix: 0.3, decay: 0, predelay_ms: 0, damping: 0.5 }]), /decay: out of range/],
+      ['nine bands', fx([{ effect: 'eq', normalize: true, bands: Array.from({ length: 9 }, () => band()) }]), /must hold 1–8 bands/],
+      ['unsupported sample rate', { ...stem, sample_rate: 12345, clips: [clip()] }, /is not a rate this project supports/],
+      ['zero-length clip', { ...stem, clips: [clip({ duration: 0 })] }, /duration: out of range/],
+      ['fractional fade', { ...stem, clips: [clip({ fade_in: 1.5 })] }, /fade_in: expected an integer/],
+      ['fades exceeding the clip', { ...stem, clips: [clip({ fade_in: 5, fade_out: 5 })] }, /fades total 10 samples/],
+    ];
+
+    for (const [name, plan, expected] of cases) {
+      await expect(render(plan), name).rejects.toThrow(expected);
+    }
+  });
+
+  it('still renders a zero-length mix when it is not looping', async () => {
+    // The valid side of the same rule (#54 review). A declared length of
+    // zero is an empty bounce — the reference produced exactly that — so
+    // only *looping* needs it positive, because that is where the fold
+    // stride would be zero. Rejecting both narrowed behaviour while
+    // looking like rigour.
+    const input = join(dir, 'a.wav');
+    writeWavFloat32(input, RATE, [new Float32Array(64)]);
+    const output = join(dir, 'out.wav');
+    await renderInsertChain({
+      op: 'mix',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      faders: [{ gain_db: 0, pan: 0 }],
+      gain_db: 0,
+      length_samples: 0,
+    });
+    expect(readFileSync(output).length).toBeGreaterThan(0); // a valid, zero-frame WAV
+  });
+
   it('reports the daemon’s own error rather than the exec wrapper’s', async () => {
     await expect(
       renderInsertChain({
+       op: 'effects',
         input: join(dir, 'missing.wav'),
         output: join(dir, 'out.wav'),
         inserts: [],
@@ -119,6 +420,7 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, [new Float32Array(256)]);
     await expect(
       renderInsertChain({
+        op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         inserts: [
@@ -131,7 +433,7 @@ describe.skipIf(!binary)('render subprocess', () => {
           } as unknown as never,
         ],
       }),
-    ).rejects.toThrow('unknown eq band type');
+    ).rejects.toThrow(/plan\.inserts\[0\]\.bands\[0\]\.type: unknown band type/);
   });
 
   it('refuses a plan version it does not speak', async () => {
@@ -142,6 +444,7 @@ describe.skipIf(!binary)('render subprocess', () => {
       planPath,
       JSON.stringify({
         version: RENDER_PLAN_VERSION + 1,
+        op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         inserts: [],
@@ -159,11 +462,12 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, [new Float32Array(256)]);
     await expect(
       renderInsertChain({
+       op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         inserts: [{ effect: 'limit', ceiling_db: -1 } as unknown as never],
       }),
-    ).rejects.toThrow(/limit insert is missing/);
+    ).rejects.toThrow(/plan\.inserts\[0\]\.lookahead_ms: is required/);
   });
 
   it('refuses an insert it does not know instead of dropping it', async () => {
@@ -174,12 +478,13 @@ describe.skipIf(!binary)('render subprocess', () => {
     writeWavFloat32(input, RATE, [new Float32Array(128)]);
     await expect(
       renderInsertChain({
+       op: 'effects',
         input,
         output: join(dir, 'out.wav'),
         // Version skew is the real case: a control plane newer than the
         // binary. Cast because the schema cannot express one.
         inserts: [{ effect: 'chorus' } as unknown as never],
       }),
-    ).rejects.toThrow('unknown insert effect');
+    ).rejects.toThrow(/plan\.inserts\[0\]\.effect: unknown insert effect/);
   });
 });

@@ -7,12 +7,12 @@ import type { Generator } from './types.js';
 // The three offline effects as standalone rules (effects.md §2). Each is a
 // one-entry insert chain over its single source.
 //
-// These are the first rules to render in the daemon rather than in
+// These were the first rules to render in the daemon rather than in
 // TypeScript (render-pipeline.md decision 8): one input and one set of
-// parameters exercises the whole new path — spawn, plan, render — with
-// nothing else changing. Track inserts and the mix master chain still go
-// through src/audio/insert-chain.ts until chunk 3 moves them, which is
-// why that file is still here.
+// parameters exercised the whole new path — spawn, plan, render — with
+// nothing else changing. Chunk 3 took stems and mixes across the same
+// boundary, so `src/audio/insert-chain.ts` and the DSP under it are no
+// longer executors of anything; chunk 4 deletes them.
 //
 // The rule versions do not change. The C++ port is byte-identical to the
 // TypeScript it replaces — verified across 40 randomised chains and both
@@ -23,7 +23,12 @@ async function renderOne(
   outputPath: string,
   insert: Insert,
 ): Promise<void> {
-  await renderInsertChain({ input: inputPath, output: outputPath, inserts: [insert] });
+  await renderInsertChain({
+    op: 'effects',
+    input: inputPath,
+    output: outputPath,
+    inserts: [insert],
+  });
 }
 
 export const eqGenerator: Generator<EqSound> = {
