@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from field_worker.protocol import JsonObject, optional_number, optional_str
+from field_worker.protocol import JsonObject, optional_number, optional_str, reject_unknown
 from field_worker.protocol import required_int as _required_int
 from field_worker.protocol import required_str as _required_str
 
@@ -49,6 +49,7 @@ class VoiceJob:
 
     @staticmethod
     def from_request(request: JsonObject) -> "VoiceJob":
+        reject_unknown(request, VoiceJob, "generate")
         return VoiceJob(
             text=_required_str(request, "text", "generate"),
             seed=_required_int(request, "seed", "generate", 0, 2**31 - 1),

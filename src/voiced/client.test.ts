@@ -181,6 +181,37 @@ describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
     ).rejects.toThrow(/'conviction' must be in/);
   });
 
+  it('refuses a field it does not understand rather than dropping it', async () => {
+    // The failure this exists to prevent, in the shape it actually took:
+    // `--exaggeration 0.3` reached a daemon started before #65 knew the
+    // field. Nothing was malformed, so the job ran at default pacing and
+    // only a killed process stopped a take being committed under a
+    // recipe claiming 0.3. A long-lived daemon is the point of the
+    // lifecycle, so "it was already running" is the normal case.
+    //
+    // `temperature` stands in for the next field we add: Chatterbox has
+    // one, we have not exposed it, and a daemon that quietly ignored it
+    // would be the same bug again.
+    await expect(
+      client.request(
+        'generate',
+        {
+          text: 'a line',
+          seed: 1,
+          variants: 1,
+          output_dir: join(root, 'out'),
+          temperature: 0.9,
+        },
+        workerOkResponseSchema,
+        5000,
+      ),
+    ).rejects.toThrow(/unrecognised field\(s\) 'temperature'/);
+    // …and it is still serving, since this is a rejected request rather
+    // than a poisoned daemon.
+    const hello = await client.request('hello', {}, workerHelloResponseSchema, 5000);
+    expect(hello.model_loaded).toBe(false);
+  });
+
   it('does not treat an omitted voice_ref as the error', async () => {
     // Narrow on purpose, and named for what it actually shows. A job with
     // no reference and one genuinely bad field comes back complaining
