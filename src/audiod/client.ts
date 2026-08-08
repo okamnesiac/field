@@ -14,6 +14,7 @@ import {
   loadResponseSchema,
   okResponseSchema,
   PROTOCOL_VERSION,
+  SOCKET_RELATIVE,
   statusResponseSchema,
   type AudiodEvent,
 } from './protocol.js';
@@ -24,7 +25,7 @@ import {
 // project root and a root-relative socket path, keeping the bound path
 // inside sun_path's 104 bytes regardless of how deep the project lives.
 
-const SOCKET_RELATIVE = '.field/audiod.sock';
+
 
 // The built daemon binary, or undefined if it has not been built. FIELD_AUDIOD
 // overrides for wrappers and tests; the default is the CMake output inside

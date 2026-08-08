@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatVersionReport, versionReport } from './version.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { SETUP_SPECS } from './generate.js';
-import { PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION } from '../audiod/protocol.js';
+import {
+  DAEMON_NAME as AUDIOD_NAME,
+  PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION,
+  SOCKET_RELATIVE as AUDIOD_SOCKET,
+} from '../audiod/protocol.js';
 
 // `field version` answers two questions, and the second is the one that
 // bites: which build is each *daemon* running. A daemon outlives the CLI
@@ -61,7 +65,7 @@ describe('field version', () => {
     // worker breaks this loudly instead of leaving the report quietly
     // short by one (#70 review).
     expect(report.daemons.map((d) => d.name)).toEqual([
-      'field-audiod',
+      AUDIOD_NAME,
       ...SETUP_SPECS.map((s) => s.name),
     ]);
     expect(report.daemons.every((d) => !d.running)).toBe(true);
@@ -107,24 +111,24 @@ describe('field version', () => {
     // alternative and worse: AudiodClient refuses a mismatch and
     // `--watch` gates on the version, so a stale audiod is an enforced
     // failure that used to print here as a clean line (#70 review).
-    await fakeDaemon('.field/audiod.sock', {
+    await fakeDaemon(AUDIOD_SOCKET, {
       protocol: AUDIOD_PROTOCOL_VERSION + 1,
-      daemon: 'field-audiod',
+      daemon: AUDIOD_NAME,
       version: '9.9.9',
     });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('rebuild the daemon');
   });
 
   it('does not flag a current audiod merely for differing from the workers', async () => {
     // The invented-disagreement case: audiod at its own current protocol
     // is fine even though that number is not the workers'.
-    await fakeDaemon('.field/audiod.sock', {
+    await fakeDaemon(AUDIOD_SOCKET, {
       protocol: AUDIOD_PROTOCOL_VERSION,
-      daemon: 'field-audiod',
+      daemon: AUDIOD_NAME,
       version: '0.4.0',
     });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(AUDIOD_PROTOCOL_VERSION).not.toBe(WORKER_PROTOCOL_VERSION); // the trap is real
     expect(audiod.note).toBeUndefined();
   });
@@ -136,19 +140,19 @@ describe('field version', () => {
     // "rebuild the daemon (pnpm build:native)". Every part wrong, and
     // instruction rather than description — someone rebuilds, nothing
     // changes, and the report keeps saying it (#70 review).
-    await fakeDaemon('.field/audiod.sock', {
+    await fakeDaemon(AUDIOD_SOCKET, {
       protocol: WORKER_PROTOCOL_VERSION,
       daemon: 'field-voiced',
       version: '0.1.0',
     });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('identifies as field-voiced');
     expect(audiod.note).not.toContain('rebuild the daemon');
   });
 
   it('does not report an audiod refusal as a healthy audiod', async () => {
-    await fakeDaemon('.field/audiod.sock', { ok: false, error: 'unknown op' });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === 'field-audiod')!;
+    await fakeDaemon(AUDIOD_SOCKET, { ok: false, error: 'unknown op' });
+    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('refused the hello');
   });
 

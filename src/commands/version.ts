@@ -5,7 +5,11 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packageVersion } from '../packageVersion.js';
 import { socketPathFor } from '../socketPath.js';
-import { PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION } from '../audiod/protocol.js';
+import {
+  DAEMON_NAME as AUDIOD_NAME,
+  PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION,
+  SOCKET_RELATIVE as AUDIOD_SOCKET,
+} from '../audiod/protocol.js';
 import { SETUP_SPECS } from './generate.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 
@@ -150,14 +154,12 @@ interface Hello {
   daemon?: string | undefined;
 }
 
-const AUDIOD_SOCKET = '.field/audiod.sock';
-
 export async function versionReport(root: string): Promise<VersionReport> {
   const daemons: DaemonReport[] = [];
 
   const audiod = await helloIfRunning(socketPathFor(root, AUDIOD_SOCKET));
   daemons.push({
-    name: 'field-audiod',
+    name: AUDIOD_NAME,
     running: audiod !== undefined,
     version: audiod?.version,
     protocol: audiod?.protocol,
@@ -166,7 +168,7 @@ export async function versionReport(root: string): Promise<VersionReport> {
     // counters — audiod is at 1 and the workers at 2 — and checking
     // either against the other would invent a disagreement.
     note: daemonNote(audiod, {
-      name: 'field-audiod',
+      name: AUDIOD_NAME,
       protocol: AUDIOD_PROTOCOL_VERSION,
       remedy: 'rebuild the daemon (pnpm build:native)',
     }),
