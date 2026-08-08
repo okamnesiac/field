@@ -172,7 +172,7 @@ void writeWavInt (const std::string& path,
 {
     if (channels.empty())
         throw std::runtime_error ("writeWavInt needs at least one channel");
-    if (bitDepth != 16 && bitDepth != 24)
+    if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
         throw std::runtime_error ("writeWavInt: unsupported bit depth "
                                   + std::to_string (bitDepth));
     const size_t frames = channels[0].size();
@@ -184,8 +184,16 @@ void writeWavInt (const std::string& path,
     const uint32_t rate = (uint32_t) sampleRate;
     const size_t width = (size_t) bitDepth / 8u;
     const size_t dataSize = frames * count * width;
+    // RIFF chunks are word-aligned: an odd `data` payload carries a pad
+    // byte that counts toward the RIFF size but not the chunk's declared
+    // size. Only reachable at 24-bit with an odd frame×channel product,
+    // which is why the stereo golden could never exercise it (#57
+    // review). Our own reader already assumes the padding — it advances
+    // by `size + (size % 2)` — so omitting it was a writer that its
+    // matching reader would eventually misparse.
+    const size_t pad = dataSize % 2;
 
-    std::vector<uint8_t> buf (12 + 8 + 16 + 8 + dataSize, 0);
+    std::vector<uint8_t> buf (12 + 8 + 16 + 8 + dataSize + pad, 0);
     size_t at = 0;
     putTag (buf, at, "RIFF");
     putU32 (buf, at + 4, (uint32_t) (buf.size() - 8));

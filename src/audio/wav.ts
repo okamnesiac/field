@@ -24,6 +24,13 @@ export interface WavHeader {
   sampleRate: number;
   channels: number;
   frames: number;
+  // The encoding, not just the geometry: 1 is integer PCM, 3 is IEEE
+  // float. `normalize` promises integer PCM at the declared depth, and
+  // nothing could check that promise until this was here (#57 review) —
+  // a decoded sample sits on the same grid either way, so only the tag
+  // and the width distinguish the two writers.
+  format: number;
+  bitsPerSample: number;
 }
 
 // Header only — no decode. The render path needs a file's rate and
@@ -59,7 +66,15 @@ function readHeaderFrom(fd: number, path: string): WavHeader {
   ) {
     throw new Error(`${path}: not a RIFF/WAVE file`);
   }
-  let fmt: { sampleRate: number; channels: number; bytesPerFrame: number } | undefined;
+  let fmt:
+    | {
+        sampleRate: number;
+        channels: number;
+        bytesPerFrame: number;
+        format: number;
+        bitsPerSample: number;
+      }
+    | undefined;
   let dataBytes: number | undefined;
   const chunk = Buffer.alloc(8);
   const body16 = Buffer.alloc(16);
@@ -76,6 +91,8 @@ function readHeaderFrom(fd: number, path: string): WavHeader {
         channels: body16.readUInt16LE(2),
         sampleRate: body16.readUInt32LE(4),
         bytesPerFrame: (body16.readUInt16LE(14) / 8) * body16.readUInt16LE(2),
+        format: body16.readUInt16LE(0),
+        bitsPerSample: body16.readUInt16LE(14),
       };
     } else if (id === 'data') {
       dataBytes = Math.min(size, Math.max(0, fileSize - body));
@@ -89,6 +106,8 @@ function readHeaderFrom(fd: number, path: string): WavHeader {
     sampleRate: fmt.sampleRate,
     channels: fmt.channels,
     frames: Math.floor(dataBytes / fmt.bytesPerFrame),
+    format: fmt.format,
+    bitsPerSample: fmt.bitsPerSample,
   };
 }
 

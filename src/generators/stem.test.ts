@@ -580,8 +580,8 @@ describe('clips over rule outputs', () => {
         '//songs/creek/track:drums',
       ]);
 
-      // Real normalize (afconvert) feeding the real TS mixer: the stem plays
-      // a render nothing ever committed.
+      // Real normalize feeding the real mixer, both in the daemon now:
+      // the stem plays a render nothing ever committed.
       const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
       const stem = outcomes.find((o) => o.label === '//songs/creek/track:drums')!;
       const wav = readWav(stem.outputPath!);

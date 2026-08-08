@@ -5,7 +5,7 @@ chunks 2–3 **withdrawn** to
 [render-pipeline.md](render-pipeline.md), which puts sample-rate
 conversion in the daemon's built-in tier rather than in TypeScript;
 §1.1 below records what that replaced and why. §5's open questions
-outlive the plan and are still open.
+outlived the plan; all but one are now answered there.
 
 Chunk 1 became the urgent one after #46 moved the single CI job to
 `ubuntu-latest` by **removing** `pnpm test` and `pnpm build:native`, so
@@ -210,14 +210,17 @@ second supported product.
 ## 2 Shape
 
 - **The resampler and format conversion** moved to
-  [render-pipeline.md](render-pipeline.md) §6, chunk 5. `normalize`
-  keeps calling `afconvert` until then — a known wart with a dated
+  [render-pipeline.md](render-pipeline.md) §6, chunk 5. `normalize` kept
+  calling `afconvert` until then — a known wart with a dated
   replacement, which beats a wart with a fresh reimplementation in front
   of it. Its schema (`sample_rate`, `bit_depth`) and `source:` semantics
-  do not change when the implementation does.
-- **`say` keeps `afconvert`** for its AIFF→WAV step, which is fine: it
-  is macOS-only anyway, and pretending otherwise would be the two-answer
-  problem decision 1 rejects.
+  did not change when the implementation did. **Done**: chunk 5 shipped,
+  and `bit_depth: 32` stayed integer PCM precisely because decision 1
+  below says the float-to-integer conversion stands.
+- ~~**`say` keeps `afconvert`**~~ for its AIFF→WAV step. **Superseded**:
+  that step was the reason `afconvert` could not be deleted, so the rule
+  went instead ([voice-generation.md](voice-generation.md) §5). Nothing
+  in the build shells out to a macOS binary now.
 - **The daemon.** `#if JUCE_MAC` around the listeners, a rescan fallback
   elsewhere, and Linux build dependencies in CI. Discovered on the first
   red build, as intended, and the guess was right about the shape:
@@ -293,13 +296,16 @@ against.
 
 ## 5 Open questions
 
-- **Filter quality target** and **dither on bit-depth reduction** moved
-  with the resampler to [render-pipeline.md](render-pipeline.md) §7,
-  where the work now lives. Both are still open.
-- **Does "field never resamples implicitly" survive?** Today the
-  refusal (`stem.ts`) is a guard against surprise; with cheap in-house
-  resampling the argument for it is unchanged, but the wording in the
-  error should stop implying the conversion is expensive or external.
+- ~~**Filter quality target** and **dither on bit-depth reduction**~~,
+  moved with the resampler to [render-pipeline.md](render-pipeline.md).
+  **Answered** by its decisions 9 and 10, and shipped in chunk 5.
+- ~~**Does "field never resamples implicitly" survive?**~~ **Yes, and
+  the wording is fixed.** The refusal in `stem.ts` stands — it guards
+  against surprise, and that argument never depended on the conversion
+  being expensive — but the diagnostic used to end "or afconvert and
+  re-import", recommending a tool that is now gone and was never
+  available on Linux (#57 review). It now points at a `normalize` sound
+  or a re-import at the project rate.
 - **SuperCollider in CI.** Installing `sclang` on the Linux job would
   un-skip the sc-render integration tests, which have never run on CI.
   Cheap coverage win, but it is a separate decision with its own minute

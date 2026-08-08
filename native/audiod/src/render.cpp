@@ -326,11 +326,13 @@ std::string runRender (const std::string& planPath)
 
             auto channels = dsp::resample (wav.channels, wav.sampleRate, rate);
             dsp::ditherTo (channels, bitDepth);
-
-            if (bitDepth == 32)
-                dsp::writeWavFloat32 (output, rate, channels);
-            else
-                dsp::writeWavInt (output, rate, channels, bitDepth);
+            // Integer PCM at every declared depth, 32 included. `LEI32` is
+            // what the outgoing afconvert command asked for and what
+            // linux-portability decision 1 says still stands, so writing
+            // IEEE float here would have changed the meaning of an
+            // existing schema value under a version bump that only claims
+            // to change the bytes (#57 review).
+            dsp::writeWavInt (output, rate, channels, bitDepth);
         }
         else
         {

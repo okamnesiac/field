@@ -416,8 +416,13 @@ argument for *when*.
    build. Fixed-order SIMD without FMA remains available later and would
    not cost the guarantee.
 10. **Bit-depth reduction dithers, deterministically** (2026-08-07,
-    chunk 5). 24- and 16-bit targets get 1-LSB TPDF dither before
-    rounding, because plain truncation leaves the quantization error
+    chunk 5). Every depth is written as **integer PCM** — `bit_depth: 32`
+    included, because that is what `afconvert -d LEI32` produced and what
+    [linux-portability.md](linux-portability.md) decision 1 says still
+    stands; writing IEEE float there would change the meaning of an
+    existing schema value under a version bump that only claims to change
+    the bytes (#57 review). 24- and 16-bit targets get 1-LSB TPDF dither
+    before rounding, because plain truncation leaves the quantization error
     correlated with the signal — audible as distortion rather than noise
     on exactly the quiet material a `normalize` target tends to carry.
 
@@ -429,6 +434,11 @@ argument for *when*.
     libc++, so using them would make the dither — and therefore every
     rendered artifact — platform-dependent, which is the one thing §4
     exists to prevent.
+
+    32-bit is undithered: its step sits about 186 dB below full scale,
+    finer than the float32 samples feeding it can resolve except at the
+    very bottom of the range, so dither there would add noise without
+    masking anything measurable.
 
     Rejected: **no dither**, which is simpler and equally deterministic
     but wrong for the reason above. Rejected: **noise shaping**, which is
@@ -652,6 +662,22 @@ most memory-bound of the three effects.
    `rule_version` goes to 2 and its artifacts re-render once — the cost
    chunks 2 and 3 priced and did not incur, arriving here instead.
 
+   **Six findings in review say how far that goes** (#57). Four were
+   coverage: routing 16-bit through the float writer, cutting
+   `tapsPerPhase` from 128 to 32, replacing the input with the dither,
+   and flooring the output length all left every property green. The
+   properties now pin the format tag and width, the passband at 10/15/19
+   kHz, the tone's magnitude against neighbouring bins, and a short
+   source's survival — each mutation now fails exactly one of them. Two
+   were the code itself: `bit_depth: 32` had regressed to IEEE float, and
+   an odd `data` chunk went unpadded while our own reader already
+   advanced past a pad byte.
+
+   The lesson is the same one chunk 4 recorded and is worth the
+   repetition: "with no oracle the properties are the specification" is a
+   claim about what the properties *catch*, and only mutation answers it.
+   Writing that sentence is not the same as earning it.
+
    With no oracle, the properties are the whole specification, so they
    were mutation-tested before being believed. Filtering at the input
    Nyquist instead of the lower of the two — the JUCE failure mode from
@@ -692,7 +718,13 @@ left.
 
 ## 7 Open questions
 
-- **When to start chunk 2.** Recommended: after chunk 1, and before AU
+**All answered as of chunk 5 (2026-08-07).** The entries below are kept
+because the reasoning behind an answer is worth more than the answer, but
+none of them is open, and the status line at the top is the one to trust.
+
+- ~~**When to start chunk 2.**~~ **Answered by doing it** — chunk 2
+  shipped in #53, after chunk 1 and before AU hosting, on exactly the
+  reasoning recorded here. Recommended: after chunk 1, and before AU
   hosting rather than during it — the port is cheap while there are
   three effects and no plugin variants, and the shipped algorithms
   transliterate nearly mechanically. The alternative, converging only
@@ -713,8 +745,13 @@ left.
   `--no-native` subset is worth having for contributors who only touch
   the control plane — a question chunk 3 sharpens, since it takes stems
   and mixes across the same boundary.
-- **Resampler quality target**, inherited unresolved from
+- ~~**Resampler quality target**~~, inherited unresolved from
   [linux-portability.md](linux-portability.md) §5: taps, transition
   width, stopband attenuation, and whether JUCE's variable-rate
   `WindowedSinc` clears the bar or a fixed-ratio polyphase design is
-  wanted. Dither on bit-depth reduction is still open there too.
+  wanted. Dither on bit-depth reduction was open there too.
+  **Answered by decisions 9 and 10**: fixed-ratio polyphase at 128 taps
+  per phase, 100 dB stopband, the transition placed against the lower
+  Nyquist, and 1-LSB TPDF dither at 16 and 24 bits. `WindowedSinc` does
+  not clear the bar and the reason is not quality but correctness — its
+  kernel width ignores the ratio, so it aliases when downsampling.

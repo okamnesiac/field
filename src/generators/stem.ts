@@ -210,7 +210,7 @@ export const stemGenerator: Generator<StemSpec> = {
         throw new Error(
           `input "${name}" is ${header.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
             `Field never resamples implicitly; render or convert it at the project rate ` +
-            `(a normalize target at ${ctx.sampleRate}, or afconvert and re-import)`,
+            `(add a normalize sound at ${ctx.sampleRate}, or re-import at that rate)`,
         );
       }
       if (header.channels > 2) {

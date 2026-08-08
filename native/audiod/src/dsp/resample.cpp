@@ -147,7 +147,15 @@ std::vector<std::vector<float>> resample (const std::vector<std::vector<float>>&
     for (const auto& channel : channels)
     {
         const long inN = (long) channel.size();
-        const long outN = (inN * phases) / stride;
+        // Round rather than floor, and never round a non-empty source
+        // away. Flooring turned a two-frame 96 kHz file into zero frames
+        // at 44.1 kHz — a short one-shot vanishing entirely under an
+        // action key that said otherwise, where afconvert produced one
+        // frame (#57 review). Integer arithmetic so the rule is exact
+        // rather than dependent on rounding mode; whole-second lengths
+        // are unaffected, which is precisely why the fixtures missed it.
+        const long scaled = (inN * phases + stride / 2) / stride;
+        const long outN = inN > 0 ? std::max (1L, scaled) : 0L;
         std::vector<float> resampled ((size_t) std::max (0L, outN), 0.0f);
 
         for (long n = 0; n < outN; ++n)
@@ -176,6 +184,12 @@ std::vector<std::vector<float>> resample (const std::vector<std::vector<float>>&
 
 void ditherTo (std::vector<std::vector<float>>& channels, int bitDepth)
 {
+    // 32 is written as integer PCM like the others, but undithered, and
+    // decision 10 scopes the dither to 16 and 24 for a reason worth
+    // stating: the step at 32-bit sits about 186 dB below full scale,
+    // finer than the float32 samples feeding it can resolve except at
+    // the very bottom of the range. Dither there would add noise without
+    // masking a correlated artefact anyone could measure.
     if (bitDepth == 32)
         return;
     if (bitDepth != 16 && bitDepth != 24)
