@@ -927,12 +927,13 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toContain('track containment cycle: a → b → a');
   });
 
-  it('refuses a placed track with nothing in it', async () => {
+  it('accepts a placed track with nothing in it — silence is content', async () => {
+    // An empty audio track renders as silence (stem.ts renderableTrack),
+    // so placing one places silence rather than dangling an edge. This was
+    // an error until a song's output became a track that starts empty.
     writeTrack('empty', ['clips: []']);
     writeTrack('outer', ['inputs:', '  - track: empty', '    at: 0']);
-    expect(await messages()).toContain(
-      'placement 1 ("empty") places a track with no clips and no tracks of its own',
-    );
+    expect(await messages()).toBe('');
   });
 
   it('refuses a placed midi track, and a midi track that places', async () => {
@@ -1004,10 +1005,13 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
 
   it('lets a mix reference a track that only contains tracks', async () => {
     writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
+    // Named `bed`, not `main`: createSong scaffolds an output track now,
+    // and a second thing called `main` is the two-outputs error rather
+    // than the mix-membership case under test.
     mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/mixes/main.yaml'),
-      'name: main\ntracks:\n  - outer\n',
+      join(root, 'songs/opener/mixes/bed.yaml'),
+      'name: bed\ntracks:\n  - outer\n',
     );
     expect(await messages()).toBe('');
   });

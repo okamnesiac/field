@@ -663,6 +663,12 @@ most memory-bound of the three effects.
    `validatePlan` refuses unknown keys and an older daemon must reject a
    plan describing work it will not do rather than render it centred.
 
+   And to 6 (2026-08-08): a placed clip's `duration` may be zero. A
+   placement's window is resolved from the rendered child, and an empty
+   track renders to nothing — so zero is a length the control plane
+   produces rather than one anybody authored, which is why an authored
+   zero-length clip stays refused upstream where `timeSpan` is positive.
+
    And to 5 (2026-08-08): a `stem` plan may carry `length_samples` and
    `loop`, the two fields `mix` already had, so a track can be a song's
    output. The cross-field rule — looping needs a positive length to fold

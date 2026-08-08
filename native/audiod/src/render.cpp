@@ -23,7 +23,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 5;
+constexpr int renderPlanVersion = 6;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two

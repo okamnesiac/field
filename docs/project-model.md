@@ -130,8 +130,8 @@ balance) — while clips carry their own gain and fades as part of the
 arrangement. Tracks also carry `inserts:` (EQ, limiter, reverb — entries
 discriminated on `effect:` so hosted plugins can join later): inserts are
 *content*, baked into the stem, so editing one re-renders the stem where a
-fader move never does. The split matters to the build graph: every audio track with
-content is implicitly buildable as `//songs/<song>/track:<name>`, a pre-fader
+fader move never does. The split matters to the build graph: every audio track
+is implicitly buildable as `//songs/<song>/track:<name>`, a pre-fader
 stem whose cache key sees clip placement but not the track fader, so mixing
 decisions never invalidate rendered stems (see
 [build-graph.md](build-graph.md) "Rules so far").

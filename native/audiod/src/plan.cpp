@@ -330,10 +330,15 @@ void validatePlan (const juce::var& plan)
                          // silence, which is what slip is.
                          { { "input", Kind::integer, true, 0.0, inputCount - 1.0 },
                            { "start", Kind::integer, true, 0.0 },
-                           // A zero-length clip contributes nothing while
-                           // the key says it does; `samples` is int ≥ 0 in
-                           // the schema, so fades are integers too.
-                           { "duration", Kind::integer, true, 1.0 },
+                           // Zero is legal here and only here: a placement
+                           // of an empty track is a window of nothing, and
+                           // its length is resolved from the rendered
+                           // child rather than authored. An authored
+                           // zero-length clip is still refused upstream —
+                           // `timeSpan` is positive in the schema — so
+                           // this admits the resolved case without
+                           // admitting the meaningless one.
+                           { "duration", Kind::integer, true, 0.0 },
                            { "read_offset", Kind::integer, true },
                            { "gain_db", Kind::number, true },
                            // Optional because the control plane omits it

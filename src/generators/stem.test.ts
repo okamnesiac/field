@@ -531,12 +531,22 @@ describe('track stems in the build graph', () => {
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
 
-    // Track gain/pan are mix parameters, not stem contents.
+    // A level is not stem content. It lives on the placement now
+    // (nested-tracks.md §1.13) — `drums` is placed in the scaffolded
+    // output track — and moving it re-sums the parent without touching
+    // this stem, which is what the run count asserts.
     writeFileSync(
-      join(root, 'songs/creek/tracks/drums.yaml'),
-      ['name: drums', 'type: audio', 'gain_db: -6', 'pan: 0.5', 'clips:', ...clipYaml(), ''].join(
-        '\n',
-      ),
+      join(root, 'songs/creek/tracks/main.yaml'),
+      [
+        'name: main',
+        'type: audio',
+        'inputs:',
+        '  - track: drums',
+        '    at: 0',
+        '    gain_db: -6',
+        '    pan: 0.5',
+        '',
+      ].join('\n'),
     );
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
@@ -594,10 +604,19 @@ describe('track stems in the build graph', () => {
     );
   });
 
-  it('leaves midi and empty tracks out of the graph', async () => {
+  it('leaves midi out of the graph, but not an empty audio track', async () => {
     createTrack(root, 'creek', 'sketch', 'midi');
     createTrack(root, 'creek', 'spare', 'audio');
-    expect(queryDeps(root, '//songs/creek/track:all')).toEqual(['//songs/creek/track:drums']);
+    // `spare` has no clips and renders as silence, which is a stem
+    // (stem.ts renderableTrack) — a song's output starts exactly this way.
+    // `sketch` is midi and has no audio to render at all.
+    // `main` is the scaffolded output track — empty, and a stem for the
+    // same reason `spare` is.
+    expect(queryDeps(root, '//songs/creek/track:all')).toEqual([
+      '//songs/creek/track:drums',
+      '//songs/creek/track:main',
+      '//songs/creek/track:spare',
+    ]);
   });
 });
 
@@ -895,18 +914,23 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
 
   it('keeps a placed child out of the default mix, so it is not summed twice', async () => {
     writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);
+    // Named `bed`, not `main`: createSong scaffolds an output track, and a
+    // mix sharing its name would be the two-outputs error rather than the
+    // membership case under test.
     mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
-    writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\n');
-    // `inner` reaches the mix through `outer`; listing it as a channel of
-    // its own would sum it twice.
-    expect(queryDeps(root, 'deps(//songs/creek/mix:main)')).toEqual([
+    writeFileSync(join(root, 'songs/creek/mixes/bed.yaml'), 'name: bed\n');
+    // `inner` reaches the mix through `outer`, so it is not a channel of
+    // its own — that is the point. The scaffolded `main` is: it is empty,
+    // which is a silent stem rather than no stem, and nothing places it.
+    expect(queryDeps(root, 'deps(//songs/creek/mix:bed)')).toEqual([
+      '//songs/creek/track:main',
       '//songs/creek/asset:kick',
       '//songs/creek/track:inner',
       '//songs/creek/track:outer',
-      '//songs/creek/mix:main',
+      '//songs/creek/mix:bed',
     ]);
-    const mix = await buildLabels(root, ['//songs/creek/mix:main']);
-    const wav = readWav(mix.find((o) => o.label === '//songs/creek/mix:main')!.outputPath!);
+    const mix = await buildLabels(root, ['//songs/creek/mix:bed']);
+    const wav = readWav(mix.find((o) => o.label === '//songs/creek/mix:bed')!.outputPath!);
     // Once, at the placement — not also at the child's own origin.
     expect(wav.channels[0]![13]).toBeCloseTo(1, 4);
     expect(wav.channels[0]![3]).toBe(0);

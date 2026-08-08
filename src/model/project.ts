@@ -748,10 +748,10 @@ function validate(project: LoadedProject): void {
           push(track.path, `${what} references unknown track "${input.track}"`);
           return;
         }
-        if (child.type !== 'audio') {
+        if (!renderableTrack(child)) {
+          // Midi is the only unplaceable kind now: it has no stem. An
+          // empty audio track has one, and it is silence.
           push(track.path, `${what} places a midi track, which renders no audio`);
-        } else if (!renderableTrack(child)) {
-          push(track.path, `${what} places a track with no clips and no tracks of its own`);
         }
         // A track's own gain and pan are retiring, not waiting to be
         // supported (§1.13): a level belongs on the edge, where it can
