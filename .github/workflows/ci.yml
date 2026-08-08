@@ -6,12 +6,15 @@ on:
   pull_request:
 
 # Two jobs, split by what a test needs rather than by platform loyalty
-# (linux-portability.md decision 4). The Linux job is the fast gate and
-# runs everything that does not shell out to a macOS binary — including
-# the daemon, which builds on both platforms since chunk 4. The macOS job
-# covers the nine tests that need a macOS binary, and is where the product
-# platform gets its full run. Both run `pnpm test` — #46's stopgap dropped
-# it entirely, and green meaning "the tests ran" is the whole point.
+# (linux-portability.md decision 4). The Linux job is the fast gate: it
+# carries typecheck, the Python pyright gate, and the daemon, which builds
+# on both platforms since chunk 4. Nothing in the suite needs a macOS
+# binary any more, so the two jobs now run the same tests — which is the
+# point of the split rather than a redundancy in it, because macOS is the
+# platform the product ships on (overview.md "V1 platform scope") and the
+# daemon it exercises there is the CoreAudio build. Both run `pnpm test` —
+# #46's stopgap dropped it entirely, and green meaning "the tests ran" is
+# the whole point.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -50,12 +53,15 @@ jobs:
       # it. With setup-uv below the tests, that skip was unconditional in
       # CI and the test only ever ran on the author's machine.
       - uses: astral-sh/setup-uv@v5
-      # Nine tests skip here — `say` (6) and `afconvert` (3) — on the
-      # capability probes in src/testing/platform.ts, not by excluding
-      # their files. Those four files hold 72 tests between them, and the
-      # other 63 are the graph, stem and DSP code this job exists to
-      # exercise. The daemon's protocol tests are no longer among the
-      # skips: they run here too, in null-output mode.
+      # One test skips here: the sclang integration case in
+      # src/graph/build.test.ts, on a `!sclangPresent` probe rather than
+      # by excluding its file. Not the nine that linux-portability.md
+      # decision 4 describes — `say` and `afconvert` both retired in
+      # render-pipeline.md §6 chunk 5 and took their guards with them, so
+      # nothing in the suite shells out to a macOS binary any more. Nor
+      # is that one skip a Linux limit: sclang runs on Linux, it just is
+      # not installed on either runner, so the macOS job skips the same
+      # test. The daemon's protocol tests run here, in null-output mode.
       - run: pnpm test
       # Python workers: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
@@ -95,7 +101,8 @@ jobs:
       # `--locked` and skips without it. This lane runs the whole suite,
       # so it needs everything the whole suite needs.
       - uses: astral-sh/setup-uv@v5
-      # The whole suite, not the nine alone. macOS is the product platform
+      # The whole suite, not a macOS-only subset (linux-portability.md
+      # decision 4's amendment). macOS is the product platform
       # (overview.md "V1 platform scope"), so it is the wrong one to give
       # partial coverage — and the suite measures ~13s against a job
       # dominated by install and the native build, so narrowing it would
