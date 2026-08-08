@@ -753,18 +753,18 @@ function validate(project: LoadedProject): void {
         } else if (!renderableTrack(child)) {
           push(track.path, `${what} places a track with no clips and no tracks of its own`);
         }
-        // A child's fader is applied by its parent while summing
-        // (§1.10) — inside the parent's render, outside the child's.
-        // That is the nested mix, chunk 3, and nothing here applies it
-        // yet: honouring the placement's own gain while quietly dropping
-        // the child's would be a wrong mix rather than a missing feature.
+        // A track's own gain and pan are retiring, not waiting to be
+        // supported (§1.13): a level belongs on the edge, where it can
+        // differ per parent, and a track with two parents cannot hold one
+        // value for both. The placement carries both now, so this points
+        // at where to put them rather than at a chunk to wait for.
         if (child.gain_db !== 0 || child.pan !== 0) {
           push(
             track.path,
             `${what} places a track with a fader set (gain_db ${child.gain_db}, pan ${child.pan}) — ` +
-              `a child's gain and pan are applied by its parent, which lands with the nested mix ` +
-              `(nested-tracks.md §7 chunk 3); until then leave them at 0 and put the level on the ` +
-              `placement's own gain_db`,
+              `a level lives on the placement, not the track, so it can differ per parent ` +
+              `(nested-tracks.md §1.13); move them to this placement's gain_db and pan, and ` +
+              `leave "${input.track}" at 0`,
           );
         }
         if (

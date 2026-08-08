@@ -656,6 +656,13 @@ most memory-bound of the three effects.
    checks, and nothing in the build shells out to a macOS binary any
    more. `RENDER_PLAN_VERSION` is 3.
 
+   Since raised to 4 (2026-08-08): a placed clip may carry an optional
+   `pan`, so a placement can balance its child the way a mix fader
+   balances a track. Optional and omitted when centred, so no stem that
+   never panned anything re-keys; the version still moves, because
+   `validatePlan` refuses unknown keys and an older daemon must reject a
+   plan describing work it will not do rather than render it centred.
+
    **This is the one rule whose output is not byte-identical to what it
    replaced**, and the difference is structural rather than incidental:
    every other chunk transliterated a TypeScript reference and could
