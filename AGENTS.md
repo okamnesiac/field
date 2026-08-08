@@ -28,16 +28,6 @@ or yarn, and never generate a package-lock.json.
 
 ## Pull requests
 
-Pull requests follow the global rules — open them, never merge them, ready for
-review by default. This repo's ruleset is what enforces them: main takes no
-direct pushes, and review threads must be resolved before a merge, so the
-global resolution rule is literal here rather than advisory.
-
-Two things the ruleset adds. Merges are squashed and linear, so the PR title
-and body become the commit message — write them like one. And roughly one PR
-per coherent chunk of a phase, not one giant phase PR.
-
-## Pull request reviews
-
-Reviews follow the global rules: local by default, Codex and Claude CLI
-reviews opt-in, findings handled and resolved thread by thread.
+Pull requests and reviews follow the global rules, and this repo's ruleset is
+the standard one they describe. The only local habit: roughly one PR per
+coherent chunk of a phase, not one giant phase PR.
