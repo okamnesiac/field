@@ -351,7 +351,7 @@ program
   .description('build labels and copy the results to ~/Desktop as numbered versions')
   .option('--to <dir>', 'destination directory instead of ~/Desktop (must exist)')
   .option('--rate <hz>', "deliver at this sample rate (default: the source's)", parseExportRate)
-  .option('--bit-depth <bits>', "deliver at this bit depth: 16, 24, or 32 (default: the source's)", parseExportBitDepth)
+  .option('--bit-depth <bits>', "deliver at this bit depth: 16, 24, or 32 (default: the source's; a float source must choose)", parseExportBitDepth)
   .action(async (patterns: string[], opts: { to?: string; rate?: number; bitDepth?: 16 | 24 | 32 }) => {
     try {
       const { exportLabels, homeRelative } = await import('./commands/export.js');

@@ -1,7 +1,7 @@
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { parseDocument, Document, isSeq } from 'yaml';
-import { readWavHeader, type WavHeader } from '../audio/wav.js';
+import { hasWavSignature, readWavHeader, type WavHeader } from '../audio/wav.js';
 import { PROJECT_MANIFEST, DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
@@ -33,19 +33,6 @@ function defaultName(file: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-
-// The 12-byte RIFF/WAVE signature, and nothing more — full parsing is
-// readWavHeader's, whose errors the caller reports as headerProblem.
-function hasWavSignature(path: string): boolean {
-  const fd = openSync(path, 'r');
-  try {
-    const bytes = Buffer.alloc(12);
-    if (readSync(fd, bytes, 0, 12, 0) !== 12) return false;
-    return bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WAVE';
-  } finally {
-    closeSync(fd);
-  }
 }
 
 // Copy a file into the song's audio/ directory and record it in

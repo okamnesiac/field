@@ -77,9 +77,13 @@ that always is: you cannot predict the file you are about to get.
 **Delivery formatting is export's** (multi-rate.md decision 1):
 `--rate` and `--bit-depth` convert on the way out through the daemon's
 normalize op — never as a node in the song — writing integer PCM at the
-chosen depth, with a flag left off defaulting to the source's own value.
-The effective pair joins the name (`creek-track-main-44100-16-v1.wav`),
-so a converted family never versions an unconverted one. This is what
+chosen depth. A flag left off defaults to the source's own value where
+it has one: a float source (everything Field renders) has no integer
+depth of its own, so `--rate` alone on a stem refuses and asks for
+`--bit-depth`. The effective pair joins the name after a dot
+(`creek-track-main.44100-16-v1.wav`) — a character no label can carry —
+so a converted family never versions an unconverted one, nor a label
+that happens to end in digits. This is what
 retired `loop-cd`: a CD deliverable is an invocation, not a sound.
 
 **Exports are versioned, never overwritten.** Finishing something and

@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, linkSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
-import { readWavHeader } from '../audio/wav.js';
+import { hasWavSignature, readWavHeader } from '../audio/wav.js';
 import { renderInsertChain } from '../audio/render-daemon.js';
 import { sha256File } from '../hash.js';
 import { resolvePlayables, type Playable } from './play.js';
@@ -27,7 +27,11 @@ import type { GeneratorRunner } from '../graph/build.js';
 
 export interface ExportResult {
   label: string;
-  from: string; // the artifact the build produced or the source it names
+  // The artifact the build produced or the source it names — always a
+  // path that outlives the call: when delivery formatting ran, the
+  // converted bytes are at `to`, and the conversion's scratch input is
+  // gone by the time this returns.
+  from: string;
   to: string;
   version: number; // the version `to` names — existing when unchanged
   // Some version already holds these bytes, so `to` names it and nothing
@@ -44,9 +48,11 @@ export interface ExportOptions {
   // Delivery formatting (multi-rate.md decision 1): rate and bit depth
   // are export parameters, converted on the way out by the daemon's
   // normalize op — never a node in the song. Either may be given alone;
-  // the other defaults to the source's own value. Conversion always
-  // writes integer PCM at the chosen depth, exactly as a `normalize`
-  // sound did, which is what lets `loop-cd` retire into an invocation.
+  // the other defaults to the source's own value where it has one — a
+  // float source (everything Field renders) has no integer depth of its
+  // own, so it must choose. Conversion always writes integer PCM at the
+  // chosen depth, exactly as a `normalize` sound did, which is what
+  // lets `loop-cd` retire into an invocation.
   rate?: number | undefined;
   bitDepth?: 16 | 24 | 32 | undefined;
   runner?: GeneratorRunner | undefined;
@@ -221,18 +227,35 @@ export async function exportLabels(
       let base = exportBaseName(item.label);
       let sha256 = originalSha;
       if (convert) {
-        if (extname(item.path).toLowerCase() !== '.wav') {
+        // Content decides convertibility, the same probe import uses: a
+        // WAV the ledger accepted as `.wave` (or bare) is as deliverable
+        // as one spelled `.wav`.
+        if (extname(item.path).toLowerCase() !== '.wav' && !hasWavSignature(item.path)) {
           throw new Error(
             `cannot convert ${item.label}: ${extname(item.path) || 'no extension'} is not a WAV`,
           );
         }
         const source = readWavHeader(item.path);
         const rate = options.rate ?? source.sampleRate;
-        const depth = options.bitDepth ?? source.bitsPerSample;
-        if (depth !== 16 && depth !== 24 && depth !== 32) {
-          throw new Error(
-            `${item.label} is ${source.bitsPerSample}-bit — pass --bit-depth 16, 24, or 32`,
-          );
+        let depth = options.bitDepth;
+        if (depth === undefined) {
+          // "The source's own value" — which a float source does not
+          // have: conversion writes integer PCM, and int32 is not
+          // float32's own value, it is the same width in a different
+          // encoding. Everything Field renders is float32, so `--rate`
+          // alone on a stem must choose rather than surprise (#108
+          // review).
+          if (source.format === 3) {
+            throw new Error(
+              `${item.label} is ${source.bitsPerSample}-bit float — conversion ` +
+                `writes integer PCM, so pass --bit-depth 16, 24, or 32`,
+            );
+          }
+          const own = source.bitsPerSample;
+          if (own !== 16 && own !== 24 && own !== 32) {
+            throw new Error(`${item.label} is ${own}-bit — pass --bit-depth 16, 24, or 32`);
+          }
+          depth = own;
         }
         path = join(scratch!, `${index}.wav`);
         await renderInsertChain({
@@ -242,7 +265,11 @@ export async function exportLabels(
           sample_rate: rate,
           bit_depth: depth,
         });
-        base = `${base}-${rate}-${depth}`;
+        // The dot cannot appear in a label (every part is a slug), so a
+        // converted family can never collide with a label that happens
+        // to end in digits — `asset:pad-44100-16` exported plain and
+        // `asset:pad` at 44100/16 are different names by construction.
+        base = `${base}.${rate}-${depth}`;
         sha256 = await sha256File(path);
       }
 
@@ -274,7 +301,7 @@ export async function exportLabels(
       if (existing !== undefined) {
         results.push({
           label: item.label,
-          from: path,
+          from: item.path,
           to: existing.path,
           version: existing.version,
           unchanged: true,
@@ -286,7 +313,7 @@ export async function exportLabels(
       const written = writeVersion(path, dir, base, newest + 1, extension);
       results.push({
         label: item.label,
-        from: path,
+        from: item.path,
         to: written.path,
         version: written.version,
         unchanged: false,
