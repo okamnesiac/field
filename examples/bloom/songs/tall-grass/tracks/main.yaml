@@ -1,5 +1,4 @@
 name: main
-type: audio
 inputs:
   - track: bass
     at: 0

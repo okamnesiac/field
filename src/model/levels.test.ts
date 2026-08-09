@@ -30,7 +30,7 @@ afterEach(() => {
 const track = (name: string, yaml: string) =>
   writeFileSync(join(root, 'songs/creek/tracks', `${name}.yaml`), yaml);
 
-const leaf = (name: string) => track(name, `name: ${name}\ntype: audio\nclips: []\n`);
+const leaf = (name: string) => track(name, `name: ${name}\n`);
 
 // main and bed both make three passes of a phrase; the phrase holds a
 // panned, attenuated `keys` beside a flat `drums`.
@@ -40,16 +40,14 @@ function creek(): void {
     'phrase',
     [
       'name: phrase',
-      'type: audio',
-      'inputs:',
+            'inputs:',
       '  - track: drums',
       '    at: 0',
       '  - track: keys',
       '    at: 0',
       '    gain_db: -4',
       '    pan: 0.2',
-      'clips: []',
-      '',
+            '',
     ].join('\n'),
   );
   const passes = ['  - track: phrase', '    at: [1]', '  - track: phrase', '    at: [5]', '  - track: phrase', '    at: [9]'];
@@ -57,18 +55,16 @@ function creek(): void {
     'main',
     [
       'name: main',
-      'type: audio',
-      'inputs:',
+            'inputs:',
       ...passes,
       '  - track: pad',
       '    at: 0',
       '    gain_db: -6',
       '    pan: -0.2',
-      'clips: []',
-      '',
+            '',
     ].join('\n'),
   );
-  track('bed', ['name: bed', 'type: audio', 'inputs:', ...passes, 'clips: []', ''].join('\n'));
+  track('bed', ['name: bed', 'inputs:', ...passes, ''].join('\n'));
 }
 
 const song = () => loadProject(root).songs.find((s) => s.name === 'creek')!;
@@ -95,32 +91,29 @@ describe('effective levels', () => {
       'main',
       [
         'name: main',
-        'type: audio',
-        'inputs:',
+                'inputs:',
         '  - track: phrase',
         '    at: [1]',
         '    gain_db: -2',
-        'clips: []',
-        '',
+                '',
       ].join('\n'),
     );
     expect(reaches(song(), 'keys').find((r) => r.to === 'main')!.gainDb).toBe(-6);
   });
 
-  it('a clip that plays a track is a placement on the path too', () => {
+  it('an entry with an id and a window is still just a placement on the path', () => {
     creek();
-    // Clip the phrase instead of placing it: same edge, clip spelling
-    // (nested-tracks.md §1.11). The clip's gain is on the path; clips
-    // carry no pan, so the hop contributes none.
+    // One list (nested-tracks.md §18): whatever else the entry carries —
+    // an id, a window — the level question sees only the edge.
     track(
       'main',
       [
         'name: main',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: phrase-take-x1a2b',
-        '    source: track:phrase',
-        '    position: 0',
+        '    track: phrase',
+        '    at: 0',
+        '    duration: [4]',
         '    gain_db: -2',
         '',
       ].join('\n'),
@@ -148,15 +141,13 @@ describe('effective levels', () => {
       'main',
       [
         'name: main',
-        'type: audio',
-        'inputs:',
+                'inputs:',
         '  - track: phrase',
         '    at: [1]',
         '  - track: phrase',
         '    at: [5]',
         '    gain_db: -3',
-        'clips: []',
-        '',
+                '',
       ].join('\n'),
     );
     expect(reaches(song(), 'phrase').map((r) => [r.to, r.gainDb, r.paths])).toEqual([
@@ -198,13 +189,11 @@ describe('effective levels', () => {
       'main',
       [
         'name: main',
-        'type: audio',
-        'inputs:',
+                'inputs:',
         '  - track: phrase',
         '    at: [1]',
         '    pan: -0.5',
-        'clips: []',
-        '',
+                '',
       ].join('\n'),
     );
     const toMain = reaches(song(), 'keys').find((r) => r.to === 'main')!;

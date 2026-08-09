@@ -1,10 +1,9 @@
 name: keys
-type: audio
-clips:
+inputs:
   # the generated four bars, exactly one pass — no loop, because the
   # phrase is the loop now. Bars 1-12 with `every: [4]` said the same
   # thing three times; main placing this phrase three times says it once.
   - id: keys-loop-p4t2n
-    source: still-water-keys
-    position: [1]
+    sound: still-water-keys
+    at: [1]
     duration: [4]

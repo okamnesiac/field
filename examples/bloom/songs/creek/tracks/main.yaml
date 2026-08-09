@@ -1,5 +1,4 @@
 name: main
-type: audio
 inserts:
   # the limiter guards the ceiling; the hand-tuned -1 dB gain retires
   - effect: limit

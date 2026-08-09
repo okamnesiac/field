@@ -46,24 +46,22 @@ export function createSong(root: string, name: string): string {
   //
   // `field track create` places each track it makes into this one, which
   // is the half of the mix's implicit "all audio tracks" people actually
-  // relied on: create a track, put clips in it, hear it. That placement is
-  // legal from the moment the track exists because an empty track renders
-  // as silence (stem.ts renderableTrack).
-  const main = trackSchema.parse({ name: SONG_OUTPUT_NAME, type: 'audio' });
+  // relied on: create a track, put content in it, hear it. That placement
+  // is legal from the moment the track exists because an empty track
+  // renders as silence (stem.ts).
+  // Only what is not a default, plus the one list a track is: `inputs:`
+  // starts empty and explicit, because membership is written down rather
+  // than inferred (above) and this is the file that holds it.
+  trackSchema.parse({ name: SONG_OUTPUT_NAME }); // shape check only
   writeFileSync(
     join(dir, 'tracks', `${SONG_OUTPUT_NAME}.yaml`),
-    stringifyCanonical(main, trackOrder),
+    stringifyCanonical({ name: SONG_OUTPUT_NAME, inputs: [] }, trackOrder),
   );
   writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
   return dir;
 }
 
-export function createTrack(
-  root: string,
-  song: string,
-  name: string,
-  type: 'audio' | 'midi',
-): string {
+export function createTrack(root: string, song: string, name: string): string {
   if (!isSlug(name)) throw new Error(`track name "${name}" must be a lowercase-slug`);
   if (name === RESERVED_LABEL_NAME) {
     throw new Error(`"${RESERVED_LABEL_NAME}" is reserved by the label grammar`);
@@ -75,8 +73,9 @@ export function createTrack(
   const path = join(songDir, 'tracks', `${name}.yaml`);
   if (existsSync(path)) throw new Error(`track "${name}" already exists in "${song}"`);
   mkdirSync(join(songDir, 'tracks'), { recursive: true });
-  writeFileSync(path, stringifyCanonical(trackSchema.parse({ name, type }), trackOrder));
-  placeInSongOutput(songDir, name, type);
+  trackSchema.parse({ name }); // shape check only
+  writeFileSync(path, stringifyCanonical({ name, inputs: [] }, trackOrder));
+  placeInSongOutput(songDir, name);
   return path;
 }
 
@@ -86,12 +85,11 @@ export function createTrack(
 // (nested-tracks.md §1.4), and the command that creates the track is the
 // one that knows.
 //
-// Quiet about what it cannot serve: a midi track has no stem to place,
-// `main` cannot place itself, and a song predating the output track has
-// nowhere to put it. None is an error — they are songs this has nothing to
-// add to.
-function placeInSongOutput(songDir: string, name: string, type: 'audio' | 'midi'): void {
-  if (type !== 'audio' || name === SONG_OUTPUT_NAME) return;
+// Quiet about what it cannot serve: `main` cannot place itself, and a
+// song predating the output track has nowhere to put it. Neither is an
+// error — they are songs this has nothing to add to.
+function placeInSongOutput(songDir: string, name: string): void {
+  if (name === SONG_OUTPUT_NAME) return;
   const outputPath = join(songDir, 'tracks', `${SONG_OUTPUT_NAME}.yaml`);
   if (!existsSync(outputPath)) return;
   // Edited as a document rather than round-tripped through JS: the output

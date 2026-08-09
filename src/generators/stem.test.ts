@@ -20,20 +20,22 @@ function track(clips: unknown[]): Track {
   // Fixture times are scalar ticks, so the parse output already satisfies
   // the resolved Track type — the same promise the loader's cast makes
   // after resolution (musical-time.md §1.6).
-  return trackSchema.parse({ name: 'drums', type: 'audio', clips }) as Track;
+  return trackSchema.parse({ name: 'drums', inputs: clips }) as Track;
 }
 
 const clip = (over: Record<string, unknown> = {}) => ({
   id: 'c1',
-  source: 'kick',
-  position: 960,
+  // The default kind gives way when the override names one — an entry
+  // plays exactly one thing.
+  ...('track' in over || 'sound' in over ? {} : { audio: 'kick' }),
+  at: 960,
   duration: 960,
   ...over,
 });
 
 describe('placedWindow', () => {
   it('projects musical clips through the tempo map', () => {
-    const [c] = track([clip()]).clips;
+    const [c] = track([clip()]).inputs;
     expect(placedWindow(c!, map120)).toEqual({ start: 24000, duration: 24000 });
   });
 
@@ -45,7 +47,7 @@ describe('placedWindow', () => {
       ],
       48000,
     );
-    const [c] = track([clip({ position: 0, duration: 1920 })]).clips;
+    const [c] = track([clip({ at: 0, duration: 1920 })]).inputs;
     const w = placedWindow(c!, ramp);
     expect(w.start).toBe(0);
     // Two beats ramping 120→60 take longer than 1 s but less than 2 s; the
@@ -56,7 +58,7 @@ describe('placedWindow', () => {
   });
 
   it('passes absolute clips through untouched', () => {
-    const [c] = track([clip({ anchor: 'absolute', position: 100, duration: 50 })]).clips;
+    const [c] = track([clip({ anchor: 'absolute', at: 100, duration: 50 })]).inputs;
     expect(placedWindow(c!, map120)).toEqual({ start: 100, duration: 50 });
   });
 });
@@ -72,7 +74,7 @@ describe('loop expansion (clip-looping.md)', () => {
 
   it('tiles at source length when every is omitted, seams click-guarded', () => {
     const spec = planTrack(
-      track([clip({ position: 0, duration: 3840, loop: { enabled: true }, fade_in: 100, fade_out: 200 })]),
+      track([clip({ at: 0, duration: 3840, loop: { enabled: true }, fade_in: 100, fade_out: 200 })]),
       map120,
       hashes,
       frames,
@@ -87,7 +89,7 @@ describe('loop expansion (clip-looping.md)', () => {
 
   it('every ticks keeps repeats on the grid, with a partial last slot', () => {
     const spec = planTrack(
-      track([clip({ position: 0, duration: 2400, loop: { every: 960 } })]),
+      track([clip({ at: 0, duration: 2400, loop: { every: 960 } })]),
       map120,
       hashes,
       frames,
@@ -102,7 +104,7 @@ describe('loop expansion (clip-looping.md)', () => {
 
   it('overlay repetitions ring to the window edge and sum', () => {
     const spec = planTrack(
-      track([clip({ position: 0, duration: 2880, loop: { every: 960, mode: 'overlay' }, fade_out: 300 })]),
+      track([clip({ at: 0, duration: 2880, loop: { every: 960, mode: 'overlay' }, fade_out: 300 })]),
       map120,
       hashes,
       frames,
@@ -130,16 +132,16 @@ describe('loop expansion (clip-looping.md)', () => {
   it('a loop reproducing hand-tiled clips produces the identical plan', () => {
     // The field keys shape: butt-jointed repeats with 480-sample seams.
     const looped = planTrack(
-      track([clip({ position: 0, duration: 2880, loop: { every: 960 }, fade_out: 200 })]),
+      track([clip({ at: 0, duration: 2880, loop: { every: 960 }, fade_out: 200 })]),
       map120,
       hashes,
       frames,
     );
     const hand = planTrack(
       track([
-        clip({ id: 'k1', position: 0, duration: 960, fade_out: 480 }),
-        clip({ id: 'k2', position: 960, duration: 960, fade_in: 480, fade_out: 480 }),
-        clip({ id: 'k3', position: 1920, duration: 960, fade_in: 480, fade_out: 200 }),
+        clip({ id: 'k1', at: 0, duration: 960, fade_out: 480 }),
+        clip({ id: 'k2', at: 960, duration: 960, fade_in: 480, fade_out: 480 }),
+        clip({ id: 'k3', at: 1920, duration: 960, fade_in: 480, fade_out: 200 }),
       ]),
       map120,
       hashes,
@@ -147,10 +149,33 @@ describe('loop expansion (clip-looping.md)', () => {
     expect(looped.clips).toEqual(hand.clips);
   });
 
+  it('repetitions carry the entry pan, exactly as hand-tiled entries would', () => {
+    // Loops only became pannable when placement fields went uniform
+    // (nested-tracks.md §18) — clips never carried pan, so expandLoop
+    // never copied one. The loop contract is that expansion matches the
+    // hand-written equivalent, pan included (Bugbot on #102).
+    const looped = planTrack(
+      track([clip({ at: 0, duration: 1920, loop: { every: 960, fade: 0 }, pan: -0.5 })]),
+      map120,
+      hashes,
+      frames,
+    );
+    const hand = planTrack(
+      track([
+        clip({ id: 'k1', at: 0, duration: 960, pan: -0.5 }),
+        clip({ id: 'k2', at: 960, duration: 960, pan: -0.5 }),
+      ]),
+      map120,
+      hashes,
+    );
+    expect(looped.clips).toEqual(hand.clips);
+    expect(looped.clips.every((c) => c.pan === -0.5)).toBe(true);
+  });
+
   it('refuses to tile a source exhausted by its read offset', () => {
     expect(() =>
       planTrack(
-        track([clip({ position: 0, duration: 3840, loop: { enabled: true }, source_offset: 24000 })]),
+        track([clip({ at: 0, duration: 3840, loop: { enabled: true }, source_offset: 24000 })]),
         map120,
         hashes,
         frames,
@@ -163,8 +188,8 @@ describe('planTrack', () => {
   it('resolves clips to samples and indexes distinct assets in hash order', () => {
     const spec = planTrack(
       track([
-        clip({ id: 'c1', source: 'snare', position: 960, duration: 960 }),
-        clip({ id: 'c2', source: 'kick', position: 0, duration: 960, slip: 100 }),
+        clip({ id: 'c1', audio: 'snare', at: 960, duration: 960 }),
+        clip({ id: 'c2', audio: 'kick', at: 0, duration: 960, slip: 100 }),
       ]),
       map120,
       hashes,
@@ -193,8 +218,8 @@ describe('planTrack', () => {
   });
 
   it('is invariant under YAML clip order (summing is commutative)', () => {
-    const a = clip({ id: 'c1', source: 'kick', position: 960 });
-    const b = clip({ id: 'c2', source: 'snare', position: 0 });
+    const a = clip({ id: 'c1', audio: 'kick', at: 960 });
+    const b = clip({ id: 'c2', audio: 'snare', at: 0 });
     expect(planTrack(track([a, b]), map120, hashes)).toEqual(
       planTrack(track([b, a]), map120, hashes),
     );
@@ -206,7 +231,7 @@ describe('planTrack', () => {
       ['kick', '0000000000000000000000000000000000000000000000000000000000000000'],
     ]);
     const spec = planTrack(
-      track([clip({ id: 'c1', source: 'apple' }), clip({ id: 'c2', source: 'kick' })]),
+      track([clip({ id: 'c1', audio: 'apple' }), clip({ id: 'c2', audio: 'kick' })]),
       map120,
       byHash,
     );
@@ -217,7 +242,7 @@ describe('planTrack', () => {
 
 describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => {
   const nested = (inputs: unknown[], clips: unknown[] = []): Track =>
-    trackSchema.parse({ name: 'outer', type: 'audio', clips, inputs }) as Track;
+    trackSchema.parse({ name: 'outer', inputs: [...inputs, ...clips] }) as Track;
   const place = (over: Record<string, unknown> = {}) => ({ track: 'verse', at: 960, ...over });
 
   it('places the child as a source, at its own origin', () => {
@@ -260,8 +285,8 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
   });
 
   it('sorts placements and clips as one list, so YAML order cannot reach the key', () => {
-    const a = planTrack(nested([place({ at: 0 })], [clip({ position: 960 })]), map120, hashes);
-    const b = planTrack(nested([place({ at: 0 })], [clip({ position: 960 })]), map120, hashes);
+    const a = planTrack(nested([place({ at: 0 })], [clip({ at: 960 })]), map120, hashes);
+    const b = planTrack(nested([place({ at: 0 })], [clip({ at: 960 })]), map120, hashes);
     expect(a).toEqual(b);
     // The placement is earlier, so it sorts first even though `clips`
     // comes first in the file.
@@ -270,7 +295,7 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
 
   it('keys a placed track as buildable: no hash exists until it renders', () => {
     const spec = planTrack(
-      nested([place({ track: 'aaa' })], [clip({ source: 'kick' })]),
+      nested([place({ track: 'aaa' })], [clip({ audio: 'kick' })]),
       map120,
       hashes,
     );
@@ -287,12 +312,12 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     // order, re-keying a parent whose children are byte-identical, which
     // is exactly what a fold must not do (nested-tracks.md §17).
     const asSound = planTrack(
-      nested([], [clip({ id: 'w', source: 'wall', position: 0 }), clip({ id: 'z', source: 'zebra', position: 960 })]),
+      nested([], [clip({ id: 'w', sound: 'wall', at: 0 }), clip({ id: 'z', sound: 'zebra', at: 960 })]),
       map120,
       hashes,
     );
     const asTrack = planTrack(
-      nested([], [clip({ id: 'w', source: 'wall', position: 0 }), clip({ id: 'z', source: 'track:zebra', position: 960 })]),
+      nested([], [clip({ id: 'w', sound: 'wall', at: 0 }), clip({ id: 'z', track: 'zebra', at: 960 })]),
       map120,
       hashes,
     );
@@ -308,7 +333,7 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     // wires (nested-tracks.md §1.11), so a track both clipped and placed
     // is one source, one render, however it is spelled.
     const spec = planTrack(
-      nested([place({ at: 0 })], [clip({ source: 'track:verse', position: 960 })]),
+      nested([place({ at: 0 })], [clip({ track: 'verse', at: 960 })]),
       map120,
       hashes,
     );
@@ -320,7 +345,7 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     // The clip half keeps clip semantics: its read offset comes from
     // source_offset − slip, where a placement's is always 0.
     const slipped = planTrack(
-      nested([], [clip({ source: 'track:verse', source_offset: 100 })]),
+      nested([], [clip({ track: 'verse', source_offset: 100 })]),
       map120,
       hashes,
     );
@@ -475,13 +500,13 @@ describe('stemGenerator.execute', () => {
 describe('track stems in the build graph', () => {
   let root: string;
 
-  const trackYaml = (lines: string[]) => ['name: drums', 'type: audio', 'clips:', ...lines, ''].join('\n');
+  const trackYaml = (lines: string[]) => ['name: drums', 'inputs:', ...lines, ''].join('\n');
 
   const clipYaml = (over: Record<string, string | number> = {}) => {
     const fields: Record<string, string | number> = {
       id: 'kick-1',
-      source: 'kick',
-      position: 960,
+      audio: 'kick',
+      at: 960,
       duration: 960,
       ...over,
     };
@@ -492,7 +517,7 @@ describe('track stems in the build graph', () => {
     root = mkdtempSync(join(tmpdir(), 'field-trackgraph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
-    createTrack(root, 'creek', 'drums', 'audio');
+    createTrack(root, 'creek', 'drums');
     const src = join(root, '..', `field-track-src-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
@@ -556,7 +581,7 @@ describe('track stems in the build graph', () => {
     // An absolute-anchored clip is untouched by tempo.
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      trackYaml(clipYaml({ anchor: 'absolute', position: 100, duration: 200 })),
+      trackYaml(clipYaml({ anchor: 'absolute', at: 100, duration: 200 })),
     );
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(3);
@@ -587,7 +612,6 @@ describe('track stems in the build graph', () => {
       join(root, 'songs/creek/tracks/main.yaml'),
       [
         'name: main',
-        'type: audio',
         'inputs:',
         '  - track: drums',
         '    at: 0',
@@ -601,7 +625,7 @@ describe('track stems in the build graph', () => {
 
     // Reordering clips in the file is not an edit to the sound.
     const c1 = clipYaml();
-    const c2 = clipYaml({ id: 'kick-2', position: 1920 });
+    const c2 = clipYaml({ id: 'kick-2', at: 1920 });
     writeFileSync(join(root, 'songs/creek/tracks/drums.yaml'), trackYaml([...c1, ...c2]));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(2); // new clip: renders once…
@@ -618,7 +642,7 @@ describe('track stems in the build graph', () => {
     rmSync(src);
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', source: 'snare', position: 1920 })]),
+      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', audio: 'snare', at: 1920 })]),
     );
 
     const state = { runs: 0 };
@@ -635,7 +659,7 @@ describe('track stems in the build graph', () => {
     writeFileSync(assetsPath, readFileSync(assetsPath, 'utf8').replace('name: snare', 'name: apple'));
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', source: 'apple', position: 1920 })]),
+      trackYaml([...clipYaml(), ...clipYaml({ id: 'snare-1', audio: 'apple', at: 1920 })]),
     );
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(1);
@@ -652,14 +676,12 @@ describe('track stems in the build graph', () => {
     );
   });
 
-  it('leaves midi out of the graph, but not an empty audio track', async () => {
-    createTrack(root, 'creek', 'sketch', 'midi');
-    createTrack(root, 'creek', 'spare', 'audio');
-    // `spare` has no clips and renders as silence, which is a stem
-    // (stem.ts renderableTrack) — a song's output starts exactly this way.
-    // `sketch` is midi and has no audio to render at all.
-    // `main` is the scaffolded output track — empty, and a stem for the
-    // same reason `spare` is.
+  it('every track is in the graph — an empty one renders as silence', async () => {
+    // `type: midi` retired with the one-list format (nested-tracks.md
+    // §18), so there is no kind of track that stays out of the graph:
+    // `spare` has no entries and renders as the silence it contains,
+    // which is exactly how a song's output starts.
+    createTrack(root, 'creek', 'spare');
     expect(queryDeps(root, '//songs/creek/track:all')).toEqual([
       '//songs/creek/track:drums',
       '//songs/creek/track:main',
@@ -675,7 +697,7 @@ describe('clips over rule outputs', () => {
     root = mkdtempSync(join(tmpdir(), 'field-clipsrc-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
-    createTrack(root, 'creek', 'drums', 'audio');
+    createTrack(root, 'creek', 'drums');
     const src = join(root, '..', `field-clipsrc-${Math.random()}.wav`);
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
@@ -696,12 +718,11 @@ describe('clips over rule outputs', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       [
         'name: drums',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: kick-1',
-        '    source: kick-24',
+        '    sound: kick-24',
         '    anchor: absolute',
-        '    position: 3',
+        '    at: 3',
         '    duration: 4',
         '',
       ].join('\n'),
@@ -712,17 +733,17 @@ describe('clips over rule outputs', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('rejects clips without a source', () => {
-    const base = { id: 'c', position: 0, duration: 1 };
-    expect(() => trackSchema.parse({ name: 't', type: 'audio', clips: [base] })).toThrow();
+  it('rejects an entry that plays nothing', () => {
+    const base = { id: 'c', at: 0, duration: 1 };
+    expect(() => trackSchema.parse({ name: 't', inputs: [base] })).toThrow();
   });
 
   it('plans buildable-sound sources after hash-sorted committed ones, name-sorted', () => {
     const spec = planTrack(
       track([
-        clip({ id: 'c1', source: 'kick' }),
-        clip({ id: 'c2', source: 'pad-sc', position: 0 }),
-        clip({ id: 'c3', source: 'kit-sc', position: 0 }),
+        clip({ id: 'c1', audio: 'kick' }),
+        clip({ id: 'c2', sound: 'pad-sc', at: 0 }),
+        clip({ id: 'c3', sound: 'kit-sc', at: 0 }),
       ]),
       map120,
       hashes, // kick has a hash; pad-sc/kit-sc are buildable
@@ -735,10 +756,10 @@ describe('clips over rule outputs', () => {
   it('diagnoses a clip on an unknown source', () => {
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
-      ['name: drums', 'type: audio', 'clips:', '  - id: c1', '    source: ghost', '    position: 0', '    duration: 4', ''].join('\n'),
+      ['name: drums', 'inputs:', '  - id: c1', '    audio: ghost', '    at: 0', '    duration: 4', ''].join('\n'),
     );
     expect(loadProject(root).diagnostics.map((d) => d.message).join('\n')).toContain(
-      'clip "c1" references unknown source "ghost"',
+      'input "c1" references unknown audio "ghost"',
     );
   });
 
@@ -806,11 +827,11 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     rmSync(src);
     // The child: silence, then the kick at sample 3. Seven samples long.
     writeTrack('inner', [
-      'clips:',
+      'inputs:',
       '  - id: kick-1',
-      '    source: kick',
+      '    audio: kick',
       '    anchor: absolute',
-      '    position: 3',
+      '    at: 3',
       '    duration: 4',
     ]);
   });
@@ -823,7 +844,7 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
     writeFileSync(
       join(root, `songs/creek/tracks/${name}.yaml`),
-      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+      [`name: ${name}`, ...body, ''].join('\n'),
     );
   }
 
@@ -860,11 +881,11 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
 
   it('a clip plays a track: the same edge, wearing the clip spelling (§1.11)', async () => {
     writeTrack('outer', [
-      'clips:',
+      'inputs:',
       '  - id: inner-1',
-      '    source: track:inner',
+      '    track: inner',
       '    anchor: absolute',
-      '    position: 10',
+      '    at: 10',
     ]);
     expect(loadProject(root).diagnostics).toEqual([]);
     // Wired exactly as a placement wires: the track is a dependency.
@@ -886,11 +907,11 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     // a clip's window starts where source_offset says — here past the
     // child's three silent samples, straight to the kick.
     writeTrack('outer', [
-      'clips:',
+      'inputs:',
       '  - id: inner-1',
-      '    source: track:inner',
+      '    track: inner',
       '    anchor: absolute',
-      '    position: 0',
+      '    at: 0',
       '    duration: 4',
       '    source_offset: 3',
     ]);
@@ -905,11 +926,11 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     // loop form legal on a buildable source — its length is unknowable
     // while planning, so tiling at source length is refused by check.
     writeTrack('outer', [
-      'clips:',
+      'inputs:',
       '  - id: inner-1',
-      '    source: track:inner',
+      '    track: inner',
       '    anchor: absolute',
-      '    position: 0',
+      '    at: 0',
       '    duration: 20',
       '    loop:',
       '      every: 10',
@@ -970,13 +991,12 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
 
   it('renders a parent that holds tracks and clips of its own', async () => {
     writeTrack('outer', [
-      'clips:',
-      '  - id: kick-direct',
-      '    source: kick',
-      '    anchor: absolute',
-      '    position: 0',
-      '    duration: 4',
       'inputs:',
+      '  - id: kick-direct',
+      '    audio: kick',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 4',
       '  - track: inner',
       '    anchor: absolute',
       '    at: 10',
@@ -1036,11 +1056,11 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
 
     runs.length = 0;
     writeTrack('inner', [
-      'clips:',
+      'inputs:',
       '  - id: kick-1',
-      '    source: kick',
+      '    audio: kick',
       '    anchor: absolute',
-      '    position: 5', // moved
+      '    at: 5', // moved
       '    duration: 4',
     ]);
     await buildLabels(root, ['//songs/creek/track:outer'], runner);
@@ -1067,11 +1087,11 @@ describe('a track as the song output (nested-tracks.md §7 chunk 2)', () => {
     rmSync(src);
     // Seven samples of content: silence, then the kick at sample 3.
     writeTrack('inner', [
-      'clips:',
+      'inputs:',
       '  - id: k',
-      '    source: kick',
+      '    audio: kick',
       '    anchor: absolute',
-      '    position: 3',
+      '    at: 3',
       '    duration: 4',
     ]);
   });
@@ -1084,7 +1104,7 @@ describe('a track as the song output (nested-tracks.md §7 chunk 2)', () => {
     mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
     writeFileSync(
       join(root, `songs/creek/tracks/${name}.yaml`),
-      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+      [`name: ${name}`, ...body, ''].join('\n'),
     );
   }
 

@@ -15,8 +15,13 @@ export function singleInputSources(spec: SingleInputSpec): string[] {
   return [spec.source];
 }
 
-// Resolve a source ref against the song's visible names; the messages
-// are shared by clips (model/project.ts) so the two sites cannot drift.
+// Resolve a sound's `source:` ref against the song's visible names.
+// One caller: validateSingleInput, below. Track entries stopped sharing
+// this when the one-list format landed (nested-tracks.md §18) — their
+// messages name the field the reference is about (`unknown audio`,
+// `unknown sound`), which this function's kind-blind "unknown source"
+// cannot, so the entry path resolves per kind in model/project.ts and
+// the two sites are deliberately separate rather than shared.
 export function checkSource(ref: string, what: string, ctx: ValidateContext): void {
   const shared = sharedAssetName(ref);
   if (shared !== undefined) {

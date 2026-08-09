@@ -59,7 +59,7 @@ put your checkout into a diff.
 
 Times are authored in musical notation — `[bar]`, `[bar, beat]`,
 `[bar, beat, tick]` — resolved through the song's meter map at load, so
-`position: [4, 4]` is "one beat before bar 5". Underneath they are integer
+`at: [4, 4]` is "one beat before bar 5". Underneath they are integer
 ticks at 960 per quarter note, and `bar.beat.tick` (like `13.1.1`) is how
 the CLI displays them. The comments in the YAML files survive
 `field fmt` — formatting is canonical, but your annotations are yours.
@@ -249,12 +249,12 @@ Field's offline effects — `eq`, `limit`, `reverb` — appear in three
 places in creek, one of each:
 
 - **A wrapper track**: `track:kit-punch` runs the kit *recipe* through
-  the EQ — one clip playing the whole of `kit-sc`, one `eq` insert (low
-  shelf for punch, high shelf for air) — and the drum clips play the
-  EQ'd render by clipping the track (`source: track:kit-punch`). Edit
-  the shelf, and render → stem → sum rebuild in one pass. This was an
-  `eq` *sound* until sounds began folding into tracks
-  (nested-tracks.md §1.12, §17); the render is bit-identical.
+  the EQ — one entry playing the whole of `kit-sc`, one `eq` insert (low
+  shelf for punch, high shelf for air) — and the drums play the EQ'd
+  render through an entry of their own (`track: kit-punch`). Edit the
+  shelf, and render → stem → sum rebuild in one pass. This was an `eq`
+  *sound* until sounds began folding into tracks (nested-tracks.md
+  §1.12, §17, §18); the render is bit-identical.
 - **A track insert**: the pad carries a `reverb` insert, so the wash is
   baked into its stem — and rings past the last clip (the stem simply
   grows by the tail).
@@ -317,8 +317,8 @@ reaches the arrangement without an imported file existing anywhere — from
 
 ```yaml
 - id: intro-pad-k3m7q
-  source: pad-sc
-  position: [1]
+  sound: pad-sc
+  at: [1]
   duration: [4]
   fade_out: 30000 # one beat, crossfading into the verse pad below
 ```

@@ -130,7 +130,7 @@ Every automatic type has a `Generator` in `src/generators/` — the code
 that generates it mechanically, in-graph, cached. The `generative` type
 has none: its generation is human-triggered (`field generate`), its
 variants are committed under `audio/<sound>/`, and its label resolves
-to the chosen variant (`field choose` repoints it; clips reference the
+to the chosen variant (`field choose` repoints it; entries reference the
 sound by name and follow).
 
 - **`normalize`** — sample-rate/bit-depth conversion in the daemon's
@@ -169,34 +169,35 @@ sound by name and follow).
   gap is where the trouble lives: `voice: Siri` followed a Settings
   toggle the cache key could not see, and two consecutive CI renders of
   it were observed to differ.
-- **`stem`** — the first *implicit* type: every audio track is buildable
+- **`stem`** — the first *implicit* type: every track is buildable
   as `//songs/<song>/track:<name>` without declaring anything, an empty one
   rendering as the silence it contains, because the track file **is** the declaration — a mix file
-  defines a `mix`, a track file implies a `stem`. Content means clips,
-  placed tracks (`inputs:`), or both: a placed track is one more source
-  in the same list, so a track→track edge is an ordinary graph edge and
-  a track placed three times is one render placed three times. A track can
+  defines a `mix`, a track file implies a `stem`. Content is the track's
+  one `inputs:` list (nested-tracks.md §18): each entry places a
+  `track:`, an `audio:` file, or (until sounds fold away) a `sound:` —
+  a placed track is one more source in the same list, so a track→track
+  edge is an ordinary graph edge and a track placed three times is one
+  render placed three times. A track can
   also be a song's *output* — the one named `main` — in which case it
   carries the song's declared `length` and `loop` and renders exactly that
   long, the way the `mix` rule does. A bare song reference resolves to it:
-  `creek` means `//songs/creek/track:main`. A clip's
-  `source:` is an asset, a sound, a shared pin, or a track spelled
-  `track:<name>` — the same edge as a placement, wearing the clip
-  spelling — and clipping an automatic sound or a track pulls its whole
+  `creek` means `//songs/creek/track:main`. Playing a buildable
+  sound or a track pulls its whole
   definition into the stem's subgraph, so the arrangement can play audio
   nothing ever committed, and editing the definition rebuilds straight
   through stem and mix. It places the
-  track's clips through the tempo map (position, source offset, slip,
-  clip gain, linear fades) and sums them into a pre-fader Float32 stereo
-  stem, in TypeScript — offline mixing has no deadline
+  entries through the tempo map (`at`, source offset, slip,
+  entry gain and pan, linear fades) and sums them into a pre-fader
+  Float32 stereo stem in the render daemon
   ([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). The
   action key hashes the *resolved placement plan* in samples, not the raw
-  YAML: a tempo edit rebuilds exactly the tracks whose musical clips moved,
-  reordering clips in the file changes nothing, and track `gain_db`/`pan`
-  are excluded entirely — they are mix-stage parameters, so a fader move
-  never re-renders a stem. Assets must already be at the project sample
-  rate: Field never resamples implicitly (mix-assembly.md §4). A clip's
-  `loop:` map tiles its source to fill the window
+  YAML: a tempo edit rebuilds exactly the tracks whose musical entries
+  moved, reordering entries in the file changes nothing, and entry
+  spelling is wiring — a sound folding into a track cannot re-key a
+  parent whose children are byte-identical. Assets must already be at
+  the project sample
+  rate: Field never resamples implicitly (mix-assembly.md §4). An
+  entry's `loop:` map tiles its source to fill the window
   ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
   repetitions expand into ordinary placement-plan entries — grid-locked
   via `loop.every`, cut or rung-out per `loop.mode`, seams click-guarded

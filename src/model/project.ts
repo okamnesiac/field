@@ -5,12 +5,11 @@ import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { wavFrameCount } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
-import { expandLoop, placedInput, placedWindow, renderableTrack } from '../generators/stem.js';
+import { entryRef, expandLoop, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
-import { sharedAssetName, SONG_OUTPUT_NAME, trackRefName } from '../labels.js';
-import { checkSource } from '../generators/single-input.js';
+import { sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
 import {
   assetsFileOrder,
@@ -607,11 +606,12 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Clip sources resolve like every other source (project-layout.md
-    // §4.3, checkSource): a bare name in the song's one namespace, or a
-    // shared pin — the whole visibility rule (§1.5) is that no spelling
-    // reaches another song. Takes reference assets only: a take is a
-    // recording, and its asset is the ledger row import wrote.
+    // Entry references resolve per kind, each in its field's own
+    // namespace (nested-tracks.md §18) — the whole visibility rule
+    // (project-layout.md §1.5) is that no spelling reaches another song,
+    // and the one cross-scope spelling is `audio: //shared/asset:`.
+    // Takes reference assets only: a take is a recording, and its asset
+    // is the ledger row import wrote.
     const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
     // Where a committed source's bytes live (undefined for buildable
     // sounds): the ledger file, the shared file, or a chosen variant.
@@ -699,109 +699,144 @@ function validate(project: LoadedProject): void {
       // to mean one thing regardless of who consumes it.
       const { tempo: trackTempo, meter: trackMeter } = timeByTrack.get(track.data.name)!;
 
-      const trackCtx = {
-        root: project.root,
-        songDir: song.dir,
-        names,
-        push: (message: string) => push(track.path, message),
-        resolveFile: (baseDir: string, file: string) =>
-          resolveAssetFile(project.root, baseDir, file),
-      };
-      const clipIds = new Set<string>();
-      for (const clip of track.data.clips) {
-        if (clipIds.has(clip.id)) push(track.path, `duplicate clip id "${clip.id}"`);
-        clipIds.add(clip.id);
-        // The clip's source is an asset, a sound, or a shared pin
-        // (mix-assembly.md §5; project-layout.md §4.3) — same resolution,
-        // same messages, as a sound's own source — or a track, spelled
-        // `track:<name>` (nested-tracks.md §1.11), checked exactly as a
-        // placement is: it resolves to a renderable track that is not
-        // this one.
-        const clippedTrack = trackRefName(clip.source);
-        if (clippedTrack !== undefined) {
-          if (clippedTrack === track.data.name) {
-            // The locally decidable cycle, with its own message, same as
-            // a placement's ("cycle: a → a" describes the mistake less
-            // well than naming it).
-            push(track.path, `clip "${clip.id}" clips this track inside itself`);
-            continue;
-          }
-          const child = trackByName.get(clippedTrack);
-          if (child === undefined) {
-            push(track.path, `clip "${clip.id}" references unknown track "${clippedTrack}"`);
-            continue;
-          }
-          if (!renderableTrack(child)) {
-            push(track.path, `clip "${clip.id}" clips a midi track, which renders no audio`);
-          }
-        } else {
-          checkSource(clip.source, `clip "${clip.id}"`, trackCtx);
+      // One entry loop (nested-tracks.md §18): what an entry plays is
+      // named by its field, so resolution is per kind and never guesses —
+      // audio: refuses a name that renders, sound: refuses committed
+      // bytes, each pointing at the field that owns the name.
+      const entryIds = new Set<string>();
+      track.data.inputs.forEach((entry, i) => {
+        // Named by id when it has one — ids are optional (§18 decision
+        // 3) — else by position and target, the way placements were.
+        const target = entry.track ?? entry.sound ?? entry.audio ?? '?';
+        const what = entry.id !== undefined ? `input "${entry.id}"` : `input ${i + 1} ("${target}")`;
+        if (entry.id !== undefined) {
+          if (entryIds.has(entry.id)) push(track.path, `duplicate input id "${entry.id}"`);
+          entryIds.add(entry.id);
         }
-        // Musical arrays need the musical anchor: an absolute clip's
+        if (entry.track !== undefined) {
+          if (entry.track === track.data.name) {
+            // The locally decidable cycle, with its own message —
+            // "cycle: a → a" describes the mistake less well than
+            // naming it.
+            push(track.path, `${what} places this track inside itself`);
+            return;
+          }
+          if (!trackByName.has(entry.track)) {
+            // Diagnosed, not fatal to the entry: the time fields still
+            // resolve, the way an unknown clip source always worked —
+            // one mistake, one message, the rest of the file readable.
+            push(track.path, `${what} references unknown track "${entry.track}"`);
+          }
+        } else if (entry.audio !== undefined) {
+          const shared = sharedAssetName(entry.audio);
+          if (shared !== undefined) {
+            if (!names.shared.has(shared)) {
+              push(track.path, `${what} references unknown shared asset "${shared}"`);
+            }
+          } else if (!names.assets.has(entry.audio)) {
+            const rendersInstead =
+              names.sounds.has(entry.audio) ||
+              names.chosen.has(entry.audio) ||
+              names.ungenerated.has(entry.audio) ||
+              names.unchosen.has(entry.audio);
+            push(
+              track.path,
+              rendersInstead
+                ? `${what} audio: names the sound "${entry.audio}" — a sound is a ` +
+                    `definition, not committed bytes; use sound: (nested-tracks.md §18)`
+                : `${what} references unknown audio "${entry.audio}"`,
+            );
+          }
+        } else if (entry.sound !== undefined) {
+          if (names.unchosen.has(entry.sound)) {
+            push(
+              track.path,
+              `${what} sources "${entry.sound}", which has no chosen variant yet — ` +
+                `field choose ${entry.sound} first`,
+            );
+          }
+          if (
+            !names.sounds.has(entry.sound) &&
+            !names.chosen.has(entry.sound) &&
+            // Unchosen is a state of a sound that exists — it got its own
+            // diagnostic above, and "unknown" on top of it would be false.
+            !names.unchosen.has(entry.sound) &&
+            !names.ungenerated.has(entry.sound)
+          ) {
+            push(
+              track.path,
+              names.assets.has(entry.sound)
+                ? `${what} sound: names the asset "${entry.sound}" — committed bytes ` +
+                    `are audio:'s to name (nested-tracks.md §18)`
+                : `${what} references unknown sound "${entry.sound}"`,
+            );
+          }
+        }
+        // Musical arrays need the musical anchor: an absolute entry's
         // scalars are samples, and silently converting [9, 2] would be a
-        // unit pun, not a convenience. A clip whose time fields fail to
+        // unit pun, not a convenience. An entry whose time fields fail to
         // resolve skips the numeric checks below — its diagnostic already
         // holds the gate.
         if (
-          clip.anchor === 'absolute' &&
-          [clip.position, clip.duration, clip.loop?.every].some((v) => Array.isArray(v))
+          entry.anchor === 'absolute' &&
+          [entry.at, entry.duration, entry.loop?.every].some((v) => Array.isArray(v))
         ) {
           push(
             track.path,
-            `clip "${clip.id}" uses musical time on an absolute clip — ` +
+            `${what} uses musical time on an absolute entry — ` +
               `musical arrays need anchor: musical`,
           );
-          continue;
+          return;
         }
-        const pos = positionTicks(track.path, `clip "${clip.id}" position`, clip.position, trackMeter);
-        if (pos === undefined) continue;
-        clip.position = pos;
-        // An *absent* duration is the clip declining to truncate, and has
+        const pos = positionTicks(track.path, `${what} at`, entry.at, trackMeter);
+        if (pos === undefined) return;
+        entry.at = pos;
+        // An *absent* duration is the entry declining to truncate, and has
         // to be told apart from one that failed to resolve: the second
         // already pushed a diagnostic and must skip the checks below,
-        // while the first is a valid clip that still has to pass them.
+        // while the first is a valid entry that still has to pass them.
         // Collapsing the two would let `duration:` be omitted and take
-        // every remaining clip check with it.
-        if (clip.duration !== undefined) {
-          const dur = spanTicks(track.path, `clip "${clip.id}" duration`, clip.duration, pos, trackMeter);
-          if (dur === undefined) continue;
+        // every remaining check with it.
+        if (entry.duration !== undefined) {
+          const dur = spanTicks(track.path, `${what} duration`, entry.duration, pos, trackMeter);
+          if (dur === undefined) return;
           if (dur <= 0) {
-            push(track.path, `clip "${clip.id}" duration resolves to zero ticks`);
-            continue;
+            push(track.path, `${what} duration resolves to zero ticks`);
+            return;
           }
-          clip.duration = dur;
-        } else if (clip.loop?.enabled) {
+          entry.duration = dur;
+        } else if (entry.loop?.enabled) {
           // A loop tiles a window, so it needs one (clip-looping.md §1).
           // "As long as the source" and "repeat to fill the window" are
           // contrary instructions, not a default and an override.
           push(
             track.path,
-            `clip "${clip.id}" loops but declares no duration — a loop tiles a window, ` +
+            `${what} loops but declares no duration — a loop tiles a window, ` +
               `so give it a duration or drop the loop`,
           );
-          continue;
+          return;
         }
-        if (clip.loop?.every !== undefined) {
-          const every = spanTicks(track.path, `clip "${clip.id}" loop.every`, clip.loop.every, pos, trackMeter);
-          if (every === undefined) continue;
+        if (entry.loop?.every !== undefined) {
+          const every = spanTicks(track.path, `${what} loop.every`, entry.loop.every, pos, trackMeter);
+          if (every === undefined) return;
           if (every <= 0) {
-            push(track.path, `clip "${clip.id}" loop.every resolves to zero ticks`);
-            continue;
+            push(track.path, `${what} loop.every resolves to zero ticks`);
+            return;
           }
-          clip.loop.every = every;
+          entry.loop.every = every;
         }
         // Loops are diagnosed here in full — running the same expansion the
         // plan will run — because check is the gate: a check-clean project
         // must never fail to construct its graph (#21 review).
-        if (clip.loop?.enabled && trackTempo) {
-          const loop = clip.loop;
-          const committed = fileBySource(clip.source);
+        if (entry.loop?.enabled && trackTempo) {
+          const loop = entry.loop;
+          const committed = fileBySource(entryRef(entry));
           if (committed === undefined && loop.every === undefined) {
-            const what = clippedTrack !== undefined ? 'track' : 'sound';
+            const kind = entry.track !== undefined ? 'track' : 'sound';
             push(
               track.path,
-              `clip "${clip.id}" loops a ${what} — set loop.every ` +
-                `(a ${what}'s length is unknown before it builds)`,
+              `${what} loops a ${kind} — set loop.every ` +
+                `(a ${kind}'s length is unknown before it builds)`,
             );
           } else {
             // Tiling at source length needs the frame count; the seek-based
@@ -815,7 +850,7 @@ function validate(project: LoadedProject): void {
                   frames = wavFrameCount(resolved.path);
                 } catch (err) {
                   sourceUnreadable = true;
-                  push(track.path, `clip "${clip.id}" loop source: ${(err as Error).message}`);
+                  push(track.path, `${what} loop source: ${(err as Error).message}`);
                 }
               } else {
                 sourceUnreadable = true; // the source itself is already diagnosed
@@ -823,14 +858,14 @@ function validate(project: LoadedProject): void {
             }
             if (!sourceUnreadable) {
               try {
-                for (const rep of expandLoop(clip, loop, trackTempo, frames)) {
+                for (const rep of expandLoop(entry, loop, trackTempo, frames)) {
                   // Fades must fit slots (clip-looping.md §3): overlapping
                   // seam fades duck the audio silently — every: 30 at 120 bpm
                   // makes 750-sample slots the default 480+480 outgrows.
                   if (rep.fade_in + rep.fade_out > rep.duration) {
                     push(
                       track.path,
-                      `clip "${clip.id}" loop fades (${rep.fade_in} + ${rep.fade_out} samples) ` +
+                      `${what} loop fades (${rep.fade_in} + ${rep.fade_out} samples) ` +
                         `exceed a ${rep.duration}-sample repetition — ` +
                         `shrink loop.fade or lengthen loop.every`,
                     );
@@ -838,102 +873,27 @@ function validate(project: LoadedProject): void {
                   }
                 }
               } catch (err) {
-                push(track.path, (err as Error).message); // names the clip itself
+                push(track.path, (err as Error).message); // names the entry itself
               }
             }
           }
         }
-        // Fades live inside the clip window; whether they fit is only known
-        // in samples, so musical clips are checked through the tempo map.
+        // Fades live inside the window; whether they fit is only known
+        // in samples, so musical entries are checked through the tempo map.
         if (trackTempo) {
-          const { duration } = placedWindow(clip, trackTempo);
+          const { duration } = placedWindow(entry, trackTempo);
           // An omitted duration has no window until the source renders, so
-          // the daemon is the only place that check can happen — the same
-          // backstop a placement with no declared window already relies on.
-          if (duration !== undefined && clip.fade_in + clip.fade_out > duration) {
+          // the daemon is the only place that check can happen.
+          if (duration !== undefined && entry.fade_in + entry.fade_out > duration) {
             push(
               track.path,
-              `clip "${clip.id}" fades (${clip.fade_in} + ${clip.fade_out} samples) ` +
-                `exceed its ${duration}-sample window`,
-            );
-          }
-        }
-      }
-
-      // Placed tracks (nested-tracks.md §1.3). A placement is a clip in
-      // every respect except what it plays, so it is checked like one:
-      // the reference resolves to something renderable, the time
-      // resolves, and a declared window holds its fades. Placements have
-      // no IDs yet (§6), so they are named by position.
-      //
-      // Either spelling of a placement counts: a clip playing a track
-      // (§1.11) places it just as an `inputs:` entry does, and a midi
-      // parent has no stem to sum either one into — buildGraph would
-      // accept the file and then never render the edge.
-      const placesTracks =
-        track.data.inputs.length > 0 ||
-        track.data.clips.some((clip) => trackRefName(clip.source) !== undefined);
-      if (placesTracks && track.data.type !== 'audio') {
-        push(track.path, `a midi track cannot place tracks — only an audio track sums audio`);
-      }
-      track.data.inputs.forEach((input, i) => {
-        const what = `placement ${i + 1} ("${input.track}")`;
-        if (input.track === track.data.name) {
-          // A cycle, but the locally decidable one, and the same reason
-          // §1.7 gives a send that reaches into itself its own message:
-          // "cycle: a → a" describes the mistake less well than naming it.
-          push(track.path, `${what} places this track inside itself`);
-          return;
-        }
-        const child = trackByName.get(input.track);
-        if (child === undefined) {
-          push(track.path, `${what} references unknown track "${input.track}"`);
-          return;
-        }
-        if (!renderableTrack(child)) {
-          // Midi is the only unplaceable kind now: it has no stem. An
-          // empty audio track has one, and it is silence.
-          push(track.path, `${what} places a midi track, which renders no audio`);
-        }
-        if (
-          input.anchor === 'absolute' &&
-          [input.at, input.duration].some((v) => Array.isArray(v))
-        ) {
-          push(
-            track.path,
-            `${what} uses musical time on an absolute placement — ` +
-              `musical arrays need anchor: musical`,
-          );
-          return;
-        }
-        const at = positionTicks(track.path, `${what} at`, input.at, trackMeter);
-        if (at === undefined) return;
-        input.at = at;
-        if (input.duration !== undefined) {
-          const dur = spanTicks(track.path, `${what} duration`, input.duration, at, trackMeter);
-          if (dur === undefined) return;
-          if (dur <= 0) {
-            push(track.path, `${what} duration resolves to zero ticks`);
-            return;
-          }
-          input.duration = dur;
-        }
-        // Fades live inside the window, same as a clip's. An omitted
-        // duration has no window until the child renders, so the daemon
-        // is the only place that check can happen — it rejects
-        // fade_in + fade_out > duration, which is the backstop for the
-        // one case check cannot reach.
-        if (trackTempo) {
-          const { duration } = placedInput(input, trackTempo);
-          if (duration !== undefined && input.fade_in + input.fade_out > duration) {
-            push(
-              track.path,
-              `${what} fades (${input.fade_in} + ${input.fade_out} samples) ` +
+              `${what} fades (${entry.fade_in} + ${entry.fade_out} samples) ` +
                 `exceed its ${duration}-sample window`,
             );
           }
         }
       });
+
     }
 
     // Containment cycles. Sound sources already made cycles declarable
@@ -951,18 +911,11 @@ function validate(project: LoadedProject): void {
         return;
       }
       containmentState.set(name, 'visiting');
-      for (const input of trackByName.get(name)?.inputs ?? []) {
-        if (input.track !== name && trackByName.has(input.track)) {
-          visitTrack(input.track, [...path, name]);
-        }
-      }
-      // A clip that plays a track is a containment edge like any
-      // placement (§1.11); direct self-clipping already got its clearer
-      // message above, so it is skipped here the same way.
-      for (const clip of trackByName.get(name)?.clips ?? []) {
-        const child = trackRefName(clip.source);
-        if (child !== undefined && child !== name && trackByName.has(child)) {
-          visitTrack(child, [...path, name]);
+      // The entries that are containment edges are exactly the ones that
+      // place a track (§18) — audio and generator entries are leaves.
+      for (const entry of trackByName.get(name)?.inputs ?? []) {
+        if (entry.track !== undefined && entry.track !== name && trackByName.has(entry.track)) {
+          visitTrack(entry.track, [...path, name]);
         }
       }
       containmentState.set(name, 'done');

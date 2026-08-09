@@ -4,7 +4,6 @@
 # this file re-listed every instrument and drifted from main whenever one
 # of them moved.
 name: bed
-type: audio
 inputs:
   - track: phrase
     at: [1]

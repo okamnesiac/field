@@ -51,7 +51,7 @@ project/
 │       ├── song.yaml
 │       ├── tempo.yaml
 │       ├── markers.yaml
-│       ├── tracks/       # one file per track: routing, inserts, clips
+│       ├── tracks/       # one file per track: inserts and its inputs
 │       ├── sounds/       # one file per defined sound (type: + source:)
 │       ├── takes/        # take manifests (see below)
 │       ├── comps/
@@ -90,74 +90,80 @@ time and musical time (`bar.beat.tick`). Everything that stores both — take
 manifests store `started_at_samples` *and* `musical_position` — must define
 which is authoritative and when the other is derived, so the two can never
 disagree. The semantics of editing the tempo map under existing content
-(do clips hold musical position or sample position?) is a per-track,
+(do entries hold musical position or sample position?) is a per-track,
 explicitly-stored property, not an ambient behavior.
 
 Time fields in project YAML take two spellings
 ([projects/all/musical-time.md](projects/all/musical-time.md)): a scalar is
-ticks (samples on absolute-anchored clips), and an array is musical,
+ticks (samples on absolute-anchored entries), and an array is musical,
 resolved through the song's meter map. Positions are ordinal and 1-indexed
 — `at: [9, 2]` is bar 9, beat 2 — while spans are cardinal counts where
 zero is legal — `duration: [4]` is four bars, `every: [0, 2]` is two beats,
 advanced from the field's anchor so meter changes mean what a musician
-means (`loop.every` resolves once, at the clip's position, and repeats as
+means (`loop.every` resolves once, at the entry's position, and repeats as
 that fixed interval thereafter). Arrays are resolved to ticks at load:
 either spelling produces the
 same build, and `field fmt` preserves whichever notation the author wrote,
 keeping arrays single-line.
 
-## Clips are metadata; audio is immutable
+## Entries are metadata; audio is immutable
 
-Audio files are never edited in place. A clip's content is its `source:`
-— an asset, a sound, or a shared pin, resolved exactly like a sound's
-own source, or a track spelled `track:<name>`. The prefix rather than a
-bare slug because tracks live deliberately outside the song's one
-namespace — a track and a sound may share a name — and a bare slug that
-tried both would be a search path; it is the same spelling the track's
-label already uses. Clipping an automatic sound or a track means the
-arrangement plays a render that is never committed, only its definition;
-clipping a `generative` sound plays its chosen committed variant. A clip
-carries three independent, non-destructive offsets:
+Audio files are never edited in place. A track file is a name, an
+optional `time:`, optional `inserts:`, and one list: `inputs:`
+(nested-tracks.md §18). Every entry places one thing on the track's
+timeline, named by the entry's field — the kind lives in the field name,
+never in a value prefix:
 
-1. **Timeline position** — where the clip sits in the arrangement (musical
+- `track: <name>` — another track's render;
+- `audio: <name>` — committed bytes, from the song's ledger or the one
+  cross-scope spelling `audio: //shared/asset:<name>`;
+- `sound: <name>` — a defined sound, transitional for exactly as long as
+  `sounds/` exists. Playing a buildable sound (or a track) means the
+  arrangement plays a render that is never committed, only its
+  definition; playing a `generative` sound plays its chosen committed
+  variant.
+
+Placement fields are uniform across kinds — none of them means something
+different depending on what produced the audio. An entry carries three
+independent, non-destructive offsets:
+
+1. **`at`** — where the entry sits on this track's timeline (musical
    position by default).
-2. **Source offset** — where the clip's window starts within its source asset.
-3. **Slip** — shifts content against the grid without moving the clip's
-   boundaries (as in Nio).
+2. **`source_offset`** — where the entry's window starts within its
+   source.
+3. **`slip`** — shifts content against the grid without moving the
+   window's boundaries (as in Nio).
 
-Fades, gain, and edits are clip metadata too. Every edit is a diff.
+Fades, gain, pan, loops, and an optional `id` — the handle automation
+attaches to — are entry metadata too. Every edit is a diff.
 
-A clip's `duration` may be omitted, and then the clip plays the whole
-source — the same thing an omitted duration means on a placement. The
-length is resolved when the source has rendered rather than while
-planning, so it never enters the action key: "the whole of it" re-keys
-through the source's own content hash. A looping clip is the exception
-and must declare one, because a loop tiles a window and the source fills
-it.
+An entry's `duration` may be omitted, and then it plays the whole
+source. The length is resolved when the source has rendered rather than
+while planning, so it never enters the action key: "the whole of it"
+re-keys through the source's own content hash. A looping entry is the
+exception and must declare one, because a loop tiles a window and the
+source fills it — and a loop on a source whose length is unknowable
+before it builds (a track, a buildable sound) must declare `every` too.
 
-Clips carry their own gain and fades as part of the arrangement. A track
-carries no level at all — `gain_db` and `pan` live on the placement that
-consumes it (see below) — but it does carry `inserts:` (EQ, limiter,
-reverb — entries discriminated on `effect:` so hosted plugins can join
+A track carries no level at all — `gain_db` and `pan` live on the entry
+that consumes it (see below) — but it does carry `inserts:` (EQ,
+limiter, reverb — discriminated on `effect:` so hosted plugins can join
 later): inserts are *content*, baked into the stem, so editing one
 re-renders the stem where a fader move never does. The split matters to
-the build graph: every audio track is implicitly buildable as
-`//songs/<song>/track:<name>`, a pre-fader stem whose cache key sees clip
-placement but not the level applied above it, so mixing decisions never
-invalidate rendered stems (see [build-graph.md](build-graph.md) "Rules so
-far").
+the build graph: every track is implicitly buildable as
+`//songs/<song>/track:<name>`, a pre-fader stem whose cache key sees the
+resolved placement plan but not the level applied above it, so mixing
+decisions never invalidate rendered stems (see
+[build-graph.md](build-graph.md) "Rules so far").
 
-A track's content is its clips, its `inputs:` — other tracks placed in it
-— or both. A placement carries a time and an optional window, so one
-track can be placed in more than one parent and more than once in the
-same one, from a single render
-([projects/all/nested-tracks.md](projects/all/nested-tracks.md)). A clip
-whose source is a track is the same edge wearing the clip spelling: it
-is checked like a placement (it must resolve to a renderable track that
-is not an ancestor), its `gain_db` counts toward `explain`'s level
-answer, and it keeps the clip powers a placement lacks —
-`source_offset`, `slip`, and loops, which still require `every` on a
-source whose length is unknown until it builds.
+A `track:` entry carries a time and an optional window, so one track can
+be placed in more than one parent and more than once in the same one,
+from a single render
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md)); it is
+checked like any entry (it must resolve to a track that is not an
+ancestor), its `gain_db` and `pan` count toward `explain`'s level
+answer, and the window powers — `source_offset`, `slip`, loops — apply
+to it exactly as to committed audio.
 
 A track may also carry its own time, in a `time:` key holding a `tempo`,
 a `meter`, or both — a 7/8 figure inside a 4/4 song is a track that says
@@ -166,7 +172,7 @@ and so does everything for the great majority of tracks that declare no
 `time:` at all. **From the song, never from the parent that places it:** a
 track can have two parents and renders exactly once, so "bar 2" inside it
 has to mean one thing no matter who consumes it. Everything in one track
-file — its clips, and the `at` of every track it places — is in that one
+file — every entry's `at` — is in that one
 track's time.
 
 The two timelines are never reconciled as maps. A track renders to
@@ -208,7 +214,7 @@ tiers, by how a thing gets it:
   is in code.
 - **Content is the identity → SHA-256.** Assets and cached outputs.
 - **Machines mint it → timestamp or slug-plus-short-random.** Takes are
-  timestamped (`take-20260804-202355`, sortable, merge-safe); clips — which
+  timestamped (`take-20260804-202355`, sortable, merge-safe); input entries — which
   automation references stably — get a readable random suffix
   (`chorus-vox-x7f3q`).
 
@@ -239,7 +245,7 @@ determinism policy.
 All audio/MIDI assets are content-addressed: each scope's ledger — a
 song's `assets.yaml`, or `shared/assets.yaml` with the identical shape —
 binds a readable asset name to its file path, SHA-256, and size, and
-clips/takes reference assets **by name** — so human-edited files stay
+entries/takes reference assets **by name** — so human-edited files stay
 readable while the hash carries the content identity. The SHA-256 equals the Git LFS OID for the
 same file, so the manifest, the LFS pointer, and the build cache share one
 identifier. Where the bytes live is a pluggable detail. **Git LFS is backend
@@ -295,7 +301,7 @@ schema-validated project file — `field check` verifies variant hashes,
 `//songs/<song>/sound:<name>-<n>` via `field play`. Generating records
 `chosen: 1`, so the sound resolves as soon as it has takes; `field choose
 <name> --variant <n>` moves `chosen:` to a different one, and from then
-on the sound's own label resolves to that variant — clips say
-`source: <name>` and follow every re-choose, a one-line diff. Nothing
+on the sound's own label resolves to that variant — entries say
+`sound: <name>` and follow every re-choose, a one-line diff. Nothing
 is copied into a ledger, and nothing ever regenerates mechanically:
 generating over takes that already exist is refused, not merged.
