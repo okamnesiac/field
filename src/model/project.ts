@@ -757,6 +757,9 @@ function validate(project: LoadedProject): void {
           if (
             !names.sounds.has(entry.sound) &&
             !names.chosen.has(entry.sound) &&
+            // Unchosen is a state of a sound that exists — it got its own
+            // diagnostic above, and "unknown" on top of it would be false.
+            !names.unchosen.has(entry.sound) &&
             !names.ungenerated.has(entry.sound)
           ) {
             push(

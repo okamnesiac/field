@@ -160,11 +160,14 @@ describe('generative sounds in the project model', () => {
 
   it('an unchosen sound is not referenceable — clips are told to choose', () => {
     writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('keys'));
+    const diags = loadProject(root).diagnostics;
     expect(
-      loadProject(root).diagnostics.some((d) =>
-        d.message.includes('no chosen variant yet — field choose keys first'),
-      ),
+      diags.some((d) => d.message.includes('no chosen variant yet — field choose keys first')),
     ).toBe(true);
+    // One mistake, one message: the sound exists, so the unknown-name
+    // check must not fire on top of the choose diagnostic (Codex on
+    // #102 — the fall-through appeared when kind checks went non-fatal).
+    expect(diags.some((d) => d.message.includes('unknown sound'))).toBe(false);
   });
 
   it('a takeless recipe is a request, and check says the project is fine', async () => {
