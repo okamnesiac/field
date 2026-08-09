@@ -8,6 +8,7 @@ import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import type { GeneratorRunner } from '../graph/build.js';
+import { formatLabel } from '../labels.js';
 import { loadProject } from '../model/project.js';
 import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
@@ -955,7 +956,9 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
     // cached: its input hashes cannot move when the render is a hit.
     const state = { runs: [] as string[] };
     const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
-      state.runs.push(node.label.name);
+      // Full labels: gen:kit-sc and track:kit-sc share a name, and the
+      // whole point is which of them the third run is.
+      state.runs.push(formatLabel(node.label));
       writeFileSync(outputPath, 'render');
     };
     mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
@@ -972,7 +975,7 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
       '    duration: 4',
     ]);
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    expect(state.runs).toEqual(['kit-sc', 'drums']);
+    expect(state.runs).toEqual(['//songs/creek/sound:kit-sc', '//songs/creek/track:drums']);
 
     // The fold: the sound file becomes a leaf track, the consumer's
     // entry changes kind. Same program, same seed, same duration.
@@ -990,10 +993,15 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
     // gen:kit-sc is a cache hit under the old sound's key; the new stem
     // wrapping it runs once; drums sees identical input bytes and params
     // and stays cached.
-    expect(state.runs).toEqual(['kit-sc', 'drums', 'kit-sc']);
+    const afterFold = [
+      '//songs/creek/sound:kit-sc',
+      '//songs/creek/track:drums',
+      '//songs/creek/track:kit-sc',
+    ];
+    expect(state.runs).toEqual(afterFold);
 
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    expect(state.runs).toEqual(['kit-sc', 'drums', 'kit-sc']); // all cached
+    expect(state.runs).toEqual(afterFold); // all cached
   });
 });
 
