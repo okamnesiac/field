@@ -1551,4 +1551,22 @@ describe('import reads the WAV header (multi-rate.md decision 5)', () => {
     const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
     expect(messages).toContain('records sample_rate 44100 but the file says 48000');
   });
+
+  it('WAV facts travel together — a partial row is refused, not skipped', async () => {
+    // The verification gate assumes "recorded together or not at all";
+    // without the schema enforcing it, a row omitting sample_rate was
+    // never checked at all, and the other three could say anything.
+    const src = wavSource(48000);
+    await importAsset(root, 'opener', src, 'hit');
+    rmSync(src);
+    const ledgerPath = join(root, 'songs/opener/assets.yaml');
+    writeFileSync(
+      ledgerPath,
+      readFileSync(ledgerPath, 'utf8')
+        .replace(/ *sample_rate: 48000\n/, '')
+        .replace('channels: 1', 'channels: 7'),
+    );
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('WAV facts travel together');
+  });
 });
