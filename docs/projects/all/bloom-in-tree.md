@@ -1,10 +1,11 @@
 # Plan: bloom moves into field
 
-**Status:** Chunks 1–3 shipped (2026-08-08). The example lives at
-`examples/bloom` and CI runs `field check` against it (#85), which is what
-the whole plan was for. §6's definition of done is met — 0 WAVs in 35
-tracked files, and a fresh export of HEAD checks `ok` with nothing
-generated — so all that is left is chunk 4, deleting `okamnesiac/bloom`.
+**Status:** Done (2026-08-08). The example lives at `examples/bloom`, CI
+runs `field check` against it (#85), and `okamnesiac/bloom` is deleted.
+§6's definition of done is met: 0 WAVs in 35 tracked files, and an export
+of HEAD checks `ok` with nothing generated. There is one repository now,
+which is the whole point — a change that breaks the only real project
+using the format fails in the pull request that makes it.
 
 **Goal:** bloom lives at `examples/bloom` in this repo, and CI runs
 `field check` against it, so a change that breaks the only real project
@@ -194,9 +195,10 @@ is never a window where the two repos disagree about it.
    `gain_db` did not, which is worth recording — bloom carries that field
    on placements, not on clips, so the first attempt at a break proved
    nothing and looked like it had.
-4. **Delete `okamnesiac/bloom`**, once the copy is proven. It is, so this
-   is unblocked; it is deliberately a human action, being both
-   irreversible and outward-facing.
+4. **Delete `okamnesiac/bloom`** — done 2026-08-08, by hand rather than by
+   an agent, being both irreversible and outward-facing. `gh api
+   repos/okamnesiac/bloom` now 404s, which is the only check this chunk
+   has.
 
 ## 6 Definition of done
 
