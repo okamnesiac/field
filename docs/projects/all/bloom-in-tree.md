@@ -1,8 +1,10 @@
 # Plan: bloom moves into field
 
-**Status:** Chunks 1 and 2 shipped (2026-08-08). The example lives at
-`examples/bloom`; chunk 3 wires it into CI, which is what the whole plan
-was for, and chunk 4 deletes `okamnesiac/bloom`.
+**Status:** Chunks 1–3 shipped (2026-08-08). The example lives at
+`examples/bloom` and CI runs `field check` against it (#85), which is what
+the whole plan was for. §6's definition of done is met — 0 WAVs in 35
+tracked files, and a fresh export of HEAD checks `ok` with nothing
+generated — so all that is left is chunk 4, deleting `okamnesiac/bloom`.
 
 **Goal:** bloom lives at `examples/bloom` in this repo, and CI runs
 `field check` against it, so a change that breaks the only real project
@@ -185,10 +187,16 @@ is never a window where the two repos disagree about it.
    copy, both ledgers gone with the last pins they held, the two
    generative recipes shipped takeless, and the README rewritten for a
    project whose audio you generate.
-3. **CI.** `field check` on `examples/bloom` in the existing linux job.
-   This is the chunk the whole plan is for, so it is worth confirming it
-   fails: break a schema on a branch and watch the example catch it.
-4. **Delete `okamnesiac/bloom`**, once the copy is proven.
+3. **CI** — done (#85). `field check` on `examples/bloom` in the existing
+   linux job. This is the chunk the whole plan is for, so it was worth
+   confirming it fails rather than assuming: renaming a placement's
+   `gain_db` on a branch turned the example red. Renaming the *clip*
+   `gain_db` did not, which is worth recording — bloom carries that field
+   on placements, not on clips, so the first attempt at a break proved
+   nothing and looked like it had.
+4. **Delete `okamnesiac/bloom`**, once the copy is proven. It is, so this
+   is unblocked; it is deliberately a human action, being both
+   irreversible and outward-facing.
 
 ## 6 Definition of done
 

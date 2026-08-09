@@ -16,6 +16,7 @@ import {
   wantsVersion,
 } from './cliParsers.js';
 import { buildLabels, explainLabel, projectRelative, queryDeps } from './commands/build.js';
+import { formatReach, rootNote } from './model/levels.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
 import {
   transportCommand,
@@ -679,6 +680,18 @@ program
       }
       for (const out of e.outputs ?? []) {
         process.stdout.write(`output: ${out.sha256.slice(0, 12)} (${out.bytes} bytes)\n`);
+      }
+      // Where the signal goes, for a track. Last because it is the mix
+      // question and everything above it is the build question — and
+      // because it is the line someone came here for when a level
+      // surprised them (nested-tracks.md §5).
+      if (e.levels) {
+        if (e.levels.reaches.length === 0) {
+          process.stdout.write(`reaches: ${rootNote(e.levels.track)}\n`);
+        }
+        for (const reach of e.levels.reaches) {
+          process.stdout.write(`reaches: ${formatReach(reach)}\n`);
+        }
       }
     } catch (err) {
       fail(err);
