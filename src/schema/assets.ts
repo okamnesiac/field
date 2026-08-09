@@ -13,6 +13,15 @@ export const assetSchema = z.strictObject({
   file: z.string().min(1), // path relative to the scope root
   sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256'),
   bytes: z.number().int().min(0),
+  // What the WAV header said at import (multi-rate.md decision 5) —
+  // stored derived values in project-core.md §3.1's sense: recorded
+  // once, verifiable against the file check already hashes. Optional
+  // because ledgers predate the fields and non-WAV assets never get
+  // them; recorded together or not at all.
+  sample_rate: z.number().int().positive().optional(),
+  bit_depth: z.number().int().positive().optional(),
+  channels: z.number().int().positive().optional(),
+  frames: z.number().int().min(0).optional(),
 });
 export type Asset = z.infer<typeof assetSchema>;
 
@@ -22,5 +31,11 @@ export const assetsFileSchema = z.strictObject({
 export type AssetsFile = z.infer<typeof assetsFileSchema>;
 export const assetsFileOrder: KeyOrder = {
   keys: ['assets'],
-  children: { assets: { items: { keys: ['name', 'file', 'sha256', 'bytes'] } } },
+  children: {
+    assets: {
+      items: {
+        keys: ['name', 'file', 'sha256', 'bytes', 'sample_rate', 'bit_depth', 'channels', 'frames'],
+      },
+    },
+  },
 };

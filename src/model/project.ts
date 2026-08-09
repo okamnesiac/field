@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
-import { wavFrameCount } from '../audio/wav.js';
+import { readWavHeader, wavFrameCount } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
@@ -1344,6 +1344,37 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
         diagnostics.push({
           file: ledger.path,
           message: `asset "${asset.name}" content does not match its recorded sha256 (${asset.file} hashes to ${actual})`,
+        });
+        continue;
+      }
+      // Recorded WAV facts are stored derived values (project-core.md
+      // §3.1, multi-rate.md decision 5): the hash just proved the bytes
+      // are the import-time bytes, so a disagreement here is a
+      // hand-edited ledger row rather than a drifted file — and a row
+      // that lies about its rate would misprice every placement.
+      if (asset.sample_rate === undefined) continue;
+      try {
+        const h = readWavHeader(path);
+        const pairs = [
+          ['sample_rate', asset.sample_rate, h.sampleRate],
+          ['bit_depth', asset.bit_depth, h.bitsPerSample],
+          ['channels', asset.channels, h.channels],
+          ['frames', asset.frames, h.frames],
+        ] as const;
+        for (const [key, recorded, fact] of pairs) {
+          if (recorded !== undefined && recorded !== fact) {
+            diagnostics.push({
+              file: ledger.path,
+              message: `asset "${asset.name}" records ${key} ${recorded} but the file says ${fact}`,
+            });
+          }
+        }
+      } catch (err) {
+        diagnostics.push({
+          file: ledger.path,
+          message:
+            `asset "${asset.name}" records WAV facts but its header cannot be read: ` +
+            `${(err as Error).message}`,
         });
       }
     }

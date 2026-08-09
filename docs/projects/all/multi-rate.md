@@ -1,11 +1,15 @@
 # Plan: Sample rate is a property of the track, converted at the edge
 
-**Status:** Planned (2026-08-09), not started. Written because chunk 6 of
-[nested-tracks.md](nested-tracks.md) hit `normalize` and found two
-features sharing its schema (§1), and the inbound half's shape depends on
-whether a project can hold more than one rate — so that decision has to
-be made first, and made on record. Blocks the remaining slices of
-nested-tracks chunk 6.
+**Status:** In progress (2026-08-09). Step 1 (import reads headers,
+decision 5) is implemented: the ledger records `sample_rate` /
+`bit_depth` / `channels` / `frames`, check verifies them against the
+file it already hashes, and a rate mismatch asks — `--allow-mismatch`
+in scripts, y/N interactively. Steps 2 and 3 unstarted. Written because
+chunk 6 of [nested-tracks.md](nested-tracks.md) hit `normalize` and
+found two features sharing its schema (§1), and the inbound half's
+shape depends on whether a project can hold more than one rate — so
+that decision had to be made first, and made on record. Blocks the
+remaining slices of nested-tracks chunk 6.
 
 **Goal:** a track may run at its own sample rate, and rates convert only
 at edges — a placement, an import, an export. "Convert before connecting"

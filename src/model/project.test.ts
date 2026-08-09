@@ -1472,3 +1472,83 @@ describe('orphaned takes directories (nested-tracks.md §18 decision 3)', () => 
     rmSync(src);
   });
 });
+
+describe('import reads the WAV header (multi-rate.md decision 5)', () => {
+  beforeEach(() => {
+    createSong(root, 'opener');
+  });
+
+  function wavSource(rate: number, frames = 4): string {
+    const path = join(root, '..', `field-test-hdr-${Date.now()}-${Math.random()}.wav`);
+    writeWavFloat32(path, rate, [Float32Array.from({ length: frames }, (_, i) => (i % 2 ? -0.5 : 0.5))]);
+    return path;
+  }
+
+  it('records the facts in the ledger, verifiable by check', async () => {
+    const src = wavSource(48000);
+    const result = await importAsset(root, 'opener', src, 'hit');
+    rmSync(src);
+    expect(result.header?.sampleRate).toBe(48000);
+    const ledger = readFileSync(join(root, 'songs/opener/assets.yaml'), 'utf8');
+    expect(ledger).toContain('sample_rate: 48000');
+    expect(ledger).toContain('bit_depth: 32');
+    expect(ledger).toContain('channels: 1');
+    expect(ledger).toContain('frames: 4');
+    expect((await check(root)).ok).toBe(true);
+  });
+
+  it('refuses a rate mismatch until acknowledged, before any write', async () => {
+    const src = wavSource(44100);
+    await expect(importAsset(root, 'opener', src, 'offrate')).rejects.toThrow(
+      "44100 Hz against the project's 48000",
+    );
+    // Refused before the copy: no item directory, no ledger row.
+    expect(existsSync(join(root, 'songs/opener/audio/offrate'))).toBe(false);
+    const declined = await importAsset(root, 'opener', src, 'offrate', {
+      confirmMismatch: async () => false,
+    }).catch((e: Error) => e.message);
+    expect(declined).toContain('--allow-mismatch');
+    const result = await importAsset(root, 'opener', src, 'offrate', { allowMismatch: true });
+    rmSync(src);
+    expect(result.header?.sampleRate).toBe(44100);
+    expect((await check(root)).ok).toBe(true);
+  });
+
+  it('an interactive yes is the other acknowledgement', async () => {
+    const src = wavSource(44100);
+    const asked: string[] = [];
+    const result = await importAsset(root, 'opener', src, 'offrate', {
+      confirmMismatch: async (message) => {
+        asked.push(message);
+        return true;
+      },
+    });
+    rmSync(src);
+    expect(result.header?.sampleRate).toBe(44100);
+    expect(asked[0]).toContain('placements will pay a conversion');
+  });
+
+  it('a .wav that is not a WAV records nothing and says so', async () => {
+    const src = sourceFile('not audio at all');
+    const result = await importAsset(root, 'opener', src, 'junk');
+    rmSync(src);
+    expect(result.header).toBeUndefined();
+    expect(result.headerProblem).toBeDefined();
+    const ledger = readFileSync(join(root, 'songs/opener/assets.yaml'), 'utf8');
+    expect(ledger).not.toContain('sample_rate');
+    expect((await check(root)).ok).toBe(true);
+  });
+
+  it('check flags a hand-edited recorded fact', async () => {
+    const src = wavSource(48000);
+    await importAsset(root, 'opener', src, 'hit');
+    rmSync(src);
+    const ledgerPath = join(root, 'songs/opener/assets.yaml');
+    writeFileSync(
+      ledgerPath,
+      readFileSync(ledgerPath, 'utf8').replace('sample_rate: 48000', 'sample_rate: 44100'),
+    );
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('records sample_rate 44100 but the file says 48000');
+  });
+});

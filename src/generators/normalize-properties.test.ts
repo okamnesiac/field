@@ -48,7 +48,10 @@ async function importTone(name: string, rate: number, frequency: number, seconds
   for (let i = 0; i < n; i++) samples[i] = 0.5 * Math.sin((2 * Math.PI * frequency * i) / rate);
   const src = join(root, '..', `field-normalize-src-${name}.wav`);
   writeWavFloat32(src, rate, [samples]);
-  await importAsset(root, 'creek', src, name);
+  // These fixtures import off-rate sources on purpose — the resampler is
+  // the thing under test — so the mismatch is acknowledged, as decision 5
+  // asks of anyone doing this deliberately.
+  await importAsset(root, 'creek', src, name, { allowMismatch: true });
   rmSync(src);
 }
 
@@ -149,7 +152,7 @@ describe('normalize properties', () => {
     const samples = Float32Array.from([0.5, -0.5]);
     const src = join(root, '..', 'field-normalize-src-short.wav');
     writeWavFloat32(src, 96000, [samples]);
-    await importAsset(root, 'creek', src, 'short');
+    await importAsset(root, 'creek', src, 'short', { allowMismatch: true });
     rmSync(src);
 
     writeSound('tiny2', ['type: normalize', 'source: short', 'sample_rate: 44100', 'bit_depth: 32']);
