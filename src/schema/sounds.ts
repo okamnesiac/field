@@ -218,7 +218,7 @@ const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
       path: [isMusic ? 'text' : 'prompt'],
       message: isMusic
         ? 'a recipe carries either `prompt` (music) or `text` (voice), not both'
-        : 'a generative sound needs `prompt` (music) or `text` (voice)',
+        : 'a generative request needs `prompt` (music) or `text` (voice)',
     });
     return;
   }
