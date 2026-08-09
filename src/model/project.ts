@@ -606,11 +606,12 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Clip sources resolve like every other source (project-layout.md
-    // §4.3, checkSource): a bare name in the song's one namespace, or a
-    // shared pin — the whole visibility rule (§1.5) is that no spelling
-    // reaches another song. Takes reference assets only: a take is a
-    // recording, and its asset is the ledger row import wrote.
+    // Entry references resolve per kind, each in its field's own
+    // namespace (nested-tracks.md §18) — the whole visibility rule
+    // (project-layout.md §1.5) is that no spelling reaches another song,
+    // and the one cross-scope spelling is `audio: //shared/asset:`.
+    // Takes reference assets only: a take is a recording, and its asset
+    // is the ledger row import wrote.
     const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
     // Where a committed source's bytes live (undefined for buildable
     // sounds): the ledger file, the shared file, or a chosen variant.
