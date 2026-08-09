@@ -10,10 +10,13 @@ is done too — a track carries its own tempo and meter (§13). Sends
 (chunk 4) are deferred to the real-time engine, which is where an edge
 that carries no offset stops needing offsets invented for it (§14). What
 is left here is folding `sounds/` in (chunk 6), which opened with the
-clip-duration prerequisite (§15, #97). The eq fold has landed — a clip
-can play a track, and `kit-punch` is one (§17); the two `normalize`
-sounds wait on [multi-rate.md](multi-rate.md) (§16), and the five leaves
-wait on §6's leaf-content question.
+clip-duration prerequisite (§15, #97) and the eq fold (§17, #100), and
+then settled the shape it was heading toward: one `inputs:` list whose
+entries place tracks, committed audio, or inline generators (§18) —
+which answers §6's leaf-content question, retires `clips:` and `type:`,
+and supersedes §17's spelling. The format lands first, the leaves fold
+behind it, and the two `normalize` sounds still wait on
+[multi-rate.md](multi-rate.md) (§16).
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -880,3 +883,108 @@ spellings, `drums` — whose YAML changed from `kit-punch` to
 `track:kit-punch` — kept its key (`6cd170a1cbfe`, cached), and
 `field build creek/track:main` came back entirely from cache: the whole
 song, bit-identical, through a model with one fewer kind in it.
+
+## 18 One list: a track's inputs (DECIDED, 2026-08-09)
+
+A track file is a name, an optional `time:`, optional `inserts:`, and
+one list: `inputs:`. Every entry places one thing on the track's
+timeline, the thing is named by the entry's field, and there are three
+kinds of thing:
+
+- `track: <name>` — another track's render
+- `audio: <name>` — committed bytes, from the song's ledger or the one
+  cross-scope spelling, `audio: //shared/asset:<name>`
+- a generator block, authored spec inline — `supercollider: {...}` or
+  `generative: {...}`
+
+Placement fields are uniform across kinds — `at`, `duration`, `loop`,
+`source_offset`, `slip`, `gain_db`, `pan`, `fade_in`, `fade_out`, and
+an `id` — because there is no field among them whose meaning depends on
+what produced the audio. Any kind, any count, anywhere: generators will
+usually be one per track by convention, because that is what you want
+to name and reuse, and the schema does not enforce a convention.
+
+```yaml
+name: drums
+inputs:
+  - track: kit-punch
+    at: [1]
+    duration: [4]
+    loop:
+      every: [2]
+      fade: 0
+```
+
+What this decides, and what it retires:
+
+1. **§1.11 lands in full, and the file format catches up with the
+   planner.** `planTrack` has sorted clips and placements into one list
+   since placements existed — the two-list split was only ever spelled
+   in YAML. `clips:` retires. A `content:` leaf block, proposed on the
+   way to this decision, never ships: "the track *is* its content"
+   turned out to be nothing more than "the track has one input", so the
+   identity-versus-edge distinction the block encoded dissolves into
+   the list.
+
+2. **The kind lives in the field name, never in a value prefix.** #100's
+   `source: track:kit-punch` (§17) lived exactly one PR: it read as a
+   type error — a source that is a track — and the fix is that no field
+   ever holds more than one kind. *Rejected: value prefixes* (`source:
+   track:x`), for that reading. *Rejected: restricting generator
+   entries to leaf tracks* — the only real dependency was run-recorded
+   state needing a stable attachment point, which `id` provides
+   (below).
+
+3. **Ids answer §6's placement-identity question by construction.**
+   Every entry may carry an `id`; automation attaches to entries, not
+   to ex-clips specifically. A `generative` entry must carry one,
+   because its takes attach to it: run-recorded state (variants,
+   `chosen`) stays out of the track file exactly as it stays out of a
+   sound's recipe today, living under `audio/<track>/`, keyed by the
+   entry's id. The exact file shape — and how `field generate <track>`
+   resolves when the track has one generative entry — is the
+   implementing chunk's to settle, with a migration for today's
+   `audio/<name>/variants.yaml`.
+
+4. **`type:` leaves the track file.** Every track is audio; `midi` was
+   a placeholder kind that renders nothing, places nothing, and is
+   placed by nothing. When MIDI becomes real it arrives as an entry
+   kind — a part driving an instrument is content a track plays — which
+   is decision 1's no-kinds argument applied to the schema's own
+   discriminator. A future track-level kind has to argue against
+   decision 1 to return.
+
+5. **The namespace collision §17 recorded as the finale's sleeping
+   issue dissolves.** With kind-in-field, no bare namespace ever holds
+   both bytes and tracks: `audio:` resolves in the ledger, `track:`
+   among tracks. The migration-quality `check` collision message and
+   the `field import` guard widening that §17 anticipated are no longer
+   owed. The `sound:` label still forwards to `track:` at the finale —
+   labels are a separate grammar and keep their own compatibility
+   story.
+
+6. **Every existing action key survives the format change.** Entry
+   spelling is wiring (`sources` never reaches a key); the resolved
+   placement plan for every existing structure is identical entry for
+   entry, so the migration must prove itself the way #100 did: drums
+   stays `6cd170a1cbfe`, `field build creek/track:main` comes back
+   entirely cached. The leaf folds owe the same proof downstream:
+   however a generator entry is keyed internally, the folded track's
+   bytes are identical, so every consumer's key holds.
+
+Sequencing, revising §16's tail and §17's remainder:
+
+1. **The format lands alone**: `clips:`/`inputs:` become one `inputs:`
+   list with `track:`/`audio:` entries, `type:` goes, ids and uniform
+   fields arrive; bloom rewrites; the old spellings get `mixes/`-grade
+   diagnostics naming what to move where; the cache proof above gates
+   it. No generator entries yet.
+2. **`supercollider:` entries** — `kit-sc`, `pad-sc`,
+   `seven-eight-loop` fold into tracks.
+3. **`generative:` entries** — `generate`/`choose` retarget to entries;
+   `lead-take` and `still-water-keys` fold, takes migrating per
+   decision 3.
+4. **Multi-rate interleaves unchanged** ([multi-rate.md](multi-rate.md)
+   §4): its step 2 frees `loop-cd`, its step 3 frees `vocal-48k`.
+5. **Finale**: `sounds/` empties, the `sound:` label forwards,
+   `rg 'type: normalize' examples/bloom/songs` finds nothing.
