@@ -116,6 +116,17 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    list. Cache-neutral: the label is not in the action key (§3.5), so
    nothing re-renders; only `.field/out/` paths move. Typing the old
    plural gets a hint at the singular rather than a bare no-such-label.
+   Amended 2026-08-08 (was: a bare song name means the song's main mix):
+   it means the song's output **track** — `field play opener` is
+   `//songs/opener/track:main`. What changed is that a track can now be a
+   song's output, carrying the declared `length` and `loop` and the master
+   chain as its inserts ([nested-tracks.md](nested-tracks.md) §7 chunk 2),
+   and it renders bit-identically to the mix it replaces. `main` is still
+   a convention rather than a requirement, and the shorthand still expands
+   to exactly one label rather than trying `track:` and falling back to
+   `mix:` — a song may not declare both, and two ways to resolve one name
+   is the thing §3.4 has avoided since it was written. Explicit `mix:`
+   labels keep working; `mixes/` retires separately.
 5. **Cache key definition (DECIDED).** SHA-256 everywhere, chosen so asset
    hash = Git LFS OID — store, pointer, and cache speak one identifier
    (BLAKE3 is faster but buys a second identity scheme). Key = hash of

@@ -50,14 +50,18 @@ export interface PlacedClip {
 // on something the control plane is supposed to have already decided.
 export type RenderedClip = Omit<PlacedClip, 'duration'> & { duration: number };
 
-// A track implies a stem where it has audio to render (mix-assembly.md
-// §3). Clips were the only content until tracks could contain tracks, so
-// a track with children and no clips of its own is now just as renderable
-// — a bus, in the vocabulary nested-tracks.md §1.1 declines to make a
-// type. One predicate, because validate and the graph asking this
-// question differently is how a check-clean project fails to build.
+// Every audio track has a stem, including an empty one — it renders as
+// silence, which is what it contains. Clips were the only content until
+// tracks could contain tracks, and requiring *some* content was the rule
+// until a song's output became a track: `field song create` writes an
+// empty `main`, and a label the bare song name resolves to has to exist
+// from that moment rather than from the first clip. A midi track still has
+// no audio to render.
+//
+// One predicate, because validate and the graph answering this question
+// differently is how a check-clean project fails to build.
 export function renderableTrack(track: Track): boolean {
-  return track.type === 'audio' && (track.clips.length > 0 || track.inputs.length > 0);
+  return track.type === 'audio';
 }
 
 // How a placed track is spelled in `sources`. Tracks are not in the

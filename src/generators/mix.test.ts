@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -179,6 +179,11 @@ describe('mix targets in the build graph', () => {
     root = mkdtempSync(join(tmpdir(), 'field-mixgraph-'));
     init({ dir: root, name: 'test-album' });
     createSong(root, 'creek');
+    // createSong scaffolds an output *track* now, so the mix these
+    // cases are about is written here rather than inherited.
+    mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
+    rmSync(join(root, 'songs/creek/tracks/main.yaml'), { force: true });
     createTrack(root, 'creek', 'kick', 'audio');
     createTrack(root, 'creek', 'snare', 'audio');
     for (const [name, samples] of [
@@ -279,6 +284,11 @@ describe('mix targets in the build graph', () => {
 
     // A fresh song's default mix has nothing to mix yet: legal, no node.
     createSong(root, 'sprout');
+    // createSong scaffolds an output *track* now, so the mix these
+    // cases are about is written here rather than inherited.
+    mkdirSync(join(root, 'songs/sprout/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/sprout/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
+    rmSync(join(root, 'songs/sprout/tracks/main.yaml'), { force: true });
     expect(loadProject(root).diagnostics.filter((d) => d.file.includes('sprout'))).toEqual([]);
     expect(() => queryDeps(root, '//songs/sprout/mix:main')).toThrow('matched no labels');
   });

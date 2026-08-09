@@ -19,11 +19,11 @@ Labels address songs and shared material alike: a clip in one song
 plays `//shared/asset:rain` exactly as it plays the song's own sounds.
 
 The absolute form is canonical, but the CLI accepts songs-relative shorthand
-for all of the above — `field build opener/mix:main`, `field explain
-opener/...` — and a bare song name plays its main mix: `field play opener`
-(project-core.md §3.4; `main` is a convention, and a song that names its
-mixes otherwise gets a no-such-label error). `//shared/...` material
-uses the full form.
+for all of the above — `field build opener/track:main`, `field explain
+opener/...` — and a bare song name plays the song's output track: `field
+play opener` is `//songs/opener/track:main` (project-core.md §3.4, amended
+2026-08-08; `main` is a convention, and a song with no track by that name
+gets a no-such-label error). `//shared/...` material uses the full form.
 
 ## Caching, and freezing is caching
 
@@ -169,21 +169,19 @@ sound by name and follow).
   gap is where the trouble lives: `voice: Siri` followed a Settings
   toggle the cache key could not see, and two consecutive CI renders of
   it were observed to differ.
-- **`stem`** — the first *implicit* type: every audio track with content
-  is buildable as `//songs/<song>/track:<name>` without declaring
-  anything, because the track file **is** the declaration — a mix file
+- **`stem`** — the first *implicit* type: every audio track is buildable
+  as `//songs/<song>/track:<name>` without declaring anything, an empty one
+  rendering as the silence it contains, because the track file **is** the declaration — a mix file
   defines a `mix`, a track file implies a `stem`. Content means clips,
   placed tracks (`inputs:`), or both: a placed track is one more source
   in the same list, so a track→track edge is an ordinary graph edge and
   a track placed three times is one render placed three times. A track can
   also be a song's *output* — the one named `main` — in which case it
   carries the song's declared `length` and `loop` and renders exactly that
-  long, the way the `mix` rule does. It shares the *name* a bare song
-  reference uses and not yet the resolution: `creek` still means
-  `//songs/creek/mix:main` specifically, so a song with an output track and
-  no mix file has to be addressed as `creek/track:main` until `mixes/`
-  retires (nested-tracks.md §7 chunk 2), which is when the bare name moves
-  with it. A clip's
+  long, the way the `mix` rule does. A bare song reference resolves to it:
+  `creek` means `//songs/creek/track:main`. `mixes/` still loads and still
+  renders, but nothing points at one by default any more, and it retires
+  next (nested-tracks.md §7 chunk 2). A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an
   automatic sound pulls its whole definition into the stem's subgraph,
   so the arrangement can play audio nothing ever committed, and editing

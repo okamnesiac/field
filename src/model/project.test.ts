@@ -106,7 +106,10 @@ describe('song and track creation', () => {
     );
     expect(() => loadProject(root)).not.toThrow();
     expect((await check(root)).ok).toBe(true);
-    expect(loadProject(root).songs[0]!.tracks).toHaveLength(1);
+    // The scaffolded output track plus lead-vocal — and not the dotfile,
+    // which is what this is about.
+    const names = loadProject(root).songs[0]!.tracks.map((t) => t.data.name).sort();
+    expect(names).toEqual(['lead-vocal', 'main']);
   });
 });
 
@@ -924,12 +927,13 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toContain('track containment cycle: a → b → a');
   });
 
-  it('refuses a placed track with nothing in it', async () => {
+  it('accepts a placed track with nothing in it — silence is content', async () => {
+    // An empty audio track renders as silence (stem.ts renderableTrack),
+    // so placing one places silence rather than dangling an edge. This was
+    // an error until a song's output became a track that starts empty.
     writeTrack('empty', ['clips: []']);
     writeTrack('outer', ['inputs:', '  - track: empty', '    at: 0']);
-    expect(await messages()).toContain(
-      'placement 1 ("empty") places a track with no clips and no tracks of its own',
-    );
+    expect(await messages()).toBe('');
   });
 
   it('refuses a placed midi track, and a midi track that places', async () => {
@@ -1001,10 +1005,13 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
 
   it('lets a mix reference a track that only contains tracks', async () => {
     writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
+    // Named `bed`, not `main`: createSong scaffolds an output track now,
+    // and a second thing called `main` is the two-outputs error rather
+    // than the mix-membership case under test.
     mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/mixes/main.yaml'),
-      'name: main\ntracks:\n  - outer\n',
+      join(root, 'songs/opener/mixes/bed.yaml'),
+      'name: bed\ntracks:\n  - outer\n',
     );
     expect(await messages()).toBe('');
   });
@@ -1034,22 +1041,28 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
   }
 
   it('refuses a song with both an output track and an output mix', async () => {
-    // createSong scaffolds mixes/main.yaml, so adding the track is all it
-    // takes — which is the migration's first step, and the point.
-    expect(existsSync(join(root, 'songs/opener/mixes/main.yaml'))).toBe(true);
+    // createSong writes the output track now, so a mix is what has to be
+    // added to produce the conflict — the shape a project mid-migration
+    // has, rather than the shape the tool produces.
+    expect(existsSync(join(root, 'songs/opener/tracks/main.yaml'))).toBe(true);
+    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\n');
     writeOutputTrack();
     const out = await messages();
     expect(out).toContain('song has two outputs');
     expect(out).toContain('delete one');
+    expect(out).toContain('a bare song name reaches the track');
   });
 
-  it('accepts the output track once the mix is gone', async () => {
+  it('accepts the output track alone', async () => {
     writeOutputTrack();
-    rmSync(join(root, 'songs/opener/mixes'), { recursive: true });
     expect(await messages()).toBe('');
   });
 
-  it('says nothing about a song that still has only a mix', async () => {
+  it('says nothing about a song that has only a mix', async () => {
+    rmSync(join(root, 'songs/opener/tracks/main.yaml'), { force: true });
+    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\n');
     expect(await messages()).toBe('');
   });
 

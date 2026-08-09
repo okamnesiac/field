@@ -248,6 +248,29 @@ describe.skipIf(!binary)('render subprocess', () => {
     ).rejects.toThrow(/plan\.faders: is required/);
   });
 
+  it('renders a zero-length clip, which is a placement of an empty track', async () => {
+    // A placement's window is resolved from the rendered child, and an
+    // empty track renders to nothing — so zero is a length the control
+    // plane produces rather than one anybody authored. An authored
+    // zero-length clip is still refused upstream, where `timeSpan` is
+    // positive. This was rejected by the daemon until a song's output
+    // became a track that starts empty.
+    const input = join(dir, 'zero-src.wav');
+    writeWavFloat32(input, RATE, [Float32Array.from([1, 0.5])]);
+    const output = join(dir, 'zero-out.wav');
+    await renderInsertChain({
+      op: 'stem',
+      output,
+      sample_rate: RATE,
+      inputs: [input],
+      clips: [{ input: 0, start: 0, duration: 0, read_offset: 0, gain_db: 0, fade_in: 0, fade_out: 0 }],
+    });
+    // A valid, zero-frame WAV — the same assertion the empty-clip-list
+    // case below makes, and for the same reason: there is no audio to
+    // inspect, only a well-formed file.
+    expect(readFileSync(output).length).toBeGreaterThan(0);
+  });
+
   it('still renders a stem with an explicitly empty clip list', async () => {
     // The other half of the same rule, and the reason the check is
     // "present and an array" rather than "non-empty": a track with no
@@ -403,9 +426,11 @@ describe.skipIf(!binary)('render subprocess', () => {
       ['normalize rate off the set', { op: 'normalize', input, output, sample_rate: 12345, bit_depth: 16 }, /is not a rate this project supports/],
       ['normalize missing bit_depth', { op: 'normalize', input, output, sample_rate: RATE }, /bit_depth: is required/],
       ['normalize carrying a chain', { op: 'normalize', input, output, sample_rate: RATE, bit_depth: 16, inserts: [] }, /inserts: is not a field this field-audiod knows/],
-      ['zero-length clip', { ...stem, clips: [clip({ duration: 0 })] }, /duration: out of range/],
       ['fractional fade', { ...stem, clips: [clip({ fade_in: 1.5 })] }, /fade_in: expected an integer/],
       ['fades exceeding the clip', { ...stem, clips: [clip({ fade_in: 5, fade_out: 5 })] }, /fades total 10 samples/],
+      // Negative stays refused; zero moved out of this list deliberately
+      // and is asserted to render below.
+      ['negative duration', { ...stem, clips: [clip({ duration: -1 })] }, /duration: out of range/],
     ];
 
     for (const [name, plan, expected] of cases) {

@@ -21,7 +21,10 @@ describe('labels', () => {
     expect(parseLabel('creek/mix:main')).toEqual({ pkg: 'songs/creek/mix', name: 'main' });
     // Even a song literally named "songs": shorthand always prefixes.
     expect(parseLabel('songs/mix:main')).toEqual({ pkg: 'songs/songs/mix', name: 'main' });
-    expect(parseLabel('songs')).toEqual({ pkg: 'songs/songs/mix', name: 'main' });
+    // A bare song name is its output *track* (nested-tracks.md §7 chunk 2).
+    // Explicit `mix:` still parses — the grammar is unchanged; what moved
+    // is only which label the shorthand expands to.
+    expect(parseLabel('songs')).toEqual({ pkg: 'songs/songs/track', name: 'main' });
     expect(parsePattern('creek/...')).toEqual({ kind: 'tree', pkg: 'songs/creek' });
     expect(parsePattern('creek/track:all')).toEqual({
       kind: 'package-all',
@@ -30,8 +33,8 @@ describe('labels', () => {
     expect(parsePattern('...')).toEqual({ kind: 'tree', pkg: 'songs' });
   });
 
-  it('a bare song name means its main mix', () => {
-    expect(parseLabel('creek')).toEqual({ pkg: 'songs/creek/mix', name: 'main' });
+  it('a bare song name means its output track', () => {
+    expect(parseLabel('creek')).toEqual({ pkg: 'songs/creek/track', name: 'main' });
     expect(() => parseLabel('Creek')).toThrow('invalid package');
   });
 

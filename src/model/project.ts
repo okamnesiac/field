@@ -748,10 +748,10 @@ function validate(project: LoadedProject): void {
           push(track.path, `${what} references unknown track "${input.track}"`);
           return;
         }
-        if (child.type !== 'audio') {
+        if (!renderableTrack(child)) {
+          // Midi is the only unplaceable kind now: it has no stem. An
+          // empty audio track has one, and it is silence.
           push(track.path, `${what} places a midi track, which renders no audio`);
-        } else if (!renderableTrack(child)) {
-          push(track.path, `${what} places a track with no clips and no tracks of its own`);
         }
         // A track's own gain and pan are retiring, not waiting to be
         // supported (§1.13): a level belongs on the edge, where it can
@@ -864,9 +864,9 @@ function validate(project: LoadedProject): void {
     }
 
     // Two things claiming to be the song's output. Both would be clamped
-    // to the declared length and both would loop, while a bare song name
-    // silently reaches the mix — so the first news of the ambiguity would
-    // be a render that came from the one you did not mean. `createSong`
+    // to the declared length and both would loop, and only one of them is
+    // what a bare song name reaches — so the first news of the ambiguity
+    // would be a render that came from the one you did not mean. `createSong`
     // scaffolds a mix, so this fires as soon as the output track has
     // content, which on the documented migration path is the step that
     // creates it; an empty `tracks/main.yaml` filled in later trips it on
@@ -893,7 +893,7 @@ function validate(project: LoadedProject): void {
         push(
           mix.path,
           `song has two outputs: track "${SONG_OUTPUT_NAME}" and mix "${SONG_OUTPUT_NAME}" ` +
-            `both carry the song's declared length, and a bare song name reaches the mix — ` +
+            `both carry the song's declared length, and a bare song name reaches the track — ` +
             `delete one (mixes/ retires in nested-tracks.md §7 chunk 2)`,
         );
       }
