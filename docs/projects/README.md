@@ -74,6 +74,11 @@ A `# Title`, then a `**Status:**` line, then a `**Goal:**` line. The status
 line is prose rather than a keyword, because the useful thing to say is which
 PRs carried the work and what is left — and it gets updated when that changes.
 
+A plan whose status line is stale is worse than one with no status at all. No
+status sends a reader to the code; a wrong one sends them to the code only
+after they have believed it, and a plan is read precisely when nobody yet
+knows enough to catch the lie.
+
 Then write what the work needs. Two habits worth keeping:
 
 - **Record decisions with their alternatives.** `(DECIDED)` with the rejected
