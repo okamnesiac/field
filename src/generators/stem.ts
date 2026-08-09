@@ -5,7 +5,7 @@ import { readWavHeader } from '../audio/wav.js';
 // spelling is free and only the resulting order matters, which is why
 // the buildable sort below is spelling-blind: order is the one channel
 // a spelling change could reach the key through.
-import { trackRef, trackRefName } from '../labels.js';
+import { genRef, genRefName, trackRef, trackRefName } from '../labels.js';
 import type { InputEntry, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
@@ -20,14 +20,25 @@ import type { Generator } from './types.js';
 // nothing. Stems render pre-fader (levels are edge parameters)
 // and start at timeline sample 0 so the mix can sum by alignment alone.
 
+// What a generator entry's node is named (nested-tracks.md §18 step 2):
+// the owning track's name, or <track>-<id> when the entry carries an id
+// — which is why a track holding two generator entries needs ids on
+// them, and check demands exactly that.
+export function generatorName(entry: InputEntry, owner: string): string {
+  return entry.id !== undefined ? `${owner}-${entry.id}` : owner;
+}
+
 // The wiring ref an entry contributes to `sources`: kind-in-field in the
 // file (nested-tracks.md §18) flattens to one string here — `audio:` and
 // `sound:` names pass through (bare, or the //shared/asset: label), a
-// `track:` gets the prefix labels.ts owns. Exactly the strings the two
-// lists produced before they merged, which is what keeps every existing
+// `track:` gets its prefix, and a generator entry contributes the node
+// minted for it, `gen:<name>` — which is why the owner's name comes in:
+// a generator has no name of its own. Exactly the strings the two lists
+// produced before they merged, which is what keeps every existing
 // action key: refs are wiring, and the resolved plan is what hashes.
-export function entryRef(entry: InputEntry): string {
+export function entryRef(entry: InputEntry, owner: string): string {
   if (entry.track !== undefined) return trackRef(entry.track);
+  if (entry.supercollider !== undefined) return genRef(generatorName(entry, owner));
   return entry.audio ?? entry.sound!;
 }
 
@@ -35,7 +46,9 @@ export function entryRef(entry: InputEntry): string {
 // what it plays — entries carry ids for automation, not for errors, so
 // a message must not require one.
 export function entryLabel(entry: InputEntry): string {
-  return entry.id ?? trackRefName(entryRef(entry)) ?? entryRef(entry);
+  if (entry.id !== undefined) return entry.id;
+  if (entry.supercollider !== undefined) return 'supercollider';
+  return entry.track ?? entry.audio ?? entry.sound ?? '?';
 }
 
 export interface PlacedClip {
@@ -233,7 +246,7 @@ export function planTrack(
   // A placed track is never in sha256BySource — its bytes do not exist
   // until it renders — so it sorts with the buildable sounds, by name,
   // for the same reason they do.
-  const refs = [...new Set(track.inputs.map(entryRef))];
+  const refs = [...new Set(track.inputs.map((e) => entryRef(e, track.name)))];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
     .sort((a, b) => {
@@ -248,7 +261,7 @@ export function planTrack(
   // ref breaks the rare tie — a sound and a track legally sharing a name
   // — where the two really are different sources and the order only has
   // to be deterministic.
-  const buildableName = (r: string): string => trackRefName(r) ?? r;
+  const buildableName = (r: string): string => trackRefName(r) ?? genRefName(r) ?? r;
   const buildable = refs
     .filter((r) => !sha256BySource.has(r))
     .sort((a, b) => {
@@ -259,10 +272,10 @@ export function planTrack(
   const sources = [...committed, ...buildable];
   const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
   const placed = track.inputs.flatMap((entry): PlacedClip[] => {
-    const input = inputIndex.get(entryRef(entry))!;
+    const input = inputIndex.get(entryRef(entry, track.name))!;
     const loop = entry.loop?.enabled ? entry.loop : undefined;
     if (loop) {
-      const frames = framesBySource.get(entryRef(entry));
+      const frames = framesBySource.get(entryRef(entry, track.name));
       return expandLoop(entry, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
     }
     const { start, duration } = placedWindow(entry, tempoMap);

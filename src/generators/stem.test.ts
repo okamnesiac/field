@@ -807,6 +807,153 @@ describe('clips over rule outputs', () => {
   });
 });
 
+describe('generator entries (nested-tracks.md §18 step 2)', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'field-gen-'));
+    init({ dir: root, name: 'test-album' });
+    createSong(root, 'creek');
+    mkdirSync(join(root, 'shared/instruments'), { recursive: true });
+    writeFileSync(join(root, 'shared/instruments/creek-kit.scd'), 'Out.ar(0, Silent.ar(2));\n');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeTrack(name: string, body: string[]): void {
+    writeFileSync(
+      join(root, `songs/creek/tracks/${name}.yaml`),
+      [`name: ${name}`, ...body, ''].join('\n'),
+    );
+  }
+
+  const SC_ENTRY = [
+    'inputs:',
+    '  - supercollider:',
+    '      source: creek-kit.scd',
+    '      seed: 4096',
+    '      duration: 5',
+  ];
+
+  it('mints a node under gen:, named by the owning track', () => {
+    writeTrack('kit-sc', SC_ENTRY);
+    writeTrack('kit-punch', ['inputs:', '  - track: kit-sc']);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    // The deps() shape option A promised: render, stem, consumer.
+    expect(queryDeps(root, 'deps(//songs/creek/track:kit-punch)')).toEqual([
+      '//songs/creek/gen:kit-sc',
+      '//songs/creek/track:kit-sc',
+      '//songs/creek/track:kit-punch',
+    ]);
+  });
+
+  it('an id names the node <track>-<id>, which is what two generators need', () => {
+    writeTrack('texture', [
+      'inputs:',
+      '  - id: shimmer',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+      '  - supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 8',
+      '      duration: 3',
+    ]);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    expect(queryDeps(root, 'deps(//songs/creek/track:texture)')).toEqual([
+      '//songs/creek/gen:texture',
+      '//songs/creek/gen:texture-shimmer',
+      '//songs/creek/track:texture',
+    ]);
+  });
+
+  it('two generators without ids collide, and the message says to add them', () => {
+    writeTrack('texture', [
+      'inputs:',
+      '  - supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+      '  - supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 8',
+      '      duration: 3',
+    ]);
+    expect(
+      loadProject(root).diagnostics.some((d) =>
+        d.message.includes('give each an id so its render has a name of its own'),
+      ),
+    ).toBe(true);
+  });
+
+  it('validates the program path exactly as a sound file would', () => {
+    writeTrack('kit-sc', [
+      'inputs:',
+      '  - supercollider:',
+      '      source: ghost.scd',
+      '      seed: 1',
+      '      duration: 2',
+    ]);
+    expect(
+      loadProject(root).diagnostics.some(
+        (d) => d.message.includes('program') && d.message.includes('not found'),
+      ),
+    ).toBe(true);
+  });
+
+  it('folding a sound into a track is a cache hit for the render', async () => {
+    // The §18 claim made falsifiable: name and type never reach an
+    // action key, and the entry's parameters are the sound schema's
+    // fields verbatim — so the fold re-renders nothing. The counting
+    // runner writes fixed bytes, which also proves the consumer stays
+    // cached: its input hashes cannot move when the render is a hit.
+    const state = { runs: [] as string[] };
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
+      state.runs.push(node.label.name);
+      writeFileSync(outputPath, 'render');
+    };
+    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/creek/sounds/kit-sc.yaml'),
+      'name: kit-sc\ntype: supercollider\nsource: creek-kit.scd\nseed: 4096\nduration: 5\n',
+    );
+    writeTrack('drums', [
+      'inputs:',
+      '  - id: kit-1',
+      '    sound: kit-sc',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 4',
+    ]);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
+    expect(state.runs).toEqual(['kit-sc', 'drums']);
+
+    // The fold: the sound file becomes a leaf track, the consumer's
+    // entry changes kind. Same program, same seed, same duration.
+    rmSync(join(root, 'songs/creek/sounds/kit-sc.yaml'));
+    writeTrack('kit-sc', SC_ENTRY);
+    writeTrack('drums', [
+      'inputs:',
+      '  - id: kit-1',
+      '    track: kit-sc',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 4',
+    ]);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
+    // gen:kit-sc is a cache hit under the old sound's key; the new stem
+    // wrapping it runs once; drums sees identical input bytes and params
+    // and stays cached.
+    expect(state.runs).toEqual(['kit-sc', 'drums', 'kit-sc']);
+
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
+    expect(state.runs).toEqual(['kit-sc', 'drums', 'kit-sc']); // all cached
+  });
+});
+
 // The falsifiable half of nesting: not that the schema accepts a child,
 // but that the audio comes out where the placement says. Real assets,
 // real daemon, no runner stub.

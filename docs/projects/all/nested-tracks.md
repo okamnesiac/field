@@ -16,9 +16,12 @@ entries place tracks, committed audio, or inline generators (§18) —
 which answers §6's leaf-content question, retires `clips:` and `type:`,
 and supersedes §17's spelling. The format has landed — one `inputs:`
 list with `track:`/`audio:`/`sound:` entries, every action key intact —
-so what remains is generator entries: the leaves fold behind them, and
-the two `normalize` sounds still wait on
-[multi-rate.md](multi-rate.md) (§16).
+and so have `supercollider:` entries: `kit-sc` and `pad-sc` are leaf
+tracks whose renders are `gen:` nodes cached under their old sound keys.
+`seven-eight-loop` waits with the normalizes: `loop-cd` sources it, a
+sound cannot see a track, and both retire together at
+[multi-rate.md](multi-rate.md) step 2 (§16). Then `generative:` entries
+fold the last two leaves.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it

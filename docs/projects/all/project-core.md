@@ -141,6 +141,13 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    `mix:` — a song may not declare both, and two ways to resolve one name
    is the thing §3.4 has avoided since it was written. Explicit `mix:`
    labels keep working; `mixes/` retires separately.
+   Amended 2026-08-09 (**the `gen:` package**): a generator entry inside
+   a track's `inputs:` (nested-tracks.md §18 step 2) mints a node for
+   its render, labeled `//songs/<song>/gen:<name>` — the owning track's
+   name, or `<track>-<id>` when the entry carries an id. Never authored:
+   generators are written inline, so the package exists only in wiring,
+   `deps()` output, and anywhere a label is typed. The grammar itself is
+   unchanged.
 5. **Cache key definition (DECIDED).** SHA-256 everywhere, chosen so asset
    hash = Git LFS OID — store, pointer, and cache speak one identifier
    (BLAKE3 is faster but buys a second identity scheme). Key = hash of
