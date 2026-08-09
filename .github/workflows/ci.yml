@@ -41,6 +41,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      # The example project, checked by the CLI that was just built. This
+      # is the reason bloom moved into the tree (bloom-in-tree.md §1): the
+      # format's only real consumer used to live in another repository,
+      # where a schema change could not break it until somebody opened it
+      # by hand — which is how a flag day half-landed, a second song went
+      # unmigrated, and a retired field sat accepted and unread.
+      #
+      # `node dist/cli.js` rather than a linked `field`, so what runs is
+      # the artifact `pnpm build` produced. `check` only: `build` would
+      # need sclang, which the runner does not have, and creek's takes are
+      # generated rather than committed so they are absent here by design.
+      - run: cd examples/bloom && node ../../dist/cli.js check
       # JUCE's build helper `juceaide` links juce_gui_basics whatever the
       # app links, so a headless console daemon still needs the X and
       # freetype headers. This list is what an ubuntu:24.04 container
