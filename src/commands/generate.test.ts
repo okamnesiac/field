@@ -382,12 +382,21 @@ describe('field generate: what lands on disk', () => {
     expect(result.seeds).toEqual([7, 8]);
 
     const written = recipe('line');
-    expect(written.model).toBe('field-voiced-stub');
+    // Provenance is per take now, because it describes a run and a sound
+    // accumulates several (bloom-in-tree.md §3).
+    expect(written.variants.map((v) => v.model)).toEqual([
+      'field-voiced-stub',
+      'field-voiced-stub',
+    ]);
+    // Generating chooses the first take, so the sound resolves without a
+    // second command — `choose` switches, it does not enable.
+    expect(written.chosen).toBe(1);
     // Each variant's hash is of its own file: the stub writes distinct
     // bytes per seed, so a recipe that paired file 1 with file 2's hash
     // would fail here rather than at some later check.
     for (const [i, variant] of written.variants.entries()) {
       expect(variant.seed).toBe(7 + i);
+      expect(variant.generated_at).toBe(written.variants[0]!.generated_at);
       expect(variant.sha256).toBe(await sha256File(join(root, 'songs/creek', variant.file)));
       expect(variant.sha256).toBe(sha256Text(`stub audio seed=${7 + i}\n`));
     }
@@ -402,7 +411,7 @@ describe('field generate: what lands on disk', () => {
     // it was invoked as, and the client refuses a mismatch (#60), so a
     // generate that reached the wrong worker would not get this far.
     await generateVariants(root, 'line', voice);
-    expect(recipe('line').model).toBe('field-voiced-stub');
+    expect(recipe('line').variants[0]!.model).toBe('field-voiced-stub');
     await generateVariants(root, 'pad', {
       song: 'creek',
       prompt: 'warm keys',
@@ -411,7 +420,7 @@ describe('field generate: what lands on disk', () => {
       bars: 2,
     });
     const pad = recipe('pad');
-    expect(pad.model).toBe('field-aced-stub');
+    expect(pad.variants[0]!.model).toBe('field-aced-stub');
     expect(pad.prompt).toBe('warm keys');
     expect(pad.duration_seconds).toBeGreaterThan(0);
     expect((await check(root)).diagnostics).toEqual([]);
@@ -451,5 +460,88 @@ describe('field generate: what lands on disk', () => {
     const stages: string[] = [];
     await generateVariants(root, 'line', { ...voice, onProgress: (s) => stages.push(s) });
     expect(stages).toContain('stubbing');
+  });
+});
+
+// The half that makes an example project possible (bloom-in-tree.md §3):
+// recipes ship without audio, and whoever clones generates their own
+// takes into them. The request stops being flags on a command line and
+// becomes the file — which is also why nothing here passes --text.
+describe('field generate: filling a recipe that shipped without takes', () => {
+  const TAKELESS = 'name: topline\ntype: generative\ntext: the water knows the way\n';
+  const run = { song: 'creek', seed: 7, variants: 2 };
+
+  function writeRecipe(yaml: string): void {
+    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+    writeFileSync(join(root, 'songs/creek/sounds/topline.yaml'), yaml);
+  }
+
+  it('takes the request from the recipe and fills it in place, comments intact', async () => {
+    writeRecipe(`# generate your own — nobody's creek is anybody else's\n${TAKELESS}`);
+    const result = await generateVariants(root, 'topline', run);
+    expect(result.files).toHaveLength(2);
+
+    // The comment surviving is the point: a shipped recipe explains
+    // itself, and re-emitting the file from the parsed object — which is
+    // what writing a fresh recipe does — would delete every line of that.
+    const raw = readFileSync(join(root, 'songs/creek/sounds/topline.yaml'), 'utf8');
+    expect(raw).toContain("# generate your own — nobody's creek is anybody else's");
+
+    const written = recipe('topline');
+    expect(written.text).toBe('the water knows the way');
+    expect(written.chosen).toBe(1);
+    expect(written.variants.map((v) => v.seed)).toEqual([7, 8]);
+    // Filling mints no name for the sound: it already owns the one it is
+    // named after. Before the pre-flight allowed for that, this run
+    // collided with the very recipe it was filling.
+    expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('refuses a flag that would be a second answer to what the recipe says', async () => {
+    writeRecipe(TAKELESS);
+    await expect(
+      generateVariants(root, 'topline', { ...run, text: 'a different line' }),
+    ).rejects.toThrow('topline.yaml already says what to generate, so --text');
+    // Nothing was spent: the refusal is pre-flight, and the same run
+    // without the flag still works.
+    expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
+    await generateVariants(root, 'topline', run);
+    expect(recipe('topline').variants).toHaveLength(2);
+  });
+
+  it('fills a music recipe that carries both lengths', async () => {
+    // What `field generate` itself writes: the seconds it ran at, and the
+    // bars it was asked for. The flag rule is exactly one, so passing both
+    // through would make an ordinary recipe unfillable — with advice
+    // naming flags that filling refuses, which is a closed loop.
+    writeRecipe(
+      'name: topline\ntype: generative\nprompt: warm keys\nbpm: 96\nduration_seconds: 10\nbars: 4\n',
+    );
+    await generateVariants(root, 'topline', run);
+    expect(recipe('topline').variants).toHaveLength(2);
+    expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('refuses before spending a run when the recipe is named something else', async () => {
+    // Already check-red, so the run was going to be wasted either way —
+    // and filling would add a second error, since takes land under
+    // audio/topline/ while check wants audio/<the name inside>/.
+    writeRecipe('name: elsewhere\ntype: generative\ntext: a line\n');
+    await expect(generateVariants(root, 'topline', run)).rejects.toThrow(
+      'topline.yaml is named "elsewhere" inside',
+    );
+    expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
+  });
+
+  it('refuses to run over takes that already exist', async () => {
+    writeRecipe(TAKELESS);
+    await generateVariants(root, 'topline', run);
+    // The trigger policy (project-layout.md §1.2): re-running would
+    // replace chosen audio under the project's feet. Filling an empty
+    // recipe is the one thing that opened up, not regeneration.
+    await expect(generateVariants(root, 'topline', { ...run, seed: 9 })).rejects.toThrow(
+      'already has 2 takes',
+    );
+    expect(recipe('topline').variants.map((v) => v.seed)).toEqual([7, 8]);
   });
 });

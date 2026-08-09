@@ -30,7 +30,11 @@ export interface SourceNames {
   assets: Set<string>; // the song's ledger
   sounds: Set<string>; // buildable sounds (have a rule)
   chosen: Set<string>; // generate sounds with a chosen variant
-  unchosen: Set<string>; // generate sounds not yet chosen
+  // Two distinct ways a deliberate sound fails to resolve, kept apart
+  // because the command that fixes each is different and only one of them
+  // is a well-formed project (bloom-in-tree.md §3).
+  ungenerated: Set<string>; // no takes yet — a recipe, awaiting field generate
+  unchosen: Set<string>; // takes exist, none picked — field choose
   shared: Set<string>; // the shared ledger
 }
 

@@ -221,18 +221,17 @@ describe('watchBuild', { timeout: 20_000 }, () => {
         [
           'name: gen1',
           'type: generative',
-          'model: acestep-v15-turbo',
           'prompt: test keys',
           'duration_seconds: 10',
-          'seed: 7',
           `chosen: ${chosen}`,
           'variants:',
           ...variants.flatMap((v, i) => [
             `  - file: ${v.file}`,
+            '    model: acestep-v15-turbo',
             `    seed: ${7 + i}`,
             `    sha256: ${v.sha256}`,
+            "    generated_at: '2026-08-06T00:00:00.000Z'",
           ]),
-          "generated_at: '2026-08-06T00:00:00.000Z'",
           '',
         ].join('\n'),
       );

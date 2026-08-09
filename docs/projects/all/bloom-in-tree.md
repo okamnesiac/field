@@ -1,8 +1,8 @@
 # Plan: bloom moves into field
 
-**Status:** Designed, not started (2026-08-08). Nothing has been written
-and bloom is deliberately untouched until it moves. Blocked on §3, which
-is a schema change rather than a copy.
+**Status:** Chunk 1 shipped (2026-08-08); chunk 2, the copy, is next.
+bloom is still deliberately untouched — nothing in it changes before it
+moves.
 
 **Goal:** bloom lives at `examples/bloom` in this repo, and CI runs
 `field check` against it, so a change that breaks the only real project
@@ -100,13 +100,46 @@ something that has not.
   uninstalled dependencies, and it keeps `check` answering "is this
   project coherent" rather than "is this machine ready".
 
-Open: whether `field build` should generate automatically or refuse and
-tell you. Refusing is what the design already says — deliberate
+The move is a breaking format change, and the migration is mechanical: a
+recipe's `model` and `generated_at` describe the one run that produced
+every variant it lists, which is exactly what `field generate` still
+writes — one model and one timestamp shared by that run's takes — so
+copying each down onto every variant preserves what was recorded rather
+than inventing per-take values. `seed` needs no home; each variant has
+carried its own all along. The retired keys are declared as `z.never`
+with those instructions, the `RETIRED_FADER` precedent, so a recipe
+written before the change says where the value went instead of answering
+"Unrecognized keys". They stay *required* on the variant: the migration
+loses nothing, and optional provenance would weaken the format
+permanently to save a one-time edit of files chunk 2 rewrites anyway.
+
+Two things this turned up that the plan above did not, both of which had
+to ship with it or the chunk would not have worked:
+
+- **`field generate` fills an existing takeless recipe.** It refused any
+  recipe that already existed — `pick a new name` — which would have made
+  a shipped recipe unfillable and the whole idea a dead end. Filling reads
+  the request from the file rather than the command line, so a content
+  flag passed alongside is refused as a second answer; `--seed` and
+  `--variants` describe the run, not the sound, and stay on the CLI. The
+  file is edited in place rather than re-emitted, so a shipped recipe's
+  comments survive being filled.
+- **`field generate` chooses its first take.** Every take it produced is
+  usable, so the sound resolves the moment it exists and `choose` means
+  what its name says — switching — rather than a second mandatory step.
+  This is also what keeps `check` honest: it still refuses takes with
+  nothing chosen, and that state is now unreachable except by hand.
+
+Decided: **`field build` refuses and names the command; it does not
+generate.** Refusing is what the design already says — deliberate
 generators are human-triggered because "automatic re-run would replace
 chosen audio under your feet and burn model-minutes uninvited"
-([project-layout.md](project-layout.md) §1.2) — but a fresh clone that
-can only say "no" is a worse first five minutes than one that offers, so
-it is worth deciding rather than inheriting.
+([project-layout.md](project-layout.md) §1.2) — and the worry that a
+fresh clone which can only say "no" is a bad first five minutes is
+answered by saying it well: the error names the sound and the exact
+command, and a pattern naming several lists all of them. Building is also
+the wrong place to spend model-minutes uninvited, which is the argument
+that decided it rather than the phrasing.
 
 ## 4 The two raw recordings
 
@@ -135,9 +168,16 @@ is never a window where the two repos disagree about it.
 
 ## 5 Chunks
 
-1. **Recipes without takes** (§3). Schema, `check`, and the `build`/`play`
-   message. No move yet; bloom stays where it is and keeps working, which
-   is what makes this chunk independently reviewable.
+1. **Recipes without takes** (§3) — done. Schema, `check`, the
+   `build`/`play` message, and the two things §3 records as having turned
+   up with it: `generate` fills a takeless recipe, and chooses its first
+   take. It moves the recipe format, so **`okamnesiac/bloom` does not
+   pass `field check` from here on** — its recipes carry the retired
+   sound-level keys. They are not migrated in place, because bloom is not
+   touched before the move; chunk 2 writes them in the new shape as it
+   copies them, which is the migration. Until then the retirement
+   messages say what to change, so the repo is stale rather than
+   mysterious.
 2. **The move.** Copy bloom to `examples/bloom` without its audio, add the
    gitignores, and do §4's substitutions in the copy: drop `water` from
    both scopes as §4 lists, and replace `seven-eight-loop` with a

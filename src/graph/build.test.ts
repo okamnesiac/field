@@ -192,6 +192,40 @@ describe('build', () => {
     expect(() => queryDeps(root, 'deps(//songs/creek/sound:ghost)')).toThrow('no such label');
   });
 
+  it('names the command that fills a takeless sound rather than denying it exists', async () => {
+    // `check` passes on a recipe with no takes (bloom-in-tree.md §3), so
+    // building is where it has to be refused — and "no such label" would
+    // be false in the most expensive way, sending someone to hunt for a
+    // typo in a name that is spelled correctly and sitting on disk.
+    writeSound('topline', 'name: topline\ntype: generative\ntext: the water knows the way\n');
+    await expect(buildLabels(root, ['//songs/creek/sound:topline'])).rejects.toThrow(
+      'has no takes yet — field generate topline --song creek --seed <n>',
+    );
+    // The same answer when it is reached as somebody else's dependency,
+    // which is how a project actually hits this. Different code path:
+    // naming a label expands it as a pattern, depending on one resolves
+    // it, and only the second went through resolveLabel.
+    expect(() => queryDeps(root, 'deps(//songs/creek/sound:topline)')).toThrow('has no takes yet');
+
+    // A pattern is a request for a set, so it answers with the set — in
+    // a song whose sounds are all takeless, which is a fresh clone of an
+    // example project before anyone has generated anything.
+    createSong(root, 'tall-grass');
+    mkdirSync(join(root, 'songs/tall-grass/sounds'), { recursive: true });
+    for (const [name, line] of [
+      ['topline', 'the water knows the way'],
+      ['bridge', 'and back again'],
+    ]) {
+      writeFileSync(
+        join(root, `songs/tall-grass/sounds/${name}.yaml`),
+        `name: ${name}\ntype: generative\ntext: ${line}\n`,
+      );
+    }
+    await expect(buildLabels(root, ['//songs/tall-grass/sound/...'])).rejects.toThrow(
+      /2 sounds with no takes yet:[\s\S]*field generate bridge[\s\S]*field generate topline/,
+    );
+  });
+
   it('points at the singular when someone types the old plural package', async () => {
     // Packages went singular; fingers and old docs still type the plural,
     // and "no such label" is a bad way to find that out. The suggestion

@@ -210,13 +210,24 @@ every committed file is still pinned exactly once.
 
 ## Deliberate generation
 
-A `generative` sound is provenance and promotion state in one file: model
-name + version, prompt, seed, duration, conditioning, per-variant output
-hashes — everything needed to audit or deliberately regenerate.
+A `generative` sound is a request and a record in one file. The request
+is the sound's own fields: prompt or text, duration, conditioning. The
+record is `variants:`, one entry per take, each carrying the model name +
+version that produced it, its seed, its output hash, and when it ran —
+provenance sits on the take because that is what it describes, and a
+sound accumulates takes from runs months and model versions apart.
 Reproducibility of the recipe is the contract; the committed bits are
 the artifact. (For SuperCollider the "recipe" is the program plus an
 explicit seed, and it *is* reproducible, which is why `supercollider` is
 an automatic type instead.)
+
+A recipe with no takes is legal, and is how a project ships when its
+audio is not committed: `variants:` is empty, `field check` passes — the
+project is coherent, the audio is simply absent — and `field build` or
+`field play` is what refuses, naming the sound and the `field generate`
+that fills it. Running that on an existing takeless recipe fills it in
+place, reading the request from the file instead of the command line, so
+the flags that describe content are refused there as a second answer.
 
 Concretely: `field generate <name> --song <song> --prompt …` runs the
 model through its worker and writes `songs/<song>/sounds/<name>.yaml`
@@ -230,8 +241,10 @@ name the committed recording that defines its voice with `--voice-ref
 it for the model's own voice. The sound is a
 schema-validated project file — `field check` verifies variant hashes,
 `field fmt` covers it — and each variant auditions as
-`//songs/<song>/sound:<name>-<n>` via `field play`. `field choose
-<name> --variant <n>` records `chosen:`, and from then on the sound's
-own label resolves to that variant — clips say
+`//songs/<song>/sound:<name>-<n>` via `field play`. Generating records
+`chosen: 1`, so the sound resolves as soon as it has takes; `field choose
+<name> --variant <n>` moves `chosen:` to a different one, and from then
+on the sound's own label resolves to that variant — clips say
 `source: <name>` and follow every re-choose, a one-line diff. Nothing
-is copied into a ledger, and nothing ever regenerates mechanically.
+is copied into a ledger, and nothing ever regenerates mechanically:
+generating over takes that already exist is refused, not merged.

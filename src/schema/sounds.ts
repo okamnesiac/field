@@ -75,18 +75,34 @@ export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
 // generative: deliberate generation (project-layout.md §1.2, §1.4) — a
 // sound with no in-graph Generator behind it: nothing may generate it
 // mechanically; you run it, with field generate. Model inference does not reproduce across GPU/framework
-// versions, so the outputs are committed (variants under audio/<name>/,
-// content-addressed like assets) and the file is provenance plus
-// promotion state: `field generate` writes it, `field choose` records
-// `chosen`, and the sound's own label resolves to the chosen variant —
-// clips reference the sound by name, no ledger copy involved. Each
-// variant is additionally auditionable as
-// //songs/<song>/sound:<name>-<n>. The `model` field says which
-// generator ran.
+// versions, so the outputs are content-addressed under audio/<name>/ and
+// the file is provenance plus promotion state: `field generate` writes
+// the takes and chooses the first, `field choose` switches which one, and
+// the sound's own label resolves to the chosen variant — clips reference
+// the sound by name, no ledger copy involved. Each variant is
+// additionally auditionable as //songs/<song>/sound:<name>-<n>.
+//
+// Provenance lives on the variant rather than on the sound, because it
+// describes a *run* and a sound accumulates several (bloom-in-tree.md
+// §3). Two takes made a month apart can come from different model
+// versions and certainly have different generation times; a single
+// `model`/`generated_at` pair on the sound could record only one answer
+// for the whole list. It is also what lets a recipe exist before any run
+// has happened, which is the shape an example project ships in.
+const RETIRED_TO_VARIANT =
+  'provenance describes a run and lives on each take now — copy this value ' +
+  'onto every entry under `variants:` and delete it here ' +
+  '(bloom-in-tree.md §3)';
+const RETIRED_SEED =
+  'each entry under `variants:` already records the seed it ran with, so ' +
+  'this one has no home — delete it (bloom-in-tree.md §3)';
+
 export const generativeVariantSchema = z.strictObject({
   file: z.string().min(1), // song-relative, under audio/<name>/
+  model: z.string().min(1), // which generator produced this take
   seed: z.number().int().min(0),
   sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256'),
+  generated_at: z.iso.datetime(),
 });
 export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
 
@@ -105,7 +121,23 @@ export const generativeSoundSchema = z
   .strictObject({
     name: labelName,
     type: z.literal('generative'),
-    model: z.string().min(1),
+    // Retired from the sound, declared only so a recipe written before the
+    // move is told where the value went — `strictObject` would otherwise
+    // answer "Unrecognized keys", which is true and tells nobody anything.
+    // The precedent is `RETIRED_FADER` (schema/track.ts), and the reason
+    // is the same: a removal that does not forward makes the reader guess.
+    //
+    // The migration is mechanical and loses nothing. A recipe's `model`
+    // and `generated_at` describe the one run that produced every variant
+    // it lists, which is exactly what `field generate` still writes — one
+    // model and one timestamp shared by that run's takes. Copying each
+    // down onto every variant preserves what was recorded rather than
+    // inventing per-take values. `seed` needs no home: each variant has
+    // carried its own since before this change.
+    // Written for the suffix — the loader appends " at <field>".
+    model: z.never({ error: RETIRED_TO_VARIANT }).optional(),
+    seed: z.never({ error: RETIRED_SEED }).optional(),
+    generated_at: z.never({ error: RETIRED_TO_VARIANT }).optional(),
     prompt: z.string().min(1).optional(),
     text: z.string().min(1).optional(),
     voice_ref: sourceRef.optional(),
@@ -129,10 +161,12 @@ export const generativeSoundSchema = z
     bpm: z.number().int().min(30).max(300).optional(),
     duration_seconds: z.number().positive().optional(),
     bars: z.number().int().positive().optional(),
-    seed: z.number().int().min(0),
     chosen: z.number().int().min(1).optional(), // 1-based variant number
-    variants: z.array(generativeVariantSchema).min(1),
-    generated_at: z.iso.datetime(),
+    // Defaulted rather than merely allowed to be empty: omitting the key
+    // and writing `variants: []` are otherwise different failures, and a
+    // hand-written recipe does the former. A takeless recipe is a request
+    // for audio rather than a record of it (bloom-in-tree.md §3).
+    variants: z.array(generativeVariantSchema).default([]),
   })
   // The kind split, enforced rather than documented. Without it a recipe
   // can be a chimera of both kinds or neither, and the generator would
@@ -163,6 +197,19 @@ export const generativeSoundSchema = z
             : `\`${key}\` is voice-only; a music recipe carries \`prompt\``,
         });
       }
+    }
+    // Music has to say how long. `field generate` asks for exactly one of
+    // --bars or --duration and a written recipe records the seconds it
+    // ran at, so a recipe with neither describes nothing runnable — and
+    // once a recipe can exist before its takes, that is reachable by
+    // writing one. Caught here so `check` says it, rather than at fill
+    // time where the advice would name flags that filling refuses.
+    if (isMusic && sound.bars === undefined && sound.duration_seconds === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['duration_seconds'],
+        message: 'a music recipe needs a length — `bars` or `duration_seconds`',
+      });
     }
     // The reference recording is the voice, so its identity is part of
     // the recipe's provenance (§1.3): name alone would let the bytes
@@ -199,7 +246,6 @@ export const soundOrder: KeyOrder = {
     'name',
     'type',
     'source',
-    'model',
     'prompt',
     'text',
     'voice_ref',
@@ -226,10 +272,9 @@ export const soundOrder: KeyOrder = {
     'damping',
     'chosen',
     'variants',
-    'generated_at',
   ],
   children: {
     bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } },
-    variants: { items: { keys: ['file', 'seed', 'sha256'] } },
+    variants: { items: { keys: ['file', 'model', 'seed', 'sha256', 'generated_at'] } },
   },
 };

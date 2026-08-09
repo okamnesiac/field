@@ -33,10 +33,11 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// The recipe a real `field generate` would leave behind, via the same
+// Takes on disk with nothing chosen, written through the same
 // schema+canonicalize path the command uses: variants in audio/<name>/,
-// the sound in sounds/<name>.yaml. No `chosen` yet — choosing is the
-// deliberate act under test.
+// the sound in sounds/<name>.yaml. `field generate` no longer leaves this
+// state — it chooses its first take — so reaching it means a hand edit,
+// which is exactly the state the guards below are for.
 function writeGenerateSound(name: string, variantContents: string[]): void {
   const songDir = join(root, 'songs/opener');
   mkdirSync(join(songDir, 'audio', name), { recursive: true });
@@ -44,19 +45,22 @@ function writeGenerateSound(name: string, variantContents: string[]): void {
   const variants = variantContents.map((content, i) => {
     const file = `audio/${name}/${i + 1}.wav`;
     writeFileSync(join(songDir, file), content);
-    return { file, seed: 90210 + i, sha256: sha256Text(content) };
+    return {
+      file,
+      model: 'acestep-v15-turbo',
+      seed: 90210 + i,
+      sha256: sha256Text(content),
+      generated_at: '2026-08-05T21:00:00.000Z',
+    };
   });
   const recipe = generativeSoundSchema.parse({
     name,
     type: 'generative',
-    model: 'acestep-v15-turbo',
     prompt: 'warm keys over still water',
     bpm: 96,
     duration_seconds: 10,
     bars: 4,
-    seed: 90210,
     variants,
-    generated_at: '2026-08-05T21:00:00.000Z',
   });
   const doc = new Document(recipe);
   canonicalizeDocument(doc, soundOrder);
@@ -89,7 +93,11 @@ describe('generative sounds in the project model', () => {
     writeFileSync(recipePath, raw.replace('audio/keys/2.wav', 'audio/keys/missing.wav'));
     expect((await check(root)).diagnostics.some((d) => d.message.includes('file not found'))).toBe(true);
 
-    writeFileSync(recipePath, raw.replace('seed: 90210\n', 'seed: 90210\nchosen: 5\n'));
+    // Anchored on `variants:`, which is a top-level key and canonically
+    // right after `chosen`. Anchoring on `seed:` would now match inside a
+    // variant — provenance moved there — and indent this into the list,
+    // where it tests YAML nesting rather than the guard it names.
+    writeFileSync(recipePath, raw.replace('variants:', 'chosen: 5\nvariants:'));
     expect(
       (await check(root)).diagnostics.some((d) => d.message.includes('chosen variant 5')),
     ).toBe(true);
@@ -130,6 +138,27 @@ describe('generative sounds in the project model', () => {
       loadProject(root).diagnostics.some((d) =>
         d.message.includes('no chosen variant yet — field choose keys first'),
       ),
+    ).toBe(true);
+  });
+
+  it('a takeless recipe is a request, and check says the project is fine', async () => {
+    // The other half of the rule above, and the one the example project
+    // depends on (bloom-in-tree.md §3): a recipe whose takes do not exist
+    // yet is well-formed, and a clip may reference it. `check` answers
+    // "is this project coherent", not "is this machine ready" — so it
+    // stays quiet here and `build` is what refuses.
+    writeFileSync(
+      join(root, 'songs/opener/sounds/topline.yaml'),
+      'name: topline\ntype: generative\ntext: the water knows the way\n',
+    );
+    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('topline'));
+    const result = await check(root);
+    expect(result.diagnostics).toEqual([]);
+    // Not by accident of the name being unknown: a genuinely unknown
+    // source is still an error, which is what tells the two apart.
+    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('ghost'));
+    expect(
+      (await check(root)).diagnostics.some((d) => d.message.includes('unknown source "ghost"')),
     ).toBe(true);
   });
 

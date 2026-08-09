@@ -60,6 +60,26 @@ export type GraphNode = AssetNode | GeneratorNode | GenerationNode;
 
 export interface Graph {
   nodes: Map<string, GraphNode>; // keyed by formatted label
+  // Deliberate sounds whose recipe exists but whose takes do not
+  // (bloom-in-tree.md §3). They mint no node: there is nothing to build,
+  // because nothing may run them mechanically, and nothing committed to
+  // point at either. So resolution fails — correctly — and this is what
+  // makes it fail saying which command fills them rather than claiming
+  // the label does not exist, which is the one thing that is not true.
+  ungenerated: Map<string, UngeneratedSound>; // keyed by formatted label
+}
+
+// A recipe waiting to be filled. Carries its label as well as its key so
+// patterns can be matched against it, not only exact labels — the two
+// spellings fail in different functions and both have to say this.
+export interface UngeneratedSound {
+  label: Label;
+  song: string;
+  name: string;
+}
+
+function fillCommand(pending: UngeneratedSound): string {
+  return `field generate ${pending.name} --song ${pending.song} --seed <n>`;
 }
 
 // Requires a project with no diagnostics: the graph trusts what validate
@@ -67,6 +87,7 @@ export interface Graph {
 export function buildGraph(project: LoadedProject): Graph {
   const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const nodes = new Map<string, GraphNode>();
+  const ungenerated = new Map<string, UngeneratedSound>();
   const addRule = (
     label: Label,
     songDir: string,
@@ -139,6 +160,10 @@ export function buildGraph(project: LoadedProject): Graph {
         // rule node — nothing may re-run it (project-layout.md §1.2/§1.4).
         // Its own label resolves to the chosen variant; every variant is
         // auditionable by number.
+        if (sound.variants.length === 0) {
+          const label: Label = { pkg: `${pkgBase}/sound`, name: sound.name };
+          ungenerated.set(formatLabel(label), { label, song: song.name, name: sound.name });
+        }
         sound.variants.forEach((variant, i) => {
           const label: Label = { pkg: `${pkgBase}/sound`, name: `${sound.name}-${i + 1}` };
           nodes.set(formatLabel(label), {
@@ -214,7 +239,7 @@ export function buildGraph(project: LoadedProject): Graph {
       }
     }
   }
-  return { nodes };
+  return { nodes, ungenerated };
 }
 
 // The canonical spelling of a pattern, for error messages: with
@@ -279,10 +304,20 @@ function singularHint(graph: Graph, pattern: LabelPattern): string {
 }
 
 export function resolveLabel(graph: Graph, label: Label): GraphNode {
-  const node = graph.nodes.get(formatLabel(label));
+  const formatted = formatLabel(label);
+  const node = graph.nodes.get(formatted);
   if (!node) {
+    // The recipe is right there on disk, so "no such label" would be
+    // false in the way that costs the most time: it sends you looking for
+    // a typo in a name that is spelled correctly. Reached both by asking
+    // for the sound directly and by building anything that depends on it,
+    // because every resolution comes through here.
+    const pending = graph.ungenerated.get(formatted);
+    if (pending !== undefined) {
+      throw new Error(`${formatted} has no takes yet — ${fillCommand(pending)}`);
+    }
     const hint = singularHint(graph, { kind: 'label', label });
-    throw new Error(`no such label: ${formatLabel(label)}${hint}`);
+    throw new Error(`no such label: ${formatted}${hint}`);
   }
   return node;
 }
@@ -290,6 +325,26 @@ export function resolveLabel(graph: Graph, label: Label): GraphNode {
 export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] {
   const matched = [...graph.nodes.values()].filter((n) => matchesPattern(n.label, pattern));
   if (matched.length === 0) {
+    // Naming a label on the command line comes through here rather than
+    // through resolveLabel, so this is the spelling a person actually
+    // types and it has to give the same answer: a pattern that matches
+    // only takeless sounds matched something real, and "matched no
+    // labels" would send them hunting for a typo. All of them, not the
+    // first — a pattern is a request for the set.
+    const pending = [...graph.ungenerated.values()].filter((u) =>
+      matchesPattern(u.label, pattern),
+    );
+    if (pending.length === 1) {
+      throw new Error(
+        `${formatLabel(pending[0]!.label)} has no takes yet — ${fillCommand(pending[0]!)}`,
+      );
+    }
+    if (pending.length > 1) {
+      throw new Error(
+        `${formatPattern(pattern)} matched ${pending.length} sounds with no takes yet:\n` +
+          pending.map((p) => `  ${fillCommand(p)}`).join('\n'),
+      );
+    }
     throw new Error(
       `pattern matched no labels: ${formatPattern(pattern)}${singularHint(graph, pattern)}`,
     );
