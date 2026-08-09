@@ -9,7 +9,7 @@ import { entryRef, expandLoop, generatorName, placedWindow } from '../generators
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
-import { sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
+import { genRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
 import {
   assetsFileOrder,
@@ -68,6 +68,17 @@ export interface LoadedSong {
   sounds: LoadedFile<Sound>[];
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
+  // Run-recorded state for `generative:` entries, keyed by gen node
+  // name (nested-tracks.md §18 step 3): audio/<name>/variants.yaml,
+  // merged here once so nothing downstream learns the file layout —
+  // the same promise the sound-side stitch makes. Absent from the map
+  // means nothing has been generated yet, which is legal.
+  genTakes: Map<string, LoadedFile<GenerativeTakes>>;
+  // The sound-side takes files themselves. Their *data* merges into the
+  // sound (variants, chosen), but fmt and unformattedFiles need the
+  // loaded file: a takes file is a schema-validated project file, and
+  // one absent from allFiles is one fmt silently skips.
+  soundTakes: LoadedFile<GenerativeTakes>[];
 }
 
 export interface LoadedProject {
@@ -156,7 +167,7 @@ function loadTakes(
   project: LoadedProject,
   songDirAbs: string,
   soundName: string,
-): GenerativeTakes | undefined {
+): LoadedFile<GenerativeTakes> | undefined {
   const abs = takesPath(songDirAbs, soundName);
   if (!existsSync(abs)) return undefined;
   const loaded = loadFile(project, abs, {
@@ -169,11 +180,54 @@ function loadTakes(
   if (loaded.data.sound !== soundName) {
     project.diagnostics.push({
       file: loaded.path,
-      message: `takes name "${loaded.data.sound}" must match the directory audio/${soundName}/`,
+      message:
+        loaded.data.gen !== undefined
+          ? `these takes attach to the gen node "${loaded.data.gen}" while ` +
+            `sounds/${soundName}.yaml still defines a sound — finish the fold, ` +
+            `or rename gen: back to sound: (nested-tracks.md §18)`
+          : `takes name "${loaded.data.sound}" must match the directory audio/${soundName}/`,
     });
     return undefined;
   }
-  return loaded.data;
+  return loaded;
+}
+
+// A generative entry's takes, beside the audio under its gen node's
+// name (nested-tracks.md §18 step 3): audio/<name>/variants.yaml with
+// `gen: <name>`. Same absent-is-legal rule as a sound's — a request
+// with no takes is the shape a project ships in.
+function loadEntryTakes(
+  project: LoadedProject,
+  songDirAbs: string,
+  genName: string,
+): LoadedFile<GenerativeTakes> | undefined {
+  const abs = takesPath(songDirAbs, genName);
+  if (!existsSync(abs)) return undefined;
+  const loaded = loadFile(project, abs, {
+    schema: generativeTakesSchema,
+    order: generativeTakesOrder,
+  });
+  if (!loaded) return undefined;
+  if (loaded.data.sound !== undefined) {
+    // A takes file from before the fold: same bytes, new attachment.
+    // Told the move rather than "must match", the way every retirement
+    // here forwards.
+    project.diagnostics.push({
+      file: loaded.path,
+      message:
+        `these takes attach to the gen node "${genName}" now — rename ` +
+        `sound: to gen: (nested-tracks.md §18)`,
+    });
+    return undefined;
+  }
+  if (loaded.data.gen !== genName) {
+    project.diagnostics.push({
+      file: loaded.path,
+      message: `takes name "${loaded.data.gen}" must match the directory audio/${genName}/`,
+    });
+    return undefined;
+  }
+  return loaded;
 }
 
 export function loadProject(root: string): LoadedProject {
@@ -207,6 +261,8 @@ export function loadProject(root: string): LoadedProject {
       sounds: [],
       tracks: [],
       takes: [],
+      genTakes: new Map(),
+      soundTakes: [],
     };
 
     // The pre-2026-08-06 layout is diagnosed, not silently ignored: a
@@ -276,9 +332,14 @@ export function loadProject(root: string): LoadedProject {
       // downstream has to know the two are separate files — and absent is
       // a legal answer, meaning nothing has been generated yet.
       const takes = loadTakes(project, dir, parsed.data.name);
+      if (takes) song.soundTakes.push(takes);
       song.sounds.push({
         ...parsed,
-        data: { ...parsed.data, variants: takes?.variants ?? [], chosen: takes?.chosen },
+        data: {
+          ...parsed.data,
+          variants: takes?.data.variants ?? [],
+          chosen: takes?.data.chosen,
+        },
       } as LoadedFile<Sound>);
     }
 
@@ -287,6 +348,17 @@ export function loadProject(root: string): LoadedProject {
         | LoadedFile<Track>
         | undefined;
       if (track) song.tracks.push(track);
+    }
+    // Stitch each generative entry's takes in by gen node name. Two
+    // entries minting one name is a collision diagnosed in the check
+    // pass; loading the same file twice here is merely idempotent.
+    for (const track of song.tracks) {
+      for (const entry of track.data.inputs) {
+        if (entry.generative === undefined) continue;
+        const name = generatorName(entry, track.data.name);
+        const takes = loadEntryTakes(project, dir, name);
+        if (takes) song.genTakes.set(name, takes);
+      }
     }
 
     const takesDir = join(dir, 'takes');
@@ -319,6 +391,8 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.tempo,
       s.assets,
       ...s.sounds,
+      ...s.soundTakes,
+      ...s.genTakes.values(),
       ...s.tracks,
       ...s.takes,
     ]),
@@ -628,6 +702,14 @@ function validate(project: LoadedProject): void {
         const variant = generate.variants[generate.chosen - 1];
         if (variant) return { base: song.dir, file: variant.file };
       }
+      // A generative entry's chosen take is committed content under its
+      // gen node's name, exactly as a sound's is under the sound's.
+      const gen = genRefName(ref);
+      if (gen !== undefined) {
+        const takes = song.genTakes.get(gen)?.data;
+        const variant = takes?.chosen !== undefined ? takes.variants[takes.chosen - 1] : undefined;
+        if (variant) return { base: song.dir, file: variant.file };
+      }
       return undefined;
     };
     // `mixes/` retired with the output track (nested-tracks.md §7 chunk 2).
@@ -708,7 +790,10 @@ function validate(project: LoadedProject): void {
         // Named by id when it has one — ids are optional (§18 decision
         // 3) — else by position and target, the way placements were.
         const target =
-          entry.track ?? entry.sound ?? entry.audio ?? (entry.supercollider ? 'supercollider' : '?');
+          entry.track ??
+          entry.sound ??
+          entry.audio ??
+          (entry.supercollider ? 'supercollider' : entry.generative ? 'generative' : '?');
         const what = entry.id !== undefined ? `input "${entry.id}"` : `input ${i + 1} ("${target}")`;
         if (entry.id !== undefined) {
           if (entryIds.has(entry.id)) push(track.path, `duplicate input id "${entry.id}"`);
@@ -790,6 +875,31 @@ function validate(project: LoadedProject): void {
             resolveFile: (baseDir: string, file: string) =>
               resolveAssetFile(project.root, baseDir, file),
           });
+        } else if (entry.generative !== undefined) {
+          // Through lookupAsset for the same reason the sound pass is:
+          // this check and `field generate` may not answer "which asset
+          // is this" differently (voice-generation.md §1.3).
+          if (
+            entry.generative.voice_ref !== undefined &&
+            lookupAsset(project, song.name, entry.generative.voice_ref) === undefined
+          ) {
+            push(
+              track.path,
+              `${what} voice_ref references unknown asset "${entry.generative.voice_ref}" — ` +
+                `a reference recording is a committed asset (voice-generation.md §1.3)`,
+            );
+          }
+          // Takes with nothing picked never comes from a command —
+          // `field generate` chooses its first take — so reaching it
+          // means a hand edit, same as the sound-side rule.
+          const gname = generatorName(entry, track.data.name);
+          const takes = song.genTakes.get(gname)?.data;
+          if (takes !== undefined && takes.chosen === undefined && takes.variants.length > 0) {
+            push(
+              track.path,
+              `${what} has takes but no chosen variant yet — field choose ${gname} first`,
+            );
+          }
         }
         // Musical arrays need the musical anchor: an absolute entry's
         // scalars are samples, and silently converting [9, 2] would be a
@@ -856,7 +966,9 @@ function validate(project: LoadedProject): void {
                 ? 'track'
                 : entry.supercollider !== undefined
                   ? 'generator'
-                  : 'sound';
+                  : entry.generative !== undefined
+                    ? 'generative entry'
+                    : 'sound';
             push(
               track.path,
               `${what} loops a ${kind} — set loop.every ` +
@@ -932,8 +1044,26 @@ function validate(project: LoadedProject): void {
     const genNames = new Map<string, string>();
     for (const trackFile of song.tracks) {
       for (const entry of trackFile.data.inputs) {
-        if (entry.supercollider === undefined) continue;
+        if (entry.supercollider === undefined && entry.generative === undefined) continue;
         const name = generatorName(entry, trackFile.data.name);
+        // A generative entry's takes claim audio/<name>/ exactly as a
+        // generative sound's do, and `field generate <name>` resolves the
+        // sound first — so one name may not be both. Same for an asset:
+        // imports land in audio/<name>/ too (project-layout.md §4.11).
+        if (entry.generative !== undefined) {
+          const holder = soundNames.has(name)
+            ? `sounds/${name}.yaml`
+            : assetNames.has(name)
+              ? `the asset "${name}"`
+              : undefined;
+          if (holder !== undefined) {
+            push(
+              trackFile.path,
+              `generative entry mints the name "${name}", which ${holder} also holds — ` +
+                `both claim audio/${name}/ (rename the track, the entry id, or the other)`,
+            );
+          }
+        }
         const first = genNames.get(name);
         if (first === undefined) {
           genNames.set(name, trackFile.path);
@@ -954,6 +1084,79 @@ function validate(project: LoadedProject): void {
               `has a name of its own (nested-tracks.md §18)`,
           );
         }
+      }
+    }
+
+    // A generative entry's takes get the checks a generative sound's do
+    // (the deliberate-sounds block above): committed, content-addressed,
+    // contained in audio/<name>/, `chosen` naming a take that exists.
+    // Pushed against the takes file, which is the file you would edit.
+    for (const [name, takesFile] of song.genTakes) {
+      const takes = takesFile.data;
+      takes.variants.forEach((_, i) => {
+        const label = `${name}-${i + 1}`;
+        if (genNames.has(label)) {
+          push(
+            takesFile.path,
+            `variant ${i + 1} audition label "${label}" collides with the generator of that name`,
+          );
+        }
+      });
+      const variantFiles = new Set<string>();
+      for (const variant of takes.variants) {
+        if (variantFiles.has(variant.file)) {
+          push(takesFile.path, `duplicate variant file "${variant.file}"`);
+        }
+        variantFiles.add(variant.file);
+        if (variant.file !== posix.normalize(variant.file) || variant.file.includes('\\')) {
+          push(takesFile.path, `variant file path not in normalized form: ${variant.file}`);
+          continue;
+        }
+        if (!variant.file.startsWith(`audio/${name}/`)) {
+          push(takesFile.path, `variant file must live in audio/${name}/: ${variant.file}`);
+        }
+        const resolved = resolveAssetFile(project.root, song.dir, variant.file);
+        if (resolved.problem) {
+          push(takesFile.path, `variant ${resolved.problem}`);
+        }
+      }
+      if (takes.chosen !== undefined && takes.chosen > takes.variants.length) {
+        push(
+          takesFile.path,
+          `chosen variant ${takes.chosen} does not exist (${takes.variants.length} variants)`,
+        );
+      }
+    }
+
+    // Nothing else ever opens audio/, so a renamed track, entry id, or
+    // sound strands its takes — model-minutes of them — with check
+    // green and the takes silently gone from the model. A directory
+    // holding a takes file is claimed by the generative request named
+    // like it; unclaimed is a rename's leftover, and this names it.
+    // Asset item directories carry no takes file and are skipped; a
+    // claimed directory with the wrong key inside is the attachment
+    // diagnostics' to say, not a second message here.
+    const claimedTakesDirs = new Set(generateSounds.map((g) => g.sound.name));
+    for (const trackFile of song.tracks) {
+      for (const entry of trackFile.data.inputs) {
+        if (entry.generative !== undefined) {
+          claimedTakesDirs.add(generatorName(entry, trackFile.data.name));
+        }
+      }
+    }
+    const audioDir = join(project.root, song.dir, 'audio');
+    if (existsSync(audioDir)) {
+      for (const item of readdirSync(audioDir).sort()) {
+        const itemDir = join(audioDir, item);
+        if (!statSync(itemDir).isDirectory()) continue;
+        if (claimedTakesDirs.has(item)) continue;
+        if (!existsSync(join(itemDir, TAKES_FILENAME))) continue;
+        push(
+          join(song.dir, 'audio', item, TAKES_FILENAME),
+          `no generative request claims audio/${item}/ — a renamed track, id, or ` +
+            `sound leaves its takes behind; rename the directory (and its ` +
+            `gen:/sound: key) to follow, or delete it`,
+        );
       }
     }
 
@@ -1175,6 +1378,27 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
         });
       }
     }
+    // A generative entry's authored pair is the same pin (§18 step 3):
+    // the hash is authored up front and generate verifies it at run
+    // time, but a swap *between* runs has to surface here or the entry
+    // stays check-green while describing a different voice.
+    for (const track of song.tracks) {
+      for (const entry of track.data.inputs) {
+        const ref = entry.generative?.voice_ref;
+        const declared = entry.generative?.voice_ref_sha256;
+        if (ref === undefined || declared === undefined) continue;
+        const recorded = lookupAsset(project, song.name, ref)?.asset.sha256;
+        if (recorded === undefined) continue; // already diagnosed by validate
+        if (recorded !== declared) {
+          diagnostics.push({
+            file: track.path,
+            message:
+              `voice_ref "${ref}" is recorded as ${recorded} but the entry declares ` +
+              `${declared} — the reference recording changed under the request`,
+          });
+        }
+      }
+    }
   }
   // Deliberate-target variants are committed artifacts with recorded
   // hashes too (project-layout.md §1.4) — a recipe whose WAVs drifted is
@@ -1189,6 +1413,22 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
         if (actual !== variant.sha256) {
           diagnostics.push({
             file: file.path,
+            message: `variant "${variant.file}" content does not match its recorded sha256 (hashes to ${actual})`,
+          });
+        }
+      }
+    }
+    // Entry takes are the same committed artifacts under the same
+    // promise; verified against the takes file, which is what recorded
+    // the hash and what you would regenerate from.
+    for (const takesFile of song.genTakes.values()) {
+      for (const variant of takesFile.data.variants) {
+        const { path } = resolveAssetFile(project.root, song.dir, variant.file);
+        if (!path) continue; // already diagnosed by validate
+        const actual = await sha256File(path);
+        if (actual !== variant.sha256) {
+          diagnostics.push({
+            file: takesFile.path,
             message: `variant "${variant.file}" content does not match its recorded sha256 (hashes to ${actual})`,
           });
         }

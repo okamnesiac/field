@@ -87,8 +87,8 @@ export async function importAsset(
   // collision would only surface as a check-red project after the copy.
   if (takenSongNames(songDir).has(assetName)) {
     throw new Error(
-      `"${assetName}" is already a sound (or an audition label) in "${song}" — ` +
-        `a song's names are one namespace (use --name)`,
+      `"${assetName}" is already a sound, a generator, or an audition label in ` +
+        `"${song}" — a song's names are one namespace (use --name)`,
     );
   }
   // Compare by resolved path, not string equality: check accepts any

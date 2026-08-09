@@ -1,0 +1,18 @@
+# the generated keys: a deliberate request, waiting for its takes. A
+# leaf track whose one entry is the recipe — nothing in the build may
+# run this; generation is human-triggered (project-layout.md §1.2), so
+# it stays a request until you ask:
+#
+#   field generate still-water-keys --song creek --seed 90210 --variants 2
+#
+# The prompt and the length below are that request; flags repeating them
+# are refused. The takes land in audio/still-water-keys/variants.yaml,
+# which is git-ignored — generating leaves this file untouched, byte for
+# byte, which is the design constraint the audio/ split serves.
+name: still-water-keys
+inputs:
+  - generative:
+      prompt: dreamy electric piano chords, sparse and warm, minor key, ambient, gentle
+      bpm: 96
+      duration_seconds: 10
+      bars: 4

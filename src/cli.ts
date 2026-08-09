@@ -133,7 +133,7 @@ program
   });
 program
   .command('generate <name>')
-  .description('run a deliberate generator: variants land in songs/<song>/audio/<name>/ with the recipe as a sound')
+  .description('run a deliberate generator: fills a generative entry (by its gen node name) or a sound; variants land in songs/<song>/audio/<name>/')
   .requiredOption('--song <name>', 'song the sound belongs to (its tempo map projects --bars)')
   .option('--prompt <text>', 'what to generate — music, through field-aced')
   .option('--text <line>', 'the line to speak or sing — voice, through field-voiced')
@@ -182,7 +182,7 @@ program
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: field play ${opts.song}/sound:${name}-1\n` +
+        `audition: field play ${opts.song}/${result.pkg}:${name}-1\n` +
           `choose:   field choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
@@ -191,7 +191,7 @@ program
   });
 program
   .command('choose <name>')
-  .description("repoint which committed variant a generate sound's label resolves to")
+  .description("repoint which committed variant a gen node's (or generate sound's) label resolves to")
   .requiredOption('--song <name>', 'song the sound belongs to')
   .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
   .action(async (name: string, opts: { song: string; variant: number }) => {
@@ -204,7 +204,9 @@ program
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
         `${moved ? 'moved' : 'chose'} ${name} → variant ${opts.variant} (${result.file})\n` +
-          `//songs/${opts.song}/sound:${name} now plays it; clips reference it as source: ${name}\n`,
+          (result.pkg === 'gen'
+            ? `//songs/${opts.song}/gen:${name} now plays it; every placement follows\n`
+            : `//songs/${opts.song}/sound:${name} now plays it; entries reference it as sound: ${name}\n`),
       );
     } catch (err) {
       fail(err);

@@ -99,6 +99,19 @@ describe('generative sounds in the project model', () => {
     expect(loadedGenerate().variants).toHaveLength(2);
   });
 
+  it('fmt sees a noncanonical takes file (#105 review)', async () => {
+    // The takes file is a schema-validated project file, so it is fmt's
+    // to cover — it was invisible to allFiles until the gen-takes fix,
+    // valid YAML in the wrong canonical order sailing through as
+    // "already canonical".
+    const raw = readFileSync(takesPath(), 'utf8');
+    // Same data with `sound:` moved to the end — valid, non-canonical.
+    writeFileSync(takesPath(), raw.replace('sound: keys\n', '') + 'sound: keys\n');
+    const result = await check(root);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.unformatted).toContain('songs/opener/audio/keys/variants.yaml');
+  });
+
   it('diagnoses name/filename mismatch, dangling files, and bad chosen', async () => {
     const recipePath = join(root, 'songs/opener/sounds/keys.yaml');
     const recipe = readFileSync(recipePath, 'utf8');

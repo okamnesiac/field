@@ -1,6 +1,6 @@
 # Plan: Nested tracks — one primitive for structure, time and mix
 
-**Status:** In progress (2026-08-08). Nesting renders, `mixes/` has
+**Status:** In progress (2026-08-09). Nesting renders, `mixes/` has
 retired into the output track (#81), and creek is now expressed as three
 placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
@@ -18,10 +18,15 @@ and supersedes §17's spelling. The format has landed — one `inputs:`
 list with `track:`/`audio:`/`sound:` entries, every action key intact —
 and so have `supercollider:` entries: `kit-sc` and `pad-sc` are leaf
 tracks whose renders are `gen:` nodes cached under their old sound keys.
-`seven-eight-loop` waits with the normalizes: `loop-cd` sources it, a
-sound cannot see a track, and both retire together at
-[multi-rate.md](multi-rate.md) step 2 (§16). Then `generative:` entries
-fold the last two leaves.
+`generative:` entries have landed too (§18 step 3, decision 3 as
+amended): `still-water-keys` is a leaf track, its takes keyed by gen
+node name so the audio directory never moved, and `generate`/`choose`
+resolve gen node names. Two sounds wait with the normalizes, for the
+same reason: a sound cannot see a track. `seven-eight-loop` is sourced
+by `loop-cd` and both retire together at
+[multi-rate.md](multi-rate.md) step 2 (§16); `lead-take` is sourced by
+`vocal-48k`, which retires at multi-rate step 3 when a track carries
+its own rate — then the last sound folds and `sounds/` empties.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -950,6 +955,25 @@ What this decides, and what it retires:
    resolves when the track has one generative entry — is the
    implementing chunk's to settle, with a migration for today's
    `audio/<name>/variants.yaml`.
+   Amended 2026-08-09 (step 3, settled on concrete files): the id
+   requirement fell. Takes key on the *gen node's name* — the owning
+   track's, or `<track>-<id>` — the uniform rule supercollider entries
+   got at step 2, so a leaf's takes live at
+   `audio/<track>/variants.yaml` and the common fold moves no files:
+   `still-water-keys`' directory survived its fold untouched. The file
+   says `gen: <name>` where it said `sound: <name>` (a one-line rekey,
+   told by a check diagnostic), and `field generate`/`field choose`
+   take the node name, so the sole-entry leaf reads as `field generate
+   <track>`. The stable attachment the required id was for is the
+   name itself: renaming a track orphans `audio/<track>/` exactly as
+   it always did for a renamed sound, and check diagnoses both the
+   same way — a takes file in a directory no generative request
+   claims is named as a rename's leftover. (Review caught this
+   sentence promising the diagnostic before it existed; the scan that
+   makes it true covers both sides, so the sound half is new too —
+   nothing opened `audio/` before it.) Ids stay what the first
+   sentence says — optional, for automation and for telling two
+   generators apart.
 
 4. **`type:` leaves the track file.** Every track is audio; `midi` was
    a placeholder kind that renders nothing, places nothing, and is

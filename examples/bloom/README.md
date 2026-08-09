@@ -99,11 +99,13 @@ field build tall-grass
 creek does not, and says why:
 
 ```text
-//songs/creek/sound:still-water-keys has no takes yet — field generate still-water-keys --song creek --seed <n>
+//songs/creek/sound:lead-take has no takes yet — field generate lead-take --song creek --seed <n>
 ```
 
-Two of creek's sounds are model-generated, and neither ships with audio. The
-recipes carry the request — the prompt, the line, the delivery — and you
+Two of creek's parts are model-generated, and neither ships with audio. The
+keys are a `generative:` entry — a leaf track whose one input *is* the
+request — and the vocal is still a sound (it folds when track rates land).
+Either way the file carries the prompt, the line, the delivery, and you
 supply the run:
 
 ```bash
@@ -113,10 +115,10 @@ field build creek
 ```
 
 Each writes `songs/creek/audio/<name>/variants.yaml` and chooses the first
-take, so the sound resolves immediately. The recipe is not touched — run
-`git status` afterwards and it is clean. Note what is *not* passed: no
-`--prompt`, no `--text`. The file already says what to generate, and a flag
-repeating it is refused as a second answer.
+take, so the name resolves immediately. The file carrying the request is not
+touched — run `git status` afterwards and it is clean. Note what is *not*
+passed: no `--prompt`, no `--text`. The file already says what to generate,
+and a flag repeating it is refused as a second answer.
 
 Then audition the takes and change your mind:
 

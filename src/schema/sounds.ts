@@ -132,21 +132,29 @@ export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
 // two places can drift, and each way they drift is quiet: pins without
 // bytes fail `check` for everyone else, bytes without pins cannot be
 // verified at all.
-export const generativeTakesSchema = z.strictObject({
-  // The sound these belong to. Redundant with the directory name, and
-  // checked against it for the same reason a sound's `name` is checked
-  // against its filename: a file that has been moved should say so rather
-  // than quietly describe something else.
-  sound: labelName,
-  chosen: z.number().int().min(1).optional(), // 1-based, as played and numbered
-  // Defaulted rather than merely allowed to be empty: omitting the key and
-  // writing `variants: []` would otherwise be different failures, and a
-  // hand-written file does the former.
-  variants: z.array(generativeVariantSchema).default([]),
-});
+export const generativeTakesSchema = z
+  .strictObject({
+    // What these takes attach to: a gen node (`gen:` — the owning
+    // track's name, or <track>-<id> when the entry carries an id), or a
+    // generative sound (`sound:`, transitional — it retires with
+    // `sounds/`). Redundant with the directory name, and checked against
+    // it for the same reason a sound's `name` is checked against its
+    // filename: a file that has been moved should say so rather than
+    // quietly describe something else.
+    gen: labelName.optional(),
+    sound: labelName.optional(),
+    chosen: z.number().int().min(1).optional(), // 1-based, as played and numbered
+    // Defaulted rather than merely allowed to be empty: omitting the key and
+    // writing `variants: []` would otherwise be different failures, and a
+    // hand-written file does the former.
+    variants: z.array(generativeVariantSchema).default([]),
+  })
+  .refine((takes) => (takes.gen !== undefined) !== (takes.sound !== undefined), {
+    error: 'takes attach to exactly one thing — `gen:` (or `sound:`, until sounds fold)',
+  });
 export type GenerativeTakes = z.infer<typeof generativeTakesSchema>;
 export const generativeTakesOrder: KeyOrder = {
-  keys: ['sound', 'chosen', 'variants'],
+  keys: ['gen', 'sound', 'chosen', 'variants'],
   children: {
     variants: { items: { keys: ['file', 'model', 'seed', 'sha256', 'generated_at'] } },
   },
@@ -164,6 +172,101 @@ export const TAKES_FILENAME = TAKES_FILE;
 //
 // A voice line has no `duration_seconds`: its length follows from the
 // text, and the committed variant WAV is its own record of what came out.
+//
+// The request fields and their refinement are shared verbatim with the
+// `generative:` entry (nested-tracks.md §18 step 3): same fields, same
+// bounds, same messages, so folding a sound into a track moves where the
+// recipe lives and changes nothing about what it may say.
+const generativeRecipeFields = {
+  prompt: z.string().min(1).optional(),
+  text: z.string().min(1).optional(),
+  voice_ref: sourceRef.optional(),
+  voice_ref_sha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256')
+    .optional(),
+  // Chatterbox's two expressive knobs, ours by name (voice-generation.md
+  // §8). `conviction` is its `cfg_weight`: classifier-free guidance,
+  // which each step blends as `cond + w * (cond - uncond)` — how far
+  // past the on-text reading to push. Higher commits harder and hurries;
+  // lower lingers. Named for what it does rather than for the technique,
+  // and left in Chatterbox's direction so a value copied from its docs
+  // means the same thing here.
+  //
+  // Bounds are deliberately narrower than the model's: widening a range
+  // later keeps every existing recipe valid, narrowing one does not.
+  exaggeration: z.number().min(0.25).max(2).optional(),
+  conviction: z.number().min(0.1).max(1).optional(),
+  lyrics: z.string().optional(),
+  bpm: z.number().int().min(30).max(300).optional(),
+  duration_seconds: z.number().positive().optional(),
+  bars: z.number().int().positive().optional(),
+};
+type RecipeFields = {
+  [K in keyof typeof generativeRecipeFields]?: z.infer<(typeof generativeRecipeFields)[K]>;
+};
+// The kind split, enforced rather than documented. Without it a recipe
+// can be a chimera of both kinds or neither, and the generator would
+// have to guess which one it was looking at — the same failure the
+// clip asset-vs-target precedent rules out.
+const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
+  const isMusic = sound.prompt !== undefined;
+  const isVoice = sound.text !== undefined;
+  if (isMusic === isVoice) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [isMusic ? 'text' : 'prompt'],
+      message: isMusic
+        ? 'a recipe carries either `prompt` (music) or `text` (voice), not both'
+        : 'a generative request needs `prompt` (music) or `text` (voice)',
+    });
+    return;
+  }
+  const musicOnly = ['lyrics', 'bpm', 'bars', 'duration_seconds'] as const;
+  const voiceOnly = ['voice_ref', 'voice_ref_sha256', 'exaggeration', 'conviction'] as const;
+  for (const key of isVoice ? musicOnly : voiceOnly) {
+    if (sound[key] !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message: isVoice
+          ? `\`${key}\` is music-only; a voice recipe carries \`text\` and \`voice_ref\``
+          : `\`${key}\` is voice-only; a music recipe carries \`prompt\``,
+      });
+    }
+  }
+  // Music has to say how long. `field generate` asks for exactly one of
+  // --bars or --duration and a written recipe records the seconds it
+  // ran at, so a recipe with neither describes nothing runnable — and
+  // once a recipe can exist before its takes, that is reachable by
+  // writing one. Caught here so `check` says it, rather than at fill
+  // time where the advice would name flags that filling refuses.
+  if (isMusic && sound.bars === undefined && sound.duration_seconds === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['duration_seconds'],
+      message: 'a music recipe needs a length — `bars` or `duration_seconds`',
+    });
+  }
+  // The reference recording is the voice, so its identity is part of
+  // the recipe's provenance (§1.3): name alone would let the bytes
+  // change under a recipe that still claims to describe them.
+  if (isVoice && (sound.voice_ref === undefined) !== (sound.voice_ref_sha256 === undefined)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['voice_ref'],
+      message: '`voice_ref` and `voice_ref_sha256` go together — the recording and its hash',
+    });
+  }
+};
+
+// The request inline in a track's `inputs:` — the sound schema's
+// authored fields, minus `name` and `type`, which the entry supplies by
+// where it sits and what field it is (nested-tracks.md §18 step 3). Its
+// takes live beside the audio under the gen node's name.
+export const generativeEntrySchema = z.strictObject(generativeRecipeFields).superRefine(refineRecipe);
+export type GenerativeEntry = z.infer<typeof generativeEntrySchema>;
+
 export const generativeSoundSchema = z
   .strictObject({
     name: labelName,
@@ -185,86 +288,11 @@ export const generativeSoundSchema = z
     model: z.never({ error: RETIRED_TO_VARIANT }).optional(),
     seed: z.never({ error: RETIRED_SEED }).optional(),
     generated_at: z.never({ error: RETIRED_TO_VARIANT }).optional(),
-    prompt: z.string().min(1).optional(),
-    text: z.string().min(1).optional(),
-    voice_ref: sourceRef.optional(),
-    voice_ref_sha256: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/, 'must be a lowercase hex sha256')
-      .optional(),
-    // Chatterbox's two expressive knobs, ours by name (voice-generation.md
-    // §8). `conviction` is its `cfg_weight`: classifier-free guidance,
-    // which each step blends as `cond + w * (cond - uncond)` — how far
-    // past the on-text reading to push. Higher commits harder and hurries;
-    // lower lingers. Named for what it does rather than for the technique,
-    // and left in Chatterbox's direction so a value copied from its docs
-    // means the same thing here.
-    //
-    // Bounds are deliberately narrower than the model's: widening a range
-    // later keeps every existing recipe valid, narrowing one does not.
-    exaggeration: z.number().min(0.25).max(2).optional(),
-    conviction: z.number().min(0.1).max(1).optional(),
-    lyrics: z.string().optional(),
-    bpm: z.number().int().min(30).max(300).optional(),
-    duration_seconds: z.number().positive().optional(),
-    bars: z.number().int().positive().optional(),
+    ...generativeRecipeFields,
     chosen: z.never({ error: RETIRED_TO_TAKES }).optional(),
     variants: z.never({ error: RETIRED_TO_TAKES }).optional(),
   })
-  // The kind split, enforced rather than documented. Without it a recipe
-  // can be a chimera of both kinds or neither, and the generator would
-  // have to guess which one it was looking at — the same failure the
-  // clip asset-vs-target precedent rules out.
-  .superRefine((sound, ctx) => {
-    const isMusic = sound.prompt !== undefined;
-    const isVoice = sound.text !== undefined;
-    if (isMusic === isVoice) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [isMusic ? 'text' : 'prompt'],
-        message: isMusic
-          ? 'a recipe carries either `prompt` (music) or `text` (voice), not both'
-          : 'a generative sound needs `prompt` (music) or `text` (voice)',
-      });
-      return;
-    }
-    const musicOnly = ['lyrics', 'bpm', 'bars', 'duration_seconds'] as const;
-    const voiceOnly = ['voice_ref', 'voice_ref_sha256', 'exaggeration', 'conviction'] as const;
-    for (const key of isVoice ? musicOnly : voiceOnly) {
-      if (sound[key] !== undefined) {
-        ctx.addIssue({
-          code: 'custom',
-          path: [key],
-          message: isVoice
-            ? `\`${key}\` is music-only; a voice recipe carries \`text\` and \`voice_ref\``
-            : `\`${key}\` is voice-only; a music recipe carries \`prompt\``,
-        });
-      }
-    }
-    // Music has to say how long. `field generate` asks for exactly one of
-    // --bars or --duration and a written recipe records the seconds it
-    // ran at, so a recipe with neither describes nothing runnable — and
-    // once a recipe can exist before its takes, that is reachable by
-    // writing one. Caught here so `check` says it, rather than at fill
-    // time where the advice would name flags that filling refuses.
-    if (isMusic && sound.bars === undefined && sound.duration_seconds === undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['duration_seconds'],
-        message: 'a music recipe needs a length — `bars` or `duration_seconds`',
-      });
-    }
-    // The reference recording is the voice, so its identity is part of
-    // the recipe's provenance (§1.3): name alone would let the bytes
-    // change under a recipe that still claims to describe them.
-    if (isVoice && (sound.voice_ref === undefined) !== (sound.voice_ref_sha256 === undefined)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['voice_ref'],
-        message: '`voice_ref` and `voice_ref_sha256` go together — the recording and its hash',
-      });
-    }
-  });
+  .superRefine(refineRecipe);
 // The recipe exactly as `sounds/<name>.yaml` carries it: the request, with
 // no takes in it.
 export type GenerativeRecipe = z.infer<typeof generativeSoundSchema>;

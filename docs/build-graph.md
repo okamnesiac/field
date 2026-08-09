@@ -127,11 +127,12 @@ outside the hash.
 ## Sound types and their generators
 
 Every automatic type has a `Generator` in `src/generators/` — the code
-that generates it mechanically, in-graph, cached. The `generative` type
+that generates it mechanically, in-graph, cached. The `generative` kind
 has none: its generation is human-triggered (`field generate`), its
-variants are committed under `audio/<sound>/`, and its label resolves
-to the chosen variant (`field choose` repoints it; entries reference the
-sound by name and follow).
+variants are committed under `audio/<name>/` — named by the gen node
+for a `generative:` entry, by the sound for the transitional sound
+form — and its label resolves to the chosen variant (`field choose`
+repoints it; every placement follows).
 
 - **`normalize`** — sample-rate/bit-depth conversion in the daemon's
   built-in tier: a fixed-ratio polyphase resampler and TPDF dither

@@ -4,6 +4,6 @@ inputs:
   # phrase is the loop now. Bars 1-12 with `every: [4]` said the same
   # thing three times; main placing this phrase three times says it once.
   - id: keys-loop-p4t2n
-    sound: still-water-keys
+    track: still-water-keys
     at: [1]
     duration: [4]
