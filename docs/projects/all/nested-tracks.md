@@ -749,3 +749,66 @@ alignment rules that the engine would immediately make wrong.
 **Consequence for §8.** The definition of done loses its sends clause
 until then; see the note there. What remains of this plan is chunk 6,
 folding `sounds/` in.
+
+## 15 Chunk 6 is not only a layout change (2026-08-08)
+
+§7 chunk 6 calls itself "a layout and namespace change rather than a
+behavioural one, and it should not be able to break nesting on its way
+in". The second half holds. The first does not, and bloom shows it
+without needing a hypothetical.
+
+Decision 12's headline example is that an `eq` sound becomes a track with
+one input and one insert. bloom has three of those — `kit-punch` (eq on
+`kit-sc`), `vocal-48k` and `loop-cd` (normalize). None of them could be
+written as a track:
+
+- `inputs[].track` is a slug naming a *track*, and `kit-sc` is a sound, so
+  the wrapped thing cannot go in `inputs:`.
+- The other way in is a clip, and a clip's `duration` was **required**
+  while a placement's is optional.
+
+So the fold would have forced a hand-written duration onto every effect
+wrapper, matching the render length of whatever it wraps, with nothing
+keeping the two in step when that render changed. That is the second
+structure that drifts, introduced by the chunk that was supposed to move
+files.
+
+The asymmetry had a stated reason, in `stem.ts`: a clip's duration is
+required because "a clip's source is committed content whose length
+validate can read, while a child track's render length is unknowable at
+plan time". True of an asset. False of a buildable sound — `kit-sc` is a
+SuperCollider render whose length is as unknowable while planning as any
+track's, and which `execute()` already resolves for placed tracks. The
+rule was right about assets and had been generalised to clips, which is
+why it survived: every clip in the project happened to be one of the
+cases it was true for.
+
+So an omitted clip duration means the whole source, and chunk 6 gets §1.11
+early — not the whole merge of `clips:` and `inputs:`, just the one
+property that made them different in a way that mattered. Landed
+2026-08-08; project-core.md §3.2 carries the amendment, since that is
+where the requirement was decided.
+
+**One trap, worth recording because it nearly shipped.** The loader bailed
+out of the entire clip block when a duration failed to resolve, and an
+absent duration resolves to `undefined` by the same path. Making the field
+optional therefore silently turned `duration:` into a way to skip the
+source check, the id check and the fade check — a clip pointing at a
+nonexistent sound passed `check` clean. Absent and unresolvable have to
+stay distinguishable, and a test now holds each of them.
+
+**The layout question in §6 is answered: `sounds/` goes entirely**
+(2026-08-08). Two shelves for one kind is the "four nouns for one object"
+problem decision 1 removed, one layer down —
+[project-layout.md](project-layout.md) §4.5's rule that a package is the
+singular of its directory would give a single kind two label packages.
+§4.1's argument for the shelf was that "the audio/sounds pair teaches the
+system's central distinction: audio is committed bytes, a sound is a
+definition", and that pair survives the rename: `audio/` against
+`tracks/` teaches it just as well, because the definition side is now the
+only side that was ever authored.
+
+Remaining, in order: effect sounds become tracks; leaf content for
+`supercollider` and `generative`, which is §6's third open question and
+the only genuinely undecided part; then `sounds/` and the `sound:` label
+retire, forwarding.
