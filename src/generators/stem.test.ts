@@ -149,6 +149,29 @@ describe('loop expansion (clip-looping.md)', () => {
     expect(looped.clips).toEqual(hand.clips);
   });
 
+  it('repetitions carry the entry pan, exactly as hand-tiled entries would', () => {
+    // Loops only became pannable when placement fields went uniform
+    // (nested-tracks.md §18) — clips never carried pan, so expandLoop
+    // never copied one. The loop contract is that expansion matches the
+    // hand-written equivalent, pan included (Bugbot on #102).
+    const looped = planTrack(
+      track([clip({ at: 0, duration: 1920, loop: { every: 960, fade: 0 }, pan: -0.5 })]),
+      map120,
+      hashes,
+      frames,
+    );
+    const hand = planTrack(
+      track([
+        clip({ id: 'k1', at: 0, duration: 960, pan: -0.5 }),
+        clip({ id: 'k2', at: 960, duration: 960, pan: -0.5 }),
+      ]),
+      map120,
+      hashes,
+    );
+    expect(looped.clips).toEqual(hand.clips);
+    expect(looped.clips.every((c) => c.pan === -0.5)).toBe(true);
+  });
+
   it('refuses to tile a source exhausted by its read offset', () => {
     expect(() =>
       planTrack(

@@ -201,6 +201,10 @@ export function expandLoop(
       duration: repDuration,
       read_offset: readOffset,
       gain_db: entry.gain_db,
+      // Same omit-when-centred rule as the direct path (PlacedClip.pan):
+      // loops only became pannable when placement fields went uniform,
+      // and a repetition carries whatever the hand-tiled equivalent would.
+      ...(entry.pan !== 0 ? { pan: entry.pan } : {}),
       // Whole-entry fades keep their meaning (first head, window tail);
       // seams get the loop's click-guard. Overlay voices all end at the
       // window edge, so the window fade covers whatever is cut there.
