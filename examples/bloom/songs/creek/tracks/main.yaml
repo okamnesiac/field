@@ -5,17 +5,21 @@ inserts:
   - effect: limit
     ceiling_db: -1
 inputs:
-  - track: drums
-    at: 0
-  - track: keys
-    at: 0
-    gain_db: -4 # scratch level while auditioning variants
-    pan: 0.2 # a touch right, opposite the pad
-  - track: lead-vocal
-    at: 0
-    gain_db: 3
-    pan: 0.2 # a touch right, opposite the pad
+  # three passes of the phrase, which is what creek is
+  - track: phrase
+    at: [1]
+  - track: phrase
+    at: [5]
+  - track: phrase
+    at: [9]
+  # the pad carries the first two passes and crosses the seam between
+  # them, so it cannot live inside a phrase
   - track: pad
     at: 0
     gain_db: -6 # the bed sits under both the vocal and the beat
     pan: -0.2 # a touch left, opposite the vocal
+  # the vocal enters on pass two and returns on pass three
+  - track: lead-vocal
+    at: 0
+    gain_db: 3
+    pan: 0.2 # a touch right, opposite the pad

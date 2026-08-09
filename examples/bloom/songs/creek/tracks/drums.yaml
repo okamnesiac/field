@@ -1,13 +1,14 @@
 name: drums
 type: audio
 clips:
-  # the seeded kit render is two bars at 96, looped through all twelve —
-  # fade 0: the phrase is exactly two bars, so the joints land clean, and
-  # bars 1-8 stay byte-identical to the hand tiling this replaces
+  # the seeded kit render is two bars at 96, tiled across the phrase —
+  # fade 0: the phrase is exactly two bars, so the joints land clean.
+  # Four bars now rather than twelve: the repetition moved up to main,
+  # which places the phrase three times.
   - id: kit-1-r2d8f
     source: kit-punch
     position: [1]
-    duration: [12]
+    duration: [4]
     loop:
       every: [2]
       fade: 0
