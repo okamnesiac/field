@@ -732,14 +732,33 @@ function validate(project: LoadedProject): void {
           continue;
         }
         const pos = positionTicks(track.path, `clip "${clip.id}" position`, clip.position, trackMeter);
-        const dur = spanTicks(track.path, `clip "${clip.id}" duration`, clip.duration, pos ?? 0, trackMeter);
-        if (pos === undefined || dur === undefined) continue;
-        if (dur <= 0) {
-          push(track.path, `clip "${clip.id}" duration resolves to zero ticks`);
+        if (pos === undefined) continue;
+        clip.position = pos;
+        // An *absent* duration is the clip declining to truncate, and has
+        // to be told apart from one that failed to resolve: the second
+        // already pushed a diagnostic and must skip the checks below,
+        // while the first is a valid clip that still has to pass them.
+        // Collapsing the two would let `duration:` be omitted and take
+        // every remaining clip check with it.
+        if (clip.duration !== undefined) {
+          const dur = spanTicks(track.path, `clip "${clip.id}" duration`, clip.duration, pos, trackMeter);
+          if (dur === undefined) continue;
+          if (dur <= 0) {
+            push(track.path, `clip "${clip.id}" duration resolves to zero ticks`);
+            continue;
+          }
+          clip.duration = dur;
+        } else if (clip.loop?.enabled) {
+          // A loop tiles a window, so it needs one (clip-looping.md §1).
+          // "As long as the source" and "repeat to fill the window" are
+          // contrary instructions, not a default and an override.
+          push(
+            track.path,
+            `clip "${clip.id}" loops but declares no duration — a loop tiles a window, ` +
+              `so give it a duration or drop the loop`,
+          );
           continue;
         }
-        clip.position = pos;
-        clip.duration = dur;
         if (clip.loop?.every !== undefined) {
           const every = spanTicks(track.path, `clip "${clip.id}" loop.every`, clip.loop.every, pos, trackMeter);
           if (every === undefined) continue;
@@ -805,7 +824,10 @@ function validate(project: LoadedProject): void {
         // in samples, so musical clips are checked through the tempo map.
         if (trackTempo) {
           const { duration } = placedWindow(clip, trackTempo);
-          if (clip.fade_in + clip.fade_out > duration) {
+          // An omitted duration has no window until the source renders, so
+          // the daemon is the only place that check can happen — the same
+          // backstop a placement with no declared window already relies on.
+          if (duration !== undefined && clip.fade_in + clip.fade_out > duration) {
             push(
               track.path,
               `clip "${clip.id}" fades (${clip.fade_in} + ${clip.fade_out} samples) ` +

@@ -76,6 +76,17 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    (a human nudge) — keeping them separate keeps the mechanical value
    re-derivable and the intent a one-line diff. Fades and gain are clip
    fields; fades in samples.
+
+   Amended 2026-08-08: `duration` is **optional**, and omitting it means
+   the whole source — the same thing an omitted duration already meant on
+   a placement ([nested-tracks.md](nested-tracks.md) §1.6, §15). It was
+   required because a clip's source was taken to be committed content
+   whose length `check` can read, which is true of an asset and false of a
+   buildable sound: that length is a render, exactly as unknowable at plan
+   time as a track's, and it resolves in the same place, `execute()`. A
+   *looping* clip still declares one, because a loop tiles a window
+   ([clip-looping.md](clip-looping.md) §1) and "as long as the source" is
+   the contrary instruction rather than a default.
 3. **ID scheme (DECIDED).** No UUIDs; three tiers. Humans name it → natural
    slug is the ID (tracks, songs, targets; filenames are keys). Content is
    the identity → SHA-256 (assets, cached outputs). Machines mint it →

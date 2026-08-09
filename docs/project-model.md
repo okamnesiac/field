@@ -123,6 +123,14 @@ three independent, non-destructive offsets:
 
 Fades, gain, and edits are clip metadata too. Every edit is a diff.
 
+A clip's `duration` may be omitted, and then the clip plays the whole
+source — the same thing an omitted duration means on a placement. The
+length is resolved when the source has rendered rather than while
+planning, so it never enters the action key: "the whole of it" re-keys
+through the source's own content hash. A looping clip is the exception
+and must declare one, because a loop tiles a window and the source fills
+it.
+
 Clips carry their own gain and fades as part of the arrangement. A track
 carries no level at all — `gain_db` and `pan` live on the placement that
 consumes it (see below) — but it does carry `inserts:` (EQ, limiter,

@@ -35,7 +35,17 @@ export const clipSchema = z.strictObject({
   source: sourceRef, // what the clip plays (§4.3): asset, sound, or shared pin
   anchor: z.enum(['musical', 'absolute']).default('musical'),
   position: timePosition, // ticks when musical, samples when absolute
-  duration: timeSpan, // same units as position
+  // Omitted means the whole source, the way a placement's omitted duration
+  // means the whole child (nested-tracks.md §1.6 — a placement declining
+  // to truncate). Required until 2026-08-08 on the argument that a clip's
+  // source is committed content whose length `check` can read; that holds
+  // for an asset and not for a buildable sound, whose length is exactly as
+  // unknowable at plan time as a track's and is resolved the same way, in
+  // execute(). A looping clip still declares one: the window is
+  // authoritative and the source tiles to fill it (clip-looping.md §1), so
+  // "as long as the source" and "tile to fill the window" are contrary
+  // instructions rather than a default.
+  duration: timeSpan.optional(), // same units as position
   loop: clipLoopSchema.optional(),
   source_offset: samples.default(0),
   slip: z.number().int().default(0),
@@ -46,7 +56,7 @@ export const clipSchema = z.strictObject({
 type ClipFile = z.infer<typeof clipSchema>;
 export type Clip = Omit<ClipFile, 'position' | 'duration' | 'loop'> & {
   position: number;
-  duration: number;
+  duration?: number | undefined;
   loop?: ClipLoop | undefined;
 };
 export const clipOrder: KeyOrder = {
