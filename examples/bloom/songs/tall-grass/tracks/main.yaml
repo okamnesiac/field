@@ -1,0 +1,7 @@
+name: main
+type: audio
+inputs:
+  - track: bass
+    at: 0
+  - track: drums
+    at: 0

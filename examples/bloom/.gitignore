@@ -1,0 +1,12 @@
+.field/
+.DS_Store
+.cache/
+
+# No audio is committed here (bloom-in-tree.md §2.4). The recipes ship;
+# whoever clones generates their own takes and chooses among them, so two
+# people's bloom sounding different is the point rather than a cost. The
+# shelves stay, because where audio *would* go is part of the layout.
+songs/*/audio/**
+!songs/*/audio/.gitkeep
+shared/samples/**
+!shared/samples/.gitkeep

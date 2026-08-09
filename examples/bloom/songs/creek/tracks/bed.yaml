@@ -1,0 +1,14 @@
+# an explicit subset: the instrumental bed without the vocal
+name: bed
+type: audio
+inputs:
+  - track: drums
+    at: 0
+  - track: keys
+    at: 0
+    gain_db: -4 # scratch level while auditioning variants
+    pan: 0.2 # a touch right, opposite the pad
+  - track: pad
+    at: 0
+    gain_db: -6 # the bed sits under both the vocal and the beat
+    pan: -0.2 # a touch left, opposite the vocal

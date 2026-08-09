@@ -1,0 +1,10 @@
+# creek sits at 96 throughout — it's a loop, and a loop wants one tempo.
+# (A ramp to 120 lived in bars 9-12 from the song's days as the tempo-ramp
+# demo; it made the looping keys smear against the grid and is gone.)
+tempo:
+  - at: 0
+    bpm: 96
+meter:
+  - at: 0
+    numerator: 4
+    denominator: 4

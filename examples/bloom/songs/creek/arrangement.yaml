@@ -1,0 +1,9 @@
+sections:
+  - name: intro
+    at: [1]
+  - name: verse
+    at: [5]
+  - name: build
+    at: [9]
+  - name: chorus
+    at: [13]
