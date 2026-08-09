@@ -2,10 +2,11 @@
 
 **Status:** In progress (2026-08-08). Nesting renders, `mixes/` has
 retired into the output track (#81), and creek is now expressed as three
-placements of a phrase — §7 chunk 5, whose verdict is §10. Still open:
-`arrangement.yaml` (the last of chunk 1), local tempo and meter maps
-(chunk 2), effective gain in `explain` (chunk 3), sends (chunk 4), and
-folding `sounds/` in (chunk 6). The chunk order changed on the way in; §9
+placements of a phrase — §7 chunk 5, whose verdict is §10.
+`arrangement.yaml` has retired into `field arrangement` (§11), which
+finishes chunk 1. Still open: local tempo and meter maps (chunk 2),
+effective gain in `explain` (chunk 3), sends (chunk 4), and folding
+`sounds/` in (chunk 6). The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
 changes the model the engine renders — doing it afterwards means
@@ -490,3 +491,55 @@ the first time — §5 says the arrangement becomes derived by walking the
 root's placements, and only after this restructure do those placements
 *be* the arrangement. Before it, the root listed instruments and the file
 listed sections, and no walk could have produced one from the other.
+
+## 11 arrangement.yaml retires (2026-08-08)
+
+§5 decided this and chunk 5 unblocked it. The file was
+`{sections: [{name, at}]}` — loaded, schema-checked for duplicate names
+and ordering, and then read by nothing. A stored copy of the structure
+that nothing consumes is a copy that drifts, and creek's had: it named a
+`chorus` at bar 13 of a twelve-bar song, and no command could notice
+because no command looked.
+
+It could not retire before chunk 5. The replacement is `field arrangement
+<song>`, which walks the output track's placements — and until creek was
+expressed as three passes of a phrase, those placements were a list of
+instruments while the file was a list of sections. No walk could have
+produced one from the other. Afterwards they are the same list, so the
+derived form is not an approximation of the stored one; it is the thing
+the stored one was describing.
+
+```
+creek (12 bars)
+  1.1.1 0:00.0  lead-vocal  (+3 dB, pan 0.2)
+  1.1.1 0:00.0  pad  (-6 dB, pan -0.2)
+  1.1.1 0:00.0  phrase
+  5.1.1 0:10.0  phrase
+  9.1.1 0:20.0  phrase
+```
+
+Two details the implementation forced, both of which are the old file's
+own bug seen from the other side:
+
+- **A length is a span, not a position.** Printing creek's `length: [12]`
+  through the meter map gives `13.1.1`, the downbeat *after* the song.
+  That is exactly what `chorus at [13]` was, and it is why the header
+  reads `12 bars`.
+- **Time order, not file order.** The file's order is authoring order.
+  A reader asking what happens when wants the timeline, so placements
+  sort by position.
+
+**What is lost: section names.** `intro`, `verse`, `build` are gone —
+placements name the track they place, so creek reads as three passes of
+`phrase`. That is more honest about creek, whose three passes *are* the
+same phrase, and it is a real loss for a song whose sections differ. The
+place it comes back is §6's open question, placement identity: a
+placement that can be named is a section, and then the derived arrangement
+prints the name. Retiring the file first is deliberate — a stored name
+that drifts is worse than no name, and the open question is now the only
+thing standing between here and named structure.
+
+A leftover `arrangement.yaml` is diagnosed rather than ignored, the
+`mixes/` precedent: the file would otherwise sit on disk describing a
+structure nothing reads, which is the state that produced `chorus` at
+bar 13.

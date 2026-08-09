@@ -49,7 +49,6 @@ project/
 ├── songs/
 │   └── <song>/
 │       ├── song.yaml
-│       ├── arrangement.yaml
 │       ├── tempo.yaml
 │       ├── markers.yaml
 │       ├── tracks/       # one file per track: routing, inserts, clips

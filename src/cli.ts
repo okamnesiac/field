@@ -720,6 +720,17 @@ program
   });
 
 program
+  .command('arrangement <song>')
+  .description("the song's structure, derived from its output track's placements")
+  .action(async (songName: string) => {
+    try {
+      const { arrangement } = await import('./commands/arrangement.js');
+      process.stdout.write(`${arrangement(requireRoot(), songName)}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+program
   .command('status')
   .description('summarize the project')
   .action(() => {
