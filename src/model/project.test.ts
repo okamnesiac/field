@@ -224,6 +224,23 @@ describe('import', () => {
     rmSync(src);
   });
 
+  it('reads a flat pre-rule ledger path as declared (project-layout.md §4.11)', async () => {
+    // A ledger written before every-item-is-a-directory: bytes at a
+    // flat path, declared by hand. Every other ledger in this suite is
+    // written by importAsset and so wears the new shape — without this
+    // one, a future rule deriving the expected path from the item name
+    // would break existing projects while the whole suite stayed green.
+    createSong(root, 'opener');
+    mkdirSync(join(root, 'songs/opener/audio'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/audio/legacy.wav'), 'legacy bytes');
+    writeFileSync(
+      join(root, 'songs/opener/assets.yaml'),
+      'assets:\n  - name: legacy\n    file: audio/legacy.wav\n' +
+        `    sha256: ${sha256Text('legacy bytes')}\n    bytes: 12\n`,
+    );
+    expect((await check(root)).ok).toBe(true);
+  });
+
   it('preserves comments in assets.yaml across imports', async () => {
     createSong(root, 'opener');
     const src = sourceFile();
