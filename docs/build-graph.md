@@ -180,10 +180,12 @@ sound by name and follow).
   carries the song's declared `length` and `loop` and renders exactly that
   long, the way the `mix` rule does. A bare song reference resolves to it:
   `creek` means `//songs/creek/track:main`. A clip's
-  `source:` is an asset, a sound, or a shared pin — clipping an
-  automatic sound pulls its whole definition into the stem's subgraph,
-  so the arrangement can play audio nothing ever committed, and editing
-  the definition rebuilds straight through stem and mix. It places the
+  `source:` is an asset, a sound, a shared pin, or a track spelled
+  `track:<name>` — the same edge as a placement, wearing the clip
+  spelling — and clipping an automatic sound or a track pulls its whole
+  definition into the stem's subgraph, so the arrangement can play audio
+  nothing ever committed, and editing the definition rebuilds straight
+  through stem and mix. It places the
   track's clips through the tempo map (position, source offset, slip,
   clip gain, linear fades) and sums them into a pre-fader Float32 stereo
   stem, in TypeScript — offline mixing has no deadline

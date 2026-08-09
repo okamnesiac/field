@@ -6,12 +6,13 @@ import {
   sharedAssetName,
   SHARED_ASSETS_PKG,
   SONG_OUTPUT_NAME,
+  trackRefName,
   type Label,
   type LabelPattern,
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
-import { planTrack, renderableTrack, trackRefName } from '../generators/stem.js';
+import { planTrack, renderableTrack } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';

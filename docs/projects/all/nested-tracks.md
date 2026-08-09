@@ -10,8 +10,10 @@ is done too — a track carries its own tempo and meter (§13). Sends
 (chunk 4) are deferred to the real-time engine, which is where an edge
 that carries no offset stops needing offsets invented for it (§14). What
 is left here is folding `sounds/` in (chunk 6), which opened with the
-clip-duration prerequisite (§15, #97) and now waits on
-[multi-rate.md](multi-rate.md) to settle what `normalize` becomes (§16).
+clip-duration prerequisite (§15, #97). The eq fold has landed — a clip
+can play a track, and `kit-punch` is one (§17); the two `normalize`
+sounds wait on [multi-rate.md](multi-rate.md) (§16), and the five leaves
+wait on §6's leaf-content question.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -834,3 +836,47 @@ reads headers and warns). Chunk 6 resumes after that plan's step 2 frees
 `loop-cd` to retire; the eq fold and the leaf-content question (§6) are
 unaffected by it but sequenced behind it so the sounds shelf empties once
 rather than twice.
+
+## 17 The eq fold lands: a clip plays a track (2026-08-09)
+
+§16's tail sequenced the eq fold behind multi-rate "so the sounds shelf
+empties once rather than twice", and that reasoning did not survive the
+morning: the shelf *retires* once either way — retirement is the finale's
+move — and a file leaving it early empties nothing twice. Resequenced
+2026-08-09: the fold is decided, unblocked and small, so it goes first,
+with the multi-rate steps interleaved behind it. `kit-punch` is now a
+track with one clip and one insert, and `sounds/kit-punch.yaml` is gone.
+
+**The transition spelling is decided: a clip plays a track as
+`source: track:<name>`.** The same string a placement already wires in
+`sources` and the label already uses (`//songs/creek/track:drums`), now
+legal where an author writes it. A bare slug keeps meaning the song's
+one namespace — assets and sounds — because tracks are deliberately
+outside it (a track and a sound may legally share a name today), and a
+bare slug that tried both would be a search path, which project-core.md
+§3.4 has forbidden since it was written ("two ways to resolve one name").
+Whether a bare slug ever comes to mean a track is the
+finale's question, when `sounds/` retires and the namespaces actually
+merge — undecided here, deliberately. That merge is also where `check`
+owes a migration-quality collision message and `field import`'s
+name guard widens; nothing merges yet, so neither changed yet.
+
+A clip that plays a track is checked exactly as a placement is (unknown,
+self, midi — each with the placement's own message shape), joins the
+containment-cycle walker as an edge, counts toward `explain`'s level
+answer with its `gain_db` (clips carry no pan), and still requires
+`loop.every` to loop — a track's length is as unknowable at plan time as
+any buildable's. It keeps the clip powers a placement lacks:
+`source_offset`, `slip`, loops. The graph needed nothing: `refLabel` has
+resolved `track:` refs since placements landed, so the authored spelling
+and the wiring spelling are now one string.
+
+**The proof the fold is only a fold:** `kit-punch`'s own action key
+changed by construction — rule `eq` became rule `stem` — so the claim is
+not "same key" but "same audio", and it held bit-for-bit: the track
+render hashes identically to the sound render it replaces
+(`d1ae4edb90b7…`). Because action keys see content hashes and never
+spellings, `drums` — whose YAML changed from `kit-punch` to
+`track:kit-punch` — kept its key (`6cd170a1cbfe`, cached), and
+`field build creek/track:main` came back entirely from cache: the whole
+song, bit-identical, through a model with one fewer kind in it.

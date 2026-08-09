@@ -248,10 +248,13 @@ feature.
 Field's offline effects — `eq`, `limit`, `reverb` — appear in three
 places in creek, one of each:
 
-- **A chained sound**: `sound:kit-punch` runs the kit *recipe* through
-  the EQ (`type: eq`, `source: kit-sc` — low shelf for punch, high shelf
-  for air), and the drum clips play the EQ'd render. Edit the shelf, and
-  render → stem → sum rebuild in one pass.
+- **A wrapper track**: `track:kit-punch` runs the kit *recipe* through
+  the EQ — one clip playing the whole of `kit-sc`, one `eq` insert (low
+  shelf for punch, high shelf for air) — and the drum clips play the
+  EQ'd render by clipping the track (`source: track:kit-punch`). Edit
+  the shelf, and render → stem → sum rebuild in one pass. This was an
+  `eq` *sound* until sounds began folding into tracks
+  (nested-tracks.md §1.12, §17); the render is bit-identical.
 - **A track insert**: the pad carries a `reverb` insert, so the wash is
   baked into its stem — and rings past the last clip (the stem simply
   grows by the tail).

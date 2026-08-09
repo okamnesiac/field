@@ -189,7 +189,8 @@ every existing citation stay stable.
    `supercollider` (§4.6) — the same principle as a bare slug resolving
    in the song's namespace: every bare spelling resolves in its natural
    home, explicit spellings escape. Never a search path: each spelling names
-   exactly one location (the one-spelling rule, project-core.md §7),
+   exactly one location (the one-spelling rule, project-core.md §3.4 —
+   §7 was a mis-address: that section defers path normalization),
    so a
    song-local program, if one ever exists, writes the slashed path.
    Clips adopt the same field: a clip's `source:` is an asset name, a

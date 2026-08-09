@@ -9,7 +9,7 @@ import { expandLoop, placedInput, placedWindow, renderableTrack } from '../gener
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
-import { sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
+import { sharedAssetName, SONG_OUTPUT_NAME, trackRefName } from '../labels.js';
 import { checkSource } from '../generators/single-input.js';
 import type { SourceNames } from '../generators/types.js';
 import {
@@ -713,8 +713,30 @@ function validate(project: LoadedProject): void {
         clipIds.add(clip.id);
         // The clip's source is an asset, a sound, or a shared pin
         // (mix-assembly.md §5; project-layout.md §4.3) — same resolution,
-        // same messages, as a sound's own source.
-        checkSource(clip.source, `clip "${clip.id}"`, trackCtx);
+        // same messages, as a sound's own source — or a track, spelled
+        // `track:<name>` (nested-tracks.md §1.11), checked exactly as a
+        // placement is: it resolves to a renderable track that is not
+        // this one.
+        const clippedTrack = trackRefName(clip.source);
+        if (clippedTrack !== undefined) {
+          if (clippedTrack === track.data.name) {
+            // The locally decidable cycle, with its own message, same as
+            // a placement's ("cycle: a → a" describes the mistake less
+            // well than naming it).
+            push(track.path, `clip "${clip.id}" clips this track inside itself`);
+            continue;
+          }
+          const child = trackByName.get(clippedTrack);
+          if (child === undefined) {
+            push(track.path, `clip "${clip.id}" references unknown track "${clippedTrack}"`);
+            continue;
+          }
+          if (!renderableTrack(child)) {
+            push(track.path, `clip "${clip.id}" clips a midi track, which renders no audio`);
+          }
+        } else {
+          checkSource(clip.source, `clip "${clip.id}"`, trackCtx);
+        }
         // Musical arrays need the musical anchor: an absolute clip's
         // scalars are samples, and silently converting [9, 2] would be a
         // unit pun, not a convenience. A clip whose time fields fail to
@@ -775,10 +797,11 @@ function validate(project: LoadedProject): void {
           const loop = clip.loop;
           const committed = fileBySource(clip.source);
           if (committed === undefined && loop.every === undefined) {
+            const what = clippedTrack !== undefined ? 'track' : 'sound';
             push(
               track.path,
-              `clip "${clip.id}" loops a sound — set loop.every ` +
-                `(a sound's length is unknown before it builds)`,
+              `clip "${clip.id}" loops a ${what} — set loop.every ` +
+                `(a ${what}'s length is unknown before it builds)`,
             );
           } else {
             // Tiling at source length needs the frame count; the seek-based
@@ -842,7 +865,15 @@ function validate(project: LoadedProject): void {
       // the reference resolves to something renderable, the time
       // resolves, and a declared window holds its fades. Placements have
       // no IDs yet (§6), so they are named by position.
-      if (track.data.inputs.length > 0 && track.data.type !== 'audio') {
+      //
+      // Either spelling of a placement counts: a clip playing a track
+      // (§1.11) places it just as an `inputs:` entry does, and a midi
+      // parent has no stem to sum either one into — buildGraph would
+      // accept the file and then never render the edge.
+      const placesTracks =
+        track.data.inputs.length > 0 ||
+        track.data.clips.some((clip) => trackRefName(clip.source) !== undefined);
+      if (placesTracks && track.data.type !== 'audio') {
         push(track.path, `a midi track cannot place tracks — only an audio track sums audio`);
       }
       track.data.inputs.forEach((input, i) => {
@@ -923,6 +954,15 @@ function validate(project: LoadedProject): void {
       for (const input of trackByName.get(name)?.inputs ?? []) {
         if (input.track !== name && trackByName.has(input.track)) {
           visitTrack(input.track, [...path, name]);
+        }
+      }
+      // A clip that plays a track is a containment edge like any
+      // placement (§1.11); direct self-clipping already got its clearer
+      // message above, so it is skipped here the same way.
+      for (const clip of trackByName.get(name)?.clips ?? []) {
+        const child = trackRefName(clip.source);
+        if (child !== undefined && child !== name && trackByName.has(child)) {
+          visitTrack(child, [...path, name]);
         }
       }
       containmentState.set(name, 'done');

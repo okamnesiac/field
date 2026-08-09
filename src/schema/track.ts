@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
-import { labelName, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
+import { clipSourceRef, labelName, samples, slug, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 import { meterEventSchema, tempoEventSchema } from './song.js';
 
@@ -8,8 +8,9 @@ import { meterEventSchema, tempoEventSchema } from './song.js';
 // (source, source_offset, slip, in samples). Effective read offset =
 // source_offset − slip (project-core.md §3.2). `source:` names the
 // content (project-layout.md §4.3): an asset or a sound in the song's
-// one namespace, or a shared pin — clipping a buildable sound means the
-// arrangement plays a render that is never committed, only its
+// one namespace, a shared pin, or a track spelled `track:<name>`
+// (nested-tracks.md §1.11) — clipping a buildable sound or a track means
+// the arrangement plays a render that is never committed, only its
 // definition (mix-assembly.md §5), and clipping a generate sound plays
 // its chosen committed variant.
 // Looping (clip-looping.md §1): the window is authoritative and the source
@@ -32,7 +33,7 @@ export type ClipLoop = Omit<ClipLoopFile, 'every'> & { every?: number | undefine
 
 export const clipSchema = z.strictObject({
   id: slug,
-  source: sourceRef, // what the clip plays (§4.3): asset, sound, or shared pin
+  source: clipSourceRef, // what the clip plays (§4.3): asset, sound, shared pin, or track:<name>
   anchor: z.enum(['musical', 'absolute']).default('musical'),
   position: timePosition, // ticks when musical, samples when absolute
   // Omitted means the whole source, the way a placement's omitted duration

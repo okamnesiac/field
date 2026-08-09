@@ -279,6 +279,54 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     expect(spec.sources).toEqual(['kick', 'track:aaa']);
   });
 
+  it('folding a sound into a track cannot permute sibling wiring', () => {
+    // Buildable refs order by the name under the spelling, so `zebra`
+    // the sound and `track:zebra` the track hold the same slot beside
+    // buildable `wall`. Raw-string order would flip [wall, zebra] to
+    // [track:zebra, wall] — reversing clip indices and the dep-hash
+    // order, re-keying a parent whose children are byte-identical, which
+    // is exactly what a fold must not do (nested-tracks.md §17).
+    const asSound = planTrack(
+      nested([], [clip({ id: 'w', source: 'wall', position: 0 }), clip({ id: 'z', source: 'zebra', position: 960 })]),
+      map120,
+      hashes,
+    );
+    const asTrack = planTrack(
+      nested([], [clip({ id: 'w', source: 'wall', position: 0 }), clip({ id: 'z', source: 'track:zebra', position: 960 })]),
+      map120,
+      hashes,
+    );
+    expect(asSound.sources).toEqual(['wall', 'zebra']);
+    expect(asTrack.sources).toEqual(['wall', 'track:zebra']);
+    expect(asTrack.clips.map((c) => [c.input, c.start])).toEqual(
+      asSound.clips.map((c) => [c.input, c.start]),
+    );
+  });
+
+  it('a clip playing a track shares its spelling — and its source — with a placement', () => {
+    // `source: track:verse` in a clip is the same ref string a placement
+    // wires (nested-tracks.md §1.11), so a track both clipped and placed
+    // is one source, one render, however it is spelled.
+    const spec = planTrack(
+      nested([place({ at: 0 })], [clip({ source: 'track:verse', position: 960 })]),
+      map120,
+      hashes,
+    );
+    expect(spec.sources).toEqual(['track:verse']);
+    expect(spec.clips.map((c) => [c.input, c.start])).toEqual([
+      [0, 0],
+      [0, 24000],
+    ]);
+    // The clip half keeps clip semantics: its read offset comes from
+    // source_offset − slip, where a placement's is always 0.
+    const slipped = planTrack(
+      nested([], [clip({ source: 'track:verse', source_offset: 100 })]),
+      map120,
+      hashes,
+    );
+    expect(slipped.clips[0]!.read_offset).toBe(100);
+  });
+
   it('omits pan when centred and carries it when not', () => {
     const centred = planTrack(nested([place()]), map120, hashes).clips[0]!;
     expect(centred).not.toHaveProperty('pan');
@@ -808,6 +856,69 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
 
     const again = await buildLabels(root, ['//songs/creek/track:outer']);
     expect(again.every((o) => o.cached)).toBe(true);
+  });
+
+  it('a clip plays a track: the same edge, wearing the clip spelling (§1.11)', async () => {
+    writeTrack('outer', [
+      'clips:',
+      '  - id: inner-1',
+      '    source: track:inner',
+      '    anchor: absolute',
+      '    position: 10',
+    ]);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    // Wired exactly as a placement wires: the track is a dependency.
+    expect(queryDeps(root, 'deps(//songs/creek/track:outer)')).toEqual([
+      '//songs/creek/asset:kick',
+      '//songs/creek/track:inner',
+      '//songs/creek/track:outer',
+    ]);
+    const out = await renderOuter();
+    // 10 + the child's own 7: an omitted duration plays the whole child,
+    // resolved after the child renders, same as a placement's.
+    expect(out).toHaveLength(17);
+    expect(out[13]).toBeCloseTo(1, 4);
+    expect(out[0]).toBe(0);
+  });
+
+  it('a clip on a track keeps clip powers a placement lacks: source_offset', async () => {
+    // A placement always reads from the child's origin (read_offset 0);
+    // a clip's window starts where source_offset says — here past the
+    // child's three silent samples, straight to the kick.
+    writeTrack('outer', [
+      'clips:',
+      '  - id: inner-1',
+      '    source: track:inner',
+      '    anchor: absolute',
+      '    position: 0',
+      '    duration: 4',
+      '    source_offset: 3',
+    ]);
+    const out = await renderOuter();
+    expect(out).toHaveLength(4);
+    expect(out[0]).toBeCloseTo(1, 4);
+    expect(out[1]).toBeCloseTo(0.5, 4);
+  });
+
+  it('a clip loops a track on the grid, every declared, frames unknown at plan time', async () => {
+    // The creek drums shape: a track tiled by `every`, which is the one
+    // loop form legal on a buildable source — its length is unknowable
+    // while planning, so tiling at source length is refused by check.
+    writeTrack('outer', [
+      'clips:',
+      '  - id: inner-1',
+      '    source: track:inner',
+      '    anchor: absolute',
+      '    position: 0',
+      '    duration: 20',
+      '    loop:',
+      '      every: 10',
+      '      fade: 0',
+    ]);
+    const out = await renderOuter();
+    expect(out).toHaveLength(20);
+    expect(out[3]).toBeCloseTo(1, 4); // first repetition
+    expect(out[13]).toBeCloseTo(1, 4); // second, at the interval
   });
 
   it('places one definition twice, from one render', async () => {

@@ -6,7 +6,7 @@ clips:
   # Four bars now rather than twelve: the repetition moved up to main,
   # which places the phrase three times.
   - id: kit-1-r2d8f
-    source: kit-punch
+    source: track:kit-punch
     position: [1]
     duration: [4]
     loop:
