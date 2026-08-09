@@ -121,9 +121,12 @@ export type TrackInput = Omit<TrackInputFile, 'at' | 'duration'> & {
 // answer "Unrecognized keys", which is true and tells nobody anything.
 // Every other removal in this retirement forwards: `mixes/` names what to
 // move, `mix.yaml` is repointed, `mix:` suggests `track:`.
+// Written for the suffix, like every other message here: the loader
+// appends " at <field>", so the sentence has to end before the name rather
+// than open with a verb whose subject arrives at the far end of it.
 const RETIRED_FADER =
-  'has moved: a level lives on the placement that consumes this track, so put ' +
-  'gain_db/pan on the `inputs:` entry that places it and delete them here ' +
+  'a level lives on the placement that consumes this track — put it on the ' +
+  '`inputs:` entry that places this track, and delete it here ' +
   '(nested-tracks.md §1.13)';
 
 export const trackSchema = z.strictObject({
