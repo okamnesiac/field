@@ -49,6 +49,22 @@ export function sharedAssetName(ref: string): string | undefined {
   return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
 }
 
+// How a track is named from inside its own song: in a stem's `sources`
+// wiring, and in a clip's `source:` (nested-tracks.md §1.11 — a clip is a
+// placement, and a placement is a stem at a time). Tracks are not in the
+// song's one namespace (project-layout.md §4.3) — a track and a sound may
+// share a name — so a bare slug would be ambiguous exactly where wiring
+// must not be. The prefix cannot collide with a source ref: bare refs are
+// slugs, which have no colon, and the only other spelling is
+// //shared/asset:.
+const TRACK_REF_PREFIX = 'track:';
+export function trackRef(name: string): string {
+  return `${TRACK_REF_PREFIX}${name}`;
+}
+export function trackRefName(ref: string): string | undefined {
+  return ref.startsWith(TRACK_REF_PREFIX) ? ref.slice(TRACK_REF_PREFIX.length) : undefined;
+}
+
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
 }

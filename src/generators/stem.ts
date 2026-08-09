@@ -1,5 +1,9 @@
 import { renderInsertChain } from '../audio/render-daemon.js';
 import { readWavHeader } from '../audio/wav.js';
+// trackRef spells a placed track in `sources` (labels.ts). Nothing about
+// the spelling reaches an action key — `sources` is wiring, so the
+// spelling is free and only the resulting order matters.
+import { trackRef } from '../labels.js';
 import type { Clip, Insert, Track, TrackInput } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
@@ -73,21 +77,6 @@ export type RenderedClip = Omit<PlacedClip, 'duration'> & { duration: number };
 // differently is how a check-clean project fails to build.
 export function renderableTrack(track: Track): boolean {
   return track.type === 'audio';
-}
-
-// How a placed track is spelled in `sources`. Tracks are not in the
-// song's one namespace (project-layout.md §4.3) — a track and a sound may
-// share a name — so a bare slug would be ambiguous exactly where wiring
-// must not be. The prefix cannot collide with a source ref: bare refs are
-// slugs, which have no colon, and the only other spelling is
-// //shared/asset:. Nothing here reaches an action key — `sources` is
-// wiring, so the spelling is free and only the resulting order matters.
-const TRACK_REF_PREFIX = 'track:';
-export function trackRef(name: string): string {
-  return `${TRACK_REF_PREFIX}${name}`;
-}
-export function trackRefName(ref: string): string | undefined {
-  return ref.startsWith(TRACK_REF_PREFIX) ? ref.slice(TRACK_REF_PREFIX.length) : undefined;
 }
 
 export interface StemSpec {

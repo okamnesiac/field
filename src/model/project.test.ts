@@ -975,6 +975,99 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
 
 });
 
+describe('clips that play tracks (nested-tracks.md §1.11)', () => {
+  // A clip whose source is `track:<name>` is a placement wearing the
+  // clip spelling, so it is checked exactly as a placement is: the
+  // reference resolves to a renderable track that is not this one, and
+  // the edge counts toward containment cycles.
+  function writeTrack(name: string, body: string[]): void {
+    writeFileSync(
+      join(root, `songs/opener/tracks/${name}.yaml`),
+      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+    );
+  }
+
+  const messages = async (): Promise<string> =>
+    (await check(root)).diagnostics.map((d) => d.message).join('\n');
+
+  beforeEach(async () => {
+    createSong(root, 'opener');
+    const wavPath = join(root, '..', `field-test-clip-${Date.now()}-${Math.random()}.wav`);
+    writeWavFloat32(wavPath, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
+    await importAsset(root, 'opener', wavPath, 'hit');
+    rmSync(wavPath);
+    writeTrack('inner', [
+      'clips:',
+      '  - id: c1',
+      '    source: hit',
+      '    anchor: absolute',
+      '    position: 0',
+      '    duration: 4',
+    ]);
+  });
+
+  it('accepts a clip on a track, forward reference and all', async () => {
+    writeTrack('outer', [
+      'clips:',
+      '  - id: k1',
+      '    source: track:inner',
+      '    position: 0',
+    ]);
+    expect(await messages()).toBe('');
+  });
+
+  it('names an unknown track', async () => {
+    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:ghost', '    position: 0']);
+    expect(await messages()).toContain('clip "k1" references unknown track "ghost"');
+  });
+
+  it('does not fall back to the song namespace: track: means a track', async () => {
+    // `hit` exists as an asset; `track:hit` must not find it. One
+    // spelling per thing (project-core.md §7) — the prefix is not a
+    // search path over namespaces.
+    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:hit', '    position: 0']);
+    expect(await messages()).toContain('clip "k1" references unknown track "hit"');
+  });
+
+  it('names a track clipped inside itself, rather than reporting a cycle', async () => {
+    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:outer', '    position: 0']);
+    const out = await messages();
+    expect(out).toContain('clip "k1" clips this track inside itself');
+    expect(out).not.toContain('cycle');
+  });
+
+  it('a clip edge closes a containment cycle like a placement does', async () => {
+    writeTrack('a', ['clips:', '  - id: k1', '    source: track:b', '    position: 0']);
+    writeTrack('b', ['inputs:', '  - track: a', '    at: 0']);
+    expect(await messages()).toContain('track containment cycle: a → b → a');
+  });
+
+  it('refuses a clipped midi track', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      'name: keys\ntype: midi\nclips: []\n',
+    );
+    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:keys', '    position: 0']);
+    expect(await messages()).toContain('clip "k1" clips a midi track, which renders no audio');
+  });
+
+  it('a loop on a track still needs every — its length is unknown before it builds', async () => {
+    writeTrack('outer', [
+      'clips:',
+      '  - id: k1',
+      '    source: track:inner',
+      '    anchor: absolute',
+      '    position: 0',
+      '    duration: 8',
+      '    loop:',
+      '      fade: 0',
+    ]);
+    expect(await messages()).toContain(
+      'clip "k1" loops a track — set loop.every',
+    );
+  });
+});
+
 describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
   beforeEach(async () => {
     createSong(root, 'opener');

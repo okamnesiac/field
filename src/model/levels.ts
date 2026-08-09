@@ -1,4 +1,4 @@
-import { SONG_OUTPUT_NAME } from '../labels.js';
+import { SONG_OUTPUT_NAME, trackRefName } from '../labels.js';
 import type { LoadedSong } from './project.js';
 
 // What a track's signal is multiplied by on its way to the top
@@ -64,6 +64,17 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
       const list = parents.get(input.track) ?? [];
       list.push({ in: track.data.name, gainDb: input.gain_db, pan: input.pan });
       parents.set(input.track, list);
+    }
+    // A clip that plays a track (`source: track:<name>`) is a placement
+    // of it (nested-tracks.md §1.11), so its gain is on the path like any
+    // placement's. Clips carry no pan — that field lives on `inputs:`
+    // entries only — so the hop contributes none.
+    for (const clip of track.data.clips ?? []) {
+      const child = trackRefName(clip.source);
+      if (child === undefined) continue;
+      const list = parents.get(child) ?? [];
+      list.push({ in: track.data.name, gainDb: clip.gain_db, pan: 0 });
+      parents.set(child, list);
     }
   }
 

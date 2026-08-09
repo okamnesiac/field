@@ -141,10 +141,11 @@ describe('cross-scope clip references', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       clipTrack('//songs/opener/asset:borrowed'),
     );
-    // Rejected at the schema layer — the ref shape admits exactly two scopes.
+    // Rejected at the schema layer — the ref shape admits the song's own
+    // names (bare or track:) and the one cross-scope spelling, //shared/asset:.
     expect(
       loadProject(root).diagnostics.some((d) =>
-        d.message.includes('must be a name in the song or //shared/asset:<name>'),
+        d.message.includes('must be a name in the song, track:<name>, or //shared/asset:<name>'),
       ),
     ).toBe(true);
   });

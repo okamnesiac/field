@@ -110,10 +110,14 @@ keeping arrays single-line.
 
 Audio files are never edited in place. A clip's content is its `source:`
 — an asset, a sound, or a shared pin, resolved exactly like a sound's
-own source. Clipping an automatic sound means the arrangement plays a
-render that is never committed, only its definition; clipping a
-`generative` sound plays its chosen committed variant. A clip carries
-three independent, non-destructive offsets:
+own source, or a track spelled `track:<name>`. The prefix rather than a
+bare slug because tracks live deliberately outside the song's one
+namespace — a track and a sound may share a name — and a bare slug that
+tried both would be a search path; it is the same spelling the track's
+label already uses. Clipping an automatic sound or a track means the
+arrangement plays a render that is never committed, only its definition;
+clipping a `generative` sound plays its chosen committed variant. A clip
+carries three independent, non-destructive offsets:
 
 1. **Timeline position** — where the clip sits in the arrangement (musical
    position by default).
@@ -147,7 +151,13 @@ A track's content is its clips, its `inputs:` — other tracks placed in it
 — or both. A placement carries a time and an optional window, so one
 track can be placed in more than one parent and more than once in the
 same one, from a single render
-([projects/all/nested-tracks.md](projects/all/nested-tracks.md)).
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md)). A clip
+whose source is a track is the same edge wearing the clip spelling: it
+is checked like a placement (it must resolve to a renderable track that
+is not an ancestor), its `gain_db` counts toward `explain`'s level
+answer, and it keeps the clip powers a placement lacks —
+`source_offset`, `slip`, and loops, which still require `every` on a
+source whose length is unknown until it builds.
 
 A track may also carry its own time, in a `time:` key holding a `tempo`,
 a `meter`, or both — a 7/8 figure inside a 4/4 song is a track that says

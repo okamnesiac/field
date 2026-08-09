@@ -107,6 +107,30 @@ describe('effective levels', () => {
     expect(reaches(song(), 'keys').find((r) => r.to === 'main')!.gainDb).toBe(-6);
   });
 
+  it('a clip that plays a track is a placement on the path too', () => {
+    creek();
+    // Clip the phrase instead of placing it: same edge, clip spelling
+    // (nested-tracks.md §1.11). The clip's gain is on the path; clips
+    // carry no pan, so the hop contributes none.
+    track(
+      'main',
+      [
+        'name: main',
+        'type: audio',
+        'clips:',
+        '  - id: phrase-take-x1a2b',
+        '    source: track:phrase',
+        '    position: 0',
+        '    gain_db: -2',
+        '',
+      ].join('\n'),
+    );
+    const toMain = reaches(song(), 'keys').find((r) => r.to === 'main')!;
+    expect(toMain.gainDb).toBe(-6);
+    expect(toMain.via).toEqual(['phrase']);
+    expect(toMain.pans).toEqual([{ in: 'phrase', track: 'keys', pan: 0.2 }]);
+  });
+
   it('counts identical placements instead of listing them', () => {
     creek();
     // `phrase` is placed three times by main at the same level. That is

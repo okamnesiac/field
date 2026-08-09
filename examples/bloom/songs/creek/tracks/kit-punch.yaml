@@ -1,0 +1,21 @@
+# the kit through Field's auto-normalizing EQ: punch below, air above,
+# level held by the response-based compensation. An effect sound until
+# chunk 6 (nested-tracks.md §1.12): now a track with one clip and one
+# insert — same contract, same render, different attachment.
+name: kit-punch
+type: audio
+inserts:
+  - effect: eq
+    bands:
+      - type: lowshelf
+        frequency: 120
+        gain_db: 4
+      - type: highshelf
+        frequency: 9000
+        gain_db: 2
+clips:
+  # the whole seeded kit render, from the top — no duration, so the clip
+  # plays as long as kit-sc is, however long that render turns out to be
+  - id: kit-sc-m4v7q
+    source: kit-sc
+    position: 0
