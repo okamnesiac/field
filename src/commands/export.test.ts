@@ -20,6 +20,7 @@ import {
   writeVersion,
 } from './export.js';
 import { importAsset } from './import.js';
+import { readWavHeader } from '../audio/wav.js';
 import { init } from './init.js';
 
 // Export is a copy with a readable name and a version number, so the
@@ -371,5 +372,65 @@ describe('exportLabels', () => {
     await expect(exportLabels(root, ['//nowhere/...'], { to: dest, runner })).rejects.toThrow(
       'matched no labels',
     );
+  });
+});
+
+describe('delivery formatting (multi-rate.md decision 1)', () => {
+  // Conversion happens on the way out, through the daemon's normalize op
+  // — the same op a `normalize` sound drove, which is what lets loop-cd
+  // retire into an export invocation. Real daemon, no stub runner: the
+  // bytes are the claim.
+
+  it('converts on the way out, naming the delivered format', async () => {
+    const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(result!.to.endsWith('creek-asset-pad-44100-16-v1.wav')).toBe(true);
+    const header = readWavHeader(result!.to);
+    expect(header.sampleRate).toBe(44100);
+    expect(header.bitsPerSample).toBe(16); // defaulted from the 16-bit source
+    expect(header.format).toBe(1); // integer PCM, as normalize always wrote
+  });
+
+  it('is bit-identical to the normalize sound it retires', async () => {
+    // The def-of-done claim: the export produces the file loop-cd used
+    // to describe. Same source, same rate and depth, one through the
+    // sound, one through the flags — same bytes.
+    writeSound(
+      'pad-cd',
+      ['name: pad-cd', 'type: normalize', 'source: pad', 'sample_rate: 44100', 'bit_depth: 16', ''].join('\n'),
+    );
+    const { buildLabels } = await import('./build.js');
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-cd']);
+    const rendered = outcomes.find((o) => o.label.endsWith(':pad-cd'))!.outputPath!;
+    const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+      bitDepth: 16,
+    });
+    expect(readFileSync(result!.to).equals(readFileSync(rendered))).toBe(true);
+  });
+
+  it('converted exports version apart from plain ones, and deterministically', async () => {
+    const [plain] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    expect(plain!.to.endsWith('creek-asset-pad-v1.wav')).toBe(true);
+    const [converted] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(converted!.to.endsWith('creek-asset-pad-44100-16-v1.wav')).toBe(true);
+    expect(converted!.unchanged).toBe(false);
+    // The resampler is deterministic (normalize-properties), so exporting
+    // again is `current`, not a v2 — and the plain family is untouched.
+    const [again] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(again!.unchanged).toBe(true);
+    expect(again!.version).toBe(1);
+    const [plainAgain] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    expect(plainAgain!.unchanged).toBe(true);
+    expect(plainAgain!.version).toBe(1);
   });
 });

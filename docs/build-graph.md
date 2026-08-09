@@ -74,6 +74,14 @@ and natural when a track plays one sound — at which point two different
 files want one name. A name that is sometimes scoped is worse than one
 that always is: you cannot predict the file you are about to get.
 
+**Delivery formatting is export's** (multi-rate.md decision 1):
+`--rate` and `--bit-depth` convert on the way out through the daemon's
+normalize op — never as a node in the song — writing integer PCM at the
+chosen depth, with a flag left off defaulting to the source's own value.
+The effective pair joins the name (`creek-track-main-44100-16-v1.wav`),
+so a converted family never versions an unconverted one. This is what
+retired `loop-cd`: a CD deliverable is an invocation, not a sound.
+
 **Exports are versioned, never overwritten.** Finishing something and
 putting it somewhere is how people mark a version, and the previous one
 is often the only copy of a decision later undone — so a second export

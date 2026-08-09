@@ -28,6 +28,27 @@ export function parseBars(value: string): number {
   return n;
 }
 
+// Export's delivery formatting (multi-rate.md decision 1), bounded by the
+// same sets the normalize schema accepts — the flags drive the identical
+// daemon op, so they may not promise a value it would refuse.
+const EXPORT_RATES = [44100, 48000, 88200, 96000, 176400, 192000];
+
+export function parseExportRate(value: string): number {
+  const n = Number(value);
+  if (!EXPORT_RATES.includes(n)) {
+    throw new InvalidArgumentError(`rate must be one of ${EXPORT_RATES.join(', ')}`);
+  }
+  return n;
+}
+
+export function parseExportBitDepth(value: string): 16 | 24 | 32 {
+  const n = Number(value);
+  if (n !== 16 && n !== 24 && n !== 32) {
+    throw new InvalidArgumentError('bit depth must be 16, 24, or 32');
+  }
+  return n;
+}
+
 // Whether this invocation is asking for the version, by position.
 // `argv.includes('--version')` matched the flag anywhere, so
 // `field build --version` printed a version report and silently never

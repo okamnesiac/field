@@ -27,6 +27,9 @@ by `loop-cd` and both retire together at
 [multi-rate.md](multi-rate.md) step 2 (§16); `lead-take` is sourced by
 `vocal-48k`, which retires at multi-rate step 3 when a track carries
 its own rate — then the last sound folds and `sounds/` empties.
+`loop-cd` has retired into `field export --rate 44100 --bit-depth 16`
+(multi-rate step 2), so `seven-eight-loop`'s fold is unblocked and
+next.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it

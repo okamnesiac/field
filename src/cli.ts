@@ -10,6 +10,8 @@ import {
   parseConviction,
   parseDurationSeconds,
   parseExaggeration,
+  parseExportBitDepth,
+  parseExportRate,
   parseSeed,
   parseVariantNumber,
   parseVariants,
@@ -348,10 +350,16 @@ program
   .command('export <patterns...>')
   .description('build labels and copy the results to ~/Desktop as numbered versions')
   .option('--to <dir>', 'destination directory instead of ~/Desktop (must exist)')
-  .action(async (patterns: string[], opts: { to?: string }) => {
+  .option('--rate <hz>', "deliver at this sample rate (default: the source's)", parseExportRate)
+  .option('--bit-depth <bits>', "deliver at this bit depth: 16, 24, or 32 (default: the source's)", parseExportBitDepth)
+  .action(async (patterns: string[], opts: { to?: string; rate?: number; bitDepth?: 16 | 24 | 32 }) => {
     try {
       const { exportLabels, homeRelative } = await import('./commands/export.js');
-      const results = await exportLabels(requireRoot(), patterns, { to: opts.to });
+      const results = await exportLabels(requireRoot(), patterns, {
+        to: opts.to,
+        rate: opts.rate,
+        bitDepth: opts.bitDepth,
+      });
       for (const r of results) {
         // Three outcomes, one column: a new version, nothing to do, and
         // the one worth stopping on — these bytes are an *older* version,
