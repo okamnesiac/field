@@ -32,3 +32,6 @@ costs nothing. See [README](README.md) for how these lists work.
 - **src/engine umbrella** — `graph/` + `generators/` (+ `audio/`?) under
   one engine module; discussed 2026-08-06, no flag-day pressure, land as
   a quiet cleanup whenever.
+- **prettier and ESLint** — neither is installed and no config exists, so a
+  tool reaching for a formatter applies its own defaults (#83, 312 lines);
+  ESLint is free, prettier costs a ~1,900-line reformat.
