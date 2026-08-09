@@ -725,7 +725,10 @@ export interface ChooseOptions {
 }
 
 export interface ChooseResult {
-  file: string; // song-relative, what the sound's label now resolves to
+  file: string; // song-relative, what the name's label now resolves to
+  // Which package the name lives in: sound: for a generative sound,
+  // gen: for a generative entry's node (nested-tracks.md §18 step 3).
+  pkg: 'sound' | 'gen';
   sha256: string;
   bytes: number;
   previous?: number | undefined; // the previously chosen variant, if any
@@ -755,6 +758,7 @@ export async function chooseVariant(
     throw new Error(`song "${options.song}" does not exist`);
   }
   const recipePath = join(songDir, 'sounds', `${name}.yaml`);
+  const pkg: 'sound' | 'gen' = existsSync(recipePath) ? 'sound' : 'gen';
   if (existsSync(recipePath)) {
     const recipeDoc = parseDocument(readFileSync(recipePath, 'utf8'));
     if (recipeDoc.errors.length > 0) {
@@ -821,7 +825,7 @@ export async function chooseVariant(
   canonicalizeDocument(takesDoc!, generativeTakesOrder);
   writeFileSync(takesFilePath(songDir, name), stringifyDocument(takesDoc!));
 
-  return { file: variant.file, sha256, bytes, previous };
+  return { file: variant.file, pkg, sha256, bytes, previous };
 }
 
 // Explicit, loud environment setup (ace-generation.md §3.4): uv sync for

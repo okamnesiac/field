@@ -204,7 +204,9 @@ program
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
         `${moved ? 'moved' : 'chose'} ${name} → variant ${opts.variant} (${result.file})\n` +
-          `//songs/${opts.song}/sound:${name} now plays it; clips reference it as source: ${name}\n`,
+          (result.pkg === 'gen'
+            ? `//songs/${opts.song}/gen:${name} now plays it; every placement follows\n`
+            : `//songs/${opts.song}/sound:${name} now plays it; entries reference it as sound: ${name}\n`),
       );
     } catch (err) {
       fail(err);
