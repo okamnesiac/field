@@ -180,7 +180,7 @@ order (ctrl-c stops the queue):
 ```bash
 field play //songs/creek/track:pad-sc           # render the pad recipe, then hear it
 field play //songs/creek/sound:lead-take-2      # audition a take you generated
-field play //songs/tall-grass/sound:seven-eight-loop  # the 7/8 groove, rendered
+field play //songs/tall-grass/track:seven-eight-loop  # the 7/8 groove, rendered
 field play //songs/creek/sound:all              # every render in creek, in order
 field play //songs/...                          # every sound in the project
 ```
