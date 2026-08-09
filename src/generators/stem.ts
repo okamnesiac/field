@@ -2,8 +2,10 @@ import { renderInsertChain } from '../audio/render-daemon.js';
 import { readWavHeader } from '../audio/wav.js';
 // trackRef spells a placed track in `sources` (labels.ts). Nothing about
 // the spelling reaches an action key — `sources` is wiring, so the
-// spelling is free and only the resulting order matters.
-import { trackRef } from '../labels.js';
+// spelling is free and only the resulting order matters, which is why
+// the buildable sort below is spelling-blind: order is the one channel
+// a spelling change could reach the key through.
+import { trackRef, trackRefName } from '../labels.js';
 import type { Clip, Insert, Track, TrackInput } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
@@ -243,7 +245,21 @@ export function planTrack(
       const hb = sha256BySource.get(b)!;
       return ha < hb ? -1 : ha > hb ? 1 : a < b ? -1 : 1;
     });
-  const buildable = refs.filter((r) => !sha256BySource.has(r)).sort();
+  // By the name under the spelling, not the raw string: a sound folding
+  // into a track (nested-tracks.md §1.12) keeps its slot among buildable
+  // siblings, so the fold cannot permute clip indices or the dep-hash
+  // order and re-key a parent whose children are byte-identical. The raw
+  // ref breaks the rare tie — a sound and a track legally sharing a name
+  // — where the two really are different sources and the order only has
+  // to be deterministic.
+  const buildableName = (r: string): string => trackRefName(r) ?? r;
+  const buildable = refs
+    .filter((r) => !sha256BySource.has(r))
+    .sort((a, b) => {
+      const na = buildableName(a);
+      const nb = buildableName(b);
+      return na < nb ? -1 : na > nb ? 1 : a < b ? -1 : 1;
+    });
   const sources = [...committed, ...buildable];
   const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
   const placements = track.inputs.map((input): PlacedClip => {

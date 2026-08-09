@@ -279,6 +279,30 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     expect(spec.sources).toEqual(['kick', 'track:aaa']);
   });
 
+  it('folding a sound into a track cannot permute sibling wiring', () => {
+    // Buildable refs order by the name under the spelling, so `zebra`
+    // the sound and `track:zebra` the track hold the same slot beside
+    // buildable `wall`. Raw-string order would flip [wall, zebra] to
+    // [track:zebra, wall] — reversing clip indices and the dep-hash
+    // order, re-keying a parent whose children are byte-identical, which
+    // is exactly what a fold must not do (nested-tracks.md §17).
+    const asSound = planTrack(
+      nested([], [clip({ id: 'w', source: 'wall', position: 0 }), clip({ id: 'z', source: 'zebra', position: 960 })]),
+      map120,
+      hashes,
+    );
+    const asTrack = planTrack(
+      nested([], [clip({ id: 'w', source: 'wall', position: 0 }), clip({ id: 'z', source: 'track:zebra', position: 960 })]),
+      map120,
+      hashes,
+    );
+    expect(asSound.sources).toEqual(['wall', 'zebra']);
+    expect(asTrack.sources).toEqual(['wall', 'track:zebra']);
+    expect(asTrack.clips.map((c) => [c.input, c.start])).toEqual(
+      asSound.clips.map((c) => [c.input, c.start]),
+    );
+  });
+
   it('a clip playing a track shares its spelling — and its source — with a placement', () => {
     // `source: track:verse` in a clip is the same ref string a placement
     // wires (nested-tracks.md §1.11), so a track both clipped and placed
