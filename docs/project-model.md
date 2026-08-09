@@ -302,6 +302,6 @@ schema-validated project file — `field check` verifies variant hashes,
 `chosen: 1`, so the sound resolves as soon as it has takes; `field choose
 <name> --variant <n>` moves `chosen:` to a different one, and from then
 on the sound's own label resolves to that variant — entries say
-`source: <name>` and follow every re-choose, a one-line diff. Nothing
+`sound: <name>` and follow every re-choose, a one-line diff. Nothing
 is copied into a ledger, and nothing ever regenerates mechanically:
 generating over takes that already exist is refused, not merged.
