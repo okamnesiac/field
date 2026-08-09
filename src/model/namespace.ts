@@ -1,11 +1,14 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parseDocument } from 'yaml';
+import { generatorName } from '../generators/stem.js';
 import {
   assetsFileSchema,
   generativeTakesSchema,
   soundSchema,
+  trackSchema,
   TAKES_FILENAME,
+  type InputEntry,
 } from '../schema/index.js';
 
 // The song's one namespace (project-layout.md §4.3), read cheaply from
@@ -51,6 +54,24 @@ export function takenSongNames(songDir: string): Set<string> {
             takes.data.variants.forEach((_, i) => taken.add(`${name}-${i + 1}`));
           }
         }
+      }
+    }
+  }
+  // A generative entry's takes claim audio/<node>/ exactly as a
+  // generative sound's do (nested-tracks.md §18 step 3), so its gen
+  // node name is taken for the same containment reason — an import
+  // landing there would share the directory the takes file pins.
+  const tracksDir = join(songDir, 'tracks');
+  if (existsSync(tracksDir)) {
+    for (const file of readdirSync(tracksDir)) {
+      if (!file.endsWith('.yaml') || file.startsWith('.')) continue;
+      const parsed = trackSchema.safeParse(
+        parseDocument(readFileSync(join(tracksDir, file), 'utf8')).toJS(),
+      );
+      if (!parsed.success) continue;
+      for (const entry of parsed.data.inputs) {
+        if (entry.generative === undefined) continue;
+        taken.add(generatorName(entry as InputEntry, parsed.data.name));
       }
     }
   }

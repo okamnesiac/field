@@ -1317,3 +1317,48 @@ describe('generative entries (nested-tracks.md §18 step 3)', () => {
     );
   });
 });
+
+describe('one audio/ directory per name (nested-tracks.md §18 step 3)', () => {
+  beforeEach(() => {
+    createSong(root, 'opener');
+  });
+
+  const genLeaf =
+    'name: rain-pad\ninputs:\n  - generative:\n      prompt: rain\n      bpm: 96\n      duration_seconds: 10\n';
+
+  it('a generative entry may not mint a name a sound holds', async () => {
+    writeFileSync(join(root, 'songs/opener/tracks/rain-pad.yaml'), genLeaf);
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/opener/sounds/rain-pad.yaml'),
+      'name: rain-pad\ntype: generative\nprompt: rain\nbpm: 96\nduration_seconds: 10\n',
+    );
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('which sounds/rain-pad.yaml also holds — both claim audio/rain-pad/');
+  });
+
+  it('a generative entry may not mint a name an asset holds', async () => {
+    writeFileSync(join(root, 'songs/opener/tracks/rain-pad.yaml'), genLeaf);
+    const src = sourceFile();
+    await importAsset(root, 'opener', src, 'other');
+    // Renamed by hand so the pre-flight cannot refuse it first — this is
+    // the check that catches what import could not have seen.
+    const assetsPath = join(root, 'songs/opener/assets.yaml');
+    writeFileSync(
+      assetsPath,
+      readFileSync(assetsPath, 'utf8').replaceAll('other', 'rain-pad'),
+    );
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('which the asset "rain-pad" also holds');
+    rmSync(src);
+  });
+
+  it('import pre-flights against gen node names', async () => {
+    writeFileSync(join(root, 'songs/opener/tracks/rain-pad.yaml'), genLeaf);
+    const src = sourceFile();
+    await expect(importAsset(root, 'opener', src, 'rain-pad')).rejects.toThrow(
+      'already a sound, a generator, or an audition label',
+    );
+    rmSync(src);
+  });
+});

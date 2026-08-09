@@ -1035,13 +1035,21 @@ function validate(project: LoadedProject): void {
         const name = generatorName(entry, trackFile.data.name);
         // A generative entry's takes claim audio/<name>/ exactly as a
         // generative sound's do, and `field generate <name>` resolves the
-        // sound first — so one name may not be both.
-        if (entry.generative !== undefined && soundNames.has(name)) {
-          push(
-            trackFile.path,
-            `generative entry mints the name "${name}", which sounds/${name}.yaml also ` +
-              `holds — both claim audio/${name}/ (rename the track, the entry id, or the sound)`,
-          );
+        // sound first — so one name may not be both. Same for an asset:
+        // imports land in audio/<name>/ too (project-layout.md §4.11).
+        if (entry.generative !== undefined) {
+          const holder = soundNames.has(name)
+            ? `sounds/${name}.yaml`
+            : assetNames.has(name)
+              ? `the asset "${name}"`
+              : undefined;
+          if (holder !== undefined) {
+            push(
+              trackFile.path,
+              `generative entry mints the name "${name}", which ${holder} also holds — ` +
+                `both claim audio/${name}/ (rename the track, the entry id, or the other)`,
+            );
+          }
         }
         const first = genNames.get(name);
         if (first === undefined) {
