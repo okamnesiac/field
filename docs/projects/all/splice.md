@@ -41,10 +41,13 @@ everything — and writes it down.
   rendering as a pure function over an injected write — is the one to
   inherit rather than re-decide.
 
-A recipe, concretely:
+A recipe, concretely — living in the item's directory (§4.11) beside
+the bytes and the license it names, with `type:` as the discriminator
+the format settled on (project-layout.md §4.2):
 
 ```yaml
-kind: splice
+# songs/creek/audio/dusk-break/splice.yaml
+type: splice
 searched: 2026-08-09
 query: dusty breakbeat
 filters:
@@ -55,7 +58,9 @@ chose:
   sample: OS_DUSK_150_drum_break_fmin.wav
   pack: DUSK — Nostalgic Breaks
   provider: Origin Sound
-license: <content hash of the stored license document>
+license:
+  file: audio/dusk-break/license.pdf
+  sha256: <hash of those bytes, so check can verify the proof exists>
 ```
 
 ## 2 What provenance pays for
@@ -63,8 +68,12 @@ license: <content hash of the stored license document>
 Both fall out of the recipe existing; neither is possible for anonymous
 imported bytes.
 
-- **`field splice list [song]`** — every Splice sample a song uses, with
-  pack and provider: a ledger query over recipes, nothing more.
+- **`field splice list [song]`** — every Splice sample the song *stores*,
+  with pack and provider: a query over recipes, nothing more. Stored and
+  used can differ — a sample removed from every track keeps its bytes
+  and recipe until someone deletes them — and telling them apart is a
+  `deps()` walk from the output track over the same names, cheap for
+  the same reason the list is.
 - **Licenses, fetched and kept.** Splice's license is per-sample and lives
   in their account pages; the recipe stores it content-addressed next to the
   asset, so the proof travels with the project instead of with the
