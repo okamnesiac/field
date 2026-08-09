@@ -1,9 +1,8 @@
 import { loadProject, type LoadedProject } from '../model/project.js';
 import { SONG_OUTPUT_NAME } from '../labels.js';
-import { trackRefName } from '../generators/stem.js';
-import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
-import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { renderableTrack } from '../generators/stem.js';
+import { MeterMap, TempoMap } from '../time/tempo.js';
+import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // `field arrangement <song>` — the song's structure, derived.
 //
@@ -51,8 +50,6 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
   const tempo = song.tempo ? new TempoMap(song.tempo.data.tempo, rate) : undefined;
   const placements: Placement[] = [];
   for (const input of output.data.inputs ?? []) {
-    // Placements name a track; anything else on `inputs:` is not structure.
-    const name = trackRefName(input.track) ?? input.track;
     // `at` is ticks when the placement is musical and samples when it is
     // absolute (schema/track.ts). Formatting samples through the meter map
     // is not a rounding error — a placement one second in came out as bar
@@ -61,7 +58,7 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
     const absolute = input.anchor === 'absolute';
     const at = absolute ? (tempo ? tempo.samplesToTicks(input.at) : input.at) : input.at;
     placements.push({
-      track: name,
+      track: input.track,
       at,
       bars: meter && (!absolute || tempo) ? meter.format(at) : String(at),
       absolute,
@@ -83,11 +80,18 @@ export function formatArrangement(view: ArrangementView, project: LoadedProject)
   // A length is a span, not a position. Formatting it as bar.beat.tick
   // prints the downbeat *after* the song — creek's twelve bars come out as
   // "13.1.1", which is precisely the off-by-one the retired
-  // arrangement.yaml carried as `chorus` at bar 13.
-  const bar = song?.tempo ? barTicks(song.tempo.data.meter[0]!) : undefined;
+  // arrangement.yaml carried as `chorus` at bar 13. So the span is that
+  // reading minus one bar.
+  //
+  // Through the meter map rather than by dividing by the opening meter's
+  // bar: a song that changes meter has no single bar length, and dividing
+  // by the first one printed 10 for creek's twelve bars on a project that
+  // checked ok — the one number not computed from the map being the one
+  // that was wrong.
+  const meter = song?.tempo ? new MeterMap(song.tempo.data.meter) : undefined;
   const length =
-    view.lengthTicks !== undefined && bar
-      ? ` (${fmtBars(view.lengthTicks / bar)})`
+    view.lengthTicks !== undefined && meter
+      ? ` (${fmtSpan(meter.format(view.lengthTicks))})`
       : '';
   lines.push(`${view.song}${length}`);
   if (view.placements.length === 0) {
@@ -111,9 +115,18 @@ export function formatArrangement(view: ArrangementView, project: LoadedProject)
   return lines.join('\n');
 }
 
-function fmtBars(n: number): string {
-  const rounded = Number.isInteger(n) ? String(n) : n.toFixed(2);
-  return `${rounded} bar${n === 1 ? '' : 's'}`;
+// The end position as a span: "13.1.1" is twelve whole bars, "12.3.1" is
+// eleven bars and two beats.
+function fmtSpan(endPosition: string): string {
+  const [bar = 1, beat = 1, tick = 1] = endPosition.split('.').map(Number);
+  const parts: string[] = [plural(bar - 1, 'bar')];
+  if (beat > 1) parts.push(plural(beat - 1, 'beat'));
+  if (tick > 1) parts.push(plural(tick - 1, 'tick'));
+  return parts.join(' ');
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
 function fmtSeconds(s: number): string {
@@ -123,5 +136,13 @@ function fmtSeconds(s: number): string {
 
 export function arrangement(root: string, songName: string): string {
   const project = loadProject(root);
+  // A derived view is only worth trusting if it refuses to guess, and
+  // unresolved musical time is exactly where it would: positions that
+  // never resolved print as raw arrays, which read like bar numbers.
+  // `build` (loadValid) and `fmt` both stop here; this was the outlier.
+  if (project.diagnostics.length > 0) {
+    const lines = project.diagnostics.map((d) => `${d.file}: ${d.message}`).join('\n');
+    throw new Error(`project has errors (field check):\n${lines}`);
+  }
   return formatArrangement(songArrangement(project, songName), project);
 }

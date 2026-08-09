@@ -126,6 +126,44 @@ describe('field arrangement', () => {
     expect(out).not.toContain('13.');
   });
 
+  it('refuses a project with diagnostics rather than printing a plausible view', () => {
+    // Unresolved musical time prints as a raw array, and `[5]` reads as
+    // bar 5 — a structure nothing consuming it can tell is wrong, which is
+    // the failure the whole command exists to end. `build` and `fmt` both
+    // stop on diagnostics; this used to be the outlier.
+    threePasses();
+    writeFileSync(
+      join(root, 'songs/creek/tempo.yaml'),
+      'tempo:\n  - at: 0\n    bpm: 120\nmeter:\n  - at: [5]\n    numerator: 4\n    denominator: 4\n',
+    );
+    expect(() => arrangement(root, 'creek')).toThrow('project has errors (field check)');
+  });
+
+  it('measures the length through the meter map, not the opening meter', async () => {
+    // A song that changes meter has no single bar length. Dividing by the
+    // first meter's bar printed 10 for creek's twelve on a project that
+    // checked ok — the one number not computed from the map being wrong.
+    threePasses();
+    writeFileSync(
+      join(root, 'songs/creek/tempo.yaml'),
+      [
+        'tempo:',
+        '  - at: 0',
+        '    bpm: 120',
+        'meter:',
+        '  - at: 0',
+        '    numerator: 4',
+        '    denominator: 4',
+        '  - at: 7680', // bar 3 in 4/4 at 960 ticks a quarter
+        '    numerator: 3',
+        '    denominator: 4',
+        '',
+      ].join('\n'),
+    );
+    expect((await check(root)).diagnostics).toEqual([]);
+    expect(arrangement(root, 'creek')).toContain('creek (12 bars)');
+  });
+
   it('says so when the output track places nothing', () => {
     expect(arrangement(root, 'creek')).toContain('nothing placed');
   });
