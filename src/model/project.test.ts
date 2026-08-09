@@ -608,10 +608,6 @@ describe('musical time (musical-time.md)', () => {
       'name: opener\nlength: [12]\nloop: true\n',
     );
     writeFileSync(
-      join(root, 'songs/opener/arrangement.yaml'),
-      'sections:\n  - name: verse\n    at: [5]\n',
-    );
-    writeFileSync(
       join(root, 'songs/opener/tracks/keys.yaml'),
       [
         'name: keys',
@@ -641,7 +637,6 @@ describe('musical time (musical-time.md)', () => {
     expect(project.diagnostics).toEqual([]);
     const song = project.songs[0]!;
     expect(song.song?.data.length).toBe(BAR * 12);
-    expect(song.arrangement?.data.sections[0]!.at).toBe(BAR * 4);
     const clip = song.tracks[0]!.data.clips[0]!;
     expect(clip.position).toBe(BAR);
     expect(clip.duration).toBe(BAR * 4);
@@ -660,10 +655,6 @@ describe('musical time (musical-time.md)', () => {
       writeFileSync(
         join(other, 'songs/opener/song.yaml'),
         `name: opener\nlength: ${BAR * 12}\nloop: true\n`,
-      );
-      writeFileSync(
-        join(other, 'songs/opener/arrangement.yaml'),
-        `sections:\n  - name: verse\n    at: ${BAR * 4}\n`,
       );
       writeFileSync(
         join(other, 'songs/opener/tracks/keys.yaml'),
@@ -689,7 +680,6 @@ describe('musical time (musical-time.md)', () => {
       expect(ticks.diagnostics).toEqual([]);
       expect(musical.songs[0]!.tracks[0]!.data).toEqual(ticks.songs[0]!.tracks[0]!.data);
       expect(musical.songs[0]!.song?.data).toEqual(ticks.songs[0]!.song?.data);
-      expect(musical.songs[0]!.arrangement?.data).toEqual(ticks.songs[0]!.arrangement?.data);
     } finally {
       rmSync(other, { recursive: true, force: true });
     }

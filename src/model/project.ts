@@ -13,8 +13,6 @@ import { sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import { checkSource } from '../generators/single-input.js';
 import type { SourceNames } from '../generators/types.js';
 import {
-  arrangementOrder,
-  arrangementSchema,
   assetsFileOrder,
   assetsFileSchema,
   projectOrder,
@@ -32,7 +30,6 @@ import {
   tempoFileSchema,
   trackOrder,
   trackSchema,
-  type Arrangement,
   type Asset,
   type AssetsFile,
   type BuildableSound,
@@ -65,7 +62,6 @@ export interface LoadedSong {
   dir: string; // project-relative
   song?: LoadedFile<Song> | undefined;
   tempo?: LoadedFile<TempoFile> | undefined;
-  arrangement?: LoadedFile<Arrangement> | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
   // One file per authored spec (project-layout.md §1.3, §4): sounds/
   // holds defined sounds — buildable types and deliberate `generate`
@@ -224,6 +220,11 @@ export function loadProject(root: string): LoadedProject {
       // retired too, so the advice this used to give is now a second dead
       // end rather than a migration.
       ['mix.yaml', 'the song\'s output is the track named "main" (nested-tracks.md §7 chunk 2)'],
+      // Sections were a stored copy of the structure, and a stored copy
+      // drifts: creek's said `chorus` at bar 13 of a twelve-bar song.
+      // `field arrangement <song>` derives the same list from the root
+      // track's placements, where it cannot (nested-tracks.md §5, §11).
+      ['arrangement.yaml', 'the arrangement is derived — run `field arrangement <song>` (nested-tracks.md §11)'],
     ] as const) {
       if (existsSync(join(dir, legacy))) {
         project.diagnostics.push({
@@ -233,7 +234,7 @@ export function loadProject(root: string): LoadedProject {
       }
     }
 
-    // The casts on time-carrying files (song, arrangement, tracks) are
+    // The casts on time-carrying files (song, tracks) are
     // the load boundary of musical-time.md §1.6: their schemas parse the
     // file types, whose time fields may be [bar, beat?, tick?] arrays;
     // validate() resolves every array to a tick scalar (or diagnoses)
@@ -255,13 +256,6 @@ export function loadProject(root: string): LoadedProject {
       project.diagnostics.push({ file: song.dir, message: 'missing tempo.yaml' });
     }
 
-    const arrangementYaml = join(dir, 'arrangement.yaml');
-    if (existsSync(arrangementYaml)) {
-      song.arrangement = loadFile(project, arrangementYaml, {
-        schema: arrangementSchema,
-        order: arrangementOrder,
-      }) as LoadedFile<Arrangement> | undefined;
-    }
 
     const assetsYaml = join(dir, 'assets.yaml');
     if (existsSync(assetsYaml)) {
@@ -324,7 +318,6 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
     ...project.songs.flatMap((s): (LoadedFile<unknown> | undefined)[] => [
       s.song,
       s.tempo,
-      s.arrangement,
       s.assets,
       ...s.sounds,
       ...s.tracks,
@@ -426,34 +419,6 @@ function validate(project: LoadedProject): void {
       if (resolved !== undefined) {
         if (resolved <= 0) push(song.song.path, 'length resolves to zero ticks');
         else song.song.data.length = resolved;
-      }
-    }
-
-    if (song.arrangement) {
-      const seen = new Set<string>();
-      let resolved = true;
-      for (const section of song.arrangement.data.sections) {
-        if (seen.has(section.name)) {
-          push(song.arrangement.path, `duplicate section "${section.name}"`);
-        }
-        seen.add(section.name);
-        const at = positionTicks(
-          song.arrangement.path,
-          `section "${section.name}" at`,
-          section.at,
-        );
-        if (at === undefined) resolved = false;
-        else section.at = at;
-      }
-      // Ordering is only meaningful once every position resolved.
-      if (resolved) {
-        let last = -1;
-        for (const section of song.arrangement.data.sections) {
-          if (section.at <= last && last >= 0) {
-            push(song.arrangement.path, `sections must be ordered by position ("${section.name}")`);
-          }
-          last = section.at;
-        }
       }
     }
 

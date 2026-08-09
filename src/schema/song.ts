@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
-import { slug, ticks, timePosition, timeSpan } from './common.js';
+import { slug, ticks, timeSpan } from './common.js';
 
 // songs/<song>/song.yaml
 export const songSchema = z.strictObject({
@@ -63,20 +63,3 @@ export const tempoFileOrder: KeyOrder = {
   },
 };
 
-// songs/<song>/arrangement.yaml — named sections on the timeline.
-export const sectionSchema = z.strictObject({
-  name: slug,
-  at: timePosition, // ticks, or [bar, beat?, tick?]
-});
-
-export const arrangementSchema = z.strictObject({
-  sections: z.array(sectionSchema),
-});
-type SectionFile = z.infer<typeof sectionSchema>;
-export type Section = Omit<SectionFile, 'at'> & { at: number };
-type ArrangementFile = z.infer<typeof arrangementSchema>;
-export type Arrangement = Omit<ArrangementFile, 'sections'> & { sections: Section[] };
-export const arrangementOrder: KeyOrder = {
-  keys: ['sections'],
-  children: { sections: { items: { keys: ['name', 'at'], children: { at: { flow: true } } } } },
-};
