@@ -1,7 +1,14 @@
 // seven-eight loop — two bars of 7/8 at tall-grass's 132 bpm, as a
-// recipe instead of a recording. The limp is the 3+2+2 grouping: a kick
-// on the downbeat of each group, a rim on the second, and eighth hats
-// underneath with seeded drift so it breathes rather than ticks.
+// recipe instead of a recording. It does not reproduce the recording it
+// replaces and is not trying to: nothing in this example ships as audio,
+// so the groove is written rather than sampled.
+//
+// The limp is the 3+2+2 grouping. A kick opens each of the three groups —
+// eighths 0, 3 and 5 of the seven — and the one on 0 is the bar's own
+// downbeat, so it lands hardest. A rim doubles the kick that opens the
+// *second* group only, on eighth 3, which is where the seven leans; the
+// other groups are left bare so the lean is audible. Eighth hats run
+// throughout with seeded drift, so it breathes rather than ticks.
 //
 // Noise UGens get client-seeded RandSeed args because scsynth's own noise
 // seeding is time-based — without this the render would not be
@@ -16,7 +23,7 @@ var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
 var out = "FIELD_OUTPUT".getenv;
 var chans = "FIELD_CHANNELS".getenv.asInteger;
 var eighth = 60 / 132 / 2; // one eighth at 132 bpm, quarter-note tempo
-var downbeats = [0, 3, 5]; // 3+2+2 across the seven
+var downbeats = [0, 3, 5]; // 3+2+2: which of the seven eighths open a group
 var events, nEighths, score;
 thisThread.randSeed = seed;
 
@@ -52,6 +59,8 @@ nEighths.do { |e|
 			\amp, if (inBar == 0) { 1.0 } { 0.7 }
 		])]);
 	};
+	// The second group only. A rim on every group's opening would even the
+	// bar back out, which is the one thing a seven should not sound like.
 	if (inBar == 3) {
 		events = events.add([t, Synth.basicNew(\grassRim).newMsg(args: [
 			\amp, 0.5, \seed, 1000000.rand
