@@ -280,14 +280,17 @@ every existing citation stay stable.
     item under `audio/` is a directory named for the item, holding
     whatever belongs to it: `field import water.wav` writes
     `audio/water/water.wav`, and a generative item's takes and
-    `variants.yaml` already lived this way (§1.4). The directory is
-    the item's home for derived forms — resampled versions, when
-    multi-rate needs them — so a derivative lands beside its original
-    rather than as a flat sibling whose relation is spelled only in
-    the filename. Rejected: flat files until derivatives exist (the
-    migration is cheapest before any project accumulates imports, and
-    the generative half of `audio/` already set the convention).
-    Consumers resolve an asset through the ledger's `file` field, so
-    ledgers written before this rule keep working as declared —
-    the rule governs what `field import` writes, not what `check`
-    accepts.
+    `variants.yaml` already lived this way (§1.4). One shape for both
+    halves of `audio/`, and the migration is cheapest now, before any
+    project accumulates imports. If a derived form of an item is ever
+    *committed*, the directory is where it belongs — but today's one
+    candidate is not one: a resampled placement is a conversion node,
+    content-addressed in the cache and never committed
+    ([multi-rate.md](multi-rate.md) §2.4), which is also how the
+    `vocal-48k`-style wrapper retires (§2.6). Rejected: flat files
+    until a second file per item exists — the generative half already
+    set the convention, and one shape for both halves is worth having
+    on its own. Consumers resolve an asset through the ledger's
+    `file` field, so ledgers written before this rule keep working as
+    declared — the rule governs what `field import` writes, not what
+    `check` accepts.

@@ -51,11 +51,11 @@ export async function importAsset(
   // Forward slashes always: the manifest format is platform-neutral.
   //
   // Every audio item is a directory (project-layout.md §4.11): the
-  // original goes in as audio/<name>/<name>.<ext> so derived forms —
-  // resampled versions, when multi-rate needs them — land beside it
-  // rather than as flat siblings whose relation is spelled in the
-  // filename. Consumers resolve through the manifest's `file`, so a
-  // ledger written before this rule keeps working as declared.
+  // original goes in as audio/<name>/<name>.<ext>, one shape for both
+  // halves of audio/ — generative items have lived this way since the
+  // takes moved in beside their WAVs. Consumers resolve through the
+  // manifest's `file`, so a ledger written before this rule keeps
+  // working as declared.
   const file = `audio/${assetName}/${assetName}${ext}`;
   const destPath = join(songDir, 'audio', assetName, `${assetName}${ext}`);
 
