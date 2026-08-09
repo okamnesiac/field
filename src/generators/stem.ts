@@ -20,14 +20,22 @@ export interface PlacedClip {
   // Window length in samples. Absent means "as long as the input is" —
   // the placement plays its whole source and truncates nothing
   // (nested-tracks.md §1.6: a container never truncates, a placement may,
-  // and an omitted duration is the placement declining to). Only a placed
-  // track can omit it: a clip's source is committed content whose length
-  // validate can read, while a child track's render length is unknowable
-  // at plan time — a reverb insert grows a stem past its last clip end.
-  // execute() resolves it from the rendered input, after the child is
-  // built and before the daemon sees a plan. Staying out of the action
-  // key is correct rather than convenient: the child's content hash is
-  // already an input, so "the whole of it" re-keys when its length moves.
+  // and an omitted duration is the placement declining to).
+  //
+  // **Either kind may omit it**, and nothing downstream may assume
+  // otherwise. Until 2026-08-08 only a placed track could, on the
+  // argument that a clip's source is committed content whose length
+  // validate can read — true of an asset, false of a buildable sound,
+  // whose length is a render as unknowable at plan time as a track's
+  // (project-core.md §3.2, amended; nested-tracks.md §15). A reverb
+  // insert growing a stem past its last clip end is the same fact from
+  // the track side.
+  //
+  // execute() resolves it from the rendered input, after the input is
+  // built and before the daemon sees a plan, and does not care which kind
+  // it came from. Staying out of the action key is correct rather than
+  // convenient: the input's content hash is already an input, so "the
+  // whole of it" re-keys when its length moves.
   duration?: number;
   // Sample of the asset playing at the window start (source_offset − slip,
   // project-core.md §3.2). May be negative or run past the asset's end:
