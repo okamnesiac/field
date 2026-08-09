@@ -216,12 +216,96 @@ async function snapshotVoiceRef(
   return { path, sha256 };
 }
 
+// What to generate, as opposed to how this run is parameterized. A
+// recipe already on disk answers every one of these — that is what makes
+// it a request — so passing one alongside would be a second and possibly
+// conflicting answer. `--seed` and `--variants` are deliberately absent:
+// they describe the run, not the sound, and stay on the command line.
+const CONTENT_FLAGS: [keyof GenerateOptions, string][] = [
+  ['prompt', '--prompt'],
+  ['text', '--text'],
+  ['lyrics', '--lyrics'],
+  ['bpm', '--bpm'],
+  ['bars', '--bars'],
+  ['durationSeconds', '--duration'],
+  ['voiceRef', '--voice-ref'],
+  ['exaggeration', '--exaggeration'],
+  ['conviction', '--conviction'],
+];
+
+interface Fillable {
+  doc: Document; // the recipe as written, comments and all
+  options: GenerateOptions; // the request it describes
+}
+
+// A recipe with no takes is a request for audio rather than a record of
+// one (bloom-in-tree.md §3), and this is what fills it. It is how a
+// project whose audio is not committed ever makes a sound: the recipes
+// ship, and everyone who clones generates their own takes into them.
+//
+// Returns undefined when no recipe exists, which is the create-from-flags
+// path this command started as and still takes for a brand-new sound.
+function fillableRecipe(
+  recipeAbsolute: string,
+  name: string,
+  options: GenerateOptions,
+): Fillable | undefined {
+  if (!existsSync(recipeAbsolute)) return undefined;
+  const doc = parseDocument(readFileSync(recipeAbsolute, 'utf8'));
+  if (doc.errors.length > 0) {
+    throw new Error(`invalid YAML in ${name}.yaml: ${doc.errors[0]!.message}`);
+  }
+  const parsed = soundSchema.safeParse(doc.toJS());
+  if (!parsed.success) {
+    throw new Error(`sound ${name}.yaml is invalid; fix it before generating (field check)`);
+  }
+  const recipe = parsed.data;
+  if (recipe.type !== 'generative') {
+    throw new Error(
+      `"${name}" is a ${recipe.type} sound in ${options.song} — it is built by a rule, ` +
+        `not generated (pick a new name)`,
+    );
+  }
+  // Anything that already has audio stays untouchable: re-running would
+  // replace takes somebody chose, which is the trigger policy the whole
+  // deliberate category exists to honour (project-layout.md §1.2).
+  if (recipe.variants.length > 0) {
+    const n = recipe.variants.length;
+    throw new Error(
+      `sound "${name}" already has ${n} take${n === 1 ? '' : 's'} in ${options.song} ` +
+        `(pick a new name)`,
+    );
+  }
+  const supplied = CONTENT_FLAGS.filter(([key]) => options[key] !== undefined);
+  if (supplied.length > 0) {
+    const flags = supplied.map(([, flag]) => flag).join(', ');
+    throw new Error(
+      `${name}.yaml already says what to generate, so ${flags} would be a second answer — ` +
+        `drop ${supplied.length === 1 ? 'it' : 'them'}, or edit the recipe`,
+    );
+  }
+  return {
+    doc,
+    options: {
+      ...options,
+      prompt: recipe.prompt,
+      text: recipe.text,
+      lyrics: recipe.lyrics,
+      bpm: recipe.bpm,
+      bars: recipe.bars,
+      durationSeconds: recipe.duration_seconds,
+      voiceRef: recipe.voice_ref,
+      exaggeration: recipe.exaggeration,
+      conviction: recipe.conviction,
+    },
+  };
+}
+
 export async function generateVariants(
   root: string,
   name: string,
   options: GenerateOptions,
 ): Promise<GenerateResult> {
-  const kind = generationKind(options);
   if (!isSlug(name)) throw new Error(`sound name "${name}" must be a lowercase-slug`);
   if (name === RESERVED_LABEL_NAME) {
     throw new Error(`"${RESERVED_LABEL_NAME}" is reserved by the label grammar`);
@@ -232,6 +316,17 @@ export async function generateVariants(
   if (!project.songs.some((s) => s.name === options.song)) {
     throw new Error(`no such song "${options.song}"`);
   }
+  const songDir = join(root, 'songs', options.song);
+  const outputDir = join(songDir, 'audio', name);
+  const recipeAbsolute = join(songDir, 'sounds', `${name}.yaml`);
+  // Where the request comes from: a takeless recipe on disk if there is
+  // one, the flags otherwise. Everything downstream reads `request`, so
+  // the two entry points converge here and a run cannot behave
+  // differently depending on which one it arrived through.
+  const fillable = fillableRecipe(recipeAbsolute, name, options);
+  const request = fillable?.options ?? options;
+  const kind = generationKind(request);
+
   // Musical time projects CLI-side; the worker never learns what a bar
   // is. Only music asks for it: a voice line's length follows from its
   // text (voice-generation.md §1.6), so a voice generate needs no tempo
@@ -239,29 +334,26 @@ export async function generateVariants(
   let durationSeconds: number | undefined;
   let bpm: number | undefined;
   if (kind === 'music') {
-    const time = songTime(project, options.song);
+    const time = songTime(project, request.song);
     durationSeconds =
-      options.durationSeconds ?? time.tempoMap.ticksToSeconds(options.bars! * time.ticksPerBar);
+      request.durationSeconds ?? time.tempoMap.ticksToSeconds(request.bars! * time.ticksPerBar);
     // The model wants a whole-number hint; ramped songs get their opening tempo.
-    bpm = options.bpm ?? Math.round(time.initialBpm);
+    bpm = request.bpm ?? Math.round(time.initialBpm);
   }
 
-  const songDir = join(root, 'songs', options.song);
-  const outputDir = join(songDir, 'audio', name);
-  const recipeAbsolute = join(songDir, 'sounds', `${name}.yaml`);
-  if (existsSync(recipeAbsolute)) {
-    throw new Error(`sound "${name}" already exists in ${options.song} (pick a new name)`);
-  }
   // One namespace per song (§4.3): everything this run will mint — the
   // sound's name AND its <name>-<n> audition labels — must be free, or
-  // the model-minutes get spent and the project lands check-red.
+  // the model-minutes get spent and the project lands check-red. Filling
+  // a recipe mints no name for the sound itself: it already owns the one
+  // it is named after, so only the audition labels are in question.
   const taken = takenSongNames(songDir);
-  const minted = [name, ...Array.from({ length: options.variants }, (_, i) => `${name}-${i + 1}`)];
+  if (fillable !== undefined) taken.delete(name);
+  const minted = [name, ...Array.from({ length: request.variants }, (_, i) => `${name}-${i + 1}`)];
   const collision = minted.find((n) => taken.has(n));
   if (collision !== undefined) {
     throw new Error(
-      `"${collision}" is already a name in ${options.song} — a song's names are one ` +
-        `namespace, and generating "${name}" with ${options.variants} variants would mint it ` +
+      `"${collision}" is already a name in ${request.song} — a song's names are one ` +
+        `namespace, and generating "${name}" with ${request.variants} variants would mint it ` +
         `(pick a new name)`,
     );
   }
@@ -275,42 +367,42 @@ export async function generateVariants(
   // Outside the project deliberately: the snapshot is scaffolding for one
   // run, and a stray copy under songs/ would be a file `field check` has
   // opinions about and a person would have to delete.
-  const scratch = options.voiceRef === undefined ? undefined : mkdtempSync(join(tmpdir(), 'field-voice-ref-'));
+  const scratch = request.voiceRef === undefined ? undefined : mkdtempSync(join(tmpdir(), 'field-voice-ref-'));
   try {
     const reference =
-      options.voiceRef === undefined
+      request.voiceRef === undefined
         ? undefined
-        : await snapshotVoiceRef(project, options.song, options.voiceRef, scratch!);
+        : await snapshotVoiceRef(project, request.song, request.voiceRef, scratch!);
     mkdirSync(outputDir, { recursive: true });
 
     const client =
       kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);
     try {
       client.on('event', (e: { event: string; stage?: string }) => {
-        if (e.event === 'progress' && e.stage) options.onProgress?.(e.stage);
+        if (e.event === 'progress' && e.stage) request.onProgress?.(e.stage);
       });
       const response =
         client instanceof VoicedClient
           ? await client.generate({
-              text: options.text!,
-              seed: options.seed,
-              variants: options.variants,
+              text: request.text!,
+              seed: request.seed,
+              variants: request.variants,
               output_dir: outputDir,
               // Omitted, never empty: "" and absent are different requests
               // and only one of them means the model's own voice (#60).
               ...(reference !== undefined ? { voice_ref: reference.path } : {}),
-              ...(options.exaggeration !== undefined
-                ? { exaggeration: options.exaggeration }
+              ...(request.exaggeration !== undefined
+                ? { exaggeration: request.exaggeration }
                 : {}),
-              ...(options.conviction !== undefined ? { conviction: options.conviction } : {}),
+              ...(request.conviction !== undefined ? { conviction: request.conviction } : {}),
             })
           : await client.generate({
-              prompt: options.prompt!,
+              prompt: request.prompt!,
               duration_seconds: durationSeconds!,
-              seed: options.seed,
-              variants: options.variants,
+              seed: request.seed,
+              variants: request.variants,
               output_dir: outputDir,
-              lyrics: options.lyrics,
+              lyrics: request.lyrics,
               bpm,
             });
 
@@ -322,60 +414,95 @@ export async function generateVariants(
       for (let i = 0; i < response.paths.length; i++) {
         const target = join(outputDir, `${i + 1}.wav`);
         renameSync(response.paths[i]!, target);
-        files.push(join('songs', options.song, 'audio', name, `${i + 1}.wav`));
+        files.push(join('songs', request.song, 'audio', name, `${i + 1}.wav`));
         hashes.push(await sha256File(target));
       }
 
-      // Provenance: everything needed to audit or deliberately regenerate.
-      // Parsed through the schema before writing — this command must never
-      // emit a target `field check` would reject — and canonicalized so
-      // `field fmt` is a no-op on fresh recipes.
-      const recipe = generativeSoundSchema.parse({
-        name,
-        type: 'generative',
+      // Provenance: everything needed to audit or deliberately regenerate,
+      // recorded per take because that is what it describes — two takes
+      // can come from different model versions (bloom-in-tree.md §3). One
+      // timestamp for the run, read once, so hashing a slow batch cannot
+      // split the takes across a second boundary and imply two runs.
+      const generatedAt = new Date().toISOString();
+      const variants = files.map((_, i) => ({
+        file: `audio/${name}/${i + 1}.wav`,
         model: response.model,
-        // The kind split, written out: whichever half this run is not, its
-        // fields are absent rather than undefined-valued, because a strict
-        // schema counts a present key.
-        ...(kind === 'voice'
-          ? {
-              text: options.text,
-              ...(reference !== undefined
-                ? { voice_ref: options.voiceRef, voice_ref_sha256: reference.sha256 }
-                : {}),
-              ...(options.exaggeration !== undefined
-                ? { exaggeration: options.exaggeration }
-                : {}),
-              ...(options.conviction !== undefined ? { conviction: options.conviction } : {}),
-            }
-          : {
-              prompt: options.prompt,
-              ...(options.lyrics !== undefined ? { lyrics: options.lyrics } : {}),
-              bpm,
-              duration_seconds: Number(durationSeconds!.toFixed(3)),
-              ...(options.bars !== undefined ? { bars: options.bars } : {}),
-            }),
-        seed: options.seed,
-        variants: files.map((_, i) => ({
-          file: `audio/${name}/${i + 1}.wav`,
-          seed: response.seeds[i]!, // schema guarantees paths/seeds align
-          sha256: hashes[i]!,
-        })),
-        generated_at: new Date().toISOString(),
-      });
+        seed: response.seeds[i]!, // schema guarantees paths/seeds align
+        sha256: hashes[i]!,
+        generated_at: generatedAt,
+      }));
+      // Every take this run produced is usable, so the first is chosen
+      // outright and the sound resolves the moment it exists. `field
+      // choose` is then what its name says — switching to another take —
+      // rather than a second mandatory step between generating audio and
+      // being able to build with it. Nothing that already has takes
+      // reaches here, so this can never overwrite somebody's pick.
+      const CHOSEN_FIRST = 1;
+      let doc: Document;
+      if (fillable !== undefined) {
+        // Filled in place. A shipped recipe carries comments explaining
+        // what it is for, and re-emitting the file from a parsed object
+        // would throw every one of them away — the same reason `choose`
+        // edits the document instead of rebuilding it.
+        doc = fillable.doc;
+        doc.setIn(['variants'], variants);
+        doc.setIn(['chosen'], CHOSEN_FIRST);
+        // The reference recording's hash is provenance no recipe could
+        // carry before a run resolved the name to bytes.
+        if (reference !== undefined) doc.setIn(['voice_ref_sha256'], reference.sha256);
+        const filled = generativeSoundSchema.safeParse(doc.toJS());
+        if (!filled.success) {
+          const issue = filled.error.issues[0]!;
+          throw new Error(
+            `filling ${name}.yaml would leave it invalid: ${issue.message} at ` +
+              `${issue.path.join('.')} (field check)`,
+          );
+        }
+      } else {
+        // Parsed through the schema before writing — this command must never
+        // emit a target `field check` would reject — and canonicalized so
+        // `field fmt` is a no-op on fresh recipes.
+        const recipe = generativeSoundSchema.parse({
+          name,
+          type: 'generative',
+          // The kind split, written out: whichever half this run is not, its
+          // fields are absent rather than undefined-valued, because a strict
+          // schema counts a present key.
+          ...(kind === 'voice'
+            ? {
+                text: request.text,
+                ...(reference !== undefined
+                  ? { voice_ref: request.voiceRef, voice_ref_sha256: reference.sha256 }
+                  : {}),
+                ...(request.exaggeration !== undefined
+                  ? { exaggeration: request.exaggeration }
+                  : {}),
+                ...(request.conviction !== undefined ? { conviction: request.conviction } : {}),
+              }
+            : {
+                prompt: request.prompt,
+                ...(request.lyrics !== undefined ? { lyrics: request.lyrics } : {}),
+                bpm,
+                duration_seconds: Number(durationSeconds!.toFixed(3)),
+                ...(request.bars !== undefined ? { bars: request.bars } : {}),
+              }),
+          chosen: CHOSEN_FIRST,
+          variants,
+        });
+        doc = new Document(recipe);
+      }
       mkdirSync(join(songDir, 'sounds'), { recursive: true });
-      const doc = new Document(recipe);
       canonicalizeDocument(doc, soundOrder);
       writeFileSync(recipeAbsolute, stringifyDocument(doc));
 
       return {
-        recipePath: join('songs', options.song, 'sounds', `${name}.yaml`),
+        recipePath: join('songs', request.song, 'sounds', `${name}.yaml`),
         files,
         seeds: response.seeds,
         model: response.model,
         durationSeconds,
         bpm,
-        voiceRef: options.voiceRef,
+        voiceRef: request.voiceRef,
       };
     } finally {
       client.close();

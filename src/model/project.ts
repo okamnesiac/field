@@ -470,8 +470,18 @@ function validate(project: LoadedProject): void {
       chosen: new Set(
         generateSounds.filter((t) => t.sound.chosen !== undefined).map((t) => t.sound.name),
       ),
+      // A recipe with no takes is the shape a project ships in when its
+      // audio is not committed (bloom-in-tree.md §2.4): well-formed, and
+      // simply not filled in yet. Takes with nothing picked is a different
+      // thing — `field generate` chooses its first take, so no command
+      // produces that state and reaching it means a hand edit.
+      ungenerated: new Set(
+        generateSounds.filter((t) => t.sound.variants.length === 0).map((t) => t.sound.name),
+      ),
       unchosen: new Set(
-        generateSounds.filter((t) => t.sound.chosen === undefined).map((t) => t.sound.name),
+        generateSounds
+          .filter((t) => t.sound.chosen === undefined && t.sound.variants.length > 0)
+          .map((t) => t.sound.name),
       ),
       shared: sharedNames,
     };

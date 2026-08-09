@@ -32,7 +32,16 @@ export function checkSource(ref: string, what: string, ctx: ValidateContext): vo
     );
     return;
   }
-  if (!ctx.names.assets.has(ref) && !ctx.names.sounds.has(ref) && !ctx.names.chosen.has(ref)) {
+  // A takeless recipe resolves as far as `check` is concerned: the
+  // reference is to a name that exists and the project is coherent, the
+  // audio is just absent. `build` and `play` are what refuse it, because
+  // that is the question they ask (bloom-in-tree.md §3).
+  if (
+    !ctx.names.assets.has(ref) &&
+    !ctx.names.sounds.has(ref) &&
+    !ctx.names.chosen.has(ref) &&
+    !ctx.names.ungenerated.has(ref)
+  ) {
     ctx.push(`${what} references unknown source "${ref}"`);
   }
 }

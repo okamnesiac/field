@@ -17,16 +17,15 @@ import { generativeSoundSchema } from './sounds.js';
 const base = {
   name: 'scratch-vocal',
   type: 'generative' as const,
-  model: 'chatterbox',
-  seed: 1,
   variants: [
     {
       file: 'audio/scratch-vocal/1.wav',
+      model: 'chatterbox',
       seed: 1,
       sha256: 'a'.repeat(64),
+      generated_at: '2026-08-07T12:00:00Z',
     },
   ],
-  generated_at: '2026-08-07T12:00:00Z',
 };
 
 const music = { ...base, prompt: 'dreamy keys', duration_seconds: 10 };
@@ -41,6 +40,45 @@ describe('generative recipes', () => {
   it('accepts a music recipe and a voice recipe', () => {
     expect(generativeSoundSchema.safeParse(music).success).toBe(true);
     expect(generativeSoundSchema.safeParse(voice).success).toBe(true);
+  });
+
+  it('accepts a recipe with no takes, however the absence is spelled', () => {
+    // The shape a project ships in when its audio is not committed
+    // (bloom-in-tree.md §3): a request for audio rather than a record of
+    // one. Both spellings have to work — a hand-written recipe omits the
+    // key, `field generate` on an emptied one leaves `variants: []` — and
+    // they were separate failures before this defaulted.
+    const { variants: _omit, ...takeless } = voice;
+    const absent = generativeSoundSchema.safeParse(takeless);
+    const empty = generativeSoundSchema.safeParse({ ...voice, variants: [] });
+    expect(absent.success).toBe(true);
+    expect(empty.success).toBe(true);
+    expect(absent.data?.variants).toEqual([]);
+  });
+
+  it('keeps provenance on the take, so takes may differ', () => {
+    // A sound accumulates runs, and two takes a month apart can come from
+    // different model versions with different generation times. One
+    // `model`/`generated_at` on the sound could record only one answer for
+    // the whole list; on the variant it records each.
+    const mixed = generativeSoundSchema.safeParse({
+      ...voice,
+      variants: [
+        voice.variants[0]!,
+        {
+          file: 'audio/scratch-vocal/2.wav',
+          model: 'chatterbox-2',
+          seed: 2,
+          sha256: 'c'.repeat(64),
+          generated_at: '2026-09-07T12:00:00Z',
+        },
+      ],
+    });
+    expect(mixed.success).toBe(true);
+    expect(mixed.data?.variants.map((v) => v.model)).toEqual(['chatterbox', 'chatterbox-2']);
+    // And provenance on the sound itself is gone, not merely optional:
+    // a leftover would otherwise sit there unread.
+    expect(generativeSoundSchema.safeParse({ ...voice, model: 'chatterbox' }).success).toBe(false);
   });
 
   it('refuses a recipe that is both kinds or neither', () => {
