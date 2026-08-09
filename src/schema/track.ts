@@ -115,9 +115,22 @@ export type TrackInput = Omit<TrackInputFile, 'at' | 'duration'> & {
 // with the mix rule that used to apply them. Leaving them as fields
 // nothing reads would be worse than removing them: a `-24` sitting in a
 // track file, passing check, changing nothing.
+// A level lives on the placement that consumes a track, not on the track
+// (nested-tracks.md §1.13). These two are declared only so a file written
+// before that says where the level went — `strictObject` would otherwise
+// answer "Unrecognized keys", which is true and tells nobody anything.
+// Every other removal in this retirement forwards: `mixes/` names what to
+// move, `mix.yaml` is repointed, `mix:` suggests `track:`.
+const RETIRED_FADER =
+  'has moved: a level lives on the placement that consumes this track, so put ' +
+  'gain_db/pan on the `inputs:` entry that places it and delete them here ' +
+  '(nested-tracks.md §1.13)';
+
 export const trackSchema = z.strictObject({
   name: labelName,
   type: z.enum(['audio', 'midi']),
+  gain_db: z.never({ error: RETIRED_FADER }).optional(),
+  pan: z.never({ error: RETIRED_FADER }).optional(),
   // Inserts are content, not mix parameters: they bake into the stem, so
   // an insert edit re-renders it — the accepted cost model (effects.md §5).
   inserts: z.array(insertSchema).default([]),

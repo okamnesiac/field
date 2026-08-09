@@ -963,7 +963,10 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
         'type: audio\ngain_db: -3\n',
       ),
     );
-    expect(await messages()).toContain('Unrecognized key');
+    // Not "Unrecognized key": a removal without a forwarding address is
+    // the failure this retirement fixes everywhere else — mixes/ names what
+    // to move, mix.yaml is repointed, mix: suggests track:.
+    expect(await messages()).toContain('a level lives on the placement that consumes this track');
   });
 
   it('refuses musical time on an absolute placement', async () => {
