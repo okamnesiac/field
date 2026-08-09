@@ -976,6 +976,17 @@ What this decides, and what it retires:
    entirely cached. The leaf folds owe the same proof downstream:
    however a generator entry is keyed internally, the folded track's
    bytes are identical, so every consumer's key holds.
+   Amended 2026-08-09 (#103, the first fold): the downstream half was
+   wrong. The wrapper stem re-encodes what scsynth wrote (24-bit →
+   float32), so the folded track's bytes differ while its samples do
+   not: each *direct* consumer re-keys exactly once and re-renders
+   byte-identically, and everything below it stays cached — kit-punch
+   came back `d1ae4edb90b7…`, the hash it has carried since #100. The
+   proof a fold owes is "the layer under the direct consumers never
+   moves", not "nothing rebuilds". Step 3's folds pay the same one-time
+   price: wrapping a chosen take's committed bytes in a stem re-encodes
+   them the same way, so expect their direct consumers to rebuild once,
+   byte-identically.
 
 Sequencing, revising §16's tail and §17's remainder:
 
