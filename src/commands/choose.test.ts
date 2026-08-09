@@ -11,7 +11,14 @@ import { importAsset } from './import.js';
 import { resolvePlayables } from './play.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
-import { generativeSoundSchema, soundOrder, type GenerativeSound } from '../schema/index.js';
+import {
+  generativeSoundSchema,
+  generativeTakesOrder,
+  generativeTakesSchema,
+  soundOrder,
+  TAKES_FILENAME,
+  type GenerativeSound,
+} from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
 // Deliberate sounds as project citizens (project-layout.md §1.4, §4):
@@ -60,12 +67,20 @@ function writeGenerateSound(name: string, variantContents: string[]): void {
     bpm: 96,
     duration_seconds: 10,
     bars: 4,
-    variants,
   });
   const doc = new Document(recipe);
   canonicalizeDocument(doc, soundOrder);
   writeFileSync(join(songDir, 'sounds', `${name}.yaml`), stringifyDocument(doc));
+  // Two files, as on disk: the request in sounds/, the takes beside the
+  // audio they pin (bloom-in-tree.md §7).
+  const takes = new Document(generativeTakesSchema.parse({ sound: name, variants }));
+  canonicalizeDocument(takes, generativeTakesOrder);
+  writeFileSync(join(songDir, 'audio', name, TAKES_FILENAME), stringifyDocument(takes));
 }
+
+// The fixture's takes file, which most of these tests edit rather than the
+// recipe now that the two are separate (bloom-in-tree.md §7).
+const takesPath = () => join(root, 'songs/opener/audio/keys', TAKES_FILENAME);
 
 function loadedGenerate(): GenerativeSound {
   const sound = loadProject(root).songs[0]!.sounds[0]!.data;
@@ -86,21 +101,33 @@ describe('generative sounds in the project model', () => {
 
   it('diagnoses name/filename mismatch, dangling files, and bad chosen', async () => {
     const recipePath = join(root, 'songs/opener/sounds/keys.yaml');
-    const raw = readFileSync(recipePath, 'utf8');
-    writeFileSync(recipePath, raw.replace('name: keys', 'name: pads'));
+    const recipe = readFileSync(recipePath, 'utf8');
+    writeFileSync(recipePath, recipe.replace('name: keys', 'name: pads'));
     expect((await check(root)).diagnostics.some((d) => d.message.includes('must match filename'))).toBe(true);
+    writeFileSync(recipePath, recipe);
 
-    writeFileSync(recipePath, raw.replace('audio/keys/2.wav', 'audio/keys/missing.wav'));
+    // The rest are properties of the takes, so they are edited there —
+    // the recipe no longer carries a variant list to break
+    // (bloom-in-tree.md §7).
+    const raw = readFileSync(takesPath(), 'utf8');
+    writeFileSync(takesPath(), raw.replace('audio/keys/2.wav', 'audio/keys/missing.wav'));
     expect((await check(root)).diagnostics.some((d) => d.message.includes('file not found'))).toBe(true);
 
-    // Anchored on `variants:`, which is a top-level key and canonically
-    // right after `chosen`. Anchoring on `seed:` would now match inside a
-    // variant — provenance moved there — and indent this into the list,
-    // where it tests YAML nesting rather than the guard it names.
-    writeFileSync(recipePath, raw.replace('variants:', 'chosen: 5\nvariants:'));
+    writeFileSync(takesPath(), raw.replace('variants:', 'chosen: 5\nvariants:'));
     expect(
       (await check(root)).diagnostics.some((d) => d.message.includes('chosen variant 5')),
     ).toBe(true);
+    writeFileSync(takesPath(), raw);
+
+    // And a takes file that names a different sound than the directory it
+    // sits in, which is the split's own version of the filename rule.
+    writeFileSync(takesPath(), raw.replace('sound: keys', 'sound: pads'));
+    expect(
+      (await check(root)).diagnostics.some((d) =>
+        d.message.includes('must match the directory audio/keys/'),
+      ),
+    ).toBe(true);
+    writeFileSync(takesPath(), raw);
   });
 
   it('rejects variant paths outside audio/<name>/', async () => {
@@ -108,9 +135,8 @@ describe('generative sounds in the project model', () => {
     // (#18 review, re-based on audio/<name>/ by project-layout.md §1.4).
     const escapee = join(root, 'songs/opener/escapee.wav');
     writeFileSync(escapee, 'fake wav one');
-    const recipePath = join(root, 'songs/opener/sounds/keys.yaml');
-    const raw = readFileSync(recipePath, 'utf8');
-    writeFileSync(recipePath, raw.replace('audio/keys/1.wav', 'escapee.wav'));
+    const raw = readFileSync(takesPath(), 'utf8');
+    writeFileSync(takesPath(), raw.replace('audio/keys/1.wav', 'escapee.wav'));
     expect(
       (await check(root)).diagnostics.some((d) =>
         d.message.includes('must live in audio/keys/'),

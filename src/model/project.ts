@@ -21,8 +21,11 @@ import {
   projectSchema,
   songOrder,
   songSchema,
+  generativeTakesOrder,
+  generativeTakesSchema,
   soundOrder,
   soundSchema,
+  TAKES_FILENAME,
   takeOrder,
   takeSchema,
   tempoFileOrder,
@@ -34,6 +37,7 @@ import {
   type AssetsFile,
   type BuildableSound,
   type GenerativeSound,
+  type GenerativeTakes,
   type Project,
   type Song,
   type Sound,
@@ -144,6 +148,39 @@ function yamlFiles(dir: string): string[] {
     .map((f) => join(dir, f));
 }
 
+// The takes beside a generative sound's audio, if a run has happened.
+// Absent is not a diagnostic: a recipe with no takes is a request rather
+// than a broken record (bloom-in-tree.md §3), and `build` is what refuses.
+// A malformed one *is* diagnosed, against its own path, so the message
+// points at the file you would edit.
+export function takesPath(songDir: string, soundName: string): string {
+  return join(songDir, 'audio', soundName, TAKES_FILENAME);
+}
+
+function loadTakes(
+  project: LoadedProject,
+  songDirAbs: string,
+  soundName: string,
+): GenerativeTakes | undefined {
+  const abs = takesPath(songDirAbs, soundName);
+  if (!existsSync(abs)) return undefined;
+  const loaded = loadFile(project, abs, {
+    schema: generativeTakesSchema,
+    order: generativeTakesOrder,
+  });
+  if (!loaded) return undefined;
+  // Same rule a sound's `name` obeys against its filename: a file that has
+  // been moved should say so rather than quietly describe another sound.
+  if (loaded.data.sound !== soundName) {
+    project.diagnostics.push({
+      file: loaded.path,
+      message: `takes name "${loaded.data.sound}" must match the directory audio/${soundName}/`,
+    });
+    return undefined;
+  }
+  return loaded.data;
+}
+
 export function loadProject(root: string): LoadedProject {
   const project: LoadedProject = { root: resolve(root), songs: [], diagnostics: [] };
 
@@ -235,8 +272,21 @@ export function loadProject(root: string): LoadedProject {
     }
 
     for (const file of yamlFiles(join(dir, 'sounds'))) {
-      const sound = loadFile(project, file, { schema: soundSchema, order: soundOrder });
-      if (sound) song.sounds.push(sound);
+      const parsed = loadFile(project, file, { schema: soundSchema, order: soundOrder });
+      if (!parsed) continue;
+      if (parsed.data.type !== 'generative') {
+        song.sounds.push(parsed as LoadedFile<Sound>);
+        continue;
+      }
+      // A generative sound is its recipe plus whatever takes exist beside
+      // its audio (bloom-in-tree.md §7). Merged here, once, so nothing
+      // downstream has to know the two are separate files — and absent is
+      // a legal answer, meaning nothing has been generated yet.
+      const takes = loadTakes(project, dir, parsed.data.name);
+      song.sounds.push({
+        ...parsed,
+        data: { ...parsed.data, variants: takes?.variants ?? [], chosen: takes?.chosen },
+      } as LoadedFile<Sound>);
     }
 
     for (const file of yamlFiles(join(dir, 'tracks'))) {

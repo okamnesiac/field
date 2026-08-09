@@ -210,20 +210,29 @@ every committed file is still pinned exactly once.
 
 ## Deliberate generation
 
-A `generative` sound is a request and a record in one file. The request
-is the sound's own fields: prompt or text, duration, conditioning. The
-record is `variants:`, one entry per take, each carrying the model name +
-version that produced it, its seed, its output hash, and when it ran —
-provenance sits on the take because that is what it describes, and a
-sound accumulates takes from runs months and model versions apart.
+A `generative` sound is a request and a record, in two files. The request
+is `sounds/<name>.yaml`: prompt or text, duration, conditioning. The record
+is `audio/<name>/variants.yaml`, one entry per take, each carrying the model
+name + version that produced it, its seed, its output hash, and when it ran —
+provenance sits on the take because that is what it describes, and a sound
+accumulates takes from runs months and model versions apart.
+
+They are separate files because they answer to different owners. The recipe
+is shared; the takes and the pick are what your machine did, so keeping them
+in the recipe meant `field generate` and `field choose` modified a committed
+file. The takes sit *inside* the audio directory so that one decision governs
+both: ignore the audio and its pins go too, commit the audio and the
+provenance comes with it (bloom-in-tree.md §7). The split is on disk only —
+the loader merges them, so everything downstream still reads a sound's
+variants and chosen take.
 Reproducibility of the recipe is the contract; the committed bits are
 the artifact. (For SuperCollider the "recipe" is the program plus an
 explicit seed, and it *is* reproducible, which is why `supercollider` is
 an automatic type instead.)
 
-A recipe with no takes is legal, and is how a project ships when its
-audio is not committed: `variants:` is empty, `field check` passes — the
-project is coherent, the audio is simply absent — and `field build` or
+A sound with no takes is legal, and is how a project ships when its audio
+is not committed: there is no `variants.yaml` at all, `field check` passes —
+the project is coherent, the audio is simply absent — and `field build` or
 `field play` is what refuses, naming the sound and the `field generate`
 that fills it. Running that on an existing takeless recipe fills it in
 place, reading the request from the file instead of the command line, so

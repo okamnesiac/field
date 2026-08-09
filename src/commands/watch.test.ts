@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BuildOutcome, GeneratorRunner } from '../graph/build.js';
 import { sha256Text } from '../hash.js';
+import { TAKES_FILENAME } from '../schema/index.js';
 import { createSong } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
@@ -218,11 +219,16 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       });
       writeSound(
         'gen1',
+        ['name: gen1', 'type: generative', 'prompt: test keys', 'duration_seconds: 10', ''].join(
+          '\n',
+        ),
+      );
+      // The pick lives beside the audio (bloom-in-tree.md §7), so this is
+      // the file `field choose` rewrites and the one watch must notice.
+      writeFileSync(
+        join(songDir, 'audio/gen1', TAKES_FILENAME),
         [
-          'name: gen1',
-          'type: generative',
-          'prompt: test keys',
-          'duration_seconds: 10',
+          'sound: gen1',
           `chosen: ${chosen}`,
           'variants:',
           ...variants.flatMap((v, i) => [

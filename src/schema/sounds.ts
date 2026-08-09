@@ -89,13 +89,23 @@ export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
 // `model`/`generated_at` pair on the sound could record only one answer
 // for the whole list. It is also what lets a recipe exist before any run
 // has happened, which is the shape an example project ships in.
+const TAKES_FILE = 'variants.yaml';
 const RETIRED_TO_VARIANT =
   'provenance describes a run and lives on each take now — copy this value ' +
-  'onto every entry under `variants:` and delete it here ' +
+  `onto every entry in audio/<name>/${TAKES_FILE} and delete it here ` +
   '(bloom-in-tree.md §3)';
 const RETIRED_SEED =
-  'each entry under `variants:` already records the seed it ran with, so ' +
-  'this one has no home — delete it (bloom-in-tree.md §3)';
+  'each take already records the seed it ran with, so this one has no home ' +
+  '— delete it (bloom-in-tree.md §3)';
+// `variants` and `chosen` left the recipe entirely (bloom-in-tree.md §7).
+// A recipe is what you share; the takes and the pick are what your machine
+// made, and leaving them here meant that running `field generate` or
+// `field choose` modified a committed file — so using the tool as
+// documented dirtied the repository.
+const RETIRED_TO_TAKES =
+  `takes and the pick live beside the audio they describe, in ` +
+  `audio/<name>/${TAKES_FILE} — move this there, keeping the same shape ` +
+  '(bloom-in-tree.md §7)';
 
 export const generativeVariantSchema = z.strictObject({
   file: z.string().min(1), // song-relative, under audio/<name>/
@@ -105,6 +115,43 @@ export const generativeVariantSchema = z.strictObject({
   generated_at: z.iso.datetime(),
 });
 export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
+
+// What a run produced, and which take you kept — `audio/<name>/variants.yaml`,
+// beside the WAVs it pins (bloom-in-tree.md §7).
+//
+// It sits there rather than in `sounds/<name>.yaml` because generating and
+// choosing are things *your* machine did, and a recipe is what you share.
+// With them in the recipe, following the documented workflow modified a
+// committed file: clone the example, run `field generate`, and the working
+// tree is dirty before you have heard anything.
+//
+// And it sits *inside the audio directory* rather than beside the recipe so
+// that one gitignore rule governs both. This file pins those WAVs and is
+// meaningless without them, so the decision to commit the audio and the
+// decision to commit its pins have to be the same decision — two rules in
+// two places can drift, and each way they drift is quiet: pins without
+// bytes fail `check` for everyone else, bytes without pins cannot be
+// verified at all.
+export const generativeTakesSchema = z.strictObject({
+  // The sound these belong to. Redundant with the directory name, and
+  // checked against it for the same reason a sound's `name` is checked
+  // against its filename: a file that has been moved should say so rather
+  // than quietly describe something else.
+  sound: labelName,
+  chosen: z.number().int().min(1).optional(), // 1-based, as played and numbered
+  // Defaulted rather than merely allowed to be empty: omitting the key and
+  // writing `variants: []` would otherwise be different failures, and a
+  // hand-written file does the former.
+  variants: z.array(generativeVariantSchema).default([]),
+});
+export type GenerativeTakes = z.infer<typeof generativeTakesSchema>;
+export const generativeTakesOrder: KeyOrder = {
+  keys: ['sound', 'chosen', 'variants'],
+  children: {
+    variants: { items: { keys: ['file', 'model', 'seed', 'sha256', 'generated_at'] } },
+  },
+};
+export const TAKES_FILENAME = TAKES_FILE;
 
 // Two kinds of generation share this one shape, discriminated by which
 // of `prompt`/`text` is present rather than by a second `type:`
@@ -161,12 +208,8 @@ export const generativeSoundSchema = z
     bpm: z.number().int().min(30).max(300).optional(),
     duration_seconds: z.number().positive().optional(),
     bars: z.number().int().positive().optional(),
-    chosen: z.number().int().min(1).optional(), // 1-based variant number
-    // Defaulted rather than merely allowed to be empty: omitting the key
-    // and writing `variants: []` are otherwise different failures, and a
-    // hand-written recipe does the former. A takeless recipe is a request
-    // for audio rather than a record of it (bloom-in-tree.md §3).
-    variants: z.array(generativeVariantSchema).default([]),
+    chosen: z.never({ error: RETIRED_TO_TAKES }).optional(),
+    variants: z.never({ error: RETIRED_TO_TAKES }).optional(),
   })
   // The kind split, enforced rather than documented. Without it a recipe
   // can be a chimera of both kinds or neither, and the generator would
@@ -222,7 +265,20 @@ export const generativeSoundSchema = z
       });
     }
   });
-export type GenerativeSound = z.infer<typeof generativeSoundSchema>;
+// The recipe exactly as `sounds/<name>.yaml` carries it: the request, with
+// no takes in it.
+export type GenerativeRecipe = z.infer<typeof generativeSoundSchema>;
+
+// The sound as everything downstream sees it — the recipe merged with the
+// takes file beside its audio, which the loader does once. Splitting the
+// two on disk deliberately does not split them in memory: a sound *has*
+// variants, they are simply stored where their bytes are, so the graph,
+// `check`, `play` and the rest keep reading `sound.variants` and
+// `sound.chosen` and did not have to learn about the file layout.
+export type GenerativeSound = Omit<GenerativeRecipe, 'variants' | 'chosen'> & {
+  variants: GenerativeVariant[];
+  chosen?: number | undefined;
+};
 
 export const soundSchema = z.discriminatedUnion('type', [
   normalizeSoundSchema,
@@ -232,14 +288,20 @@ export const soundSchema = z.discriminatedUnion('type', [
   limitSoundSchema,
   reverbSoundSchema,
 ]);
-export type Sound = z.infer<typeof soundSchema>;
+// A sound as parsed from disk. Generative members are recipes here; the
+// loader replaces them with the merged form below.
+export type ParsedSound = z.infer<typeof soundSchema>;
 
 // The types the graph may generate automatically — the ones with a
 // Generator (src/generators/). `generative` is deliberately excluded: its
 // generation is human-triggered, which is the §1.2 trigger policy
 // expressed in the type system, so dispatching code narrows to this
 // first.
-export type BuildableSound = Exclude<Sound, GenerativeSound>;
+export type BuildableSound = Exclude<ParsedSound, GenerativeRecipe>;
+
+// What a loaded project holds: buildable sounds unchanged, generative ones
+// merged with their takes.
+export type Sound = BuildableSound | GenerativeSound;
 
 export const soundOrder: KeyOrder = {
   keys: [

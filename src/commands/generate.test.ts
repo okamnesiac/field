@@ -13,12 +13,12 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { check } from './check.js';
 import { createSong } from './create.js';
-import { generateVariants } from './generate.js';
+import { chooseVariant, generateVariants } from './generate.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
-import { type GenerativeSound } from '../schema/index.js';
+import { TAKES_FILENAME, type GenerativeSound } from '../schema/index.js';
 
 // The CLI seam: one `field generate` over two generators, and the first
 // code in field that *writes* a content hash into a committed file rather
@@ -531,6 +531,32 @@ describe('field generate: filling a recipe that shipped without takes', () => {
       'topline.yaml is named "elsewhere" inside',
     );
     expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
+  });
+
+  it('leaves the recipe byte-identical, writing the takes beside the audio', async () => {
+    // The reason for the split (bloom-in-tree.md §7): a shipped recipe is
+    // committed, and generating into it made using the tool as documented
+    // produce a diff. Bytes, not just content — a re-emit that happened to
+    // round-trip would still rewrite comments and key order.
+    writeRecipe(`# generate your own\n${TAKELESS}`);
+    const recipePath = join(root, 'songs/creek/sounds/topline.yaml');
+    const before = readFileSync(recipePath);
+    await generateVariants(root, 'topline', run);
+    expect(readFileSync(recipePath).equals(before)).toBe(true);
+
+    // …and the takes went to their own file, beside the WAVs they pin.
+    const takes = join(root, 'songs/creek/audio/topline', TAKES_FILENAME);
+    expect(existsSync(takes)).toBe(true);
+    const written = recipe('topline');
+    expect(written.chosen).toBe(1);
+    expect(written.variants).toHaveLength(2);
+
+    // Choosing is the same promise: it moves a line in the takes file and
+    // the recipe still does not change.
+    await chooseVariant(root, 'topline', { song: 'creek', variant: 2 });
+    expect(readFileSync(recipePath).equals(before)).toBe(true);
+    expect(recipe('topline').chosen).toBe(2);
+    expect((await check(root)).diagnostics).toEqual([]);
   });
 
   it('refuses to run over takes that already exist', async () => {

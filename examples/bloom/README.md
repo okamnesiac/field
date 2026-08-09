@@ -50,9 +50,12 @@ that promise — it does not reproduce across GPU and framework versions — so 
 generated sound records what it *did*: the prompt, and per take the model,
 seed, hash and time. Provenance instead of reproducibility.
 
-In a project that commits its audio, those takes sit beside the recipe as
-WAVs. This one ships the recipes with `variants: []` and lets you fill them,
-which is the same format saying the same thing with the audio left out.
+A recipe holds only the request. What a run produced and which take you kept
+live in `audio/<name>/variants.yaml`, beside the WAVs they pin — because
+those are facts about *your* machine, and a recipe is what everybody shares.
+That split is what lets this example ship: generating and choosing here leave
+every committed file untouched, so following the instructions below does not
+put your checkout into a diff.
 
 Times are authored in musical notation — `[bar]`, `[bar, beat]`,
 `[bar, beat, tick]` — resolved through the song's meter map at load, so
@@ -109,10 +112,11 @@ field generate lead-take --song creek --seed 4823 --variants 3
 field build creek
 ```
 
-Each fills its recipe in place, keeping the comments, and chooses the first
-take so the sound resolves immediately. Note what is *not* passed: no
+Each writes `songs/creek/audio/<name>/variants.yaml` and chooses the first
+take, so the sound resolves immediately. The recipe is not touched — run
+`git status` afterwards and it is clean. Note what is *not* passed: no
 `--prompt`, no `--text`. The file already says what to generate, and a flag
-repeating it is refused as a second answer — the recipe is the request.
+repeating it is refused as a second answer.
 
 Then audition the takes and change your mind:
 
@@ -127,9 +131,12 @@ diff — nothing is copied and nothing is re-imported. Those takes are yours:
 generation does not reproduce across GPU and framework versions, so your
 creek is not this creek, and the repository never claims otherwise.
 
-The generated WAVs land under `songs/creek/audio/` and are git-ignored. If
-you want them back exactly, keep the seeds — but the honest answer is that
-you regenerate, and pick again.
+The takes and the WAVs both land under `songs/creek/audio/` and are
+git-ignored by one rule, because the pins and the bytes they pin are the same
+commit decision — a project that *does* commit its audio commits both, and
+gets provenance `field check` can verify. If you want your takes back
+exactly, keep the seeds; but the honest answer is that model generation does
+not reproduce, so you regenerate and pick again.
 
 ## Building
 
