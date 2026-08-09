@@ -7,12 +7,12 @@ vocabulary (project-layout.md §4: the format speaks sounds, types, and
 sources; the engine speaks nodes, generators, and action keys).
 
 ```bash
-field build //songs/opener/mix:main
+field build //songs/opener/track:main
 field build //songs/opener/stems/...
-field export //songs/opener/mix:main
+field export //songs/opener/track:main
 field test //...
-field query 'deps(//songs/opener/mix:main)'
-field explain //songs/opener/mix:main
+field query 'deps(//songs/opener/track:main)'
+field explain //songs/opener/track:main
 ```
 
 Labels address songs and shared material alike: a clip in one song
@@ -61,7 +61,7 @@ Outputs live under their content hash, materialized at
 wants in a Finder window or an email. `field export <patterns>` builds
 and then copies the result to `~/Desktop` (or `--to <dir>`) under the
 label with its punctuation flattened, minus the `songs/` prefix:
-`//songs/creek/mix:main` becomes `creek-mix-main-v1.wav`, and shared
+`//songs/creek/track:main` becomes `creek-track-main-v1.wav`, and shared
 material keeps its shelf (`shared-asset-water-v1.wav`). It exports what
 `play` would play, through the same resolver, and only the labels the
 patterns match — the dependencies a build prints are means, not
@@ -179,9 +179,7 @@ sound by name and follow).
   also be a song's *output* — the one named `main` — in which case it
   carries the song's declared `length` and `loop` and renders exactly that
   long, the way the `mix` rule does. A bare song reference resolves to it:
-  `creek` means `//songs/creek/track:main`. `mixes/` still loads and still
-  renders, but nothing points at one by default any more, and it retires
-  next (nested-tracks.md §7 chunk 2). A clip's
+  `creek` means `//songs/creek/track:main`. A clip's
   `source:` is an asset, a sound, or a shared pin — clipping an
   automatic sound pulls its whole definition into the stem's subgraph,
   so the arrangement can play audio nothing ever committed, and editing
@@ -214,25 +212,14 @@ sound by name and follow).
   track `inserts:` (baked into the stem) and in the mix `master:` chain
   (post-gain, so the limiter guards the true output). Cycles became
   declarable with sound→sound edges, so `field check` names them.
-- **`mix`** — declared one file per mix in `songs/<song>/mixes/`
-  (`//songs/<song>/mix:<name>`; `field song create` writes a default
-  `main`). Sums track stems — the
-  graph's first rule→rule edges — applying each track's `gain_db`/`pan`
-  (constant-power balance) and a master gain while summing. Because inputs
-  are the stems' *content hashes*, a fader move re-runs only the sum, and a
-  clip edit that leaves a stem byte-identical stops there: early cutoff
-  falls out of content addressing. `tracks:` omitted means every audio
-  track with clips; a mix with nothing to mix is legal and simply absent
-  from the graph until content exists. A song may declare `length:`
-  (`song.yaml`, in ticks or a musical span like `[12]` — see
-  [project-model.md](project-model.md) "Timeline and tempo"): the mix
-  then renders *exactly* that long — tails
-  truncate after the master chain, short content pads — so a song's
-  extent is authored rather than emergent from whichever stem rings
-  longest. Adding `loop: true` folds the overhang back onto the start
-  instead (bar 12's reverb tail rings into bar 1): the render is one
-  seamless pass of the infinite loop, and a looping song's length *is*
-  its loop length.
+- **`mix`** — *retired* (nested-tracks.md §7 chunk 2). A song's output is
+  the track named `main`, and it does everything the mix rule did: sums its
+  inputs applying each placement's `gain_db` and `pan`, bakes its own
+  `inserts:` in where the master chain went, and renders exactly the song's
+  declared `length`, with `loop:` folding the overhang back onto the start.
+  The same machinery — a mix was a track that could not hold clips or nest —
+  and creek renders bit-identically across the change. A `mixes/` directory
+  left behind is named by `check` rather than ignored.
 
 ## Determinism policy
 

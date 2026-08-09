@@ -1003,18 +1003,6 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toBe('');
   });
 
-  it('lets a mix reference a track that only contains tracks', async () => {
-    writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
-    // Named `bed`, not `main`: createSong scaffolds an output track now,
-    // and a second thing called `main` is the two-outputs error rather
-    // than the mix-membership case under test.
-    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
-    writeFileSync(
-      join(root, 'songs/opener/mixes/bed.yaml'),
-      'name: bed\ntracks:\n  - outer\n',
-    );
-    expect(await messages()).toBe('');
-  });
 });
 
 describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
@@ -1040,31 +1028,12 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
     );
   }
 
-  it('refuses a song with both an output track and an output mix', async () => {
-    // createSong writes the output track now, so a mix is what has to be
-    // added to produce the conflict — the shape a project mid-migration
-    // has, rather than the shape the tool produces.
-    expect(existsSync(join(root, 'songs/opener/tracks/main.yaml'))).toBe(true);
-    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
-    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\n');
-    writeOutputTrack();
-    const out = await messages();
-    expect(out).toContain('song has two outputs');
-    expect(out).toContain('delete one');
-    expect(out).toContain('a bare song name reaches the track');
-  });
 
   it('accepts the output track alone', async () => {
     writeOutputTrack();
     expect(await messages()).toBe('');
   });
 
-  it('says nothing about a song that has only a mix', async () => {
-    rmSync(join(root, 'songs/opener/tracks/main.yaml'), { force: true });
-    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
-    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\n');
-    expect(await messages()).toBe('');
-  });
 
   it('says nothing about a midi or empty track named main', async () => {
     // Only a renderable track ever claims the song's extent, so neither of

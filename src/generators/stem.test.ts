@@ -912,29 +912,6 @@ describe('a nested track renders (nested-tracks.md §7 chunk 1)', () => {
     expect(explicit.every((o) => o.cached)).toBe(true);
   });
 
-  it('keeps a placed child out of the default mix, so it is not summed twice', async () => {
-    writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);
-    // Named `bed`, not `main`: createSong scaffolds an output track, and a
-    // mix sharing its name would be the two-outputs error rather than the
-    // membership case under test.
-    mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
-    writeFileSync(join(root, 'songs/creek/mixes/bed.yaml'), 'name: bed\n');
-    // `inner` reaches the mix through `outer`, so it is not a channel of
-    // its own — that is the point. The scaffolded `main` is: it is empty,
-    // which is a silent stem rather than no stem, and nothing places it.
-    expect(queryDeps(root, 'deps(//songs/creek/mix:bed)')).toEqual([
-      '//songs/creek/track:main',
-      '//songs/creek/asset:kick',
-      '//songs/creek/track:inner',
-      '//songs/creek/track:outer',
-      '//songs/creek/mix:bed',
-    ]);
-    const mix = await buildLabels(root, ['//songs/creek/mix:bed']);
-    const wav = readWav(mix.find((o) => o.label === '//songs/creek/mix:bed')!.outputPath!);
-    // Once, at the placement — not also at the child's own origin.
-    expect(wav.channels[0]![13]).toBeCloseTo(1, 4);
-    expect(wav.channels[0]![3]).toBe(0);
-  });
 
   it('rebuilds the parent when the child changes, and not otherwise', async () => {
     writeTrack('outer', ['inputs:', '  - track: inner', '    anchor: absolute', '    at: 10']);

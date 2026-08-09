@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { daemonBinary } from '../audiod/client.js';
 import type { Insert } from '../schema/index.js';
-import type { Fader } from '../generators/mix.js';
 import type { RenderedClip } from '../generators/stem.js';
 
 const execFileAsync = promisify(execFile);
@@ -66,6 +65,16 @@ export interface StemPlan {
   inserts?: readonly Insert[];
   length_samples?: number;
   loop?: boolean;
+}
+
+// Nothing in the control plane produces one of these any more: `mixes/`
+// retired with the output track (nested-tracks.md §7 chunk 2). The daemon
+// still speaks the op, so the shape stays until that half is removed —
+// deleting the type while the binary answers to `op: "mix"` would leave a
+// wire format nothing describes.
+interface Fader {
+  gain_db: number;
+  pan: number;
 }
 
 export interface MixPlan {

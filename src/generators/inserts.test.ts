@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,11 +43,6 @@ beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'field-inserts-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  // createSong scaffolds an output *track* now, so the mix these
-  // cases are about is written here rather than inherited.
-  mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
-  writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
-  rmSync(join(root, 'songs/creek/tracks/main.yaml'), { force: true });
   createTrack(root, 'creek', 'drums', 'audio');
   const src = join(root, '..', `field-inserts-src-${Math.random()}.wav`);
   const tone = new Float32Array(48000);
@@ -84,10 +79,21 @@ describe('track inserts', () => {
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['drums', 'drums']);
 
-    // A fader move on the same track is still mix-stage only.
+    // A level move is not a content edit. It lives on the placement that
+    // consumes this track (nested-tracks.md §1.13), so it re-sums the
+    // parent and leaves this stem alone — which is the pre-fader property
+    // surviving the retirement of the thing that used to carry it.
     writeFileSync(
-      join(root, 'songs/creek/tracks/drums.yaml'),
-      trackYaml(['gain_db: -6', ...eqInsert(-6)]),
+      join(root, 'songs/creek/tracks/main.yaml'),
+      [
+        'name: main',
+        'type: audio',
+        'inputs:',
+        '  - track: drums',
+        '    at: 0',
+        '    gain_db: -6',
+        '',
+      ].join('\n'),
     );
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['drums', 'drums']);
@@ -113,42 +119,57 @@ describe('track inserts', () => {
   });
 });
 
-describe('the master chain', () => {
-  it('is applied after the master gain, so the limiter guards the true output', async () => {
+describe("the output track's chain (what the master chain became)", () => {
+  it('is applied after the level driving into it, so the limiter guards the output', async () => {
+    // The mix's `gain_db` drove the sum into the master chain; a placement's
+    // gain drives its child into the parent's inserts, which is the same
+    // stage (nested-tracks.md §1.13) and the reason no separate field
+    // survived the retirement.
     writeFileSync(
-      join(root, 'songs/creek/mixes/main.yaml'),
+      join(root, 'songs/creek/tracks/main.yaml'),
       [
         'name: main',
-        'gain_db: 24 # drive the sum well past full scale',
-        'master:',
+        'type: audio',
+        'inserts:',
         '  - effect: limit',
         '    ceiling_db: -3',
+        'inputs:',
+        '  - track: drums',
+        '    at: 0',
+        '    gain_db: 24 # drive the sum well past full scale',
         '',
       ].join('\n'),
     );
-    const outcomes = await buildLabels(root, ['//songs/creek/mix:main']);
-    const mix = outcomes.find((o) => o.label.endsWith('mix:main'))!;
+    const outcomes = await buildLabels(root, ['//songs/creek/track:main']);
+    const out = outcomes.find((o) => o.label.endsWith('track:main'))!;
     const ceiling = Math.pow(10, -3 / 20);
-    for (const channel of readWav(mix.outputPath!).channels) {
+    for (const channel of readWav(out.outputPath!).channels) {
       for (const v of channel) expect(Math.abs(v)).toBeLessThanOrEqual(ceiling + 1e-6);
     }
   });
 
-  it('re-runs only the sum on a master edit; stems stay cached', async () => {
+  it('re-runs only the output track on a chain edit; children stay cached', async () => {
     const runs: string[] = [];
     const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
       runs.push(node.label.name);
       writeFileSync(outputPath, 'out');
     };
-    await buildLabels(root, ['//songs/creek/mix:main'], runner);
-    expect(runs).toEqual(['drums', 'main']);
-
-    const path = join(root, 'songs/creek/mixes/main.yaml');
+    const path = join(root, 'songs/creek/tracks/main.yaml');
     writeFileSync(
       path,
-      readFileSync(path, 'utf8').replace('master: []', 'master:\n  - effect: limit'),
+      ['name: main', 'type: audio', 'inputs:', '  - track: drums', '    at: 0', ''].join('\n'),
     );
-    await buildLabels(root, ['//songs/creek/mix:main'], runner);
+    await buildLabels(root, ['//songs/creek/track:main'], runner);
+    expect(runs).toEqual(['drums', 'main']);
+
+    writeFileSync(
+      path,
+      readFileSync(path, 'utf8').replace(
+        'type: audio\n',
+        'type: audio\ninserts:\n  - effect: limit\n    ceiling_db: -1\n',
+      ),
+    );
+    await buildLabels(root, ['//songs/creek/track:main'], runner);
     expect(runs).toEqual(['drums', 'main', 'main']);
   });
 });

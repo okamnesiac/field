@@ -34,7 +34,7 @@ small native control surface, all driving the same engine and the same files.
 - **Node** — a producer or processor in the dependency graph: a recorded track,
   a SuperCollider program, a generative sound, a plugin chain, a bus.
 - **Label** — the address of something buildable: a stem, a sound, a cue mix,
-  the main mix. `field build //songs/opener/mix:main`. See
+  the song's output track. `field build //songs/opener/track:main`. See
   [build-graph.md](build-graph.md).
 - **Take** — one performance of something. Recorded takes and renders of
   nondeterministic nodes use the same machinery: numbered, auditioned, one
@@ -60,7 +60,7 @@ surround/Atmos, and Apollo Console automation (no supported API exists — see
 
 **CLI-first.** Create, configure, generate, play, record, process, and render a
 project from the command line: `field init`, `field sc render`, `field ace
-generate`, `field build //mix:main`, `field record --track lead-vocal --punch
+generate`, `field build //track:main`, `field record --track lead-vocal --punch
 42.2.1..46.1.1`.
 
 **A minimal recording widget** (later). A compact native macOS control surface
