@@ -967,8 +967,13 @@ What this decides, and what it retires:
    <track>`. The stable attachment the required id was for is the
    name itself: renaming a track orphans `audio/<track>/` exactly as
    it always did for a renamed sound, and check diagnoses both the
-   same way. Ids stay what the first sentence says — optional, for
-   automation and for telling two generators apart.
+   same way — a takes file in a directory no generative request
+   claims is named as a rename's leftover. (Review caught this
+   sentence promising the diagnostic before it existed; the scan that
+   makes it true covers both sides, so the sound half is new too —
+   nothing opened `audio/` before it.) Ids stay what the first
+   sentence says — optional, for automation and for telling two
+   generators apart.
 
 4. **`type:` leaves the track file.** Every track is audio; `midi` was
    a placeholder kind that renders nothing, places nothing, and is

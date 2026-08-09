@@ -1362,3 +1362,113 @@ describe('one audio/ directory per name (nested-tracks.md §18 step 3)', () => {
     rmSync(src);
   });
 });
+
+describe('generative-entry takes carry the same pins a sound\'s do', () => {
+  // The three verification passes sounds get — variant hashes, the
+  // voice_ref pin, fmt coverage — reach entry takes too. Each test here
+  // fails if its pass reads song.sounds only.
+  beforeEach(() => {
+    createSong(root, 'opener');
+  });
+
+  function writeLeafWithTakes(): void {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/rain-pad.yaml'),
+      'name: rain-pad\ninputs:\n  - generative:\n      prompt: rain\n      bpm: 96\n      duration_seconds: 10\n',
+    );
+    mkdirSync(join(root, 'songs/opener/audio/rain-pad'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/audio/rain-pad/1.wav'), 'take one');
+    writeFileSync(
+      join(root, 'songs/opener/audio/rain-pad/variants.yaml'),
+      'gen: rain-pad\nchosen: 1\nvariants:\n' +
+        '  - file: audio/rain-pad/1.wav\n    model: acestep-v15-turbo\n    seed: 7\n' +
+        `    sha256: ${sha256Text('take one')}\n    generated_at: 2026-08-05T21:00:00.000Z\n`,
+    );
+  }
+
+  it('flags a tampered take', async () => {
+    writeLeafWithTakes();
+    expect((await check(root)).diagnostics).toEqual([]);
+    writeFileSync(join(root, 'songs/opener/audio/rain-pad/1.wav'), 'tampered');
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain(
+      'variant "audio/rain-pad/1.wav" content does not match its recorded sha256',
+    );
+  });
+
+  it('flags a voice reference that changed under the entry', async () => {
+    const src = sourceFile('a voice recording');
+    await importAsset(root, 'opener', src, 'ref-voice');
+    rmSync(src);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/spoken.yaml'),
+      'name: spoken\ninputs:\n  - generative:\n      text: down to the creek\n' +
+        `      voice_ref: ref-voice\n      voice_ref_sha256: ${sha256Text('some other recording')}\n`,
+    );
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('the reference recording changed under the request');
+  });
+
+  it('fmt sees a noncanonical takes file', async () => {
+    writeLeafWithTakes();
+    // chosen: after variants: is valid YAML in the wrong canonical order.
+    const takesPath = join(root, 'songs/opener/audio/rain-pad/variants.yaml');
+    const raw = readFileSync(takesPath, 'utf8');
+    writeFileSync(takesPath, raw.replace('gen: rain-pad\nchosen: 1\n', 'chosen: 1\ngen: rain-pad\n'));
+    const result = await check(root);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.unformatted).toContain('songs/opener/audio/rain-pad/variants.yaml');
+  });
+});
+
+describe('orphaned takes directories (nested-tracks.md §18 decision 3)', () => {
+  // Nothing else opens audio/, so a rename silently strands its takes —
+  // model-minutes of them — while check stays green. The scan names the
+  // leftover on both sides, which is the parity the decision 3
+  // amendment claims.
+  beforeEach(() => {
+    createSong(root, 'opener');
+  });
+
+  function writeOrphanTakes(dir: string, key: string): void {
+    mkdirSync(join(root, `songs/opener/audio/${dir}`), { recursive: true });
+    writeFileSync(join(root, `songs/opener/audio/${dir}/1.wav`), 'stranded take');
+    writeFileSync(
+      join(root, `songs/opener/audio/${dir}/variants.yaml`),
+      `${key}: ${dir}\nchosen: 1\nvariants:\n` +
+        `  - file: audio/${dir}/1.wav\n    model: acestep-v15-turbo\n    seed: 7\n` +
+        `    sha256: ${sha256Text('stranded take')}\n    generated_at: 2026-08-05T21:00:00.000Z\n`,
+    );
+  }
+
+  it('flags a gen-keyed takes file nothing mints', async () => {
+    writeOrphanTakes('ghost', 'gen');
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('no generative request claims audio/ghost/');
+  });
+
+  it('flags a sound-keyed takes file nothing defines', async () => {
+    writeOrphanTakes('ghost', 'sound');
+    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
+    expect(messages).toContain('no generative request claims audio/ghost/');
+  });
+
+  it('a pre-fold file under a live name gets the rename diagnostic alone', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/ghost.yaml'),
+      'name: ghost\ninputs:\n  - generative:\n      prompt: rain\n      bpm: 96\n      duration_seconds: 10\n',
+    );
+    writeOrphanTakes('ghost', 'sound');
+    const messages = (await check(root)).diagnostics.map((d) => d.message);
+    expect(messages.join('\n')).toContain('rename sound: to gen:');
+    expect(messages.join('\n')).not.toContain('no generative request claims');
+    expect(messages).toHaveLength(1);
+  });
+
+  it('says nothing about an asset item directory', async () => {
+    const src = sourceFile();
+    await importAsset(root, 'opener', src, 'water');
+    expect((await check(root)).diagnostics).toEqual([]);
+    rmSync(src);
+  });
+});
