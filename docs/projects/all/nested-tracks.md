@@ -8,9 +8,11 @@ finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
 (#76) and `field explain` now answers the level question (§12). Chunk 2
 is done too — a track carries its own tempo and meter (§13). Sends
 (chunk 4) are deferred to the real-time engine, which is where an edge
-that carries no offset stops needing offsets invented for it (§14), so
-what is left here is folding `sounds/` in (chunk 6). The chunk order
-changed on the way in; §9
+that carries no offset stops needing offsets invented for it (§14). What
+is left here is folding `sounds/` in (chunk 6), which opened with the
+clip-duration prerequisite (§15, #97) and now waits on
+[multi-rate.md](multi-rate.md) to settle what `normalize` becomes (§16).
+The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
 changes the model the engine renders — doing it afterwards means
@@ -812,3 +814,23 @@ Remaining, in order: effect sounds become tracks; leaf content for
 `supercollider` and `generative`, which is §6's third open question and
 the only genuinely undecided part; then `sounds/` and the `sound:` label
 retire, forwarding.
+
+## 16 Chunk 6 pauses on normalize (2026-08-09)
+
+§15's "effect sounds become tracks" stopped one file in: `normalize` has
+no insert form, and reading bloom's two normalize sounds showed why it
+never will — they are different features. `vocal-48k` conditions an input
+to the project rate (its `sample_rate` can only hold one correct value;
+its `bit_depth` is unobservable on an internal float stem), while
+`loop-cd` formats a CD deliverable nothing references because nothing
+should. One schema, two jobs, neither an insert.
+
+Pulling that thread reached a real decision — whether a project can hold
+more than one sample rate — and that is its own plan:
+[multi-rate.md](multi-rate.md), which records the answers (outbound
+formatting moves to `field export`; a track may declare `rate:`;
+conversion is an automatic cached node on the placement edge; import
+reads headers and warns). Chunk 6 resumes after that plan's step 2 frees
+`loop-cd` to retire; the eq fold and the leaf-content question (§6) are
+unaffected by it but sequenced behind it so the sounds shelf empties once
+rather than twice.
