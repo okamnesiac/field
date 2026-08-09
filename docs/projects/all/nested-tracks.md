@@ -562,10 +562,17 @@ auditioning variants` — a note written two levels below the output, in a
 file nobody opens while listening to the mix:
 
 ```
+$ field generate still-water-keys --song creek --seed 1   # takes are gitignored
 $ field explain //songs/creek/track:keys
 reaches: track:bed -4.0 dB, pan 0.2 (via track:phrase, 3 placements)
 reaches: track:main -4.0 dB, pan 0.2 (via track:phrase, 3 placements)
 ```
+
+The `generate` line is not decoration: creek's takes never leave the
+machine that made them (bloom-in-tree.md §2.4), so `keys` has no chosen
+variant in a fresh clone and `explain` refuses it by name. `pad` and
+`drums` need none — between them they show the same four fields, a level
+and a pan to two roots and a route with a count.
 
 Three things the implementation forced.
 

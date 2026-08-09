@@ -188,7 +188,11 @@ describe('effective levels', () => {
       { in: 'phrase', track: 'keys', pan: 0.2 },
       { in: 'main', track: 'phrase', pan: -0.5 },
     ]);
-    expect(formatReach(toMain)).toContain('balances compose per channel');
+    // The route keeps its position on every line, so the caveat comes
+    // after it — two parenthetical groups back to back read as one.
+    expect(formatReach(toMain)).toBe(
+      'track:main -4.0 dB, pan 0.2 in track:phrase, then -0.5 in track:main (via track:phrase) — balances compose per channel, not into one pan',
+    );
   });
 });
 

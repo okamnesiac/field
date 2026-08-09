@@ -142,15 +142,18 @@ export function formatReach(reach: Reach): string {
   // Two pans on one path do not make a third pan (see `reaches`), so they
   // are named where they sit rather than added up.
   else if (reach.pans.length > 1) {
-    parts.push(
-      `pan ${reach.pans.map((p) => `${p.pan} in track:${p.in}`).join(', then ')} (balances compose per channel, not into one pan)`,
-    );
+    parts.push(`pan ${reach.pans.map((p) => `${p.pan} in track:${p.in}`).join(', then ')}`);
   }
   const route: string[] = [];
   if (reach.via.length > 0) route.push(`via ${reach.via.map((v) => `track:${v}`).join(' → ')}`);
   if (reach.paths > 1) route.push(`${reach.paths} placements`);
   const where = route.length > 0 ? ` (${route.join(', ')})` : '';
-  return `track:${reach.to} ${parts.join(', ')}${where}`;
+  // The route is the part a reader scans for, so it sits in the same
+  // place on every line. The caveat goes after it rather than shouldering
+  // it aside — two parenthetical groups back to back read as though the
+  // second belonged to the first (#92 review).
+  const caveat = reach.pans.length > 1 ? ' — balances compose per channel, not into one pan' : '';
+  return `track:${reach.to} ${parts.join(', ')}${where}${caveat}`;
 }
 
 // A root track is either the song's output or something nothing consumes.
