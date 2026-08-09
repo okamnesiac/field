@@ -4,8 +4,9 @@
 retired into the output track (#81), and creek is now expressed as three
 placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
-finishes chunk 1. Still open: local tempo and meter maps (chunk 2),
-effective gain in `explain` (chunk 3), sends (chunk 4), and folding
+finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
+(#76) and `field explain` now answers the level question (§12). Still
+open: local tempo and meter maps (chunk 2), sends (chunk 4), and folding
 `sounds/` in (chunk 6). The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -433,7 +434,10 @@ half of it would be worse than none:
   placement where it can differ per parent. So the refusal is a migration
   stance rather than a missing feature, and the thing chunk 3 must
   actually build is per-clip pan in the daemon's `sumClips` — the one
-  piece that is not moving fields around.
+  piece that is not moving fields around. Landed 2026-08-08 (#76), reusing
+  the `balanceGains` the faders already used rather than writing a second
+  copy of the law. What remained of chunk 3 after it was only surfacing
+  the effective level, which is §12.
 - **Negative `at`.** §1.6 allows it for pickups; `timePosition` is
   non-negative today, for clips as much as for placements, so allowing it
   is a change to the time primitive rather than to nesting.
@@ -543,3 +547,66 @@ A leftover `arrangement.yaml` is diagnosed rather than ignored, the
 `mixes/` precedent: the file would otherwise sit on disk describing a
 structure nothing reads, which is the state that produced `chorus` at
 bar 13.
+
+## 12 Effective level, and what would not compose (2026-08-08)
+
+§5 said effective gain lives in `explain`, and §1.13 is why it has to
+live somewhere: one gain, on the edge, means a track's own file carries
+no level at all. Reading `keys.yaml` tells you nothing about how loud
+`keys` is. The answer is spread across every placement above it, in files
+`keys` does not know exist.
+
+creek supplies the motivating case without anyone having to invent one.
+`keys` sits at −4 dB inside `phrase`, annotated `scratch level while
+auditioning variants` — a note written two levels below the output, in a
+file nobody opens while listening to the mix:
+
+```
+$ field generate still-water-keys --song creek --seed 1   # takes are gitignored
+$ field explain //songs/creek/track:keys
+reaches: track:bed -4.0 dB, pan 0.2 (via track:phrase, 3 placements)
+reaches: track:main -4.0 dB, pan 0.2 (via track:phrase, 3 placements)
+```
+
+The `generate` line is not decoration: creek's takes never leave the
+machine that made them (bloom-in-tree.md §2.4), so `keys` has no chosen
+variant in a fresh clone and `explain` refuses it by name. `pad` and
+`drums` need none — between them they show the same four fields, a level
+and a pan to two roots and a route with a count.
+
+Three things the implementation forced.
+
+- **Gain composes; pan is listed.** Levels are dB and add, so the sum is
+  arithmetic. Pan does not reduce the same way: the daemon applies it as
+  a balance that attenuates one side and never boosts, so two pans
+  compose per channel rather than into a third pan — hard left then hard
+  right is silence, not centre. Collapsing them here would mean a second
+  copy of `balanceGains` in TypeScript, drifting against the one the
+  audio actually goes through, which is exactly what #76 avoided by
+  reusing it for placements and faders alike. So a path reports the pans
+  it passes, in order, and says that they do not add up. The composition
+  *is* expressible — factor the common attenuation out of the per-channel
+  product and what remains is a single pan — but it is not expressible
+  without owning the law, and the level question does not need it.
+- **Every root, not just the song's output.** `bed` is creek's second
+  render target: nothing places it, and `field build creek/track:bed`
+  renders it. A walk that stopped at `main` would report that `keys`
+  reaches one place when it reaches two, and would have been invisible in
+  testing — creek's only two-hop path is `-4 + 0`, where summing and
+  taking the nearest gain agree. Both gaps survived the first round of
+  tests and were caught by mutating the code rather than by reading it.
+- **A track nothing places says so, and which kind it is.** "This is the
+  song's output" and "nothing consumes this" are the same graph fact and
+  very different news — the second is also what a typo in an `inputs:`
+  entry leaves behind.
+
+*Not done here:* sounds and clips. A clip carries `gain_db` and no `pan`
+(pan went to the edge with §1.13), so extending the walk down to
+`//songs/creek/sound:still-water-keys` is one more hop of the same
+addition. It waits for §1.11, where clips and placements become one list:
+doing it now would encode the two-list shape in a third place a week
+before it goes away.
+
+Deliberately still not a `check` warning, per §5. Nothing here is an
+error — a −4 dB scratch level is a decision somebody made, and the
+command that surfaces it is the one you run when a number surprises you.

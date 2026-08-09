@@ -4,6 +4,7 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
+import { reaches, type Reach } from '../model/levels.js';
 import { generatorFor, type ExtraInput, type RunContext } from '../generators/index.js';
 import { deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
@@ -46,6 +47,12 @@ export interface Explanation {
   actionKey?: string;
   cached?: boolean;
   outputs?: { sha256: string; bytes: number }[];
+  // Tracks only: where this track's signal goes and at what level
+  // (model/levels.ts). The build graph runs the other way — a parent
+  // depends on its children — so this is the one answer `explain` cannot
+  // read off the node it was handed. An empty `reaches` means the track
+  // is a root; `rootNote` says which kind.
+  levels?: { track: string; reaches: Reach[] };
 }
 
 // Executes a rule: reads input files, writes the output file. Injectable so
@@ -363,6 +370,13 @@ export async function explain(
   const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const key = unknown ? undefined : actionKey(node, inputs.map((i) => i.sha256), sampleRate);
   const cached = key === undefined ? undefined : readAction(project, key);
+  // A stem is the one spec synthesized from a track file, so it is also
+  // the one whose level question has an answer (nested-tracks.md §5).
+  const song = project.songs.find((s) => s.dir === node.songDir);
+  const levels =
+    node.spec.type === 'stem' && song
+      ? { track: node.label.name, reaches: reaches(song, node.label.name) }
+      : undefined;
   const explanation: Explanation = {
     label,
     kind: 'rule',
@@ -373,6 +387,7 @@ export async function explain(
     ...(key !== undefined ? { actionKey: key } : {}),
     cached: cached !== undefined,
     ...(cached ? { outputs: cached.outputs } : {}),
+    ...(levels ? { levels } : {}),
   };
   memo.set(label, explanation);
   return explanation;

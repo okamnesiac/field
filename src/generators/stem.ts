@@ -34,7 +34,10 @@ export interface PlacedClip {
   // out-of-range reads are silence — slipping never errors.
   read_offset: number;
   gain_db: number;
-  // Constant-power balance for this placement, -1 left … 1 right.
+  // Balance for this placement, -1 left … 1 right: `balanceGains`
+  // attenuates the opposite channel and never boosts, so this is not a
+  // constant-power pan — hard over silences one channel, which is 3 dB of
+  // total power for a centred source.
   // **Omitted when centred**, which is not a micro-optimisation: `clips`
   // reaches the action key, so serializing `pan: 0` on every clip would
   // re-key every stem in every project for a field none of them set. Same

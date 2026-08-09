@@ -123,16 +123,17 @@ three independent, non-destructive offsets:
 
 Fades, gain, and edits are clip metadata too. Every edit is a diff.
 
-Tracks carry the mix-stage controls — `gain_db` and `pan` (constant-power
-balance) — while clips carry their own gain and fades as part of the
-arrangement. Tracks also carry `inserts:` (EQ, limiter, reverb — entries
-discriminated on `effect:` so hosted plugins can join later): inserts are
-*content*, baked into the stem, so editing one re-renders the stem where a
-fader move never does. The split matters to the build graph: every audio track
-is implicitly buildable as `//songs/<song>/track:<name>`, a pre-fader
-stem whose cache key sees clip placement but not the track fader, so mixing
-decisions never invalidate rendered stems (see
-[build-graph.md](build-graph.md) "Rules so far").
+Clips carry their own gain and fades as part of the arrangement. A track
+carries no level at all — `gain_db` and `pan` live on the placement that
+consumes it (see below) — but it does carry `inserts:` (EQ, limiter,
+reverb — entries discriminated on `effect:` so hosted plugins can join
+later): inserts are *content*, baked into the stem, so editing one
+re-renders the stem where a fader move never does. The split matters to
+the build graph: every audio track is implicitly buildable as
+`//songs/<song>/track:<name>`, a pre-fader stem whose cache key sees clip
+placement but not the level applied above it, so mixing decisions never
+invalidate rendered stems (see [build-graph.md](build-graph.md) "Rules so
+far").
 
 A track's content is its clips, its `inputs:` — other tracks placed in it
 — or both. A placement carries a time and an optional window, so one
@@ -147,9 +148,18 @@ same thing its bus calls an input level, and a track with two parents
 cannot hold one value for both. So the placement carries it, applied by
 the parent while summing and therefore outside the child's own render,
 which is how nesting keeps the pre-fader property rather than diluting
-it. A track's own `gain_db`/`pan` are retiring into placements with the
-mix; `check` refuses to place a track that still sets them rather than
-quietly ignoring them.
+it. A track's own `gain_db`/`pan` are gone from the schema rather than
+merely unread: a file that still sets one is told where the level went
+rather than having it quietly ignored.
+
+`pan` is a balance rather than a constant-power pan: it attenuates the
+opposite channel and never boosts, so a hard-panned placement silences
+one channel — 3 dB of total power for a centred source — and two pans on
+one path compose per channel instead of adding up to a third pan. That is why `field explain <track>` answers
+the level question by summing the gains along each path to a root and
+*listing* the pans it passes rather than folding them together — a track
+carries no level, so the only place the answer exists is spread across
+the placements above it.
 
 ## Identity: names, not UUIDs
 
