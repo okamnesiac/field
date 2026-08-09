@@ -392,30 +392,44 @@ function validate(project: LoadedProject): void {
       what: string,
       value: number | number[] | undefined,
       resolve: (meter: MeterMap, arr: number[]) => number,
+      // The map to read this file's musical time under — the song's, or a
+      // track's own (nested-tracks.md §13). Passed rather than defaulted:
+      // `undefined` means *no valid map applies*, which a track with a
+      // broken local map reaches as surely as a song with a broken
+      // tempo.yaml. Falling back to the song's there would resolve the
+      // positions against a map the author did not write, inventing
+      // numbers on top of an error that was already reported.
+      meter: MeterMap | undefined,
     ): number | undefined => {
       if (!Array.isArray(value)) return value;
-      if (!meterMap) {
-        push(file, `${what} is musical time but the song has no valid meter map`);
+      if (!meter) {
+        push(file, `${what} is musical time but no valid meter map applies`);
         return undefined;
       }
       try {
-        return resolve(meterMap, value);
+        return resolve(meter, value);
       } catch (err) {
         push(file, `${what}: ${(err as Error).message}`);
         return undefined;
       }
     };
-    const positionTicks = (file: string, what: string, value: number | number[]) =>
-      musical(file, what, value, (meter, arr) => meter.positionTicks(arr[0]!, arr[1], arr[2]));
+    const positionTicks = (
+      file: string,
+      what: string,
+      value: number | number[],
+      map: MeterMap | undefined,
+    ) =>
+      musical(file, what, value, (meter, arr) => meter.positionTicks(arr[0]!, arr[1], arr[2]), map);
     const spanTicks = (
       file: string,
       what: string,
       value: number | number[] | undefined,
       from: number,
-    ) => musical(file, what, value, (meter, arr) => meter.spanTicks(from, arr));
+      map: MeterMap | undefined,
+    ) => musical(file, what, value, (meter, arr) => meter.spanTicks(from, arr), map);
 
     if (song.song?.data.length !== undefined) {
-      const resolved = spanTicks(song.song.path, 'length', song.song.data.length, 0);
+      const resolved = spanTicks(song.song.path, 'length', song.song.data.length, 0, meterMap);
       if (resolved !== undefined) {
         if (resolved <= 0) push(song.song.path, 'length resolves to zero ticks');
         else song.song.data.length = resolved;
@@ -643,6 +657,37 @@ function validate(project: LoadedProject): void {
         push(track.path, `name "${track.data.name}" must match filename "${expected}"`);
       }
 
+      // A track's own timeline (nested-tracks.md §1.5, §13). Everything in
+      // this file — its clips and the `at` of every track it places — is
+      // in this track's time, so one map governs the whole file. Each half
+      // falls back to the song's independently: a 7/8 figure at the song's
+      // tempo declares a meter and nothing else.
+      //
+      // The song's maps, not the placing parent's. A track can be placed
+      // in two parents (§1.3) and renders once, so "bar 2" inside it has
+      // to mean one thing regardless of who consumes it.
+      let trackTempo = tempoMap;
+      let trackMeter = meterMap;
+      if (track.data.time) {
+        const time = track.data.time;
+        if (time.tempo) {
+          try {
+            trackTempo = new TempoMap(time.tempo, project.manifest?.data.sample_rate ?? 48000);
+          } catch (err) {
+            push(track.path, `local tempo: ${(err as Error).message}`);
+            trackTempo = undefined;
+          }
+        }
+        if (time.meter) {
+          try {
+            trackMeter = new MeterMap(time.meter);
+          } catch (err) {
+            push(track.path, `local meter: ${(err as Error).message}`);
+            trackMeter = undefined;
+          }
+        }
+      }
+
       const trackCtx = {
         root: project.root,
         songDir: song.dir,
@@ -675,8 +720,8 @@ function validate(project: LoadedProject): void {
           );
           continue;
         }
-        const pos = positionTicks(track.path, `clip "${clip.id}" position`, clip.position);
-        const dur = spanTicks(track.path, `clip "${clip.id}" duration`, clip.duration, pos ?? 0);
+        const pos = positionTicks(track.path, `clip "${clip.id}" position`, clip.position, trackMeter);
+        const dur = spanTicks(track.path, `clip "${clip.id}" duration`, clip.duration, pos ?? 0, trackMeter);
         if (pos === undefined || dur === undefined) continue;
         if (dur <= 0) {
           push(track.path, `clip "${clip.id}" duration resolves to zero ticks`);
@@ -685,7 +730,7 @@ function validate(project: LoadedProject): void {
         clip.position = pos;
         clip.duration = dur;
         if (clip.loop?.every !== undefined) {
-          const every = spanTicks(track.path, `clip "${clip.id}" loop.every`, clip.loop.every, pos);
+          const every = spanTicks(track.path, `clip "${clip.id}" loop.every`, clip.loop.every, pos, trackMeter);
           if (every === undefined) continue;
           if (every <= 0) {
             push(track.path, `clip "${clip.id}" loop.every resolves to zero ticks`);
@@ -696,7 +741,7 @@ function validate(project: LoadedProject): void {
         // Loops are diagnosed here in full — running the same expansion the
         // plan will run — because check is the gate: a check-clean project
         // must never fail to construct its graph (#21 review).
-        if (clip.loop?.enabled && tempoMap) {
+        if (clip.loop?.enabled && trackTempo) {
           const loop = clip.loop;
           const committed = fileBySource(clip.source);
           if (committed === undefined && loop.every === undefined) {
@@ -725,7 +770,7 @@ function validate(project: LoadedProject): void {
             }
             if (!sourceUnreadable) {
               try {
-                for (const rep of expandLoop(clip, loop, tempoMap, frames)) {
+                for (const rep of expandLoop(clip, loop, trackTempo, frames)) {
                   // Fades must fit slots (clip-looping.md §3): overlapping
                   // seam fades duck the audio silently — every: 30 at 120 bpm
                   // makes 750-sample slots the default 480+480 outgrows.
@@ -747,8 +792,8 @@ function validate(project: LoadedProject): void {
         }
         // Fades live inside the clip window; whether they fit is only known
         // in samples, so musical clips are checked through the tempo map.
-        if (tempoMap) {
-          const { duration } = placedWindow(clip, tempoMap);
+        if (trackTempo) {
+          const { duration } = placedWindow(clip, trackTempo);
           if (clip.fade_in + clip.fade_out > duration) {
             push(
               track.path,
@@ -797,11 +842,11 @@ function validate(project: LoadedProject): void {
           );
           return;
         }
-        const at = positionTicks(track.path, `${what} at`, input.at);
+        const at = positionTicks(track.path, `${what} at`, input.at, trackMeter);
         if (at === undefined) return;
         input.at = at;
         if (input.duration !== undefined) {
-          const dur = spanTicks(track.path, `${what} duration`, input.duration, at);
+          const dur = spanTicks(track.path, `${what} duration`, input.duration, at, trackMeter);
           if (dur === undefined) return;
           if (dur <= 0) {
             push(track.path, `${what} duration resolves to zero ticks`);
@@ -814,8 +859,8 @@ function validate(project: LoadedProject): void {
         // is the only place that check can happen — it rejects
         // fade_in + fade_out > duration, which is the backstop for the
         // one case check cannot reach.
-        if (tempoMap) {
-          const { duration } = placedInput(input, tempoMap);
+        if (trackTempo) {
+          const { duration } = placedInput(input, trackTempo);
           if (duration !== undefined && input.fade_in + input.fade_out > duration) {
             push(
               track.path,

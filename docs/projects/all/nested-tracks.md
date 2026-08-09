@@ -5,9 +5,10 @@ retired into the output track (#81), and creek is now expressed as three
 placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
 finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
-(#76) and `field explain` now answers the level question (§12). Still
-open: local tempo and meter maps (chunk 2), sends (chunk 4), and folding
-`sounds/` in (chunk 6). The chunk order changed on the way in; §9
+(#76) and `field explain` now answers the level question (§12). Chunk 2
+is done too — a track carries its own tempo and meter (§13). Still open:
+sends (chunk 4) and folding `sounds/` in (chunk 6). The chunk order
+changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
 changes the model the engine renders — doing it afterwards means
@@ -610,3 +611,66 @@ before it goes away.
 Deliberately still not a `check` warning, per §5. Nothing here is an
 error — a −4 dB scratch level is a decision somebody made, and the
 command that surfaces it is the one you run when a number surprises you.
+
+## 13 Local time, and where it is inherited from (2026-08-08)
+
+§7 chunk 2's last piece. A track may declare `time:` with a `tempo`, a
+`meter`, or both; a 7/8 figure inside a 4/4 song is a track that says so.
+That is what takes up
+[project-core.md](project-core.md) §3.1's deferral of loops with their own
+internal timeline — the local timeline turned out to be a property of
+every track rather than a feature of loops, exactly as §1.5 predicted.
+
+**Inheritance is from the song, never the parent.** §1.5 says song time is
+"the composition of the maps from the root down", which reads as a track
+inheriting from whatever places it. That cannot work, and §1.3 is the
+reason: a track may be placed in more than one parent, and it renders
+*once*. One stem, one cache entry, six placements in creek's case. A
+single render cannot hold two meanings for "bar 2", so the fallback has
+to be something singular, and the only singular thing above a track is
+the song. This is forced rather than chosen — it is §1.3's consequence
+arriving somewhere §1.5 had not been pushed.
+
+**The maps never compose; only offsets add.** This is the part that made
+the chunk small. A track renders to samples in its own time, starting at
+its own sample 0. Its parent's `at` resolves to samples under the
+parent's map. The daemon sums by sample offset. So a 7/8 child inside a
+4/4 parent is an addition, and at no point does anything convert between
+two meters — a conversion that has no meaning anyway, since the two
+timelines are not measuring the same thing. Everything in one track file,
+its clips and the `at` of every track it places, is in that one track's
+time: one map governs one file.
+
+**Each half is independently optional**, and that is a choice rather than
+a consequence. The polymetric case usually wants a different meter at the
+*same* tempo; demanding both would copy the song's bpm into a track file
+that cannot be told when the song's changes. A second copy of one fact
+that drifts is what §11 retired `arrangement.yaml` for.
+
+**A broken local map does not fall back to the song's.** The first
+implementation did, silently, because the resolver defaulted its map
+argument — a track with an unparseable meter had its positions resolved
+against a map its author never wrote, producing plausible numbers on top
+of a reported error. The map is now a required argument with no default,
+and `undefined` means *no valid map applies* rather than *none was
+given*.
+
+Two things worth recording about proving it:
+
+- **Nothing that exists re-keys.** creek's four track action keys
+  (`d723eef188f5`, `9953828a1b8b`, `7b2c2d14f283`, `9bf70a2d4afb`) are
+  byte-identical before and after and still report `cached`, which is the
+  claim "the song's map when the track declares none" makes and the only
+  way to check it.
+- **A local meter alone cannot test the render path.** The meter decides
+  a tick position at load; ticks become samples through the *tempo* map.
+  So a 7/8 track at the song's tempo passes every assertion with the
+  graph still handing `planTrack` the song's map. The first version of
+  the test file did exactly that, and it took mutating the graph to
+  notice. Only a track with its own `tempo` exercises it.
+
+*Not done here:* `field arrangement` still prints through the song's
+meter, which is right for every project today and wrong the moment the
+output track itself declares `time:`. It is a two-line fix in the same
+place §11's length header already reads the map from, and it waits until
+there is a project that can tell the difference.

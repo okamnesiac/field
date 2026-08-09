@@ -63,7 +63,10 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    [nested-tracks.md](nested-tracks.md) §1.5 (2026-08-08)**, which makes
    that local timeline a property of every track rather than a feature of
    loops: a polymetric loop is a track carrying its own meter, mapped into
-   its parent at the reference's `at`.
+   its parent at the reference's `at`. Landed 2026-08-08 as a track's
+   `time:` key ([nested-tracks.md](nested-tracks.md) §13), which also
+   records the one thing §1.5 had not been pushed against — a track
+   inherits the *song's* maps, never the parent's.
 2. **Clip offsets (DECIDED).** A clip is a *window* (`position`, `duration`,
    in anchor units) on *content* (`asset`, `source_offset` in samples, `slip`
    in samples, default 0; effective read offset = `source_offset − slip`, so
