@@ -21,12 +21,25 @@ everything — and writes it down.
   never re-fetched — the same committed-not-cached stance as
   [ace-generation.md](ace-generation.md) §3.1, arrived at from a stronger
   premise (there is no seed to replay).
-- **The chosen sample is an ordinary committed asset**, landing through the
-  same seam ace's chosen variants use, with the recipe beside it. The graph,
-  clips, and takes see a normal asset.
-- **Browsing is a TUI** — search, filter, audition previews, pick. This is
-  Field's first interactive surface, which is most of the real cost of this
-  plan and the reason it sits in Later.
+- **The chosen sample resolves by label; no ledger row is minted.** The
+  seam this bullet first named — choose imports the pick as an ordinary
+  asset — was ace-generation.md §3.1 as written, and project-layout.md
+  §4.8 (DECIDED) dissolved it: choosing repoints what a label means, and
+  a recipe minting an asset named for itself would self-collide under
+  §4.3's one namespace. A Splice recipe named for its sample is that
+  same collision, so the same fix applies: the recipe's own label
+  resolves to the chosen bytes, exactly as a generative sound's does and
+  as gen nodes do after nested-tracks.md §18 step 3. The graph, entries,
+  and takes see committed content either way. The item is a directory
+  (project-layout.md §4.11): `audio/<name>/` holds the sample, the
+  recipe, and the stored license together.
+- **Browsing is a TUI** — search, filter, audition previews, pick. This
+  is Field's first *input*-interactive surface, which is most of the real
+  cost of this plan and the reason it sits in Later. It is not the first
+  live tty surface: `src/commands/loop-ui.ts` (watch.md §2) already
+  renders ANSI with a plain sequential fallback, and its discipline —
+  rendering as a pure function over an injected write — is the one to
+  inherit rather than re-decide.
 
 A recipe, concretely:
 
