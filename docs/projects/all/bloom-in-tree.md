@@ -64,27 +64,37 @@ the coordination problem with an extra step.
 
 ## 3 What has to change first
 
-A `generative` sound cannot currently exist before its takes do:
+A `generative` sound cannot currently exist before its takes do. A recipe
+carrying only `name`, `type`, and `prompt`:
 
 ```
 Invalid input: expected string, received undefined at model
 Invalid input: expected number, received undefined at seed
-Too small: expected array to have >=1 items at variants
+Invalid input: expected array, received undefined at variants
+Invalid input: expected string, received undefined at generated_at
 ```
 
-`model` and `seed` are recorded *from* a run, so a recipe written before
-one cannot supply them, and `variants` requires at least one. The file is
-a record of something that happened; decision 4 needs it to also be able
-to be a request for something that has not.
+Four fields, and every one of them is recorded *from* a run — `model` and
+`seed` are what was asked of the generator, `generated_at` is literally
+`new Date().toISOString()` at the moment one finishes. A recipe written
+before a run can supply none of them. The file is a record of something
+that happened; decision 4 needs it to also be able to be a request for
+something that has not.
 
-- **`model` and `seed` move to the variant.** They describe a run, and a
-  sound can have several — two takes a month apart may come from
-  different model versions, which the current shape cannot record. This
-  is a provenance improvement that happens to unblock the move, not a
-  concession to it.
-- **`variants: []` becomes legal**, and `check` passes on a project whose
-  takes are not generated yet: the project is well-formed, the audio is
-  simply absent.
+- **`model`, `seed`, and `generated_at` move to the variant.** They
+  describe a run, and a sound can have several — two takes a month apart
+  may come from different model versions, and certainly have two
+  generation times, neither of which the current shape can record.
+  `generated_at` is the purest case: one timestamp for a list of takes is
+  already wrong in a project that never wanted this move. A provenance
+  improvement that happens to unblock it, not a concession to it.
+- **`variants` defaults to `[]`**, so an absent key and an empty list mean
+  the same thing. They are separate failures today — omitting it gives
+  the `received undefined` above, writing `variants: []` gives `Too small:
+  expected array to have >=1 items` — and a chunk that fixed only the
+  `.min(1)` would leave a hand-written recipe failing on the other one.
+- **`check` passes on a project whose takes are not generated yet.** The
+  project is well-formed; the audio is simply absent.
 - **`build` and `play` are what report it**, naming the sound and the
   command that fills it. That is the relationship a lockfile has to
   uninstalled dependencies, and it keeps `check` answering "is this
@@ -102,17 +112,25 @@ it is worth deciding rather than inheriting.
 
 Neither is generated, and both must leave the tree for §2.4.
 
-- **`water`** (2.0 MB, creek) — downloaded from a free source, then
-  normalized, so its recorded hash is of the *processed* file. A download
-  rule would therefore have to be `download` → `normalize` with the pin
-  on the output, not a URL field on the ledger. Deferred to its own plan;
-  until it exists, the example drops `water` and the track that uses it.
+- **`water`** (2.0 MB) — a *shared* asset rather than creek's own:
+  `shared/assets.yaml` pins it, the bytes sit at `shared/samples/water.wav`,
+  and creek reaches it across the scope boundary as `//shared/asset:water`.
+  It was downloaded from a free source and then normalized, so its recorded
+  hash is of the *processed* file. A download rule would therefore have to
+  be `download` → `normalize` with the pin on the output, not a URL field
+  on the ledger. Deferred to its own plan; until it exists, the example
+  touches four files across both scopes — the pin in `shared/assets.yaml`
+  and the bytes under `shared/samples/`, then `songs/creek/tracks/water.yaml`
+  and that track's placement in `songs/creek/tracks/main.yaml`. Only creek
+  references it, so nothing else
+  moves; but a deletion that stops at the track file leaves a pin whose
+  file is gone, which is the shared shelf's characteristic way to fail.
 - **`seven-eight-loop`** (300 KB, tall-grass) — replaced with a
   `supercollider` sound, which needs no committed bytes and is
   deterministic.
 
 bloom is not touched before the move. `tall-grass` in particular is left
-exactly as it is; its loop is replaced in the copy, in chunk 3, so there
+exactly as it is; its loop is replaced in the copy, in chunk 2, so there
 is never a window where the two repos disagree about it.
 
 ## 5 Chunks
@@ -121,9 +139,10 @@ is never a window where the two repos disagree about it.
    message. No move yet; bloom stays where it is and keeps working, which
    is what makes this chunk independently reviewable.
 2. **The move.** Copy bloom to `examples/bloom` without its audio, add the
-   gitignores, and do §4's substitutions in the copy — drop `water` and
-   the track using it, replace `seven-eight-loop` with a `supercollider`
-   sound. A README points at the archived repo for history.
+   gitignores, and do §4's substitutions in the copy: drop `water` from
+   both scopes as §4 lists, and replace `seven-eight-loop` with a
+   `supercollider` sound. A README points at the archived repo for
+   history.
 3. **CI.** `field check` on `examples/bloom` in the existing linux job.
    This is the chunk the whole plan is for, so it is worth confirming it
    fails: break a schema on a branch and watch the example catch it.
