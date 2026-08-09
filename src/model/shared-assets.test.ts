@@ -59,11 +59,6 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-shared-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  // createSong scaffolds an output *track* now, so the mix these
-  // cases are about is written here rather than inherited.
-  mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
-  writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
-  rmSync(join(root, 'songs/creek/tracks/main.yaml'), { force: true });
   createTrack(root, 'creek', 'drums', 'audio');
   const wav = wavBytes();
   writeFileSync(join(root, 'shared/samples/rain.wav'), wav);
@@ -142,11 +137,6 @@ describe('cross-scope clip references', () => {
 
   it('no spelling reaches another song: only bare names and //shared/asset:', () => {
     createSong(root, 'opener');
-    // createSong scaffolds an output *track* now, so the mix these
-    // cases are about is written here rather than inherited.
-    mkdirSync(join(root, 'songs/opener/mixes'), { recursive: true });
-    writeFileSync(join(root, 'songs/opener/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
-    rmSync(join(root, 'songs/opener/tracks/main.yaml'), { force: true });
     writeFileSync(
       join(root, 'songs/creek/tracks/drums.yaml'),
       clipTrack('//songs/opener/asset:borrowed'),
@@ -191,18 +181,12 @@ describe('the old layout is diagnosed, not ignored', () => {
     mkdirSync(join(root, 'songs/creek/generation'), { recursive: true });
     const messages = loadProject(root).diagnostics.map((d) => `${d.file}: ${d.message}`);
     expect(messages.some((m) => m.includes('targets.yaml') && m.includes('sounds/'))).toBe(true);
-    expect(messages.some((m) => m.includes('mix.yaml') && m.includes('mixes/'))).toBe(true);
+    // Still named, now pointed at the output track: mixes/ retired too, so
+    // the old advice would have been a second dead end.
+    expect(messages.some((m) => m.includes('mix.yaml') && m.includes('track named "main"'))).toBe(
+      true,
+    );
     expect(messages.some((m) => m.includes('generation') && m.includes('audio/'))).toBe(true);
   });
 });
 
-describe('per-file mixes', () => {
-  it('mix names must match their filenames', () => {
-    writeFileSync(join(root, 'songs/creek/mixes/alt.yaml'), 'name: wrong\n');
-    expect(
-      loadProject(root).diagnostics.some((d) =>
-        d.message.includes('name "wrong" must match filename "alt"'),
-      ),
-    ).toBe(true);
-  });
-});

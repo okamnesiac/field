@@ -14,7 +14,7 @@ generation recipes). A DAWproject *exporter* is a possible later feature.
 
 A project is an album-shaped workspace: one or more songs plus shared material
 reused across them. Songs are packages; shared material is a library; build
-labels address both (`//songs/opener/mix:main`, `//shared/asset:rain`).
+labels address both (`//songs/opener/track:main`, `//shared/asset:rain`).
 
 The shared library has three shelves, split by **contract** — make, is,
 change ([projects/all/project-layout.md](projects/all/project-layout.md)
@@ -54,7 +54,6 @@ project/
 │       ├── markers.yaml
 │       ├── tracks/       # one file per track: routing, inserts, clips
 │       ├── sounds/       # one file per defined sound (type: + source:)
-│       ├── mixes/        # one file per mix
 │       ├── takes/        # take manifests (see below)
 │       ├── comps/
 │       ├── midi/

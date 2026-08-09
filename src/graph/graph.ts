@@ -11,7 +11,6 @@ import {
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
-import { planMix } from '../generators/mix.js';
 import { planTrack, renderableTrack, trackRefName } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
@@ -167,13 +166,13 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel);
       }
     }
-    const mixable = song.tracks.filter((t) => renderableTrack(t.data)).map((t) => t.data);
+    const renderable = song.tracks.filter((t) => renderableTrack(t.data)).map((t) => t.data);
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
       // Loops without `every` tile at the source's length, so the plan
       // needs frame counts — but only for the sources such loops touch.
       const framesBySource = new Map<string, number>();
-      for (const track of mixable) {
+      for (const track of renderable) {
         for (const clip of track.clips) {
           if (clip.loop?.enabled && clip.loop.every === undefined) {
             const committed = fileBySource.get(clip.source);
@@ -192,16 +191,16 @@ export function buildGraph(project: LoadedProject): Graph {
         song.song?.data.length !== undefined
           ? tempoMap.ticksToSamples(song.song.data.length)
           : undefined;
-      for (const track of mixable) {
-        // MIDI tracks have no audio to render, and an empty stem is not a
-        // useful artifact — implicit stems exist where there is content
-        // (renderableTrack). A track that only contains tracks has
-        // content: its children's, summed at their placements.
+      for (const track of renderable) {
+        // Every audio track gets a node, an empty one rendering as the
+        // silence it contains (renderableTrack) — which is what lets a
+        // song answer to its own name from the moment `field song create`
+        // writes its output track. MIDI has no audio to render at all.
         //
         // The song's output track carries the song's extent, the way the
-        // mix does. Which track that is, is the same convention a bare
-        // song name resolves through, read from the same constant rather
-        // than spelled twice (nested-tracks.md §1.2).
+        // mix did before it retired. Which track that is, is the same
+        // convention a bare song name resolves through, read from the same
+        // constant rather than spelled twice (nested-tracks.md §1.2).
         const extent =
           track.name === SONG_OUTPUT_NAME
             ? { lengthSamples, loop: song.song?.data.loop }
@@ -212,16 +211,6 @@ export function buildGraph(project: LoadedProject): Graph {
           planTrack(track, tempoMap, sha256BySource, framesBySource, extent),
           refLabel,
         );
-      }
-      for (const file of song.mixes) {
-        const spec = planMix(file.data, mixable, lengthSamples, song.song?.data.loop);
-        if (spec.tracks.length === 0) continue; // nothing to mix yet
-        // Mix inputs are track stems — rule→rule edges, wired here where
-        // the spec is synthesized rather than through assetDeps (which is
-        // for asset-package edges).
-        const label: Label = { pkg: `${pkgBase}/mix`, name: file.data.name };
-        const deps = spec.tracks.map((name): Label => ({ pkg: `${pkgBase}/track`, name }));
-        nodes.set(formatLabel(label), { kind: 'rule', label, songDir: song.dir, spec, deps });
       }
     }
   }
@@ -260,7 +249,12 @@ const PACKAGE_HINTS: Record<string, { to: string; why: string }> = {
   sounds: { to: 'sound', why: 'packages are singular:' },
   tracks: { to: 'track', why: 'packages are singular:' },
   assets: { to: 'asset', why: 'packages are singular:' },
-  mixes: { to: 'mix', why: 'packages are singular:' },
+  // `mix:` retired with mixes/ (nested-tracks.md §7 chunk 2), so both the
+  // plural and the singular now point at the track that replaced them —
+  // correcting `mixes:` to `mix:` would hand back a second dead end, which
+  // is the mistake `targets:` was already fixed for.
+  mixes: { to: 'track', why: 'mix: is now track:' },
+  mix: { to: 'track', why: 'mix: is now track:' },
   targets: { to: 'sound', why: 'targets: is now sound:' },
 };
 

@@ -46,11 +46,6 @@ beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'field-build-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  // createSong scaffolds an output *track* now, so the mix these
-  // cases are about is written here rather than inherited.
-  mkdirSync(join(root, 'songs/creek/mixes'), { recursive: true });
-  writeFileSync(join(root, 'songs/creek/mixes/main.yaml'), 'name: main\ntype: mix\ngain_db: 0\nmaster: []\n');
-  rmSync(join(root, 'songs/creek/tracks/main.yaml'), { force: true });
   const src = join(root, '..', `field-build-src-${Math.random()}.wav`);
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
@@ -164,13 +159,17 @@ describe('build', () => {
   it('expands wildcards, including the everything pattern', async () => {
     const { state, runner } = countingRunner();
     const outcomes = await buildLabels(root, ['//songs/...'], runner);
+    // `track:main` is the scaffolded output track — empty, and a stem of
+    // silence rather than no stem, so it is a buildable label like any
+    // other.
     expect(outcomes.map((o) => o.label).sort()).toEqual([
       '//songs/creek/asset:pad',
       '//songs/creek/sound:pad-normalized',
+      '//songs/creek/track:main',
     ]);
-    expect(state.runs).toBe(1);
+    expect(state.runs).toBe(2);
     const everything = await buildLabels(root, ['//...'], runner);
-    expect(everything).toHaveLength(2);
+    expect(everything).toHaveLength(3);
   });
 
   it('reserves "all" as a name', async () => {
@@ -211,11 +210,12 @@ describe('build', () => {
       'try //songs/creek/asset:pad',
     );
     // Only when the singular actually exists — no guessing at a package
-    // this project does not have. This fixture has no clip'd track, so
-    // buildGraph mints no mix node and there is no `mix` package to
-    // suggest.
-    await expect(buildLabels(root, ['//songs/creek/mixes:main'])).rejects.toThrow(
-      /matched no labels: \/\/songs\/creek\/mixes:main$/,
+    // this project does not have. A song that is not here has no `track`
+    // package, so the mixes:→track: mapping has nothing to suggest and the
+    // error stays bare. (creek itself now always has one: `field song
+    // create` scaffolds the output track.)
+    await expect(buildLabels(root, ['//songs/ghost/mixes:main'])).rejects.toThrow(
+      /matched no labels: \/\/songs\/ghost\/mixes:main$/,
     );
   });
 
@@ -241,23 +241,22 @@ describe('build', () => {
     );
   });
 
-  it('maps mixes: to mix:, the one package that was singular already', async () => {
-    // The negative case above cannot reach this mapping — it bails at the
-    // existence check first — so the branch the PR body singles out had
-    // no test behind it (#41 review). A clip'd track gives the song a mix
-    // node, and then the plural spelling has something to point at.
+  it('points mix: and mixes: at track:, the package that replaced them', async () => {
+    // Both spellings, because correcting the plural to `mix:` would hand
+    // back a second dead end now that mixes/ has retired — the same
+    // mistake `targets:` was fixed for. The hint only fires when the
+    // suggestion exists, so the song needs a track node first.
     mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
     writeFileSync(
       join(root, 'songs/creek/tracks/pad-track.yaml'),
       ['name: pad-track', 'type: audio', 'clips:', '  - id: c1', '    source: pad', '    position: [1]', '    duration: [1]', ''].join('\n'),
     );
-    writeFileSync(
-      join(root, 'songs/creek/mixes/main.yaml'),
-      ['name: main', 'tracks:', '  - pad-track', ''].join('\n'),
-    );
 
-    await expect(buildLabels(root, ['//songs/creek/mixes:main'])).rejects.toThrow(
-      'try //songs/creek/mix:main',
+    await expect(buildLabels(root, ['//songs/creek/mixes:pad-track'])).rejects.toThrow(
+      'try //songs/creek/track:pad-track',
+    );
+    await expect(buildLabels(root, ['//songs/creek/mix:pad-track'])).rejects.toThrow(
+      'try //songs/creek/track:pad-track',
     );
   });
 

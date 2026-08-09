@@ -17,8 +17,6 @@ import {
   arrangementSchema,
   assetsFileOrder,
   assetsFileSchema,
-  mixOrder,
-  mixSchema,
   projectOrder,
   projectSchema,
   songOrder,
@@ -36,7 +34,6 @@ import {
   type AssetsFile,
   type BuildableSound,
   type GenerativeSound,
-  type Mix,
   type Project,
   type Song,
   type Sound,
@@ -68,9 +65,8 @@ export interface LoadedSong {
   assets?: LoadedFile<AssetsFile> | undefined;
   // One file per authored spec (project-layout.md §1.3, §4): sounds/
   // holds defined sounds — buildable types and deliberate `generate`
-  // recipes alike — and mixes/ holds mixes.
+  // recipes alike.
   sounds: LoadedFile<Sound>[];
-  mixes: LoadedFile<Mix>[];
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
 }
@@ -177,7 +173,6 @@ export function loadProject(root: string): LoadedProject {
       name: basename(dir),
       dir: relative(project.root, dir),
       sounds: [],
-      mixes: [],
       tracks: [],
       takes: [],
     };
@@ -187,8 +182,11 @@ export function loadProject(root: string): LoadedProject {
     // stop contributing targets, which reads as data loss.
     for (const [legacy, replacement] of [
       ['targets.yaml', 'one file per sound in sounds/ (project-layout.md §1.3, §4)'],
-      ['mix.yaml', 'one file per mix in mixes/ (project-layout.md §1.3)'],
       ['generation', 'deliberate sounds in sounds/, variants in audio/ (project-layout.md §1.4)'],
+      // Still diagnosed, but no longer pointed at mixes/: that shelf
+      // retired too, so the advice this used to give is now a second dead
+      // end rather than a migration.
+      ['mix.yaml', 'the song\'s output is the track named "main" (nested-tracks.md §7 chunk 2)'],
     ] as const) {
       if (existsSync(join(dir, legacy))) {
         project.diagnostics.push({
@@ -241,11 +239,6 @@ export function loadProject(root: string): LoadedProject {
       if (sound) song.sounds.push(sound);
     }
 
-    for (const file of yamlFiles(join(dir, 'mixes'))) {
-      const mix = loadFile(project, file, { schema: mixSchema, order: mixOrder });
-      if (mix) song.mixes.push(mix);
-    }
-
     for (const file of yamlFiles(join(dir, 'tracks'))) {
       const track = loadFile(project, file, { schema: trackSchema, order: trackOrder }) as
         | LoadedFile<Track>
@@ -284,7 +277,6 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.arrangement,
       s.assets,
       ...s.sounds,
-      ...s.mixes,
       ...s.tracks,
       ...s.takes,
     ]),
@@ -599,6 +591,22 @@ function validate(project: LoadedProject): void {
       }
       return undefined;
     };
+    // `mixes/` retired with the output track (nested-tracks.md §7 chunk 2).
+    // A directory still sitting there is a project mid-migration, and
+    // silently not reading it is the worst of the three options: the mix
+    // it describes would simply stop existing, with the files still on
+    // disk saying otherwise.
+    if (existsSync(join(project.root, song.dir, 'mixes'))) {
+      push(
+        join(song.dir, 'mixes'),
+        `mixes/ has retired — a song's output is the track named ` +
+          `"${SONG_OUTPUT_NAME}" (nested-tracks.md §7 chunk 2). Move each mix's ` +
+          `tracks to that track's inputs, carrying each one's gain_db and pan onto ` +
+          `its placement, put the master chain in the track's inserts, and delete ` +
+          `the directory`,
+      );
+    }
+
     // Names first, in full, like sounds: a track may place a track
     // declared in any file, and a forward reference is fine.
     const trackByName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
@@ -753,20 +761,6 @@ function validate(project: LoadedProject): void {
           // empty audio track has one, and it is silence.
           push(track.path, `${what} places a midi track, which renders no audio`);
         }
-        // A track's own gain and pan are retiring, not waiting to be
-        // supported (§1.13): a level belongs on the edge, where it can
-        // differ per parent, and a track with two parents cannot hold one
-        // value for both. The placement carries both now, so this points
-        // at where to put them rather than at a chunk to wait for.
-        if (child.gain_db !== 0 || child.pan !== 0) {
-          push(
-            track.path,
-            `${what} places a track with a fader set (gain_db ${child.gain_db}, pan ${child.pan}) — ` +
-              `a level lives on the placement, not the track, so it can differ per parent ` +
-              `(nested-tracks.md §1.13); move them to this placement's gain_db and pan, and ` +
-              `leave "${input.track}" at 0`,
-          );
-        }
         if (
           input.anchor === 'absolute' &&
           [input.at, input.duration].some((v) => Array.isArray(v))
@@ -831,73 +825,6 @@ function validate(project: LoadedProject): void {
       containmentState.set(name, 'done');
     };
     for (const track of song.tracks) visitTrack(track.data.name, []);
-
-    // Mixes reference tracks that can actually produce stems: audio, with
-    // clips (mix-assembly.md §3). Omitted `tracks` means all of them, which
-    // may be none — an empty mix is legal (a fresh song), it just has no
-    // graph node yet. One mix per file, so the filesystem is the duplicate
-    // check; the name must match the filename like everything else.
-    if (song.mixes.length > 0) {
-      const mixable = new Set(
-        song.tracks.filter((t) => renderableTrack(t.data)).map((t) => t.data.name),
-      );
-      for (const file of song.mixes) {
-        const mix = file.data;
-        const expected = basename(file.path, '.yaml');
-        if (mix.name !== expected) {
-          push(file.path, `name "${mix.name}" must match filename "${expected}"`);
-        }
-        if (!mix.tracks) continue;
-        const listed = new Set<string>();
-        for (const trackName of mix.tracks) {
-          if (listed.has(trackName)) {
-            push(file.path, `mix "${mix.name}" lists track "${trackName}" twice`);
-          }
-          listed.add(trackName);
-          if (!trackNames.has(trackName)) {
-            push(file.path, `mix "${mix.name}" references unknown track "${trackName}"`);
-          } else if (!mixable.has(trackName)) {
-            push(file.path, `mix "${mix.name}" track "${trackName}" has no audio clips to mix`);
-          }
-        }
-      }
-    }
-
-    // Two things claiming to be the song's output. Both would be clamped
-    // to the declared length and both would loop, and only one of them is
-    // what a bare song name reaches — so the first news of the ambiguity
-    // would be a render that came from the one you did not mean. `createSong`
-    // scaffolds a mix, so this fires as soon as the output track has
-    // content, which on the documented migration path is the step that
-    // creates it; an empty `tracks/main.yaml` filled in later trips it on
-    // the fill rather than the create.
-    //
-    // An error rather than a note because check has one severity and
-    // because there is no lasting use for two: the fix is to delete one,
-    // which is what the migration does. Comparing the old render against
-    // the new does not need both to exist at once — build the mix, keep
-    // its hash, then migrate.
-    //
-    // Renderable, not merely named: only a track the graph builds a stem
-    // for ever claims the extent — the same `renderableTrack` graph.ts
-    // filters `mixable` with, so check and the graph answer "is this an
-    // output" identically. A midi or contentless track called `main` is
-    // not a second output, and saying it carries the song's length would
-    // be false.
-    const outputTrack = song.tracks.find(
-      (t) => t.data.name === SONG_OUTPUT_NAME && renderableTrack(t.data),
-    );
-    if (outputTrack) {
-      const mix = song.mixes.find((m) => m.data.name === SONG_OUTPUT_NAME);
-      if (mix) {
-        push(
-          mix.path,
-          `song has two outputs: track "${SONG_OUTPUT_NAME}" and mix "${SONG_OUTPUT_NAME}" ` +
-            `both carry the song's declared length, and a bare song name reaches the track — ` +
-            `delete one (mixes/ retires in nested-tracks.md §7 chunk 2)`,
-        );
-      }
-    }
 
     for (const take of song.takes) {
       // Filenames are keys (project-core.md §6): takes/<track>/<take-id>.yaml.
