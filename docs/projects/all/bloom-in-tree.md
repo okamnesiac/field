@@ -196,3 +196,47 @@ is never a window where the two repos disagree about it.
 on a fresh clone passes with no generation having been run, CI fails when
 a schema change breaks the example, and `field generate` followed by
 `field choose` produces a playable creek that is nobody else's creek.
+
+## 7 Takes leave the recipe (DECIDED, 2026-08-08)
+
+`variants` and `chosen` moved out of `sounds/<name>.yaml` and into
+`audio/<name>/variants.yaml`, beside the WAVs they pin.
+
+The recipe is what you share. The takes and the pick are what your
+machine made — so with them in the recipe, following this example's own
+README modified a committed file: clone it, run `field generate`, and the
+working tree is dirty before you have heard anything. `field choose`
+did the same on every re-pick. Decision 4 wanted an example whose audio
+you generate; that is not usable if generating is a diff.
+
+**Inside the audio directory, not beside the recipe.** The alternative
+was `sounds/<name>.variants.yaml`, which is easier to find — you read
+`sounds/` to understand a song, and the file that says which take is live
+would be right there. It lost on the gitignore: two rules governing the
+pins and the bytes can disagree, and each way they disagree is quiet.
+Change only the audio rule and you commit WAVs whose hashes nothing
+records; change only the other and you commit pins to files nobody has,
+which fails `check` for everyone else. In `audio/<name>/` there is one
+rule, and the decision to commit the audio *is* the decision to commit
+its pins. A project that commits its audio gets both, with no special
+case.
+
+*Not `takes.yaml`:* `takes/` already means recorded takes — the
+`take-YYYYMMDD-HHMMSS` files with device and latency metadata — so the
+word is spoken for and `variants` is what the field was already called.
+
+*Rejected: `.field/generated/`.* Always local, no gitignore rule needed
+at all. But it separates the record from the bytes permanently, so a
+project that does commit its audio has nowhere to put the provenance that
+pins it.
+
+The split is on disk only. The loader merges the two, so `sound.variants`
+and `sound.chosen` still read the same everywhere downstream — the graph,
+`check` and `play` did not have to learn the file layout. Retired keys in
+the recipe forward to the new file rather than answering "Unrecognized
+keys", the `RETIRED_FADER` precedent.
+
+One consequence worth stating: `field generate` no longer writes the
+recipe at all, except to record a voice reference's hash, which is a
+property of the request rather than of a take. Filling a shipped recipe
+now leaves its bytes untouched.

@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Document, parseDocument } from 'yaml';
@@ -25,7 +25,15 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
 import { loadProject, lookupAsset, type LoadedProject } from '../model/project.js';
 import { takenSongNames } from '../model/namespace.js';
-import { generativeSoundSchema, soundOrder, soundSchema } from '../schema/index.js';
+import {
+  generativeSoundSchema,
+  generativeTakesOrder,
+  generativeTakesSchema,
+  soundOrder,
+  soundSchema,
+  TAKES_FILENAME,
+  type GenerativeTakes,
+} from '../schema/index.js';
 import { barTicks, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
@@ -238,6 +246,46 @@ interface Fillable {
   options: GenerateOptions; // the request it describes
 }
 
+// The takes beside a sound's audio (bloom-in-tree.md §7), read as a
+// document so `choose` can edit it without discarding comments. Absent
+// means nothing has been generated, which is a legal state rather than an
+// error — the whole point of the split.
+function takesFilePath(songDir: string, name: string): string {
+  return join(songDir, 'audio', name, TAKES_FILENAME);
+}
+
+function readTakesDoc(songDir: string, name: string): Document | undefined {
+  const path = takesFilePath(songDir, name);
+  if (!existsSync(path)) return undefined;
+  const doc = parseDocument(readFileSync(path, 'utf8'));
+  if (doc.errors.length > 0) {
+    throw new Error(`invalid YAML in ${TAKES_FILENAME} for "${name}": ${doc.errors[0]!.message}`);
+  }
+  return doc;
+}
+
+function readTakes(songDir: string, name: string): GenerativeTakes | undefined {
+  const doc = readTakesDoc(songDir, name);
+  if (doc === undefined) return undefined;
+  const parsed = generativeTakesSchema.safeParse(doc.toJS());
+  if (!parsed.success) {
+    throw new Error(
+      `the takes for "${name}" are invalid; fix them before generating or choosing ` +
+        `(field check)`,
+    );
+  }
+  return parsed.data;
+}
+
+function writeTakes(songDir: string, name: string, takes: GenerativeTakes): string {
+  const path = takesFilePath(songDir, name);
+  mkdirSync(dirname(path), { recursive: true });
+  const doc = new Document(generativeTakesSchema.parse(takes));
+  canonicalizeDocument(doc, generativeTakesOrder);
+  writeFileSync(path, stringifyDocument(doc));
+  return path;
+}
+
 // A recipe with no takes is a request for audio rather than a record of
 // one (bloom-in-tree.md §3), and this is what fills it. It is how a
 // project whose audio is not committed ever makes a sound: the recipes
@@ -246,6 +294,7 @@ interface Fillable {
 // Returns undefined when no recipe exists, which is the create-from-flags
 // path this command started as and still takes for a brand-new sound.
 function fillableRecipe(
+  songDir: string,
   recipeAbsolute: string,
   name: string,
   options: GenerateOptions,
@@ -263,7 +312,7 @@ function fillableRecipe(
   // The filename is what was opened; `name:` is what the project reads.
   // They already have to agree — `check` says so — but a project that is
   // check-red today would otherwise spend a whole run before finding out,
-  // and land a second error too: variants go under audio/<cli-name>/ while
+  // and land a second error too: takes go under audio/<cli-name>/ while
   // check wants audio/<recipe.name>/. Pre-flight, for the same reason the
   // namespace check below is.
   if (recipe.name !== name) {
@@ -281,9 +330,11 @@ function fillableRecipe(
   }
   // Anything that already has audio stays untouchable: re-running would
   // replace takes somebody chose, which is the trigger policy the whole
-  // deliberate category exists to honour (project-layout.md §1.2).
-  if (recipe.variants.length > 0) {
-    const n = recipe.variants.length;
+  // deliberate category exists to honour (project-layout.md §1.2). The
+  // takes file is the record of that, not the recipe (bloom-in-tree.md §7).
+  const existing = readTakes(songDir, name);
+  if (existing !== undefined && existing.variants.length > 0) {
+    const n = existing.variants.length;
     throw new Error(
       `sound "${name}" already has ${n} take${n === 1 ? '' : 's'} in ${options.song} ` +
         `(pick a new name)`,
@@ -342,7 +393,7 @@ export async function generateVariants(
   // one, the flags otherwise. Everything downstream reads `request`, so
   // the two entry points converge here and a run cannot behave
   // differently depending on which one it arrived through.
-  const fillable = fillableRecipe(recipeAbsolute, name, options);
+  const fillable = fillableRecipe(songDir, recipeAbsolute, name, options);
   const request = fillable?.options ?? options;
   const kind = generationKind(request);
 
@@ -457,25 +508,28 @@ export async function generateVariants(
       // being able to build with it. Nothing that already has takes
       // reaches here, so this can never overwrite somebody's pick.
       const CHOSEN_FIRST = 1;
-      let doc: Document;
+      // The takes go beside their audio, never into the recipe — that is
+      // what keeps generating from modifying a committed file
+      // (bloom-in-tree.md §7).
+      writeTakes(songDir, name, { sound: name, chosen: CHOSEN_FIRST, variants });
+
+      let doc: Document | undefined;
       if (fillable !== undefined) {
-        // Filled in place. A shipped recipe carries comments explaining
-        // what it is for, and re-emitting the file from a parsed object
-        // would throw every one of them away — the same reason `choose`
-        // edits the document instead of rebuilding it.
-        doc = fillable.doc;
-        doc.setIn(['variants'], variants);
-        doc.setIn(['chosen'], CHOSEN_FIRST);
-        // The reference recording's hash is provenance no recipe could
-        // carry before a run resolved the name to bytes.
-        if (reference !== undefined) doc.setIn(['voice_ref_sha256'], reference.sha256);
-        const filled = generativeSoundSchema.safeParse(doc.toJS());
-        if (!filled.success) {
-          const issue = filled.error.issues[0]!;
-          throw new Error(
-            `filling ${name}.yaml would leave it invalid: ${issue.message} at ` +
-              `${issue.path.join('.')} (field check)`,
-          );
+        // The recipe is left exactly as it was found. The one thing a run
+        // can still add to it is the reference recording's hash, which is
+        // provenance no recipe could carry before a run resolved the name
+        // to bytes — and it is a property of the request, not of a take.
+        if (reference !== undefined) {
+          doc = fillable.doc;
+          doc.setIn(['voice_ref_sha256'], reference.sha256);
+          const filled = generativeSoundSchema.safeParse(doc.toJS());
+          if (!filled.success) {
+            const issue = filled.error.issues[0]!;
+            throw new Error(
+              `filling ${name}.yaml would leave it invalid: ${issue.message} at ` +
+                `${issue.path.join('.')} (field check)`,
+            );
+          }
         }
       } else {
         // Parsed through the schema before writing — this command must never
@@ -505,14 +559,17 @@ export async function generateVariants(
                 duration_seconds: Number(durationSeconds!.toFixed(3)),
                 ...(request.bars !== undefined ? { bars: request.bars } : {}),
               }),
-          chosen: CHOSEN_FIRST,
-          variants,
         });
         doc = new Document(recipe);
       }
-      mkdirSync(join(songDir, 'sounds'), { recursive: true });
-      canonicalizeDocument(doc, soundOrder);
-      writeFileSync(recipeAbsolute, stringifyDocument(doc));
+      // Only when this run actually changed it: filling a recipe that
+      // needs no reference hash must leave the file's bytes alone, so a
+      // shipped example stays clean in `git status` after generating.
+      if (doc !== undefined) {
+        mkdirSync(join(songDir, 'sounds'), { recursive: true });
+        canonicalizeDocument(doc, soundOrder);
+        writeFileSync(recipeAbsolute, stringifyDocument(doc));
+      }
 
       return {
         recipePath: join('songs', request.song, 'sounds', `${name}.yaml`),
@@ -549,9 +606,13 @@ export interface ChooseResult {
 // the sound's own label resolves to its chosen variant, clips reference
 // the sound by name, and the bytes never move — so choosing again is a
 // one-line diff and every reference follows. There is no ledger step:
-// the sound file itself pins its variants (sha256 per variant, verified
-// by check), and a same-name asset would violate the song's one
-// namespace anyway.
+// the takes file pins them (sha256 per take, verified by check), and a
+// same-name asset would violate the song's one namespace anyway.
+//
+// The line it edits is in audio/<name>/variants.yaml, not in the recipe
+// (bloom-in-tree.md §7): which take you kept is a fact about your machine,
+// and a project that ships its recipes without audio must not be dirtied
+// by someone choosing.
 export async function chooseVariant(
   root: string,
   name: string,
@@ -582,16 +643,23 @@ export async function chooseVariant(
     );
   }
 
-  const variant = recipe.data.variants[options.variant - 1];
+  const takesDoc = readTakesDoc(songDir, name);
+  const takes = takesDoc && readTakes(songDir, name);
+  if (takes === undefined || takes.variants.length === 0) {
+    throw new Error(
+      `"${name}" has no takes yet — field generate ${name} --song ${options.song} --seed <n>`,
+    );
+  }
+  const variant = takes.variants[options.variant - 1];
   if (!variant) {
     throw new Error(
-      `variant ${options.variant} does not exist (${recipe.data.variants.length} variants)`,
+      `variant ${options.variant} does not exist (${takes.variants.length} variants)`,
     );
   }
   const absolute = join(songDir, variant.file);
   if (!existsSync(absolute)) throw new Error(`variant file not found: ${variant.file}`);
   // Choosing asserts provenance, so the bytes must still be the bytes the
-  // recipe recorded — drifted output gets diagnosed, never chosen.
+  // takes file recorded — drifted output gets diagnosed, never chosen.
   const sha256 = await sha256File(absolute);
   if (sha256 !== variant.sha256) {
     throw new Error(
@@ -600,10 +668,10 @@ export async function chooseVariant(
   }
   const bytes = statSync(absolute).size;
 
-  const previous = recipe.data.chosen;
-  recipeDoc.setIn(['chosen'], options.variant);
-  canonicalizeDocument(recipeDoc, soundOrder);
-  writeFileSync(recipePath, stringifyDocument(recipeDoc));
+  const previous = takes.chosen;
+  takesDoc!.setIn(['chosen'], options.variant);
+  canonicalizeDocument(takesDoc!, generativeTakesOrder);
+  writeFileSync(takesFilePath(songDir, name), stringifyDocument(takesDoc!));
 
   return { file: variant.file, sha256, bytes, previous };
 }

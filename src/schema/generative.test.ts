@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generativeSoundSchema } from './sounds.js';
+import { generativeSoundSchema, generativeTakesSchema } from './sounds.js';
 
 // The kind split inside `generative` (voice-generation.md §1.6). One
 // schema serves music and voice recipes so that variants, `chosen`, the
@@ -14,19 +14,22 @@ import { generativeSoundSchema } from './sounds.js';
 // still narrows on the discriminant, so the decision holds — but for a
 // different reason than the one written down.
 
+// A recipe is the request and nothing else now: takes live beside their
+// audio (bloom-in-tree.md §7), so the two fixtures are separate files in
+// the same way the real ones are.
 const base = {
   name: 'scratch-vocal',
   type: 'generative' as const,
-  variants: [
-    {
-      file: 'audio/scratch-vocal/1.wav',
-      model: 'chatterbox',
-      seed: 1,
-      sha256: 'a'.repeat(64),
-      generated_at: '2026-08-07T12:00:00Z',
-    },
-  ],
 };
+
+const takeOne = {
+  file: 'audio/scratch-vocal/1.wav',
+  model: 'chatterbox',
+  seed: 1,
+  sha256: 'a'.repeat(64),
+  generated_at: '2026-08-07T12:00:00Z',
+};
+const takes = { sound: 'scratch-vocal', chosen: 1, variants: [takeOne] };
 
 const music = { ...base, prompt: 'dreamy keys', duration_seconds: 10 };
 const voice = {
@@ -42,18 +45,31 @@ describe('generative recipes', () => {
     expect(generativeSoundSchema.safeParse(voice).success).toBe(true);
   });
 
-  it('accepts a recipe with no takes, however the absence is spelled', () => {
+  it('accepts a takes file with no takes, however the absence is spelled', () => {
     // The shape a project ships in when its audio is not committed
-    // (bloom-in-tree.md §3): a request for audio rather than a record of
-    // one. Both spellings have to work — a hand-written recipe omits the
-    // key, `field generate` on an emptied one leaves `variants: []` — and
-    // they were separate failures before this defaulted.
-    const { variants: _omit, ...takeless } = voice;
-    const absent = generativeSoundSchema.safeParse(takeless);
-    const empty = generativeSoundSchema.safeParse({ ...voice, variants: [] });
+    // (bloom-in-tree.md §3). Both spellings have to work — a hand-written
+    // file omits the key — and they were separate failures before this
+    // defaulted.
+    const { variants: _omit, ...noKey } = takes;
+    const absent = generativeTakesSchema.safeParse(noKey);
+    const empty = generativeTakesSchema.safeParse({ ...takes, variants: [] });
     expect(absent.success).toBe(true);
     expect(empty.success).toBe(true);
     expect(absent.data?.variants).toEqual([]);
+  });
+
+  it('sends takes and the pick out of the recipe, saying where they went', () => {
+    // Generating and choosing are things your machine did, so leaving them
+    // in the recipe meant the documented workflow modified a committed
+    // file (bloom-in-tree.md §7). Retired with a forwarding message rather
+    // than removed, the RETIRED_FADER precedent.
+    const parsed = generativeSoundSchema.safeParse({ ...voice, variants: [takeOne], chosen: 1 });
+    expect(parsed.success).toBe(false);
+    const byField = Object.fromEntries(
+      parsed.error!.issues.map((i) => [i.path.join('.'), i.message]),
+    );
+    expect(byField['variants']).toContain('audio/<name>/variants.yaml');
+    expect(byField['chosen']).toContain('audio/<name>/variants.yaml');
   });
 
   it('tells a recipe written before the move where its provenance went', () => {
@@ -68,7 +84,7 @@ describe('generative recipes', () => {
     const byField = Object.fromEntries(
       parsed.error!.issues.map((i) => [i.path.join('.'), i.message]),
     );
-    expect(byField['model']).toContain('copy this value onto every entry under `variants:`');
+    expect(byField['model']).toContain('copy this value onto every entry in audio/<name>/variants.yaml');
     expect(byField['generated_at']).toContain('copy this value onto every entry');
     // The seed has nowhere to go: each variant has recorded its own all
     // along, so the advice is deletion rather than a move.
@@ -86,8 +102,7 @@ describe('generative recipes', () => {
     expect(parsed.error!.issues[0]!.message).toContain('a music recipe needs a length');
     expect(generativeSoundSchema.safeParse({ ...noLength, bars: 4 }).success).toBe(true);
     // A voice line is not asked: its length follows from the text.
-    const { variants: _v, ...takelessVoice } = voice;
-    expect(generativeSoundSchema.safeParse(takelessVoice).success).toBe(true);
+    expect(generativeSoundSchema.safeParse(voice).success).toBe(true);
   });
 
   it('keeps provenance on the take, so takes may differ', () => {
@@ -95,10 +110,10 @@ describe('generative recipes', () => {
     // different model versions with different generation times. One
     // `model`/`generated_at` on the sound could record only one answer for
     // the whole list; on the variant it records each.
-    const mixed = generativeSoundSchema.safeParse({
-      ...voice,
+    const mixed = generativeTakesSchema.safeParse({
+      ...takes,
       variants: [
-        voice.variants[0]!,
+        takeOne,
         {
           file: 'audio/scratch-vocal/2.wav',
           model: 'chatterbox-2',

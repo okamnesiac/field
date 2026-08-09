@@ -1,7 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parseDocument } from 'yaml';
-import { assetsFileSchema, soundSchema } from '../schema/index.js';
+import {
+  assetsFileSchema,
+  generativeTakesSchema,
+  soundSchema,
+  TAKES_FILENAME,
+} from '../schema/index.js';
 
 // The song's one namespace (project-layout.md §4.3), read cheaply from
 // disk for command pre-flight: asset names, sound names, and the
@@ -32,7 +37,20 @@ export function takenSongNames(songDir: string): Set<string> {
         parseDocument(readFileSync(join(soundsDir, file), 'utf8')).toJS(),
       );
       if (parsed.success && parsed.data.type === 'generative') {
-        parsed.data.variants.forEach((_, i) => taken.add(`${parsed.data.name}-${i + 1}`));
+        // Audition labels are minted by takes, and takes live beside the
+        // audio (bloom-in-tree.md §7). A recipe with no run behind it
+        // mints none, which is why this reads the other file rather than
+        // the one it just parsed.
+        const name = parsed.data.name;
+        const takesFile = join(songDir, 'audio', name, TAKES_FILENAME);
+        if (existsSync(takesFile)) {
+          const takes = generativeTakesSchema.safeParse(
+            parseDocument(readFileSync(takesFile, 'utf8')).toJS(),
+          );
+          if (takes.success) {
+            takes.data.variants.forEach((_, i) => taken.add(`${name}-${i + 1}`));
+          }
+        }
       }
     }
   }
