@@ -922,21 +922,38 @@ function validate(project: LoadedProject): void {
 
     // A generator entry's render is a node, so it needs a name no other
     // generator claims (nested-tracks.md §18 step 2): the owning track's,
-    // or <track>-<id>. Two un-id'd generators in one track collide here,
-    // and the fix is the message: give them ids.
-    const genNames = new Set<string>();
+    // or <track>-<id>. The first claimant is recorded so a collision can
+    // say what actually collided: within one track, two un-id'd entries
+    // (the fix is the message: give them ids) — the same-track same-id
+    // case is already the duplicate-id diagnostic above, and a second
+    // message could only give false advice. Across tracks (`kit-sc` with
+    // `id: b` against a track named `kit-sc-b`), no id is missing, so
+    // the message names both files instead.
+    const genNames = new Map<string, string>();
     for (const trackFile of song.tracks) {
       for (const entry of trackFile.data.inputs) {
         if (entry.supercollider === undefined) continue;
         const name = generatorName(entry, trackFile.data.name);
-        if (genNames.has(name)) {
+        const first = genNames.get(name);
+        if (first === undefined) {
+          genNames.set(name, trackFile.path);
+        } else if (first === trackFile.path) {
+          // Same track, same name: same id (diagnosed above) or no ids.
+          if (entry.id === undefined) {
+            push(
+              trackFile.path,
+              `two generator entries share the name "${name}" — give each an id so ` +
+                `its render has a name of its own (nested-tracks.md §18)`,
+            );
+          }
+        } else {
           push(
             trackFile.path,
-            `two generator entries share the name "${name}" — give each an id so ` +
-              `its render has a name of its own (nested-tracks.md §18)`,
+            `a generator entry here and one in ${first} both mint the render ` +
+              `name "${name}" — rename a track or change an id so each render ` +
+              `has a name of its own (nested-tracks.md §18)`,
           );
         }
-        genNames.add(name);
       }
     }
 

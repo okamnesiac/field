@@ -889,6 +889,49 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
     ).toBe(true);
   });
 
+  it('a duplicate id is one mistake, one message — the name collision stays quiet', () => {
+    writeTrack('texture', [
+      'inputs:',
+      '  - id: a',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+      '  - id: a',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 8',
+      '      duration: 3',
+    ]);
+    const { diagnostics } = loadProject(root);
+    expect(diagnostics.some((d) => d.message.includes('duplicate input id "a"'))).toBe(true);
+    // The collision the duplicate causes must not be re-diagnosed with
+    // advice to add ids that are already there.
+    expect(diagnostics.some((d) => d.message.includes('give each an id'))).toBe(false);
+  });
+
+  it('a cross-track name collision names both tracks', () => {
+    // `kit-sc` with `id: b` and a track literally named `kit-sc-b` both
+    // mint gen:kit-sc-b. Neither entry is missing an id, so the in-track
+    // advice would be false; the message must name the other file.
+    writeTrack('kit-sc', [
+      'inputs:',
+      '  - id: b',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+    ]);
+    writeTrack('kit-sc-b', SC_ENTRY);
+    const { diagnostics } = loadProject(root);
+    const collisions = diagnostics.filter((d) => d.message.includes('"kit-sc-b"'));
+    expect(collisions).toHaveLength(1);
+    const seen = collisions[0]!.file + ' ' + collisions[0]!.message;
+    expect(seen).toContain('tracks/kit-sc.yaml');
+    expect(seen).toContain('tracks/kit-sc-b.yaml');
+    expect(collisions[0]!.message).not.toContain('give each an id');
+  });
+
   it('validates the program path exactly as a sound file would', () => {
     writeTrack('kit-sc', [
       'inputs:',
