@@ -12,6 +12,5 @@ inputs:
   - track: phrase
     at: [9]
   - track: pad
-    at: 0
     gain_db: -6 # the bed sits under both the vocal and the beat
     pan: -0.2 # a touch left, opposite the vocal

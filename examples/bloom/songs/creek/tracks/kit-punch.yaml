@@ -17,4 +17,3 @@ inputs:
   # plays as long as kit-sc is, however long that render turns out to be
   - id: kit-sc-m4v7q
     track: kit-sc
-    at: 0

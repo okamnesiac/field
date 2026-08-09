@@ -10,8 +10,6 @@
 name: phrase
 inputs:
   - track: drums
-    at: 0
   - track: keys
-    at: 0
     gain_db: -4 # scratch level while auditioning variants
     pan: 0.2 # a touch right, opposite the pad
