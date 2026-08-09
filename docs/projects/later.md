@@ -35,3 +35,7 @@ costs nothing. See [README](README.md) for how these lists work.
 - **prettier and ESLint** — neither is installed and no config exists, so a
   tool reaching for a formatter applies its own defaults (#83, 312 lines);
   ESLint is free, prettier costs a ~1,900-line reformat.
+- **Splice support** — shaped like ace, not import: search in, TUI to
+  audition, choosing commits the sample with the recipe of how it was
+  found — which pays for per-song listing and kept licenses
+  ([splice.md](all/splice.md)).
