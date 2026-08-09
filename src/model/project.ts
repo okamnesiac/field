@@ -651,6 +651,37 @@ function validate(project: LoadedProject): void {
     const trackByName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
     const trackPathByName = new Map(song.tracks.map((t) => [t.data.name, t.path]));
     const trackNames = new Set(trackByName.keys());
+
+    // One timeline per track file, resolved once. Both the track loop and
+    // the takes loop below read it: a take is a recording *on* a track, so
+    // its ticks are in that track's time exactly as a clip's are
+    // (nested-tracks.md §13, #95 review).
+    const timeByTrack = new Map<
+      string,
+      { tempo: TempoMap | undefined; meter: MeterMap | undefined }
+    >();
+    for (const track of song.tracks) {
+      let tempo = tempoMap;
+      let meter = meterMap;
+      const time = track.data.time;
+      if (time?.tempo) {
+        try {
+          tempo = new TempoMap(time.tempo, project.manifest?.data.sample_rate ?? 48000);
+        } catch (err) {
+          push(track.path, `local tempo: ${(err as Error).message}`);
+          tempo = undefined;
+        }
+      }
+      if (time?.meter) {
+        try {
+          meter = new MeterMap(time.meter);
+        } catch (err) {
+          push(track.path, `local meter: ${(err as Error).message}`);
+          meter = undefined;
+        }
+      }
+      timeByTrack.set(track.data.name, { tempo, meter });
+    }
     for (const track of song.tracks) {
       const expected = basename(track.path, '.yaml');
       if (track.data.name !== expected) {
@@ -666,27 +697,7 @@ function validate(project: LoadedProject): void {
       // The song's maps, not the placing parent's. A track can be placed
       // in two parents (§1.3) and renders once, so "bar 2" inside it has
       // to mean one thing regardless of who consumes it.
-      let trackTempo = tempoMap;
-      let trackMeter = meterMap;
-      if (track.data.time) {
-        const time = track.data.time;
-        if (time.tempo) {
-          try {
-            trackTempo = new TempoMap(time.tempo, project.manifest?.data.sample_rate ?? 48000);
-          } catch (err) {
-            push(track.path, `local tempo: ${(err as Error).message}`);
-            trackTempo = undefined;
-          }
-        }
-        if (time.meter) {
-          try {
-            trackMeter = new MeterMap(time.meter);
-          } catch (err) {
-            push(track.path, `local meter: ${(err as Error).message}`);
-            trackMeter = undefined;
-          }
-        }
-      }
+      const { tempo: trackTempo, meter: trackMeter } = timeByTrack.get(track.data.name)!;
 
       const trackCtx = {
         root: project.root,
@@ -914,10 +925,16 @@ function validate(project: LoadedProject): void {
       }
 
       // Takes store both time representations under a declared anchor; the
-      // derived one must agree with the tempo map (project-core.md §3.1).
-      if (tempoMap) {
+      // derived one must agree with the tempo map (project-core.md §3.1) —
+      // the track's own, since that is the timeline the recording sits in.
+      // A known track whose local map failed to parse yields `undefined`
+      // and skips the check: its error is already reported, and deriving
+      // against the song's map would reject samples that are right.
+      const onTrack = timeByTrack.get(take.data.track);
+      const takeTempo = onTrack ? onTrack.tempo : tempoMap;
+      if (takeTempo) {
         if (take.data.anchor === 'musical') {
-          const derived = tempoMap.ticksToSamples(take.data.position);
+          const derived = takeTempo.ticksToSamples(take.data.position);
           if (derived !== take.data.position_samples) {
             push(
               take.path,
@@ -926,7 +943,7 @@ function validate(project: LoadedProject): void {
             );
           }
         } else {
-          const derived = tempoMap.samplesToTicks(take.data.position_samples);
+          const derived = takeTempo.samplesToTicks(take.data.position_samples);
           // ±1 tick tolerance: the authoritative samples value rounds to ticks.
           if (Math.abs(derived - take.data.position) > 1) {
             push(

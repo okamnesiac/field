@@ -639,7 +639,17 @@ parent's map. The daemon sums by sample offset. So a 7/8 child inside a
 two meters — a conversion that has no meaning anyway, since the two
 timelines are not measuring the same thing. Everything in one track file,
 its clips and the `at` of every track it places, is in that one track's
-time: one map governs one file.
+time.
+
+The unit is the *track*, though, not quite the file. A take under
+`takes/<track>/` is a recording on that track, so its ticks are in that
+track's timeline too, and `check`'s cross-check of `position` against
+`position_samples` (project-core.md §3.1) has to derive through the same
+map. It did not in the first version of this — it used the song's, which
+rejected a take whose samples were right for the track it was recorded
+on. Found in review (#95), which is the second thing on this branch that
+only showed up once something outside the track file had to agree with
+it.
 
 **Each half is independently optional**, and that is a choice rather than
 a consequence. The polymetric case usually wants a different meter at the
