@@ -153,6 +153,16 @@ point of this is that it no longer has to.
    declaring its own — a placement's whole nature is that it declares a
    time.
 
+   Amended 2026-08-08: "time mapping" here means the **timeline the signal
+   is read under** — a track's tempo and meter maps, which §13 made a
+   precise thing — and not the **offset origin**, where the audio lands.
+   The two are one phrase apart in the sentence above, and only the first
+   is inherited. Taking it as the second is the reading §14 rules out:
+   measuring a send's arrival from the target's origin would slide a
+   reverb off the sound it is reverberating whenever the bus moved. The
+   distinction did not exist when this was written, because a track had no
+   timeline of its own to inherit.
+
 8. **Children and sends are both inputs; they differ in what the edge
    carries.** A child arrives with an **offset**; a send arrives with a
    **level**. Neither carries the other's.
