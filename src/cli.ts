@@ -241,14 +241,42 @@ track
 
 program
   .command('import <file>')
-  .description('copy an audio file into a song and record it in assets.yaml')
+  .description('copy an audio file into a song and record it (and its WAV facts) in assets.yaml')
   .requiredOption('--song <name>', 'song to import into')
   .option('--name <slug>', 'asset name (defaults to the slugified filename)')
-  .action(async (file: string, opts: { song: string; name?: string }) => {
+  .option('--allow-mismatch', "import a WAV whose sample rate differs from the project's")
+  .action(async (file: string, opts: { song: string; name?: string; allowMismatch?: boolean }) => {
     try {
-      const result = await importAsset(requireRoot(), opts.song, file, opts.name);
-      process.stdout.write(`imported ${result.name} (${result.file}, ${result.bytes} bytes)\n`);
+      // The y/N prompt is the interactive half of decision 5's
+      // acknowledgement; scripts pass --allow-mismatch instead.
+      const confirmMismatch = process.stdin.isTTY
+        ? async (message: string): Promise<boolean> => {
+            const { createInterface } = await import('node:readline/promises');
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            try {
+              const answer = await rl.question(`${message}\nimport anyway? [y/N] `);
+              return answer.trim().toLowerCase() === 'y';
+            } finally {
+              rl.close();
+            }
+          }
+        : undefined;
+      const result = await importAsset(requireRoot(), opts.song, file, opts.name, {
+        allowMismatch: opts.allowMismatch,
+        confirmMismatch,
+      });
+      const facts =
+        result.header !== undefined
+          ? `, ${result.header.sampleRate} Hz ${result.header.bitsPerSample}-bit ` +
+            `${result.header.channels}ch, ${result.header.frames} frames`
+          : '';
+      process.stdout.write(`imported ${result.name} (${result.file}, ${result.bytes} bytes${facts})\n`);
       process.stdout.write(`sha256 ${result.sha256}\n`);
+      if (result.headerProblem !== undefined) {
+        process.stdout.write(
+          `note: WAV header unreadable, nothing recorded — ${result.headerProblem}\n`,
+        );
+      }
     } catch (err) {
       fail(err);
     }

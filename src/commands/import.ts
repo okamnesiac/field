@@ -1,18 +1,31 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { parseDocument, Document, isSeq } from 'yaml';
+import { readWavHeader, type WavHeader } from '../audio/wav.js';
+import { PROJECT_MANIFEST, DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
-import { assetsFileOrder, assetsFileSchema } from '../schema/index.js';
+import { assetsFileOrder, assetsFileSchema, projectSchema } from '../schema/index.js';
 import { takenSongNames } from '../model/namespace.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
+
+export interface ImportOptions {
+  // A rate that differs from the project's is a conversion cost, not an
+  // error (multi-rate.md decision 5) — but it must be acknowledged:
+  // `--allow-mismatch` in scripts, or an interactive yes through
+  // `confirmMismatch`. With neither, a mismatch refuses.
+  allowMismatch?: boolean | undefined;
+  confirmMismatch?: ((message: string) => Promise<boolean>) | undefined;
+}
 
 export interface ImportResult {
   name: string;
   file: string; // song-relative path of the copied asset
   sha256: string;
   bytes: number;
+  header?: WavHeader | undefined; // recorded facts, when the source is a readable WAV
+  headerProblem?: string | undefined; // a .wav whose header would not parse
 }
 
 function defaultName(file: string): string {
@@ -20,6 +33,19 @@ function defaultName(file: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+// The 12-byte RIFF/WAVE signature, and nothing more — full parsing is
+// readWavHeader's, whose errors the caller reports as headerProblem.
+function hasWavSignature(path: string): boolean {
+  const fd = openSync(path, 'r');
+  try {
+    const bytes = Buffer.alloc(12);
+    if (readSync(fd, bytes, 0, 12, 0) !== 12) return false;
+    return bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WAVE';
+  } finally {
+    closeSync(fd);
+  }
 }
 
 // Copy a file into the song's audio/ directory and record it in
@@ -30,6 +56,7 @@ export async function importAsset(
   song: string,
   sourcePath: string,
   name?: string,
+  options: ImportOptions = {},
 ): Promise<ImportResult> {
   const songDir = join(root, 'songs', song);
   if (!existsSync(join(songDir, 'song.yaml'))) {
@@ -37,6 +64,50 @@ export async function importAsset(
   }
   if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
     throw new Error(`no such file: ${sourcePath}`);
+  }
+
+  // The first content validation import has ever had (multi-rate.md
+  // decision 5): read the WAV header before any write, record the facts,
+  // and make a rate mismatch acknowledged rather than fatal — it fires
+  // at the moment the mistake is cheap to fix, not at first build. A
+  // .wav whose header will not parse records nothing; the problem is
+  // reported for the caller to surface, because import has always been
+  // willing to carry bytes it does not understand.
+  let header: WavHeader | undefined;
+  let headerProblem: string | undefined;
+  // Content decides, not the filename: a WAV named .wave (or nothing)
+  // must not bypass the acknowledgement by spelling alone, so the
+  // signature is probed wherever the extension does not already claim it.
+  if (extname(sourcePath).toLowerCase() === '.wav' || hasWavSignature(sourcePath)) {
+    try {
+      header = readWavHeader(sourcePath);
+    } catch (err) {
+      headerProblem = (err as Error).message;
+    }
+    // A structurally parseable header can still declare the impossible —
+    // readWavHeader trusts fmt's sample rate, and 0 would sail through
+    // the mismatch prompt into a ledger row the schema refuses. Facts
+    // that cannot be true are a header problem, recorded as nothing.
+    if (header !== undefined && header.sampleRate <= 0) {
+      headerProblem = `header declares a sample rate of ${header.sampleRate} — nothing recorded`;
+      header = undefined;
+    }
+    if (header !== undefined) {
+      const manifest = projectSchema.safeParse(
+        parseDocument(readFileSync(join(root, PROJECT_MANIFEST), 'utf8')).toJS(),
+      );
+      const projectRate = manifest.success ? manifest.data.sample_rate : DEFAULT_SAMPLE_RATE;
+      if (header.sampleRate !== projectRate && options.allowMismatch !== true) {
+        const message =
+          `${basename(sourcePath)} is ${header.sampleRate} Hz against the project's ` +
+          `${projectRate} — placements will pay a conversion (multi-rate.md §2.4)`;
+        const acknowledged =
+          options.confirmMismatch !== undefined && (await options.confirmMismatch(message));
+        if (!acknowledged) {
+          throw new Error(`${message}; import it anyway with --allow-mismatch`);
+        }
+      }
+    }
   }
 
   const assetName = name ?? defaultName(sourcePath);
@@ -108,9 +179,25 @@ export async function importAsset(
     // to extend; without this it would set a bare map and corrupt the file.
     doc.setIn(['assets'], doc.createNode([]));
   }
-  doc.addIn(['assets'], doc.createNode({ name: assetName, file, sha256, bytes }));
+  doc.addIn(
+    ['assets'],
+    doc.createNode({
+      name: assetName,
+      file,
+      sha256,
+      bytes,
+      ...(header !== undefined
+        ? {
+            sample_rate: header.sampleRate,
+            bit_depth: header.bitsPerSample,
+            channels: header.channels,
+            frames: header.frames,
+          }
+        : {}),
+    }),
+  );
   canonicalizeDocument(doc, assetsFileOrder);
   writeFileSync(assetsPath, stringifyDocument(doc));
 
-  return { name: assetName, file, sha256, bytes };
+  return { name: assetName, file, sha256, bytes, header, headerProblem };
 }

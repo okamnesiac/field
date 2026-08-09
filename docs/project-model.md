@@ -260,7 +260,12 @@ determinism policy.
 
 All audio/MIDI assets are content-addressed: each scope's ledger — a
 song's `assets.yaml`, or `shared/assets.yaml` with the identical shape —
-binds a readable asset name to its file path, SHA-256, and size, and
+binds a readable asset name to its file path, SHA-256, and size — plus,
+for WAVs, the header's facts (`sample_rate`, `bit_depth`, `channels`,
+`frames`), recorded at import and verified by `check` against the file
+it already hashes (multi-rate.md decision 5); importing a rate the
+project does not run at asks first, because a mismatch is a conversion
+cost someone should pay knowingly — and
 entries/takes reference assets **by name** — so human-edited files stay
 readable while the hash carries the content identity. The SHA-256 equals the Git LFS OID for the
 same file, so the manifest, the LFS pointer, and the build cache share one
