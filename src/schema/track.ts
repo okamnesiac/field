@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
+import { meterEventSchema, tempoEventSchema } from './song.js';
 
 // A clip is a window (position, duration, in anchor units) on content
 // (source, source_offset, slip, in samples). Effective read offset =
@@ -129,9 +130,38 @@ const RETIRED_FADER =
   '`inputs:` entry that places this track, and delete it here ' +
   '(nested-tracks.md §1.13)';
 
+// A track's own tempo and meter (nested-tracks.md §1.5). A 7/8 figure
+// inside a 4/4 song is a track with a local meter rather than a feature,
+// which is what subsumes project-core.md §3.1's loops-with-their-own-
+// timeline deferral.
+//
+// Each half is independently optional and falls back to the song's. The
+// polymetric case usually wants a different meter at the *same* tempo, so
+// requiring both would copy the song's bpm into a file that cannot be
+// told when the song's changes — a second copy of one fact, which is the
+// drift `arrangement.yaml` retired for (§11).
+//
+// Inheritance is from the song, never from the parent that places this
+// track: a track may have two parents (§1.3) and renders exactly once, so
+// its musical time has to mean one thing no matter who consumes it
+// (§13).
+export const trackTimeSchema = z
+  .strictObject({
+    tempo: z.array(tempoEventSchema).min(1).optional(),
+    meter: z.array(meterEventSchema).min(1).optional(),
+  })
+  .refine((time) => time.tempo !== undefined || time.meter !== undefined, {
+    error:
+      'declare a `tempo`, a `meter`, or both — an empty `time:` inherits ' +
+      'everything, which is what omitting it already does (nested-tracks.md §1.5)',
+  });
+export type TrackTime = z.infer<typeof trackTimeSchema>;
+
 export const trackSchema = z.strictObject({
   name: labelName,
   type: z.enum(['audio', 'midi']),
+  // Omitted means the song's maps, which is every track today.
+  time: trackTimeSchema.optional(),
   gain_db: z.never({ error: RETIRED_FADER }).optional(),
   pan: z.never({ error: RETIRED_FADER }).optional(),
   // Inserts are content, not mix parameters: they bake into the stem, so
@@ -146,8 +176,17 @@ export type Track = Omit<TrackFile, 'clips' | 'inputs'> & {
   inputs: TrackInput[];
 };
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'type', 'inserts', 'inputs', 'clips'],
+  keys: ['name', 'type', 'time', 'inserts', 'inputs', 'clips'],
   children: {
+    // Same shape and order as tempo.yaml's, so a local map reads like the
+    // song map it overrides rather than like a different kind of thing.
+    time: {
+      keys: ['tempo', 'meter'],
+      children: {
+        tempo: { items: { keys: ['at', 'bpm', 'ramp'] } },
+        meter: { items: { keys: ['at', 'numerator', 'denominator'] } },
+      },
+    },
     inserts: { items: insertOrder },
     clips: { items: clipOrder },
     inputs: {

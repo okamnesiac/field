@@ -141,6 +141,21 @@ track can be placed in more than one parent and more than once in the
 same one, from a single render
 ([projects/all/nested-tracks.md](projects/all/nested-tracks.md)).
 
+A track may also carry its own time, in a `time:` key holding a `tempo`,
+a `meter`, or both — a 7/8 figure inside a 4/4 song is a track that says
+so, rather than a feature. Whichever half it omits comes from the song,
+and so does everything for the great majority of tracks that declare no
+`time:` at all. **From the song, never from the parent that places it:** a
+track can have two parents and renders exactly once, so "bar 2" inside it
+has to mean one thing no matter who consumes it. Everything in one track
+file — its clips, and the `at` of every track it places — is in that one
+track's time.
+
+The two timelines are never reconciled as maps. A track renders to
+samples in its own time from its own sample 0; its parent's `at` resolves
+to samples under the parent's map; the daemon sums by sample offset. So
+placing a 7/8 child in a 4/4 parent is an addition, not a conversion.
+
 A placement also carries the level — `gain_db` and `pan` — and that is
 where a level lives, rather than on the track. The two are one gain stage
 seen from two directions: what a console calls a channel's fader is the

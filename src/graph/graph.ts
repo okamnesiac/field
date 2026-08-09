@@ -230,10 +230,22 @@ export function buildGraph(project: LoadedProject): Graph {
           track.name === SONG_OUTPUT_NAME
             ? { lengthSamples, loop: song.song?.data.loop }
             : {};
+        // A track plans in its own time (nested-tracks.md §13). The two
+        // timelines never have to be reconciled as maps: this stem's
+        // positions resolve to samples here, its parent's `at` resolves to
+        // samples under the parent's map, and the daemon sums by sample
+        // offset — so a 7/8 child inside a 4/4 parent is an addition, not
+        // a conversion.
+        //
+        // The song's map when the track declares none, which is every
+        // track today, so nothing that exists now changes key.
+        const local = track.time?.tempo
+          ? new TempoMap(track.time.tempo, sampleRate)
+          : tempoMap;
         addRule(
           { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,
-          planTrack(track, tempoMap, sha256BySource, framesBySource, extent),
+          planTrack(track, local, sha256BySource, framesBySource, extent),
           refLabel,
         );
       }
