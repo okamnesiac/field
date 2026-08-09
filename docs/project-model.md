@@ -124,6 +124,13 @@ never in a value prefix:
   The render is minted as its own node, `//songs/<song>/gen:<name>`,
   named by the owning track (or `<track>-<id>` when the entry carries an
   id — which is why a track holding two generators needs ids on them);
+- `generative:` — a deliberate request inline: `prompt:` (music) or
+  `text:` (voice) plus the conditioning fields, exactly as a generative
+  sound carries them. It mints a `gen:` node under the same naming rule,
+  but nothing in the build may run it — the node resolves to the chosen
+  take, and its run-recorded state lives beside the audio (see
+  "Deliberate generation"). The track file never changes when audio is
+  generated or chosen;
 - `sound: <name>` — a defined sound, transitional for exactly as long as
   `sounds/` exists. Playing a buildable sound (or a track) means the
   arrangement plays a render that is never committed, only its
@@ -267,21 +274,28 @@ every committed file is still pinned exactly once.
 
 ## Deliberate generation
 
-A `generative` sound is a request and a record, in two files. The request
-is `sounds/<name>.yaml`: prompt or text, duration, conditioning. The record
-is `audio/<name>/variants.yaml`, one entry per take, each carrying the model
-name + version that produced it, its seed, its output hash, and when it ran —
-provenance sits on the take because that is what it describes, and a sound
-accumulates takes from runs months and model versions apart.
+A deliberate generation is a request and a record, in two places. The
+request is a `generative:` entry in a track file — or, transitionally, a
+sound in `sounds/<name>.yaml` — carrying prompt or text, duration,
+conditioning. The record is `audio/<name>/variants.yaml`, where `<name>`
+is the gen node's name for an entry (the owning track's, or
+`<track>-<id>`) and the sound's name for a sound; the file's first key
+says which it attaches to (`gen:` or `sound:`). One entry per take, each
+carrying the model name + version that produced it, its seed, its output
+hash, and when it ran — provenance sits on the take because that is what
+it describes, and a request accumulates takes from runs months and model
+versions apart.
 
-They are separate files because they answer to different owners. The recipe
-is shared; the takes and the pick are what your machine did, so keeping them
-in the recipe meant `field generate` and `field choose` modified a committed
-file. The takes sit *inside* the audio directory so that one decision governs
-both: ignore the audio and its pins go too, commit the audio and the
-provenance comes with it (bloom-in-tree.md §7). The split is on disk only —
-the loader merges them, so everything downstream still reads a sound's
-variants and chosen take.
+They are separate files because they answer to different owners. The
+request is shared; the takes and the pick are what your machine did, so
+keeping them together would mean `field generate` and `field choose`
+modified a committed file — which is also why generating never touches
+the track file that carries the entry, byte for byte. The takes sit
+*inside* the audio directory so that one decision governs both: ignore
+the audio and its pins go too, commit the audio and the provenance comes
+with it (bloom-in-tree.md §7). The split is on disk only — the loader
+merges them, so everything downstream still reads the request's variants
+and chosen take.
 Reproducibility of the recipe is the contract; the committed bits are
 the artifact. (For SuperCollider the "recipe" is the program plus an
 explicit seed, and it *is* reproducible, which is why `supercollider` is
@@ -295,22 +309,27 @@ that fills it. Running that on an existing takeless recipe fills it in
 place, reading the request from the file instead of the command line, so
 the flags that describe content are refused there as a second answer.
 
-Concretely: `field generate <name> --song <song> --prompt …` runs the
-model through its worker and writes `songs/<song>/sounds/<name>.yaml`
-plus numbered variant WAVs under `audio/<name>/`. One verb covers both
+Concretely: `field generate <name> --song <song>` fills the request that
+name means — a gen node's entry, or a sound — writing numbered variant
+WAVs and `variants.yaml` under `audio/<name>/`; with content flags and a
+name that is neither, it creates a new sound recipe (transitional, as
+`sounds/` is). One verb covers both
 generators: `--prompt` is music, through field-aced, and `--text` is a
-voice line, through field-voiced — the recipe's `model:` records which
+voice line, through field-voiced — the takes' `model:` records which
 one ran, and its flags are the ones its kind takes (a voice line has no
 `--bars`, because its length follows from the text). A voice line may
-name the committed recording that defines its voice with `--voice-ref
-<asset>`, recorded as a name *and* the hash of the bytes read, or omit
-it for the model's own voice. The sound is a
-schema-validated project file — `field check` verifies variant hashes,
-`field fmt` covers it — and each variant auditions as
-`//songs/<song>/sound:<name>-<n>` via `field play`. Generating records
-`chosen: 1`, so the sound resolves as soon as it has takes; `field choose
+name the committed recording that defines its voice with `voice_ref`,
+recorded as a name *and* the hash of the bytes read, or omit
+it for the model's own voice — an entry authors both up front, and the
+run verifies the hash rather than writing it back. Every file involved
+is schema-validated — `field check` verifies variant hashes,
+`field fmt` covers them — and each variant auditions as
+`//songs/<song>/gen:<name>-<n>` (or `sound:<name>-<n>`) via `field
+play`. Generating records
+`chosen: 1`, so the request resolves as soon as it has takes; `field choose
 <name> --variant <n>` moves `chosen:` to a different one, and from then
-on the sound's own label resolves to that variant — entries say
-`sound: <name>` and follow every re-choose, a one-line diff. Nothing
+on the node's own label resolves to that variant — every placement of
+the entry (or every `sound: <name>` entry, transitionally) follows a
+re-choose as a one-line diff. Nothing
 is copied into a ledger, and nothing ever regenerates mechanically:
 generating over takes that already exist is refused, not merged.
