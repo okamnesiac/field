@@ -20,8 +20,9 @@ import { renderableTrack } from '../generators/stem.js';
 
 export interface Placement {
   track: string; // the placed track's name
-  at: number; // ticks
+  at: number; // ticks, whatever the placement's anchor was
   bars: string; // bar.beat.tick, projected through the song's meter map
+  absolute: boolean; // pinned to time rather than to the grid
   gainDb: number;
   pan: number;
 }
@@ -46,14 +47,24 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
     throw new Error(`"${SONG_OUTPUT_NAME}" in ${songName} is not an audio track`);
   }
   const meter = song.tempo ? new MeterMap(song.tempo.data.meter) : undefined;
+  const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  const tempo = song.tempo ? new TempoMap(song.tempo.data.tempo, rate) : undefined;
   const placements: Placement[] = [];
   for (const input of output.data.inputs ?? []) {
     // Placements name a track; anything else on `inputs:` is not structure.
     const name = trackRefName(input.track) ?? input.track;
+    // `at` is ticks when the placement is musical and samples when it is
+    // absolute (schema/track.ts). Formatting samples through the meter map
+    // is not a rounding error — a placement one second in came out as bar
+    // 13 of an eight-bar song, which is the same class of lie this command
+    // exists to stop telling.
+    const absolute = input.anchor === 'absolute';
+    const at = absolute ? (tempo ? tempo.samplesToTicks(input.at) : input.at) : input.at;
     placements.push({
       track: name,
-      at: input.at,
-      bars: meter ? meter.format(input.at) : String(input.at),
+      at,
+      bars: meter && (!absolute || tempo) ? meter.format(at) : String(at),
+      absolute,
       gainDb: input.gain_db,
       pan: input.pan,
     });
@@ -92,9 +103,10 @@ export function formatArrangement(view: ArrangementView, project: LoadedProject)
     ]
       .filter(Boolean)
       .join(', ');
-    lines.push(
-      `  ${p.bars.padEnd(width)}${seconds}  ${p.track}${level ? `  (${level})` : ''}`,
-    );
+    // An absolute placement is pinned to time, so its bar reading moves if
+    // the tempo map does. Saying which it is costs four characters.
+    const note = [p.absolute ? 'absolute' : '', level].filter(Boolean).join(', ');
+    lines.push(`  ${p.bars.padEnd(width)}${seconds}  ${p.track}${note ? `  (${note})` : ''}`);
   }
   return lines.join('\n');
 }

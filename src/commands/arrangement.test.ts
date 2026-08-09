@@ -99,6 +99,33 @@ describe('field arrangement', () => {
     expect(after).toContain('11.1.1');
   });
 
+  it('reads an absolute placement in time, not as if its samples were ticks', () => {
+    // `at` is ticks when the placement is musical and samples when it is
+    // absolute. Formatting samples through the meter map is not a rounding
+    // error: 48000 samples is one second, and it came out as bar 13 of an
+    // eight-bar song — the same class of lie this command exists to stop.
+    writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [8]\nloop: true\n');
+    track('child', 'name: child\ntype: audio\nclips: []\n');
+    track(
+      'main',
+      [
+        'name: main',
+        'type: audio',
+        'inserts: []',
+        'inputs:',
+        '  - track: child',
+        '    anchor: absolute',
+        '    at: 48000',
+        'clips: []',
+        '',
+      ].join('\n'),
+    );
+    const out = arrangement(root, 'creek');
+    // One second at the scaffolded 120 bpm in 4/4 is half a bar: beat 3.
+    expect(out).toContain('1.3.1 0:01.0  child  (absolute)');
+    expect(out).not.toContain('13.');
+  });
+
   it('says so when the output track places nothing', () => {
     expect(arrangement(root, 'creek')).toContain('nothing placed');
   });
