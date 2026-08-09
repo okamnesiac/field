@@ -128,7 +128,7 @@ describe('build', () => {
     const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);
     // Every outcome names a playable path — watch hands any label's fresh
     // artifact to the daemon, including committed content.
-    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad.wav')).toBe(true);
+    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad/pad.wav')).toBe(true);
     // ...and says the path is a source it never produced, which `cached`
     // alone cannot distinguish from a cache hit.
     expect(outcomes[0]!.committed).toBe(true);
@@ -296,7 +296,7 @@ describe('build', () => {
 
   it('refuses to build when input bytes disagree with the declaration', async () => {
     const { state, runner } = countingRunner();
-    const assetPath = join(root, 'songs/creek/audio/pad.wav');
+    const assetPath = join(root, 'songs/creek/audio/pad/pad.wav');
     const original = readFileSync(assetPath);
     writeFileSync(assetPath, Buffer.concat([original, Buffer.from([0, 0])]));
     await expect(
@@ -534,7 +534,7 @@ describe('play resolution', () => {
       '//songs/creek/asset:pad',
       '//songs/creek/sound:pad-normalized',
     ]);
-    expect(items[0]!.path).toBe(join(root, 'songs/creek/audio/pad.wav'));
+    expect(items[0]!.path).toBe(join(root, 'songs/creek/audio/pad/pad.wav'));
     expect(existsSync(items[1]!.path)).toBe(true);
     expect(state.runs).toBe(1); // the rule target was built
   });

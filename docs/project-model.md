@@ -57,7 +57,8 @@ project/
 │       ├── comps/
 │       ├── midi/
 │       ├── audio/        # ALL committed song sound (LFS): recorded,
-│       │                 # imported, generated (variants in audio/<sound>/)
+│       │                 # imported, generated — a directory per item
+│       │                 # (audio/<name>/, project-layout.md §4.11)
 │       ├── automation/
 │       ├── assets.yaml   # the song's ledger
 │       └── monitoring/

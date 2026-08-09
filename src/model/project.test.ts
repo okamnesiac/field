@@ -119,9 +119,9 @@ describe('import', () => {
     const src = sourceFile('hello audio');
     const result = await importAsset(root, 'opener', src, 'first-take');
 
-    expect(result.file).toBe('audio/first-take.wav');
+    expect(result.file).toBe('audio/first-take/first-take.wav');
     expect(result.sha256).toBe(sha256Text('hello audio'));
-    expect(existsSync(join(root, 'songs/opener/audio/first-take.wav'))).toBe(true);
+    expect(existsSync(join(root, 'songs/opener/audio/first-take/first-take.wav'))).toBe(true);
     expect((await check(root)).ok).toBe(true);
     rmSync(src);
   });
@@ -170,7 +170,7 @@ describe('import', () => {
     createSong(root, 'opener');
     const src = sourceFile('kick bytes');
     await importAsset(root, 'opener', src, 'kick');
-    // Hand-rename the entry's name; its file still references audio/kick.wav.
+    // Hand-rename the entry's name; its file still references the kick item.
     const assetsPath = join(root, 'songs/opener/assets.yaml');
     writeFileSync(assetsPath, readFileSync(assetsPath, 'utf8').replace('name: kick', 'name: kick-alt'));
     expect((await check(root)).ok).toBe(true);
@@ -179,7 +179,7 @@ describe('import', () => {
     await expect(importAsset(root, 'opener', other, 'kick')).rejects.toThrow(
       'already belongs to a declared asset',
     );
-    expect(readFileSync(join(root, 'songs/opener/audio/kick.wav'), 'utf8')).toBe('kick bytes');
+    expect(readFileSync(join(root, 'songs/opener/audio/kick/kick.wav'), 'utf8')).toBe('kick bytes');
     expect((await check(root)).ok).toBe(true);
     rmSync(src);
     rmSync(other);
@@ -190,19 +190,19 @@ describe('import', () => {
     const src = sourceFile('kick bytes');
     await importAsset(root, 'opener', src, 'kick');
     const assetsPath = join(root, 'songs/opener/assets.yaml');
-    // "./audio/kick.wav" resolves identically and passes check; the guard
-    // must compare resolved paths, not strings.
+    // "./audio/kick/kick.wav" resolves identically and passes check; the
+    // guard must compare resolved paths, not strings.
     writeFileSync(
       assetsPath,
       readFileSync(assetsPath, 'utf8')
         .replace('name: kick', 'name: kick-alt')
-        .replace('file: audio/kick.wav', 'file: ./audio/kick.wav'),
+        .replace('file: audio/kick/kick.wav', 'file: ./audio/kick/kick.wav'),
     );
     const other = sourceFile('other bytes');
     await expect(importAsset(root, 'opener', other, 'kick')).rejects.toThrow(
       'already belongs to a declared asset',
     );
-    expect(readFileSync(join(root, 'songs/opener/audio/kick.wav'), 'utf8')).toBe('kick bytes');
+    expect(readFileSync(join(root, 'songs/opener/audio/kick/kick.wav'), 'utf8')).toBe('kick bytes');
     rmSync(src);
     rmSync(other);
   });
@@ -220,7 +220,7 @@ describe('import', () => {
     createSong(root, 'opener');
     const src = sourceFile();
     const result = await importAsset(root, 'opener', src, 'first');
-    expect(result.file).toBe('audio/first.wav');
+    expect(result.file).toBe('audio/first/first.wav');
     rmSync(src);
   });
 
@@ -356,7 +356,7 @@ describe('check', () => {
     createSong(root, 'opener');
     const src = sourceFile('original bytes');
     await importAsset(root, 'opener', src, 'take-one');
-    writeFileSync(join(root, 'songs/opener/audio/take-one.wav'), 'tampered bytes');
+    writeFileSync(join(root, 'songs/opener/audio/take-one/take-one.wav'), 'tampered bytes');
     const result = await check(root);
     expect(result.diagnostics.map((d) => d.message).join()).toContain(
       'does not match its recorded sha256',

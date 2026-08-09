@@ -49,8 +49,15 @@ export async function importAsset(
 
   const ext = extname(sourcePath).toLowerCase();
   // Forward slashes always: the manifest format is platform-neutral.
-  const file = `audio/${assetName}${ext}`;
-  const destPath = join(songDir, 'audio', `${assetName}${ext}`);
+  //
+  // Every audio item is a directory (project-layout.md §4.11): the
+  // original goes in as audio/<name>/<name>.<ext> so derived forms —
+  // resampled versions, when multi-rate needs them — land beside it
+  // rather than as flat siblings whose relation is spelled in the
+  // filename. Consumers resolve through the manifest's `file`, so a
+  // ledger written before this rule keeps working as declared.
+  const file = `audio/${assetName}/${assetName}${ext}`;
+  const destPath = join(songDir, 'audio', assetName, `${assetName}${ext}`);
 
   const assetsPath = join(songDir, 'assets.yaml');
   let doc: Document;
@@ -91,7 +98,7 @@ export async function importAsset(
     throw new Error(`${file} already belongs to a declared asset in "${song}"`);
   }
 
-  mkdirSync(join(songDir, 'audio'), { recursive: true });
+  mkdirSync(join(songDir, 'audio', assetName), { recursive: true });
   copyFileSync(sourcePath, destPath);
   const sha256 = await sha256File(destPath);
   const bytes = statSync(destPath).size;
