@@ -1,8 +1,8 @@
 # Plan: bloom moves into field
 
-**Status:** Chunk 1 shipped (2026-08-08); chunk 2, the copy, is next.
-bloom is still deliberately untouched — nothing in it changes before it
-moves.
+**Status:** Chunks 1 and 2 shipped (2026-08-08). The example lives at
+`examples/bloom`; chunk 3 wires it into CI, which is what the whole plan
+was for, and chunk 4 deletes `okamnesiac/bloom`.
 
 **Goal:** bloom lives at `examples/bloom` in this repo, and CI runs
 `field check` against it, so a change that breaks the only real project
@@ -34,11 +34,13 @@ the coordination problem with an extra step.
 
 ## 2 Decisions (DECIDED, 2026-08-08)
 
-1. **A copy, not a migration.** bloom's 33 commits stay in
-   `okamnesiac/bloom`, archived read-only, linked from
-   `examples/bloom/README.md`. Losing `git blame` on a track file is a
-   real cost and the ruleset makes it unavoidable; naming where the
-   history went is what makes it survivable.
+1. **A copy, and the history goes.** `okamnesiac/bloom` is deleted rather
+   than archived. This started out planning to keep the old repo read-only
+   and link it, on the theory that losing `git blame` on a track file
+   needed compensating for; it does not. bloom is an example project whose
+   33 commits record how the format was exercised while it was being
+   built, and none of that is worth a second repository to point at.
+   Updated 2026-08-08.
 
 2. **`examples/` is the right word.** Nothing in bloom is real music —
    creek exists to exercise the format. A directory that says "example"
@@ -178,15 +180,15 @@ is never a window where the two repos disagree about it.
    copies them, which is the migration. Until then the retirement
    messages say what to change, so the repo is stale rather than
    mysterious.
-2. **The move.** Copy bloom to `examples/bloom` without its audio, add the
-   gitignores, and do §4's substitutions in the copy: drop `water` from
-   both scopes as §4 lists, and replace `seven-eight-loop` with a
-   `supercollider` sound. A README points at the archived repo for
-   history.
+2. **The move** — done. bloom copied to `examples/bloom` without its
+   audio: 36 files, none of them a WAV. §4's substitutions applied in the
+   copy, both ledgers gone with the last pins they held, the two
+   generative recipes shipped takeless, and the README rewritten for a
+   project whose audio you generate.
 3. **CI.** `field check` on `examples/bloom` in the existing linux job.
    This is the chunk the whole plan is for, so it is worth confirming it
    fails: break a schema on a branch and watch the example catch it.
-4. **Archive `okamnesiac/bloom`** read-only, once the copy is proven.
+4. **Delete `okamnesiac/bloom`**, once the copy is proven.
 
 ## 6 Definition of done
 

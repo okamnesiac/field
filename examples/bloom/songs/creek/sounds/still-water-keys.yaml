@@ -1,0 +1,15 @@
+# the generated keys: a deliberate sound, waiting for its takes. Nothing
+# in the build may run this — generation is human-triggered
+# (project-layout.md §1.2) — so it stays empty until you ask:
+#
+#   field generate still-water-keys --song creek --seed 90210 --variants 2
+#
+# The prompt and the length below are the request; the flags that would
+# describe them again are refused, because this file already says it.
+name: still-water-keys
+type: generative
+prompt: dreamy electric piano chords, sparse and warm, minor key, ambient, gentle
+bpm: 96
+duration_seconds: 10
+bars: 4
+variants: []

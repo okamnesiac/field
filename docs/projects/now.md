@@ -8,8 +8,8 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [bloom moves into field](all/bloom-in-tree.md) — the example lives at
   `examples/bloom` and CI checks it, so breaking the only real project
-  using the format fails in the PR that does it. Chunk 1 done; the copy
-  itself is next.
+  using the format fails in the PR that does it. Copied in; CI is the
+  chunk that makes the sentence above true.
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; sequenced before
   the real-time engine because it changes the model the engine renders.

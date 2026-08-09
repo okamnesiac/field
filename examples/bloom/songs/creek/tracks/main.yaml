@@ -1,0 +1,21 @@
+name: main
+type: audio
+inserts:
+  # the limiter guards the ceiling; the hand-tuned -1 dB gain retires
+  - effect: limit
+    ceiling_db: -1
+inputs:
+  - track: drums
+    at: 0
+  - track: keys
+    at: 0
+    gain_db: -4 # scratch level while auditioning variants
+    pan: 0.2 # a touch right, opposite the pad
+  - track: lead-vocal
+    at: 0
+    gain_db: 3
+    pan: 0.2 # a touch right, opposite the pad
+  - track: pad
+    at: 0
+    gain_db: -6 # the bed sits under both the vocal and the beat
+    pan: -0.2 # a touch left, opposite the vocal

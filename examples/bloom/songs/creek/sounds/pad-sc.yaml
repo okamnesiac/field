@@ -1,0 +1,7 @@
+# the pad as a recipe: code + seed instead of committed bytes
+name: pad-sc
+type: supercollider
+source: still-water-pad.scd
+seed: 90210
+duration: 10
+channels: 2

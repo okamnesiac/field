@@ -1,0 +1,3 @@
+name: creek
+length: [12] # twelve bars: three passes of the keys phrase
+loop: true # the render is one seamless pass of the infinite loop

@@ -1,0 +1,5 @@
+sections:
+  - name: intro
+    at: [1]
+  - name: groove
+    at: [3]
