@@ -6,8 +6,10 @@ placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
 finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
 (#76) and `field explain` now answers the level question (§12). Chunk 2
-is done too — a track carries its own tempo and meter (§13). Still open:
-sends (chunk 4) and folding `sounds/` in (chunk 6). The chunk order
+is done too — a track carries its own tempo and meter (§13). Sends
+(chunk 4) are deferred to the real-time engine, which is where an edge
+that carries no offset stops needing offsets invented for it (§14), so
+what is left here is folding `sounds/` in (chunk 6). The chunk order
 changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -402,6 +404,13 @@ mix that renders to the same audio as the flat version did — or better,
 with a written reason for any difference. `field check` catches a send
 that reaches into itself and names it.
 
+Amended 2026-08-08: the two sends clauses — the shared reverb and the
+reach-into-itself message — move to the real-time engine with §7 chunk 4,
+for the reason in §14. Everything else here is met: creek is three
+placements of one `phrase` (§10), the pad and the lead vocal span above
+them, and the restructure was measured against the flat version at
+−144 dBFS with the two seams accounted for.
+
 ## 9 Sequencing, revised (2026-08-08)
 
 §7's chunk 1 is the migration — express creek as it is today, at depth
@@ -684,3 +693,49 @@ meter, which is right for every project today and wrong the moment the
 output track itself declares `time:`. It is a two-line fix in the same
 place §11's length header already reads the map from, and it waits until
 there is a project that can tell the difference.
+
+## 14 Sends wait for the real-time engine (2026-08-08)
+
+§7 chunk 4 is deferred until the engine
+([audio-engine.md](../../audio-engine.md)) exists, which already lists
+`routing/buses/sends` among its responsibilities. Nothing in §1.7 or §1.8
+is withdrawn — the target rule, the cycle detection, the reach-into-itself
+message and level-not-offset all stand, and they are the specification for
+whoever builds it. What is deferred is building it *offline*.
+
+**What surfaced.** A send declares no `at` (§1.8), so an offline renderer
+has to derive one: at what offsets does the sent signal arrive? The
+motivating case in §1.7 is `snare` inside `verse` with `verse` placed at
+bars 5 and 13, and the answer there is clearly "both" — the send delivers
+the source at every offset it occupies, which is §12's `reaches` walk
+carrying offsets instead of gains. But that only fixes the *source* side.
+The target has placements too, and if a plate is itself placed at bar 3,
+the offsets are either measured from the song (right, and then the plate's
+own placement must be forbidden from mattering) or from the target
+(wrong — moving a reverb bus would slide the reverb off the sound it is
+reverberating). Every rule that makes the first one work amounts to
+refusing most targets by name, which is a type distinction reintroduced
+through validation after decision 1 removed it from the schema.
+
+**Why that is the feature telling us something rather than a puzzle to
+solve.** §1.8 already says a send "routes *signal*, computed as it goes",
+and warns that faking it offline is "the trap: a project would render one
+way and play another". That argument was made about negative delay; it
+applies to the whole edge. A placement expresses a *position* and a send
+expresses *flow*, and offsets are how an offline model spells position —
+so an offline send is the one construct in this design that has to be
+translated into a vocabulary it does not share. In real time the question
+does not arise: there are no offsets, the signal arrives when it arrives,
+and the level is the only thing the edge ever carried.
+
+**This does not undo §9's sequencing.** Nesting went before the engine
+because it changes the model the engine renders, and that is still why
+chunks 1–3 and the local timelines landed first. Sends do not change that
+model — they add an edge kind on top of a containment graph that is
+already built and already rendering. Adding one later costs nothing that
+adding it now would have saved, and adding it now costs a set of offline
+alignment rules that the engine would immediately make wrong.
+
+**Consequence for §8.** The definition of done loses its sends clause
+until then; see the note there. What remains of this plan is chunk 6,
+folding `sounds/` in.
