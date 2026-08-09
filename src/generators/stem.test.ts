@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import { buildLabels, queryDeps } from '../commands/build.js';
+import { sha256Text } from '../hash.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
@@ -946,6 +947,66 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
         (d) => d.message.includes('program') && d.message.includes('not found'),
       ),
     ).toBe(true);
+  });
+
+  function writeGenerativeTakes(name: string, contents: string[], chosen?: number): void {
+    mkdirSync(join(root, `songs/creek/audio/${name}`), { recursive: true });
+    const rows = contents.map((content, i) => {
+      writeFileSync(join(root, `songs/creek/audio/${name}/${i + 1}.wav`), content);
+      return (
+        `  - file: audio/${name}/${i + 1}.wav\n    model: acestep-v15-turbo\n` +
+        `    seed: ${7 + i}\n    sha256: ${sha256Text(content)}\n` +
+        `    generated_at: 2026-08-05T21:00:00.000Z\n`
+      );
+    });
+    writeFileSync(
+      join(root, `songs/creek/audio/${name}/variants.yaml`),
+      `gen: ${name}\n` +
+        (chosen !== undefined ? `chosen: ${chosen}\n` : '') +
+        `variants:\n${rows.join('')}`,
+    );
+  }
+
+  const GENERATIVE_ENTRY = [
+    'inputs:',
+    '  - generative:',
+    '      prompt: soft rain over a warm pad',
+    '      bpm: 96',
+    '      duration_seconds: 10',
+  ];
+
+  it('a generative leaf resolves to its chosen take and never runs', async () => {
+    writeTrack('rain-pad', GENERATIVE_ENTRY);
+    writeGenerativeTakes('rain-pad', ['take one', 'take two'], 2);
+    writeTrack('ambience', ['inputs:', '  - track: rain-pad']);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    // Same three-line shape a supercollider leaf has — the gen node is
+    // committed content here rather than a rule, but it is a node.
+    expect(queryDeps(root, 'deps(//songs/creek/track:ambience)')).toEqual([
+      '//songs/creek/gen:rain-pad',
+      '//songs/creek/track:rain-pad',
+      '//songs/creek/track:ambience',
+    ]);
+    const runs: string[] = [];
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
+      runs.push(formatLabel(node.label));
+      writeFileSync(outputPath, 'render');
+    };
+    await buildLabels(root, ['//songs/creek/track:ambience'], runner);
+    // Only the stems run: the take is committed bytes, not an action —
+    // a gen label in this list would mean the build tried to run a
+    // deliberate generation, which nothing may (project-layout.md §1.2).
+    expect(runs).toEqual(['//songs/creek/track:rain-pad', '//songs/creek/track:ambience']);
+  });
+
+  it('a request with no takes fails resolution naming the fill command', async () => {
+    writeTrack('rain-pad', GENERATIVE_ENTRY);
+    const runner: GeneratorRunner = async (_node, _inputPaths, outputPath) => {
+      writeFileSync(outputPath, 'render');
+    };
+    await expect(buildLabels(root, ['//songs/creek/track:rain-pad'], runner)).rejects.toThrow(
+      /gen:rain-pad has no takes yet — field generate rain-pad --song creek/,
+    );
   });
 
   it('folding a sound into a track is a cache hit for the render', async () => {

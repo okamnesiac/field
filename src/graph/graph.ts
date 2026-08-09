@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { wavFrameCount } from '../audio/wav.js';
 import {
   formatLabel,
+  genRef,
   genRefName,
   matchesPattern,
   sharedAssetName,
@@ -199,20 +200,58 @@ export function buildGraph(project: LoadedProject): Graph {
     // step 2, option A — uniformly, whether the entry is a leaf's sole
     // content or windowed among siblings): //songs/<song>/gen:<name>,
     // named by the owning track, or <track>-<id> when the entry carries
-    // an id. The spec is the supercollider sound schema's shape with the
-    // entry's fields, so a sound folded into a track keeps its action
-    // key verbatim — name and type never reach a key (build.ts
-    // ruleParameters), and the parameters are identical by construction.
+    // an id. A supercollider entry becomes a rule: the spec is the
+    // supercollider sound schema's shape with the entry's fields, so a
+    // sound folded into a track keeps its action key verbatim — name and
+    // type never reach a key (build.ts ruleParameters), and the
+    // parameters are identical by construction. A generative entry is
+    // deliberate and contributes committed-content nodes exactly as a
+    // generative sound does, in the gen: package: its label resolves to
+    // the chosen take, every take is auditionable by number, and a
+    // request with no takes joins `ungenerated` so resolution fails
+    // naming the command that fills it.
     for (const file of song.tracks) {
       for (const entry of file.data.inputs) {
-        if (entry.supercollider === undefined) continue;
-        const name = generatorName(entry, file.data.name);
-        addRule(
-          { pkg: `${pkgBase}/gen`, name },
-          song.dir,
-          { name, type: 'supercollider', ...entry.supercollider },
-          refLabel,
-        );
+        if (entry.supercollider !== undefined) {
+          const name = generatorName(entry, file.data.name);
+          addRule(
+            { pkg: `${pkgBase}/gen`, name },
+            song.dir,
+            { name, type: 'supercollider', ...entry.supercollider },
+            refLabel,
+          );
+        } else if (entry.generative !== undefined) {
+          const name = generatorName(entry, file.data.name);
+          const takes = song.genTakes.get(name)?.data;
+          const variants = takes?.variants ?? [];
+          if (variants.length === 0) {
+            const label: Label = { pkg: `${pkgBase}/gen`, name };
+            ungenerated.set(formatLabel(label), { label, song: song.name, name });
+          }
+          variants.forEach((variant, i) => {
+            const label: Label = { pkg: `${pkgBase}/gen`, name: `${name}-${i + 1}` };
+            nodes.set(formatLabel(label), {
+              kind: 'generation',
+              label,
+              songDir: song.dir,
+              file: variant.file,
+              sha256: variant.sha256,
+            });
+          });
+          if (takes?.chosen !== undefined) {
+            const variant = variants[takes.chosen - 1]!;
+            const label: Label = { pkg: `${pkgBase}/gen`, name };
+            nodes.set(formatLabel(label), {
+              kind: 'generation',
+              label,
+              songDir: song.dir,
+              file: variant.file,
+              sha256: variant.sha256,
+            });
+            sha256BySource.set(genRef(name), variant.sha256);
+            fileBySource.set(genRef(name), { base: song.dir, file: variant.file });
+          }
+        }
       }
     }
     const renderable = song.tracks.map((t) => t.data);

@@ -3,6 +3,7 @@ import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 import { meterEventSchema, tempoEventSchema } from './song.js';
+import { generativeEntrySchema } from './sounds.js';
 
 // One list (nested-tracks.md §18): a track file is a name, an optional
 // `time:`, optional `inserts:`, and `inputs:`. Every entry places one
@@ -22,8 +23,9 @@ import { meterEventSchema, tempoEventSchema } from './song.js';
 // Generator entries are §18's third kind: authored spec inline, the
 // render minted as its own node under `gen:` (option A — uniformly,
 // whether the entry is a leaf's sole content or windowed among
-// siblings). `supercollider:` is here; `generative:` lands in the next
-// chunk with the takes migration.
+// siblings). `supercollider:` renders in-graph; `generative:` is
+// deliberate — its takes live beside the audio under the gen node's
+// name, and nothing in the build may run it (project-layout.md §1.2).
 //
 // Placement fields are uniform across kinds, because none of them means
 // something different depending on what produced the audio. A window is
@@ -74,6 +76,7 @@ export const inputEntrySchema = z
     audio: sourceRef.optional(), // ledger name, or //shared/asset:<name>
     sound: slug.optional(), // transitional; retires with sounds/
     supercollider: supercolliderEntrySchema.optional(), // an inline render
+    generative: generativeEntrySchema.optional(), // a deliberate request
     anchor: z.enum(['musical', 'absolute']).default('musical'),
     // Omitted means the track's start — the leaf case reads as bare
     // content (`- supercollider: {...}` with nothing else), and tick 0
@@ -98,15 +101,19 @@ export const inputEntrySchema = z
     source: z.never({ error: RETIRED_SOURCE }).optional(),
   })
   .superRefine((entry, ctx) => {
-    const kinds = [entry.track, entry.audio, entry.sound, entry.supercollider].filter(
-      (v) => v !== undefined,
-    );
+    const kinds = [
+      entry.track,
+      entry.audio,
+      entry.sound,
+      entry.supercollider,
+      entry.generative,
+    ].filter((v) => v !== undefined);
     if (kinds.length !== 1) {
       ctx.addIssue({
         code: 'custom',
         message:
           'an entry plays exactly one thing — name it with track:, audio:, ' +
-          'supercollider:, or (until sounds fold) sound:',
+          'supercollider:, generative:, or (until sounds fold) sound:',
       });
     }
   });
@@ -123,6 +130,7 @@ export const inputEntryOrder: KeyOrder = {
     'audio',
     'sound',
     'supercollider',
+    'generative',
     'anchor',
     'at',
     'duration',
@@ -136,6 +144,20 @@ export const inputEntryOrder: KeyOrder = {
   ],
   children: {
     supercollider: { keys: ['source', 'seed', 'duration', 'channels'] },
+    generative: {
+      keys: [
+        'prompt',
+        'text',
+        'voice_ref',
+        'voice_ref_sha256',
+        'exaggeration',
+        'conviction',
+        'lyrics',
+        'bpm',
+        'duration_seconds',
+        'bars',
+      ],
+    },
     at: { flow: true },
     duration: { flow: true },
     loop: { keys: ['enabled', 'every', 'mode', 'fade'], children: { every: { flow: true } } },

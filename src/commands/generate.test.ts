@@ -571,3 +571,89 @@ describe('field generate: filling a recipe that shipped without takes', () => {
     expect(recipe('topline').variants.map((v) => v.seed)).toEqual([7, 8]);
   });
 });
+
+describe('field generate: filling a generative entry (nested-tracks.md §18 step 3)', () => {
+  // The request lives in a track's inputs:, addressed by its gen node
+  // name; the run writes gen-keyed takes and must leave every authored
+  // file byte-identical.
+  function writeGenLeaf(): void {
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/creek/tracks/rain-pad.yaml'),
+      'name: rain-pad\ninputs:\n  - generative:\n      prompt: soft rain over a warm pad\n' +
+        '      bpm: 96\n      duration_seconds: 10\n',
+    );
+  }
+
+  it('fills by gen node name and leaves the track file untouched', async () => {
+    writeGenLeaf();
+    const trackPath = join(root, 'songs/creek/tracks/rain-pad.yaml');
+    const before = readFileSync(trackPath, 'utf8');
+    const result = await generateVariants(root, 'rain-pad', {
+      song: 'creek',
+      seed: 7,
+      variants: 2,
+    });
+    expect(result.pkg).toBe('gen');
+    expect(result.recipePath).toBe('songs/creek/tracks/rain-pad.yaml');
+    // The design constraint, asserted at the byte level: generating
+    // changes nothing about the track file.
+    expect(readFileSync(trackPath, 'utf8')).toBe(before);
+    // No recipe materializes in sounds/ — the entry is the recipe.
+    expect(existsSync(join(root, 'songs/creek/sounds/rain-pad.yaml'))).toBe(false);
+    const takes = readFileSync(
+      join(root, 'songs/creek/audio/rain-pad/variants.yaml'),
+      'utf8',
+    );
+    expect(takes).toContain('gen: rain-pad');
+    expect(takes).toContain('chosen: 1');
+    expect(takes).not.toContain('sound:');
+    expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('refuses flags that second-guess the entry', async () => {
+    writeGenLeaf();
+    await expect(
+      generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2, prompt: 'x' }),
+    ).rejects.toThrow('the entry already says what to generate');
+  });
+
+  it('refuses to refill an entry that has takes', async () => {
+    writeGenLeaf();
+    await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 1 });
+    await expect(
+      generateVariants(root, 'rain-pad', { song: 'creek', seed: 9, variants: 1 }),
+    ).rejects.toThrow('already has 1 take');
+  });
+
+  it('a supercollider node is built, not generated', async () => {
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/creek/tracks/kit.yaml'),
+      'name: kit\ninputs:\n  - supercollider:\n      source: kit.scd\n      seed: 1\n      duration: 2\n',
+    );
+    await expect(
+      generateVariants(root, 'kit', { song: 'creek', seed: 7, variants: 1 }),
+    ).rejects.toThrow('built by a rule, not generated');
+  });
+
+  it('choosing repoints the gen-keyed takes and nothing else', async () => {
+    writeGenLeaf();
+    await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2 });
+    const result = await chooseVariant(root, 'rain-pad', { song: 'creek', variant: 2 });
+    expect(result.previous).toBe(1);
+    const takes = readFileSync(
+      join(root, 'songs/creek/audio/rain-pad/variants.yaml'),
+      'utf8',
+    );
+    expect(takes).toContain('gen: rain-pad');
+    expect(takes).toContain('chosen: 2');
+    expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('choosing an unknown name says what namespaces were searched', async () => {
+    await expect(
+      chooseVariant(root, 'ghost', { song: 'creek', variant: 1 }),
+    ).rejects.toThrow('no sound or generator "ghost" in creek');
+  });
+});

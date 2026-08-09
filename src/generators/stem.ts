@@ -38,7 +38,9 @@ export function generatorName(entry: InputEntry, owner: string): string {
 // action key: refs are wiring, and the resolved plan is what hashes.
 export function entryRef(entry: InputEntry, owner: string): string {
   if (entry.track !== undefined) return trackRef(entry.track);
-  if (entry.supercollider !== undefined) return genRef(generatorName(entry, owner));
+  if (entry.supercollider !== undefined || entry.generative !== undefined) {
+    return genRef(generatorName(entry, owner));
+  }
   return entry.audio ?? entry.sound!;
 }
 
@@ -48,6 +50,7 @@ export function entryRef(entry: InputEntry, owner: string): string {
 export function entryLabel(entry: InputEntry): string {
   if (entry.id !== undefined) return entry.id;
   if (entry.supercollider !== undefined) return 'supercollider';
+  if (entry.generative !== undefined) return 'generative';
   return entry.track ?? entry.audio ?? entry.sound ?? '?';
 }
 

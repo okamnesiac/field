@@ -24,6 +24,7 @@ import { isSlug } from '../ids.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
 import { loadProject, lookupAsset, type LoadedProject } from '../model/project.js';
+import { generatorName } from '../generators/stem.js';
 import { takenSongNames } from '../model/namespace.js';
 import {
   generativeSoundSchema,
@@ -82,7 +83,12 @@ export interface GenerateOptions {
 }
 
 export interface GenerateResult {
+  // Where the request lives: sounds/<name>.yaml, or the track file whose
+  // generative entry this run filled (nested-tracks.md §18 step 3).
   recipePath: string; // project-relative
+  // Which package the takes audition under: sound:<name>-<n> for a
+  // sound, gen:<name>-<n> for an entry.
+  pkg: 'sound' | 'gen';
   files: string[]; // project-relative variant WAVs, seed order
   seeds: number[];
   model: string;
@@ -371,6 +377,77 @@ function fillableRecipe(
   };
 }
 
+// A generative entry is the same request living in a track's `inputs:`,
+// addressed by its gen node's name — the owning track's, or <track>-<id>
+// (nested-tracks.md §18 step 3). Filling it writes takes under that name
+// and touches nothing the author wrote: a track file reads the same
+// before and after generating, which is the constraint the audio/ split
+// serves. That is also why a voice entry carries `voice_ref_sha256` up
+// front (the schema pairs it with `voice_ref`) — the run *verifies* the
+// snapshot against it instead of writing it back into the file.
+interface EntryFill {
+  trackPath: string; // project-relative, for the result
+  voiceRefSha256?: string | undefined;
+  options: GenerateOptions;
+}
+
+function fillableEntry(
+  project: LoadedProject,
+  songDir: string,
+  name: string,
+  options: GenerateOptions,
+): EntryFill | undefined {
+  const song = project.songs.find((s) => s.name === options.song);
+  if (song === undefined) return undefined;
+  for (const track of song.tracks) {
+    for (const entry of track.data.inputs) {
+      if (entry.supercollider === undefined && entry.generative === undefined) continue;
+      if (generatorName(entry, track.data.name) !== name) continue;
+      if (entry.supercollider !== undefined) {
+        throw new Error(
+          `"${name}" is a supercollider generator in ${options.song} — it is built ` +
+            `by a rule, not generated`,
+        );
+      }
+      const recipe = entry.generative!;
+      const existing = readTakes(songDir, name);
+      if (existing !== undefined && existing.variants.length > 0) {
+        const n = existing.variants.length;
+        throw new Error(
+          `"${name}" already has ${n} take${n === 1 ? '' : 's'} in ${options.song} — ` +
+            `choose among them, or give the entry a new id for a fresh set`,
+        );
+      }
+      const supplied = CONTENT_FLAGS.filter(([key]) => options[key] !== undefined);
+      if (supplied.length > 0) {
+        const flags = supplied.map(([, flag]) => flag).join(', ');
+        throw new Error(
+          `the entry already says what to generate, so ${flags} would be a second answer — ` +
+            `drop ${supplied.length === 1 ? 'it' : 'them'}, or edit the entry`,
+        );
+      }
+      return {
+        trackPath: track.path,
+        voiceRefSha256: recipe.voice_ref_sha256,
+        options: {
+          ...options,
+          prompt: recipe.prompt,
+          text: recipe.text,
+          lyrics: recipe.lyrics,
+          bpm: recipe.bpm,
+          // Seconds win over bars, for the reason fillableRecipe gives.
+          durationSeconds: recipe.duration_seconds,
+          bars: recipe.duration_seconds === undefined ? recipe.bars : undefined,
+          voiceRef: recipe.voice_ref,
+          exaggeration: recipe.exaggeration,
+          conviction: recipe.conviction,
+        },
+      };
+    }
+  }
+  return undefined;
+}
+
 export async function generateVariants(
   root: string,
   name: string,
@@ -394,7 +471,12 @@ export async function generateVariants(
   // the two entry points converge here and a run cannot behave
   // differently depending on which one it arrived through.
   const fillable = fillableRecipe(songDir, recipeAbsolute, name, options);
-  const request = fillable?.options ?? options;
+  // A name that is not a sound may be a gen node (§18 step 3); only a
+  // name that is neither takes the create-from-flags path.
+  const entryFill = fillable === undefined
+    ? fillableEntry(project, songDir, name, options)
+    : undefined;
+  const request = fillable?.options ?? entryFill?.options ?? options;
   const kind = generationKind(request);
 
   // Musical time projects CLI-side; the worker never learns what a bar
@@ -416,16 +498,42 @@ export async function generateVariants(
   // the model-minutes get spent and the project lands check-red. Filling
   // a recipe mints no name for the sound itself: it already owns the one
   // it is named after, so only the audition labels are in question.
-  const taken = takenSongNames(songDir);
-  if (fillable !== undefined) taken.delete(name);
-  const minted = [name, ...Array.from({ length: request.variants }, (_, i) => `${name}-${i + 1}`)];
-  const collision = minted.find((n) => taken.has(n));
-  if (collision !== undefined) {
-    throw new Error(
-      `"${collision}" is already a name in ${request.song} — a song's names are one ` +
-        `namespace, and generating "${name}" with ${request.variants} variants would mint it ` +
-        `(pick a new name)`,
-    );
+  if (entryFill === undefined) {
+    const taken = takenSongNames(songDir);
+    if (fillable !== undefined) taken.delete(name);
+    const minted = [name, ...Array.from({ length: request.variants }, (_, i) => `${name}-${i + 1}`)];
+    const collision = minted.find((n) => taken.has(n));
+    if (collision !== undefined) {
+      throw new Error(
+        `"${collision}" is already a name in ${request.song} — a song's names are one ` +
+          `namespace, and generating "${name}" with ${request.variants} variants would mint it ` +
+          `(pick a new name)`,
+      );
+    }
+  } else {
+    // An entry's takes audition in the gen: package, so the pre-flight
+    // runs there: `${name}-<n>` must not be another generator's node
+    // name, for the same spent-model-minutes reason.
+    const song = project.songs.find((s) => s.name === request.song)!;
+    const genNames = new Set<string>();
+    for (const track of song.tracks) {
+      for (const entry of track.data.inputs) {
+        if (entry.supercollider === undefined && entry.generative === undefined) continue;
+        const n = generatorName(entry, track.data.name);
+        if (n !== name) genNames.add(n);
+      }
+    }
+    const collision = Array.from(
+      { length: request.variants },
+      (_, i) => `${name}-${i + 1}`,
+    ).find((n) => genNames.has(n));
+    if (collision !== undefined) {
+      throw new Error(
+        `"${collision}" is already a generator name in ${request.song} — generating ` +
+          `${request.variants} variants of "${name}" would mint it as an audition label ` +
+          `(rename a track or change an id)`,
+      );
+    }
   }
   // The reference recording, snapshotted before the worker starts: a
   // name in the song's namespace becomes the bytes the model reads and
@@ -443,6 +551,19 @@ export async function generateVariants(
       request.voiceRef === undefined
         ? undefined
         : await snapshotVoiceRef(project, request.song, request.voiceRef, scratch!);
+    // An entry's reference hash is authored, not filled in (the track
+    // file never changes on generate), so the snapshot verifies against
+    // it — a generate in a drifted voice is refused, not recorded.
+    if (
+      entryFill?.voiceRefSha256 !== undefined &&
+      reference !== undefined &&
+      reference.sha256 !== entryFill.voiceRefSha256
+    ) {
+      throw new Error(
+        `voice_ref "${request.voiceRef}" does not match the entry's voice_ref_sha256 — ` +
+          `refusing to generate in a drifted voice (re-import the recording, or update the hash)`,
+      );
+    }
     mkdirSync(outputDir, { recursive: true });
 
     const client =
@@ -511,7 +632,11 @@ export async function generateVariants(
       // The takes go beside their audio, never into the recipe — that is
       // what keeps generating from modifying a committed file
       // (bloom-in-tree.md §7).
-      writeTakes(songDir, name, { sound: name, chosen: CHOSEN_FIRST, variants });
+      writeTakes(songDir, name, {
+        ...(entryFill !== undefined ? { gen: name } : { sound: name }),
+        chosen: CHOSEN_FIRST,
+        variants,
+      });
 
       let doc: Document | undefined;
       if (fillable !== undefined) {
@@ -531,7 +656,7 @@ export async function generateVariants(
             );
           }
         }
-      } else {
+      } else if (entryFill === undefined) {
         // Parsed through the schema before writing — this command must never
         // emit a target `field check` would reject — and canonicalized so
         // `field fmt` is a no-op on fresh recipes.
@@ -572,7 +697,11 @@ export async function generateVariants(
       }
 
       return {
-        recipePath: join('songs', request.song, 'sounds', `${name}.yaml`),
+        recipePath:
+          entryFill !== undefined
+            ? entryFill.trackPath
+            : join('songs', request.song, 'sounds', `${name}.yaml`),
+        pkg: entryFill !== undefined ? 'gen' : 'sound',
         files,
         seeds: response.seeds,
         model: response.model,
@@ -626,21 +755,40 @@ export async function chooseVariant(
     throw new Error(`song "${options.song}" does not exist`);
   }
   const recipePath = join(songDir, 'sounds', `${name}.yaml`);
-  if (!existsSync(recipePath)) {
-    throw new Error(`no sound "${name}" in ${options.song}`);
-  }
-  const recipeDoc = parseDocument(readFileSync(recipePath, 'utf8'));
-  if (recipeDoc.errors.length > 0) {
-    throw new Error(`invalid YAML in ${name}.yaml: ${recipeDoc.errors[0]!.message}`);
-  }
-  const recipe = soundSchema.safeParse(recipeDoc.toJS());
-  if (!recipe.success) {
-    throw new Error(`sound ${name}.yaml is invalid; fix it before choosing (field check)`);
-  }
-  if (recipe.data.type !== 'generative') {
-    throw new Error(
-      `"${name}" is a ${recipe.data.type} sound — only deliberate generative sounds have variants to choose`,
-    );
+  if (existsSync(recipePath)) {
+    const recipeDoc = parseDocument(readFileSync(recipePath, 'utf8'));
+    if (recipeDoc.errors.length > 0) {
+      throw new Error(`invalid YAML in ${name}.yaml: ${recipeDoc.errors[0]!.message}`);
+    }
+    const recipe = soundSchema.safeParse(recipeDoc.toJS());
+    if (!recipe.success) {
+      throw new Error(`sound ${name}.yaml is invalid; fix it before choosing (field check)`);
+    }
+    if (recipe.data.type !== 'generative') {
+      throw new Error(
+        `"${name}" is a ${recipe.data.type} sound — only deliberate generative sounds have variants to choose`,
+      );
+    }
+  } else {
+    // Not a sound: a gen node, then (nested-tracks.md §18 step 3) — a
+    // generative entry minting this name in one of the song's tracks.
+    const project = loadProject(root);
+    const song = project.songs.find((s) => s.name === options.song)!;
+    let found = false;
+    for (const track of song.tracks) {
+      for (const entry of track.data.inputs) {
+        if (entry.supercollider === undefined && entry.generative === undefined) continue;
+        if (generatorName(entry, track.data.name) !== name) continue;
+        if (entry.supercollider !== undefined) {
+          throw new Error(
+            `"${name}" is a supercollider generator — it is built by a rule, ` +
+              `and has no takes to choose`,
+          );
+        }
+        found = true;
+      }
+    }
+    if (!found) throw new Error(`no sound or generator "${name}" in ${options.song}`);
   }
 
   const takesDoc = readTakesDoc(songDir, name);
