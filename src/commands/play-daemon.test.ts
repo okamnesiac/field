@@ -433,7 +433,7 @@ describe.skipIf(!binary)('field play through the daemon', () => {
 
     const lines = await transportStatusLines(root, project);
     expect(lines[0]).toMatch(/^playing {2}\d+\.\d+\.\d+ \(/);
-    expect(lines[1]).toContain('songs/creek/audio/long.wav');
+    expect(lines[1]).toContain('songs/creek/audio/long/long.wav');
 
     // Bar 3 at 120 bpm = 8 beats = 192000 samples.
     expect(await transportLocate(root, project, '3.1.1')).toBe('3.1.1 (0:04.0)');

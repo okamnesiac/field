@@ -204,7 +204,7 @@ describe('exportLabels', () => {
   it('exports committed sources too, straight from the song', async () => {
     const [asset] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
     expect(asset!.to).toBe(join(dest, 'creek-asset-pad-v1.wav'));
-    expect(asset!.from).toBe(join(root, 'songs/creek/audio/pad.wav'));
+    expect(asset!.from).toBe(join(root, 'songs/creek/audio/pad/pad.wav'));
   });
 
   it('a changed mix becomes the next version, and the old one survives', async () => {
@@ -331,7 +331,7 @@ describe('exportLabels', () => {
     // committed file when it consumes it as an input. Exporting it as
     // `current` would put different audio on the Desktop under a name
     // that says it matches the project.
-    writeFileSync(join(root, 'songs/creek/audio/pad.wav'), 'different audio entirely');
+    writeFileSync(join(root, 'songs/creek/audio/pad/pad.wav'), 'different audio entirely');
 
     await expect(
       exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner }),
@@ -350,7 +350,7 @@ describe('exportLabels', () => {
     writeWav(src);
     await importAsset(root, 'creek', src, 'aaa-first');
     rmSync(src);
-    writeFileSync(join(root, 'songs/creek/audio/pad.wav'), 'drifted after import');
+    writeFileSync(join(root, 'songs/creek/audio/pad/pad.wav'), 'drifted after import');
 
     await expect(
       exportLabels(root, ['//songs/creek/asset:aaa-first', '//songs/creek/asset:pad'], {

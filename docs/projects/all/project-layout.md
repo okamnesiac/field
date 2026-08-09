@@ -276,3 +276,21 @@ every existing citation stay stable.
     the action key, so stems re-key once — deterministic summing means
     they re-render byte-identically and mixes stay cached, same class
     as §4.4's supercollider re-key, free inside the same flag-day.
+11. **Every audio item is a directory (DECIDED, 2026-08-09).** An
+    item under `audio/` is a directory named for the item, holding
+    whatever belongs to it: `field import water.wav` writes
+    `audio/water/water.wav`, and a generative item's takes and
+    `variants.yaml` already lived this way (§1.4). One shape for both
+    halves of `audio/`, and the migration is cheapest now, before any
+    project accumulates imports. If a derived form of an item is ever
+    *committed*, the directory is where it belongs — but today's one
+    candidate is not one: a resampled placement is a conversion node,
+    content-addressed in the cache and never committed
+    ([multi-rate.md](multi-rate.md) §2.4), which is also how the
+    `vocal-48k`-style wrapper retires (§2.6). Rejected: flat files
+    until a second file per item exists — the generative half already
+    set the convention, and one shape for both halves is worth having
+    on its own. Consumers resolve an asset through the ledger's
+    `file` field, so ledgers written before this rule keep working as
+    declared — the rule governs what `field import` writes, not what
+    `check` accepts.
