@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { wavFrameCount } from '../audio/wav.js';
 import {
   formatLabel,
+  genRefName,
   matchesPattern,
   sharedAssetName,
   SHARED_ASSETS_PKG,
@@ -12,7 +13,7 @@ import {
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
-import { entryRef, planTrack } from '../generators/stem.js';
+import { entryRef, generatorName, planTrack } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -146,11 +147,13 @@ export function buildGraph(project: LoadedProject): Graph {
     const refLabel = (ref: string): Label => {
       const shared = sharedAssetName(ref);
       if (shared !== undefined) return { pkg: SHARED_ASSETS_PKG, name: shared };
-      // A placed track (nested-tracks.md §1.3) — the one ref that is not
-      // a name in the song's namespace, hence the one that carries its
-      // package with it.
+      // A placed track (nested-tracks.md §1.3) — a ref that is not a
+      // name in the song's namespace, hence one that carries its
+      // package with it. A generator entry's node is the same shape.
       const placed = trackRefName(ref);
       if (placed !== undefined) return { pkg: `${pkgBase}/track`, name: placed };
+      const gen = genRefName(ref);
+      if (gen !== undefined) return { pkg: `${pkgBase}/gen`, name: gen };
       if (assetNames.has(ref)) return { pkg: `${pkgBase}/asset`, name: ref };
       return { pkg: `${pkgBase}/sound`, name: ref };
     };
@@ -192,6 +195,26 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel);
       }
     }
+    // Generator entries mint their own nodes (nested-tracks.md §18
+    // step 2, option A — uniformly, whether the entry is a leaf's sole
+    // content or windowed among siblings): //songs/<song>/gen:<name>,
+    // named by the owning track, or <track>-<id> when the entry carries
+    // an id. The spec is the supercollider sound schema's shape with the
+    // entry's fields, so a sound folded into a track keeps its action
+    // key verbatim — name and type never reach a key (build.ts
+    // ruleParameters), and the parameters are identical by construction.
+    for (const file of song.tracks) {
+      for (const entry of file.data.inputs) {
+        if (entry.supercollider === undefined) continue;
+        const name = generatorName(entry, file.data.name);
+        addRule(
+          { pkg: `${pkgBase}/gen`, name },
+          song.dir,
+          { name, type: 'supercollider', ...entry.supercollider },
+          refLabel,
+        );
+      }
+    }
     const renderable = song.tracks.map((t) => t.data);
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
@@ -201,7 +224,7 @@ export function buildGraph(project: LoadedProject): Graph {
       for (const track of renderable) {
         for (const entry of track.inputs) {
           if (entry.loop?.enabled && entry.loop.every === undefined) {
-            const ref = entryRef(entry);
+            const ref = entryRef(entry, track.name);
             const committed = fileBySource.get(ref);
             if (committed !== undefined && !framesBySource.has(ref)) {
               framesBySource.set(

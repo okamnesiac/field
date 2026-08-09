@@ -8,6 +8,7 @@ import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import type { GeneratorRunner } from '../graph/build.js';
+import { formatLabel } from '../labels.js';
 import { loadProject } from '../model/project.js';
 import { trackSchema, type Track } from '../schema/index.js';
 import { TempoMap } from '../time/tempo.js';
@@ -804,6 +805,203 @@ describe('clips over rule outputs', () => {
     writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
+  });
+});
+
+describe('generator entries (nested-tracks.md §18 step 2)', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'field-gen-'));
+    init({ dir: root, name: 'test-album' });
+    createSong(root, 'creek');
+    mkdirSync(join(root, 'shared/instruments'), { recursive: true });
+    writeFileSync(join(root, 'shared/instruments/creek-kit.scd'), 'Out.ar(0, Silent.ar(2));\n');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeTrack(name: string, body: string[]): void {
+    writeFileSync(
+      join(root, `songs/creek/tracks/${name}.yaml`),
+      [`name: ${name}`, ...body, ''].join('\n'),
+    );
+  }
+
+  const SC_ENTRY = [
+    'inputs:',
+    '  - supercollider:',
+    '      source: creek-kit.scd',
+    '      seed: 4096',
+    '      duration: 5',
+  ];
+
+  it('mints a node under gen:, named by the owning track', () => {
+    writeTrack('kit-sc', SC_ENTRY);
+    writeTrack('kit-punch', ['inputs:', '  - track: kit-sc']);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    // The deps() shape option A promised: render, stem, consumer.
+    expect(queryDeps(root, 'deps(//songs/creek/track:kit-punch)')).toEqual([
+      '//songs/creek/gen:kit-sc',
+      '//songs/creek/track:kit-sc',
+      '//songs/creek/track:kit-punch',
+    ]);
+  });
+
+  it('an id names the node <track>-<id>, which is what two generators need', () => {
+    writeTrack('texture', [
+      'inputs:',
+      '  - id: shimmer',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+      '  - supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 8',
+      '      duration: 3',
+    ]);
+    expect(loadProject(root).diagnostics).toEqual([]);
+    expect(queryDeps(root, 'deps(//songs/creek/track:texture)')).toEqual([
+      '//songs/creek/gen:texture',
+      '//songs/creek/gen:texture-shimmer',
+      '//songs/creek/track:texture',
+    ]);
+  });
+
+  it('two generators without ids collide, and the message says to add them', () => {
+    writeTrack('texture', [
+      'inputs:',
+      '  - supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+      '  - supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 8',
+      '      duration: 3',
+    ]);
+    expect(
+      loadProject(root).diagnostics.some((d) =>
+        d.message.includes('give each an id so its render has a name of its own'),
+      ),
+    ).toBe(true);
+  });
+
+  it('a duplicate id is one mistake, one message — the name collision stays quiet', () => {
+    writeTrack('texture', [
+      'inputs:',
+      '  - id: a',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+      '  - id: a',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 8',
+      '      duration: 3',
+    ]);
+    const { diagnostics } = loadProject(root);
+    expect(diagnostics.some((d) => d.message.includes('duplicate input id "a"'))).toBe(true);
+    // The collision the duplicate causes must not be re-diagnosed with
+    // advice to add ids that are already there.
+    expect(diagnostics.some((d) => d.message.includes('give each an id'))).toBe(false);
+  });
+
+  it('a cross-track name collision names both tracks', () => {
+    // `kit-sc` with `id: b` and a track literally named `kit-sc-b` both
+    // mint gen:kit-sc-b. Neither entry is missing an id, so the in-track
+    // advice would be false; the message must name the other file.
+    writeTrack('kit-sc', [
+      'inputs:',
+      '  - id: b',
+      '    supercollider:',
+      '      source: creek-kit.scd',
+      '      seed: 7',
+      '      duration: 3',
+    ]);
+    writeTrack('kit-sc-b', SC_ENTRY);
+    const { diagnostics } = loadProject(root);
+    const collisions = diagnostics.filter((d) => d.message.includes('"kit-sc-b"'));
+    expect(collisions).toHaveLength(1);
+    const seen = collisions[0]!.file + ' ' + collisions[0]!.message;
+    expect(seen).toContain('tracks/kit-sc.yaml');
+    expect(seen).toContain('tracks/kit-sc-b.yaml');
+    expect(collisions[0]!.message).not.toContain('give each an id');
+  });
+
+  it('validates the program path exactly as a sound file would', () => {
+    writeTrack('kit-sc', [
+      'inputs:',
+      '  - supercollider:',
+      '      source: ghost.scd',
+      '      seed: 1',
+      '      duration: 2',
+    ]);
+    expect(
+      loadProject(root).diagnostics.some(
+        (d) => d.message.includes('program') && d.message.includes('not found'),
+      ),
+    ).toBe(true);
+  });
+
+  it('folding a sound into a track is a cache hit for the render', async () => {
+    // The §18 claim made falsifiable: name and type never reach an
+    // action key, and the entry's parameters are the sound schema's
+    // fields verbatim — so the fold re-renders nothing. The counting
+    // runner writes fixed bytes, which also proves the consumer stays
+    // cached: its input hashes cannot move when the render is a hit.
+    const state = { runs: [] as string[] };
+    const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
+      // Full labels: gen:kit-sc and track:kit-sc share a name, and the
+      // whole point is which of them the third run is.
+      state.runs.push(formatLabel(node.label));
+      writeFileSync(outputPath, 'render');
+    };
+    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/creek/sounds/kit-sc.yaml'),
+      'name: kit-sc\ntype: supercollider\nsource: creek-kit.scd\nseed: 4096\nduration: 5\n',
+    );
+    writeTrack('drums', [
+      'inputs:',
+      '  - id: kit-1',
+      '    sound: kit-sc',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 4',
+    ]);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
+    expect(state.runs).toEqual(['//songs/creek/sound:kit-sc', '//songs/creek/track:drums']);
+
+    // The fold: the sound file becomes a leaf track, the consumer's
+    // entry changes kind. Same program, same seed, same duration.
+    rmSync(join(root, 'songs/creek/sounds/kit-sc.yaml'));
+    writeTrack('kit-sc', SC_ENTRY);
+    writeTrack('drums', [
+      'inputs:',
+      '  - id: kit-1',
+      '    track: kit-sc',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 4',
+    ]);
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
+    // gen:kit-sc is a cache hit under the old sound's key; the new stem
+    // wrapping it runs once; drums sees identical input bytes and params
+    // and stays cached.
+    const afterFold = [
+      '//songs/creek/sound:kit-sc',
+      '//songs/creek/track:drums',
+      '//songs/creek/track:kit-sc',
+    ];
+    expect(state.runs).toEqual(afterFold);
+
+    await buildLabels(root, ['//songs/creek/track:drums'], runner);
+    expect(state.runs).toEqual(afterFold); // all cached
   });
 });
 

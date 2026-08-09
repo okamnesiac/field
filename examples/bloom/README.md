@@ -176,7 +176,7 @@ build it, and you get the same outputs from the same recipe.
 order (ctrl-c stops the queue):
 
 ```bash
-field play //songs/creek/sound:pad-sc           # render the pad recipe, then hear it
+field play //songs/creek/track:pad-sc           # render the pad recipe, then hear it
 field play //songs/creek/sound:lead-take-2      # audition a take you generated
 field play //songs/tall-grass/sound:seven-eight-loop  # the 7/8 groove, rendered
 field play //songs/creek/sound:all              # every render in creek, in order
@@ -279,27 +279,28 @@ changing *level* — boosting stops being a free loudness win. Set
 
 `shared/instruments/still-water-pad.scd` is the D-minor pad as **code**:
 twelve detuned sine voices whose detunes and pans are drawn from a seeded
-random stream. The sound pins the seed — `songs/creek/sounds/pad-sc.yaml`
+random stream. The track pins the seed — `songs/creek/tracks/pad-sc.yaml`
 in full:
 
 ```yaml
 # the pad as a recipe: code + seed instead of committed bytes
 name: pad-sc
-type: supercollider
-source: still-water-pad.scd
-seed: 90210
-duration: 10
-channels: 2
+inputs:
+  - supercollider:
+      source: still-water-pad.scd
+      seed: 90210
+      duration: 10
+      channels: 2
 ```
 
-`field build //songs/creek/sound:pad-sc` renders it through SuperCollider's
+`field build //songs/creek/track:pad-sc` renders it through SuperCollider's
 offline (NRT) mode — and the render is **bit-for-bit reproducible**: wipe
 `.field/cache` and rebuild, and you get the identical file, byte for byte.
 Edit the program and only its renders invalidate (the code's content hash is
 a cache input). Change the seed and you get a sibling performance of the same
 recipe.
 
-To iterate on a program before pinning it as a sound:
+To iterate on a program before pinning it in a track:
 
 ```bash
 field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10
@@ -308,16 +309,16 @@ field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 1
 And to hear the committed recipe exactly as pinned:
 
 ```bash
-field play //songs/creek/sound:pad-sc
+field play //songs/creek/track:pad-sc
 ```
 
-And since a clip's `source:` can name a *sound* instead of an asset, the pad
+And since an entry can place a *track* instead of committed audio, the pad
 reaches the arrangement without an imported file existing anywhere — from
 `songs/creek/tracks/pad.yaml`:
 
 ```yaml
 - id: intro-pad-k3m7q
-  sound: pad-sc
+  track: pad-sc
   at: [1]
   duration: [4]
   fade_out: 30000 # one beat, crossfading into the verse pad below
@@ -332,7 +333,7 @@ anyone can regenerate. (Requires
 creek's pad and beat, and tall-grass's groove.)
 
 creek's beat is the second recipe: `shared/instruments/creek-kit.scd`
-(`sound:kit-sc`), two bars of kick, snare, and seeded hats, looped from
+(`track:kit-sc`), two bars of kick, snare, and seeded hats, looped from
 the downbeat to the build. It has a
 determinism detail the pad didn't need: noise UGens get client-seeded
 `RandSeed` args, because scsynth's own noise seeding is time-based —

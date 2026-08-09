@@ -117,6 +117,12 @@ never in a value prefix:
 - `track: <name>` — another track's render;
 - `audio: <name>` — committed bytes, from the song's ledger or the one
   cross-scope spelling `audio: //shared/asset:<name>`;
+- `supercollider:` — an inline render: the sound schema's authored
+  fields (`source:` — the program, `seed`, `duration`, `channels`),
+  written where they play.
+  The render is minted as its own node, `//songs/<song>/gen:<name>`,
+  named by the owning track (or `<track>-<id>` when the entry carries an
+  id — which is why a track holding two generators needs ids on them);
 - `sound: <name>` — a defined sound, transitional for exactly as long as
   `sounds/` exists. Playing a buildable sound (or a track) means the
   arrangement plays a render that is never committed, only its
@@ -128,7 +134,9 @@ different depending on what produced the audio. An entry carries three
 independent, non-destructive offsets:
 
 1. **`at`** — where the entry sits on this track's timeline (musical
-   position by default).
+   position by default). Omitted means the track's start, for every
+   kind — which is what lets a leaf read as bare content, and makes
+   `at: 0` never worth writing.
 2. **`source_offset`** — where the entry's window starts within its
    source.
 3. **`slip`** — shifts content against the grid without moving the

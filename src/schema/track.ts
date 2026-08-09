@@ -19,8 +19,11 @@ import { meterEventSchema, tempoEventSchema } from './song.js';
 //     renders — that would rebuild the bytes-versus-definitions
 //     ambiguity kind-in-field exists to remove.
 //
-// Generator entries (`supercollider:`, `generative:`) are §18's third
-// kind and land in the chunks after the format itself.
+// Generator entries are §18's third kind: authored spec inline, the
+// render minted as its own node under `gen:` (option A — uniformly,
+// whether the entry is a leaf's sole content or windowed among
+// siblings). `supercollider:` is here; `generative:` lands in the next
+// chunk with the takes migration.
 //
 // Placement fields are uniform across kinds, because none of them means
 // something different depending on what produced the audio. A window is
@@ -49,16 +52,33 @@ const RETIRED_SOURCE =
   'source: split by kind — audio: for committed bytes, sound: for a defined ' +
   'sound, track: for a track (nested-tracks.md §18)';
 
+// The authored half of a SuperCollider render, inline: the sound schema
+// (schema/sounds.ts) minus name and type, which the entry supplies by
+// where it sits and what field it is. Same fields, same meanings, same
+// defaults — the action key sees identical parameters, which is what
+// makes folding a sound into a track a cache hit rather than a render.
+export const supercolliderEntrySchema = z.strictObject({
+  source: z.string().min(1), // the program; bare names resolve in shared/instruments/
+  seed: z.number().int().min(0),
+  duration: z.number().positive().max(3600), // seconds
+  channels: z.union([z.literal(1), z.literal(2)]).default(2),
+});
+export type SupercolliderEntry = z.infer<typeof supercolliderEntrySchema>;
+
 export const inputEntrySchema = z
   .strictObject({
     id: slug.optional(),
-    // Exactly one of these three names what the entry plays; the
-    // superRefine below is the arity check.
+    // Exactly one of these names what the entry plays; the superRefine
+    // below is the arity check.
     track: slug.optional(), // a track in this song
     audio: sourceRef.optional(), // ledger name, or //shared/asset:<name>
     sound: slug.optional(), // transitional; retires with sounds/
+    supercollider: supercolliderEntrySchema.optional(), // an inline render
     anchor: z.enum(['musical', 'absolute']).default('musical'),
-    at: timePosition, // ticks when musical, samples when absolute
+    // Omitted means the track's start — the leaf case reads as bare
+    // content (`- supercollider: {...}` with nothing else), and tick 0
+    // and sample 0 are the same instant, so the default is anchor-safe.
+    at: timePosition.default(0), // ticks when musical, samples when absolute
     // Omitted means the whole source — the placement declining to
     // truncate (nested-tracks.md §1.6). A looping entry still declares
     // one: the window is authoritative and the source tiles to fill it,
@@ -78,13 +98,15 @@ export const inputEntrySchema = z
     source: z.never({ error: RETIRED_SOURCE }).optional(),
   })
   .superRefine((entry, ctx) => {
-    const kinds = [entry.track, entry.audio, entry.sound].filter((v) => v !== undefined);
+    const kinds = [entry.track, entry.audio, entry.sound, entry.supercollider].filter(
+      (v) => v !== undefined,
+    );
     if (kinds.length !== 1) {
       ctx.addIssue({
         code: 'custom',
         message:
-          'an entry plays exactly one thing — name it with track:, audio:, or ' +
-          '(until sounds fold) sound:',
+          'an entry plays exactly one thing — name it with track:, audio:, ' +
+          'supercollider:, or (until sounds fold) sound:',
       });
     }
   });
@@ -100,6 +122,7 @@ export const inputEntryOrder: KeyOrder = {
     'track',
     'audio',
     'sound',
+    'supercollider',
     'anchor',
     'at',
     'duration',
@@ -112,6 +135,7 @@ export const inputEntryOrder: KeyOrder = {
     'fade_out',
   ],
   children: {
+    supercollider: { keys: ['source', 'seed', 'duration', 'channels'] },
     at: { flow: true },
     duration: { flow: true },
     loop: { keys: ['enabled', 'every', 'mode', 'fade'], children: { every: { flow: true } } },

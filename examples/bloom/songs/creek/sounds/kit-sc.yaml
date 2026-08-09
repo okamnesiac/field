@@ -1,7 +1,0 @@
-# the verse beat, same trade: two bars of seeded kit at 96 bpm
-name: kit-sc
-type: supercollider
-source: creek-kit.scd
-seed: 4096
-duration: 5
-channels: 2

@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
 import { wavFrameCount } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
-import { entryRef, expandLoop, placedWindow } from '../generators/stem.js';
+import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { sha256File } from '../hash.js';
@@ -707,7 +707,8 @@ function validate(project: LoadedProject): void {
       track.data.inputs.forEach((entry, i) => {
         // Named by id when it has one — ids are optional (§18 decision
         // 3) — else by position and target, the way placements were.
-        const target = entry.track ?? entry.sound ?? entry.audio ?? '?';
+        const target =
+          entry.track ?? entry.sound ?? entry.audio ?? (entry.supercollider ? 'supercollider' : '?');
         const what = entry.id !== undefined ? `input "${entry.id}"` : `input ${i + 1} ("${target}")`;
         if (entry.id !== undefined) {
           if (entryIds.has(entry.id)) push(track.path, `duplicate input id "${entry.id}"`);
@@ -771,6 +772,24 @@ function validate(project: LoadedProject): void {
                 : `${what} references unknown sound "${entry.sound}"`,
             );
           }
+        } else if (entry.supercollider !== undefined) {
+          // The generator's own rule validates the entry the way it
+          // validates a sound file — same program-path resolution, same
+          // messages — against a spec built exactly as buildGraph builds
+          // it, so the two sites cannot answer differently.
+          const spec = {
+            name: generatorName(entry, track.data.name),
+            type: 'supercollider' as const,
+            ...entry.supercollider,
+          };
+          generatorFor(spec).validate(spec, {
+            root: project.root,
+            songDir: song.dir,
+            names,
+            push: (message: string) => push(track.path, `${what} ${message}`),
+            resolveFile: (baseDir: string, file: string) =>
+              resolveAssetFile(project.root, baseDir, file),
+          });
         }
         // Musical arrays need the musical anchor: an absolute entry's
         // scalars are samples, and silently converting [9, 2] would be a
@@ -830,9 +849,14 @@ function validate(project: LoadedProject): void {
         // must never fail to construct its graph (#21 review).
         if (entry.loop?.enabled && trackTempo) {
           const loop = entry.loop;
-          const committed = fileBySource(entryRef(entry));
+          const committed = fileBySource(entryRef(entry, track.data.name));
           if (committed === undefined && loop.every === undefined) {
-            const kind = entry.track !== undefined ? 'track' : 'sound';
+            const kind =
+              entry.track !== undefined
+                ? 'track'
+                : entry.supercollider !== undefined
+                  ? 'generator'
+                  : 'sound';
             push(
               track.path,
               `${what} loops a ${kind} — set loop.every ` +
@@ -894,6 +918,43 @@ function validate(project: LoadedProject): void {
         }
       });
 
+    }
+
+    // A generator entry's render is a node, so it needs a name no other
+    // generator claims (nested-tracks.md §18 step 2): the owning track's,
+    // or <track>-<id>. The first claimant is recorded so a collision can
+    // say what actually collided: within one track, two un-id'd entries
+    // (the fix is the message: give them ids) — the same-track same-id
+    // case is already the duplicate-id diagnostic above, and a second
+    // message could only give false advice. Across tracks (`kit-sc` with
+    // `id: b` against a track named `kit-sc-b`), no id is missing, so
+    // the message names both files instead.
+    const genNames = new Map<string, string>();
+    for (const trackFile of song.tracks) {
+      for (const entry of trackFile.data.inputs) {
+        if (entry.supercollider === undefined) continue;
+        const name = generatorName(entry, trackFile.data.name);
+        const first = genNames.get(name);
+        if (first === undefined) {
+          genNames.set(name, trackFile.path);
+        } else if (first === trackFile.path) {
+          // Same track, same name: same id (diagnosed above) or no ids.
+          if (entry.id === undefined) {
+            push(
+              trackFile.path,
+              `two generator entries share the name "${name}" — give each an id so ` +
+                `its render has a name of its own (nested-tracks.md §18)`,
+            );
+          }
+        } else {
+          push(
+            trackFile.path,
+            `a generator entry here and one in ${first} both mint the render ` +
+              `name "${name}" — rename a track or change an id so each render ` +
+              `has a name of its own (nested-tracks.md §18)`,
+          );
+        }
+      }
     }
 
     // Containment cycles. Sound sources already made cycles declarable

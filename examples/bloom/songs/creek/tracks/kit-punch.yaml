@@ -16,5 +16,4 @@ inputs:
   # the whole seeded kit render, from the top — no duration, so the clip
   # plays as long as kit-sc is, however long that render turns out to be
   - id: kit-sc-m4v7q
-    sound: kit-sc
-    at: 0
+    track: kit-sc

@@ -16,9 +16,12 @@ entries place tracks, committed audio, or inline generators (§18) —
 which answers §6's leaf-content question, retires `clips:` and `type:`,
 and supersedes §17's spelling. The format has landed — one `inputs:`
 list with `track:`/`audio:`/`sound:` entries, every action key intact —
-so what remains is generator entries: the leaves fold behind them, and
-the two `normalize` sounds still wait on
-[multi-rate.md](multi-rate.md) (§16).
+and so have `supercollider:` entries: `kit-sc` and `pad-sc` are leaf
+tracks whose renders are `gen:` nodes cached under their old sound keys.
+`seven-eight-loop` waits with the normalizes: `loop-cd` sources it, a
+sound cannot see a track, and both retire together at
+[multi-rate.md](multi-rate.md) step 2 (§16). Then `generative:` entries
+fold the last two leaves.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -973,6 +976,17 @@ What this decides, and what it retires:
    entirely cached. The leaf folds owe the same proof downstream:
    however a generator entry is keyed internally, the folded track's
    bytes are identical, so every consumer's key holds.
+   Amended 2026-08-09 (#103, the first fold): the downstream half was
+   wrong. The wrapper stem re-encodes what scsynth wrote (24-bit →
+   float32), so the folded track's bytes differ while its samples do
+   not: each *direct* consumer re-keys exactly once and re-renders
+   byte-identically, and everything below it stays cached — kit-punch
+   came back `d1ae4edb90b7…`, the hash it has carried since #100. The
+   proof a fold owes is "the layer under the direct consumers never
+   moves", not "nothing rebuilds". Step 3's folds pay the same one-time
+   price: wrapping a chosen take's committed bytes in a stem re-encodes
+   them the same way, so expect their direct consumers to rebuild once,
+   byte-identically.
 
 Sequencing, revising §16's tail and §17's remainder:
 

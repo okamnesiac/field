@@ -65,6 +65,21 @@ export function trackRefName(ref: string): string | undefined {
   return ref.startsWith(TRACK_REF_PREFIX) ? ref.slice(TRACK_REF_PREFIX.length) : undefined;
 }
 
+// A generator entry's render in the same wiring: `gen:<name>` names the
+// node minted for an inline generator (nested-tracks.md §18 step 2,
+// option A — every generator entry is a node, labeled
+// //songs/<song>/gen:<name>, where <name> is the owning track's name,
+// or <track>-<id> when the entry carries an id). Never authored — a
+// generator is written inline, so this spelling exists only in wiring
+// and in labels.
+const GEN_REF_PREFIX = 'gen:';
+export function genRef(name: string): string {
+  return `${GEN_REF_PREFIX}${name}`;
+}
+export function genRefName(ref: string): string | undefined {
+  return ref.startsWith(GEN_REF_PREFIX) ? ref.slice(GEN_REF_PREFIX.length) : undefined;
+}
+
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
 }

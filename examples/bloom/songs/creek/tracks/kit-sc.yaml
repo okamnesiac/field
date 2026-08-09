@@ -1,0 +1,10 @@
+# the verse beat, same trade: two bars of seeded kit at 96 bpm. A sound
+# until §18's generator entries — now a leaf track whose one input is
+# the render itself, and the render's action key did not move.
+name: kit-sc
+inputs:
+  - supercollider:
+      source: creek-kit.scd
+      seed: 4096
+      duration: 5
+      channels: 2

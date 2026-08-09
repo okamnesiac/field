@@ -174,8 +174,10 @@ sound by name and follow).
   rendering as the silence it contains, because the track file **is** the declaration — a mix file
   defines a `mix`, a track file implies a `stem`. Content is the track's
   one `inputs:` list (nested-tracks.md §18): each entry places a
-  `track:`, an `audio:` file, or (until sounds fold away) a `sound:` —
-  a placed track is one more source in the same list, so a track→track
+  `track:`, an `audio:` file, an inline `supercollider:` render — minted
+  as its own `gen:` node, so it caches and is addressable like any rule
+  — or (until sounds fold away) a `sound:`. A placed track is one more
+  source in the same list, so a track→track
   edge is an ordinary graph edge and a track placed three times is one
   render placed three times. A track can
   also be a song's *output* — the one named `main` — in which case it
