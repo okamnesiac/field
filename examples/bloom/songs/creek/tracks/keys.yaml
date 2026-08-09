@@ -1,13 +1,10 @@
 name: keys
 type: audio
 clips:
-  # the generated four bars, looping on the grid to bar 13: the window is
-  # authoritative and the source tiles to fill it (clip-looping.md). The
-  # band stops at bar 9; the third pass carries the build alone and rings
-  # out where the chorus would land.
+  # the generated four bars, exactly one pass — no loop, because the
+  # phrase is the loop now. Bars 1-12 with `every: [4]` said the same
+  # thing three times; main placing this phrase three times says it once.
   - id: keys-loop-p4t2n
     source: still-water-keys
     position: [1]
-    duration: [12]
-    loop:
-      every: [4] # matching the phrase
+    duration: [4]

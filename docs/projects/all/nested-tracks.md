@@ -1,8 +1,11 @@
 # Plan: Nested tracks — one primitive for structure, time and mix
 
-**Status:** In progress (2026-08-08). Nesting renders — a track can
-contain a track, `check` gates it, and the stem places the child's render
-at the placement's offset. The chunk order changed on the way in; §9
+**Status:** In progress (2026-08-08). Nesting renders, `mixes/` has
+retired into the output track (#81), and creek is now expressed as three
+placements of a phrase — §7 chunk 5, whose verdict is §10. Still open:
+`arrangement.yaml` (the last of chunk 1), local tempo and meter maps
+(chunk 2), effective gain in `explain` (chunk 3), sends (chunk 4), and
+folding `sounds/` in (chunk 6). The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
 changes the model the engine renders — doing it afterwards means
@@ -435,3 +438,55 @@ half of it would be worse than none:
   is a change to the time primitive rather than to nesting.
 - **Placement identity.** §6's open question. Placements are named by
   position in diagnostics until it is answered.
+
+## 10 What chunk 5 decided (2026-08-08)
+
+§7 chunk 5 exists to answer one question — does the structure read better
+than the flat version — and it can only be answered by writing it. creek
+is now three placements of a four-bar `phrase` in `examples/bloom`.
+
+**The answer is yes, and the reason is what moved out of prose.** Before,
+`song.yaml` said "twelve bars: three passes of the keys phrase" in a
+comment, and the three passes existed as `loop: every: [4]` inside one
+clip on one track. Nothing structural said creek repeats. Now `main`
+lists the phrase three times, at bars 1, 5 and 9, and the two things that
+are *not* the repeating unit stay at the root and say so: the pad crosses
+a phrase boundary (its second clip enters a beat before bar 5) and the
+vocal skips the first pass entirely.
+
+`bed` is the sharper evidence. It was a hand-copy of main's instrument
+list minus the vocal, carrying duplicated `gain_db` and `pan` that had to
+be kept in step by hand. It is now the same three placements minus the
+one that carries the voice. Decision 6 argued that a subset should be a
+track rather than a mode; this is that argument paying out on the only
+subset the project actually has.
+
+**One gap, which is the real finding.** A loop owns its seam treatment and
+a placement does not. `loop.fade` defaults to 480 samples precisely
+because "the naive loop must not click", and expressing the same
+repetition as three placements drops it silently — nothing warns, and
+`check` is happy. creek survives because its phrase render begins and
+ends at 0.0008 (−62 dBFS, effectively silence), so butt-joining introduces
+no discontinuity: measured, the worst adjacent-sample step at bars 5 and 9
+is identical before and after. Material whose phrase does not
+self-terminate would click, and the fix available to clips — two
+overlapping faded clips, which is how the pad crossfades — is not
+available to placements, because placements of one track at two times
+cannot overlap without the parent's timeline saying so.
+
+That is not a blocker for creek and it is a real edge for chunk 3 or
+chunk 4 to settle: either placements grow a seam treatment, or the
+guidance is that a clip that loops stays a looping clip and nesting is
+for structure that repeats *containers* rather than samples.
+
+**Cost, measured against the pre-restructure render:** −144 dBFS
+everywhere, which is float reassociation from one more summation level
+and is inaudible; −62 dBFS in the two one-second windows at bars 5 and 9,
+which is the absent crossfade. Both `track:main` and `track:bed` are still
+exactly 30.000 s.
+
+*Not done here:* `arrangement.yaml` still exists. It can retire now for
+the first time — §5 says the arrangement becomes derived by walking the
+root's placements, and only after this restructure do those placements
+*be* the arrangement. Before it, the root listed instruments and the file
+listed sections, and no walk could have produced one from the other.
