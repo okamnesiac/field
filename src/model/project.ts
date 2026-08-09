@@ -65,7 +65,7 @@ export interface LoadedSong {
   assets?: LoadedFile<AssetsFile> | undefined;
   // One file per authored spec (project-layout.md §1.3, §4): sounds/
   // holds defined sounds — buildable types and deliberate `generate`
-  // recipes alike — and mixes/ holds mixes.
+  // recipes alike.
   sounds: LoadedFile<Sound>[];
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
@@ -760,20 +760,6 @@ function validate(project: LoadedProject): void {
           // Midi is the only unplaceable kind now: it has no stem. An
           // empty audio track has one, and it is silence.
           push(track.path, `${what} places a midi track, which renders no audio`);
-        }
-        // A track's own gain and pan are retiring, not waiting to be
-        // supported (§1.13): a level belongs on the edge, where it can
-        // differ per parent, and a track with two parents cannot hold one
-        // value for both. The placement carries both now, so this points
-        // at where to put them rather than at a chunk to wait for.
-        if (child.gain_db !== 0 || child.pan !== 0) {
-          push(
-            track.path,
-            `${what} places a track with a fader set (gain_db ${child.gain_db}, pan ${child.pan}) — ` +
-              `a level lives on the placement, not the track, so it can differ per parent ` +
-              `(nested-tracks.md §1.13); move them to this placement's gain_db and pan, and ` +
-              `leave "${input.track}" at 0`,
-          );
         }
         if (
           input.anchor === 'absolute' &&

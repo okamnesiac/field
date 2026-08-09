@@ -107,14 +107,17 @@ export type TrackInput = Omit<TrackInputFile, 'at' | 'duration'> & {
 };
 
 // songs/<song>/tracks/<name>.yaml — name must match the filename; the slug
-// is the identity (project-core.md §6). gain_db and pan are mix-stage
-// parameters: stems render pre-fader, the mix rule applies them while
-// summing (mix-assembly.md §3), so a fader nudge never rebuilds a stem.
+// is the identity (project-core.md §6).
+//
+// No `gain_db` or `pan` here. A level lives on the placement that consumes
+// this track (nested-tracks.md §1.13), where it can differ per parent —
+// which a field on the track cannot do, and which is why these retired
+// with the mix rule that used to apply them. Leaving them as fields
+// nothing reads would be worse than removing them: a `-24` sitting in a
+// track file, passing check, changing nothing.
 export const trackSchema = z.strictObject({
   name: labelName,
   type: z.enum(['audio', 'midi']),
-  gain_db: z.number().default(0),
-  pan: z.number().min(-1).max(1).default(0), // constant-power balance, -1 left … 1 right
   // Inserts are content, not mix parameters: they bake into the stem, so
   // an insert edit re-renders it — the accepted cost model (effects.md §5).
   inserts: z.array(insertSchema).default([]),
@@ -127,7 +130,7 @@ export type Track = Omit<TrackFile, 'clips' | 'inputs'> & {
   inputs: TrackInput[];
 };
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'type', 'gain_db', 'pan', 'inserts', 'inputs', 'clips'],
+  keys: ['name', 'type', 'inserts', 'inputs', 'clips'],
   children: {
     inserts: { items: insertOrder },
     clips: { items: clipOrder },

@@ -245,6 +245,14 @@ point of this is that it no longer has to.
     *Rejected: a separate track-level trim* before the inserts. Real as a
     stage, redundant as a field, since a level expresses it.
 
+    Landed 2026-08-08: `track.gain_db`/`pan` are gone from the schema, not
+    merely unused. They survived one commit past the mix rule that read
+    them, during which a `-24` on a track file passed `check` and changed
+    nothing. Turning the *song* down is this decision's own move applied to
+    the root — another gain stage is another level, so `main` places a
+    `body` track and carries the level on that placement, measured at
+    exactly -12.0 dB for `gain_db: -12`.
+
     Consequence for chunk 3: `pan` is the same stage as gain, so it moves
     to the edge too — and the daemon's stem op sums clips with a gain and
     **no pan**. Per-clip pan in `sumClips` is the prerequisite, and the

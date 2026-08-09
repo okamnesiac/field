@@ -951,7 +951,11 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toContain('a midi track cannot place tracks');
   });
 
-  it('refuses a child whose fader is set, pointing at the placement that replaces it', async () => {
+  it('has no track-level fader to refuse: the field retired with the mix', async () => {
+    // A level lives on the placement (nested-tracks.md §1.13). `gain_db`
+    // on a track file used to be applied by the mix rule and then, for one
+    // commit, by nothing at all — accepted, silent, and unread. The schema
+    // refuses it now rather than letting it sit there meaning nothing.
     writeFileSync(
       join(root, 'songs/opener/tracks/inner.yaml'),
       readFileSync(join(root, 'songs/opener/tracks/inner.yaml'), 'utf8').replace(
@@ -959,13 +963,7 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
         'type: audio\ngain_db: -3\n',
       ),
     );
-    writeTrack('outer', ['inputs:', '  - track: inner', '    at: 0']);
-    const out = await messages();
-    expect(out).toContain('places a track with a fader set (gain_db -3, pan 0)');
-    // The field is retiring, not pending: the message must say where the
-    // level goes, not which chunk to wait for (nested-tracks.md §1.13).
-    expect(out).toContain("move them to this placement's gain_db and pan");
-    expect(out).not.toContain('chunk');
+    expect(await messages()).toContain('Unrecognized key');
   });
 
   it('refuses musical time on an absolute placement', async () => {

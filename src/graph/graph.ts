@@ -192,15 +192,15 @@ export function buildGraph(project: LoadedProject): Graph {
           ? tempoMap.ticksToSamples(song.song.data.length)
           : undefined;
       for (const track of renderable) {
-        // MIDI tracks have no audio to render, and an empty stem is not a
-        // useful artifact — implicit stems exist where there is content
-        // (renderableTrack). A track that only contains tracks has
-        // content: its children's, summed at their placements.
+        // Every audio track gets a node, an empty one rendering as the
+        // silence it contains (renderableTrack) — which is what lets a
+        // song answer to its own name from the moment `field song create`
+        // writes its output track. MIDI has no audio to render at all.
         //
         // The song's output track carries the song's extent, the way the
-        // mix does. Which track that is, is the same convention a bare
-        // song name resolves through, read from the same constant rather
-        // than spelled twice (nested-tracks.md §1.2).
+        // mix did before it retired. Which track that is, is the same
+        // convention a bare song name resolves through, read from the same
+        // constant rather than spelled twice (nested-tracks.md §1.2).
         const extent =
           track.name === SONG_OUTPUT_NAME
             ? { lengthSamples, loop: song.song?.data.loop }
