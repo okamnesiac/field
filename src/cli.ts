@@ -228,13 +228,9 @@ const track = program.command('track').description('manage tracks');
 track
   .command('create <song> <name>')
   .description('create a track in a song')
-  .option('--type <type>', 'audio | midi', 'audio')
-  .action((songName: string, name: string, opts: { type: string }) => {
+  .action((songName: string, name: string) => {
     try {
-      if (opts.type !== 'audio' && opts.type !== 'midi') {
-        throw new Error(`unknown track type "${opts.type}"`);
-      }
-      const path = createTrack(requireRoot(), songName, name, opts.type);
+      const path = createTrack(requireRoot(), songName, name);
       process.stdout.write(`created ${path}\n`);
     } catch (err) {
       fail(err);
@@ -753,9 +749,9 @@ program
     const rate = project.manifest?.data.sample_rate;
     process.stdout.write(`project ${name}${rate ? ` @ ${rate} Hz` : ''}\n`);
     for (const song of project.songs) {
-      const clips = song.tracks.reduce((n, t) => n + t.data.clips.length, 0);
+      const inputs = song.tracks.reduce((n, t) => n + t.data.inputs.length, 0);
       process.stdout.write(
-        `  ${song.name}: ${song.tracks.length} tracks, ${clips} clips, ${song.takes.length} takes\n`,
+        `  ${song.name}: ${song.tracks.length} tracks, ${inputs} inputs, ${song.takes.length} takes\n`,
       );
     }
     if (project.diagnostics.length > 0) {

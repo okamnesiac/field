@@ -283,7 +283,7 @@ describe('build', () => {
     mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
     writeFileSync(
       join(root, 'songs/creek/tracks/pad-track.yaml'),
-      ['name: pad-track', 'type: audio', 'clips:', '  - id: c1', '    source: pad', '    position: [1]', '    duration: [1]', ''].join('\n'),
+      ['name: pad-track', 'inputs:', '  - id: c1', '    audio: pad', '    at: [1]', '    duration: [1]', ''].join('\n'),
     );
 
     await expect(buildLabels(root, ['//songs/creek/mixes:pad-track'])).rejects.toThrow(

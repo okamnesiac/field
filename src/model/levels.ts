@@ -1,4 +1,4 @@
-import { SONG_OUTPUT_NAME, trackRefName } from '../labels.js';
+import { SONG_OUTPUT_NAME } from '../labels.js';
 import type { LoadedSong } from './project.js';
 
 // What a track's signal is multiplied by on its way to the top
@@ -58,23 +58,16 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
   // Who places whom. The placement lives in the parent's file, so this is
   // the edge list read backwards — the direction the build graph does not
   // go, since a parent depends on its children.
+  // One list (nested-tracks.md §18): the entries that create parent
+  // edges are exactly the ones that place a track — audio and generator
+  // entries are leaves of this walk, not hops on it.
   const parents = new Map<string, { in: string; gainDb: number; pan: number }[]>();
   for (const track of song.tracks) {
-    for (const input of track.data.inputs ?? []) {
-      const list = parents.get(input.track) ?? [];
-      list.push({ in: track.data.name, gainDb: input.gain_db, pan: input.pan });
-      parents.set(input.track, list);
-    }
-    // A clip that plays a track (`source: track:<name>`) is a placement
-    // of it (nested-tracks.md §1.11), so its gain is on the path like any
-    // placement's. Clips carry no pan — that field lives on `inputs:`
-    // entries only — so the hop contributes none.
-    for (const clip of track.data.clips ?? []) {
-      const child = trackRefName(clip.source);
-      if (child === undefined) continue;
-      const list = parents.get(child) ?? [];
-      list.push({ in: track.data.name, gainDb: clip.gain_db, pan: 0 });
-      parents.set(child, list);
+    for (const entry of track.data.inputs ?? []) {
+      if (entry.track === undefined) continue;
+      const list = parents.get(entry.track) ?? [];
+      list.push({ in: track.data.name, gainDb: entry.gain_db, pan: entry.pan });
+      parents.set(entry.track, list);
     }
   }
 

@@ -41,12 +41,11 @@ function wavBytes(): Buffer {
 const clipTrack = (sourceRef: string) =>
   [
     'name: drums',
-    'type: audio',
-    'clips:',
+    'inputs:',
     '  - id: c1',
-    `    source: ${sourceRef}`,
+    `    audio: ${sourceRef}`,
     '    anchor: absolute',
-    '    position: 0',
+    '    at: 0',
     '    duration: 100',
     '',
   ].join('\n');
@@ -59,7 +58,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-shared-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  createTrack(root, 'creek', 'drums', 'audio');
+  createTrack(root, 'creek', 'drums');
   const wav = wavBytes();
   writeFileSync(join(root, 'shared/samples/rain.wav'), wav);
   writeFileSync(
@@ -145,7 +144,7 @@ describe('cross-scope clip references', () => {
     // names (bare or track:) and the one cross-scope spelling, //shared/asset:.
     expect(
       loadProject(root).diagnostics.some((d) =>
-        d.message.includes('must be a name in the song, track:<name>, or //shared/asset:<name>'),
+        d.message.includes('must be a name in the song or //shared/asset:<name>'),
       ),
     ).toBe(true);
   });
@@ -156,12 +155,11 @@ describe('cross-scope clip references', () => {
       join(root, 'songs/creek/tracks/drums.yaml'),
       [
         'name: drums',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: c1',
-        '    source: //shared/asset:rain',
+        '    audio: //shared/asset:rain',
         '    anchor: absolute',
-        '    position: 0',
+        '    at: 0',
         '    duration: 300',
         '    loop:',
         '      enabled: true',

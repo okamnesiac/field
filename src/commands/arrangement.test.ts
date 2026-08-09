@@ -31,13 +31,12 @@ function threePasses(): void {
   // `field song create` scaffolds no length; the header only has something
   // to report when the song declares one.
   writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [12]\nloop: true\n');
-  track('phrase', 'name: phrase\ntype: audio\nclips: []\n');
-  track('vox', 'name: vox\ntype: audio\nclips: []\n');
+  track('phrase', 'name: phrase\n');
+  track('vox', 'name: vox\n');
   track(
     'main',
     [
       'name: main',
-      'type: audio',
       'inserts: []',
       'inputs:',
       '  - track: phrase',
@@ -50,7 +49,6 @@ function threePasses(): void {
       '    at: [5]',
       '    gain_db: 3',
       '    pan: 0.2',
-      'clips: []',
       '',
     ].join('\n'),
   );
@@ -105,18 +103,16 @@ describe('field arrangement', () => {
     // error: 48000 samples is one second, and it came out as bar 13 of an
     // eight-bar song — the same class of lie this command exists to stop.
     writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [8]\nloop: true\n');
-    track('child', 'name: child\ntype: audio\nclips: []\n');
+    track('child', 'name: child\n');
     track(
       'main',
       [
         'name: main',
-        'type: audio',
         'inserts: []',
         'inputs:',
         '  - track: child',
         '    anchor: absolute',
         '    at: 48000',
-        'clips: []',
         '',
       ].join('\n'),
     );

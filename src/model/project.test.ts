@@ -66,7 +66,7 @@ describe('init', () => {
 describe('song and track creation', () => {
   it('creates songs and tracks that pass check', async () => {
     createSong(root, 'opener');
-    createTrack(root, 'opener', 'lead-vocal', 'audio');
+    createTrack(root, 'opener', 'lead-vocal');
     expect((await check(root)).ok).toBe(true);
 
     const project = loadProject(root);
@@ -77,11 +77,11 @@ describe('song and track creation', () => {
   it('rejects non-slug names', () => {
     expect(() => createSong(root, 'My Song')).toThrow('slug');
     createSong(root, 'opener');
-    expect(() => createTrack(root, 'opener', 'Lead_Vocal', 'audio')).toThrow('slug');
+    expect(() => createTrack(root, 'opener', 'Lead_Vocal')).toThrow('slug');
   });
 
   it('rejects tracks in missing songs', () => {
-    expect(() => createTrack(root, 'nope', 'lead-vocal', 'audio')).toThrow('does not exist');
+    expect(() => createTrack(root, 'nope', 'lead-vocal')).toThrow('does not exist');
   });
 
   it('recovers from a partially created song', async () => {
@@ -95,7 +95,7 @@ describe('song and track creation', () => {
 
   it('ignores editor dotfiles that end in .yaml', async () => {
     createSong(root, 'opener');
-    createTrack(root, 'opener', 'lead-vocal', 'audio');
+    createTrack(root, 'opener', 'lead-vocal');
     // Emacs marks an unsaved buffer with a dangling symlink whose name
     // ends in .yaml. Loading it throws ENOENT rather than producing a
     // diagnostic, so under --watch merely opening a track file would end
@@ -244,7 +244,7 @@ describe('check', () => {
     createSong(root, 'opener');
     writeFileSync(
       join(root, 'songs/opener/tracks/lead-vocal.yaml'),
-      'name: other-name\ntype: audio\nclips: []\n',
+      'name: other-name\n',
     );
     const result = await check(root);
     expect(result.diagnostics.map((d) => d.message).join()).toContain('must match filename');
@@ -256,17 +256,16 @@ describe('check', () => {
       join(root, 'songs/opener/tracks/vox.yaml'),
       [
         'name: vox',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: intro-vox-abc12',
-        '    source: nonexistent',
-        '    position: 0',
+        '    sound: nonexistent',
+        '    at: 0',
         '    duration: 960',
         '',
       ].join('\n'),
     );
     const result = await check(root);
-    expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown source');
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown sound');
   });
 
   it('diagnoses loop sources exhausted by their read offset — check, not a graph crash', async () => {
@@ -280,11 +279,10 @@ describe('check', () => {
       join(root, 'songs/opener/tracks/vox.yaml'),
       [
         'name: vox',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: loop-vox-abc12',
-        '    source: hit',
-        '    position: 0',
+        '    audio: hit',
+        '    at: 0',
         '    duration: 3840',
         '    loop:',
         '      enabled: true',
@@ -308,11 +306,10 @@ describe('check', () => {
       join(root, 'songs/opener/tracks/vox.yaml'),
       [
         'name: vox',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: loop-vox-abc12',
-        '    source: hit',
-        '    position: 0',
+        '    audio: hit',
+        '    at: 0',
         '    duration: 960',
         '    loop:',
         '      every: 30', // 750-sample slots at 120; the default 480+480 seam fades overlap
@@ -341,11 +338,10 @@ describe('check', () => {
       join(root, 'songs/opener/tracks/pad.yaml'),
       [
         'name: pad',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: loop-pad-abc12',
-        '    source: pad',
-        '    position: 0',
+        '    sound: pad',
+        '    at: 0',
         '    duration: 3840',
         '    loop:',
         '      enabled: true',
@@ -563,7 +559,7 @@ describe('takes', () => {
 
   const setupTake = async (yaml: string, filename = 'take-20260804-202355.yaml') => {
     createSong(root, 'opener');
-    createTrack(root, 'opener', 'vox', 'audio');
+    createTrack(root, 'opener', 'vox');
     const src = sourceFile();
     await importAsset(root, 'opener', src, 'take-audio');
     rmSync(src);
@@ -611,11 +607,10 @@ describe('musical time (musical-time.md)', () => {
       join(root, 'songs/opener/tracks/keys.yaml'),
       [
         'name: keys',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: keys-1',
-        '    source: hit',
-        '    position: [2]',
+        '    audio: hit',
+        '    at: [2]',
         '    duration: [4]',
         '    loop:',
         '      every: [1]',
@@ -637,10 +632,10 @@ describe('musical time (musical-time.md)', () => {
     expect(project.diagnostics).toEqual([]);
     const song = project.songs[0]!;
     expect(song.song?.data.length).toBe(BAR * 12);
-    const clip = song.tracks[0]!.data.clips[0]!;
-    expect(clip.position).toBe(BAR);
-    expect(clip.duration).toBe(BAR * 4);
-    expect(clip.loop?.every).toBe(BAR);
+    const entry = song.tracks[0]!.data.inputs[0]!;
+    expect(entry.at).toBe(BAR);
+    expect(entry.duration).toBe(BAR * 4);
+    expect(entry.loop?.every).toBe(BAR);
   });
 
   it('loads array and tick spellings to identical data', async () => {
@@ -660,11 +655,10 @@ describe('musical time (musical-time.md)', () => {
         join(other, 'songs/opener/tracks/keys.yaml'),
         [
           'name: keys',
-          'type: audio',
-          'clips:',
+          'inputs:',
           '  - id: keys-1',
-          '    source: hit',
-          `    position: ${BAR}`,
+          '    audio: hit',
+          `    at: ${BAR}`,
           `    duration: ${BAR * 4}`,
           '    loop:',
           `      every: ${BAR}`,
@@ -692,7 +686,7 @@ describe('musical time (musical-time.md)', () => {
     const song = readFileSync(join(root, 'songs/opener/song.yaml'), 'utf8');
     expect(song).toContain('length: [12]');
     const track = readFileSync(join(root, 'songs/opener/tracks/keys.yaml'), 'utf8');
-    expect(track).toContain('position: [2]');
+    expect(track).toContain('at: [2]');
     expect(track).toContain('every: [1]');
     expect((await check(root)).ok).toBe(true);
   });
@@ -704,11 +698,10 @@ describe('musical time (musical-time.md)', () => {
       join(root, 'songs/opener/tracks/keys.yaml'),
       [
         'name: keys',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: keys-1',
-        '    source: hit',
-        '    position: [2, 5]',
+        '    audio: hit',
+        '    at: [2, 5]',
         '    duration: [4]',
         '',
       ].join('\n'),
@@ -726,12 +719,11 @@ describe('musical time (musical-time.md)', () => {
       join(root, 'songs/opener/tracks/keys.yaml'),
       [
         'name: keys',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: keys-1',
-        '    source: hit',
+        '    audio: hit',
         '    anchor: absolute',
-        '    position: [2]',
+        '    at: [2]',
         '    duration: 960',
         '',
       ].join('\n'),
@@ -747,11 +739,10 @@ describe('musical time (musical-time.md)', () => {
       join(root, 'songs/opener/tracks/keys.yaml'),
       [
         'name: keys',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: keys-1',
-        '    source: hit',
-        '    position: [2]',
+        '    audio: hit',
+        '    at: [2]',
         '    duration: [0]',
         '',
       ].join('\n'),
@@ -791,7 +782,7 @@ describe('anchors and aliases', () => {
     createSong(root, 'opener');
     writeFileSync(
       join(root, 'songs/opener/tracks/vox.yaml'),
-      'name: &n vox\ntype: audio\nclips: []\n',
+      'name: &n vox\n',
     );
     const messages = (await check(root)).diagnostics.map((d) => d.message).join();
     expect(messages).toContain('anchors and aliases are not allowed');
@@ -801,20 +792,20 @@ describe('anchors and aliases', () => {
 describe('fmt', () => {
   it('formats a track named "song" with track order, not song order', async () => {
     createSong(root, 'opener');
-    createTrack(root, 'opener', 'song', 'audio');
+    createTrack(root, 'opener', 'song');
     const path = join(root, 'songs/opener/tracks/song.yaml');
-    writeFileSync(path, 'type: audio\nclips: []\nname: song\n');
+    writeFileSync(path, 'inputs: []\nname: song\n');
 
     expect((await check(root)).unformatted).toEqual(['songs/opener/tracks/song.yaml']);
     expect(fmt(root).formatted).toEqual(['songs/opener/tracks/song.yaml']);
     expect((await check(root)).ok).toBe(true);
-    expect(readFileSync(path, 'utf8')).toBe('name: song\ntype: audio\nclips: []\n');
+    expect(readFileSync(path, 'utf8')).toBe('name: song\ninputs: []\n');
   });
 
   it('canonicalizes shuffled keys and preserves comments', async () => {
     createSong(root, 'opener');
     const path = join(root, 'songs/opener/tracks/vox.yaml');
-    writeFileSync(path, '# my favorite track\ntype: audio\nclips: []\nname: vox\n');
+    writeFileSync(path, '# my favorite track\ninputs: []\nname: vox\n');
 
     expect((await check(root)).unformatted).toEqual(['songs/opener/tracks/vox.yaml']);
     const result = fmt(root);
@@ -823,7 +814,7 @@ describe('fmt', () => {
     expect((await check(root)).ok).toBe(true);
     const text = readFileSync(path, 'utf8');
     expect(text).toContain('# my favorite track');
-    expect(text.indexOf('name:')).toBeLessThan(text.indexOf('type:'));
+    expect(text.indexOf('name:')).toBeLessThan(text.indexOf('inputs:'));
   });
 
   it('refuses to format an invalid project', () => {
@@ -842,12 +833,11 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
       join(root, `songs/${song}/tracks/inner.yaml`),
       [
         'name: inner',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: c1',
-        '    source: hit',
+        '    audio: hit',
         '    anchor: absolute',
-        '    position: 0',
+        '    at: 0',
         '    duration: 4',
         '',
       ].join('\n'),
@@ -857,7 +847,7 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
   function writeTrack(name: string, body: string[], song = 'opener'): void {
     writeFileSync(
       join(root, `songs/${song}/tracks/${name}.yaml`),
-      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+      [`name: ${name}`, ...body, ''].join('\n'),
     );
   }
 
@@ -880,13 +870,13 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
 
   it('names an unknown track', async () => {
     writeTrack('outer', ['inputs:', '  - track: ghost', '    at: 0']);
-    expect(await messages()).toContain('placement 1 ("ghost") references unknown track "ghost"');
+    expect(await messages()).toContain('input 1 ("ghost") references unknown track "ghost"');
   });
 
   it('names a track placed inside itself, rather than reporting a cycle', async () => {
     writeTrack('outer', ['inputs:', '  - track: outer', '    at: 0']);
     const out = await messages();
-    expect(out).toContain('placement 1 ("outer") places this track inside itself');
+    expect(out).toContain('input 1 ("outer") places this track inside itself');
     expect(out).not.toContain('cycle');
   });
 
@@ -900,24 +890,9 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     // An empty audio track renders as silence (stem.ts renderableTrack),
     // so placing one places silence rather than dangling an edge. This was
     // an error until a song's output became a track that starts empty.
-    writeTrack('empty', ['clips: []']);
+    writeTrack('empty', ['inputs: []']);
     writeTrack('outer', ['inputs:', '  - track: empty', '    at: 0']);
     expect(await messages()).toBe('');
-  });
-
-  it('refuses a placed midi track, and a midi track that places', async () => {
-    writeFileSync(
-      join(root, 'songs/opener/tracks/keys.yaml'),
-      'name: keys\ntype: midi\nclips: []\n',
-    );
-    writeTrack('outer', ['inputs:', '  - track: keys', '    at: 0']);
-    expect(await messages()).toContain('places a midi track, which renders no audio');
-
-    writeFileSync(
-      join(root, 'songs/opener/tracks/keys.yaml'),
-      'name: keys\ntype: midi\ninputs:\n  - track: inner\n    at: 0\n',
-    );
-    expect(await messages()).toContain('a midi track cannot place tracks');
   });
 
   it('has no track-level fader to refuse: the field retired with the mix', async () => {
@@ -928,8 +903,8 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     writeFileSync(
       join(root, 'songs/opener/tracks/inner.yaml'),
       readFileSync(join(root, 'songs/opener/tracks/inner.yaml'), 'utf8').replace(
-        'type: audio\n',
-        'type: audio\ngain_db: -3\n',
+        'name: inner\n',
+        'name: inner\ngain_db: -3\n',
       ),
     );
     // Not "Unrecognized key": a removal without a forwarding address is
@@ -975,15 +950,14 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
 
 });
 
-describe('clips that play tracks (nested-tracks.md §1.11)', () => {
-  // A clip whose source is `track:<name>` is a placement wearing the
-  // clip spelling, so it is checked exactly as a placement is: the
-  // reference resolves to a renderable track that is not this one, and
-  // the edge counts toward containment cycles.
+describe('input entries with ids (nested-tracks.md §18)', () => {
+  // One list: an entry that places a track carries the same checks the
+  // placement always had, plus an optional id — and the id, not the
+  // entry's kind, is how it is named in diagnostics.
   function writeTrack(name: string, body: string[]): void {
     writeFileSync(
       join(root, `songs/opener/tracks/${name}.yaml`),
-      [`name: ${name}`, 'type: audio', ...body, ''].join('\n'),
+      [`name: ${name}`, ...body, ''].join('\n'),
     );
   }
 
@@ -997,85 +971,122 @@ describe('clips that play tracks (nested-tracks.md §1.11)', () => {
     await importAsset(root, 'opener', wavPath, 'hit');
     rmSync(wavPath);
     writeTrack('inner', [
-      'clips:',
+      'inputs:',
       '  - id: c1',
-      '    source: hit',
+      '    audio: hit',
       '    anchor: absolute',
-      '    position: 0',
+      '    at: 0',
       '    duration: 4',
     ]);
   });
 
-  it('accepts a clip on a track, forward reference and all', async () => {
+  it('accepts a track entry with an id and a window, forward reference and all', async () => {
     writeTrack('outer', [
-      'clips:',
+      'inputs:',
       '  - id: k1',
-      '    source: track:inner',
-      '    position: 0',
+      '    track: inner',
+      '    at: 0',
     ]);
     expect(await messages()).toBe('');
   });
 
-  it('names an unknown track', async () => {
-    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:ghost', '    position: 0']);
-    expect(await messages()).toContain('clip "k1" references unknown track "ghost"');
+  it('names an unknown track by the entry id when there is one', async () => {
+    writeTrack('outer', ['inputs:', '  - id: k1', '    track: ghost', '    at: 0']);
+    expect(await messages()).toContain('input "k1" references unknown track "ghost"');
   });
 
   it('does not fall back to the song namespace: track: means a track', async () => {
-    // `hit` exists as an asset; `track:hit` must not find it. One
-    // spelling per thing (project-core.md §7) — the prefix is not a
-    // search path over namespaces.
-    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:hit', '    position: 0']);
-    expect(await messages()).toContain('clip "k1" references unknown track "hit"');
+    // `hit` exists as an asset; `track: hit` must not find it. The kind
+    // lives in the field name (§18), and no field is a search path over
+    // namespaces (project-core.md §3.4).
+    writeTrack('outer', ['inputs:', '  - id: k1', '    track: hit', '    at: 0']);
+    expect(await messages()).toContain('input "k1" references unknown track "hit"');
   });
 
-  it('names a track clipped inside itself, rather than reporting a cycle', async () => {
-    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:outer', '    position: 0']);
+  it('names an entry that plays two kinds at once', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - id: k1',
+      '    track: inner',
+      '    audio: hit',
+      '    at: 0',
+    ]);
+    expect(await messages()).toContain('an entry plays exactly one thing');
+  });
+
+  it('audio: refuses a name that renders, pointing at sound:', async () => {
+    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/opener/sounds/pad.yaml'),
+      'name: pad\ntype: supercollider\nsource: pad.scd\nseed: 1\nduration: 2\n',
+    );
+    writeFileSync(join(root, 'shared/instruments/pad.scd'), 'Out.ar(0, Silent.ar(2));\n');
+    writeTrack('outer', ['inputs:', '  - id: k1', '    audio: pad', '    at: 0']);
+    expect(await messages()).toContain('audio: names the sound "pad"');
+    // And the reverse: sound: refuses committed bytes, pointing back.
+    writeTrack('outer', ['inputs:', '  - id: k2', '    sound: hit', '    at: 0']);
+    expect(await messages()).toContain('sound: names the asset "hit"');
+  });
+
+  it('refuses a duplicate id, and accepts entries with no id at all', async () => {
+    writeTrack('outer', [
+      'inputs:',
+      '  - id: k1',
+      '    track: inner',
+      '    at: 0',
+      '  - id: k1',
+      '    audio: hit',
+      '    at: 0',
+      '  - track: inner',
+      '    at: 0',
+    ]);
+    expect(await messages()).toContain('duplicate input id "k1"');
+  });
+
+  it('names a track placed inside itself, rather than reporting a cycle', async () => {
+    writeTrack('outer', ['inputs:', '  - id: k1', '    track: outer', '    at: 0']);
     const out = await messages();
-    expect(out).toContain('clip "k1" clips this track inside itself');
+    expect(out).toContain('input "k1" places this track inside itself');
     expect(out).not.toContain('cycle');
   });
 
-  it('a clip edge closes a containment cycle like a placement does', async () => {
-    writeTrack('a', ['clips:', '  - id: k1', '    source: track:b', '    position: 0']);
+  it('an id-carrying entry closes a containment cycle like any placement', async () => {
+    writeTrack('a', ['inputs:', '  - id: k1', '    track: b', '    at: 0']);
     writeTrack('b', ['inputs:', '  - track: a', '    at: 0']);
     expect(await messages()).toContain('track containment cycle: a → b → a');
   });
 
-  it('refuses a clipped midi track', async () => {
-    writeFileSync(
-      join(root, 'songs/opener/tracks/keys.yaml'),
-      'name: keys\ntype: midi\nclips: []\n',
-    );
-    writeTrack('outer', ['clips:', '  - id: k1', '    source: track:keys', '    position: 0']);
-    expect(await messages()).toContain('clip "k1" clips a midi track, which renders no audio');
-  });
-
-  it('refuses a midi track that places through a clip, same as through inputs:', async () => {
-    // The placement rule, not a clip rule: only an audio track sums
-    // audio, and a clip playing a track is a placement (§1.11). Without
-    // this, a midi parent passes check while buildGraph gives it no stem
-    // — the clip silently never renders, and `reaches` counts the edge.
+  it('type: is retired with a forwarding message, not an unrecognized-key shrug', async () => {
+    // `midi` was the one kind that rendered nothing; §18 retires the
+    // field and the message says where kinds went.
     writeFileSync(
       join(root, 'songs/opener/tracks/scratch.yaml'),
-      'name: scratch\ntype: midi\nclips:\n  - id: k1\n    source: track:inner\n    position: 0\n',
+      'name: scratch\ntype: midi\ninputs: []\n',
     );
-    expect(await messages()).toContain('a midi track cannot place tracks');
+    expect(await messages()).toContain('every track is audio — delete type:');
+  });
+
+  it('clips: is retired with a forwarding message naming the field moves', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/scratch.yaml'),
+      'name: scratch\nclips:\n  - id: k1\n    source: hit\n    position: 0\n',
+    );
+    expect(await messages()).toContain('clips: merged into inputs:');
   });
 
   it('a loop on a track still needs every — its length is unknown before it builds', async () => {
     writeTrack('outer', [
-      'clips:',
+      'inputs:',
       '  - id: k1',
-      '    source: track:inner',
+      '    track: inner',
       '    anchor: absolute',
-      '    position: 0',
+      '    at: 0',
       '    duration: 8',
       '    loop:',
       '      fade: 0',
     ]);
     expect(await messages()).toContain(
-      'clip "k1" loops a track — set loop.every',
+      'input "k1" loops a track — set loop.every',
     );
   });
 });
@@ -1089,7 +1100,7 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
     rmSync(wavPath);
     writeFileSync(
       join(root, 'songs/opener/tracks/verse.yaml'),
-      'name: verse\ntype: audio\nclips:\n  - id: c\n    source: hit\n    anchor: absolute\n    position: 0\n    duration: 4\n',
+      'name: verse\ninputs:\n  - id: c\n    audio: hit\n    anchor: absolute\n    at: 0\n    duration: 4\n',
     );
   });
 
@@ -1099,7 +1110,7 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
   function writeOutputTrack(): void {
     writeFileSync(
       join(root, 'songs/opener/tracks/main.yaml'),
-      'name: main\ntype: audio\ninputs:\n  - track: verse\n    at: 0\n',
+      'name: main\ninputs:\n  - track: verse\n    at: 0\n',
     );
   }
 
@@ -1110,19 +1121,13 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
   });
 
 
-  it('says nothing about a midi or empty track named main', async () => {
-    // Only a renderable track ever claims the song's extent, so neither of
-    // these is a second output — claiming they carry the length would be
-    // false about tracks the graph never builds a stem for.
+  it('says nothing about an empty track named main', async () => {
+    // An empty output renders as the silence it contains and still
+    // carries the song's extent — starting empty is exactly how `field
+    // song create` writes it.
     writeFileSync(
       join(root, 'songs/opener/tracks/main.yaml'),
-      'name: main\ntype: midi\nclips: []\n',
-    );
-    expect(await messages()).toBe('');
-
-    writeFileSync(
-      join(root, 'songs/opener/tracks/main.yaml'),
-      'name: main\ntype: audio\nclips: []\n',
+      'name: main\n',
     );
     expect(await messages()).toBe('');
   });
@@ -1130,7 +1135,7 @@ describe("a song's output (nested-tracks.md §7 chunk 2)", () => {
   it('says nothing about a non-output track sharing the song with a mix', async () => {
     writeFileSync(
       join(root, 'songs/opener/tracks/bridge.yaml'),
-      'name: bridge\ntype: audio\ninputs:\n  - track: verse\n    at: 0\n',
+      'name: bridge\ninputs:\n  - track: verse\n    at: 0\n',
     );
     expect(await messages()).toBe('');
   });

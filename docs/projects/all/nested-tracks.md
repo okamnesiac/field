@@ -14,8 +14,10 @@ clip-duration prerequisite (§15, #97) and the eq fold (§17, #100), and
 then settled the shape it was heading toward: one `inputs:` list whose
 entries place tracks, committed audio, or inline generators (§18) —
 which answers §6's leaf-content question, retires `clips:` and `type:`,
-and supersedes §17's spelling. The format lands first, the leaves fold
-behind it, and the two `normalize` sounds still wait on
+and supersedes §17's spelling. The format has landed — one `inputs:`
+list with `track:`/`audio:`/`sound:` entries, every action key intact —
+so what remains is generator entries: the leaves fold behind them, and
+the two `normalize` sounds still wait on
 [multi-rate.md](multi-rate.md) (§16).
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the

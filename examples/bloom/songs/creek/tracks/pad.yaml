@@ -1,23 +1,22 @@
 name: pad
-type: audio
 inserts:
   # the wash is a track insert, so its tail rings past the last clip
   - effect: reverb
     mix: 0.25
     decay: 3
     damping: 0.6
-clips:
+inputs:
   # four bars of pad under the intro (the render is exactly 4 bars at 96)
   - id: intro-pad-k3m7q
-    source: pad-sc
-    position: [1]
+    sound: pad-sc
+    at: [1]
     duration: [4]
     fade_out: 30000 # one beat, crossfading into the verse pad below
   # the same render again under the verse, entering a beat early: two
   # overlapping faded clips ARE the crossfade — it is not a schema feature
   - id: verse-pad-j5r8w
-    source: pad-sc
-    position: [4, 4] # one beat before bar 5
+    sound: pad-sc
+    at: [4, 4] # one beat before bar 5
     duration: [4]
     fade_in: 30000 # one beat at 96 bpm
     fade_out: 30000

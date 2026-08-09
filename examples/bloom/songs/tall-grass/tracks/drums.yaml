@@ -1,8 +1,7 @@
 name: drums
-type: audio
-clips:
+inputs:
   - id: groove-p2v4t
-    source: seven-eight-loop
-    position: [1]
+    sound: seven-eight-loop
+    at: [1]
     duration: [2] # two bars of 7/8
     slip: 5455 # dragged half an eighth late against the grid (samples)

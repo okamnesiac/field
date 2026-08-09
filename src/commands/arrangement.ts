@@ -1,6 +1,5 @@
 import { loadProject, type LoadedProject } from '../model/project.js';
 import { SONG_OUTPUT_NAME } from '../labels.js';
-import { renderableTrack } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
@@ -42,28 +41,28 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
         `track (nested-tracks.md §7 chunk 2)`,
     );
   }
-  if (!renderableTrack(output.data)) {
-    throw new Error(`"${SONG_OUTPUT_NAME}" in ${songName} is not an audio track`);
-  }
   const meter = song.tempo ? new MeterMap(song.tempo.data.meter) : undefined;
   const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const tempo = song.tempo ? new TempoMap(song.tempo.data.tempo, rate) : undefined;
   const placements: Placement[] = [];
-  for (const input of output.data.inputs ?? []) {
+  for (const entry of output.data.inputs ?? []) {
+    // Structure means placed *tracks* (nested-tracks.md §18): an audio or
+    // generator entry on the output is material, not a section.
+    if (entry.track === undefined) continue;
     // `at` is ticks when the placement is musical and samples when it is
     // absolute (schema/track.ts). Formatting samples through the meter map
     // is not a rounding error — a placement one second in came out as bar
     // 13 of an eight-bar song, which is the same class of lie this command
     // exists to stop telling.
-    const absolute = input.anchor === 'absolute';
-    const at = absolute ? (tempo ? tempo.samplesToTicks(input.at) : input.at) : input.at;
+    const absolute = entry.anchor === 'absolute';
+    const at = absolute ? (tempo ? tempo.samplesToTicks(entry.at) : entry.at) : entry.at;
     placements.push({
-      track: input.track,
+      track: entry.track,
       at,
       bars: meter && (!absolute || tempo) ? meter.format(at) : String(at),
       absolute,
-      gainDb: input.gain_db,
-      pan: input.pan,
+      gainDb: entry.gain_db,
+      pan: entry.pan,
     });
   }
   // Reading order is time order — the file's order is authoring order, and

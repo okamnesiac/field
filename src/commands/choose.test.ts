@@ -89,7 +89,7 @@ function loadedGenerate(): GenerativeSound {
 }
 
 const clipYaml = (source: string) =>
-  `name: piano\ntype: audio\nclips:\n  - id: intro\n    source: ${source}\n    position: 0\n    duration: 960\n`;
+  `name: piano\ninputs:\n  - id: intro\n    sound: ${source}\n    at: 0\n    duration: 960\n`;
 
 describe('generative sounds in the project model', () => {
   it('loads, validates, and formats canonically', async () => {
@@ -184,7 +184,7 @@ describe('generative sounds in the project model', () => {
     // source is still an error, which is what tells the two apart.
     writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('ghost'));
     expect(
-      (await check(root)).diagnostics.some((d) => d.message.includes('unknown source "ghost"')),
+      (await check(root)).diagnostics.some((d) => d.message.includes('unknown sound "ghost"')),
     ).toBe(true);
   });
 

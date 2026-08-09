@@ -39,7 +39,7 @@ const track = (name: string, yaml: string) =>
 const clip = (extra: string[] = []) =>
   track(
     'bed',
-    ['name: bed', 'type: audio', 'clips:', '  - id: hit', '    source: blip', '    position: 0', ...extra, ''].join(
+    ['name: bed', 'inputs:', '  - id: hit', '    sound: blip', '    at: 0', ...extra, ''].join(
       '\n',
     ),
   );
@@ -69,16 +69,15 @@ describe('a clip with no duration', () => {
       'bed',
       [
         'name: bed',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: hit',
-        '    source: nonexistent',
-        '    position: 0',
+        '    sound: nonexistent',
+        '    at: 0',
         '',
       ].join('\n'),
     );
     const messages = (await check(root)).diagnostics.map((d) => d.message);
-    expect(messages.join('\n')).toContain('unknown source "nonexistent"');
+    expect(messages.join('\n')).toContain('unknown sound "nonexistent"');
   });
 
   it('is refused when the clip also loops', async () => {
@@ -96,7 +95,7 @@ describe('a clip with no duration', () => {
     // an omission.
     clip(['    anchor: absolute', '    duration: [4]']);
     const messages = (await check(root)).diagnostics.map((d) => d.message);
-    expect(messages.join('\n')).toContain('musical time on an absolute clip');
+    expect(messages.join('\n')).toContain('musical time on an absolute entry');
   });
 });
 

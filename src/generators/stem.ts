@@ -6,19 +6,37 @@ import { readWavHeader } from '../audio/wav.js';
 // the buildable sort below is spelling-blind: order is the one channel
 // a spelling change could reach the key through.
 import { trackRef, trackRefName } from '../labels.js';
-import type { Clip, Insert, Track, TrackInput } from '../schema/index.js';
+import type { InputEntry, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
 
 // stem: the implicit generator behind //songs/<song>/track:<name>
 // (mix-assembly.md §3) — a mix file defines a mix, a track file implies
 // a stem. The spec is synthesized from the track file, never declared:
-// clip windows are projected through the tempo map
+// entry windows are projected through the tempo map
 // to samples *before* hashing, so the action key sees the resolved placement
 // plan. A tempo edit therefore rebuilds exactly the tracks whose musical
-// clips moved; reordering clips in YAML or renaming an asset changes
-// nothing. Stems render pre-fader (track gain_db/pan are mix parameters)
+// entries moved; reordering entries in YAML or renaming an asset changes
+// nothing. Stems render pre-fader (levels are edge parameters)
 // and start at timeline sample 0 so the mix can sum by alignment alone.
+
+// The wiring ref an entry contributes to `sources`: kind-in-field in the
+// file (nested-tracks.md §18) flattens to one string here — `audio:` and
+// `sound:` names pass through (bare, or the //shared/asset: label), a
+// `track:` gets the prefix labels.ts owns. Exactly the strings the two
+// lists produced before they merged, which is what keeps every existing
+// action key: refs are wiring, and the resolved plan is what hashes.
+export function entryRef(entry: InputEntry): string {
+  if (entry.track !== undefined) return trackRef(entry.track);
+  return entry.audio ?? entry.sound!;
+}
+
+// How an entry is named in a diagnostic: its id when it has one, else
+// what it plays — entries carry ids for automation, not for errors, so
+// a message must not require one.
+export function entryLabel(entry: InputEntry): string {
+  return entry.id ?? trackRefName(entryRef(entry)) ?? entryRef(entry);
+}
 
 export interface PlacedClip {
   input: number; // index into spec.sources
@@ -67,19 +85,12 @@ export interface PlacedClip {
 // on something the control plane is supposed to have already decided.
 export type RenderedClip = Omit<PlacedClip, 'duration'> & { duration: number };
 
-// Every audio track has a stem, including an empty one — it renders as
-// silence, which is what it contains. Clips were the only content until
-// tracks could contain tracks, and requiring *some* content was the rule
-// until a song's output became a track: `field song create` writes an
+// Every track has a stem, including an empty one — it renders as
+// silence, which is what it contains. `field song create` writes an
 // empty `main`, and a label the bare song name resolves to has to exist
-// from that moment rather than from the first clip. A midi track still has
-// no audio to render.
-//
-// One predicate, because validate and the graph answering this question
-// differently is how a check-clean project fails to build.
-export function renderableTrack(track: Track): boolean {
-  return track.type === 'audio';
-}
+// from that moment rather than from the first entry. (`type: midi` — the
+// one kind that rendered nothing — retired with the one-list format,
+// nested-tracks.md §18.)
 
 export interface StemSpec {
   name: string;
@@ -105,88 +116,73 @@ export interface StemSpec {
   loop?: boolean;
 }
 
-// A clip's window on the stem timeline, in samples. Musical clips project
-// both edges through the tempo map (the window end is position + duration
-// in ticks, so a clip spanning a ramp gets its true sample length); absolute
-// clips are already samples.
+// An entry's window on the stem timeline, in samples — one projection
+// for every kind, because the window never depended on what produced the
+// audio. Musical entries project both edges through the tempo map (the
+// window end is at + duration in ticks, so a window spanning a ramp gets
+// its true sample length); absolute entries are already samples.
 export function placedWindow(
-  clip: Clip,
+  entry: InputEntry,
   tempoMap: TempoMap,
 ): { start: number; duration?: number } {
   // An omitted duration stays omitted all the way to execute(), which
-  // resolves it from the rendered input — the same path a placed track's
-  // takes, and for the same reason: the source's length is not knowable
-  // while planning.
-  if (clip.anchor === 'absolute') {
-    return clip.duration === undefined
-      ? { start: clip.position }
-      : { start: clip.position, duration: clip.duration };
+  // resolves it from the rendered input — the source's length is not
+  // knowable while planning, whichever kind renders it.
+  if (entry.anchor === 'absolute') {
+    return entry.duration === undefined
+      ? { start: entry.at }
+      : { start: entry.at, duration: entry.duration };
   }
-  const start = tempoMap.ticksToSamples(clip.position);
-  if (clip.duration === undefined) return { start };
-  return { start, duration: tempoMap.ticksToSamples(clip.position + clip.duration) - start };
+  const start = tempoMap.ticksToSamples(entry.at);
+  if (entry.duration === undefined) return { start };
+  return { start, duration: tempoMap.ticksToSamples(entry.at + entry.duration) - start };
 }
 
 // A placed track's window, projected the same way — the child's origin
-// lands at `at`, and a declared duration measures from there so a
-// placement spanning a tempo ramp gets its true sample length. An omitted
-// duration stays omitted all the way to execute(); see PlacedClip.
-export function placedInput(
-  input: TrackInput,
-  tempoMap: TempoMap,
-): { start: number; duration?: number } {
-  if (input.anchor === 'absolute') {
-    return input.duration === undefined
-      ? { start: input.at }
-      : { start: input.at, duration: input.duration };
-  }
-  const start = tempoMap.ticksToSamples(input.at);
-  if (input.duration === undefined) return { start };
-  return { start, duration: tempoMap.ticksToSamples(input.at + input.duration) - start };
-}
-
-// Loop expansion (clip-looping.md §1.6): a looped clip becomes the same
-// resolved per-repetition entries equivalent hand-written clips would
+// Loop expansion (clip-looping.md §1.6): a looped entry becomes the same
+// resolved per-repetition windows equivalent hand-written entries would
 // produce — the renderer and the action-key format don't know loops exist.
-// Returns entries without input wiring; planTrack fills that in. Exported
+// Returns windows without input wiring; planTrack fills that in. Exported
 // for validate, which runs the same expansion to diagnose exhausted
 // sources and fades that outgrow their slots before any graph exists —
 // the throw below is a backstop the gate makes unreachable.
 export function expandLoop(
-  clip: Clip,
-  loop: NonNullable<Clip['loop']>,
+  entry: InputEntry,
+  loop: NonNullable<InputEntry['loop']>,
   tempoMap: TempoMap,
   sourceFrames: number | undefined,
-  // Every repetition has a concrete window: a loop tiles a clip, so a
-  // looping clip declares a duration even though an ordinary one need not
+  // Every repetition has a concrete window: a loop tiles a window, so a
+  // looping entry declares a duration even though an ordinary one need not
   // (schema/track.ts). `check` refuses the combination by name; this is
   // the guard for anything that reaches the planner another way.
 ): Omit<RenderedClip, 'input'>[] {
-  const { start, duration } = placedWindow(clip, tempoMap);
+  const { start, duration } = placedWindow(entry, tempoMap);
   if (duration === undefined) {
-    throw new Error(`clip "${clip.id}" loops but declares no duration — a loop tiles a window`);
+    throw new Error(
+      `input "${entryLabel(entry)}" loops but declares no duration — a loop tiles a window`,
+    );
   }
   const windowEnd = start + duration;
-  const readOffset = clip.source_offset - clip.slip;
+  const readOffset = entry.source_offset - entry.slip;
 
   // Repetition boundaries on the stem timeline, in samples.
   const bounds: number[] = [];
   if (loop.every !== undefined) {
-    // Anchor units, like position/duration: musical loops repeat on the
+    // Anchor units, like at/duration: musical loops repeat on the
     // grid straight through tempo ramps.
-    for (let at = clip.position; ; at += loop.every) {
-      const sample = clip.anchor === 'absolute' ? at : tempoMap.ticksToSamples(at);
+    for (let at = entry.at; ; at += loop.every) {
+      const sample = entry.anchor === 'absolute' ? at : tempoMap.ticksToSamples(at);
       if (sample >= windowEnd) break;
       bounds.push(sample);
     }
   } else {
-    // Tile at the source's own length. A target's length is unknown at
+    // Tile at the source's own length. A buildable's length is unknown at
     // plan time (validate already demands `every` there); an asset whose
     // content is exhausted by the read offset has nothing to tile.
     const interval = (sourceFrames ?? 0) - readOffset;
     if (interval <= 0) {
       throw new Error(
-        `clip "${clip.id}": loop without 'every' needs source content after its read offset`,
+        `input "${entryLabel(entry)}": loop without 'every' needs source content after its read offset`,
       );
     }
     for (let at = start; at < windowEnd; at += interval) bounds.push(at);
@@ -198,19 +194,19 @@ export function expandLoop(
     // truncate cuts each repetition at its slot; overlay lets it ring to
     // the window's edge — reads past the source's end are silence, so the
     // voice ends where its content does, and overlapping voices sum like
-    // any overlapping clips.
+    // any overlapping windows.
     const repDuration = loop.mode === 'overlay' ? windowEnd - slotStart : slotEnd - slotStart;
     return {
       start: slotStart,
       duration: repDuration,
       read_offset: readOffset,
-      gain_db: clip.gain_db,
-      // Whole-clip fades keep their meaning (first head, window tail);
+      gain_db: entry.gain_db,
+      // Whole-entry fades keep their meaning (first head, window tail);
       // seams get the loop's click-guard. Overlay voices all end at the
       // window edge, so the window fade covers whatever is cut there.
-      fade_in: k === 0 ? clip.fade_in : loop.fade,
+      fade_in: k === 0 ? entry.fade_in : loop.fade,
       fade_out:
-        loop.mode === 'overlay' ? clip.fade_out : last ? clip.fade_out : loop.fade,
+        loop.mode === 'overlay' ? entry.fade_out : last ? entry.fade_out : loop.fade,
     };
   });
 }
@@ -229,15 +225,11 @@ export function planTrack(
   // Set only for a song's output track; see StemSpec.
   extent: { lengthSamples?: number | undefined; loop?: boolean | undefined } = {},
 ): StemSpec {
-  // Clips and placed tracks share one source list, because they are one
-  // thing wearing two spellings (nested-tracks.md §1.11: a clip is a
-  // placement, and a placement is a stem at a time). A placed track is
-  // never in sha256BySource — its bytes do not exist until it renders —
-  // so it sorts with the buildable sounds, by name, for the same reason
-  // they do.
-  const refs = [
-    ...new Set([...track.clips.map((c) => c.source), ...track.inputs.map((i) => trackRef(i.track))]),
-  ];
+  // One list in the file (nested-tracks.md §18), one source list here.
+  // A placed track is never in sha256BySource — its bytes do not exist
+  // until it renders — so it sorts with the buildable sounds, by name,
+  // for the same reason they do.
+  const refs = [...new Set(track.inputs.map(entryRef))];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
     .sort((a, b) => {
@@ -262,48 +254,31 @@ export function planTrack(
     });
   const sources = [...committed, ...buildable];
   const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
-  const placements = track.inputs.map((input): PlacedClip => {
-    const { start, duration } = placedInput(input, tempoMap);
-    return {
-      input: inputIndex.get(trackRef(input.track))!,
-      start,
-      ...(duration !== undefined ? { duration } : {}),
-      // A placement reads its child from the child's own origin. Slip is
-      // a clip's way of moving content under a fixed window; a placement
-      // moves the window instead, which is what `at` is.
-      read_offset: 0,
-      gain_db: input.gain_db,
-      ...(input.pan !== 0 ? { pan: input.pan } : {}),
-      fade_in: input.fade_in,
-      fade_out: input.fade_out,
-    };
-  });
-  const clips = track.clips.flatMap((clip): PlacedClip[] => {
-    const input = inputIndex.get(clip.source)!;
-    const loop = clip.loop?.enabled ? clip.loop : undefined;
+  const placed = track.inputs.flatMap((entry): PlacedClip[] => {
+    const input = inputIndex.get(entryRef(entry))!;
+    const loop = entry.loop?.enabled ? entry.loop : undefined;
     if (loop) {
-      const frames = framesBySource.get(clip.source);
-      return expandLoop(clip, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
+      const frames = framesBySource.get(entryRef(entry));
+      return expandLoop(entry, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
     }
-    const { start, duration } = placedWindow(clip, tempoMap);
+    const { start, duration } = placedWindow(entry, tempoMap);
     return [
       {
         input,
         start,
         ...(duration !== undefined ? { duration } : {}),
-        read_offset: clip.source_offset - clip.slip,
-        gain_db: clip.gain_db,
-        fade_in: clip.fade_in,
-        fade_out: clip.fade_out,
+        read_offset: entry.source_offset - entry.slip,
+        gain_db: entry.gain_db,
+        ...(entry.pan !== 0 ? { pan: entry.pan } : {}),
+        fade_in: entry.fade_in,
+        fade_out: entry.fade_out,
       },
     ];
   });
   // Canonical order: summing is commutative, so the action key must not
-  // depend on YAML clip order — nor on whether a placement was written
-  // among the clips or after them, which is why the two lists sort as
-  // one. An absent duration sorts as -1: no real window is shorter, and
-  // the comparator's job is to be total and stable, not meaningful.
-  const placed = [...clips, ...placements];
+  // depend on YAML entry order. An absent duration sorts as -1: no real
+  // window is shorter, and the comparator's job is to be total and
+  // stable, not meaningful.
   placed.sort(
     (a, b) =>
       a.start - b.start ||

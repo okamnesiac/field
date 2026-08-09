@@ -54,20 +54,19 @@ describe('a track with its own time', () => {
       'figure',
       [
         'name: figure',
-        'type: audio',
         ...SEVEN_EIGHT,
-        'clips:',
+        'inputs:',
         '  - id: hit',
-        '    source: kick',
-        '    position: [2]',
+        '    sound: kick',
+        '    at: [2]',
         '    duration: [1]',
         '',
       ].join('\n'),
     );
     // Bar 2 of 7/8 is 3360 ticks. Under the song's 4/4 it would be 3840 —
     // the number this whole feature exists to stop being wrong.
-    expect(named('figure').clips[0]!.position).toBe(3360);
-    expect(named('figure').clips[0]!.duration).toBe(3360);
+    expect(named('figure').inputs[0]!.at).toBe(3360);
+    expect(named('figure').inputs[0]!.duration).toBe(3360);
   });
 
   it('inherits the half it does not declare', () => {
@@ -76,14 +75,14 @@ describe('a track with its own time', () => {
     // a second copy of the song's tempo that nothing can keep in step.
     track(
       'figure',
-      ['name: figure', 'type: audio', ...SEVEN_EIGHT, 'clips: []', ''].join('\n'),
+      ['name: figure', ...SEVEN_EIGHT, ''].join('\n'),
     );
     expect(named('figure').time?.tempo).toBeUndefined();
     expect(named('figure').time?.meter?.[0]?.numerator).toBe(7);
   });
 
   it('refuses an empty time: rather than treating it as inherit-everything', async () => {
-    track('figure', ['name: figure', 'type: audio', 'time: {}', 'clips: []', ''].join('\n'));
+    track('figure', ['name: figure', 'time: {}', ''].join('\n'));
     const messages = (await check(root)).diagnostics.map((d) => d.message);
     expect(messages.join('\n')).toContain('an empty `time:` inherits everything');
   });
@@ -95,16 +94,15 @@ describe('a track with its own time', () => {
       'figure',
       [
         'name: figure',
-        'type: audio',
         'time:',
         '  meter:',
         '    - at: 1',  // not a bar boundary of the preceding meter
         '      numerator: 7',
         '      denominator: 8',
-        'clips:',
+        'inputs:',
         '  - id: hit',
-        '    source: kick',
-        '    position: [2]',
+        '    sound: kick',
+        '    at: [2]',
         '    duration: [1]',
         '',
       ].join('\n'),
@@ -112,7 +110,7 @@ describe('a track with its own time', () => {
     const diags = (await check(root)).diagnostics;
     expect(diags.some((d) => d.file.endsWith('figure.yaml') && d.message.includes('local meter'))).toBe(true);
     // The position never silently became 3840.
-    expect(named('figure').clips[0]!.position).not.toBe(3840);
+    expect(named('figure').inputs[0]!.at).not.toBe(3840);
   });
 });
 
@@ -126,11 +124,10 @@ describe('inheritance comes from the song, not the parent', () => {
       'child',
       [
         'name: child',
-        'type: audio',
-        'clips:',
+        'inputs:',
         '  - id: hit',
-        '    source: kick',
-        '    position: [2]',
+        '    sound: kick',
+        '    at: [2]',
         '    duration: [1]',
         '',
       ].join('\n'),
@@ -139,12 +136,10 @@ describe('inheritance comes from the song, not the parent', () => {
       'parent',
       [
         'name: parent',
-        'type: audio',
         ...SEVEN_EIGHT,
         'inputs:',
         '  - track: child',
         '    at: [2]',
-        'clips: []',
         '',
       ].join('\n'),
     );
@@ -156,16 +151,15 @@ describe('inheritance comes from the song, not the parent', () => {
     expect(named('parent').inputs[0]!.at).toBe(3360);
     // The clip is in the child's file, and the child declared no time, so
     // it is the song's 4/4 — not the 7/8 of the track that places it.
-    expect(named('child').clips[0]!.position).toBe(3840);
+    expect(named('child').inputs[0]!.at).toBe(3840);
   });
 
   it('does not change the child when the parent changes meter', () => {
-    const before = named('child').clips[0]!.position;
+    const before = named('child').inputs[0]!.at;
     track(
       'parent',
       [
         'name: parent',
-        'type: audio',
         'time:',
         '  meter:',
         '    - at: 0',
@@ -174,11 +168,10 @@ describe('inheritance comes from the song, not the parent', () => {
         'inputs:',
         '  - track: child',
         '    at: [2]',
-        'clips: []',
         '',
       ].join('\n'),
     );
-    expect(named('child').clips[0]!.position).toBe(before);
+    expect(named('child').inputs[0]!.at).toBe(before);
     expect(named('parent').inputs[0]!.at).toBe(4800); // bar 2 of 5/4
   });
 });
@@ -194,15 +187,14 @@ describe("the stem is planned in the track's own tempo", () => {
       'slow',
       [
         'name: slow',
-        'type: audio',
         'time:',
         '  tempo:',
         '    - at: 0',
         '      bpm: 60',
-        'clips:',
+        'inputs:',
         '  - id: hit',
-        '    source: kick',
-        '    position: [2]',
+        '    sound: kick',
+        '    at: [2]',
         '    duration: [1]',
         '',
       ].join('\n'),
@@ -224,12 +216,11 @@ describe('composition is offset addition, not map arithmetic', () => {
       'figure',
       [
         'name: figure',
-        'type: audio',
         ...SEVEN_EIGHT,
-        'clips:',
+        'inputs:',
         '  - id: hit',
-        '    source: kick',
-        '    position: [2]',
+        '    sound: kick',
+        '    at: [2]',
         '    duration: [1]',
         '',
       ].join('\n'),
@@ -238,12 +229,10 @@ describe('composition is offset addition, not map arithmetic', () => {
       join(root, 'songs/creek/tracks/main.yaml'),
       [
         'name: main',
-        'type: audio',
         'inserts: []',
         'inputs:',
         '  - track: figure',
         '    at: [2]',
-        'clips: []',
         '',
       ].join('\n'),
     );
@@ -274,12 +263,10 @@ describe("a take is content on a track, so it is in that track's time", () => {
       'slow',
       [
         'name: slow',
-        'type: audio',
         'time:',
         '  tempo:',
         '    - at: 0',
         '      bpm: 60',
-        'clips: []',
         '',
       ].join('\n'),
     );

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SLUG_PATTERN } from '../ids.js';
-import { RESERVED_LABEL_NAME, sharedAssetName, trackRefName } from '../labels.js';
+import { RESERVED_LABEL_NAME, sharedAssetName } from '../labels.js';
 
 // Shared building blocks for the per-file schemas (index.ts is the
 // barrel). Zod schemas are the single source of truth for the canonical
@@ -36,33 +36,6 @@ export const sourceRef = z.string().superRefine((ref, ctx) => {
         ? `packages are singular: //shared/assets: is now //shared/asset: (try //shared/asset:${stale[1]!})`
         : 'must be a name in the song or //shared/asset:<name>',
   });
-});
-
-// A clip's source admits one spelling more than a sound's: `track:<name>`
-// plays a track in this song (nested-tracks.md §1.11 — a clip is a
-// placement, and a placement is a stem at a time). The prefix, not a bare
-// slug, because tracks are deliberately outside the song's one namespace
-// (project-layout.md §4.3): a track and a sound may legally share a name
-// today, and a bare slug that meant either would be a search path, which
-// the one-spelling rule forbids (project-core.md §3.4). It is the same
-// spelling the track's label already uses (//songs/<song>/track:<name>).
-export const clipSourceRef = z.string().superRefine((ref, ctx) => {
-  const placed = trackRefName(ref);
-  if (placed !== undefined) {
-    if (SLUG_PATTERN.test(placed) && placed !== RESERVED_LABEL_NAME) return;
-    ctx.addIssue({ code: 'custom', message: 'track: must name a track by its lowercase-slug' });
-    return;
-  }
-  const parsed = sourceRef.safeParse(ref);
-  for (const issue of parsed.error?.issues ?? []) {
-    ctx.addIssue({
-      code: 'custom',
-      message: issue.message.replace(
-        'must be a name in the song or',
-        'must be a name in the song, track:<name>, or',
-      ),
-    });
-  }
 });
 
 export const ticks = z.number().int().min(0);

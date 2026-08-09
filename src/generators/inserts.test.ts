@@ -18,13 +18,12 @@ let root: string;
 const trackYaml = (extra: string[]) =>
   [
     'name: drums',
-    'type: audio',
     ...extra,
-    'clips:',
+    'inputs:',
     '  - id: c1',
-    '    source: tone',
+    '    audio: tone',
     '    anchor: absolute',
-    '    position: 0',
+    '    at: 0',
     '    duration: 48000',
     '',
   ].join('\n');
@@ -43,7 +42,7 @@ beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'field-inserts-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  createTrack(root, 'creek', 'drums', 'audio');
+  createTrack(root, 'creek', 'drums');
   const src = join(root, '..', `field-inserts-src-${Math.random()}.wav`);
   const tone = new Float32Array(48000);
   for (let i = 0; i < tone.length; i++) tone[i] = 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000);
@@ -87,7 +86,6 @@ describe('track inserts', () => {
       join(root, 'songs/creek/tracks/main.yaml'),
       [
         'name: main',
-        'type: audio',
         'inputs:',
         '  - track: drums',
         '    at: 0',
@@ -129,7 +127,6 @@ describe("the output track's chain (what the master chain became)", () => {
       join(root, 'songs/creek/tracks/main.yaml'),
       [
         'name: main',
-        'type: audio',
         'inserts:',
         '  - effect: limit',
         '    ceiling_db: -3',
@@ -157,7 +154,7 @@ describe("the output track's chain (what the master chain became)", () => {
     const path = join(root, 'songs/creek/tracks/main.yaml');
     writeFileSync(
       path,
-      ['name: main', 'type: audio', 'inputs:', '  - track: drums', '    at: 0', ''].join('\n'),
+      ['name: main', 'inputs:', '  - track: drums', '    at: 0', ''].join('\n'),
     );
     await buildLabels(root, ['//songs/creek/track:main'], runner);
     expect(runs).toEqual(['drums', 'main']);
@@ -165,8 +162,8 @@ describe("the output track's chain (what the master chain became)", () => {
     writeFileSync(
       path,
       readFileSync(path, 'utf8').replace(
-        'type: audio\n',
-        'type: audio\ninserts:\n  - effect: limit\n    ceiling_db: -1\n',
+        'name: main\n',
+        'name: main\ninserts:\n  - effect: limit\n    ceiling_db: -1\n',
       ),
     );
     await buildLabels(root, ['//songs/creek/track:main'], runner);

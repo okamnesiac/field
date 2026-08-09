@@ -8,7 +8,6 @@
 # vocal only sings over passes two and three, so both stay at the root
 # where they can span or skip passes. A phrase is what repeats exactly.
 name: phrase
-type: audio
 inputs:
   - track: drums
     at: 0

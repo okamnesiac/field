@@ -12,7 +12,7 @@ import {
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
-import { planTrack, renderableTrack } from '../generators/stem.js';
+import { entryRef, planTrack } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -192,19 +192,20 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel);
       }
     }
-    const renderable = song.tracks.filter((t) => renderableTrack(t.data)).map((t) => t.data);
+    const renderable = song.tracks.map((t) => t.data);
     if (song.tempo) {
       const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
       // Loops without `every` tile at the source's length, so the plan
       // needs frame counts — but only for the sources such loops touch.
       const framesBySource = new Map<string, number>();
       for (const track of renderable) {
-        for (const clip of track.clips) {
-          if (clip.loop?.enabled && clip.loop.every === undefined) {
-            const committed = fileBySource.get(clip.source);
-            if (committed !== undefined && !framesBySource.has(clip.source)) {
+        for (const entry of track.inputs) {
+          if (entry.loop?.enabled && entry.loop.every === undefined) {
+            const ref = entryRef(entry);
+            const committed = fileBySource.get(ref);
+            if (committed !== undefined && !framesBySource.has(ref)) {
               framesBySource.set(
-                clip.source,
+                ref,
                 wavFrameCount(join(project.root, committed.base, committed.file)),
               );
             }
@@ -218,10 +219,9 @@ export function buildGraph(project: LoadedProject): Graph {
           ? tempoMap.ticksToSamples(song.song.data.length)
           : undefined;
       for (const track of renderable) {
-        // Every audio track gets a node, an empty one rendering as the
-        // silence it contains (renderableTrack) — which is what lets a
-        // song answer to its own name from the moment `field song create`
-        // writes its output track. MIDI has no audio to render at all.
+        // Every track gets a node, an empty one rendering as the silence
+        // it contains — which is what lets a song answer to its own name
+        // from the moment `field song create` writes its output track.
         //
         // The song's output track carries the song's extent, the way the
         // mix did before it retired. Which track that is, is the same
