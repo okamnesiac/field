@@ -72,7 +72,7 @@ an insert that can only restate `project.yaml` should not exist.
 
    *Rejected: silent inline resampling in the daemon.* Invisible cost,
    and it would put a second resampler implementation in the render path
-   (render-pipeline.md §9 has exactly one).
+   ([render-pipeline.md](render-pipeline.md) §2.9 has exactly one).
    *Rejected: refusing mismatched placements and demanding a hand-written
    node* — the current behaviour, generalized. The error message already
    names the one correct fix ("add a normalize sound at 48000"); a
