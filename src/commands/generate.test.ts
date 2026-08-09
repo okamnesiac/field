@@ -626,6 +626,28 @@ describe('field generate: filling a generative entry (nested-tracks.md §18 step
     ).rejects.toThrow('already has 1 take');
   });
 
+  it('refuses to fill an entry whose name an asset owns', async () => {
+    // Reached only by hand-editing (import and check both refuse the
+    // collision), but generate must still not spend the run: the model
+    // minutes go first, and the takes would land in — and renameSync
+    // into — the directory the ledger's files live in.
+    writeGenLeaf();
+    const src = join(root, 'clash.wav');
+    writeFileSync(src, 'asset bytes');
+    await importAsset(root, 'creek', src, 'other');
+    rmSync(src);
+    const assetsPath = join(root, 'songs/creek/assets.yaml');
+    writeFileSync(
+      assetsPath,
+      readFileSync(assetsPath, 'utf8').replaceAll('other', 'rain-pad'),
+    );
+    await expect(
+      generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 1 }),
+    ).rejects.toThrow('is also an asset in creek');
+    // The refusal came before the worker: nothing was asked to generate.
+    expect(existsSync(join(root, '.field/stub-requests.ndjson'))).toBe(false);
+  });
+
   it('a supercollider node is built, not generated', async () => {
     mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
     writeFileSync(
@@ -649,6 +671,21 @@ describe('field generate: filling a generative entry (nested-tracks.md §18 step
     expect(takes).toContain('gen: rain-pad');
     expect(takes).toContain('chosen: 2');
     expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('choose refuses a takes file that attaches elsewhere', async () => {
+    // A stale pre-fold sound:-keyed file would otherwise get `chosen`
+    // rewritten and a gen success report, while the loader rejects the
+    // file and the graph never sees the choice.
+    writeGenLeaf();
+    await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2 });
+    const takesPath = join(root, 'songs/creek/audio/rain-pad/variants.yaml');
+    const raw = readFileSync(takesPath, 'utf8');
+    writeFileSync(takesPath, raw.replace('gen: rain-pad', 'sound: rain-pad'));
+    await expect(
+      chooseVariant(root, 'rain-pad', { song: 'creek', variant: 2 }),
+    ).rejects.toThrow('rename sound: to gen:');
+    expect(readFileSync(takesPath, 'utf8')).toContain('chosen: 1');
   });
 
   it('choosing an unknown name says what namespaces were searched', async () => {

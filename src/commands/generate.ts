@@ -515,6 +515,18 @@ export async function generateVariants(
     // runs there: `${name}-<n>` must not be another generator's node
     // name, for the same spent-model-minutes reason.
     const song = project.songs.find((s) => s.name === request.song)!;
+    // The base name must not be an asset's: audio/<name>/ would be the
+    // ledger's directory, and the run's renameSync would write into it —
+    // over a legacy flat file's item, potentially over the bytes
+    // themselves. check names this collision; generate refuses to act
+    // under it.
+    if (song.assets?.data.assets.some((a) => a.name === name)) {
+      throw new Error(
+        `"${name}" is also an asset in ${request.song} — audio/${name}/ is the ` +
+          `ledger's, and filling the entry would write into it (field check names ` +
+          `the collision; rename one side)`,
+      );
+    }
     const genNames = new Set<string>();
     for (const track of song.tracks) {
       for (const entry of track.data.inputs) {
@@ -800,6 +812,27 @@ export async function chooseVariant(
   if (takes === undefined || takes.variants.length === 0) {
     throw new Error(
       `"${name}" has no takes yet — field generate ${name} --song ${options.song} --seed <n>`,
+    );
+  }
+  // The attachment must be the one this path resolved. Without this, a
+  // stale pre-fold `sound:` file gets `chosen` rewritten and a gen
+  // success report while the loader rejects the file and the graph
+  // never sees the choice — check's rename diagnostic owns the fix, so
+  // the refusal points there.
+  if (pkg === 'gen' && takes.gen !== name) {
+    throw new Error(
+      takes.sound !== undefined
+        ? `the takes in audio/${name}/ still attach to sound: — rename sound: to ` +
+          `gen: first (field check)`
+        : `the takes in audio/${name}/ attach to gen "${takes.gen}", not "${name}" (field check)`,
+    );
+  }
+  if (pkg === 'sound' && takes.sound !== name) {
+    throw new Error(
+      takes.gen !== undefined
+        ? `the takes in audio/${name}/ attach to the gen node "${takes.gen}" — ` +
+          `choose that name, not the sound's (field check)`
+        : `the takes in audio/${name}/ attach to "${takes.sound}", not "${name}" (field check)`,
     );
   }
   const variant = takes.variants[options.variant - 1];
