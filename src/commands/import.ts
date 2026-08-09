@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { parseDocument, Document, isSeq } from 'yaml';
 import { readWavHeader, type WavHeader } from '../audio/wav.js';
@@ -35,6 +35,19 @@ function defaultName(file: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+// The 12-byte RIFF/WAVE signature, and nothing more — full parsing is
+// readWavHeader's, whose errors the caller reports as headerProblem.
+function hasWavSignature(path: string): boolean {
+  const fd = openSync(path, 'r');
+  try {
+    const bytes = Buffer.alloc(12);
+    if (readSync(fd, bytes, 0, 12, 0) !== 12) return false;
+    return bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WAVE';
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // Copy a file into the song's audio/ directory and record it in
 // assets.yaml: name → file + sha256 (= Git LFS OID) + size. The assets file
 // is edited as a document so existing comments survive.
@@ -62,11 +75,22 @@ export async function importAsset(
   // willing to carry bytes it does not understand.
   let header: WavHeader | undefined;
   let headerProblem: string | undefined;
-  if (extname(sourcePath).toLowerCase() === '.wav') {
+  // Content decides, not the filename: a WAV named .wave (or nothing)
+  // must not bypass the acknowledgement by spelling alone, so the
+  // signature is probed wherever the extension does not already claim it.
+  if (extname(sourcePath).toLowerCase() === '.wav' || hasWavSignature(sourcePath)) {
     try {
       header = readWavHeader(sourcePath);
     } catch (err) {
       headerProblem = (err as Error).message;
+    }
+    // A structurally parseable header can still declare the impossible —
+    // readWavHeader trusts fmt's sample rate, and 0 would sail through
+    // the mismatch prompt into a ledger row the schema refuses. Facts
+    // that cannot be true are a header problem, recorded as nothing.
+    if (header !== undefined && header.sampleRate <= 0) {
+      headerProblem = `header declares a sample rate of ${header.sampleRate} — nothing recorded`;
+      header = undefined;
     }
     if (header !== undefined) {
       const manifest = projectSchema.safeParse(

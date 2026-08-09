@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -1550,6 +1551,41 @@ describe('import reads the WAV header (multi-rate.md decision 5)', () => {
     );
     const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
     expect(messages).toContain('records sample_rate 44100 but the file says 48000');
+  });
+
+  it('a header declaring a zero rate records nothing, not a row check rejects', async () => {
+    // readWavHeader trusts fmt's sampleRate, so a structurally valid
+    // file can declare 0 — and 0 !== the project rate would then ask
+    // for a mismatch acknowledgement whose reward is a ledger row the
+    // schema refuses. Semantically impossible facts are a header
+    // problem, recorded as nothing.
+    const src = wavSource(48000);
+    const bytes = readFileSync(src);
+    bytes.writeUInt32LE(0, 24); // fmt sampleRate field
+    writeFileSync(src, bytes);
+    const result = await importAsset(root, 'opener', src, 'zeroed');
+    rmSync(src);
+    expect(result.header).toBeUndefined();
+    expect(result.headerProblem).toContain('sample rate');
+    const ledger = readFileSync(join(root, 'songs/opener/assets.yaml'), 'utf8');
+    expect(ledger).not.toContain('sample_rate: 0');
+    expect((await check(root)).ok).toBe(true);
+  });
+
+  it('WAV content is sniffed, not the filename', async () => {
+    // A real 44.1k WAV named .wave (or nothing) must not bypass the
+    // acknowledgement by spelling alone.
+    const orig = wavSource(44100);
+    const src = orig.replace(/\.wav$/, '.wave');
+    renameSync(orig, src);
+    await expect(importAsset(root, 'opener', src, 'sneaky')).rejects.toThrow(
+      "44100 Hz against the project's 48000",
+    );
+    const result = await importAsset(root, 'opener', src, 'sneaky', { allowMismatch: true });
+    rmSync(src);
+    expect(result.header?.sampleRate).toBe(44100);
+    const ledger = readFileSync(join(root, 'songs/opener/assets.yaml'), 'utf8');
+    expect(ledger).toContain('sample_rate: 44100');
   });
 
   it('WAV facts travel together — a partial row is refused, not skipped', async () => {
