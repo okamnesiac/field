@@ -865,7 +865,15 @@ function validate(project: LoadedProject): void {
       // the reference resolves to something renderable, the time
       // resolves, and a declared window holds its fades. Placements have
       // no IDs yet (§6), so they are named by position.
-      if (track.data.inputs.length > 0 && track.data.type !== 'audio') {
+      //
+      // Either spelling of a placement counts: a clip playing a track
+      // (§1.11) places it just as an `inputs:` entry does, and a midi
+      // parent has no stem to sum either one into — buildGraph would
+      // accept the file and then never render the edge.
+      const placesTracks =
+        track.data.inputs.length > 0 ||
+        track.data.clips.some((clip) => trackRefName(clip.source) !== undefined);
+      if (placesTracks && track.data.type !== 'audio') {
         push(track.path, `a midi track cannot place tracks — only an audio track sums audio`);
       }
       track.data.inputs.forEach((input, i) => {

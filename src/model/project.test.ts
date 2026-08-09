@@ -1051,6 +1051,18 @@ describe('clips that play tracks (nested-tracks.md §1.11)', () => {
     expect(await messages()).toContain('clip "k1" clips a midi track, which renders no audio');
   });
 
+  it('refuses a midi track that places through a clip, same as through inputs:', async () => {
+    // The placement rule, not a clip rule: only an audio track sums
+    // audio, and a clip playing a track is a placement (§1.11). Without
+    // this, a midi parent passes check while buildGraph gives it no stem
+    // — the clip silently never renders, and `reaches` counts the edge.
+    writeFileSync(
+      join(root, 'songs/opener/tracks/scratch.yaml'),
+      'name: scratch\ntype: midi\nclips:\n  - id: k1\n    source: track:inner\n    position: 0\n',
+    );
+    expect(await messages()).toContain('a midi track cannot place tracks');
+  });
+
   it('a loop on a track still needs every — its length is unknown before it builds', async () => {
     writeTrack('outer', [
       'clips:',
