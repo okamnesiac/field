@@ -266,7 +266,7 @@ function buildStatus(o: BuildOutcome): string {
 
 program
   .command('build <patterns...>')
-  .description('build labels (creek/sound:pad-96k, creek/..., or a bare song for its main mix)')
+  .description('build labels (creek/sound:pad-96k, creek/..., or a bare song for its output track)')
   .option('--watch', 'rebuild on project changes until ctrl-c, reporting outputs that audibly moved')
   .action(async (patterns: string[], opts: { watch?: boolean }) => {
     try {
