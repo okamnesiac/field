@@ -509,6 +509,30 @@ describe('field generate: filling a recipe that shipped without takes', () => {
     expect(recipe('topline').variants).toHaveLength(2);
   });
 
+  it('fills a music recipe that carries both lengths', async () => {
+    // What `field generate` itself writes: the seconds it ran at, and the
+    // bars it was asked for. The flag rule is exactly one, so passing both
+    // through would make an ordinary recipe unfillable — with advice
+    // naming flags that filling refuses, which is a closed loop.
+    writeRecipe(
+      'name: topline\ntype: generative\nprompt: warm keys\nbpm: 96\nduration_seconds: 10\nbars: 4\n',
+    );
+    await generateVariants(root, 'topline', run);
+    expect(recipe('topline').variants).toHaveLength(2);
+    expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('refuses before spending a run when the recipe is named something else', async () => {
+    // Already check-red, so the run was going to be wasted either way —
+    // and filling would add a second error, since takes land under
+    // audio/topline/ while check wants audio/<the name inside>/.
+    writeRecipe('name: elsewhere\ntype: generative\ntext: a line\n');
+    await expect(generateVariants(root, 'topline', run)).rejects.toThrow(
+      'topline.yaml is named "elsewhere" inside',
+    );
+    expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
+  });
+
   it('refuses to run over takes that already exist', async () => {
     writeRecipe(TAKELESS);
     await generateVariants(root, 'topline', run);

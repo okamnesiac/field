@@ -56,6 +56,40 @@ describe('generative recipes', () => {
     expect(absent.data?.variants).toEqual([]);
   });
 
+  it('tells a recipe written before the move where its provenance went', () => {
+    // `strictObject` would answer "Unrecognized keys", which is true and
+    // tells nobody anything — the RETIRED_FADER precedent. The migration
+    // these messages describe is mechanical and lossless: a recipe's
+    // `model`/`generated_at` describe the one run that made every variant
+    // it lists, which is the same shape `generate` writes now.
+    const old = { ...voice, model: 'chatterbox', generated_at: '2026-08-07T12:00:00Z', seed: 1 };
+    const parsed = generativeSoundSchema.safeParse(old);
+    expect(parsed.success).toBe(false);
+    const byField = Object.fromEntries(
+      parsed.error!.issues.map((i) => [i.path.join('.'), i.message]),
+    );
+    expect(byField['model']).toContain('copy this value onto every entry under `variants:`');
+    expect(byField['generated_at']).toContain('copy this value onto every entry');
+    // The seed has nowhere to go: each variant has recorded its own all
+    // along, so the advice is deletion rather than a move.
+    expect(byField['seed']).toContain('has no home — delete it');
+  });
+
+  it('makes a music recipe say how long, since filling cannot be told later', () => {
+    // Reachable only now that a recipe can exist before its takes. Left
+    // to `generate`, the failure names --bars/--duration, and those are
+    // refused on a recipe that already says what to generate — so the
+    // advice would be for a door that is locked. `check` says it instead.
+    const { duration_seconds: _seconds, ...noLength } = music;
+    const parsed = generativeSoundSchema.safeParse(noLength);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues[0]!.message).toContain('a music recipe needs a length');
+    expect(generativeSoundSchema.safeParse({ ...noLength, bars: 4 }).success).toBe(true);
+    // A voice line is not asked: its length follows from the text.
+    const { variants: _v, ...takelessVoice } = voice;
+    expect(generativeSoundSchema.safeParse(takelessVoice).success).toBe(true);
+  });
+
   it('keeps provenance on the take, so takes may differ', () => {
     // A sound accumulates runs, and two takes a month apart can come from
     // different model versions with different generation times. One

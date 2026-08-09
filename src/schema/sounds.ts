@@ -89,6 +89,14 @@ export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
 // `model`/`generated_at` pair on the sound could record only one answer
 // for the whole list. It is also what lets a recipe exist before any run
 // has happened, which is the shape an example project ships in.
+const RETIRED_TO_VARIANT =
+  'provenance describes a run and lives on each take now — copy this value ' +
+  'onto every entry under `variants:` and delete it here ' +
+  '(bloom-in-tree.md §3)';
+const RETIRED_SEED =
+  'each entry under `variants:` already records the seed it ran with, so ' +
+  'this one has no home — delete it (bloom-in-tree.md §3)';
+
 export const generativeVariantSchema = z.strictObject({
   file: z.string().min(1), // song-relative, under audio/<name>/
   model: z.string().min(1), // which generator produced this take
@@ -113,6 +121,23 @@ export const generativeSoundSchema = z
   .strictObject({
     name: labelName,
     type: z.literal('generative'),
+    // Retired from the sound, declared only so a recipe written before the
+    // move is told where the value went — `strictObject` would otherwise
+    // answer "Unrecognized keys", which is true and tells nobody anything.
+    // The precedent is `RETIRED_FADER` (schema/track.ts), and the reason
+    // is the same: a removal that does not forward makes the reader guess.
+    //
+    // The migration is mechanical and loses nothing. A recipe's `model`
+    // and `generated_at` describe the one run that produced every variant
+    // it lists, which is exactly what `field generate` still writes — one
+    // model and one timestamp shared by that run's takes. Copying each
+    // down onto every variant preserves what was recorded rather than
+    // inventing per-take values. `seed` needs no home: each variant has
+    // carried its own since before this change.
+    // Written for the suffix — the loader appends " at <field>".
+    model: z.never({ error: RETIRED_TO_VARIANT }).optional(),
+    seed: z.never({ error: RETIRED_SEED }).optional(),
+    generated_at: z.never({ error: RETIRED_TO_VARIANT }).optional(),
     prompt: z.string().min(1).optional(),
     text: z.string().min(1).optional(),
     voice_ref: sourceRef.optional(),
@@ -172,6 +197,19 @@ export const generativeSoundSchema = z
             : `\`${key}\` is voice-only; a music recipe carries \`prompt\``,
         });
       }
+    }
+    // Music has to say how long. `field generate` asks for exactly one of
+    // --bars or --duration and a written recipe records the seconds it
+    // ran at, so a recipe with neither describes nothing runnable — and
+    // once a recipe can exist before its takes, that is reachable by
+    // writing one. Caught here so `check` says it, rather than at fill
+    // time where the advice would name flags that filling refuses.
+    if (isMusic && sound.bars === undefined && sound.duration_seconds === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['duration_seconds'],
+        message: 'a music recipe needs a length — `bars` or `duration_seconds`',
+      });
     }
     // The reference recording is the voice, so its identity is part of
     // the recipe's provenance (§1.3): name alone would let the bytes

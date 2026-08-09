@@ -100,6 +100,19 @@ something that has not.
   uninstalled dependencies, and it keeps `check` answering "is this
   project coherent" rather than "is this machine ready".
 
+The move is a breaking format change, and the migration is mechanical: a
+recipe's `model` and `generated_at` describe the one run that produced
+every variant it lists, which is exactly what `field generate` still
+writes — one model and one timestamp shared by that run's takes — so
+copying each down onto every variant preserves what was recorded rather
+than inventing per-take values. `seed` needs no home; each variant has
+carried its own all along. The retired keys are declared as `z.never`
+with those instructions, the `RETIRED_FADER` precedent, so a recipe
+written before the change says where the value went instead of answering
+"Unrecognized keys". They stay *required* on the variant: the migration
+loses nothing, and optional provenance would weaken the format
+permanently to save a one-time edit of files chunk 2 rewrites anyway.
+
 Two things this turned up that the plan above did not, both of which had
 to ship with it or the chunk would not have worked:
 
@@ -158,8 +171,13 @@ is never a window where the two repos disagree about it.
 1. **Recipes without takes** (§3) — done. Schema, `check`, the
    `build`/`play` message, and the two things §3 records as having turned
    up with it: `generate` fills a takeless recipe, and chooses its first
-   take. No move yet; bloom stayed where it is and kept working, which is
-   what made this chunk independently reviewable.
+   take. It moves the recipe format, so **`okamnesiac/bloom` does not
+   pass `field check` from here on** — its recipes carry the retired
+   sound-level keys. They are not migrated in place, because bloom is not
+   touched before the move; chunk 2 writes them in the new shape as it
+   copies them, which is the migration. Until then the retirement
+   messages say what to change, so the repo is stale rather than
+   mysterious.
 2. **The move.** Copy bloom to `examples/bloom` without its audio, add the
    gitignores, and do §4's substitutions in the copy: drop `water` from
    both scopes as §4 lists, and replace `seven-eight-loop` with a

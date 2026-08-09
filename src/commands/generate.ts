@@ -260,6 +260,19 @@ function fillableRecipe(
     throw new Error(`sound ${name}.yaml is invalid; fix it before generating (field check)`);
   }
   const recipe = parsed.data;
+  // The filename is what was opened; `name:` is what the project reads.
+  // They already have to agree — `check` says so — but a project that is
+  // check-red today would otherwise spend a whole run before finding out,
+  // and land a second error too: variants go under audio/<cli-name>/ while
+  // check wants audio/<recipe.name>/. Pre-flight, for the same reason the
+  // namespace check below is.
+  if (recipe.name !== name) {
+    throw new Error(
+      `${name}.yaml is named "${recipe.name}" inside — a sound's name must match its ` +
+        `filename, and filling it would put its takes under audio/${name}/ where check ` +
+        `wants audio/${recipe.name}/ (field check)`,
+    );
+  }
   if (recipe.type !== 'generative') {
     throw new Error(
       `"${name}" is a ${recipe.type} sound in ${options.song} — it is built by a rule, ` +
@@ -292,8 +305,14 @@ function fillableRecipe(
       text: recipe.text,
       lyrics: recipe.lyrics,
       bpm: recipe.bpm,
-      bars: recipe.bars,
+      // A recipe may carry both lengths — `field generate` records the
+      // seconds it ran at and keeps the `bars` it was asked for — while
+      // the flag rule is exactly one of them. Resolve here rather than
+      // relaxing that rule: seconds win, because seconds are what ran.
+      // Passing both through would make an ordinary recipe unfillable
+      // with advice naming flags that filling refuses.
       durationSeconds: recipe.duration_seconds,
+      bars: recipe.duration_seconds === undefined ? recipe.bars : undefined,
       voiceRef: recipe.voice_ref,
       exaggeration: recipe.exaggeration,
       conviction: recipe.conviction,
