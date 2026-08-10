@@ -358,6 +358,7 @@ export function buildGraph(project: LoadedProject): Graph {
         // literally named "track-foo"), which validate does not chase.
         const convertBySource = new Map<string, { ref: string; scale: number }>();
         for (const entry of track.inputs) {
+          if (entry.receive !== undefined) continue; // a cable is not a source here
           const raw = entryRef(entry, track.name);
           if (convertBySource.has(raw)) continue;
           const src = sourceRate(raw);

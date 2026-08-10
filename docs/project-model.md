@@ -229,6 +229,37 @@ the level question by summing the gains along each path to a root and
 carries no level, so the only place the answer exists is spread across
 the placements above it.
 
+## Sends are cables
+
+A send is the one edge that is not containment
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19). The
+sending track declares it under `sends:`, a map keyed by label; the
+receiving track carries `- receive: <label>` among its `inputs:`; one
+label links exactly one send to exactly one receive, like a patch cable.
+The edge carries a level (`gain_db`) and a tap point (`tap: pre | post`,
+default post — after the sender's inserts) and never an offset: a
+receive is not a placement, carries no time fields at all, and a bare
+label is a unity post-insert send.
+
+`field check` owns the wiring: a label on two sends or two receives is
+an error, a label with one end is a *warning* — wiring incrementally is
+normal — and cycles are checked on the combined graph, containment plus
+cables, with the locally decidable case kept as its own message (a send
+cannot reach into itself). A receive is legal only where the path from
+its track up to the cable's common ancestor is a single unshifted pass:
+`at`, `slip` and `source_offset` at their defaults and no `loop:`
+(`duration` and fades stay legal — they window and shape without moving
+anything). That rule is what lets arrival times be *derived* instead of
+invented: the walk up contributes nothing, so the sender's arrivals are
+read off its own placements walking down from the ancestor — a sender
+placed twice arrives twice — and when the receiving track resolves
+through several containment paths, every path must yield the same
+arrival set, because arrivals bake into a render that exists once
+however often it is placed. Paths that disagree are an error naming the
+paths. What a receive *renders* — the sender's signal summed at those
+arrivals through the receiver's inserts — lands with the rest of
+nested-tracks.md §7 chunk 4.
+
 ## Identity: names, not UUIDs
 
 Nothing in a Field project carries an opaque ID. Identity comes in three

@@ -76,7 +76,26 @@ export const supercolliderEntrySchema = z.strictObject({
 });
 export type SupercolliderEntry = z.infer<typeof supercolliderEntrySchema>;
 
-export const inputEntrySchema = z
+// A receive carries nothing but its label (nested-tracks.md §19,
+// decision 9): the position-domain entries place content, this one
+// admits signal, and a cable has no spelling for an offset — which is
+// what keeps offline sends as causal as the engine will play them. The
+// guard runs on the raw keys because it must tell an authored `at: 0`
+// from the default the schema would otherwise hand every entry.
+const RECEIVE_ONLY =
+  'a receive admits signal, not a placement — it carries only its label ' +
+  '(nested-tracks.md §19)';
+const receiveGuard = (raw: unknown, ctx: z.RefinementCtx): unknown => {
+  if (raw !== null && typeof raw === 'object' && 'receive' in raw) {
+    const extra = Object.keys(raw).filter((k) => k !== 'receive');
+    if (extra.length > 0) {
+      ctx.addIssue({ code: 'custom', message: `${RECEIVE_ONLY} — remove ${extra.join(', ')}` });
+    }
+  }
+  return raw;
+};
+
+const inputEntryFields = z
   .strictObject({
     id: slug.optional(),
     // Exactly one of these names what the entry plays; the superRefine
@@ -86,6 +105,7 @@ export const inputEntrySchema = z
     sound: z.never({ error: RETIRED_SOUND }).optional(),
     supercollider: supercolliderEntrySchema.optional(), // an inline render
     generative: generativeEntrySchema.optional(), // a deliberate request
+    receive: labelName.optional(), // a cable's label (nested-tracks.md §19)
     anchor: z.enum(['musical', 'absolute']).default('musical'),
     // Omitted means the track's start — the leaf case reads as bare
     // content (`- supercollider: {...}` with nothing else), and tick 0
@@ -110,18 +130,23 @@ export const inputEntrySchema = z
     source: z.never({ error: RETIRED_SOURCE }).optional(),
   })
   .superRefine((entry, ctx) => {
-    const kinds = [entry.track, entry.audio, entry.supercollider, entry.generative].filter(
-      (v) => v !== undefined,
-    );
+    const kinds = [
+      entry.track,
+      entry.audio,
+      entry.supercollider,
+      entry.generative,
+      entry.receive,
+    ].filter((v) => v !== undefined);
     if (kinds.length !== 1) {
       ctx.addIssue({
         code: 'custom',
         message:
           'an entry plays exactly one thing — name it with track:, audio:, ' +
-          'supercollider:, or generative:',
+          'supercollider:, generative:, or receive:',
       });
     }
   });
+export const inputEntrySchema = z.preprocess(receiveGuard, inputEntryFields);
 type InputEntryFile = z.infer<typeof inputEntrySchema>;
 export type InputEntry = Omit<InputEntryFile, 'at' | 'duration' | 'loop'> & {
   at: number;
@@ -135,6 +160,7 @@ export const inputEntryOrder: KeyOrder = {
     'audio',
     'supercollider',
     'generative',
+    'receive',
     'anchor',
     'at',
     'duration',
@@ -167,6 +193,23 @@ export const inputEntryOrder: KeyOrder = {
     loop: { keys: ['enabled', 'every', 'mode', 'fade'], children: { every: { flow: true } } },
   },
 };
+
+// One end of a cable (nested-tracks.md §19): a send is declared on the
+// sending track, keyed by the label that links it to exactly one
+// `- receive: <label>` entry somewhere in the song. The edge carries a
+// level and never an offset (§1.8), plus where it taps the sender's
+// signal — after its inserts by default, `pre` for feeding a shared
+// effect the unprocessed signal. A unity post-insert send is the bare
+// label: `sends:\n  chorus-reverb:` — the preprocess turns YAML's null
+// into the defaults.
+export const sendSchema = z.preprocess(
+  (v) => v ?? {},
+  z.strictObject({
+    gain_db: z.number().default(0),
+    tap: z.enum(['pre', 'post']).default('post'),
+  }),
+);
+export type Send = z.infer<typeof sendSchema>;
 
 // A track's own tempo and meter (nested-tracks.md §1.5). A 7/8 figure
 // inside a 4/4 song is a track with a local meter rather than a feature,
@@ -242,6 +285,10 @@ export const trackSchema = z.strictObject({
   // Inserts are content, not mix parameters: they bake into the stem, so
   // an insert edit re-renders it — the accepted cost model (effects.md §5).
   inserts: z.array(insertSchema).default([]),
+  // A map, not a list (nested-tracks.md §19 decision 1): sends are an
+  // unordered set keyed by a unique label, YAML itself enforces per-track
+  // label uniqueness, and a level tweak diffs under a stable key.
+  sends: z.record(labelName, sendSchema).default({}),
   inputs: z.array(inputEntrySchema).default([]),
   clips: z.never({ error: RETIRED_CLIPS }).optional(),
 });
@@ -250,8 +297,10 @@ export type Track = Omit<TrackFile, 'inputs'> & {
   inputs: InputEntry[];
 };
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'rate', 'time', 'inserts', 'inputs'],
+  keys: ['name', 'rate', 'time', 'inserts', 'sends', 'inputs'],
   children: {
+    // The labels are the author's; only the values have known keys.
+    sends: { entries: { keys: ['gain_db', 'tap'] } },
     // Same shape and order as tempo.yaml's, so a local map reads like the
     // song map it overrides rather than like a different kind of thing.
     time: {

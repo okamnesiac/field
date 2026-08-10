@@ -169,6 +169,32 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     await done;
   });
 
+  it('a warning reports and the build still proceeds (nested-tracks.md §19 chunk 4)', async () => {
+    const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
+    await until(() => events.find((e) => e.kind === 'outcomes'));
+
+    // A dangling send is a warning: the edit must report it AND rebuild —
+    // the frequency moved in the same write, so a change proves the build
+    // ran rather than waiting for the file to come clean.
+    writeSound(
+      'pad-eq',
+      ['name: pad-eq', 'sends:', '  verb:', ...eqYaml(400).split('\n').slice(1)].join('\n'),
+    );
+    const warned = await until(() =>
+      events.find((e) => e.kind === 'diagnostics' && e.lines.join().includes('warning:')),
+    );
+    if (warned.kind !== 'diagnostics') return;
+    expect(warned.lines.join()).toContain('warning: send "verb" has no receive');
+    const rebuilt = await until(() =>
+      events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
+    );
+    if (rebuilt.kind !== 'outcomes') return;
+    expect(rebuilt.changed.map((o) => o.label)).toEqual(['//songs/creek/track:pad-eq']);
+
+    abort.abort();
+    await done;
+  });
+
   it('a no-op edit rebuilds to silence: cache hits, nothing changed', async () => {
     const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));

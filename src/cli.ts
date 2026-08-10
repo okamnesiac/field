@@ -35,7 +35,12 @@ import { fmt } from './commands/fmt.js';
 import { importAsset } from './commands/import.js';
 import { init } from './commands/init.js';
 import type { BuildOutcome } from './graph/build.js';
-import { findProjectRoot, loadProject } from './model/project.js';
+import {
+  diagnosticErrors,
+  findProjectRoot,
+  formatDiagnostic,
+  loadProject,
+} from './model/project.js';
 
 const program = new Command();
 
@@ -324,7 +329,9 @@ program
     try {
       const root = requireRoot();
       if (opts.watch !== true) {
-        const outcomes = await buildLabels(root, patterns);
+        const outcomes = await buildLabels(root, patterns, undefined, (line) =>
+          process.stdout.write(`check: ${line}\n`),
+        );
         for (const o of outcomes) {
           const where = o.outputPath ? ` → ${projectRelative(root, o.outputPath)}` : '';
           process.stdout.write(`${buildStatus(o)}  ${o.label}${where}\n`);
@@ -776,7 +783,7 @@ program
       fail(err);
     }
     for (const d of result.diagnostics) {
-      process.stdout.write(`${d.file}: ${d.message}\n`);
+      process.stdout.write(`${formatDiagnostic(d)}\n`);
     }
     for (const f of result.unformatted) {
       process.stdout.write(`${f}: not canonically formatted (run field fmt)\n`);
@@ -825,9 +832,10 @@ program
         `  ${song.name}: ${song.tracks.length} tracks, ${inputs} inputs, ${song.takes.length} takes\n`,
       );
     }
-    if (project.diagnostics.length > 0) {
-      process.stdout.write(`${project.diagnostics.length} problems (run field check)\n`);
-    }
+    const problems = diagnosticErrors(project.diagnostics).length;
+    const warned = project.diagnostics.length - problems;
+    if (problems > 0) process.stdout.write(`${problems} problems (run field check)\n`);
+    if (warned > 0) process.stdout.write(`${warned} warnings (run field check)\n`);
   });
 
 // Positional: `argv[2]` is the only place this flag means the whole

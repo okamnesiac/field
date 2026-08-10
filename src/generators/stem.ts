@@ -268,13 +268,17 @@ export function planTrack(
     const scale = convertBySource.get(entryRef(e, track.name))?.scale ?? 1;
     return Math.round((e.source_offset - e.slip) * scale);
   };
+  // Receives are not placements (nested-tracks.md §19): a cable's signal
+  // joins the stem at derived arrivals, which is the next slice's work —
+  // until it lands, a receive contributes nothing to the plan.
+  const placeable = track.inputs.filter((e) => e.receive === undefined);
   // One list in the file (nested-tracks.md §18), one source list here.
   // A placed track is never in sha256BySource — its bytes do not exist
   // until it renders — so it sorts with the buildable sounds, by name,
   // for the same reason they do. A converted source is buildable however
   // committed its origin: the stem's input is the conversion's output,
   // whose bytes do not exist until it runs.
-  const refs = [...new Set(track.inputs.map(refFor))];
+  const refs = [...new Set(placeable.map(refFor))];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
     .sort((a, b) => {
@@ -300,7 +304,7 @@ export function planTrack(
     });
   const sources = [...committed, ...buildable];
   const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
-  const placed = track.inputs.flatMap((entry): PlacedClip[] => {
+  const placed = placeable.flatMap((entry): PlacedClip[] => {
     const input = inputIndex.get(refFor(entry))!;
     const loop = entry.loop?.enabled ? entry.loop : undefined;
     if (loop) {

@@ -36,6 +36,16 @@ is real, so we pick once. TypeScript wins on MCP SDK maturity, schema
 validation (zod), and long-running-process ergonomics. The canonical project
 format remains language-neutral regardless.
 
+**Diagnostics have two severities, and only one holds the gate.** A
+diagnostic without a severity is an error: `field check` fails, `build`
+refuses, `watch` reports and waits for the next edit. A `warning`
+reports without failing any of them — `check` prints it (marked
+`warning:`) and still says ok, `build` surfaces it and proceeds, `watch`
+reports it and rebuilds anyway. The level exists because some true
+findings describe normal intermediate states — a cable with one end
+wired (nested-tracks.md §19 decision 3) — and a gate that fails on
+those either stops legitimate work or trains people to expect red.
+
 **`field --version` reports the build, not the checkout.** `pnpm build`
 stamps `dist/build-info.json` with the commit, branch, and dirty count
 at build time (cleared before `tsc`, written after everything succeeds,
