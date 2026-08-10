@@ -381,7 +381,7 @@ export function buildGraph(project: LoadedProject): Graph {
         // consume it; the action cache extends that across songs. The
         // guard is for a name crafted to collide anyway (a sound
         // literally named "track-foo"), which validate does not chase.
-        const convertBySource = new Map<string, string>();
+        const convertBySource = new Map<string, { ref: string; scale: number }>();
         for (const entry of track.inputs) {
           const raw = entryRef(entry, track.name);
           if (convertBySource.has(raw)) continue;
@@ -401,7 +401,10 @@ export function buildGraph(project: LoadedProject): Graph {
           } else {
             addRule(label, song.dir, { name, type: 'resample', source: raw, sample_rate: rate }, refLabel, rate);
           }
-          convertBySource.set(raw, convertRef(name));
+          // The scale rides along so the plan can keep `source_offset`
+          // meaning what it says: samples *of the source*, which the
+          // converted file stores rate/src as many of.
+          convertBySource.set(raw, { ref: convertRef(name), scale: rate / src });
         }
         // A track plans in its own time (nested-tracks.md §13). The two
         // timelines never have to be reconciled as maps: this stem's

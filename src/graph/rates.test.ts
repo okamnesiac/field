@@ -216,6 +216,48 @@ describe('conversion at the edge (decision 4)', () => {
     expect(at480.actionKey).not.toBe(at441.actionKey);
   });
 
+  it('scales the read offset to the rate the clip actually reads', async () => {
+    // `source_offset` addresses the *source* in samples (project-core.md
+    // §3.2), but a converted clip reads the resampled file at the track
+    // rate — one second into a 44.1 kHz asset is sample 44100 of the
+    // original and sample 48000 of what the stem consumes. Unscaled, the
+    // clip starts at the wrong moment without failing anything (#112
+    // review, Bugbot).
+    await importTone('pad', 44100, 2);
+    writeTrack('bed', [
+      'inputs:',
+      '  - audio: pad',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 4800',
+      '    source_offset: 44100',
+      '    slip: -2205', // same axis as source_offset, so it scales with it
+    ]);
+    const explained = await explainLabel(root, '//songs/creek/track:bed');
+    const clips = explained.parameters!['clips'] as { read_offset: number }[];
+    // (44100 − −2205) × 48000/44100 = 46305 × 48000/44100 = 50400.
+    expect(clips[0]!.read_offset).toBe(50400);
+  });
+
+  it('scales a looping clip\'s read offset the same way', async () => {
+    await importTone('pad', 44100, 2);
+    writeTrack('bed', [
+      'inputs:',
+      '  - audio: pad',
+      '    anchor: absolute',
+      '    at: 0',
+      '    duration: 9600',
+      '    source_offset: 22050',
+      '    loop:',
+      '      enabled: true',
+      '      every: 4800',
+    ]);
+    const explained = await explainLabel(root, '//songs/creek/track:bed');
+    const clips = explained.parameters!['clips'] as { read_offset: number }[];
+    expect(clips.length).toBeGreaterThan(1);
+    for (const clip of clips) expect(clip.read_offset).toBe(24000); // 22050 × 48000/44100
+  });
+
   it('demands loop.every across a rate boundary', async () => {
     // Tiling at "the source's length" would tile at the wrong one: the
     // conversion changes it, and the converted count exists only after

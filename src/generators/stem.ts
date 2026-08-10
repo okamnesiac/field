@@ -167,6 +167,12 @@ export function expandLoop(
   loop: NonNullable<InputEntry['loop']>,
   tempoMap: TempoMap,
   sourceFrames: number | undefined,
+  // The effective read offset, when the caller has already projected it
+  // into the rate the clip reads (a converted source — planTrack's
+  // readOffsetFor). Defaulted from the entry itself for every same-rate
+  // caller, validate included, which is all of them until a conversion
+  // is in play.
+  readOffset: number = entry.source_offset - entry.slip,
   // Every repetition has a concrete window: a loop tiles a window, so a
   // looping entry declares a duration even though an ordinary one need not
   // (schema/track.ts). `check` refuses the combination by name; this is
@@ -179,7 +185,6 @@ export function expandLoop(
     );
   }
   const windowEnd = start + duration;
-  const readOffset = entry.source_offset - entry.slip;
 
   // Repetition boundaries on the stem timeline, in samples.
   const bounds: number[] = [];
@@ -246,13 +251,22 @@ export function planTrack(
   extent: { lengthSamples?: number | undefined; loop?: boolean | undefined } = {},
   // Sources arriving at another rate, rewired through the resample node
   // the graph minted at this edge (multi-rate.md decision 4): raw entry
-  // ref → convert: ref. The stem consumes the conversion, so its wiring
-  // and its input hash both follow the bytes it actually sums.
-  convertBySource: Map<string, string> = new Map(),
+  // ref → the convert: ref plus the rate ratio. The stem consumes the
+  // conversion, so its wiring and its input hash both follow the bytes
+  // it actually sums — and the read offset scales by the same ratio,
+  // because `source_offset` and `slip` address the *source's* samples
+  // (project-core.md §3.2) while the clip reads the converted file: one
+  // second into a 44.1 kHz asset is sample 44100 of the original and
+  // sample 48000 of what this stem consumes (#112 review, Bugbot).
+  convertBySource: Map<string, { ref: string; scale: number }> = new Map(),
 ): StemSpec {
   const refFor = (e: InputEntry): string => {
     const raw = entryRef(e, track.name);
-    return convertBySource.get(raw) ?? raw;
+    return convertBySource.get(raw)?.ref ?? raw;
+  };
+  const readOffsetFor = (e: InputEntry): number => {
+    const scale = convertBySource.get(entryRef(e, track.name))?.scale ?? 1;
+    return Math.round((e.source_offset - e.slip) * scale);
   };
   // One list in the file (nested-tracks.md §18), one source list here.
   // A placed track is never in sha256BySource — its bytes do not exist
@@ -291,7 +305,10 @@ export function planTrack(
     const loop = entry.loop?.enabled ? entry.loop : undefined;
     if (loop) {
       const frames = framesBySource.get(refFor(entry));
-      return expandLoop(entry, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
+      return expandLoop(entry, loop, tempoMap, frames, readOffsetFor(entry)).map((rep) => ({
+        input,
+        ...rep,
+      }));
     }
     const { start, duration } = placedWindow(entry, tempoMap);
     return [
@@ -299,7 +316,7 @@ export function planTrack(
         input,
         start,
         ...(duration !== undefined ? { duration } : {}),
-        read_offset: entry.source_offset - entry.slip,
+        read_offset: readOffsetFor(entry),
         gain_db: entry.gain_db,
         ...(entry.pan !== 0 ? { pan: entry.pan } : {}),
         fade_in: entry.fade_in,
