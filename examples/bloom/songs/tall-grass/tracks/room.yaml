@@ -1,0 +1,14 @@
+# the drum room — fully wet, fed by one cable from drums (tap is moot:
+# drums carries no inserts), so the room answers the groove exactly as
+# placed, slip and all. Short and dark on purpose: at 132 in 7/8 a bar
+# lasts about 1.6 s, so anything past a second of decay smears the meter
+# instead of putting the kit in a space.
+name: room
+inserts:
+  - effect: reverb
+    mix: 1.0
+    decay: 1.2
+    predelay_ms: 10
+    damping: 0.7
+inputs:
+  - receive: drum-verb

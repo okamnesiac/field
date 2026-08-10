@@ -1,4 +1,9 @@
 name: drums
+sends:
+  # into the drum room (tracks/room.yaml); the dry groove still arrives
+  # through main — this cable carries only what the room answers
+  drum-verb:
+    gain_db: -10
 inputs:
   - id: groove-p2v4t
     track: seven-eight-loop

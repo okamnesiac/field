@@ -25,10 +25,13 @@ that is the point of the example rather than a limitation of it.
   and a band that exists almost entirely as recipes: a pad and a kit as
   seeded SuperCollider programs, a lead vocal generated from text by a
   local model (placements reference **tracks**, not files), the vocal
-  clipped into the arrangement, and a `main` track that sums it all with
+  clipped into the arrangement, a shared reverb (`space`) fed by cables
+  from two depths of the tree, and a `main` track that sums it all with
   a fader on every placement
-- `songs/tall-grass/` — 7/8 at 132 BPM, with a MIDI track and a percussion
-  loop clip that uses `slip` to drag the groove late against the grid
+- `songs/tall-grass/` — 7/8 at 132 BPM, with a MIDI track, a percussion
+  loop clip that uses `slip` to drag the groove late against the grid, and
+  a drum room fed by a send — the smallest possible cable: one sender,
+  one fully wet return, placed in `main` like any other track
 - `shared/` — three shelves shared across songs: `instruments/` (the
   SuperCollider programs), `samples/`, and `plugins/`. The sample shelf is
   empty here, because nothing recorded is committed; `field import` is what

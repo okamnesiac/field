@@ -2,3 +2,7 @@ name: main
 inputs:
   - track: bass
   - track: drums
+  # the room rides under the dry kit — its size in the mix is this
+  # fader, not a reverb parameter
+  - track: room
+    gain_db: -6
