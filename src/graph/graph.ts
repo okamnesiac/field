@@ -99,8 +99,13 @@ export interface UngeneratedSound {
   name: string;
 }
 
+// The fill instruction is shaped to be copied: the command sits alone
+// on its own line and --seed stays out of it — omitted, generate draws
+// a seed and records it per take, so the pasteable line is complete as
+// written. The seed note rides the prose line above instead.
+const SEED_NOTE = '(--seed pins a seed; omitted, one is drawn and recorded)';
 function fillCommand(pending: UngeneratedSound): string {
-  return `field generate ${pending.song}/${pending.name} --seed <n>`;
+  return `field generate ${pending.song}/${pending.name}`;
 }
 
 // Requires a project with no diagnostics: the graph trusts what validate
@@ -474,7 +479,7 @@ export function resolveLabel(graph: Graph, label: Label): GraphNode {
     // because every resolution comes through here.
     const pending = graph.ungenerated.get(formatted);
     if (pending !== undefined) {
-      throw new Error(`${formatted} has no takes yet — ${fillCommand(pending)}`);
+      throw new Error(`${formatted} has no takes yet ${SEED_NOTE}:\n  ${fillCommand(pending)}`);
     }
     const hint = singularHint(graph, { kind: 'label', label });
     throw new Error(`no such label: ${formatted}${hint}`);
@@ -496,12 +501,13 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
     );
     if (pending.length === 1) {
       throw new Error(
-        `${formatLabel(pending[0]!.label)} has no takes yet — ${fillCommand(pending[0]!)}`,
+        `${formatLabel(pending[0]!.label)} has no takes yet ${SEED_NOTE}:\n  ${fillCommand(pending[0]!)}`,
       );
     }
     if (pending.length > 1) {
       throw new Error(
-        `${formatPattern(pattern)} matched ${pending.length} generative requests with no takes yet:\n` +
+        `${formatPattern(pattern)} matched ${pending.length} generative requests with no ` +
+          `takes yet ${SEED_NOTE}:\n` +
           pending.map((p) => `  ${fillCommand(p)}`).join('\n'),
       );
     }
@@ -513,18 +519,48 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
 }
 
 // Transitive dependencies of a node, dependencies first, node last.
+//
+// Takeless requests are collected across the whole walk and reported
+// together: failing on the first pending dependency means generating
+// it, waiting, and being told about the next — a session peels the
+// list one play at a time (found exercising the folded format). Other
+// resolution failures still throw where they stand, because they are
+// errors rather than work the walk can enumerate.
 export function deps(graph: Graph, start: GraphNode): GraphNode[] {
   const out: GraphNode[] = [];
   const seen = new Set<string>();
+  const pending = new Map<string, UngeneratedSound>();
   const visit = (node: GraphNode) => {
     const key = formatLabel(node.label);
     if (seen.has(key)) return;
     seen.add(key);
     if (node.kind === 'rule') {
-      for (const dep of node.deps) visit(resolveLabel(graph, dep));
+      for (const dep of node.deps) {
+        const formatted = formatLabel(dep);
+        const takeless = graph.ungenerated.get(formatted);
+        if (takeless !== undefined) {
+          pending.set(formatted, takeless);
+          continue;
+        }
+        visit(resolveLabel(graph, dep));
+      }
     }
     out.push(node);
   };
   visit(start);
+  if (pending.size === 1) {
+    const [only] = pending.values();
+    throw new Error(`${formatLabel(only!.label)} has no takes yet ${SEED_NOTE}:\n  ${fillCommand(only!)}`);
+  }
+  if (pending.size > 1) {
+    // Sorted so the list is stable however the walk met them.
+    const commands = [...pending.values()]
+      .sort((a, b) => (a.name < b.name ? -1 : 1))
+      .map((p) => `  ${fillCommand(p)}`);
+    throw new Error(
+      `${formatLabel(start.label)} needs ${pending.size} generative requests that have ` +
+        `no takes yet ${SEED_NOTE}:\n${commands.join('\n')}`,
+    );
+  }
   return out;
 }

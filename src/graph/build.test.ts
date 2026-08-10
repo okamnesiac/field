@@ -213,7 +213,7 @@ describe('build', () => {
     // typo in a name that is spelled correctly and sitting on disk.
     writeTrack('topline', 'name: topline\ninputs:\n  - generative:\n      text: the water knows the way\n');
     await expect(buildLabels(root, ['//songs/creek/gen:topline'])).rejects.toThrow(
-      'has no takes yet — field generate creek/topline --seed <n>',
+      /has no takes yet \(--seed pins a seed; omitted, one is drawn and recorded\):\n  field generate creek\/topline$/,
     );
     // The same answer when it is reached as somebody else's dependency,
     // which is how a project actually hits this. Different code path:
@@ -236,7 +236,26 @@ describe('build', () => {
       );
     }
     await expect(buildLabels(root, ['//songs/tall-grass/gen/...'])).rejects.toThrow(
-      /2 generative requests with no takes yet:[\s\S]*field generate tall-grass\/bridge[\s\S]*field generate tall-grass\/topline/,
+      /2 generative requests with no takes yet \(--seed[\s\S]*\n  field generate tall-grass\/bridge\n  field generate tall-grass\/topline/,
+    );
+
+    // And the answer a *consumer* gets is the whole list, not the first
+    // pending dependency the walk happened to meet: peeling them one
+    // play at a time means generating, waiting, and being told about
+    // the next one (#118-era session finding).
+    writeFileSync(
+      join(root, 'songs/tall-grass/tracks/main.yaml'),
+      [
+        'name: main',
+        'inputs:',
+        '  - track: topline',
+        '  - track: bridge',
+        '    at: [3]',
+        '',
+      ].join('\n'),
+    );
+    await expect(buildLabels(root, ['//songs/tall-grass/track:main'])).rejects.toThrow(
+      /needs 2 generative requests that have no takes yet \(--seed[\s\S]*\n  field generate tall-grass\/bridge\n  field generate tall-grass\/topline/,
     );
   });
 

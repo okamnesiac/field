@@ -697,7 +697,8 @@ export async function chooseVariant(
   const takes = takesDoc && readTakes(songDir, name);
   if (takes === undefined || takes.variants.length === 0) {
     throw new Error(
-      `"${name}" has no takes yet — field generate ${options.song}/${name} --seed <n>`,
+      `"${name}" has no takes yet (--seed pins a seed; omitted, one is drawn and ` +
+        `recorded):\n  field generate ${options.song}/${name}`,
     );
   }
   // The attachment must be the gen node this path resolved. Without

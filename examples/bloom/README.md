@@ -97,7 +97,8 @@ field build tall-grass
 creek does not, and says why:
 
 ```text
-//songs/creek/gen:lead-take has no takes yet — field generate creek/lead-take --seed <n>
+//songs/creek/gen:lead-take has no takes yet (--seed pins a seed; omitted, one is drawn and recorded):
+  field generate creek/lead-take
 ```
 
 Two of creek's parts are model-generated, and neither ships with audio.
