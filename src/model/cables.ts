@@ -1,6 +1,7 @@
 import type { InputEntry, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import { expandLoop, placedWindow } from '../generators/stem.js';
+import { fmtDb } from './levels.js';
 import type { LoadedFile } from './project.js';
 
 // The cable model (nested-tracks.md §19): a label links exactly one
@@ -469,6 +470,22 @@ export function checkCables(
     });
   }
   return cables;
+}
+
+// One line per cable end, for `field explain` — a cable appears when
+// either end's level is questioned (nested-tracks.md §19 chunk 4),
+// because the edge's gain is part of the answer neither track file
+// shows in full.
+export function formatCable(cable: Cable, from: string): string {
+  const level = `${fmtDb(cable.gainDb)} dB (tap ${cable.tap})`;
+  if (cable.sender === from) {
+    return `send "${cable.label}" → track:${cable.receiver}, ${level}`;
+  }
+  const arrivals =
+    cable.arrivals.length === 1
+      ? `arrives at sample ${cable.arrivals[0]}`
+      : `${cable.arrivals.length} arrivals at samples ${cable.arrivals.join(', ')}`;
+  return `receive "${cable.label}" ← track:${cable.sender}, ${level}, ${arrivals}`;
 }
 
 // A dependency path from `from` to `to` over containment and cable

@@ -26,6 +26,12 @@ inserts:
     predelay_ms: 40 # dry ahead of the wash; at 700 Hz that is body, not
     # consonants — there are none left to place
     damping: 0.7
+sends:
+  # the voice joins the same room as the keys (tracks/space.yaml) —
+  # post, so the room hears the buried, already-set line rather than
+  # the raw consonants the chain above deliberately loses
+  vocal-verb:
+    gain_db: -10
 inputs:
   # The generated line, placed from its own leaf track — the one place
   # the request is written (tracks/lead-take.yaml). Chatterbox emits

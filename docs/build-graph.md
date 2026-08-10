@@ -221,7 +221,16 @@ it; every placement follows).
   node at the edge rather than being refused (what mix-assembly.md §4
   called "never resamples implicitly" became "never resamples
   *invisibly*": the conversion is automatic, and it is a node you can
-  ask about). An
+  ask about). Cables join the plan the same way
+  ([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19):
+  a track receiving a send consumes the sender's stem — or, for
+  `tap: pre`, an implicit `tap:` node, the sender's plan minus its
+  inserts, shared by every pre cable from that sender — as ordinary
+  clips placed at the derived arrivals at the cable's gain, converted
+  at the edge like any source. The receive therefore re-keys on sender
+  content, gain, tap and arrivals, and on nothing else: a send-level
+  tweak re-renders the receiver alone, which creek demonstrates — its
+  shared reverb rebuild leaves every other stem a cache hit. An
   entry's `loop:` map tiles its source to fill the window
   ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
   repetitions expand into ordinary placement-plan entries — grid-locked

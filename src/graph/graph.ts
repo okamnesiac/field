@@ -29,8 +29,9 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 // The dependency graph, derived from the project model by convention
 // (project-core.md §3.4). Node kinds: source assets (song and shared
 // ledgers), generator entries' renders (gen:), chosen takes
-// (generation), resample edges (convert:), and implicit track stems —
-// every track is buildable as //songs/<song>/track:<name>
+// (generation), resample edges (convert:), pre-insert taps (tap:,
+// nested-tracks.md §19 decision 6), and implicit track stems — every
+// track is buildable as //songs/<song>/track:<name>
 // (mix-assembly.md §3). "Node" and "rule" are deliberately the engine's
 // words (project-layout.md §4): the format speaks tracks and entries,
 // and this module realizes them. Declared sounds were a kind here until

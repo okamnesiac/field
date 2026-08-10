@@ -19,7 +19,7 @@ recovery, peak generation.
 
 Sends no longer wait for this engine:
 [projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19
-specifies them to render offline first. A label links exactly one send
+renders them offline, and that shipped first. A label links exactly one send
 to one receive, the edge carries a level and a tap point and never an
 offset, and a receive may sit only where its path to the cable's common
 ancestor accumulates zero time displacement — which is what makes

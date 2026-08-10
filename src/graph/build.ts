@@ -4,6 +4,7 @@ import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { reaches, type Reach } from '../model/levels.js';
+import type { Cable } from '../model/cables.js';
 import { generatorFor, type ExtraInput, type RunContext } from '../generators/index.js';
 import { assertGenerated, deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
@@ -56,8 +57,10 @@ export interface Explanation {
   // (model/levels.ts). The build graph runs the other way — a parent
   // depends on its children — so this is the one answer `explain` cannot
   // read off the node it was handed. An empty `reaches` means the track
-  // is a root; `rootNote` says which kind.
-  levels?: { track: string; reaches: Reach[] };
+  // is a root; `rootNote` says which kind. `cables` are the song's
+  // cables touching this track, either end: a cable appears when either
+  // end's level is questioned (nested-tracks.md §19 chunk 4).
+  levels?: { track: string; reaches: Reach[]; cables: Cable[] };
 }
 
 // Executes a rule: reads input files, writes the output file. Injectable so
@@ -387,7 +390,13 @@ export async function explain(
   const song = project.songs.find((s) => s.dir === node.songDir);
   const levels =
     node.spec.type === 'stem' && song
-      ? { track: node.label.name, reaches: reaches(song, node.label.name) }
+      ? {
+          track: node.label.name,
+          reaches: reaches(song, node.label.name),
+          cables: song.cables.filter(
+            (c) => c.sender === node.label.name || c.receiver === node.label.name,
+          ),
+        }
       : undefined;
   const explanation: Explanation = {
     label,

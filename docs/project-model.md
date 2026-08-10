@@ -265,9 +265,17 @@ resolves through several parents, their views must agree, because
 arrivals bake into a render that exists once however often it is placed
 (disagreement is an error naming both paths), and identical landings
 collapse to a count rather than repeating — a doubled sender is one
-arrival at twice the amplitude. What a receive *renders* — the sender's
-signal summed at those arrivals through the receiver's inserts — lands
-with the rest of nested-tracks.md §7 chunk 4.
+arrival at twice the amplitude.
+
+A receive renders as ordinary clips: the sender's whole render — its
+stem for a post tap, a shared pre-insert tap node for `pre` — placed at
+each derived arrival at the cable's gain, converted at the edge if the
+sender runs at another rate, and summed through the receiver's inserts
+with everything else it plays. So the receive's action key re-keys on
+exactly what §19 names — sender content, gain, tap and arrivals — and
+on nothing else: a send-level tweak re-renders the receiver alone.
+`field explain` shows a cable from either end, because the edge's gain
+is part of a level answer neither track file holds in full.
 
 ## Identity: names, not UUIDs
 

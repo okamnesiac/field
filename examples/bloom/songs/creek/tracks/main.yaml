@@ -20,3 +20,8 @@ inputs:
   - track: lead-vocal
     gain_db: 3
     pan: 0.2 # a touch right, opposite the pad
+  # the shared room (fed by keys and the vocal over cables) — level on
+  # the placement like every level, so the room's size in the mix is a
+  # mix decision, not a room parameter
+  - track: space
+    gain_db: -3
