@@ -1248,7 +1248,7 @@ describe('generative entries (nested-tracks.md §18 step 3)', () => {
     writeLeaf();
     writeTakes('rain-pad', ['take one']);
     expect(await messages()).toContain(
-      'has takes but no chosen variant yet — field choose rain-pad first',
+      'has takes but no chosen variant yet — field choose opener/rain-pad first',
     );
   });
 

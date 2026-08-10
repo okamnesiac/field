@@ -187,7 +187,7 @@ describe('generative requests in the project model', () => {
     writeGenerateLeaf('hum', ['fake wav'], {});
     const diags = loadProject(root).diagnostics;
     expect(
-      diags.some((d) => d.message.includes('no chosen variant yet — field choose hum first')),
+      diags.some((d) => d.message.includes('no chosen variant yet — field choose opener/hum first')),
     ).toBe(true);
   });
 

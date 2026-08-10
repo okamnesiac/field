@@ -100,7 +100,7 @@ export interface UngeneratedSound {
 }
 
 function fillCommand(pending: UngeneratedSound): string {
-  return `field generate ${pending.name} --song ${pending.song} --seed <n>`;
+  return `field generate ${pending.song}/${pending.name} --seed <n>`;
 }
 
 // Requires a project with no diagnostics: the graph trusts what validate

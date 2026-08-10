@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseBars,
+  parseGenTarget,
   parseBpm,
   parseChannels,
   parseDurationSeconds,
@@ -71,5 +72,44 @@ describe('wantsVersion', () => {
 
   it('is false for no arguments at all', () => {
     expect(wantsVersion(['node', 'field'])).toBe(false);
+  });
+});
+
+describe('parseGenTarget', () => {
+  // The song rides in the argument, in every spelling the CLI itself
+  // prints — there is no --song, because two ways to say one thing is a
+  // search path over flags (project-core.md §3.4's rule).
+  it('accepts song/name, song/gen:name, and the full label', () => {
+    expect(parseGenTarget('creek/still-water-keys', 'choose')).toEqual({
+      song: 'creek',
+      name: 'still-water-keys',
+    });
+    expect(parseGenTarget('creek/gen:still-water-keys', 'choose')).toEqual({
+      song: 'creek',
+      name: 'still-water-keys',
+    });
+    expect(parseGenTarget('//songs/creek/gen:lead-take', 'generate')).toEqual({
+      song: 'creek',
+      name: 'lead-take',
+    });
+  });
+
+  it('a bare name is told the spelling that carries the song', () => {
+    expect(() => parseGenTarget('still-water-keys', 'choose')).toThrow(
+      'field choose <song>/still-water-keys',
+    );
+    // Stripping a gen: prefix first, so the advice is pasteable.
+    expect(() => parseGenTarget('gen:lead-take', 'generate')).toThrow(
+      'field generate <song>/lead-take',
+    );
+  });
+
+  it('refuses other packages and non-songs labels by name', () => {
+    expect(() => parseGenTarget('creek/track:keys', 'choose')).toThrow(
+      'choose addresses a gen node',
+    );
+    expect(() => parseGenTarget('//shared/asset:pad', 'choose')).toThrow(
+      'only //songs/ labels',
+    );
   });
 });

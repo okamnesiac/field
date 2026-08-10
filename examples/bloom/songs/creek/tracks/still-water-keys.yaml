@@ -3,7 +3,7 @@
 # run this; generation is human-triggered (project-layout.md §1.2), so
 # it stays a request until you ask:
 #
-#   field generate still-water-keys --song creek --seed 90210 --variants 2
+#   field generate creek/still-water-keys --seed 90210 --variants 2
 #
 # The prompt and the length below are that request; flags repeating them
 # are refused. The takes land in audio/still-water-keys/variants.yaml,

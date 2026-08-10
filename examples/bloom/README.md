@@ -97,7 +97,7 @@ field build tall-grass
 creek does not, and says why:
 
 ```text
-//songs/creek/gen:lead-take has no takes yet — field generate lead-take --song creek --seed <n>
+//songs/creek/gen:lead-take has no takes yet — field generate creek/lead-take --seed <n>
 ```
 
 Two of creek's parts are model-generated, and neither ships with audio.
@@ -106,8 +106,8 @@ request: the keys a prompt, the vocal a line and its delivery — and you
 supply the run:
 
 ```bash
-field generate still-water-keys --song creek --seed 90210 --variants 2
-field generate lead-take --song creek --seed 4823 --variants 3
+field generate creek/still-water-keys --seed 90210 --variants 2
+field generate creek/lead-take --seed 4823 --variants 3
 field build creek
 ```
 
@@ -122,7 +122,7 @@ Then audition the takes and change your mind:
 ```bash
 field play //songs/creek/gen:lead-take-1
 field play //songs/creek/gen:lead-take-2
-field choose lead-take --song creek --variant 2
+field choose creek/lead-take --variant 2
 ```
 
 `choose` moves what the *gen node* means, so every placement follows in a

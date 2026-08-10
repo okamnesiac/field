@@ -2,10 +2,10 @@
 # this example (bloom-in-tree.md §2.4), so the first thing creek asks of
 # you is your own voice for it.
 #
-#   field generate lead-take --song creek --seed 4823 --variants 3
+#   field generate creek/lead-take --seed 4823 --variants 3
 #
 # That writes audio/lead-take/variants.yaml and chooses the first take.
-# `field choose lead-take --song creek --variant 2` moves which one the
+# `field choose creek/lead-take --variant 2` moves which one the
 # gen node means; every placement follows, because lead-vocal places
 # this track and not a file. Neither command touches this file — what
 # you generated and what you kept are yours, and this is the part that
