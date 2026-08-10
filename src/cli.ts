@@ -700,6 +700,16 @@ program
       // The CLI speaks the format's language (project-layout.md §4):
       // type, not the engine's rule.
       if (e.rule) process.stdout.write(`type: ${e.rule} v${e.ruleVersion}\n`);
+      // "Which variant are we using" is this command's question to
+      // answer: the chosen line on the request's own label, the bare
+      // file on a per-take audition label.
+      if (e.choice) {
+        process.stdout.write(
+          `chosen: variant ${e.choice.chosen} of ${e.choice.takes} (${e.file})\n`,
+        );
+      } else if (e.file) {
+        process.stdout.write(`file: ${e.file}\n`);
+      }
       for (const input of e.inputs) {
         const sha = input.sha256 ? input.sha256.slice(0, 12) : '(not built)';
         process.stdout.write(`input: ${input.label} ${sha}\n`);

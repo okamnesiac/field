@@ -7,6 +7,7 @@ import { check } from './check.js';
 import { createSong } from './create.js';
 import { init } from './init.js';
 import { chooseVariant, generateVariants } from './generate.js';
+import { explainLabel } from './build.js';
 import { importAsset } from './import.js';
 import { resolvePlayables } from './play.js';
 import { sha256Text } from '../hash.js';
@@ -158,6 +159,22 @@ describe('generative requests in the project model', () => {
     expect(
       result.diagnostics.some((d) => d.message.includes('does not match its recorded sha256')),
     ).toBe(true);
+  });
+
+  it('explain answers which take is chosen, of how many', async () => {
+    // The readout for "which variant are we using": the node the
+    // request's own label resolves to names its choice, the take count,
+    // and the committed file. The alternatives were reading raw YAML or
+    // inferring the number from a build line's filename — explain is the
+    // command whose job this is, and it knew the file all along.
+    const e = await explainLabel(root, '//songs/opener/gen:keys');
+    expect(e.choice).toEqual({ chosen: 1, takes: 2 });
+    expect(e.file).toBe('audio/keys/1.wav');
+    // An audition node names its own file but carries no choice — it is
+    // one take, not the choosing.
+    const take = await explainLabel(root, '//songs/opener/gen:keys-2');
+    expect(take.choice).toBeUndefined();
+    expect(take.file).toBe('audio/keys/2.wav');
   });
 
   it('variants are auditionable by number under the gen package', async () => {

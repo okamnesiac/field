@@ -69,6 +69,12 @@ export interface GenerationNode {
   songDir: string;
   file: string; // song-dir-relative (audio/<name>/<n>.wav)
   sha256: string;
+  // Present on the node the request's own label resolves to — which take
+  // `field choose` picked, of how many exist — and absent on the
+  // per-variant audition nodes, which are one take each rather than the
+  // choosing. `explain` is the reader: "which variant are we using" must
+  // have a better answer than raw YAML or a filename's digit (#115).
+  choice?: { chosen: number; takes: number };
 }
 
 export type GraphNode = AssetNode | GeneratorNode | GenerationNode;
@@ -237,6 +243,7 @@ export function buildGraph(project: LoadedProject): Graph {
               songDir: song.dir,
               file: variant.file,
               sha256: variant.sha256,
+              choice: { chosen: takes.chosen, takes: variants.length },
             });
             sha256BySource.set(genRef(name), variant.sha256);
             fileBySource.set(genRef(name), { base: song.dir, file: variant.file });
