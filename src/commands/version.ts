@@ -268,9 +268,15 @@ export function formatVersionReport(report: VersionReport, root: string): string
     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
       `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}` +
+      // No count here: checkoutDirtyFiles is the checkout's absolute
+      // current state, but any number in this sentence reads as a delta
+      // since the build — and a stamp taken from a dirty tree makes
+      // "0 uncommitted files since the build" false on every reading
+      // (minjudd on #121). The report keeps the number; the sentence
+      // only needs the fact.
       `${
         cli.checkoutDirtyFiles !== undefined
-          ? `; checkout has ${cli.checkoutDirtyFiles} uncommitted file${cli.checkoutDirtyFiles === 1 ? '' : 's'} since the build — pnpm build to update`
+          ? '; checkout has changed since the build — pnpm build to update'
           : ''
       }`
     : 'not a git checkout';

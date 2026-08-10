@@ -40,12 +40,13 @@ format remains language-neutral regardless.
 stamps `dist/build-info.json` with the commit, branch, and dirty count
 at build time (cleared before `tsc`, written after everything succeeds,
 so a failed build leaves no stamp), and the dist artifact reads its
-stamp. When the checkout has moved since the build — a new HEAD, or
-edits without a commit — the report says so beside the baked identity
-(`checkout now at <sha> — pnpm build to update`) instead of
-impersonating it. Running from source (tsx, vitest) keeps the live git
-read, because there the checkout is the code; an unstamped dist falls
-back to the live read.
+stamp. When the checkout has moved since the build, the report says so
+beside the baked identity instead of impersonating it: a new HEAD prints
+`checkout now at <sha> — pnpm build to update`, and edits without a
+commit print `checkout has changed since the build — pnpm build to
+update`. Running from source (tsx, vitest) keeps the live git read,
+because there the checkout is the code; an unstamped dist falls back to
+the live read.
 
 ## Native audio daemon (C++ / JUCE) — `field-audiod`
 

@@ -227,6 +227,17 @@ describe('resolveIdentity', () => {
     expect(resolved.checkoutCommit).toBeUndefined();
     expect(resolved.checkoutDirtyFiles).toBe(4);
   });
+
+  it('reports edits discarded since a dirty build — the count can drop to 0', () => {
+    // Build with one edit in flight, then stash or discard it: the tree
+    // is now cleaner than the dist, which still runs the baked edit.
+    const resolved = resolveIdentity(
+      { commit: 'aaaa111', branch: 'main', dirtyFiles: 4 },
+      { commit: 'aaaa111', branch: 'main', dirtyFiles: 0 },
+    );
+    expect(resolved.checkoutCommit).toBeUndefined();
+    expect(resolved.checkoutDirtyFiles).toBe(0);
+  });
 });
 
 describe('formatVersionReport with a drifted checkout', () => {
@@ -244,7 +255,11 @@ describe('formatVersionReport with a drifted checkout', () => {
 });
 
 describe('formatVersionReport with post-build edits', () => {
-  it('names the dirty count and the reconciling command', () => {
+  it('says the checkout changed without quoting a count', () => {
+    // The count is the checkout's absolute current state, but any number
+    // in this sentence reads as a delta since the build — and when the
+    // stamp was itself taken dirty, "0 uncommitted files since the
+    // build" has no true reading. So the sentence carries no number.
     const text = formatVersionReport(
       {
         cli: { version: '0.1.0', commit: 'aaaa111', branch: 'main', checkoutDirtyFiles: 4 },
@@ -254,7 +269,29 @@ describe('formatVersionReport with post-build edits', () => {
       process.cwd(),
     );
     expect(text).toContain(
-      'aaaa111 on main; checkout has 4 uncommitted files since the build — pnpm build to update',
+      'aaaa111 on main; checkout has changed since the build — pnpm build to update',
+    );
+  });
+
+  it('reads the same when the tree got cleaner than the dist', () => {
+    // Stamp taken with edits in flight, edits discarded: current count
+    // is 0 and the dist is still stale.
+    const text = formatVersionReport(
+      {
+        cli: {
+          version: '0.1.0',
+          commit: 'aaaa111',
+          branch: 'main',
+          dirtyFiles: 1,
+          checkoutDirtyFiles: 0,
+        },
+        workerProtocol: 2,
+        daemons: [],
+      },
+      process.cwd(),
+    );
+    expect(text).toContain(
+      'aaaa111 on main, 1 file uncommitted; checkout has changed since the build — pnpm build to update',
     );
   });
 });
