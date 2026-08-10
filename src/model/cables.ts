@@ -380,6 +380,11 @@ export function checkCables(
       });
     }
     if (pathError || results.some((r) => r.arrivals === undefined)) continue;
+    // No containment path at all means every upward walk re-entered a
+    // containment cycle — validate's own diagnostic, already reported.
+    // Falling through would make the every-empty check below vacuously
+    // true and blame the cable for the cycle (Bugbot on #125).
+    if (results.length === 0) continue;
     if (results.every((r) => r.arrivals!.length === 0)) {
       push(
         receive.file,

@@ -191,6 +191,20 @@ describe('checkCables: arrival derivation', () => {
     expect(cables[0]!.arrivals).toEqual([24000]);
   });
 
+  it('a receiver inside a containment cycle is the cycle diagnostic to report, not a cable error', () => {
+    // a ⇄ b is a containment cycle, which validate names on its own
+    // pass. Every upward walk from the receiver re-enters it, so there
+    // is no containment path at all — which must read as "nothing to
+    // derive here", not as the no-common-ancestor error (Bugbot on
+    // #125: an empty result set made that check vacuously true).
+    const x = trackData('x', { sends: { verb: { gain_db: 0, tap: 'post' } } });
+    const a = trackData('a', { inputs: [entry({ receive: 'verb' }), entry({ track: 'b' })] });
+    const b = trackData('b', { inputs: [entry({ track: 'a' })] });
+    const { cables, pushed } = run([x, a, b]);
+    expect(pushed).toEqual([]);
+    expect(cables).toEqual([]);
+  });
+
   it('parallel mixes hearing identical arrivals agree (§19: the bed shape)', () => {
     const keys = trackData('keys', { sends: { verb: { gain_db: 0, tap: 'post' } } });
     const verse = trackData('verse', { inputs: [entry({ track: 'keys' })] });
