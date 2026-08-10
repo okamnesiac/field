@@ -46,6 +46,12 @@ export interface Explanation {
   actionKey?: string;
   cached?: boolean;
   outputs?: { sha256: string; bytes: number }[];
+  // Generation nodes only: the committed file, and — on the node the
+  // request's own label resolves to — which take is chosen, of how many.
+  // This is the answer to "which variant are we using", so it lives on
+  // the command whose job that question is (#115).
+  file?: string;
+  choice?: { chosen: number; takes: number };
   // Tracks only: where this track's signal goes and at what level
   // (model/levels.ts). The build graph runs the other way — a parent
   // depends on its children — so this is the one answer `explain` cannot
@@ -343,6 +349,8 @@ export async function explain(
       label,
       kind: 'generation',
       inputs: [],
+      file: node.file,
+      ...(node.choice !== undefined ? { choice: node.choice } : {}),
       outputs: [
         {
           sha256: node.sha256,
