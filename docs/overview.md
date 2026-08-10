@@ -70,10 +70,12 @@ supported API exists — see [audio-engine.md](audio-engine.md)).
 
 **CLI-first.** You create, configure, generate, build, and play a
 project from the command line, and recording joins the same surface when
-the engine grows it:
+the engine grows it. `field init` starts an empty project; on a fresh
+clone of [`examples/bloom`](../examples/bloom/README.md), this sequence
+takes creek from request to delivered file:
 
 ```bash
-field init
+field generate creek/still-water-keys --seed 90210 --variants 2
 field generate creek/lead-take --seed 4823 --variants 3
 field build creek/track:main
 field play creek
