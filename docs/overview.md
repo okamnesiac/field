@@ -27,8 +27,8 @@ small native control surface, all driving the same engine and the same files.
   shared instruments and samples reused across them. See
   [project-model.md](project-model.md).
 - **Song** — one piece within a project: its own arrangement, tempo map,
-  tracks, sounds, takes, and mixes, drawing freely on the project's shared
-  material.
+  tracks, takes, and committed audio, drawing freely on the project's
+  shared material.
 - **Asset** — an immutable audio/MIDI file, referenced by content hash. Audio is
   never edited in place; all placement and editing is metadata.
 - **Node** — a producer or processor in the dependency graph: a recorded track,

@@ -17,8 +17,9 @@ import { chooseVariant, generateVariants } from './generate.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { sha256File, sha256Text } from '../hash.js';
+import { generatorName } from '../generators/stem.js';
 import { loadProject } from '../model/project.js';
-import { TAKES_FILENAME, type GenerativeSound } from '../schema/index.js';
+import { type GenerativeEntry, type GenerativeTakes } from '../schema/index.js';
 
 // The CLI seam: one `field generate` over two generators, and the first
 // code in field that *writes* a content hash into a committed file rather
@@ -26,11 +27,15 @@ import { TAKES_FILENAME, type GenerativeSound } from '../schema/index.js';
 //
 // Two kinds of test here, on purpose. The option-shape group asserts that
 // every wrong combination fails *before* a worker is spawned — the schema
-// would reject the same recipe on the way to disk, but by then the model
+// would reject the same request on the way to disk, but by then the model
 // minutes are spent. The end-to-end group runs against the stub worker
-// (src/testing/stub-worker.mjs) so the job actually sent and the recipe
+// (src/testing/stub-worker.mjs) so the job actually sent and the file
 // actually written are both observed; the wire protocol itself is covered
 // the other way round, against the real daemons, in src/*/client.test.ts.
+//
+// Requests live as `generative:` entries in tracks (nested-tracks.md §18,
+// decision 12 — `sounds/` retired): filling targets an entry by its gen
+// node name, and a brand-new name scaffolds a leaf track carrying it.
 
 const stubWorker = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -68,12 +73,27 @@ async function importReference(name = 'ref-voice', song = 'creek'): Promise<stri
   return join(root, 'songs', song, result.file);
 }
 
-function recipe(name: string, song = 'creek'): GenerativeSound {
-  const sound = loadProject(root)
+// The request as the project reads it: the generative entry minting this
+// gen node name, wherever it lives.
+function entryOf(name: string, song = 'creek'): GenerativeEntry {
+  const loaded = loadProject(root).songs.find((s) => s.name === song)!;
+  for (const track of loaded.tracks) {
+    for (const entry of track.data.inputs) {
+      if (entry.generative !== undefined && generatorName(entry, track.data.name) === name) {
+        return entry.generative;
+      }
+    }
+  }
+  throw new Error(`no generative entry "${name}" in ${song}`);
+}
+
+// The run-recorded half, beside the audio (bloom-in-tree.md §7).
+function takesOf(name: string, song = 'creek'): GenerativeTakes {
+  const takes = loadProject(root)
     .songs.find((s) => s.name === song)!
-    .sounds.find((f) => f.data.name === name)!.data;
-  expect(sound.type).toBe('generative');
-  return sound as GenerativeSound;
+    .genTakes.get(name);
+  expect(takes).toBeDefined();
+  return takes!.data;
 }
 
 // Everything the stub was asked for, in order. Both stubs log to one file
@@ -90,7 +110,7 @@ describe('field generate: which generator, decided before anything spawns', () =
   const voice = { song: 'creek', text: 'the water knows the way', seed: 7, variants: 2 };
   const music = { song: 'creek', prompt: 'warm keys', seed: 7, variants: 2, bars: 4 };
 
-  it('refuses a recipe that is both kinds or neither', async () => {
+  it('refuses a request that is both kinds or neither', async () => {
     await expect(
       generateVariants(root, 'line', { ...voice, prompt: 'warm keys' }),
     ).rejects.toThrow('not both');
@@ -100,7 +120,7 @@ describe('field generate: which generator, decided before anything spawns', () =
   });
 
   it('refuses a music flag on a voice line, naming the flag', async () => {
-    // A voice recipe carrying `duration_seconds` declares a field its
+    // A voice request carrying `duration_seconds` declares a field its
     // generator ignores (voice-generation.md §6), and the schema says so
     // — but only once the audio exists. These say it first.
     await expect(generateVariants(root, 'line', { ...voice, bars: 4 })).rejects.toThrow(
@@ -122,8 +142,8 @@ describe('field generate: which generator, decided before anything spawns', () =
       generateVariants(root, 'pad', { ...music, voiceRef: 'ref-voice' }),
     ).rejects.toThrow('--voice-ref is a voice option');
     // The delivery knobs are voice-only for the same reason a music
-    // recipe may not carry `voice_ref`: a field its generator ignores is
-    // a recipe describing something that did not happen.
+    // request may not carry `voice_ref`: a field its generator ignores is
+    // a request describing something that did not happen.
     await expect(
       generateVariants(root, 'pad', { ...music, exaggeration: 0.3 }),
     ).rejects.toThrow('--exaggeration is a voice option');
@@ -144,7 +164,7 @@ describe('field generate: which generator, decided before anything spawns', () =
     // the point is only that nothing asked for a length.
     const result = await generateVariants(root, 'line', voice);
     expect(result.durationSeconds).toBeUndefined();
-    expect(recipe('line').duration_seconds).toBeUndefined();
+    expect(entryOf('line').duration_seconds).toBeUndefined();
   });
 });
 
@@ -157,15 +177,14 @@ describe('field generate: resolving the voice a line is generated in', () => {
     );
   });
 
-  it('refuses a reference that names a sound rather than an asset', async () => {
-    // The namespace holds both (project-layout.md §4.3), and `source:`
-    // takes either — but a reference recording must be a committed asset,
-    // because that is where the provenance comes from (§1.3). A generated
-    // sound resolving here would be the #58 finding's other half.
-    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+  it('refuses a reference that names a render rather than an asset', async () => {
+    // A reference recording must be a committed asset, because that is
+    // where the provenance comes from (§1.3). A generator's node
+    // resolving here would be the #58 finding's other half.
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/creek/sounds/spoken.yaml'),
-      'name: spoken\ntype: supercollider\nsource: tone.scd\nseed: 1\nduration: 1\n',
+      join(root, 'songs/creek/tracks/spoken.yaml'),
+      'name: spoken\ninputs:\n  - supercollider:\n      source: tone.scd\n      seed: 1\n      duration: 1\n',
     );
     await expect(generateVariants(root, 'line', { ...voice, voiceRef: 'spoken' })).rejects.toThrow(
       'is not a committed asset',
@@ -237,7 +256,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
   it('refuses a recording that has drifted from its ledger entry', async () => {
     // The refusal `field choose` already makes about a drifted variant.
     // Generating anyway would pin a hash to bytes the model never heard —
-    // and pinning the *ledger's* hash instead would leave the recipe
+    // and pinning the *ledger's* hash instead would leave the request
     // check-green while describing the wrong recording entirely.
     const path = await importReference();
     writeFileSync(path, 'a different voice entirely\n');
@@ -282,7 +301,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
       const heard = stubRequests().find((r) => r['op'] === 'read')!;
       expect(heard['voice_ref_sha256']).toBe(sha256Text(REF_BYTES));
       expect(heard['voice_ref_sha256']).not.toBe(sha256Text(other));
-      expect(recipe('line').voice_ref_sha256).toBe(heard['voice_ref_sha256']);
+      expect(entryOf('line').voice_ref_sha256).toBe(heard['voice_ref_sha256']);
       // And the path handed over was never the asset itself — that is
       // what made the swap a no-op rather than something to detect.
       const job = stubRequests().find((r) => r['op'] === 'generate')!;
@@ -305,7 +324,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     const path = await importReference();
     const result = await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
 
-    const written = recipe('line');
+    const written = entryOf('line');
     expect(written.text).toBe(voice.text);
     expect(written.voice_ref).toBe('ref-voice');
     // The hash of the bytes actually read, which the ledger agrees with —
@@ -316,7 +335,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     // The worker is handed a path, never an asset name: it has no project
     // to resolve one against (voice-generation.md §1.4). A snapshot of
     // the recording rather than the recording itself, and so outside the
-    // project entirely — but carrying the bytes the recipe pins.
+    // project entirely — but carrying the bytes the request pins.
     const job = stubRequests().find((r) => r['op'] === 'generate')!;
     expect(typeof job['voice_ref']).toBe('string');
     expect(job['voice_ref']).not.toBe(path);
@@ -341,8 +360,8 @@ describe('field generate: resolving the voice a line is generated in', () => {
     );
     await generateVariants(root, 'line', { ...voice, voiceRef: '//shared/asset:justin' });
 
-    expect(recipe('line').voice_ref).toBe('//shared/asset:justin');
-    expect(recipe('line').voice_ref_sha256).toBe(sha256Text(REF_BYTES));
+    expect(entryOf('line').voice_ref).toBe('//shared/asset:justin');
+    expect(entryOf('line').voice_ref_sha256).toBe(sha256Text(REF_BYTES));
     // Snapshotted like a song-scoped one, and of the shared recording's
     // bytes rather than some same-named song asset's.
     const job = stubRequests().find((r) => r['op'] === 'generate')!;
@@ -354,14 +373,14 @@ describe('field generate: resolving the voice a line is generated in', () => {
   });
 
   it("omits voice_ref entirely for the model's own voice", async () => {
-    // "" and absent are different requests (#60), and the recipe has the
+    // "" and absent are different requests (#60), and the entry has the
     // same distinction: no key at all, not an empty one. This is the
     // configuration bloom generates with today (§6).
     await generateVariants(root, 'line', voice);
-    const written = recipe('line');
+    const written = entryOf('line');
     expect(written.voice_ref).toBeUndefined();
     expect(written.voice_ref_sha256).toBeUndefined();
-    expect(readFileSync(join(root, 'songs/creek/sounds/line.yaml'), 'utf8')).not.toContain(
+    expect(readFileSync(join(root, 'songs/creek/tracks/line.yaml'), 'utf8')).not.toContain(
       'voice_ref',
     );
     const job = stubRequests().find((r) => r['op'] === 'generate')!;
@@ -381,22 +400,22 @@ describe('field generate: what lands on disk', () => {
     ]);
     expect(result.seeds).toEqual([7, 8]);
 
-    const written = recipe('line');
-    // Provenance is per take now, because it describes a run and a sound
+    const takes = takesOf('line');
+    // Provenance is per take, because it describes a run and a request
     // accumulates several (bloom-in-tree.md §3).
-    expect(written.variants.map((v) => v.model)).toEqual([
+    expect(takes.variants.map((v) => v.model)).toEqual([
       'field-voiced-stub',
       'field-voiced-stub',
     ]);
-    // Generating chooses the first take, so the sound resolves without a
-    // second command — `choose` switches, it does not enable.
-    expect(written.chosen).toBe(1);
+    // Generating chooses the first take, so the gen node resolves without
+    // a second command — `choose` switches, it does not enable.
+    expect(takes.chosen).toBe(1);
     // Each variant's hash is of its own file: the stub writes distinct
-    // bytes per seed, so a recipe that paired file 1 with file 2's hash
-    // would fail here rather than at some later check.
-    for (const [i, variant] of written.variants.entries()) {
+    // bytes per seed, so a takes file that paired file 1 with file 2's
+    // hash would fail here rather than at some later check.
+    for (const [i, variant] of takes.variants.entries()) {
       expect(variant.seed).toBe(7 + i);
-      expect(variant.generated_at).toBe(written.variants[0]!.generated_at);
+      expect(variant.generated_at).toBe(takes.variants[0]!.generated_at);
       expect(variant.sha256).toBe(await sha256File(join(root, 'songs/creek', variant.file)));
       expect(variant.sha256).toBe(sha256Text(`stub audio seed=${7 + i}\n`));
     }
@@ -405,13 +424,28 @@ describe('field generate: what lands on disk', () => {
     expect(checked.unformatted).toEqual([]);
   });
 
+  it('scaffolds a leaf track for a brand-new request', async () => {
+    // The create path's file is a track like any other — the shape every
+    // request lives in (nested-tracks.md §18, decision 12) — and it must
+    // be exactly the file a person would write: no defaulted placement
+    // noise, canonical order, check-green.
+    const result = await generateVariants(root, 'line', voice);
+    expect(result.recipePath).toBe(join('songs', 'creek', 'tracks', 'line.yaml'));
+    const raw = readFileSync(join(root, 'songs/creek/tracks/line.yaml'), 'utf8');
+    expect(raw).toContain('name: line');
+    expect(raw).toContain('generative:');
+    expect(raw).toContain('text: the water knows the way');
+    expect(raw).not.toContain('anchor:'); // defaults stay unwritten
+    expect((await check(root)).unformatted).toEqual([]);
+  });
+
   it('routes music to field-aced and voice to field-voiced', async () => {
     // Same verb, different socket — which is the whole of the routing
     // decision (project-layout.md §1.7). The stub answers with the name
     // it was invoked as, and the client refuses a mismatch (#60), so a
     // generate that reached the wrong worker would not get this far.
     await generateVariants(root, 'line', voice);
-    expect(recipe('line').variants[0]!.model).toBe('field-voiced-stub');
+    expect(takesOf('line').variants[0]!.model).toBe('field-voiced-stub');
     await generateVariants(root, 'pad', {
       song: 'creek',
       prompt: 'warm keys',
@@ -419,8 +453,8 @@ describe('field generate: what lands on disk', () => {
       variants: 1,
       bars: 2,
     });
-    const pad = recipe('pad');
-    expect(pad.variants[0]!.model).toBe('field-aced-stub');
+    expect(takesOf('pad').variants[0]!.model).toBe('field-aced-stub');
+    const pad = entryOf('pad');
     expect(pad.prompt).toBe('warm keys');
     expect(pad.duration_seconds).toBeGreaterThan(0);
     expect((await check(root)).diagnostics).toEqual([]);
@@ -436,7 +470,7 @@ describe('field generate: what lands on disk', () => {
     expect(job['conviction']).toBe(0.3);
     expect('cfg_weight' in job).toBe(false);
 
-    const written = recipe('line');
+    const written = entryOf('line');
     expect(written.exaggeration).toBe(0.3);
     expect(written.conviction).toBe(0.3);
     expect((await check(root)).diagnostics).toEqual([]);
@@ -451,7 +485,7 @@ describe('field generate: what lands on disk', () => {
     const job = stubRequests().find((r) => r['op'] === 'generate')!;
     expect('exaggeration' in job).toBe(false);
     expect('conviction' in job).toBe(false);
-    const raw = readFileSync(join(root, 'songs/creek/sounds/line.yaml'), 'utf8');
+    const raw = readFileSync(join(root, 'songs/creek/tracks/line.yaml'), 'utf8');
     expect(raw).not.toContain('exaggeration');
     expect(raw).not.toContain('conviction');
   });
@@ -464,115 +498,111 @@ describe('field generate: what lands on disk', () => {
 });
 
 // The half that makes an example project possible (bloom-in-tree.md §3):
-// recipes ship without audio, and whoever clones generates their own
+// requests ship without audio, and whoever clones generates their own
 // takes into them. The request stops being flags on a command line and
 // becomes the file — which is also why nothing here passes --text.
-describe('field generate: filling a recipe that shipped without takes', () => {
-  const TAKELESS = 'name: topline\ntype: generative\ntext: the water knows the way\n';
+describe('field generate: filling a leaf that shipped without takes', () => {
+  const TAKELESS =
+    'name: topline\ninputs:\n  - generative:\n      text: the water knows the way\n';
   const run = { song: 'creek', seed: 7, variants: 2 };
 
-  function writeRecipe(yaml: string): void {
-    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
-    writeFileSync(join(root, 'songs/creek/sounds/topline.yaml'), yaml);
+  function writeLeaf(yaml: string): void {
+    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+    writeFileSync(join(root, 'songs/creek/tracks/topline.yaml'), yaml);
   }
 
-  it('takes the request from the recipe and fills it in place, comments intact', async () => {
-    writeRecipe(`# generate your own — nobody's creek is anybody else's\n${TAKELESS}`);
+  it('takes the request from the entry and fills it in place, comments intact', async () => {
+    writeLeaf(`# generate your own — nobody's creek is anybody else's\n${TAKELESS}`);
     const result = await generateVariants(root, 'topline', run);
     expect(result.files).toHaveLength(2);
 
-    // The comment surviving is the point: a shipped recipe explains
-    // itself, and re-emitting the file from the parsed object — which is
-    // what writing a fresh recipe does — would delete every line of that.
-    const raw = readFileSync(join(root, 'songs/creek/sounds/topline.yaml'), 'utf8');
+    // The comment surviving is the point: a shipped request explains
+    // itself, and the fill path never touches the file at all.
+    const raw = readFileSync(join(root, 'songs/creek/tracks/topline.yaml'), 'utf8');
     expect(raw).toContain("# generate your own — nobody's creek is anybody else's");
 
-    const written = recipe('topline');
-    expect(written.text).toBe('the water knows the way');
-    expect(written.chosen).toBe(1);
-    expect(written.variants.map((v) => v.seed)).toEqual([7, 8]);
-    // Filling mints no name for the sound: it already owns the one it is
-    // named after. Before the pre-flight allowed for that, this run
-    // collided with the very recipe it was filling.
+    expect(entryOf('topline').text).toBe('the water knows the way');
+    const takes = takesOf('topline');
+    expect(takes.chosen).toBe(1);
+    expect(takes.variants.map((v) => v.seed)).toEqual([7, 8]);
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it('refuses a flag that would be a second answer to what the recipe says', async () => {
-    writeRecipe(TAKELESS);
+  it('refuses a flag that would be a second answer to what the entry says', async () => {
+    writeLeaf(TAKELESS);
     await expect(
       generateVariants(root, 'topline', { ...run, text: 'a different line' }),
-    ).rejects.toThrow('topline.yaml already says what to generate, so --text');
+    ).rejects.toThrow('the entry already says what to generate, so --text');
     // Nothing was spent: the refusal is pre-flight, and the same run
     // without the flag still works.
     expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
     await generateVariants(root, 'topline', run);
-    expect(recipe('topline').variants).toHaveLength(2);
+    expect(takesOf('topline').variants).toHaveLength(2);
   });
 
-  it('fills a music recipe that carries both lengths', async () => {
+  it('fills a music entry that carries both lengths', async () => {
     // What `field generate` itself writes: the seconds it ran at, and the
     // bars it was asked for. The flag rule is exactly one, so passing both
-    // through would make an ordinary recipe unfillable — with advice
+    // through would make an ordinary request unfillable — with advice
     // naming flags that filling refuses, which is a closed loop.
-    writeRecipe(
-      'name: topline\ntype: generative\nprompt: warm keys\nbpm: 96\nduration_seconds: 10\nbars: 4\n',
+    writeLeaf(
+      'name: topline\ninputs:\n  - generative:\n      prompt: warm keys\n      bpm: 96\n' +
+        '      duration_seconds: 10\n      bars: 4\n',
     );
     await generateVariants(root, 'topline', run);
-    expect(recipe('topline').variants).toHaveLength(2);
+    expect(takesOf('topline').variants).toHaveLength(2);
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it('refuses before spending a run when the recipe is named something else', async () => {
-    // Already check-red, so the run was going to be wasted either way —
-    // and filling would add a second error, since takes land under
-    // audio/topline/ while check wants audio/<the name inside>/.
-    writeRecipe('name: elsewhere\ntype: generative\ntext: a line\n');
-    await expect(generateVariants(root, 'topline', run)).rejects.toThrow(
-      'topline.yaml is named "elsewhere" inside',
+  it('refuses to scaffold over a track that already exists', async () => {
+    // A track whose file name does not mint this gen node name is not
+    // fillable — and creating would overwrite the file. Refused by name
+    // rather than clobbered.
+    writeLeaf('name: topline\ninputs: []\n');
+    await expect(generateVariants(root, 'topline', { ...run, text: 'a line' })).rejects.toThrow(
+      '"topline" is already a track in creek',
     );
     expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
   });
 
-  it('leaves the recipe byte-identical, writing the takes beside the audio', async () => {
-    // The reason for the split (bloom-in-tree.md §7): a shipped recipe is
+  it('leaves the leaf byte-identical, writing the takes beside the audio', async () => {
+    // The reason for the split (bloom-in-tree.md §7): a shipped request is
     // committed, and generating into it made using the tool as documented
     // produce a diff. Bytes, not just content — a re-emit that happened to
     // round-trip would still rewrite comments and key order.
-    writeRecipe(`# generate your own\n${TAKELESS}`);
-    const recipePath = join(root, 'songs/creek/sounds/topline.yaml');
-    const before = readFileSync(recipePath);
+    writeLeaf(`# generate your own\n${TAKELESS}`);
+    const leafPath = join(root, 'songs/creek/tracks/topline.yaml');
+    const before = readFileSync(leafPath);
     await generateVariants(root, 'topline', run);
-    expect(readFileSync(recipePath).equals(before)).toBe(true);
+    expect(readFileSync(leafPath).equals(before)).toBe(true);
 
     // …and the takes went to their own file, beside the WAVs they pin.
-    const takes = join(root, 'songs/creek/audio/topline', TAKES_FILENAME);
-    expect(existsSync(takes)).toBe(true);
-    const written = recipe('topline');
-    expect(written.chosen).toBe(1);
-    expect(written.variants).toHaveLength(2);
+    expect(existsSync(join(root, 'songs/creek/audio/topline/variants.yaml'))).toBe(true);
+    expect(takesOf('topline').chosen).toBe(1);
+    expect(takesOf('topline').variants).toHaveLength(2);
 
     // Choosing is the same promise: it moves a line in the takes file and
-    // the recipe still does not change.
+    // the track file still does not change.
     await chooseVariant(root, 'topline', { song: 'creek', variant: 2 });
-    expect(readFileSync(recipePath).equals(before)).toBe(true);
-    expect(recipe('topline').chosen).toBe(2);
+    expect(readFileSync(leafPath).equals(before)).toBe(true);
+    expect(takesOf('topline').chosen).toBe(2);
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
   it('refuses to run over takes that already exist', async () => {
-    writeRecipe(TAKELESS);
+    writeLeaf(TAKELESS);
     await generateVariants(root, 'topline', run);
     // The trigger policy (project-layout.md §1.2): re-running would
     // replace chosen audio under the project's feet. Filling an empty
-    // recipe is the one thing that opened up, not regeneration.
+    // request is the one thing that opened up, not regeneration.
     await expect(generateVariants(root, 'topline', { ...run, seed: 9 })).rejects.toThrow(
       'already has 2 takes',
     );
-    expect(recipe('topline').variants.map((v) => v.seed)).toEqual([7, 8]);
+    expect(takesOf('topline').variants.map((v) => v.seed)).toEqual([7, 8]);
   });
 });
 
-describe('field generate: filling a generative entry (nested-tracks.md §18 step 3)', () => {
+describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () => {
   // The request lives in a track's inputs:, addressed by its gen node
   // name; the run writes gen-keyed takes and must leave every authored
   // file byte-identical.
@@ -594,13 +624,10 @@ describe('field generate: filling a generative entry (nested-tracks.md §18 step
       seed: 7,
       variants: 2,
     });
-    expect(result.pkg).toBe('gen');
     expect(result.recipePath).toBe('songs/creek/tracks/rain-pad.yaml');
     // The design constraint, asserted at the byte level: generating
     // changes nothing about the track file.
     expect(readFileSync(trackPath, 'utf8')).toBe(before);
-    // No recipe materializes in sounds/ — the entry is the recipe.
-    expect(existsSync(join(root, 'songs/creek/sounds/rain-pad.yaml'))).toBe(false);
     const takes = readFileSync(
       join(root, 'songs/creek/audio/rain-pad/variants.yaml'),
       'utf8',
@@ -675,7 +702,7 @@ describe('field generate: filling a generative entry (nested-tracks.md §18 step
 
   it('choose refuses a takes file that attaches elsewhere', async () => {
     // A stale pre-fold sound:-keyed file would otherwise get `chosen`
-    // rewritten and a gen success report, while the loader rejects the
+    // rewritten and a success report, while the loader rejects the
     // file and the graph never sees the choice.
     writeGenLeaf();
     await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2 });
@@ -688,9 +715,9 @@ describe('field generate: filling a generative entry (nested-tracks.md §18 step
     expect(readFileSync(takesPath, 'utf8')).toContain('chosen: 1');
   });
 
-  it('choosing an unknown name says what namespaces were searched', async () => {
+  it('choosing an unknown name says so', async () => {
     await expect(
       chooseVariant(root, 'ghost', { song: 'creek', variant: 1 }),
-    ).rejects.toThrow('no sound or generator "ghost" in creek');
+    ).rejects.toThrow('no generative request "ghost" in creek');
   });
 });

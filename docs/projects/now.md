@@ -7,8 +7,11 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
-  structure, local time and the mixer are one primitive; sequenced before
-  the real-time engine because it changes the model the engine renders.
+  structure, local time and the mixer are one primitive; every chunk has
+  shipped or moved (sends wait for the real-time engine, §14), the
+  chunk 6 finale retiring `sounds/` last. Stays until sessions have
+  worked the folded format, per the neighbours' precedent — the entry
+  list, gen nodes and takes machinery are where every edit now lands.
 - [Multi-rate](all/multi-rate.md) — all three steps shipped (#107, #108,
   #112); stays until a session has actually played through an edge
   conversion, per the neighbours' precedent — every action key moved, the

@@ -29,11 +29,11 @@ export function generatorName(entry: InputEntry, owner: string): string {
 }
 
 // The wiring ref an entry contributes to `sources`: kind-in-field in the
-// file (nested-tracks.md §18) flattens to one string here — `audio:` and
-// `sound:` names pass through (bare, or the //shared/asset: label), a
-// `track:` gets its prefix, and a generator entry contributes the node
-// minted for it, `gen:<name>` — which is why the owner's name comes in:
-// a generator has no name of its own. Exactly the strings the two lists
+// file (nested-tracks.md §18) flattens to one string here — `audio:`
+// names pass through (bare, or the //shared/asset: label), a `track:`
+// gets its prefix, and a generator entry contributes the node minted
+// for it, `gen:<name>` — which is why the owner's name comes in: a
+// generator has no name of its own. Exactly the strings the two lists
 // produced before they merged, which is what keeps every existing
 // action key: refs are wiring, and the resolved plan is what hashes.
 export function entryRef(entry: InputEntry, owner: string): string {
@@ -41,7 +41,7 @@ export function entryRef(entry: InputEntry, owner: string): string {
   if (entry.supercollider !== undefined || entry.generative !== undefined) {
     return genRef(generatorName(entry, owner));
   }
-  return entry.audio ?? entry.sound!;
+  return entry.audio!;
 }
 
 // How an entry is named in a diagnostic: its id when it has one, else
@@ -51,7 +51,7 @@ export function entryLabel(entry: InputEntry): string {
   if (entry.id !== undefined) return entry.id;
   if (entry.supercollider !== undefined) return 'supercollider';
   if (entry.generative !== undefined) return 'generative';
-  return entry.track ?? entry.audio ?? entry.sound ?? '?';
+  return entry.track ?? entry.audio ?? '?';
 }
 
 export interface PlacedClip {

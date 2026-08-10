@@ -39,18 +39,20 @@ function writeWav(path: string): void {
 }
 
 const writeSound = (name: string, yaml: string) => {
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
-  writeFileSync(join(root, `songs/creek/sounds/${name}.yaml`), yaml);
+  mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+  writeFileSync(join(root, `songs/creek/tracks/${name}.yaml`), yaml);
 };
 
 const eqYaml = (frequency: number) =>
   [
     'name: pad-eq',
-    'type: eq',
-    'source: pad',
-    'bands:',
-    '  - type: lowpass',
-    `    frequency: ${frequency}`,
+    'inserts:',
+    '  - effect: eq',
+    '    bands:',
+    '      - type: lowpass',
+    `        frequency: ${frequency}`,
+    'inputs:',
+    '  - audio: pad',
     '',
   ].join('\n');
 
@@ -126,7 +128,7 @@ afterEach(() => {
 
 describe('watchBuild', { timeout: 20_000 }, () => {
   it('baselines, then reports the label whose output hash moved', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
+    const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
     expect(first.kind).toBe('outcomes');
     if (first.kind !== 'outcomes') return;
@@ -139,14 +141,14 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       return later.find((e) => e.kind === 'outcomes' && e.changed.length > 0);
     });
     if (moved.kind !== 'outcomes') return;
-    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
+    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/track:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('a red project prints diagnostics, keeps the baseline, and recovers', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
+    const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
 
     writeSound('pad-eq', 'name: [broken\n');
@@ -161,14 +163,14 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (recovered.kind !== 'outcomes') return;
-    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
+    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/track:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('a no-op edit rebuilds to silence: cache hits, nothing changed', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
+    const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
 
     // A comment is invisible to the parsed spec — the action key holds,
@@ -188,7 +190,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
   });
 
   it('a loader throw routes to onError and the watch survives (P2)', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
+    const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
 
     // The reviewer's repro: a dangling symlink directly under songs/
@@ -210,14 +212,14 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (recovered.kind !== 'outcomes') return;
-    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
+    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/track:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('a chosen-variant repoint reports with the committed path (#35 P2)', async () => {
-    // A hand-authored generative sound: two committed variants, chosen: 1.
+    // A hand-authored generative leaf: two committed takes, chosen: 1.
     const writeGenerative = (chosen: number): void => {
       const songDir = join(root, 'songs/creek');
       mkdirSync(join(songDir, 'audio/gen1'), { recursive: true });
@@ -227,16 +229,21 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       });
       writeSound(
         'gen1',
-        ['name: gen1', 'type: generative', 'prompt: test keys', 'duration_seconds: 10', ''].join(
-          '\n',
-        ),
+        [
+          'name: gen1',
+          'inputs:',
+          '  - generative:',
+          '      prompt: test keys',
+          '      duration_seconds: 10',
+          '',
+        ].join('\n'),
       );
       // The pick lives beside the audio (bloom-in-tree.md §7), so this is
       // the file `field choose` rewrites and the one watch must notice.
       writeFileSync(
         join(songDir, 'audio/gen1', TAKES_FILENAME),
         [
-          'sound: gen1',
+          'gen: gen1',
           `chosen: ${chosen}`,
           'variants:',
           ...variants.flatMap((v, i) => [
@@ -251,10 +258,10 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       );
     };
     writeGenerative(1);
-    const { events, abort, done } = startWatch(['//songs/creek/sound:gen1']);
+    const { events, abort, done } = startWatch(['//songs/creek/gen:gen1']);
     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
     if (first.kind !== 'outcomes') return;
-    const base = first.outcomes.find((o) => o.label === '//songs/creek/sound:gen1')!;
+    const base = first.outcomes.find((o) => o.label === '//songs/creek/gen:gen1')!;
     expect(base.outputPath!.endsWith('audio/gen1/1.wav')).toBe(true);
 
     // field choose is exactly this YAML edit (watch.md §1.5): the label's
@@ -265,7 +272,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (moved.kind !== 'outcomes') return;
-    const repointed = moved.changed.find((o) => o.label === '//songs/creek/sound:gen1')!;
+    const repointed = moved.changed.find((o) => o.label === '//songs/creek/gen:gen1')!;
     expect(repointed.outputPath!.endsWith('audio/gen1/2.wav')).toBe(true);
     expect(repointed.sha256).toBe(sha256Text('variant two bytes'));
 
@@ -278,12 +285,12 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     // (an edit landing before the watcher's first pass) must be reported,
     // not silently absorbed as the baseline.
     const { events, abort, done } = startWatch(
-      ['//songs/creek/sound:pad-eq'],
-      { baseline: new Map([['//songs/creek/sound:pad-eq', 'deadbeef'.repeat(8)]]) },
+      ['//songs/creek/track:pad-eq'],
+      { baseline: new Map([['//songs/creek/track:pad-eq', 'deadbeef'.repeat(8)]]) },
     );
     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
     if (first.kind !== 'outcomes') return;
-    expect(first.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
+    expect(first.changed.map((o) => o.label)).toEqual(['//songs/creek/track:pad-eq']);
     abort.abort();
     await done;
   });
@@ -301,7 +308,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     };
     const done = watchBuild(
       root,
-      ['//songs/creek/sound:pad-eq'],
+      ['//songs/creek/track:pad-eq'],
       { debounceMs: 50, signal: abort.signal, runner: stallingRunner },
       { onOutcomes: (outcomes, changed) => events.push({ kind: 'outcomes', outcomes, changed }) },
     );
@@ -323,7 +330,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     // self-trigger forever (§2). Nothing pinned that until now — and the
     // second half is what makes the first half mean anything: a watcher
     // that had simply died would also report no rebuild.
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
+    const { events, abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
     // Settle first: the fixture's own writes (init, createSong, import)
     // can still be in FSEvents' pipeline when the baseline lands, and a
@@ -342,14 +349,14 @@ describe('watchBuild', { timeout: 20_000 }, () => {
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (moved.kind !== 'outcomes') return;
-    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
+    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/track:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('an aborted session resolves', async () => {
-    const { abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
+    const { abort, done } = startWatch(['//songs/creek/track:pad-eq']);
     abort.abort();
     await done;
   });

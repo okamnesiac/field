@@ -33,24 +33,26 @@ function writeWav(path: string): void {
   writeFileSync(path, Buffer.concat([header, data]));
 }
 
-// One file per sound (project-layout.md §1.3, §4): sounds/<name>.yaml.
-const writeSound = (name: string, yaml: string) => {
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
-  writeFileSync(join(root, `songs/creek/sounds/${name}.yaml`), yaml);
+// One file per track (project-layout.md §1.3, §4): tracks/<name>.yaml.
+const writeTrack = (name: string, yaml: string) => {
+  mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
+  writeFileSync(join(root, `songs/creek/tracks/${name}.yaml`), yaml);
 };
 
-// The canonical declared rule for these tests: an eq, because it is the
-// simplest single-input sound left now that normalize has retired
-// (multi-rate.md step 3). The frequency is the parameter the re-key
-// tests turn.
-const eqYaml = (frequency: number) =>
+// The canonical declared rule for these tests: a wrapper track with one
+// insert — the shape every effect sound folded into (nested-tracks.md
+// §18, decision 12). The frequency is the parameter the re-key tests
+// turn.
+const eqTrackYaml = (frequency: number) =>
   [
     'name: pad-eq',
-    'type: eq',
-    'source: pad',
-    'bands:',
-    '  - type: lowpass',
-    `    frequency: ${frequency}`,
+    'inserts:',
+    '  - effect: eq',
+    '    bands:',
+    '      - type: lowpass',
+    `        frequency: ${frequency}`,
+    'inputs:',
+    '  - audio: pad',
     '',
   ].join('\n');
 
@@ -62,7 +64,7 @@ beforeEach(async () => {
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
-  writeSound('pad-eq', eqYaml(700));
+  writeTrack('pad-eq', eqTrackYaml(700));
 });
 
 afterEach(() => {
@@ -120,18 +122,18 @@ describe('build', () => {
   it('builds, caches, and rebuilds on parameter change', async () => {
     const { state, runner } = countingRunner();
 
-    const first = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(1);
     const target = first.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
 
-    const second = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const second = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(1); // action-cache hit, nothing executed
     expect(second.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(true);
 
-    writeSound('pad-eq', eqYaml(400));
-    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    writeTrack('pad-eq', eqTrackYaml(400));
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
@@ -148,7 +150,7 @@ describe('build', () => {
 
   it('a rule outcome is never marked committed', async () => {
     const { runner } = countingRunner();
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     const rule = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(rule.committed).toBeUndefined();
     expect(rule.outputPath!).toContain('.field/out'); // materialized, not committed
@@ -156,15 +158,15 @@ describe('build', () => {
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
     const { runner } = countingRunner();
-    const first = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     const out = first.find((o) => o.label.endsWith(':pad-eq'))!.outputPath!;
     const before = statSync(out).ino;
 
     // Under watch the daemon streams the previous artifact from this very
     // path; a rebuild must land on a fresh inode so an open reader keeps
     // its bytes — an in-place copy would truncate under it.
-    writeSound('pad-eq', eqYaml(400));
-    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    writeTrack('pad-eq', eqTrackYaml(400));
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(statSync(out).ino).not.toBe(before);
   });
 
@@ -176,8 +178,8 @@ describe('build', () => {
     // other.
     expect(outcomes.map((o) => o.label).sort()).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-eq',
       '//songs/creek/track:main',
+      '//songs/creek/track:pad-eq',
     ]);
     expect(state.runs).toBe(2);
     const everything = await buildLabels(root, ['//...'], runner);
@@ -190,51 +192,51 @@ describe('build', () => {
     await expect(importAsset(root, 'creek', src, 'all')).rejects.toThrow('reserved');
     rmSync(src);
     // Hand-written YAML is caught by the schema.
-    writeSound('pad-eq', eqYaml(700).replace('name: pad-eq', 'name: all'));
+    writeTrack('all', eqTrackYaml(700).replace('name: pad-eq', 'name: all'));
     await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('reserved');
   });
 
   it('refuses to build an invalid project', async () => {
-    writeSound('pad-eq', eqYaml(700).replace('source: pad', 'source: ghost'));
-    await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('unknown source');
+    writeTrack('pad-eq', eqTrackYaml(700).replace('audio: pad', 'audio: ghost'));
+    await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('unknown audio');
   });
 
   it('errors on unmatched patterns and unknown labels', async () => {
     await expect(buildLabels(root, ['//nowhere/...'])).rejects.toThrow('matched no labels');
-    expect(() => queryDeps(root, 'deps(//songs/creek/sound:ghost)')).toThrow('no such label');
+    expect(() => queryDeps(root, 'deps(//songs/creek/track:ghost)')).toThrow('no such label');
   });
 
-  it('names the command that fills a takeless sound rather than denying it exists', async () => {
-    // `check` passes on a recipe with no takes (bloom-in-tree.md §3), so
+  it('names the command that fills a takeless request rather than denying it exists', async () => {
+    // `check` passes on a request with no takes (bloom-in-tree.md §3), so
     // building is where it has to be refused — and "no such label" would
     // be false in the most expensive way, sending someone to hunt for a
     // typo in a name that is spelled correctly and sitting on disk.
-    writeSound('topline', 'name: topline\ntype: generative\ntext: the water knows the way\n');
-    await expect(buildLabels(root, ['//songs/creek/sound:topline'])).rejects.toThrow(
+    writeTrack('topline', 'name: topline\ninputs:\n  - generative:\n      text: the water knows the way\n');
+    await expect(buildLabels(root, ['//songs/creek/gen:topline'])).rejects.toThrow(
       'has no takes yet — field generate topline --song creek --seed <n>',
     );
     // The same answer when it is reached as somebody else's dependency,
     // which is how a project actually hits this. Different code path:
     // naming a label expands it as a pattern, depending on one resolves
     // it, and only the second went through resolveLabel.
-    expect(() => queryDeps(root, 'deps(//songs/creek/sound:topline)')).toThrow('has no takes yet');
+    expect(() => queryDeps(root, 'deps(//songs/creek/gen:topline)')).toThrow('has no takes yet');
 
     // A pattern is a request for a set, so it answers with the set — in
-    // a song whose sounds are all takeless, which is a fresh clone of an
-    // example project before anyone has generated anything.
+    // a song whose requests are all takeless, which is a fresh clone of
+    // an example project before anyone has generated anything.
     createSong(root, 'tall-grass');
-    mkdirSync(join(root, 'songs/tall-grass/sounds'), { recursive: true });
+    mkdirSync(join(root, 'songs/tall-grass/tracks'), { recursive: true });
     for (const [name, line] of [
       ['topline', 'the water knows the way'],
       ['bridge', 'and back again'],
     ]) {
       writeFileSync(
-        join(root, `songs/tall-grass/sounds/${name}.yaml`),
-        `name: ${name}\ntype: generative\ntext: ${line}\n`,
+        join(root, `songs/tall-grass/tracks/${name}.yaml`),
+        `name: ${name}\ninputs:\n  - generative:\n      text: ${line}\n`,
       );
     }
-    await expect(buildLabels(root, ['//songs/tall-grass/sound/...'])).rejects.toThrow(
-      /2 sounds with no takes yet:[\s\S]*field generate bridge[\s\S]*field generate topline/,
+    await expect(buildLabels(root, ['//songs/tall-grass/gen/...'])).rejects.toThrow(
+      /2 generative requests with no takes yet:[\s\S]*field generate bridge[\s\S]*field generate topline/,
     );
   });
 
@@ -243,14 +245,14 @@ describe('build', () => {
     // and "no such label" is a bad way to find that out. The suggestion
     // keeps the shape it was given — correcting the package but handing
     // back a different shape would also not work (#41 review).
-    await expect(buildLabels(root, ['//songs/creek/sounds:pad-eq'])).rejects.toThrow(
-      'try //songs/creek/sound:pad-eq',
+    await expect(buildLabels(root, ['//songs/creek/tracks:pad-eq'])).rejects.toThrow(
+      'try //songs/creek/track:pad-eq',
     );
-    await expect(buildLabels(root, ['//songs/creek/sounds/...'])).rejects.toThrow(
-      'try //songs/creek/sound/...',
+    await expect(buildLabels(root, ['//songs/creek/tracks/...'])).rejects.toThrow(
+      'try //songs/creek/track/...',
     );
-    await expect(buildLabels(root, ['//songs/creek/sounds:all'])).rejects.toThrow(
-      'try //songs/creek/sound:all',
+    await expect(buildLabels(root, ['//songs/creek/tracks:all'])).rejects.toThrow(
+      'try //songs/creek/track:all',
     );
     expect(() => queryDeps(root, 'deps(//songs/creek/assets:pad)')).toThrow(
       'try //songs/creek/asset:pad',
@@ -265,25 +267,25 @@ describe('build', () => {
     );
   });
 
-  it('points targets: at sound:, the package the layout migration renamed', async () => {
-    // `targets` is not a plural, so it fell through the singular mapping
-    // and got no hint at all — a flat dead end for every command in the
-    // sample project's README, which described the pre-#31 layout. It is
-    // the spelling most likely to be typed from old docs, so it earns the
-    // same treatment, worded for what actually happened to it.
-    await expect(buildLabels(root, ['//songs/creek/targets:pad-eq'])).rejects.toThrow(
-      '(targets: is now sound: try //songs/creek/sound:pad-eq)',
+  it('points sound:, sounds: and targets: at track:, where sounds folded', async () => {
+    // `sound:` forwards to `track:` at the finale (nested-tracks.md §18
+    // decision 5): every sound is a track now, and correcting the plural
+    // to `sound:` — or `targets:` to it — would hand back a second dead
+    // end, the mistake `targets:` was already fixed for once.
+    await expect(buildLabels(root, ['//songs/creek/sound:pad-eq'])).rejects.toThrow(
+      'sounds folded into tracks: try //songs/creek/track:pad-eq',
     );
-    await expect(buildLabels(root, ['//songs/creek/targets/...'])).rejects.toThrow(
-      'try //songs/creek/sound/...',
+    await expect(buildLabels(root, ['//songs/creek/sounds:pad-eq'])).rejects.toThrow(
+      'try //songs/creek/track:pad-eq',
+    );
+    await expect(buildLabels(root, ['//songs/creek/sound/...'])).rejects.toThrow(
+      'try //songs/creek/track/...',
+    );
+    await expect(buildLabels(root, ['//songs/creek/targets:pad-eq'])).rejects.toThrow(
+      '(targets: is now track: try //songs/creek/track:pad-eq)',
     );
     await expect(buildLabels(root, ['//songs/creek/targets:all'])).rejects.toThrow(
-      'try //songs/creek/sound:all',
-    );
-    // The plural keeps its own wording: the grammar lesson is true of it
-    // and false of `targets`.
-    await expect(buildLabels(root, ['//songs/creek/sounds:pad-eq'])).rejects.toThrow(
-      'packages are singular: try //songs/creek/sound:pad-eq',
+      'try //songs/creek/track:all',
     );
   });
 
@@ -312,49 +314,49 @@ describe('build', () => {
     const original = readFileSync(assetPath);
     writeFileSync(assetPath, Buffer.concat([original, Buffer.from([0, 0])]));
     await expect(
-      buildLabels(root, ['//songs/creek/sound:pad-eq'], runner),
+      buildLabels(root, ['//songs/creek/track:pad-eq'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0); // nothing executed, nothing cached
 
     // Same-size tamper is caught by the hash, not the size.
     writeFileSync(assetPath, Buffer.from(original.map((b, i) => (i === 50 ? b ^ 0xff : b))));
     await expect(
-      buildLabels(root, ['//songs/creek/sound:pad-eq'], runner),
+      buildLabels(root, ['//songs/creek/track:pad-eq'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0);
 
     // Restore the declared bytes and the build proceeds.
     writeFileSync(assetPath, original);
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(1);
     expect(outcomes.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(false);
   });
 
   it('treats a corrupt action entry as a cache miss and repairs it', async () => {
     const { state, runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(1);
 
     const actionsDir = join(root, '.field/cache/actions');
     const entry = readdirSync(actionsDir).find((f) => f.endsWith('.json'))!;
     writeFileSync(join(actionsDir, entry), '{"rule": "norm'); // crash mid-write
 
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(2); // re-ran instead of crashing
     expect(outcomes.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(false);
 
-    const again = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const again = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     expect(state.runs).toBe(2); // entry rewritten; cache healthy again
     expect(again.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(true);
   });
 
   it('renders real audio through the daemon', async () => {
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq']);
+    const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq']);
     const target = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
     // Second build is a cache hit even with the real runner.
-    const again = await buildLabels(root, ['//songs/creek/sound:pad-eq']);
+    const again = await buildLabels(root, ['//songs/creek/track:pad-eq']);
     expect(again.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(true);
   });
 });
@@ -362,23 +364,24 @@ describe('build', () => {
 const scYaml = (seed: number) =>
   [
     'name: texture',
-    'type: supercollider',
-    'source: shared/instruments/texture.scd',
-    `seed: ${seed}`,
-    'duration: 0.25',
-    'channels: 1',
+    'inputs:',
+    '  - supercollider:',
+    '      source: shared/instruments/texture.scd',
+    `      seed: ${seed}`,
+    '      duration: 0.25',
+    '      channels: 1',
     '',
   ].join('\n');
 
 describe('supercollider', () => {
   beforeEach(() => {
     writeFileSync(join(root, 'shared/instruments/texture.scd'), '// fake program v1\n');
-    writeSound('texture', scYaml(42));
+    writeTrack('texture', scYaml(42));
   });
 
   it('builds, caches, and rebuilds when seed or program change', async () => {
     const { state, runner } = countingRunner();
-    const label = '//songs/creek/sound:texture';
+    const label = '//songs/creek/gen:texture';
 
     const first = await buildLabels(root, [label], runner);
     expect(state.runs).toBe(1);
@@ -387,7 +390,7 @@ describe('supercollider', () => {
     await buildLabels(root, [label], runner);
     expect(state.runs).toBe(1); // cache hit
 
-    writeSound('texture', scYaml(43));
+    writeTrack('texture', scYaml(43));
     await buildLabels(root, [label], runner);
     expect(state.runs).toBe(2); // seed is a parameter
 
@@ -397,10 +400,10 @@ describe('supercollider', () => {
   });
 
   it('has no graph deps but shows the program as an explain input', async () => {
-    expect(queryDeps(root, 'deps(//songs/creek/sound:texture)')).toEqual([
-      '//songs/creek/sound:texture',
+    expect(queryDeps(root, 'deps(//songs/creek/gen:texture)')).toEqual([
+      '//songs/creek/gen:texture',
     ]);
-    const e = await explainLabel(root, '//songs/creek/sound:texture');
+    const e = await explainLabel(root, '//songs/creek/gen:texture');
     expect(e.rule).toBe('supercollider');
     expect(e.inputs).toHaveLength(1);
     expect(e.inputs[0]!.label).toBe('shared/instruments/texture.scd');
@@ -408,10 +411,10 @@ describe('supercollider', () => {
   });
 
   it('rejects missing and escaping program paths', async () => {
-    writeSound('texture', scYaml(42).replace('shared/instruments/texture.scd', 'shared/instruments/ghost.scd'));
+    writeTrack('texture', scYaml(42).replace('shared/instruments/texture.scd', 'shared/instruments/ghost.scd'));
     await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('not found');
 
-    writeSound('texture', scYaml(42).replace('shared/instruments/texture.scd', '../outside.scd'));
+    writeTrack('texture', scYaml(42).replace('shared/instruments/texture.scd', '../outside.scd'));
     await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('escapes the project');
   });
 });
@@ -463,18 +466,18 @@ describe('runScProgram edges (no sclang needed)', () => {
 
   it('refuses to cache when the program changes during the render', async () => {
     writeFileSync(join(root, 'shared/instruments/texture.scd'), '// v1\n');
-    writeSound('texture', scYaml(42));
+    writeTrack('texture', scYaml(42));
     const midRenderEdit: GeneratorRunner = async (_node, _inputPath, outputPath) => {
       writeFileSync(join(root, 'shared/instruments/texture.scd'), '// edited mid-render\n');
       writeFileSync(outputPath, 'audio');
     };
     await expect(
-      buildLabels(root, ['//songs/creek/sound:texture'], midRenderEdit),
+      buildLabels(root, ['//songs/creek/gen:texture'], midRenderEdit),
     ).rejects.toThrow('changed during the render');
 
     // Nothing was cached: the next build executes again.
     const { state, runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sound:texture'], runner);
+    await buildLabels(root, ['//songs/creek/gen:texture'], runner);
     expect(state.runs).toBe(1);
   });
 });
@@ -515,8 +518,8 @@ score.recordNRT(
 
   it('renders a seeded tone deterministically through real sclang', { timeout: 120_000 }, async () => {
     writeFileSync(join(root, 'shared/instruments/texture.scd'), SC_PROGRAM);
-    writeSound('texture', scYaml(42));
-    const label = '//songs/creek/sound:texture';
+    writeTrack('texture', scYaml(42));
+    const label = '//songs/creek/gen:texture';
 
     const first = await buildLabels(root, [label]);
     expect(first[0]!.cached).toBe(false);
@@ -539,12 +542,12 @@ describe('play resolution', () => {
     const { state, runner } = countingRunner();
     const items = await resolvePlayables(
       root,
-      ['//songs/creek/asset:pad', '//songs/creek/sound:pad-eq', '//songs/creek/asset:pad'],
+      ['//songs/creek/asset:pad', '//songs/creek/track:pad-eq', '//songs/creek/asset:pad'],
       runner,
     );
     expect(items.map((i) => i.label)).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-eq',
+      '//songs/creek/track:pad-eq',
     ]);
     expect(items[0]!.path).toBe(join(root, 'songs/creek/audio/pad/pad.wav'));
     expect(existsSync(items[1]!.path)).toBe(true);
@@ -554,9 +557,9 @@ describe('play resolution', () => {
 
 describe('query and explain', () => {
   it('lists deps in dependency order', () => {
-    expect(queryDeps(root, 'deps(//songs/creek/sound:pad-eq)')).toEqual([
+    expect(queryDeps(root, 'deps(//songs/creek/track:pad-eq)')).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-eq',
+      '//songs/creek/track:pad-eq',
     ]);
   });
 
@@ -565,18 +568,21 @@ describe('query and explain', () => {
   });
 
   it('explains a rule target', async () => {
-    const before = await explainLabel(root, '//songs/creek/sound:pad-eq');
-    expect(before.rule).toBe('eq');
+    const before = await explainLabel(root, '//songs/creek/track:pad-eq');
+    expect(before.rule).toBe('stem');
     expect(before.cached).toBe(false);
-    expect(before.parameters).toEqual({
-      bands: [{ type: 'lowpass', frequency: 700, gain_db: 0, bandwidth: 2 }],
-      normalize: true,
-    });
+    expect(before.parameters!['inserts']).toEqual([
+      {
+        effect: 'eq',
+        bands: [{ type: 'lowpass', frequency: 700, gain_db: 0, bandwidth: 2 }],
+        normalize: true,
+      },
+    ]);
     expect(before.inputs[0]!.label).toBe('//songs/creek/asset:pad');
 
     const { runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
-    const after = await explainLabel(root, '//songs/creek/sound:pad-eq');
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    const after = await explainLabel(root, '//songs/creek/track:pad-eq');
     expect(after.cached).toBe(true);
     expect(after.actionKey).toBe(before.actionKey);
     expect(after.outputs).toHaveLength(1);

@@ -127,13 +127,13 @@ describe('import', () => {
     rmSync(src);
   });
 
-  it('pre-flights past an editor lock file in sounds/', async () => {
+  it('pre-flights past an editor lock file in tracks/', async () => {
     createSong(root, 'opener');
-    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
-    // The name-collision pre-flight reads every sounds/*.yaml, and a
-    // dangling `.#hum.yaml` made it throw ENOENT before it could parse —
-    // crashing the command it exists to protect (#38 review P2).
-    symlinkSync('justin@Mac.12345:1754500000', join(root, 'songs/opener/sounds/.#hum.yaml'));
+    // The name-collision pre-flight reads every tracks/*.yaml, and a
+    // dangling `.#hum.yaml` made the sounds/-era equivalent throw ENOENT
+    // before it could parse — crashing the command it exists to protect
+    // (#38 review P2).
+    symlinkSync('justin@Mac.12345:1754500000', join(root, 'songs/opener/tracks/.#hum.yaml'));
     const src = sourceFile('hello audio');
     await expect(importAsset(root, 'opener', src, 'first-take')).resolves.toBeDefined();
     rmSync(src);
@@ -276,14 +276,14 @@ describe('check', () => {
         'name: vox',
         'inputs:',
         '  - id: intro-vox-abc12',
-        '    sound: nonexistent',
+        '    track: nonexistent',
         '    at: 0',
         '    duration: 960',
         '',
       ].join('\n'),
     );
     const result = await check(root);
-    expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown sound');
+    expect(result.diagnostics.map((d) => d.message).join()).toContain('unknown track');
   });
 
   it('diagnoses loop sources exhausted by their read offset — check, not a graph crash', async () => {
@@ -338,27 +338,27 @@ describe('check', () => {
     expect(result.diagnostics.map((d) => d.message).join()).toContain('loop fades');
   });
 
-  it('flags loops over targets without loop.every', async () => {
+  it('flags loops over renders without loop.every', async () => {
     createSong(root, 'opener');
-    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
-    writeFileSync(
-      join(root, 'songs/opener/sounds/pad.yaml'),
-      [
-        'name: pad',
-        'type: supercollider',
-        'source: sc/pad.scd',
-        'seed: 1',
-        'duration: 2',
-        '',
-      ].join('\n'),
-    );
     writeFileSync(
       join(root, 'songs/opener/tracks/pad.yaml'),
       [
         'name: pad',
         'inputs:',
+        '  - supercollider:',
+        '      source: sc/pad.scd',
+        '      seed: 1',
+        '      duration: 2',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/opener/tracks/bed.yaml'),
+      [
+        'name: bed',
+        'inputs:',
         '  - id: loop-pad-abc12',
-        '    sound: pad',
+        '    track: pad',
         '    at: 0',
         '    duration: 3840',
         '    loop:',
@@ -382,7 +382,7 @@ describe('check', () => {
     rmSync(src);
   });
 
-  it('flags a voice recipe whose reference recording is missing or drifted', async () => {
+  it('flags a voice request whose reference recording is missing or drifted', async () => {
     // The hash has to be a *pin*, not a field. Both of these parsed fine
     // and left `field check` green (#58 review): the schema pairs
     // `voice_ref` with its sha, but nothing resolved the name or compared
@@ -394,29 +394,29 @@ describe('check', () => {
     await importAsset(root, 'opener', src, 'ref-voice');
     rmSync(src);
 
-    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
     const recipe = (lines: string[]) =>
       writeFileSync(
-        join(root, 'songs/opener/sounds/line.yaml'),
+        join(root, 'songs/opener/tracks/line.yaml'),
         [
           'name: line',
-          'type: generative',
-          'text: I walked the fence line',
+          'inputs:',
+          '  - generative:',
+          '      text: I walked the fence line',
           ...lines,
           '',
         ].join('\n'),
       );
 
-    recipe([`voice_ref: ghost`, `voice_ref_sha256: ${'b'.repeat(64)}`]);
+    recipe([`      voice_ref: ghost`, `      voice_ref_sha256: ${'b'.repeat(64)}`]);
     const missing = await check(root);
     expect(missing.diagnostics.map((d) => d.message).join()).toContain(
       'voice_ref references unknown asset "ghost"',
     );
 
-    recipe([`voice_ref: ref-voice`, `voice_ref_sha256: ${'b'.repeat(64)}`]);
+    recipe([`      voice_ref: ref-voice`, `      voice_ref_sha256: ${'b'.repeat(64)}`]);
     const drifted = await check(root);
     expect(drifted.diagnostics.map((d) => d.message).join()).toContain(
-      'the reference recording changed under the recipe',
+      'the reference recording changed under the request',
     );
   });
 
@@ -446,15 +446,15 @@ describe('check', () => {
     expect(shaOf('opener')).not.toBe(shaOf('closer'));
 
     for (const song of ['opener', 'closer']) {
-      mkdirSync(join(root, `songs/${song}/sounds`), { recursive: true });
       writeFileSync(
-        join(root, `songs/${song}/sounds/line.yaml`),
+        join(root, `songs/${song}/tracks/line.yaml`),
         [
           'name: line',
-          'type: generative',
-          'text: I walked the fence line',
-          'voice_ref: ref-voice',
-          `voice_ref_sha256: ${shaOf(song)}`,
+          'inputs:',
+          '  - generative:',
+          '      text: I walked the fence line',
+          '      voice_ref: ref-voice',
+          `      voice_ref_sha256: ${shaOf(song)}`,
           '',
         ].join('\n'),
       );
@@ -464,17 +464,17 @@ describe('check', () => {
     expect(result.diagnostics.map((d) => d.message).join()).not.toContain('voice_ref');
   });
 
-  it('accepts a voice recipe with no reference — the default voice', async () => {
+  it('accepts a voice request with no reference — the default voice', async () => {
     // The other half of the same rule: absent is legal and must stay so,
     // or bloom's current configuration becomes a diagnostic.
     createSong(root, 'opener');
-    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
     writeFileSync(
-      join(root, 'songs/opener/sounds/line.yaml'),
+      join(root, 'songs/opener/tracks/line.yaml'),
       [
         'name: line',
-        'type: generative',
-        'text: I walked the fence line',
+        'inputs:',
+        '  - generative:',
+        '      text: I walked the fence line',
         '',
       ].join('\n'),
     );
@@ -1032,18 +1032,21 @@ describe('input entries with ids (nested-tracks.md §18)', () => {
     expect(await messages()).toContain('an entry plays exactly one thing');
   });
 
-  it('audio: refuses a name that renders, pointing at sound:', async () => {
-    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
-    writeFileSync(
-      join(root, 'songs/opener/sounds/pad.yaml'),
-      'name: pad\ntype: supercollider\nsource: pad.scd\nseed: 1\nduration: 2\n',
-    );
+  it('audio: refuses a name that renders, pointing at the track', async () => {
+    writeTrack('pad', [
+      'inputs:',
+      '  - supercollider:',
+      '      source: pad.scd',
+      '      seed: 1',
+      '      duration: 2',
+    ]);
     writeFileSync(join(root, 'shared/instruments/pad.scd'), 'Out.ar(0, Silent.ar(2));\n');
     writeTrack('outer', ['inputs:', '  - id: k1', '    audio: pad', '    at: 0']);
-    expect(await messages()).toContain('audio: names the sound "pad"');
-    // And the reverse: sound: refuses committed bytes, pointing back.
+    expect(await messages()).toContain('audio: names the generator "pad"');
+    // And the retired spelling forwards rather than answering grammar:
+    // sound: is a tombstone that names where its targets went.
     writeTrack('outer', ['inputs:', '  - id: k2', '    sound: hit', '    at: 0']);
-    expect(await messages()).toContain('sound: names the asset "hit"');
+    expect(await messages()).toContain('sound: retired with sounds/');
   });
 
   it('refuses a duplicate id, and accepts entries with no id at all', async () => {
@@ -1327,17 +1330,6 @@ describe('one audio/ directory per name (nested-tracks.md §18 step 3)', () => {
   const genLeaf =
     'name: rain-pad\ninputs:\n  - generative:\n      prompt: rain\n      bpm: 96\n      duration_seconds: 10\n';
 
-  it('a generative entry may not mint a name a sound holds', async () => {
-    writeFileSync(join(root, 'songs/opener/tracks/rain-pad.yaml'), genLeaf);
-    mkdirSync(join(root, 'songs/opener/sounds'), { recursive: true });
-    writeFileSync(
-      join(root, 'songs/opener/sounds/rain-pad.yaml'),
-      'name: rain-pad\ntype: generative\nprompt: rain\nbpm: 96\nduration_seconds: 10\n',
-    );
-    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
-    expect(messages).toContain('which sounds/rain-pad.yaml also holds — both claim audio/rain-pad/');
-  });
-
   it('a generative entry may not mint a name an asset holds', async () => {
     writeFileSync(join(root, 'songs/opener/tracks/rain-pad.yaml'), genLeaf);
     const src = sourceFile();
@@ -1358,7 +1350,7 @@ describe('one audio/ directory per name (nested-tracks.md §18 step 3)', () => {
     writeFileSync(join(root, 'songs/opener/tracks/rain-pad.yaml'), genLeaf);
     const src = sourceFile();
     await expect(importAsset(root, 'opener', src, 'rain-pad')).rejects.toThrow(
-      'already a sound, a generator, or an audition label',
+      "already a generator's name",
     );
     rmSync(src);
   });

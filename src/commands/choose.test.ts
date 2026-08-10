@@ -12,20 +12,19 @@ import { resolvePlayables } from './play.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
 import {
-  generativeSoundSchema,
   generativeTakesOrder,
   generativeTakesSchema,
-  soundOrder,
   TAKES_FILENAME,
-  type GenerativeSound,
+  type GenerativeTakes,
 } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
-// Deliberate sounds as project citizens (project-layout.md §1.4, §4):
-// loaded from sounds/ beside the buildable types, validated,
-// hash-verified, every variant auditionable, and `field choose`
-// repointing what the sound's own label resolves to — clips reference
-// the sound by name, so nothing is ever copied into a ledger.
+// Generative requests as project citizens (project-layout.md §1.4, §4):
+// a leaf track carries the request, the takes beside the audio pin the
+// committed variants, every variant is auditionable, and `field choose`
+// repoints what the gen node's label resolves to — placements reference
+// the track, so nothing is ever copied into a ledger. (These lived in
+// sounds/ until nested-tracks.md §18 decision 12 folded them in.)
 
 let root: string;
 
@@ -33,22 +32,27 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-choose-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'opener');
-  writeGenerateSound('keys', ['fake wav one', 'fake wav two']);
+  writeGenerateLeaf('keys', ['fake wav one', 'fake wav two'], { chosen: 1 });
 });
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// Takes on disk with nothing chosen, written through the same
-// schema+canonicalize path the command uses: variants in audio/<name>/,
-// the sound in sounds/<name>.yaml. `field generate` no longer leaves this
-// state — it chooses its first take — so reaching it means a hand edit,
-// which is exactly the state the guards below are for.
-function writeGenerateSound(name: string, variantContents: string[]): void {
+// A generative leaf with takes on disk, written through the same
+// schema+canonicalize path the command uses: the request in
+// tracks/<name>.yaml, variants in audio/<name>/. `chosen` is settable
+// because some guards below are about the unchosen state, which no
+// command produces — `field generate` chooses its first take — so
+// reaching it means a hand edit.
+function writeGenerateLeaf(
+  name: string,
+  variantContents: string[],
+  opts: { chosen?: number } = {},
+): void {
   const songDir = join(root, 'songs/opener');
   mkdirSync(join(songDir, 'audio', name), { recursive: true });
-  mkdirSync(join(songDir, 'sounds'), { recursive: true });
+  mkdirSync(join(songDir, 'tracks'), { recursive: true });
   const variants = variantContents.map((content, i) => {
     const file = `audio/${name}/${i + 1}.wav`;
     writeFileSync(join(songDir, file), content);
@@ -60,43 +64,37 @@ function writeGenerateSound(name: string, variantContents: string[]): void {
       generated_at: '2026-08-05T21:00:00.000Z',
     };
   });
-  const recipe = generativeSoundSchema.parse({
-    name,
-    type: 'generative',
-    prompt: 'warm keys over still water',
-    bpm: 96,
-    duration_seconds: 10,
-    bars: 4,
-  });
-  const doc = new Document(recipe);
-  canonicalizeDocument(doc, soundOrder);
-  writeFileSync(join(songDir, 'sounds', `${name}.yaml`), stringifyDocument(doc));
-  // Two files, as on disk: the request in sounds/, the takes beside the
-  // audio they pin (bloom-in-tree.md §7).
-  const takes = new Document(generativeTakesSchema.parse({ sound: name, variants }));
+  writeFileSync(
+    join(songDir, 'tracks', `${name}.yaml`),
+    `name: ${name}\ninputs:\n  - generative:\n      prompt: warm keys over still water\n` +
+      `      bpm: 96\n      duration_seconds: 10\n      bars: 4\n`,
+  );
+  const takes = new Document(
+    generativeTakesSchema.parse({ gen: name, ...(opts.chosen !== undefined ? { chosen: opts.chosen } : {}), variants }),
+  );
   canonicalizeDocument(takes, generativeTakesOrder);
   writeFileSync(join(songDir, 'audio', name, TAKES_FILENAME), stringifyDocument(takes));
 }
 
-// The fixture's takes file, which most of these tests edit rather than the
-// recipe now that the two are separate (bloom-in-tree.md §7).
+// The fixture's takes file, which most of these tests edit — the request
+// and the takes are separate files (bloom-in-tree.md §7).
 const takesPath = () => join(root, 'songs/opener/audio/keys', TAKES_FILENAME);
 
-function loadedGenerate(): GenerativeSound {
-  const sound = loadProject(root).songs[0]!.sounds[0]!.data;
-  expect(sound.type).toBe('generative');
-  return sound as GenerativeSound;
+function loadedTakes(name = 'keys'): GenerativeTakes {
+  const takes = loadProject(root).songs[0]!.genTakes.get(name);
+  expect(takes).toBeDefined();
+  return takes!.data;
 }
 
-const clipYaml = (source: string) =>
-  `name: piano\ninputs:\n  - id: intro\n    sound: ${source}\n    at: 0\n    duration: 960\n`;
+const placementYaml = (source: string) =>
+  `name: piano\ninputs:\n  - id: intro\n    track: ${source}\n    at: 0\n    duration: 960\n`;
 
-describe('generative sounds in the project model', () => {
+describe('generative requests in the project model', () => {
   it('loads, validates, and formats canonically', async () => {
     const result = await check(root);
     expect(result.diagnostics).toEqual([]);
     expect(result.unformatted).toEqual([]);
-    expect(loadedGenerate().variants).toHaveLength(2);
+    expect(loadedTakes().variants).toHaveLength(2);
   });
 
   it('fmt sees a noncanonical takes file (#105 review)', async () => {
@@ -105,36 +103,33 @@ describe('generative sounds in the project model', () => {
     // valid YAML in the wrong canonical order sailing through as
     // "already canonical".
     const raw = readFileSync(takesPath(), 'utf8');
-    // Same data with `sound:` moved to the end — valid, non-canonical.
-    writeFileSync(takesPath(), raw.replace('sound: keys\n', '') + 'sound: keys\n');
+    // Same data with `gen:` moved to the end — valid, non-canonical.
+    writeFileSync(takesPath(), raw.replace('gen: keys\n', '') + 'gen: keys\n');
     const result = await check(root);
     expect(result.diagnostics).toEqual([]);
     expect(result.unformatted).toContain('songs/opener/audio/keys/variants.yaml');
   });
 
   it('diagnoses name/filename mismatch, dangling files, and bad chosen', async () => {
-    const recipePath = join(root, 'songs/opener/sounds/keys.yaml');
-    const recipe = readFileSync(recipePath, 'utf8');
-    writeFileSync(recipePath, recipe.replace('name: keys', 'name: pads'));
+    const leafPath = join(root, 'songs/opener/tracks/keys.yaml');
+    const leaf = readFileSync(leafPath, 'utf8');
+    writeFileSync(leafPath, leaf.replace('name: keys', 'name: pads'));
     expect((await check(root)).diagnostics.some((d) => d.message.includes('must match filename'))).toBe(true);
-    writeFileSync(recipePath, recipe);
+    writeFileSync(leafPath, leaf);
 
-    // The rest are properties of the takes, so they are edited there —
-    // the recipe no longer carries a variant list to break
-    // (bloom-in-tree.md §7).
     const raw = readFileSync(takesPath(), 'utf8');
     writeFileSync(takesPath(), raw.replace('audio/keys/2.wav', 'audio/keys/missing.wav'));
     expect((await check(root)).diagnostics.some((d) => d.message.includes('file not found'))).toBe(true);
 
-    writeFileSync(takesPath(), raw.replace('variants:', 'chosen: 5\nvariants:'));
+    writeFileSync(takesPath(), raw.replace('chosen: 1', 'chosen: 5'));
     expect(
       (await check(root)).diagnostics.some((d) => d.message.includes('chosen variant 5')),
     ).toBe(true);
     writeFileSync(takesPath(), raw);
 
-    // And a takes file that names a different sound than the directory it
-    // sits in, which is the split's own version of the filename rule.
-    writeFileSync(takesPath(), raw.replace('sound: keys', 'sound: pads'));
+    // And a takes file that names a different gen node than the directory
+    // it sits in, which is the split's own version of the filename rule.
+    writeFileSync(takesPath(), raw.replace('gen: keys', 'gen: pads'));
     expect(
       (await check(root)).diagnostics.some((d) =>
         d.message.includes('must match the directory audio/keys/'),
@@ -165,46 +160,42 @@ describe('generative sounds in the project model', () => {
     ).toBe(true);
   });
 
-  it('variants are auditionable by number under the sounds package', async () => {
-    const playables = await resolvePlayables(root, ['//songs/opener/sound:keys-2']);
+  it('variants are auditionable by number under the gen package', async () => {
+    const playables = await resolvePlayables(root, ['//songs/opener/gen:keys-2']);
     expect(playables).toHaveLength(1);
     expect(playables[0]!.path).toBe(join(root, 'songs/opener/audio/keys/2.wav'));
   });
 
-  it('an unchosen sound is not referenceable — clips are told to choose', () => {
-    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('keys'));
+  it('takes with nothing picked are diagnosed — choose is named', () => {
+    writeGenerateLeaf('hum', ['fake wav'], {});
     const diags = loadProject(root).diagnostics;
     expect(
-      diags.some((d) => d.message.includes('no chosen variant yet — field choose keys first')),
+      diags.some((d) => d.message.includes('no chosen variant yet — field choose hum first')),
     ).toBe(true);
-    // One mistake, one message: the sound exists, so the unknown-name
-    // check must not fire on top of the choose diagnostic (Codex on
-    // #102 — the fall-through appeared when kind checks went non-fatal).
-    expect(diags.some((d) => d.message.includes('unknown sound'))).toBe(false);
   });
 
-  it('a takeless recipe is a request, and check says the project is fine', async () => {
-    // The other half of the rule above, and the one the example project
-    // depends on (bloom-in-tree.md §3): a recipe whose takes do not exist
-    // yet is well-formed, and a clip may reference it. `check` answers
-    // "is this project coherent", not "is this machine ready" — so it
-    // stays quiet here and `build` is what refuses.
+  it('a takeless request is a request, and check says the project is fine', async () => {
+    // The one the example project depends on (bloom-in-tree.md §3): a
+    // request whose takes do not exist yet is well-formed, and a
+    // placement may reference its track. `check` answers "is this
+    // project coherent", not "is this machine ready" — so it stays quiet
+    // here and `build` is what refuses.
     writeFileSync(
-      join(root, 'songs/opener/sounds/topline.yaml'),
-      'name: topline\ntype: generative\ntext: the water knows the way\n',
+      join(root, 'songs/opener/tracks/topline.yaml'),
+      'name: topline\ninputs:\n  - generative:\n      text: the water knows the way\n',
     );
-    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('topline'));
+    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), placementYaml('topline'));
     const result = await check(root);
     expect(result.diagnostics).toEqual([]);
     // Not by accident of the name being unknown: a genuinely unknown
-    // source is still an error, which is what tells the two apart.
-    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('ghost'));
+    // placement is still an error, which is what tells the two apart.
+    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), placementYaml('ghost'));
     expect(
-      (await check(root)).diagnostics.some((d) => d.message.includes('unknown sound "ghost"')),
+      (await check(root)).diagnostics.some((d) => d.message.includes('unknown track "ghost"')),
     ).toBe(true);
   });
 
-  it('a sound may not shadow an asset: one namespace per song', async () => {
+  it('a generative entry may not mint an asset\'s name: one directory per claimant', async () => {
     writeFileSync(join(root, 'songs/opener/audio/keys.wav'), 'recorded keys');
     writeFileSync(
       join(root, 'songs/opener/assets.yaml'),
@@ -212,30 +203,30 @@ describe('generative sounds in the project model', () => {
     );
     expect(
       loadProject(root).diagnostics.some((d) =>
-        d.message.includes('collides with an asset of the same name'),
+        d.message.includes('both claim audio/keys/'),
       ),
     ).toBe(true);
   });
 
-  it('import pre-flights the namespace: sound names and audition labels refuse', async () => {
+  it('import pre-flights the namespace: a gen node name refuses', async () => {
     // The #31 review's asymmetry, closed from the import side: without
-    // the guard the copy succeeds and check goes red afterwards.
+    // the guard the copy succeeds and check goes red afterwards. The
+    // audition labels live in the gen: package and reserve nothing here —
+    // an asset named keys-2 claims audio/keys-2/, not audio/keys/.
     const src = join(root, 'water.wav');
     writeFileSync(src, 'not really a wav');
     await expect(importAsset(root, 'opener', src, 'keys')).rejects.toThrow('one namespace');
-    await expect(importAsset(root, 'opener', src, 'keys-2')).rejects.toThrow('one namespace');
     // A free name passes the namespace gate.
     const result = await importAsset(root, 'opener', src, 'rain');
     expect(result.name).toBe('rain');
   });
 
   it('generate pre-flights the audition labels its variants would mint', async () => {
-    // A sound named keys-1 exists (the variant label of "keys" would be
-    // fine — "keys" itself is taken — so test a fresh name whose -N
-    // label collides).
+    // A generator named other-2 exists, so generating "other" with two
+    // variants would mint gen:other-2 as an audition label over it.
     writeFileSync(
-      join(root, 'songs/opener/sounds/other-2.yaml'),
-      'name: other-2\ntype: reverb\nsource: keys\n',
+      join(root, 'songs/opener/tracks/other-2.yaml'),
+      'name: other-2\ninputs:\n  - supercollider:\n      source: keys.scd\n      seed: 1\n      duration: 1\n',
     );
     await expect(
       generateVariants(root, 'other', {
@@ -245,36 +236,37 @@ describe('generative sounds in the project model', () => {
         bars: 1,
         variants: 2,
       }),
-    ).rejects.toThrow('"other-2" is already a name');
+    ).rejects.toThrow('"other-2" is already a generator name');
   });
 });
 
 describe('field choose', () => {
-  it('repoints the sound to a variant and annotates the recipe', async () => {
-    const result = await chooseVariant(root, 'keys', { song: 'opener', variant: 1 });
+  it('repoints the gen node to a variant', async () => {
+    writeGenerateLeaf('hum', ['hum one', 'hum two'], {});
+    const result = await chooseVariant(root, 'hum', { song: 'opener', variant: 1 });
     expect(result).toMatchObject({
-      file: 'audio/keys/1.wav',
-      sha256: sha256Text('fake wav one'),
-      bytes: 'fake wav one'.length,
+      file: 'audio/hum/1.wav',
+      sha256: sha256Text('hum one'),
+      bytes: 'hum one'.length,
     });
     expect(result.previous).toBeUndefined();
 
     const project = loadProject(root);
     expect(project.diagnostics).toEqual([]);
-    // No ledger entry: the sound file itself pins its variants.
+    // No ledger entry: the takes file itself pins its variants.
     expect(project.songs[0]!.assets).toBeUndefined();
-    expect(loadedGenerate().chosen).toBe(1);
+    expect(loadedTakes('hum').chosen).toBe(1);
     // The rewritten file must still be canonically formatted.
     expect((await check(root)).unformatted).toEqual([]);
   });
 
-  it('a chosen sound resolves by its own label and is clip-referenceable', async () => {
+  it('a chosen gen node resolves by its own label and is placeable', async () => {
     await chooseVariant(root, 'keys', { song: 'opener', variant: 2 });
 
-    const playables = await resolvePlayables(root, ['//songs/opener/sound:keys']);
+    const playables = await resolvePlayables(root, ['//songs/opener/gen:keys']);
     expect(playables[0]!.path).toBe(join(root, 'songs/opener/audio/keys/2.wav'));
 
-    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), clipYaml('keys'));
+    writeFileSync(join(root, 'songs/opener/tracks/piano.yaml'), placementYaml('keys'));
     expect(loadProject(root).diagnostics).toEqual([]);
   });
 
@@ -282,13 +274,13 @@ describe('field choose', () => {
     await chooseVariant(root, 'keys', { song: 'opener', variant: 1 });
     const result = await chooseVariant(root, 'keys', { song: 'opener', variant: 2 });
     expect(result.previous).toBe(1);
-    expect(loadedGenerate().chosen).toBe(2);
+    expect(loadedTakes().chosen).toBe(2);
 
-    const playables = await resolvePlayables(root, ['//songs/opener/sound:keys']);
+    const playables = await resolvePlayables(root, ['//songs/opener/gen:keys']);
     expect(playables[0]!.path).toBe(join(root, 'songs/opener/audio/keys/2.wav'));
   });
 
-  it('rejects non-slug sound and song names before building any path', async () => {
+  it('rejects non-slug names before building any path', async () => {
     await expect(chooseVariant(root, '../other', { song: 'opener', variant: 1 })).rejects.toThrow(
       'lowercase-slug',
     );
@@ -307,13 +299,13 @@ describe('field choose', () => {
     );
   });
 
-  it('refuses choosing on a buildable sound', async () => {
+  it('refuses choosing on a supercollider generator', async () => {
     writeFileSync(
-      join(root, 'songs/opener/sounds/verse.yaml'),
-      'name: verse\ntype: reverb\nsource: keys\n',
+      join(root, 'songs/opener/tracks/verse.yaml'),
+      'name: verse\ninputs:\n  - supercollider:\n      source: keys.scd\n      seed: 1\n      duration: 1\n',
     );
     await expect(chooseVariant(root, 'verse', { song: 'opener', variant: 1 })).rejects.toThrow(
-      'only deliberate generative sounds',
+      'built by a rule, and has no takes to choose',
     );
   });
 });

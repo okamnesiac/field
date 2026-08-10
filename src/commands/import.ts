@@ -141,11 +141,12 @@ export async function importAsset(
     throw new Error(`asset "${assetName}" already declared in "${song}"`);
   }
   // One namespace per song (project-layout.md §4.3): an imported asset
-  // may not shadow a sound or a generative sound's audition label — the
-  // collision would only surface as a check-red project after the copy.
+  // may not shadow a generator's node name — its takes claim the same
+  // audio/<name>/ directory the import would land in, and the collision
+  // would only surface as a check-red project after the copy.
   if (takenSongNames(songDir).has(assetName)) {
     throw new Error(
-      `"${assetName}" is already a sound, a generator, or an audition label in ` +
+      `"${assetName}" is already a generator's name in ` +
         `"${song}" — a song's names are one namespace (use --name)`,
     );
   }

@@ -3,8 +3,8 @@
 Field treats a project as an explicit dependency graph, Bazel-style:
 labels, dependencies, content-addressed outputs, incremental rebuilds,
 cached outputs, queries, and tests — without Bazel syntax or its
-vocabulary (project-layout.md §4: the format speaks sounds, types, and
-sources; the engine speaks nodes, generators, and action keys).
+vocabulary (project-layout.md §4: the format speaks tracks, entries, and
+inserts; the engine speaks nodes, generators, and action keys).
 
 ```bash
 field build //songs/opener/track:main
@@ -15,8 +15,8 @@ field query 'deps(//songs/opener/track:main)'
 field explain //songs/opener/track:main
 ```
 
-Labels address songs and shared material alike: a clip in one song
-plays `//shared/asset:rain` exactly as it plays the song's own sounds.
+Labels address songs and shared material alike: an entry in one song
+plays `//shared/asset:rain` exactly as it plays the song's own audio.
 
 The absolute form is canonical, but the CLI accepts songs-relative shorthand
 for all of the above — `field build opener/track:main`, `field explain
@@ -50,7 +50,7 @@ mid-edit — the common case) keeps its last good outputs and retries on
 the next change. `field play <song> --loop --watch` composes the same
 loop with playback: when the playing label's hash moves, the daemon
 finishes the current pass and the next wrap starts the new file. Watch
-runs `build`, and build never generates a generative sound — but a
+runs `build`, and build never runs a generative request — but a
 `chosen:` repoint is just a YAML edit, so `field choose` against a
 running watch is live variant A/B-ing inside the loop.
 
@@ -68,9 +68,8 @@ patterns match — the dependencies a build prints are means, not
 products.
 
 The name is long deliberately. A short form (`creek-main`) reads better
-until a song has a track and a sound of the same name — legal, since the
-one-namespace rule (project-layout.md §4.3) covers sounds and assets,
-and natural when a track plays one sound — at which point two different
+until a song has a track and a gen node of the same name — which every
+generative leaf has by construction — at which point two different
 files want one name. A name that is sometimes scoped is worse than one
 that always is: you cannot predict the file you are about to get.
 
@@ -84,7 +83,7 @@ depth of its own, so `--rate` alone on a stem refuses and asks for
 (`creek-track-main.44100-16-v1.wav`) — a character no label can carry —
 so a converted family never versions an unconverted one, nor a label
 that happens to end in digits. This is what
-retired `loop-cd`: a CD deliverable is an invocation, not a sound.
+retired `loop-cd`: a CD deliverable is an invocation, not a node.
 
 **Exports are versioned, never overwritten.** Finishing something and
 putting it somewhere is how people mark a version, and the previous one
@@ -136,15 +135,14 @@ declaring an audio return path ("this device's output returns on Apollo inputs
 other render — and flags it nondeterministic, because knobs on hardware are
 outside the hash.
 
-## Sound types and their generators
+## Node types and their generators
 
 Every automatic type has a `Generator` in `src/generators/` — the code
 that generates it mechanically, in-graph, cached. The `generative` kind
 has none: its generation is human-triggered (`field generate`), its
-variants are committed under `audio/<name>/` — named by the gen node
-for a `generative:` entry, by the sound for the transitional sound
-form — and its label resolves to the chosen variant (`field choose`
-repoints it; every placement follows).
+variants are committed under `audio/<name>/`, named by the gen node —
+and its label resolves to the chosen variant (`field choose` repoints
+it; every placement follows).
 
 - **`resample`** — the second implicit type after `stem`, and the only
   one nobody can declare: when a source arrives at a placement at a rate
@@ -156,8 +154,9 @@ repoints it; every placement follows).
   same one `--rate` exports through) and writes float32 undithered,
   because it sits between two float stages — quantization is a delivery
   choice, made at export. The `normalize` *sound* that used to close
-  this loop by hand retired with multi-rate.md step 3; the daemon op
-  behind it survives as export's converter.
+  this loop by hand retired with multi-rate.md step 3 — and `sounds/`
+  entirely with the chunk 6 finale; the daemon op behind it survives as
+  export's converter.
 - **`supercollider`** — a SuperCollider program defines the sound,
   rendered offline via scsynth's NRT mode. `source:` names the program —
   a bare filename resolves in `shared/instruments/`, a slashed path is
@@ -194,20 +193,19 @@ repoints it; every placement follows).
   rendering as the silence it contains, because the track file **is** the declaration — a mix file
   defines a `mix`, a track file implies a `stem`. Content is the track's
   one `inputs:` list (nested-tracks.md §18): each entry places a
-  `track:`, an `audio:` file, an inline `supercollider:` render — minted
-  as its own `gen:` node, so it caches and is addressable like any rule
-  — or (until sounds fold away) a `sound:`. A placed track is one more
+  `track:`, an `audio:` file, or an inline `supercollider:`/`generative:`
+  render — minted as its own `gen:` node, so it caches and is
+  addressable like any rule. A placed track is one more
   source in the same list, so a track→track
   edge is an ordinary graph edge and a track placed three times is one
   render placed three times. A track can
   also be a song's *output* — the one named `main` — in which case it
   carries the song's declared `length` and `loop` and renders exactly that
   long, the way the `mix` rule does. A bare song reference resolves to it:
-  `creek` means `//songs/creek/track:main`. Playing a buildable
-  sound or a track pulls its whole
-  definition into the stem's subgraph, so the arrangement can play audio
-  nothing ever committed, and editing the definition rebuilds straight
-  through stem and mix. It places the
+  `creek` means `//songs/creek/track:main`. Placing a track pulls its
+  whole definition into the stem's subgraph, so the arrangement can play
+  audio nothing ever committed, and editing the definition rebuilds
+  straight through stem and mix. It places the
   entries through the tempo map (`at`, source offset, slip,
   entry gain and pan, linear fades) and sums them into a pre-fader
   Float32 stereo stem in the render daemon
@@ -215,8 +213,8 @@ repoints it; every placement follows).
   action key hashes the *resolved placement plan* in samples, not the raw
   YAML: a tempo edit rebuilds exactly the tracks whose musical entries
   moved, reordering entries in the file changes nothing, and entry
-  spelling is wiring — a sound folding into a track cannot re-key a
-  parent whose children are byte-identical. A track may declare `rate:`
+  spelling is wiring — a ref changing kind cannot re-key a parent whose
+  children are byte-identical. A track may declare `rate:`
   (multi-rate.md decision 3), the project's `sample_rate` otherwise —
   the whole file, ticks included, projects to samples at that rate, and
   a source arriving at any other rate converts through a `resample`
@@ -235,13 +233,13 @@ repoints it; every placement follows).
   auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
   compensation on by default — tone changes, level doesn't), an offline
   lookahead limiter with a hard ceiling guarantee, and a deterministic
-  Freeverb whose output grows by its tail. Each takes one `source:`, so
-  chains are just sounds sourcing sounds — `supercollider → eq →
-  reverb` — cached per link, and a sound wrapped in an effect is a
-  different sound. The same parameters run as
-  track `inserts:` (baked into the stem) and in the mix `master:` chain
-  (post-gain, so the limiter guards the true output). Cycles became
-  declarable with sound→sound edges, so `field check` names them.
+  Freeverb whose output grows by its tail. They run as `inserts:` —
+  baked into the stem, on the song's output track where the master
+  chain went — and chains are wrapper tracks placing wrapper tracks,
+  cached per link: a track wrapped in an effect is a different track.
+  The declared effect *sounds* these once were folded in with
+  nested-tracks.md decision 12; `field check` names containment cycles
+  the way it named sound→sound ones.
 - **`mix`** — *retired* (nested-tracks.md §7 chunk 2). A song's output is
   the track named `main`, and it does everything the mix rule did: sums its
   inputs applying each placement's `gain_db` and `pan`, bakes its own
@@ -259,7 +257,7 @@ floating-point scheduling) but sound the same; the build system never
 re-renders unchanged inputs, so nondeterminism only surfaces on deliberate
 cold rebuilds. Seeded SC renders are deterministic; ACE with a fixed seed is
 reproducible on the same machine but not guaranteed across GPU/framework
-versions — which is why generative sounds commit their variants, never
+versions — which is why generative requests commit their takes, never
 regenerating mechanically.
 
 Nodes that can differ *audibly* between renders are flagged

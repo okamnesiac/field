@@ -20,8 +20,6 @@ import {
   songSchema,
   generativeTakesOrder,
   generativeTakesSchema,
-  soundOrder,
-  soundSchema,
   TAKES_FILENAME,
   takeOrder,
   takeSchema,
@@ -31,12 +29,9 @@ import {
   trackSchema,
   type Asset,
   type AssetsFile,
-  type BuildableSound,
-  type GenerativeSound,
   type GenerativeTakes,
   type Project,
   type Song,
-  type Sound,
   type Take,
   type TempoFile,
   type Track,
@@ -62,23 +57,15 @@ export interface LoadedSong {
   song?: LoadedFile<Song> | undefined;
   tempo?: LoadedFile<TempoFile> | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
-  // One file per authored spec (project-layout.md §1.3, §4): sounds/
-  // holds defined sounds — buildable types and deliberate `generate`
-  // recipes alike.
-  sounds: LoadedFile<Sound>[];
   tracks: LoadedFile<Track>[];
   takes: LoadedFile<Take>[];
   // Run-recorded state for `generative:` entries, keyed by gen node
   // name (nested-tracks.md §18 step 3): audio/<name>/variants.yaml,
-  // merged here once so nothing downstream learns the file layout —
-  // the same promise the sound-side stitch makes. Absent from the map
-  // means nothing has been generated yet, which is legal.
+  // merged here once so nothing downstream learns the file layout.
+  // Absent from the map means nothing has been generated yet, which is
+  // legal. (`sounds:` and its takes lived beside this until `sounds/`
+  // retired — §18 decision 12, the chunk 6 finale.)
   genTakes: Map<string, LoadedFile<GenerativeTakes>>;
-  // The sound-side takes files themselves. Their *data* merges into the
-  // sound (variants, chosen), but fmt and unformattedFiles need the
-  // loaded file: a takes file is a schema-validated project file, and
-  // one absent from allFiles is one fmt silently skips.
-  soundTakes: LoadedFile<GenerativeTakes>[];
 }
 
 export interface LoadedProject {
@@ -154,48 +141,19 @@ function yamlFiles(dir: string): string[] {
     .map((f) => join(dir, f));
 }
 
-// The takes beside a generative sound's audio, if a run has happened.
-// Absent is not a diagnostic: a recipe with no takes is a request rather
+// The takes beside a generative request's audio, if a run has happened.
+// Absent is not a diagnostic: a request with no takes is a request rather
 // than a broken record (bloom-in-tree.md §3), and `build` is what refuses.
 // A malformed one *is* diagnosed, against its own path, so the message
 // points at the file you would edit.
-export function takesPath(songDir: string, soundName: string): string {
-  return join(songDir, 'audio', soundName, TAKES_FILENAME);
-}
-
-function loadTakes(
-  project: LoadedProject,
-  songDirAbs: string,
-  soundName: string,
-): LoadedFile<GenerativeTakes> | undefined {
-  const abs = takesPath(songDirAbs, soundName);
-  if (!existsSync(abs)) return undefined;
-  const loaded = loadFile(project, abs, {
-    schema: generativeTakesSchema,
-    order: generativeTakesOrder,
-  });
-  if (!loaded) return undefined;
-  // Same rule a sound's `name` obeys against its filename: a file that has
-  // been moved should say so rather than quietly describe another sound.
-  if (loaded.data.sound !== soundName) {
-    project.diagnostics.push({
-      file: loaded.path,
-      message:
-        loaded.data.gen !== undefined
-          ? `these takes attach to the gen node "${loaded.data.gen}" while ` +
-            `sounds/${soundName}.yaml still defines a sound — finish the fold, ` +
-            `or rename gen: back to sound: (nested-tracks.md §18)`
-          : `takes name "${loaded.data.sound}" must match the directory audio/${soundName}/`,
-    });
-    return undefined;
-  }
-  return loaded;
+export function takesPath(songDir: string, genName: string): string {
+  return join(songDir, 'audio', genName, TAKES_FILENAME);
 }
 
 // A generative entry's takes, beside the audio under its gen node's
 // name (nested-tracks.md §18 step 3): audio/<name>/variants.yaml with
-// `gen: <name>`. Same absent-is-legal rule as a sound's — a request
-// with no takes is the shape a project ships in.
+// `gen: <name>`. Absent is legal — a request with no takes is the shape
+// a project ships in.
 function loadEntryTakes(
   project: LoadedProject,
   songDirAbs: string,
@@ -258,11 +216,9 @@ export function loadProject(root: string): LoadedProject {
     const song: LoadedSong = {
       name: basename(dir),
       dir: relative(project.root, dir),
-      sounds: [],
       tracks: [],
       takes: [],
       genTakes: new Map(),
-      soundTakes: [],
     };
 
     // The pre-2026-08-06 layout is diagnosed, not silently ignored: a
@@ -320,27 +276,23 @@ export function loadProject(root: string): LoadedProject {
       });
     }
 
-    for (const file of yamlFiles(join(dir, 'sounds'))) {
-      const parsed = loadFile(project, file, { schema: soundSchema, order: soundOrder });
-      if (!parsed) continue;
-      if (parsed.data.type !== 'generative') {
-        song.sounds.push(parsed as LoadedFile<Sound>);
-        continue;
-      }
-      // A generative sound is its recipe plus whatever takes exist beside
-      // its audio (bloom-in-tree.md §7). Merged here, once, so nothing
-      // downstream has to know the two are separate files — and absent is
-      // a legal answer, meaning nothing has been generated yet.
-      const takes = loadTakes(project, dir, parsed.data.name);
-      if (takes) song.soundTakes.push(takes);
-      song.sounds.push({
-        ...parsed,
-        data: {
-          ...parsed.data,
-          variants: takes?.data.variants ?? [],
-          chosen: takes?.data.chosen,
-        },
-      } as LoadedFile<Sound>);
+    // `sounds/` retired when the last sound folded into a track
+    // (nested-tracks.md §18, decision 12 — the chunk 6 finale). A
+    // directory still here is a project mid-migration, and silently not
+    // reading it would be the worst option, for mixes/'s reason: every
+    // sound it defines would simply stop existing, files still on disk
+    // saying otherwise. One message for the directory rather than one
+    // per file, because the fix is the same fold for all of them.
+    if (existsSync(join(dir, 'sounds'))) {
+      project.diagnostics.push({
+        file: posix.join(song.dir, 'sounds'),
+        message:
+          `sounds/ has retired — every sound is a track now (nested-tracks.md §18, ` +
+          `decision 12): fold an effect sound into a track with one insert, a ` +
+          `supercollider or generative sound into a leaf track carrying the entry ` +
+          `in inputs:, rename sound: to gen: in its audio/<name>/variants.yaml, ` +
+          `and delete the directory`,
+      });
     }
 
     for (const file of yamlFiles(join(dir, 'tracks'))) {
@@ -390,8 +342,6 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.song,
       s.tempo,
       s.assets,
-      ...s.sounds,
-      ...s.soundTakes,
       ...s.genTakes.values(),
       ...s.tracks,
       ...s.takes,
@@ -532,153 +482,13 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Defined sounds are one file each, name matching filename
-    // (project-layout.md §1.3, §4). Names are collected first, in full:
-    // sources may reference sounds declared in other files, and forward
-    // references are fine. Deliberate `generate` sounds share the
-    // namespace but not the machinery — no Generator, no cycle
-    // participation — and mint per-variant audition labels (<name>-<n>)
-    // that must not collide with other sounds.
-    const soundNames = new Set<string>();
-    const buildableSounds: { path: string; sound: BuildableSound }[] = [];
-    const generateSounds: { path: string; sound: GenerativeSound }[] = [];
-    for (const file of song.sounds) {
-      const expected = basename(file.path, '.yaml');
-      if (file.data.name !== expected) {
-        push(file.path, `name "${file.data.name}" must match filename "${expected}"`);
-      }
-      if (soundNames.has(file.data.name)) {
-        push(file.path, `duplicate sound "${file.data.name}"`);
-      }
-      soundNames.add(file.data.name);
-      // One namespace per song (§4.3): `source: pad` must mean exactly
-      // one thing, so a sound may not shadow an asset.
-      if (assetNames.has(file.data.name)) {
-        push(
-          file.path,
-          `sound "${file.data.name}" collides with an asset of the same name — ` +
-            `a song's names are one namespace (project-layout.md §4.3)`,
-        );
-      }
-      if (file.data.type === 'generative') {
-        generateSounds.push({ path: file.path, sound: file.data });
-      } else {
-        buildableSounds.push({ path: file.path, sound: file.data });
-      }
-    }
+    // The namespace a bare `audio:` ref resolves in (§4.3). Sounds
+    // shared it until `sounds/` retired; what remains is the ledger,
+    // plus the shared scope's for the one cross-scope spelling.
     const names: SourceNames = {
       assets: assetNames,
-      sounds: new Set(buildableSounds.map((t) => t.sound.name)),
-      chosen: new Set(
-        generateSounds.filter((t) => t.sound.chosen !== undefined).map((t) => t.sound.name),
-      ),
-      // A recipe with no takes is the shape a project ships in when its
-      // audio is not committed (bloom-in-tree.md §2.4): well-formed, and
-      // simply not filled in yet. Takes with nothing picked is a different
-      // thing — `field generate` chooses its first take, so no command
-      // produces that state and reaching it means a hand edit.
-      ungenerated: new Set(
-        generateSounds.filter((t) => t.sound.variants.length === 0).map((t) => t.sound.name),
-      ),
-      unchosen: new Set(
-        generateSounds
-          .filter((t) => t.sound.chosen === undefined && t.sound.variants.length > 0)
-          .map((t) => t.sound.name),
-      ),
       shared: sharedNames,
     };
-    // A voice recipe's reference recording must resolve, and to a
-    // *committed asset* rather than to any visible name: §1.3's argument
-    // for a recording over a vendor's voice ID is provenance, and a
-    // generated sound cannot carry that. Absent `voice_ref` is the
-    // default-voice case and is deliberately fine (§6).
-    for (const { path, sound } of generateSounds) {
-      if (sound.voice_ref === undefined) continue;
-      // Through lookupAsset, not the name sets, so this pass and `field
-      // generate` cannot answer "which asset is this" differently. An
-      // asset whose *file* is unresolvable is still found here — the
-      // ledger loop above already diagnosed that, and saying it twice
-      // would read as two problems.
-      if (lookupAsset(project, song.name, sound.voice_ref) === undefined) {
-        push(
-          path,
-          `sound "${sound.name}" voice_ref references unknown asset "${sound.voice_ref}" — ` +
-            `a reference recording is a committed asset (voice-generation.md §1.3)`,
-        );
-      }
-    }
-    for (const { path, sound } of buildableSounds) {
-      // Rule-specific semantics live with the rule (src/generators/).
-      generatorFor(sound).validate(sound, {
-        root: project.root,
-        songDir: song.dir,
-        names,
-        push: (message) => push(path, `sound "${sound.name}" ${message}`),
-        resolveFile: (baseDir, file) => resolveAssetFile(project.root, baseDir, file),
-      });
-    }
-    // Sound→sound references make cycles declarable (effects.md §3);
-    // check must name the cycle before the engine's ordering guard ever
-    // trips on it. Only buildable-sound sources are edges — assets and
-    // chosen variants are committed leaves.
-    const byName = new Map(buildableSounds.map(({ sound }) => [sound.name, sound]));
-    const pathByName = new Map(buildableSounds.map(({ path, sound }) => [sound.name, path]));
-    const state = new Map<string, 'visiting' | 'done'>();
-    const visit = (name: string, path: string[]): void => {
-      if (state.get(name) === 'done') return;
-      if (state.get(name) === 'visiting') {
-        const cycle = [...path.slice(path.indexOf(name)), name].join(' → ');
-        push(pathByName.get(name)!, `sound dependency cycle: ${cycle}`);
-        return;
-      }
-      state.set(name, 'visiting');
-      const sound = byName.get(name);
-      if (sound) {
-        for (const dep of generatorFor(sound).sources(sound)) {
-          if (byName.has(dep)) visit(dep, [...path, name]);
-        }
-      }
-      state.set(name, 'done');
-    };
-    for (const { sound } of buildableSounds) visit(sound.name, []);
-
-    // Deliberate sounds (project-layout.md §1.4): variants are committed,
-    // content-addressed artifacts in the song's audio/<name>/ — the
-    // containment is also what makes choose's re-choose guard sound — and
-    // `chosen` must name a variant that exists.
-    for (const { path, sound } of generateSounds) {
-      sound.variants.forEach((_, i) => {
-        const label = `${sound.name}-${i + 1}`;
-        if (soundNames.has(label) || assetNames.has(label)) {
-          const what = assetNames.has(label) ? 'asset' : 'sound';
-          push(path, `variant ${i + 1} audition label "${label}" collides with the ${what} of that name`);
-        }
-      });
-      const variantFiles = new Set<string>();
-      for (const variant of sound.variants) {
-        if (variantFiles.has(variant.file)) {
-          push(path, `duplicate variant file "${variant.file}"`);
-        }
-        variantFiles.add(variant.file);
-        if (variant.file !== posix.normalize(variant.file) || variant.file.includes('\\')) {
-          push(path, `variant file path not in normalized form: ${variant.file}`);
-          continue;
-        }
-        if (!variant.file.startsWith(`audio/${sound.name}/`)) {
-          push(path, `variant file must live in audio/${sound.name}/: ${variant.file}`);
-        }
-        const resolved = resolveAssetFile(project.root, song.dir, variant.file);
-        if (resolved.problem) {
-          push(path, `variant ${resolved.problem}`);
-        }
-      }
-      if (sound.chosen !== undefined && sound.chosen > sound.variants.length) {
-        push(
-          path,
-          `chosen variant ${sound.chosen} does not exist (${sound.variants.length} variants)`,
-        );
-      }
-    }
 
     // Entry references resolve per kind, each in its field's own
     // namespace (nested-tracks.md §18) — the whole visibility rule
@@ -687,8 +497,8 @@ function validate(project: LoadedProject): void {
     // Takes reference assets only: a take is a recording, and its asset
     // is the ledger row import wrote.
     const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
-    // Where a committed source's bytes live (undefined for buildable
-    // sounds): the ledger file, the shared file, or a chosen variant.
+    // Where a committed source's bytes live (undefined for anything that
+    // renders): the ledger file, the shared file, or a chosen take.
     const fileBySource = (ref: string): { base: string; file: string } | undefined => {
       const shared = sharedAssetName(ref);
       if (shared !== undefined) {
@@ -697,13 +507,8 @@ function validate(project: LoadedProject): void {
       }
       const asset = assetFileByName.get(ref);
       if (asset !== undefined) return { base: song.dir, file: asset };
-      const generate = generateSounds.find((g) => g.sound.name === ref)?.sound;
-      if (generate?.chosen !== undefined) {
-        const variant = generate.variants[generate.chosen - 1];
-        if (variant) return { base: song.dir, file: variant.file };
-      }
       // A generative entry's chosen take is committed content under its
-      // gen node's name, exactly as a sound's is under the sound's.
+      // gen node's name.
       const gen = genRefName(ref);
       if (gen !== undefined) {
         const takes = song.genTakes.get(gen)?.data;
@@ -728,11 +533,22 @@ function validate(project: LoadedProject): void {
       );
     }
 
-    // Names first, in full, like sounds: a track may place a track
-    // declared in any file, and a forward reference is fine.
+    // Names first, in full: a track may place a track declared in any
+    // file, and a forward reference is fine.
     const trackByName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
     const trackPathByName = new Map(song.tracks.map((t) => [t.data.name, t.path]));
     const trackNames = new Set(trackByName.keys());
+    // Every generator entry's node name, up front: the audio: diagnostic
+    // below asks "does this name render", and forward references across
+    // files are as fine for generators as for tracks.
+    const genNodeNames = new Set<string>();
+    for (const trackFile of song.tracks) {
+      for (const entry of trackFile.data.inputs) {
+        if (entry.supercollider !== undefined || entry.generative !== undefined) {
+          genNodeNames.add(generatorName(entry, trackFile.data.name));
+        }
+      }
+    }
 
     // One timeline per track file, resolved once. Both the track loop and
     // the takes loop below read it: a take is a recording *on* a track, so
@@ -844,41 +660,16 @@ function validate(project: LoadedProject): void {
               push(track.path, `${what} references unknown shared asset "${shared}"`);
             }
           } else if (!names.assets.has(entry.audio)) {
-            const rendersInstead =
-              names.sounds.has(entry.audio) ||
-              names.chosen.has(entry.audio) ||
-              names.ungenerated.has(entry.audio) ||
-              names.unchosen.has(entry.audio);
+            // A name that renders is not committed bytes: a gen node's
+            // takes live under audio/<name>/, but the way to play them
+            // is to place the track that carries the request.
             push(
               track.path,
-              rendersInstead
-                ? `${what} audio: names the sound "${entry.audio}" — a sound is a ` +
-                    `definition, not committed bytes; use sound: (nested-tracks.md §18)`
+              genNodeNames.has(entry.audio)
+                ? `${what} audio: names the generator "${entry.audio}" — a render is ` +
+                    `not committed bytes; place the track that carries the entry ` +
+                    `(nested-tracks.md §18)`
                 : `${what} references unknown audio "${entry.audio}"`,
-            );
-          }
-        } else if (entry.sound !== undefined) {
-          if (names.unchosen.has(entry.sound)) {
-            push(
-              track.path,
-              `${what} sources "${entry.sound}", which has no chosen variant yet — ` +
-                `field choose ${entry.sound} first`,
-            );
-          }
-          if (
-            !names.sounds.has(entry.sound) &&
-            !names.chosen.has(entry.sound) &&
-            // Unchosen is a state of a sound that exists — it got its own
-            // diagnostic above, and "unknown" on top of it would be false.
-            !names.unchosen.has(entry.sound) &&
-            !names.ungenerated.has(entry.sound)
-          ) {
-            push(
-              track.path,
-              names.assets.has(entry.sound)
-                ? `${what} sound: names the asset "${entry.sound}" — committed bytes ` +
-                    `are audio:'s to name (nested-tracks.md §18)`
-                : `${what} references unknown sound "${entry.sound}"`,
             );
           }
         } else if (entry.supercollider !== undefined) {
@@ -1086,23 +877,16 @@ function validate(project: LoadedProject): void {
       for (const entry of trackFile.data.inputs) {
         if (entry.supercollider === undefined && entry.generative === undefined) continue;
         const name = generatorName(entry, trackFile.data.name);
-        // A generative entry's takes claim audio/<name>/ exactly as a
-        // generative sound's do, and `field generate <name>` resolves the
-        // sound first — so one name may not be both. Same for an asset:
-        // imports land in audio/<name>/ too (project-layout.md §4.11).
-        if (entry.generative !== undefined) {
-          const holder = soundNames.has(name)
-            ? `sounds/${name}.yaml`
-            : assetNames.has(name)
-              ? `the asset "${name}"`
-              : undefined;
-          if (holder !== undefined) {
-            push(
-              trackFile.path,
-              `generative entry mints the name "${name}", which ${holder} also holds — ` +
-                `both claim audio/${name}/ (rename the track, the entry id, or the other)`,
-            );
-          }
+        // A generative entry's takes claim audio/<name>/, and so does an
+        // asset: imports land in audio/<name>/ too (project-layout.md
+        // §4.11) — so one name may not be both.
+        if (entry.generative !== undefined && assetNames.has(name)) {
+          push(
+            trackFile.path,
+            `generative entry mints the name "${name}", which the asset "${name}" also ` +
+              `holds — both claim audio/${name}/ (rename the track, the entry id, or ` +
+              `the asset)`,
+          );
         }
         const first = genNames.get(name);
         if (first === undefined) {
@@ -1168,15 +952,15 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // Nothing else ever opens audio/, so a renamed track, entry id, or
-    // sound strands its takes — model-minutes of them — with check
-    // green and the takes silently gone from the model. A directory
-    // holding a takes file is claimed by the generative request named
-    // like it; unclaimed is a rename's leftover, and this names it.
-    // Asset item directories carry no takes file and are skipped; a
-    // claimed directory with the wrong key inside is the attachment
+    // Nothing else ever opens audio/, so a renamed track or entry id
+    // strands its takes — model-minutes of them — with check green and
+    // the takes silently gone from the model. A directory holding a
+    // takes file is claimed by the generative request named like it;
+    // unclaimed is a rename's leftover, and this names it. Asset item
+    // directories carry no takes file and are skipped; a claimed
+    // directory with the wrong key inside is the attachment
     // diagnostics' to say, not a second message here.
-    const claimedTakesDirs = new Set(generateSounds.map((g) => g.sound.name));
+    const claimedTakesDirs = new Set<string>();
     for (const trackFile of song.tracks) {
       for (const entry of trackFile.data.inputs) {
         if (entry.generative !== undefined) {
@@ -1193,9 +977,9 @@ function validate(project: LoadedProject): void {
         if (!existsSync(join(itemDir, TAKES_FILENAME))) continue;
         push(
           join(song.dir, 'audio', item, TAKES_FILENAME),
-          `no generative request claims audio/${item}/ — a renamed track, id, or ` +
-            `sound leaves its takes behind; rename the directory (and its ` +
-            `gen:/sound: key) to follow, or delete it`,
+          `no generative request claims audio/${item}/ — a renamed track or id ` +
+            `leaves its takes behind; rename the directory (and its gen: key) ` +
+            `to follow, or delete it`,
         );
       }
     }
@@ -1419,10 +1203,10 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
       }
     }
   }
-  // A voice recipe's reference recording is pinned by hash for the same
+  // A voice request's reference recording is pinned by hash for the same
   // reason its variants are (voice-generation.md §1.3 and §6). Without
   // this the hash is a field, not a pin: the recording could be swapped
-  // under a recipe that still claimed to describe it and the project
+  // under a request that still claimed to describe it and the project
   // stayed check-green (#58 review). Compared against the ledger's
   // recorded sha rather than re-hashing, because the loop above has
   // already proved recorded matches actual.
@@ -1430,29 +1214,15 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
   // Resolved per song through lookupAsset, which is what makes a bare
   // name mean its own song's asset (project-layout.md §4.3). The map this
   // replaced was built once and keyed by bare name, so a later song's
-  // `ref-voice` overwrote an earlier song's and a recipe then verified
+  // `ref-voice` overwrote an earlier song's and a request then verified
   // against a recording from a different song entirely — false drift one
   // way, a silent pass the other (#58 review).
+  //
+  // The entry's authored pair is the pin (§18 step 3): the hash is
+  // authored up front and generate verifies it at run time, but a swap
+  // *between* runs has to surface here or the entry stays check-green
+  // while describing a different voice.
   for (const song of project.songs) {
-    for (const file of song.sounds) {
-      if (file.data.type !== 'generative') continue;
-      const { voice_ref: ref, voice_ref_sha256: declared } = file.data;
-      if (ref === undefined || declared === undefined) continue;
-      const recorded = lookupAsset(project, song.name, ref)?.asset.sha256;
-      if (recorded === undefined) continue; // already diagnosed by validate
-      if (recorded !== declared) {
-        diagnostics.push({
-          file: file.path,
-          message:
-            `voice_ref "${ref}" is recorded as ${recorded} but the recipe declares ` +
-            `${declared} — the reference recording changed under the recipe`,
-        });
-      }
-    }
-    // A generative entry's authored pair is the same pin (§18 step 3):
-    // the hash is authored up front and generate verifies it at run
-    // time, but a swap *between* runs has to surface here or the entry
-    // stays check-green while describing a different voice.
     for (const track of song.tracks) {
       for (const entry of track.data.inputs) {
         const ref = entry.generative?.voice_ref;
@@ -1471,27 +1241,12 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
       }
     }
   }
-  // Deliberate-target variants are committed artifacts with recorded
-  // hashes too (project-layout.md §1.4) — a recipe whose WAVs drifted is
-  // provenance that lies, which is the one thing a recipe must never do.
+  // Takes are committed artifacts with recorded hashes too
+  // (project-layout.md §1.4) — a request whose WAVs drifted is
+  // provenance that lies, which is the one thing provenance must never
+  // do. Verified against the takes file, which is what recorded the
+  // hash and what you would regenerate from.
   for (const song of project.songs) {
-    for (const file of song.sounds) {
-      if (file.data.type !== 'generative') continue;
-      for (const variant of file.data.variants) {
-        const { path } = resolveAssetFile(project.root, song.dir, variant.file);
-        if (!path) continue; // already diagnosed by validate
-        const actual = await sha256File(path);
-        if (actual !== variant.sha256) {
-          diagnostics.push({
-            file: file.path,
-            message: `variant "${variant.file}" content does not match its recorded sha256 (hashes to ${actual})`,
-          });
-        }
-      }
-    }
-    // Entry takes are the same committed artifacts under the same
-    // promise; verified against the takes file, which is what recorded
-    // the hash and what you would regenerate from.
     for (const takesFile of song.genTakes.values()) {
       for (const variant of takesFile.data.variants) {
         const { path } = resolveAssetFile(project.root, song.dir, variant.file);

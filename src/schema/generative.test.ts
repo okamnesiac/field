@@ -1,27 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { generativeSoundSchema, generativeTakesSchema } from './sounds.js';
+import { generativeEntrySchema, generativeTakesSchema } from './sounds.js';
 
 // The kind split inside `generative` (voice-generation.md §1.6). One
-// schema serves music and voice recipes so that variants, `chosen`, the
+// schema serves music and voice requests so that variants, `chosen`, the
 // hashes and `field choose` stay single-implementation; what keeps that
-// from becoming a shape nobody can reason about is that every recipe is
+// from becoming a shape nobody can reason about is that every request is
 // exactly one kind, enforced here rather than described in a comment.
-//
-// Worth recording because §1.6's parenthetical is now wrong while its
-// conclusion survives: it justified a refine by saying the recipe schema
-// is "a single object, not a discriminated union", and after the layout
-// migration it is a member of one. zod v4 accepts a refined member and
-// still narrows on the discriminant, so the decision holds — but for a
-// different reason than the one written down.
+// These asserted against the generative *sound* schema until `sounds/`
+// retired (nested-tracks.md §18, decision 12); the entry carries the
+// same fields and the same refinement, which is exactly what the fold
+// promised.
 
-// A recipe is the request and nothing else now: takes live beside their
+// A request is the request and nothing else: takes live beside their
 // audio (bloom-in-tree.md §7), so the two fixtures are separate files in
 // the same way the real ones are.
-const base = {
-  name: 'scratch-vocal',
-  type: 'generative' as const,
-};
-
 const takeOne = {
   file: 'audio/scratch-vocal/1.wav',
   model: 'chatterbox',
@@ -29,20 +21,19 @@ const takeOne = {
   sha256: 'a'.repeat(64),
   generated_at: '2026-08-07T12:00:00Z',
 };
-const takes = { sound: 'scratch-vocal', chosen: 1, variants: [takeOne] };
+const takes = { gen: 'scratch-vocal', chosen: 1, variants: [takeOne] };
 
-const music = { ...base, prompt: 'dreamy keys', duration_seconds: 10 };
+const music = { prompt: 'dreamy keys', duration_seconds: 10 };
 const voice = {
-  ...base,
   text: 'I walked the fence line in the tall grass',
   voice_ref: 'justin-ref',
   voice_ref_sha256: 'b'.repeat(64),
 };
 
-describe('generative recipes', () => {
-  it('accepts a music recipe and a voice recipe', () => {
-    expect(generativeSoundSchema.safeParse(music).success).toBe(true);
-    expect(generativeSoundSchema.safeParse(voice).success).toBe(true);
+describe('generative requests', () => {
+  it('accepts a music request and a voice request', () => {
+    expect(generativeEntrySchema.safeParse(music).success).toBe(true);
+    expect(generativeEntrySchema.safeParse(voice).success).toBe(true);
   });
 
   it('accepts a takes file with no takes, however the absence is spelled', () => {
@@ -58,58 +49,34 @@ describe('generative recipes', () => {
     expect(absent.data?.variants).toEqual([]);
   });
 
-  it('sends takes and the pick out of the recipe, saying where they went', () => {
-    // Generating and choosing are things your machine did, so leaving them
-    // in the recipe meant the documented workflow modified a committed
-    // file (bloom-in-tree.md §7). Retired with a forwarding message rather
-    // than removed, the RETIRED_FADER precedent.
-    const parsed = generativeSoundSchema.safeParse({ ...voice, variants: [takeOne], chosen: 1 });
-    expect(parsed.success).toBe(false);
-    const byField = Object.fromEntries(
-      parsed.error!.issues.map((i) => [i.path.join('.'), i.message]),
-    );
-    expect(byField['variants']).toContain('audio/<name>/variants.yaml');
-    expect(byField['chosen']).toContain('audio/<name>/variants.yaml');
+  it('still admits the pre-fold sound: attachment, for the loader to forward', () => {
+    // `sounds/` has retired, but a takes file written before the fold
+    // says `sound:` — the schema admits it so the loader can tell it the
+    // rename instead of "unrecognized key" (model/project.ts), and the
+    // exactly-one refine still refuses a file claiming both.
+    expect(generativeTakesSchema.safeParse({ ...takes, gen: undefined, sound: 'scratch-vocal' }).success).toBe(true);
+    expect(generativeTakesSchema.safeParse({ ...takes, sound: 'scratch-vocal' }).success).toBe(false);
   });
 
-  it('tells a recipe written before the move where its provenance went', () => {
-    // `strictObject` would answer "Unrecognized keys", which is true and
-    // tells nobody anything — the RETIRED_FADER precedent. The migration
-    // these messages describe is mechanical and lossless: a recipe's
-    // `model`/`generated_at` describe the one run that made every variant
-    // it lists, which is the same shape `generate` writes now.
-    const old = { ...voice, model: 'chatterbox', generated_at: '2026-08-07T12:00:00Z', seed: 1 };
-    const parsed = generativeSoundSchema.safeParse(old);
-    expect(parsed.success).toBe(false);
-    const byField = Object.fromEntries(
-      parsed.error!.issues.map((i) => [i.path.join('.'), i.message]),
-    );
-    expect(byField['model']).toContain('copy this value onto every entry in audio/<name>/variants.yaml');
-    expect(byField['generated_at']).toContain('copy this value onto every entry');
-    // The seed has nowhere to go: each variant has recorded its own all
-    // along, so the advice is deletion rather than a move.
-    expect(byField['seed']).toContain('has no home — delete it');
-  });
-
-  it('makes a music recipe say how long, since filling cannot be told later', () => {
-    // Reachable only now that a recipe can exist before its takes. Left
-    // to `generate`, the failure names --bars/--duration, and those are
-    // refused on a recipe that already says what to generate — so the
-    // advice would be for a door that is locked. `check` says it instead.
+  it('makes a music request say how long, since filling cannot be told later', () => {
+    // Left to `generate`, the failure names --bars/--duration, and those
+    // are refused on a request that already says what to generate — so
+    // the advice would be for a door that is locked. `check` says it
+    // instead.
     const { duration_seconds: _seconds, ...noLength } = music;
-    const parsed = generativeSoundSchema.safeParse(noLength);
+    const parsed = generativeEntrySchema.safeParse(noLength);
     expect(parsed.success).toBe(false);
     expect(parsed.error!.issues[0]!.message).toContain('a music recipe needs a length');
-    expect(generativeSoundSchema.safeParse({ ...noLength, bars: 4 }).success).toBe(true);
+    expect(generativeEntrySchema.safeParse({ ...noLength, bars: 4 }).success).toBe(true);
     // A voice line is not asked: its length follows from the text.
-    expect(generativeSoundSchema.safeParse(voice).success).toBe(true);
+    expect(generativeEntrySchema.safeParse(voice).success).toBe(true);
   });
 
   it('keeps provenance on the take, so takes may differ', () => {
-    // A sound accumulates runs, and two takes a month apart can come from
-    // different model versions with different generation times. One
-    // `model`/`generated_at` on the sound could record only one answer for
-    // the whole list; on the variant it records each.
+    // A request accumulates runs, and two takes a month apart can come
+    // from different model versions with different generation times. One
+    // `model`/`generated_at` pair on the request could record only one
+    // answer for the whole list; on the variant it records each.
     const mixed = generativeTakesSchema.safeParse({
       ...takes,
       variants: [
@@ -125,37 +92,34 @@ describe('generative recipes', () => {
     });
     expect(mixed.success).toBe(true);
     expect(mixed.data?.variants.map((v) => v.model)).toEqual(['chatterbox', 'chatterbox-2']);
-    // And provenance on the sound itself is gone, not merely optional:
-    // a leftover would otherwise sit there unread.
-    expect(generativeSoundSchema.safeParse({ ...voice, model: 'chatterbox' }).success).toBe(false);
   });
 
-  it('refuses a recipe that is both kinds or neither', () => {
+  it('refuses a request that is both kinds or neither', () => {
     // The chimera and the blank. A generator handed either would have to
     // guess which model to run, which is the guess this exists to remove.
-    const both = generativeSoundSchema.safeParse({ ...music, text: 'hello' });
+    const both = generativeEntrySchema.safeParse({ ...music, text: 'hello' });
     expect(both.success).toBe(false);
     expect(both.error?.issues[0]?.message).toMatch(/either .prompt. \(music\) or .text. \(voice\)/);
 
-    const neither = generativeSoundSchema.safeParse(base);
+    const neither = generativeEntrySchema.safeParse({});
     expect(neither.success).toBe(false);
     expect(neither.error?.issues[0]?.message).toMatch(/needs .prompt. \(music\) or .text. \(voice\)/);
   });
 
-  it('keeps music-only fields off voice recipes', () => {
+  it('keeps music-only fields off voice requests', () => {
     // A voice line's length follows from its text, so `duration_seconds`
-    // on one is a number nothing would honour — and a recipe carrying a
-    // field its generator ignores is a recipe that lies about its inputs.
+    // on one is a number nothing would honour — and a request carrying a
+    // field its generator ignores is a request that lies about its inputs.
     for (const field of ['lyrics', 'bpm', 'bars', 'duration_seconds'] as const) {
       const value = field === 'lyrics' ? 'la la' : field === 'bpm' ? 120 : 4;
-      const parsed = generativeSoundSchema.safeParse({ ...voice, [field]: value });
-      expect(parsed.success, `${field} on a voice recipe`).toBe(false);
+      const parsed = generativeEntrySchema.safeParse({ ...voice, [field]: value });
+      expect(parsed.success, `${field} on a voice request`).toBe(false);
       expect(parsed.error?.issues[0]?.path).toEqual([field]);
       expect(parsed.error?.issues[0]?.message).toMatch(/music-only/);
     }
   });
 
-  it('keeps voice-only fields off music recipes', () => {
+  it('keeps voice-only fields off music requests', () => {
     for (const field of [
       'voice_ref',
       'voice_ref_sha256',
@@ -168,15 +132,15 @@ describe('generative recipes', () => {
           : field === 'voice_ref_sha256'
             ? 'c'.repeat(64)
             : 0.3;
-      const parsed = generativeSoundSchema.safeParse({ ...music, [field]: value });
-      expect(parsed.success, `${field} on a music recipe`).toBe(false);
+      const parsed = generativeEntrySchema.safeParse({ ...music, [field]: value });
+      expect(parsed.success, `${field} on a music request`).toBe(false);
       expect(parsed.error?.issues[0]?.path).toEqual([field]);
       expect(parsed.error?.issues[0]?.message).toMatch(/voice-only/);
     }
   });
 
-  it('accepts a voice recipe with no reference at all — the default voice', () => {
-    // `voice_ref` is optional, not merely paired: a recipe with `text`
+  it('accepts a voice request with no reference at all — the default voice', () => {
+    // `voice_ref` is optional, not merely paired: a request with `text`
     // alone means the model's own default voice, which is what bloom
     // uses until a reference recording exists. The voice is then defined
     // by `model:` and nothing else, and that is honest rather than
@@ -189,38 +153,38 @@ describe('generative recipes', () => {
     const { voice_ref, voice_ref_sha256, ...noReference } = voice;
     void voice_ref;
     void voice_ref_sha256;
-    expect(generativeSoundSchema.safeParse(noReference).success).toBe(true);
+    expect(generativeEntrySchema.safeParse(noReference).success).toBe(true);
   });
 
   it('requires the reference recording and its hash together', () => {
-    // The recording *is* the voice (§1.3), so the recipe pins its bytes
+    // The recording *is* the voice (§1.3), so the request pins its bytes
     // the way it pins a variant's. A name without a hash would let the
-    // file change under a recipe still claiming to describe it — the
+    // file change under a request still claiming to describe it — the
     // provenance argument for preferring a recording to a vendor ID
     // collapses if the recording is not pinned.
-    const nameOnly = generativeSoundSchema.safeParse({ ...voice, voice_ref_sha256: undefined });
+    const nameOnly = generativeEntrySchema.safeParse({ ...voice, voice_ref_sha256: undefined });
     expect(nameOnly.success).toBe(false);
     expect(nameOnly.error?.issues[0]?.message).toMatch(/go together/);
 
-    const hashOnly = generativeSoundSchema.safeParse({ ...voice, voice_ref: undefined });
+    const hashOnly = generativeEntrySchema.safeParse({ ...voice, voice_ref: undefined });
     expect(hashOnly.success).toBe(false);
   });
 
   it('still rejects unknown keys', () => {
     // The refine sits on a strict object; adding one must not have
     // loosened the other.
-    expect(generativeSoundSchema.safeParse({ ...voice, tempo: 120 }).success).toBe(false);
+    expect(generativeEntrySchema.safeParse({ ...voice, tempo: 120 }).success).toBe(false);
   });
 });
 
 describe('the voice delivery knobs', () => {
   // Bounds narrower than Chatterbox's, on purpose: widening a range
-  // later leaves every committed recipe valid, narrowing one does not
+  // later leaves every committed request valid, narrowing one does not
   // (voice-generation.md §8).
-  it('accepts a voice recipe carrying either or both', () => {
-    expect(generativeSoundSchema.safeParse({ ...voice, exaggeration: 0.3 }).success).toBe(true);
-    expect(generativeSoundSchema.safeParse({ ...voice, conviction: 0.3 }).success).toBe(true);
-    const both = generativeSoundSchema.safeParse({
+  it('accepts a voice request carrying either or both', () => {
+    expect(generativeEntrySchema.safeParse({ ...voice, exaggeration: 0.3 }).success).toBe(true);
+    expect(generativeEntrySchema.safeParse({ ...voice, conviction: 0.3 }).success).toBe(true);
+    const both = generativeEntrySchema.safeParse({
       ...voice,
       exaggeration: 2,
       conviction: 1,
@@ -232,10 +196,10 @@ describe('the voice delivery knobs', () => {
     // A clamped value would be recorded as the number asked for while
     // the audio came from a different one.
     for (const bad of [{ exaggeration: 0.2 }, { exaggeration: 2.1 }]) {
-      expect(generativeSoundSchema.safeParse({ ...voice, ...bad }).success).toBe(false);
+      expect(generativeEntrySchema.safeParse({ ...voice, ...bad }).success).toBe(false);
     }
     for (const bad of [{ conviction: 0.05 }, { conviction: 1.1 }]) {
-      expect(generativeSoundSchema.safeParse({ ...voice, ...bad }).success).toBe(false);
+      expect(generativeEntrySchema.safeParse({ ...voice, ...bad }).success).toBe(false);
     }
   });
 });

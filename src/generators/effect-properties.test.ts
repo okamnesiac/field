@@ -56,12 +56,28 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// One file per sound (project-layout.md §1.3, §4).
+// One file per wrapper track (project-layout.md §1.3, §4). The effect
+// sounds these properties were written against folded into tracks with
+// one input and one insert (nested-tracks.md §18, decision 12); the
+// fixtures keep the sound-shaped [type, source, ...params] spelling and
+// this translates it, so every assertion still goes through the build
+// rules — write a file, build the label, read the WAV.
 function writeSound(name: string, lines: string[]): void {
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+  const type = lines[0]!.replace('type: ', '');
+  const source = lines[1]!.replace('source: ', '');
+  const params = lines.slice(2).map((line) => `    ${line}`);
+  mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
   writeFileSync(
-    join(root, `songs/creek/sounds/${name}.yaml`),
-    [`name: ${name}`, ...lines, ''].join('\n'),
+    join(root, `songs/creek/tracks/${name}.yaml`),
+    [
+      `name: ${name}`,
+      'inserts:',
+      `  - effect: ${type}`,
+      ...params,
+      'inputs:',
+      `  - audio: ${source}`,
+      '',
+    ].join('\n'),
   );
 }
 
@@ -73,7 +89,7 @@ async function importSource(name: string, ...channels: Float32Array[]): Promise<
 }
 
 async function renderChannels(label: string): Promise<Float32Array[]> {
-  const outcomes = await buildLabels(root, [`//songs/creek/sound:${label}`]);
+  const outcomes = await buildLabels(root, [`//songs/creek/track:${label}`]);
   return readWav(outcomes.find((o) => o.label.endsWith(`:${label}`))!.outputPath!).channels;
 }
 
