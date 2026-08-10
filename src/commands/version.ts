@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packageVersion } from '../packageVersion.js';
 import { socketPathFor } from '../socketPath.js';
@@ -40,6 +40,12 @@ export interface VersionReport {
     commit?: string | undefined;
     branch?: string | undefined;
     dirtyFiles?: number | undefined;
+    // Set when the artifact's baked identity and the checkout's HEAD
+    // disagree — the stale-dist case --version exists to catch.
+    checkoutCommit?: string | undefined;
+    // Set when HEAD matches but the working tree's dirty count moved
+    // since the build: edits without a commit also go stale.
+    checkoutDirtyFiles?: number | undefined;
   };
   workerProtocol: number;
   daemons: DaemonReport[];
@@ -54,16 +60,22 @@ function packageRoot(): string {
 // the thing that changed under you moved twenty minutes ago. Absent when
 // this is not a git checkout, which is honest rather than a fallback to
 // something invented.
-function buildIdentity(): {
+interface BuildIdentity {
   commit?: string | undefined;
   branch?: string | undefined;
   dirtyFiles?: number | undefined;
-} {
+  checkoutCommit?: string | undefined;
+  checkoutDirtyFiles?: number | undefined;
+}
+
+function liveIdentity(): BuildIdentity {
   const git = (args: string[]): string | undefined => {
     const r = spawnSync('git', ['-C', packageRoot(), ...args], { encoding: 'utf8' });
     return r.status === 0 ? r.stdout.trim() : undefined;
   };
-  const commit = git(['rev-parse', '--short', 'HEAD']);
+  // Full sha, compared exactly — --short lengthens as the repo grows,
+  // so equal objects can compare unequal as strings (Bugbot on #121).
+  const commit = git(['rev-parse', 'HEAD']);
   if (commit === undefined) return {};
   const status = git(['status', '--porcelain']);
   return {
@@ -71,6 +83,54 @@ function buildIdentity(): {
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
     dirtyFiles: status === undefined ? undefined : status.split('\n').filter((l) => l.trim()).length,
   };
+}
+
+// The artifact reports what it was BUILT from — `pnpm build` stamps
+// dist/build-info.json (scripts/stamp-build.mjs) — because the checkout
+// moves the moment a branch is switched, and a --version that reads
+// HEAD at invocation describes code that is not running (it reported a
+// branch whose message changes the installed dist did not contain, and
+// the confusion cost a debugging round, 2026-08-09). Running from
+// source (tsx, vitest) keeps the live read: there the checkout IS the
+// code. An unstamped dist — a build from before this — falls back to
+// the live read, the old behavior rather than a crash.
+export function resolveIdentity(stamped: BuildIdentity, live: BuildIdentity): BuildIdentity {
+  const commitDrift =
+    live.commit !== undefined && stamped.commit !== undefined && live.commit !== stamped.commit;
+  // Same commit but a different dirty count is drift too: build from a
+  // clean tree, edit without committing, and HEAD never moves while the
+  // running code goes stale (Codex on #121). The count is the affordable
+  // signal — equal counts over different edits stay invisible, which a
+  // build-input fingerprint would catch and this deliberately does not.
+  const dirtyDrift =
+    !commitDrift &&
+    live.commit !== undefined &&
+    (live.dirtyFiles ?? 0) !== (stamped.dirtyFiles ?? 0);
+  return {
+    ...stamped,
+    ...(commitDrift ? { checkoutCommit: live.commit } : {}),
+    ...(dirtyDrift ? { checkoutDirtyFiles: live.dirtyFiles ?? 0 } : {}),
+  };
+}
+
+function buildIdentity(): BuildIdentity {
+  // Inside THIS package's dist directory exactly — a substring test on
+  // any `dist` path component classifies a source checkout that merely
+  // lives under some ancestor named dist as compiled output, and then a
+  // tsx run reports someone else's sha with advice to rebuild (minjudd
+  // and Codex on #121, independently).
+  const here = fileURLToPath(import.meta.url);
+  const fromDist = here.startsWith(join(packageRoot(), 'dist') + sep);
+  if (!fromDist) return liveIdentity();
+  try {
+    const stamped = JSON.parse(
+      readFileSync(join(packageRoot(), 'dist', 'build-info.json'), 'utf8'),
+    ) as BuildIdentity;
+    if (stamped.commit === undefined) return liveIdentity();
+    return resolveIdentity(stamped, liveIdentity());
+  } catch {
+    return liveIdentity();
+  }
 }
 
 // A hello against a socket that is already there. Deliberately raw rather
@@ -201,9 +261,24 @@ export async function versionReport(root: string): Promise<VersionReport> {
 export function formatVersionReport(report: VersionReport, root: string): string {
   const { cli } = report;
   const lines: string[] = [];
+  // Shortened at display alone; the report and the drift comparison
+  // carry full shas.
+  const short = (sha: string): string => sha.slice(0, 7);
   const build = cli.commit
-    ? `${cli.commit}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
-      `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}`
+    ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
+      `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
+      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}` +
+      // No count here: checkoutDirtyFiles is the checkout's absolute
+      // current state, but any number in this sentence reads as a delta
+      // since the build — and a stamp taken from a dirty tree makes
+      // "0 uncommitted files since the build" false on every reading
+      // (minjudd on #121). The report keeps the number; the sentence
+      // only needs the fact.
+      `${
+        cli.checkoutDirtyFiles !== undefined
+          ? '; checkout has changed since the build — pnpm build to update'
+          : ''
+      }`
     : 'not a git checkout';
   lines.push(`field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);
