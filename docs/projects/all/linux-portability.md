@@ -32,7 +32,7 @@ all along (sclang runs on Linux), and the daemon tests are
 **Goal:** field builds, tests, and plays on Linux, so that the parts of
 the system with no business being platform-bound stop being so — and so
 CI can run most of the suite on a runner that does not bill at 10×. The
-charter does not change: macOS is the product platform (overview.md
+charter does not change: macOS is the product platform (docs/README.md
 "V1 platform scope"), and this buys reproducibility and cheap CI, not a
 second supported product.
 
@@ -228,7 +228,7 @@ second supported product.
    for it.
 
    Running everything on macOS was also the right default for the
-   platform the product ships on (overview.md "V1 platform scope"):
+   platform the product ships on (docs/README.md "V1 platform scope"):
    giving the product platform partial coverage is the wrong way round.
 
 5. **Linux is a build-and-test target, not a support promise.** No

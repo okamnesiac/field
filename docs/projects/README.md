@@ -128,7 +128,7 @@ and not `plans/`.
 ## What doesn't go here
 
 How-it-works documentation stays in the [docs root](../):
-[overview](../overview.md), [architecture](../architecture.md),
+[overview](../README.md), [architecture](../architecture.md),
 [tracks](../tracks.md), [project model](../project-model.md),
 [build graph](../build-graph.md), [audio engine](../audio-engine.md). Those are living documents describing
 current design and behaviour. These are point-in-time execution artifacts:
