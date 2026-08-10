@@ -5,7 +5,7 @@ import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { reaches, type Reach } from '../model/levels.js';
 import { generatorFor, type ExtraInput, type RunContext } from '../generators/index.js';
-import { deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
+import { assertGenerated, deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
 // store under .field/cache/cas/<sha256>; the action index maps an action
@@ -308,6 +308,10 @@ export async function build(
   nodes: GraphNode[],
   runner: GeneratorRunner = defaultRunner,
 ): Promise<BuildOutcome[]> {
+  // Across every requested target at once, before any per-target walk:
+  // a queue where each target hides its own takeless request must
+  // report one list, not throw per target (Codex on #119).
+  assertGenerated(graph, nodes);
   const outcomes: BuildOutcome[] = [];
   const built = new Map<string, BuildOutcome>();
   for (const start of nodes) {

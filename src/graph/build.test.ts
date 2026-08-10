@@ -213,7 +213,7 @@ describe('build', () => {
     // typo in a name that is spelled correctly and sitting on disk.
     writeTrack('topline', 'name: topline\ninputs:\n  - generative:\n      text: the water knows the way\n');
     await expect(buildLabels(root, ['//songs/creek/gen:topline'])).rejects.toThrow(
-      'has no takes yet — field generate creek/topline --seed <n>',
+      /has no takes yet\n\n# Use this command to generate\. Specify a seed with --seed <n>\nfield generate creek\/topline$/,
     );
     // The same answer when it is reached as somebody else's dependency,
     // which is how a project actually hits this. Different code path:
@@ -236,8 +236,70 @@ describe('build', () => {
       );
     }
     await expect(buildLabels(root, ['//songs/tall-grass/gen/...'])).rejects.toThrow(
-      /2 generative requests with no takes yet:[\s\S]*field generate tall-grass\/bridge[\s\S]*field generate tall-grass\/topline/,
+      /2 generative requests with no takes yet\n\n# Use these commands to generate\.[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
     );
+
+    // And the answer a *consumer* gets is the whole list, not the first
+    // pending dependency the walk happened to meet: peeling them one
+    // play at a time means generating, waiting, and being told about
+    // the next one (#118-era session finding).
+    writeFileSync(
+      join(root, 'songs/tall-grass/tracks/main.yaml'),
+      [
+        'name: main',
+        'inputs:',
+        '  - track: topline',
+        '  - track: bridge',
+        '    at: [3]',
+        '',
+      ].join('\n'),
+    );
+    await expect(buildLabels(root, ['//songs/tall-grass/track:main'])).rejects.toThrow(
+      /2 generative requests have no takes yet\n\n# Use these commands to generate\.[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
+    );
+
+    // Across *independent* roots too: a queue of targets, each with its
+    // own takeless leaf, is still one session and gets one list — the
+    // per-target aggregate alone re-created the peel at the queue level
+    // (Codex on #119).
+    writeFileSync(
+      join(root, 'songs/tall-grass/tracks/verse.yaml'),
+      ['name: verse', 'inputs:', '  - track: topline', ''].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/tall-grass/tracks/chorus.yaml'),
+      ['name: chorus', 'inputs:', '  - track: bridge', ''].join('\n'),
+    );
+    await expect(
+      buildLabels(root, ['//songs/tall-grass/track:verse', '//songs/tall-grass/track:chorus']),
+    ).rejects.toThrow(
+      /2 generative requests have no takes yet[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
+    );
+
+    // Same *name* in two songs — reachable exactly since the walk took
+    // many starts, which may span songs. A name comparator meets two
+    // equal keys and its order collapses to walk order; the label is
+    // unique by construction, so sorting on it holds whichever way the
+    // arguments arrive (minjudd on #119).
+    createSong(root, 'alpha');
+    mkdirSync(join(root, 'songs/alpha/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/alpha/tracks/bridge.yaml'),
+      'name: bridge\ninputs:\n  - generative:\n      text: over the water\n',
+    );
+    writeFileSync(
+      join(root, 'songs/alpha/tracks/carrier.yaml'),
+      ['name: carrier', 'inputs:', '  - track: bridge', ''].join('\n'),
+    );
+    const bothWays = [
+      ['//songs/alpha/track:carrier', '//songs/tall-grass/track:chorus'],
+      ['//songs/tall-grass/track:chorus', '//songs/alpha/track:carrier'],
+    ];
+    for (const order of bothWays) {
+      await expect(buildLabels(root, order)).rejects.toThrow(
+        /\nfield generate alpha\/bridge\nfield generate tall-grass\/bridge/,
+      );
+    }
   });
 
   it('points at the singular when someone types the old plural package', async () => {

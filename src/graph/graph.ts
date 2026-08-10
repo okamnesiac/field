@@ -99,8 +99,20 @@ export interface UngeneratedSound {
   name: string;
 }
 
+// The fill instruction is shaped to be copied: a blank line, a
+// #-comment (itself paste-safe in a shell) carrying the seed note, and
+// the bare command — --seed stays out of it, because omitted, generate
+// draws a seed and records it per take, so the line is complete as
+// written. The exact shape is Justin's spec, verbatim.
 function fillCommand(pending: UngeneratedSound): string {
-  return `field generate ${pending.song}/${pending.name} --seed <n>`;
+  return `field generate ${pending.song}/${pending.name}`;
+}
+function fillInstructions(pending: UngeneratedSound[]): string {
+  const plural = pending.length === 1 ? 'this command' : 'these commands';
+  return (
+    `\n\n# Use ${plural} to generate. Specify a seed with --seed <n>\n` +
+    pending.map(fillCommand).join('\n')
+  );
 }
 
 // Requires a project with no diagnostics: the graph trusts what validate
@@ -474,7 +486,7 @@ export function resolveLabel(graph: Graph, label: Label): GraphNode {
     // because every resolution comes through here.
     const pending = graph.ungenerated.get(formatted);
     if (pending !== undefined) {
-      throw new Error(`${formatted} has no takes yet — ${fillCommand(pending)}`);
+      throw new Error(`${formatted} has no takes yet${fillInstructions([pending])}`);
     }
     const hint = singularHint(graph, { kind: 'label', label });
     throw new Error(`no such label: ${formatted}${hint}`);
@@ -496,13 +508,13 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
     );
     if (pending.length === 1) {
       throw new Error(
-        `${formatLabel(pending[0]!.label)} has no takes yet — ${fillCommand(pending[0]!)}`,
+        `${formatLabel(pending[0]!.label)} has no takes yet${fillInstructions([pending[0]!])}`,
       );
     }
     if (pending.length > 1) {
       throw new Error(
-        `${formatPattern(pattern)} matched ${pending.length} generative requests with no takes yet:\n` +
-          pending.map((p) => `  ${fillCommand(p)}`).join('\n'),
+        `${formatPattern(pattern)} matched ${pending.length} generative requests with no ` +
+          `takes yet${fillInstructions(pending)}`,
       );
     }
     throw new Error(
@@ -512,8 +524,52 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
   return matched;
 }
 
+// Every takeless request reachable from any of the starts, reported as
+// one instruction block. One walk over the whole request, because any
+// finer scope re-creates the peel it exists to end: failing on the
+// first pending dependency meant generate, wait, be told the next
+// (found exercising the folded format), and a per-target aggregate
+// alone moved the same loop up to the build queue (Codex on #119).
+// Other resolution failures still throw where they stand, because they
+// are errors rather than work a walk can enumerate.
+export function assertGenerated(graph: Graph, starts: GraphNode[]): void {
+  const seen = new Set<string>();
+  const pending = new Map<string, UngeneratedSound>();
+  const visit = (node: GraphNode) => {
+    const key = formatLabel(node.label);
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (node.kind !== 'rule') return;
+    for (const dep of node.deps) {
+      const formatted = formatLabel(dep);
+      const takeless = graph.ungenerated.get(formatted);
+      if (takeless !== undefined) {
+        pending.set(formatted, takeless);
+        continue;
+      }
+      visit(resolveLabel(graph, dep));
+    }
+  };
+  for (const start of starts) visit(start);
+  if (pending.size === 0) return;
+  // Sorted on the formatted label, which the map is keyed by and so is
+  // unique by construction — a *name* comparator meets two equal keys
+  // the moment starts span songs (two songs, each a takeless `bridge`)
+  // and never returns 0, collapsing the order back to walk order, the
+  // very thing the sort exists to normalize (minjudd on #119).
+  const sorted = [...pending.values()].sort((a, b) =>
+    formatLabel(a.label) < formatLabel(b.label) ? -1 : 1,
+  );
+  const fact =
+    pending.size === 1
+      ? `${formatLabel(sorted[0]!.label)} has no takes yet`
+      : `${pending.size} generative requests have no takes yet`;
+  throw new Error(`${fact}${fillInstructions(sorted)}`);
+}
+
 // Transitive dependencies of a node, dependencies first, node last.
 export function deps(graph: Graph, start: GraphNode): GraphNode[] {
+  assertGenerated(graph, [start]);
   const out: GraphNode[] = [];
   const seen = new Set<string>();
   const visit = (node: GraphNode) => {
