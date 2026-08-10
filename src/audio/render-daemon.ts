@@ -34,7 +34,7 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 6;
+export const RENDER_PLAN_VERSION = 7;
 
 export class RenderUnavailableError extends Error {}
 
@@ -101,7 +101,18 @@ export interface NormalizePlan {
   bit_depth: 16 | 24 | 32;
 }
 
-export type RenderPlan = EffectsPlan | StemPlan | MixPlan | NormalizePlan;
+// The float edge conversion (multi-rate.md decision 4): rate and nothing
+// else. Where normalize quantizes for delivery, resample sits between two
+// float stages and writes float32 — quantizing there would clip a stem
+// legitimately above 0 dBFS before its edge gain applies.
+export interface ResamplePlan {
+  op: 'resample';
+  input: string;
+  output: string;
+  sample_rate: number;
+}
+
+export type RenderPlan = EffectsPlan | StemPlan | MixPlan | NormalizePlan | ResamplePlan;
 
 // Resolved per call rather than cached: the binary can be built partway
 // through a session, and a stale "missing" answer would outlive it.

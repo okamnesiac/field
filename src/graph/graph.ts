@@ -1,6 +1,8 @@
 import { join } from 'node:path';
-import { wavFrameCount } from '../audio/wav.js';
+import { readWavHeader, wavFrameCount } from '../audio/wav.js';
 import {
+  convertRef,
+  convertRefName,
   formatLabel,
   genRef,
   genRefName,
@@ -14,6 +16,7 @@ import {
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
+import type { ResampleSpec } from '../generators/resample.js';
 import { entryRef, generatorName, planTrack } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset } from '../schema/index.js';
@@ -40,9 +43,16 @@ export interface GeneratorNode {
   kind: 'rule';
   label: Label;
   songDir: string;
-  // A declared sound, or a spec synthesized from the model (stem, mix).
+  // A declared sound, or a spec synthesized from the model (stem,
+  // resample).
   spec: GeneratorSpec;
   deps: Label[];
+  // The rate this node renders at (multi-rate.md decision 3): the owning
+  // track's effective rate for stems and entry generators, the target
+  // rate for a resample edge, the project rate for declared sounds. It
+  // reaches the action key and the run context, which is what makes a
+  // `rate:` edit re-render exactly the tracks it moved.
+  sampleRate: number;
 }
 
 // A deliberate sound's committed audio (project-layout.md §1.4):
@@ -88,7 +98,7 @@ function fillCommand(pending: UngeneratedSound): string {
 // Requires a project with no diagnostics: the graph trusts what validate
 // accepted (unique names, known references, valid tempo maps).
 export function buildGraph(project: LoadedProject): Graph {
-  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  const projectRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const nodes = new Map<string, GraphNode>();
   const ungenerated = new Map<string, UngeneratedSound>();
   const addRule = (
@@ -96,6 +106,7 @@ export function buildGraph(project: LoadedProject): Graph {
     songDir: string,
     spec: GeneratorSpec,
     refLabel: (ref: string) => Label,
+    sampleRate: number,
   ) => {
     // Each rule declares its ordered sources; the classifier maps each
     // ref — a name in the song's one namespace or a //shared/asset:
@@ -103,7 +114,7 @@ export function buildGraph(project: LoadedProject): Graph {
     // participate by content hash without being nodes.
     const impl = generatorFor(spec);
     const deps: Label[] = impl.sources(spec).map(refLabel);
-    nodes.set(formatLabel(label), { kind: 'rule', label, songDir, spec, deps });
+    nodes.set(formatLabel(label), { kind: 'rule', label, songDir, spec, deps, sampleRate });
   };
 
   const sharedByName = new Map<string, Asset>();
@@ -122,7 +133,7 @@ export function buildGraph(project: LoadedProject): Graph {
     // sounds carry. Chosen generate variants are committed content, so
     // they join the map; a ref absent here is a buildable sound.
     const sha256BySource = new Map<string, string>();
-    const assetNames = new Set<string>();
+    const assetByName = new Map<string, Asset>();
     for (const [name, asset] of sharedByName) {
       sha256BySource.set(`//${SHARED_ASSETS_PKG}:${name}`, asset.sha256);
     }
@@ -131,7 +142,7 @@ export function buildGraph(project: LoadedProject): Graph {
         const label: Label = { pkg: `${pkgBase}/asset`, name: asset.name };
         nodes.set(formatLabel(label), { kind: 'asset', label, scopeDir: song.dir, asset });
         sha256BySource.set(asset.name, asset.sha256);
-        assetNames.add(asset.name);
+        assetByName.set(asset.name, asset);
       }
     }
     // Where a committed source's bytes live, for loop tiling and for
@@ -155,7 +166,9 @@ export function buildGraph(project: LoadedProject): Graph {
       if (placed !== undefined) return { pkg: `${pkgBase}/track`, name: placed };
       const gen = genRefName(ref);
       if (gen !== undefined) return { pkg: `${pkgBase}/gen`, name: gen };
-      if (assetNames.has(ref)) return { pkg: `${pkgBase}/asset`, name: ref };
+      const conv = convertRefName(ref);
+      if (conv !== undefined) return { pkg: `${pkgBase}/convert`, name: conv };
+      if (assetByName.has(ref)) return { pkg: `${pkgBase}/asset`, name: ref };
       return { pkg: `${pkgBase}/sound`, name: ref };
     };
     for (const file of song.sounds) {
@@ -193,7 +206,10 @@ export function buildGraph(project: LoadedProject): Graph {
           fileBySource.set(sound.name, { base: song.dir, file: variant.file });
         }
       } else {
-        addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel);
+        // Declared sounds belong to the song and render at the project
+        // rate — a supercollider render asks for it, and the effects
+        // process at their input's own rate without reading it.
+        addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel, projectRate);
       }
     }
     // Generator entries mint their own nodes (nested-tracks.md §18
@@ -210,15 +226,26 @@ export function buildGraph(project: LoadedProject): Graph {
     // the chosen take, every take is auditionable by number, and a
     // request with no takes joins `ungenerated` so resolution fails
     // naming the command that fills it.
+    // A track's effective rate (multi-rate.md decision 3): its own, or
+    // the project's — never the placing parent's, because a track renders
+    // once.
+    const trackRate = (track: { rate?: number | undefined }): number =>
+      track.rate ?? projectRate;
+    // Entry generators render at their owner's rate — the render is the
+    // track's own content, so producing it at the project rate only to
+    // convert it back at the edge would be a conversion nobody asked for.
+    const scEntryRate = new Map<string, number>();
     for (const file of song.tracks) {
       for (const entry of file.data.inputs) {
         if (entry.supercollider !== undefined) {
           const name = generatorName(entry, file.data.name);
+          scEntryRate.set(name, trackRate(file.data));
           addRule(
             { pkg: `${pkgBase}/gen`, name },
             song.dir,
             { name, type: 'supercollider', ...entry.supercollider },
             refLabel,
+            trackRate(file.data),
           );
         } else if (entry.generative !== undefined) {
           const name = generatorName(entry, file.data.name);
@@ -254,9 +281,60 @@ export function buildGraph(project: LoadedProject): Graph {
         }
       }
     }
+    // What rate a source arrives at, so a placement can convert at the
+    // edge when it differs from the consuming track's (multi-rate.md
+    // decision 4). Committed content answers from the ledger's recorded
+    // fact where the import wrote one, else from its own header — the
+    // same 44-byte seek-read the loop planner already pays; a placed
+    // track answers from the model; an entry generator from its owner;
+    // an effect sound with its source's rate, because effects process at
+    // the file's own rate. Undefined means unknowable here (an
+    // ungenerated recipe, an unreadable file): no conversion is minted,
+    // and the stem rule's own header check is the backstop.
+    const headerRate = (base: string, file: string): number | undefined => {
+      try {
+        return readWavHeader(join(project.root, base, file)).sampleRate;
+      } catch {
+        return undefined;
+      }
+    };
+    const committedRate = (ref: string): number | undefined => {
+      const committed = fileBySource.get(ref);
+      return committed === undefined ? undefined : headerRate(committed.base, committed.file);
+    };
+    const soundByName = new Map(song.sounds.map((f) => [f.data.name, f.data]));
+    const trackByName = new Map(song.tracks.map((f) => [f.data.name, f.data]));
+    const rateMemo = new Map<string, number | undefined>();
+    const sourceRate = (ref: string): number | undefined => {
+      if (rateMemo.has(ref)) return rateMemo.get(ref);
+      rateMemo.set(ref, undefined); // settles a source cycle; check refuses them first
+      let rate: number | undefined;
+      const shared = sharedAssetName(ref);
+      const placed = trackRefName(ref);
+      const gen = genRefName(ref);
+      const asset = assetByName.get(ref);
+      if (shared !== undefined) {
+        const pinned = sharedByName.get(shared);
+        if (pinned !== undefined) rate = pinned.sample_rate ?? headerRate('shared', pinned.file);
+      } else if (placed !== undefined) {
+        const child = trackByName.get(placed);
+        if (child !== undefined) rate = trackRate(child);
+      } else if (gen !== undefined) {
+        rate = scEntryRate.get(gen) ?? committedRate(ref);
+      } else if (asset !== undefined) {
+        rate = asset.sample_rate ?? headerRate(song.dir, asset.file);
+      } else {
+        const sound = soundByName.get(ref);
+        if (sound?.type === 'generative') rate = committedRate(ref);
+        else if (sound?.type === 'supercollider') rate = projectRate;
+        else if (sound !== undefined) rate = sourceRate(sound.source);
+      }
+      rateMemo.set(ref, rate);
+      return rate;
+    };
     const renderable = song.tracks.map((t) => t.data);
     if (song.tempo) {
-      const tempoMap = new TempoMap(song.tempo.data.tempo, sampleRate);
+      const tempoMap = new TempoMap(song.tempo.data.tempo, projectRate);
       // Loops without `every` tile at the source's length, so the plan
       // needs frame counts — but only for the sources such loops touch.
       const framesBySource = new Map<string, number>();
@@ -293,23 +371,61 @@ export function buildGraph(project: LoadedProject): Graph {
           track.name === SONG_OUTPUT_NAME
             ? { lengthSamples, loop: song.song?.data.loop }
             : {};
+        const rate = trackRate(track);
+        // Rates convert at the placement (multi-rate.md decision 4): a
+        // source arriving at another rate gets a resample node between it
+        // and this stem, named for the source and the rate it becomes —
+        // track: and gen: refs keep their kind in the name, so a track
+        // and a sound legally sharing a name cannot mint one node for two
+        // sources. One node per (source, rate) however many placements
+        // consume it; the action cache extends that across songs. The
+        // guard is for a name crafted to collide anyway (a sound
+        // literally named "track-foo"), which validate does not chase.
+        const convertBySource = new Map<string, string>();
+        for (const entry of track.inputs) {
+          const raw = entryRef(entry, track.name);
+          if (convertBySource.has(raw)) continue;
+          const src = sourceRate(raw);
+          if (src === undefined || src === rate) continue;
+          const shared = sharedAssetName(raw);
+          const base = shared !== undefined ? `shared-${shared}` : raw.replace(':', '-');
+          const name = `${base}-${rate}`;
+          const label: Label = { pkg: `${pkgBase}/convert`, name };
+          const existing = nodes.get(formatLabel(label));
+          if (existing !== undefined) {
+            if (existing.kind !== 'rule' || (existing.spec as ResampleSpec).source !== raw) {
+              throw new Error(
+                `convert node ${formatLabel(label)} is claimed by two different sources — rename one`,
+              );
+            }
+          } else {
+            addRule(label, song.dir, { name, type: 'resample', source: raw, sample_rate: rate }, refLabel, rate);
+          }
+          convertBySource.set(raw, convertRef(name));
+        }
         // A track plans in its own time (nested-tracks.md §13). The two
         // timelines never have to be reconciled as maps: this stem's
         // positions resolve to samples here, its parent's `at` resolves to
         // samples under the parent's map, and the daemon sums by sample
         // offset — so a 7/8 child inside a 4/4 parent is an addition, not
-        // a conversion.
+        // a conversion. Across a rate boundary the addition holds, each
+        // side computed in its own rate (§13 as amended by multi-rate).
         //
-        // The song's map when the track declares none, which is every
-        // track today, so nothing that exists now changes key.
+        // The song's map when the track declares none — at the track's
+        // rate, because ticks project to samples differently at 96 kHz
+        // than at 48; a track at the project rate keeps the song's own
+        // map, so nothing that exists now changes key.
         const local = track.time?.tempo
-          ? new TempoMap(track.time.tempo, sampleRate)
-          : tempoMap;
+          ? new TempoMap(track.time.tempo, rate)
+          : rate === projectRate
+            ? tempoMap
+            : new TempoMap(song.tempo.data.tempo, rate);
         addRule(
           { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,
-          planTrack(track, local, sha256BySource, framesBySource, extent),
+          planTrack(track, local, sha256BySource, framesBySource, extent, convertBySource),
           refLabel,
+          rate,
         );
       }
     }

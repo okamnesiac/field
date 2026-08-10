@@ -148,29 +148,33 @@ convention, Bazel-style:
 
 ```bash
 field build //songs/...                        # everything
-field build //songs/creek/sound:vocal-48k      # one render
-field query 'deps(//songs/creek/sound:vocal-48k)'
-field explain //songs/creek/sound:vocal-48k
+field build //songs/creek/track:lead-vocal     # one stem
+field query 'deps(//songs/creek/track:lead-vocal)'
+field explain //songs/creek/convert:lead-take-48000
 ```
 
-The first build runs the rule (sample-rate conversion in the daemon) and
-materializes output under `.field/out/`; the second is an action-cache hit
-that executes nothing. `explain` shows why:
+The chosen take is 24 kHz mono — Chatterbox's own rate, no project's — so
+the placement edge mints a conversion at the song's 48 kHz automatically
+(multi-rate.md decision 4); nothing in the project spells it. The first
+build runs it in the daemon and materializes output under `.field/out/`;
+the second is an action-cache hit that executes nothing. `explain` shows
+the node the edge implied, like any other:
 
 ```text
-//songs/creek/sound:vocal-48k (rule)
-type: normalize v2
+//songs/creek/convert:lead-take-48000 (rule)
+type: resample v1
 input: //songs/creek/sound:lead-take 180d928010e2
-parameters: {"sample_rate":48000,"bit_depth":24}
-action: bbe6e6398cf2 (cached)
-output: c3a1551d9068 (449324 bytes)
+parameters: {"sample_rate":48000}
+action: 0f0e2880191f (cached)
+output: 4a95681045f8 (599098 bytes)
 ```
 
 The cache key is the hash of the rule, its version, the input content
-hashes, and the parameters — change `sample_rate` in
-`songs/creek/sounds/vocal-48k.yaml` (a one-line diff) and only that target
-rebuilds. `.field/` is local state and never committed; clone this repo,
-build it, and you get the same outputs from the same recipe.
+hashes, the parameters, and the rate the node renders at — choose a
+different take (a one-line diff in your takes file) and only this
+conversion and the stems that play it rebuild. `.field/` is local state
+and never committed; clone this repo, build it, and you get the same
+outputs from the same recipe.
 
 ## Listening
 
@@ -237,8 +241,8 @@ track's stem and the sum, and no other track. Even the tempo map is precise
 about blame: stems are keyed on clip placement *in samples*, so a tempo edit
 rebuilds only tracks whose musical clips actually moved.
 
-In creek, the lead vocal sits in the arrangement through its normalize
-wrapper: the generated take resampled to the project rate, clipped at
+In creek, the lead vocal clips the generated sound directly: the take's
+24 kHz converts at the placement edge (see Building, above), clipped at
 bar 5 with a softened entrance (`fade_in`, in samples), and again at
 bar 9 over the stripped-back third pass. And the pad carries under the verse by clipping the same render
 twice, the second entering a beat early with fades on both sides of the

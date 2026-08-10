@@ -5,7 +5,7 @@ import { readWavHeader } from '../audio/wav.js';
 // spelling is free and only the resulting order matters, which is why
 // the buildable sort below is spelling-blind: order is the one channel
 // a spelling change could reach the key through.
-import { genRef, genRefName, trackRef, trackRefName } from '../labels.js';
+import { convertRefName, genRef, genRefName, trackRef, trackRefName } from '../labels.js';
 import type { InputEntry, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
@@ -244,12 +244,23 @@ export function planTrack(
   framesBySource: Map<string, number> = new Map(),
   // Set only for a song's output track; see StemSpec.
   extent: { lengthSamples?: number | undefined; loop?: boolean | undefined } = {},
+  // Sources arriving at another rate, rewired through the resample node
+  // the graph minted at this edge (multi-rate.md decision 4): raw entry
+  // ref → convert: ref. The stem consumes the conversion, so its wiring
+  // and its input hash both follow the bytes it actually sums.
+  convertBySource: Map<string, string> = new Map(),
 ): StemSpec {
+  const refFor = (e: InputEntry): string => {
+    const raw = entryRef(e, track.name);
+    return convertBySource.get(raw) ?? raw;
+  };
   // One list in the file (nested-tracks.md §18), one source list here.
   // A placed track is never in sha256BySource — its bytes do not exist
   // until it renders — so it sorts with the buildable sounds, by name,
-  // for the same reason they do.
-  const refs = [...new Set(track.inputs.map((e) => entryRef(e, track.name)))];
+  // for the same reason they do. A converted source is buildable however
+  // committed its origin: the stem's input is the conversion's output,
+  // whose bytes do not exist until it runs.
+  const refs = [...new Set(track.inputs.map(refFor))];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
     .sort((a, b) => {
@@ -264,7 +275,8 @@ export function planTrack(
   // ref breaks the rare tie — a sound and a track legally sharing a name
   // — where the two really are different sources and the order only has
   // to be deterministic.
-  const buildableName = (r: string): string => trackRefName(r) ?? genRefName(r) ?? r;
+  const buildableName = (r: string): string =>
+    trackRefName(r) ?? genRefName(r) ?? convertRefName(r) ?? r;
   const buildable = refs
     .filter((r) => !sha256BySource.has(r))
     .sort((a, b) => {
@@ -275,10 +287,10 @@ export function planTrack(
   const sources = [...committed, ...buildable];
   const inputIndex = new Map(sources.map((ref, i): [string, number] => [ref, i]));
   const placed = track.inputs.flatMap((entry): PlacedClip[] => {
-    const input = inputIndex.get(entryRef(entry, track.name))!;
+    const input = inputIndex.get(refFor(entry))!;
     const loop = entry.loop?.enabled ? entry.loop : undefined;
     if (loop) {
-      const frames = framesBySource.get(entryRef(entry, track.name));
+      const frames = framesBySource.get(refFor(entry));
       return expandLoop(entry, loop, tempoMap, frames).map((rep) => ({ input, ...rep }));
     }
     const { start, duration } = placedWindow(entry, tempoMap);
@@ -347,10 +359,14 @@ export const stemGenerator: Generator<StemSpec> = {
     const frames = spec.sources.map((name, i) => {
       const header = readWavHeader(inputPaths[i]!);
       if (header.sampleRate !== ctx.sampleRate) {
+        // The graph converts mismatched sources at the edge (multi-rate.md
+        // decision 4), so reaching this means it could not see the rate
+        // this file actually has — a header the planner failed to read, or
+        // a file that changed under it.
         throw new Error(
-          `input "${name}" is ${header.sampleRate} Hz but the project is ${ctx.sampleRate} Hz — ` +
-            `Field never resamples implicitly; render or convert it at the project rate ` +
-            `(add a normalize sound at ${ctx.sampleRate}, or re-import at that rate)`,
+          `input "${name}" is ${header.sampleRate} Hz but "${spec.name}" renders at ` +
+            `${ctx.sampleRate} Hz — the edge converts automatically when the source's rate ` +
+            `is readable at plan time, so this one was not; field check`,
         );
       }
       if (header.channels > 2) {

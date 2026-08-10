@@ -1,4 +1,5 @@
 import type { BuildableSound } from '../schema/index.js';
+import type { ResampleSpec } from './resample.js';
 import type { StemSpec } from './stem.js';
 
 // A Generator is a pluggable module that generates a type of sound
@@ -11,16 +12,19 @@ import type { StemSpec } from './stem.js';
 // has no Generator here — its generation is human-triggered
 // (field generate), which is what BuildableSound encodes. A Generator's
 // spec is either a declared sound (sounds/<name>.yaml) or a spec
-// synthesized from the project model (stem, from track files). Each is
-// typed against its own spec —
-// Generator<NormalizeSound> and so on — so per-method "wrong type"
+// synthesized from the project model (stem, from track files; resample,
+// from a rate-mismatched edge). Each is typed against its own spec —
+// Generator<SupercolliderSound> and so on — so per-method "wrong type"
 // narrowing is proven by the compiler.
 
-export type GeneratorSpec = BuildableSound | StemSpec;
+export type GeneratorSpec = BuildableSound | StemSpec | ResampleSpec;
 
 export interface RunContext {
   root: string; // absolute project root
-  sampleRate: number; // project sample rate
+  // The rate this node renders at (multi-rate.md decision 3): the owning
+  // track's effective rate for stems and entry generators, the project
+  // rate for declared sounds. Before rate: existed these were one number.
+  sampleRate: number;
 }
 
 // The song's visible names, pre-classified for source resolution

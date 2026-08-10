@@ -117,14 +117,22 @@ describe('effect chains', () => {
     for (const v of channel!) expect(Math.abs(v)).toBeLessThanOrEqual(ceiling + 1e-6);
   });
 
-  it('normalize accepts a target, closing the rate-fix loop', async () => {
-    writeSounds({
-      'tone-eq': eqLines('source: tone', -3),
-      'tone-eq-441': ['type: normalize', 'source: tone-eq', 'sample_rate: 44100', 'bit_depth: 16'],
-    });
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:tone-eq-441']);
-    const converted = outcomes.find((o) => o.label.endsWith(':tone-eq-441'))!;
-    expect(readWav(converted.outputPath!).sampleRate).toBe(44100);
+  it('an effect keeps its source at the source\'s own rate', async () => {
+    // Effects are rate-agnostic DSP: they process at the file's rate and
+    // never change it. The rate-fix loop `normalize` used to close is
+    // the placement edge's job now (multi-rate.md decision 4), so what
+    // an effect promises is exactly this and nothing more.
+    const src = join(root, '..', `field-effects-441-${Math.random()}.wav`);
+    const tone = new Float32Array(44100);
+    for (let i = 0; i < tone.length; i++) tone[i] = 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 44100);
+    writeWavFloat32(src, 44100, [tone]);
+    await importAsset(root, 'creek', src, 'tone-441', { allowMismatch: true });
+    rmSync(src);
+
+    writeSounds({ 'tone-441-eq': eqLines('source: tone-441', -3) });
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:tone-441-eq']);
+    const shaped = outcomes.find((o) => o.label.endsWith(':tone-441-eq'))!;
+    expect(readWav(shaped.outputPath!).sampleRate).toBe(44100);
   });
 
   it('diagnoses cycles, unknown sources, and namespace collisions', () => {

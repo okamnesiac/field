@@ -43,8 +43,16 @@ const writeSound = (name: string, yaml: string) => {
   writeFileSync(join(root, `songs/creek/sounds/${name}.yaml`), yaml);
 };
 
-const normalizeYaml = (rate: number) =>
-  ['name: pad-normalized', 'type: normalize', 'source: pad', `sample_rate: ${rate}`, 'bit_depth: 16', ''].join('\n');
+const eqYaml = (frequency: number) =>
+  [
+    'name: pad-eq',
+    'type: eq',
+    'source: pad',
+    'bands:',
+    '  - type: lowpass',
+    `    frequency: ${frequency}`,
+    '',
+  ].join('\n');
 
 const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
   // Parameter-sensitive fake: output content tracks the spec, so a
@@ -109,7 +117,7 @@ beforeEach(async () => {
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
-  writeSound('pad-normalized', normalizeYaml(96000));
+  writeSound('pad-eq', eqYaml(700));
 });
 
 afterEach(() => {
@@ -118,55 +126,55 @@ afterEach(() => {
 
 describe('watchBuild', { timeout: 20_000 }, () => {
   it('baselines, then reports the label whose output hash moved', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-normalized']);
+    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
     expect(first.kind).toBe('outcomes');
     if (first.kind !== 'outcomes') return;
     expect(first.changed).toEqual([]); // the baseline is not a change
-    expect(first.outcomes.some((o) => o.label.endsWith(':pad-normalized'))).toBe(true);
+    expect(first.outcomes.some((o) => o.label.endsWith(':pad-eq'))).toBe(true);
 
-    writeSound('pad-normalized', normalizeYaml(44100));
+    writeSound('pad-eq', eqYaml(400));
     const moved = await until(() => {
       const later = events.filter((e) => e.kind === 'outcomes').slice(1);
       return later.find((e) => e.kind === 'outcomes' && e.changed.length > 0);
     });
     if (moved.kind !== 'outcomes') return;
-    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-normalized']);
+    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('a red project prints diagnostics, keeps the baseline, and recovers', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-normalized']);
+    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
 
-    writeSound('pad-normalized', 'name: [broken\n');
+    writeSound('pad-eq', 'name: [broken\n');
     const red = await until(() => events.find((e) => e.kind === 'diagnostics'));
     if (red.kind !== 'diagnostics') return;
-    expect(red.lines.join('\n')).toContain('pad-normalized');
+    expect(red.lines.join('\n')).toContain('pad-eq');
 
     // Fixing the file rebuilds against the last GOOD baseline: the rate
     // moved from 96000 to 44100, so the recovery reports a change.
-    writeSound('pad-normalized', normalizeYaml(44100));
+    writeSound('pad-eq', eqYaml(400));
     const recovered = await until(() =>
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (recovered.kind !== 'outcomes') return;
-    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-normalized']);
+    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('a no-op edit rebuilds to silence: cache hits, nothing changed', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-normalized']);
+    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
 
     // A comment is invisible to the parsed spec — the action key holds,
     // the output hash holds, and the report says so (watch.md §1.3: a
     // fmt pass is all cache hits).
-    writeSound('pad-normalized', `# tweaked comment\n${normalizeYaml(96000)}`);
+    writeSound('pad-eq', `# tweaked comment\n${eqYaml(700)}`);
     const quiet = await until(() => {
       const later = events.filter((e) => e.kind === 'outcomes').slice(1);
       return later[0];
@@ -180,7 +188,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
   });
 
   it('a loader throw routes to onError and the watch survives (P2)', async () => {
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-normalized']);
+    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
 
     // The reviewer's repro: a dangling symlink directly under songs/
@@ -197,12 +205,12 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     // Removing the wreckage plus a real edit: the same session recovers
     // and reports against the last good baseline.
     rmSync(ghost);
-    writeSound('pad-normalized', normalizeYaml(44100));
+    writeSound('pad-eq', eqYaml(400));
     const recovered = await until(() =>
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (recovered.kind !== 'outcomes') return;
-    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-normalized']);
+    expect(recovered.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
 
     abort.abort();
     await done;
@@ -270,12 +278,12 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     // (an edit landing before the watcher's first pass) must be reported,
     // not silently absorbed as the baseline.
     const { events, abort, done } = startWatch(
-      ['//songs/creek/sound:pad-normalized'],
-      { baseline: new Map([['//songs/creek/sound:pad-normalized', 'deadbeef'.repeat(8)]]) },
+      ['//songs/creek/sound:pad-eq'],
+      { baseline: new Map([['//songs/creek/sound:pad-eq', 'deadbeef'.repeat(8)]]) },
     );
     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
     if (first.kind !== 'outcomes') return;
-    expect(first.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-normalized']);
+    expect(first.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
     abort.abort();
     await done;
   });
@@ -293,7 +301,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     };
     const done = watchBuild(
       root,
-      ['//songs/creek/sound:pad-normalized'],
+      ['//songs/creek/sound:pad-eq'],
       { debounceMs: 50, signal: abort.signal, runner: stallingRunner },
       { onOutcomes: (outcomes, changed) => events.push({ kind: 'outcomes', outcomes, changed }) },
     );
@@ -301,7 +309,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
 
     // Edit, then ctrl-c inside the render — an ordinary way to quit. The
     // stalled build completes after the abort and must report nothing.
-    writeSound('pad-normalized', normalizeYaml(44100));
+    writeSound('pad-eq', eqYaml(400));
     await until(() => (executions >= 2 ? true : undefined));
     abort.abort();
     release();
@@ -315,7 +323,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     // self-trigger forever (§2). Nothing pinned that until now — and the
     // second half is what makes the first half mean anything: a watcher
     // that had simply died would also report no rebuild.
-    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-normalized']);
+    const { events, abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
     await until(() => events.find((e) => e.kind === 'outcomes'));
     // Settle first: the fixture's own writes (init, createSong, import)
     // can still be in FSEvents' pipeline when the baseline lands, and a
@@ -329,19 +337,19 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     await new Promise((r) => setTimeout(r, 400)); // 8× the debounce
     expect(events).toHaveLength(before);
 
-    writeSound('pad-normalized', normalizeYaml(44100));
+    writeSound('pad-eq', eqYaml(400));
     const moved = await until(() =>
       events.find((e) => e.kind === 'outcomes' && e.changed.length > 0),
     );
     if (moved.kind !== 'outcomes') return;
-    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-normalized']);
+    expect(moved.changed.map((o) => o.label)).toEqual(['//songs/creek/sound:pad-eq']);
 
     abort.abort();
     await done;
   });
 
   it('an aborted session resolves', async () => {
-    const { abort, done } = startWatch(['//songs/creek/sound:pad-normalized']);
+    const { abort, done } = startWatch(['//songs/creek/sound:pad-eq']);
     abort.abort();
     await done;
   });

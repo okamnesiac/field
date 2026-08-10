@@ -1,14 +1,19 @@
 # Plan: Sample rate is a property of the track, converted at the edge
 
-**Status:** In progress (2026-08-09). Step 1 (import reads headers,
-decision 5) is implemented: the ledger records `sample_rate` /
+**Status:** Complete (2026-08-09), all three steps. Step 1 (import
+reads headers, decision 5): the ledger records `sample_rate` /
 `bit_depth` / `channels` / `frames`, check verifies them against the
 file it already hashes, and a rate mismatch asks — `--allow-mismatch`
 in scripts, y/N interactively. Step 2 (export grows `--rate` /
-`--bit-depth`, decision 1) is implemented: conversion on the way out
+`--bit-depth`, decision 1): conversion on the way out
 through the daemon's normalize op, proven bit-identical to `loop-cd`'s
-render before that sound retired. Step 3 unstarted; the
-`seven-eight-loop` fold it unblocked has landed (nested-tracks chunk 6).
+render before that sound retired. Step 3 (decisions 3, 4, 6): `rate:`
+on tracks, `resample` nodes minted at mismatched edges
+(`//songs/<song>/convert:<name>-<rate>`), the `normalize` sound type
+retired behind a tombstone diagnostic, and `vocal-48k` gone — creek's
+`lead-vocal` clips `lead-take` directly. §3's costs were paid as
+priced, with one amendment recorded there (the daemon grew a float
+`resample` op). §5 records how each done-clause was discharged.
 Written because
 chunk 6 of [nested-tracks.md](nested-tracks.md) hit `normalize` and
 found two features sharing its schema (§1), and the inbound half's
@@ -135,6 +140,15 @@ an insert that can only restate `project.yaml` should not exist.
   one rate, with conversions as separate upstream actions — `plan.cpp`
   needs nothing.
 
+  *Amended 2026-08-09, landing step 3:* the single-rate claim held —
+  stem and mix plans learned nothing — but `plan.cpp` did gain one op.
+  The edge conversion cannot ride the `normalize` op, because normalize
+  always quantizes to integer PCM (a delivery choice, #57 review) and an
+  internal stem legitimately exceeds 0 dBFS in float before its edge
+  gain applies — int conversion would clip it. So the daemon grew
+  `resample`: rate and nothing else, float32 out, no dither, the same
+  polyphase resampler (render-pipeline.md §2.9 still has exactly one).
+
 ## 4 Sequencing
 
 Before the real-time engine, by nested-tracks.md §9's own argument: this
@@ -161,3 +175,17 @@ used to describe, bit-identical to that sound's render; a track declared
 at a non-project rate renders, places, and explains, with the conversion
 node visible in `deps()`; and `rg 'type: normalize'` over `examples/`
 finds nothing.
+
+How each clause was discharged (2026-08-09): the mismatch warning and
+recording shipped with step 1; the bit-identical export with step 2
+(`cmp` against `loop-cd`'s render before the deletion, and
+`export.test.ts` reconstructs the comparison against the op on every
+run). Step 3's clauses: the conversion node is visible in bloom itself —
+`deps(//songs/creek/track:lead-vocal)` shows
+`convert:lead-take-48000` between the 24 kHz takes and the stem — and
+`rg 'type: normalize'` over `examples/` finds nothing. The declared
+`rate:` and 44.1 kHz-asset clauses are carried by `rates.test.ts`
+rather than by bloom: an unplaced asset is dead weight, and placing one
+— like declaring a track at 96 kHz — is a musical decision about what
+bloom should sound like, not a mechanical one, so bloom demonstrates
+the edge with the material it already has.

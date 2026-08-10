@@ -146,11 +146,18 @@ for a `generative:` entry, by the sound for the transitional sound
 form — and its label resolves to the chosen variant (`field choose`
 repoints it; every placement follows).
 
-- **`normalize`** — sample-rate/bit-depth conversion in the daemon's
-  built-in tier: a fixed-ratio polyphase resampler and TPDF dither
-  (projects/all/render-pipeline.md decisions 9 and 10), replacing macOS
-  `afconvert` in chunk 5. `source:` is any committed or buildable name
-  (verified against its declaration before the generator executes).
+- **`resample`** — the second implicit type after `stem`, and the only
+  one nobody can declare: when a source arrives at a placement at a rate
+  other than its track's, the graph mints
+  `//songs/<song>/convert:<name>-<rate>` between them (multi-rate.md
+  decision 4) — one node per (source, rate) however many placements
+  consume it, visible in `explain` and `deps()` like any rule. It runs
+  the daemon's polyphase resampler (render-pipeline.md decision 9, the
+  same one `--rate` exports through) and writes float32 undithered,
+  because it sits between two float stages — quantization is a delivery
+  choice, made at export. The `normalize` *sound* that used to close
+  this loop by hand retired with multi-rate.md step 3; the daemon op
+  behind it survives as export's converter.
 - **`supercollider`** — a SuperCollider program defines the sound,
   rendered offline via scsynth's NRT mode. `source:` names the program —
   a bare filename resolves in `shared/instruments/`, a slashed path is
@@ -174,7 +181,7 @@ repoints it; every placement follows).
 
   Worth keeping from it: `say` was this document's example of the
   *hermetic* side of the determinism boundary, and the boundary itself is
-  unchanged — `supercollider`, `eq`, `limit`, `reverb`, `normalize` and
+  unchanged — `supercollider`, `eq`, `limit`, `reverb`, `resample` and
   `stem` are all still recipes cached under an action key, while voice
   generation will be a deliberate generative sound with committed
   outputs on the other side. What `say` also demonstrated, less
@@ -209,9 +216,14 @@ repoints it; every placement follows).
   YAML: a tempo edit rebuilds exactly the tracks whose musical entries
   moved, reordering entries in the file changes nothing, and entry
   spelling is wiring — a sound folding into a track cannot re-key a
-  parent whose children are byte-identical. Assets must already be at
-  the project sample
-  rate: Field never resamples implicitly (mix-assembly.md §4). An
+  parent whose children are byte-identical. A track may declare `rate:`
+  (multi-rate.md decision 3), the project's `sample_rate` otherwise —
+  the whole file, ticks included, projects to samples at that rate, and
+  a source arriving at any other rate converts through a `resample`
+  node at the edge rather than being refused (what mix-assembly.md §4
+  called "never resamples implicitly" became "never resamples
+  *invisibly*": the conversion is automatic, and it is a node you can
+  ask about). An
   entry's `loop:` map tiles its source to fill the window
   ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
   repetitions expand into ordinary placement-plan entries — grid-locked

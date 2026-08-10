@@ -80,6 +80,18 @@ export function genRefName(ref: string): string | undefined {
   return ref.startsWith(GEN_REF_PREFIX) ? ref.slice(GEN_REF_PREFIX.length) : undefined;
 }
 
+// A rate conversion the graph minted at an edge (multi-rate.md decision
+// 4): `convert:<name>` in wiring, //songs/<song>/convert:<name> as a
+// label. Never authored — the whole point of the node is that nobody
+// writes it — so like gen: the spelling exists only in wiring and labels.
+const CONVERT_REF_PREFIX = 'convert:';
+export function convertRef(name: string): string {
+  return `${CONVERT_REF_PREFIX}${name}`;
+}
+export function convertRefName(ref: string): string | undefined {
+  return ref.startsWith(CONVERT_REF_PREFIX) ? ref.slice(CONVERT_REF_PREFIX.length) : undefined;
+}
+
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
 }

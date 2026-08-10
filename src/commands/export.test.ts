@@ -56,8 +56,16 @@ const writeSound = (name: string, yaml: string) => {
   writeFileSync(join(root, `songs/creek/sounds/${name}.yaml`), yaml);
 };
 
-const normalizeYaml = (name: string, rate = 96000) =>
-  [`name: ${name}`, 'type: normalize', 'source: pad', `sample_rate: ${rate}`, 'bit_depth: 16', ''].join('\n');
+const eqYaml = (name: string, frequency = 700) =>
+  [
+    `name: ${name}`,
+    'type: eq',
+    'source: pad',
+    'bands:',
+    '  - type: lowpass',
+    `    frequency: ${frequency}`,
+    '',
+  ].join('\n');
 
 // Output tracks the input *and* the spec, so a parameter edit moves the
 // output hash the way a real render would. (Copying the input straight
@@ -79,7 +87,7 @@ beforeEach(async () => {
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
-  writeSound('pad-normalized', normalizeYaml('pad-normalized'));
+  writeSound('pad-eq', eqYaml('pad-eq'));
 });
 
 afterEach(() => {
@@ -184,12 +192,12 @@ describe('homeRelative', () => {
 
 describe('exportLabels', () => {
   it('copies the built artifact as v1', async () => {
-    const results = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
+    const results = await exportLabels(root, ['//songs/creek/sound:pad-eq'], {
       to: dest,
       runner,
     });
     expect(results).toHaveLength(1);
-    expect(results[0]!.to).toBe(join(dest, 'creek-sound-pad-normalized-v1.wav'));
+    expect(results[0]!.to).toBe(join(dest, 'creek-sound-pad-eq-v1.wav'));
     expect(results[0]!.version).toBe(1);
     expect(results[0]!.unchanged).toBe(false);
     expect(readFileSync(results[0]!.to)).toEqual(readFileSync(results[0]!.from));
@@ -198,8 +206,8 @@ describe('exportLabels', () => {
   it('exports what was asked for, not what the build had to make', async () => {
     // The rule depends on the asset, so `field build` prints two labels.
     // Exporting must still put exactly one file on the Desktop.
-    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
-    expect(readdirSync(dest)).toEqual(['creek-sound-pad-normalized-v1.wav']);
+    await exportLabels(root, ['//songs/creek/sound:pad-eq'], { to: dest, runner });
+    expect(readdirSync(dest)).toEqual(['creek-sound-pad-eq-v1.wav']);
   });
 
   it('exports committed sources too, straight from the song', async () => {
@@ -209,23 +217,23 @@ describe('exportLabels', () => {
   });
 
   it('a changed mix becomes the next version, and the old one survives', async () => {
-    const [v1] = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
+    const [v1] = await exportLabels(root, ['//songs/creek/sound:pad-eq'], {
       to: dest,
       runner,
     });
     const before = readFileSync(v1!.to);
 
-    writeSound('pad-normalized', normalizeYaml('pad-normalized', 44100)); // a real change
-    const [v2] = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
+    writeSound('pad-eq', eqYaml('pad-eq', 400)); // a real change
+    const [v2] = await exportLabels(root, ['//songs/creek/sound:pad-eq'], {
       to: dest,
       runner,
     });
 
     expect(v2!.version).toBe(2);
-    expect(v2!.to).toBe(join(dest, 'creek-sound-pad-normalized-v2.wav'));
+    expect(v2!.to).toBe(join(dest, 'creek-sound-pad-eq-v2.wav'));
     expect(readdirSync(dest).sort()).toEqual([
-      'creek-sound-pad-normalized-v1.wav',
-      'creek-sound-pad-normalized-v2.wav',
+      'creek-sound-pad-eq-v1.wav',
+      'creek-sound-pad-eq-v2.wav',
     ]);
     // The point of the whole design: v1 is byte-for-byte what it was.
     expect(readFileSync(v1!.to)).toEqual(before);
@@ -247,12 +255,12 @@ describe('exportLabels', () => {
     // version on the disk would no longer be what you just built — the
     // one case where a silent no-op would mislead, so the caller can see
     // both numbers.
-    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
-    writeSound('pad-normalized', normalizeYaml('pad-normalized', 44100));
-    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
-    writeSound('pad-normalized', normalizeYaml('pad-normalized', 96000)); // back to v1
+    await exportLabels(root, ['//songs/creek/sound:pad-eq'], { to: dest, runner });
+    writeSound('pad-eq', eqYaml('pad-eq', 400));
+    await exportLabels(root, ['//songs/creek/sound:pad-eq'], { to: dest, runner });
+    writeSound('pad-eq', eqYaml('pad-eq', 700)); // back to v1
 
-    const [third] = await exportLabels(root, ['//songs/creek/sound:pad-normalized'], {
+    const [third] = await exportLabels(root, ['//songs/creek/sound:pad-eq'], {
       to: dest,
       runner,
     });
@@ -260,7 +268,7 @@ describe('exportLabels', () => {
     expect(third!.unchanged).toBe(true);
     expect(third!.version).toBe(1); // the version these bytes already are
     expect(third!.newest).toBe(2); // and the one that is still newest
-    expect(third!.to).toBe(join(dest, 'creek-sound-pad-normalized-v1.wav'));
+    expect(third!.to).toBe(join(dest, 'creek-sound-pad-eq-v1.wav'));
     expect(readdirSync(dest)).toHaveLength(2); // nothing minted
   });
 
@@ -289,13 +297,13 @@ describe('exportLabels', () => {
   it('never touches a file it did not write', async () => {
     // Someone's own work, sitting on the Desktop under a name in the
     // family. Export must leave it exactly as it found it.
-    const theirs = join(dest, 'creek-sound-pad-normalized-v1.wav');
+    const theirs = join(dest, 'creek-sound-pad-eq-v1.wav');
     writeFileSync(theirs, 'a mix I bounced by hand');
-    await exportLabels(root, ['//songs/creek/sound:pad-normalized'], { to: dest, runner });
+    await exportLabels(root, ['//songs/creek/sound:pad-eq'], { to: dest, runner });
     expect(readFileSync(theirs, 'utf8')).toBe('a mix I bounced by hand');
     expect(readdirSync(dest).sort()).toEqual([
-      'creek-sound-pad-normalized-v1.wav',
-      'creek-sound-pad-normalized-v2.wav',
+      'creek-sound-pad-eq-v1.wav',
+      'creek-sound-pad-eq-v2.wav',
     ]);
   });
 
@@ -393,23 +401,28 @@ describe('delivery formatting (multi-rate.md decision 1)', () => {
     expect(header.format).toBe(1); // integer PCM, as normalize always wrote
   });
 
-  it('is bit-identical to the normalize sound it retires', async () => {
+  it('is bit-identical to the normalize op it drives', async () => {
     // The def-of-done claim: the export produces the file loop-cd used
     // to describe. Same source, same rate and depth, one through the
-    // sound, one through the flags — same bytes.
-    writeSound(
-      'pad-cd',
-      ['name: pad-cd', 'type: normalize', 'source: pad', 'sample_rate: 44100', 'bit_depth: 16', ''].join('\n'),
-    );
-    const { buildLabels } = await import('./build.js');
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-cd']);
-    const rendered = outcomes.find((o) => o.label.endsWith(':pad-cd'))!.outputPath!;
+    // daemon op directly, one through the flags — same bytes. (This
+    // compared against a `type: normalize` *sound* until that type
+    // retired with step 3; the op is the reference now, which is the
+    // same DSP the sound always named.)
+    const { renderInsertChain } = await import('../audio/render-daemon.js');
+    const reference = join(dest, 'reference.wav');
+    await renderInsertChain({
+      op: 'normalize',
+      input: join(root, 'songs/creek/audio/pad/pad.wav'),
+      output: reference,
+      sample_rate: 44100,
+      bit_depth: 16,
+    });
     const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], {
       to: dest,
       rate: 44100,
       bitDepth: 16,
     });
-    expect(readFileSync(result!.to).equals(readFileSync(rendered))).toBe(true);
+    expect(readFileSync(result!.to).equals(readFileSync(reference))).toBe(true);
   });
 
   it('converted exports version apart from plain ones, and deterministically', async () => {

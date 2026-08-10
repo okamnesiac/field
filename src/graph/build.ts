@@ -1,6 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
@@ -11,7 +10,7 @@ import { deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } fr
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
 // store under .field/cache/cas/<sha256>; the action index maps an action
 // key — the hash of canonical JSON of {rule, rule_version, input hashes,
-// parameters, project sample rate} — to its output hashes. Same key, no
+// parameters, the node's sample rate} — to its output hashes. Same key, no
 // work. Rule behavior lives in src/generators/; this engine only knows that
 // rules exist.
 
@@ -125,19 +124,22 @@ function ruleParameters(node: GeneratorNode): Record<string, unknown> {
   return Object.fromEntries(Object.entries(node.spec).filter(([k]) => !wiring.has(k)));
 }
 
-function actionKey(node: GeneratorNode, inputHashes: string[], projectSampleRate: number): string {
+function actionKey(node: GeneratorNode, inputHashes: string[]): string {
   // The serialized field stays spelled `rule` deliberately: it is pure
   // cache machinery, and renaming a hash key would invalidate every
   // cached action for zero semantic gain (project-layout.md §4 keeps
-  // engine words in the engine). Only type *values* changing re-keys —
-  // sc-render → supercollider, priced in by §4.4.
+  // engine words in the engine). `sample_rate` was `project_sample_rate`
+  // until multi-rate.md step 3 made the rate a property of the node —
+  // that rename bought semantic truth at the priced-in cost of one full
+  // re-render (multi-rate.md §3), the same deliberate trade §4.4's
+  // sc-render → supercollider value change made.
   return sha256Text(
     canonicalJson({
       rule: node.spec.type,
       rule_version: generatorFor(node.spec).version,
       inputs: inputHashes,
       parameters: ruleParameters(node),
-      project_sample_rate: projectSampleRate,
+      sample_rate: node.sampleRate,
     }),
   );
 }
@@ -207,8 +209,7 @@ async function buildNode(
     ? await impl.extraInputs(project.root, node.spec)
     : [];
   const inputHashes = [...declaredHashes, ...extraInputs.map((e) => e.sha256)];
-  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
-  const key = actionKey(node, inputHashes, sampleRate);
+  const key = actionKey(node, inputHashes);
 
   const materialize = (sha256: string): string => {
     const out = outPath(project, node);
@@ -271,7 +272,7 @@ async function buildNode(
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
   const tmpOut = join(tmpDir, `${key}.out`);
-  await runner(node, inputPaths, tmpOut, { root: project.root, sampleRate });
+  await runner(node, inputPaths, tmpOut, { root: project.root, sampleRate: node.sampleRate });
   if (!existsSync(tmpOut)) {
     throw new Error(`type "${node.spec.type}" produced no output for ${formatLabel(node.label)}`);
   }
@@ -367,8 +368,7 @@ export async function explain(
   if (impl.extraInputs) {
     inputs.push(...(await impl.extraInputs(project.root, node.spec)));
   }
-  const sampleRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
-  const key = unknown ? undefined : actionKey(node, inputs.map((i) => i.sha256), sampleRate);
+  const key = unknown ? undefined : actionKey(node, inputs.map((i) => i.sha256));
   const cached = key === undefined ? undefined : readAction(project, key);
   // A stem is the one spec synthesized from a track file, so it is also
   // the one whose level question has an answer (nested-tracks.md §5).

@@ -63,3 +63,9 @@ export const sampleRate = z.union([
   z.literal(176400),
   z.literal(192000),
 ]);
+
+// The depths delivery can quantize to (`field export --bit-depth`, and
+// the daemon's normalize op behind it). It lived on the normalize sound
+// until that type retired with multi-rate.md step 3; the wire format and
+// the generated plan limits still read it from here.
+export const bitDepth = z.union([z.literal(16), z.literal(24), z.literal(32)]);

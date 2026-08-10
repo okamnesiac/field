@@ -39,8 +39,20 @@ const writeSound = (name: string, yaml: string) => {
   writeFileSync(join(root, `songs/creek/sounds/${name}.yaml`), yaml);
 };
 
-const normalizeYaml = (rate: number) =>
-  ['name: pad-normalized', 'type: normalize', 'source: pad', `sample_rate: ${rate}`, 'bit_depth: 16', ''].join('\n');
+// The canonical declared rule for these tests: an eq, because it is the
+// simplest single-input sound left now that normalize has retired
+// (multi-rate.md step 3). The frequency is the parameter the re-key
+// tests turn.
+const eqYaml = (frequency: number) =>
+  [
+    'name: pad-eq',
+    'type: eq',
+    'source: pad',
+    'bands:',
+    '  - type: lowpass',
+    `    frequency: ${frequency}`,
+    '',
+  ].join('\n');
 
 beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'field-build-'));
@@ -50,7 +62,7 @@ beforeEach(async () => {
   writeWav(src);
   await importAsset(root, 'creek', src, 'pad');
   rmSync(src);
-  writeSound('pad-normalized', normalizeYaml(96000));
+  writeSound('pad-eq', eqYaml(700));
 });
 
 afterEach(() => {
@@ -108,18 +120,18 @@ describe('build', () => {
   it('builds, caches, and rebuilds on parameter change', async () => {
     const { state, runner } = countingRunner();
 
-    const first = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    const first = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(1);
-    const target = first.find((o) => o.label.endsWith(':pad-normalized'))!;
+    const target = first.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
 
-    const second = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    const second = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(1); // action-cache hit, nothing executed
-    expect(second.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
+    expect(second.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(true);
 
-    writeSound('pad-normalized', normalizeYaml(44100));
-    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    writeSound('pad-eq', eqYaml(400));
+    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
@@ -136,23 +148,23 @@ describe('build', () => {
 
   it('a rule outcome is never marked committed', async () => {
     const { runner } = countingRunner();
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
-    const rule = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const rule = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(rule.committed).toBeUndefined();
     expect(rule.outputPath!).toContain('.field/out'); // materialized, not committed
   });
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
     const { runner } = countingRunner();
-    const first = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
-    const out = first.find((o) => o.label.endsWith(':pad-normalized'))!.outputPath!;
+    const first = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const out = first.find((o) => o.label.endsWith(':pad-eq'))!.outputPath!;
     const before = statSync(out).ino;
 
     // Under watch the daemon streams the previous artifact from this very
     // path; a rebuild must land on a fresh inode so an open reader keeps
     // its bytes — an in-place copy would truncate under it.
-    writeSound('pad-normalized', normalizeYaml(44100));
-    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    writeSound('pad-eq', eqYaml(400));
+    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(statSync(out).ino).not.toBe(before);
   });
 
@@ -164,7 +176,7 @@ describe('build', () => {
     // other.
     expect(outcomes.map((o) => o.label).sort()).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-normalized',
+      '//songs/creek/sound:pad-eq',
       '//songs/creek/track:main',
     ]);
     expect(state.runs).toBe(2);
@@ -178,12 +190,12 @@ describe('build', () => {
     await expect(importAsset(root, 'creek', src, 'all')).rejects.toThrow('reserved');
     rmSync(src);
     // Hand-written YAML is caught by the schema.
-    writeSound('pad-normalized', normalizeYaml(96000).replace('name: pad-normalized', 'name: all'));
+    writeSound('pad-eq', eqYaml(700).replace('name: pad-eq', 'name: all'));
     await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('reserved');
   });
 
   it('refuses to build an invalid project', async () => {
-    writeSound('pad-normalized', normalizeYaml(96000).replace('source: pad', 'source: ghost'));
+    writeSound('pad-eq', eqYaml(700).replace('source: pad', 'source: ghost'));
     await expect(buildLabels(root, ['//songs/...'])).rejects.toThrow('unknown source');
   });
 
@@ -231,8 +243,8 @@ describe('build', () => {
     // and "no such label" is a bad way to find that out. The suggestion
     // keeps the shape it was given — correcting the package but handing
     // back a different shape would also not work (#41 review).
-    await expect(buildLabels(root, ['//songs/creek/sounds:pad-normalized'])).rejects.toThrow(
-      'try //songs/creek/sound:pad-normalized',
+    await expect(buildLabels(root, ['//songs/creek/sounds:pad-eq'])).rejects.toThrow(
+      'try //songs/creek/sound:pad-eq',
     );
     await expect(buildLabels(root, ['//songs/creek/sounds/...'])).rejects.toThrow(
       'try //songs/creek/sound/...',
@@ -259,8 +271,8 @@ describe('build', () => {
     // sample project's README, which described the pre-#31 layout. It is
     // the spelling most likely to be typed from old docs, so it earns the
     // same treatment, worded for what actually happened to it.
-    await expect(buildLabels(root, ['//songs/creek/targets:pad-normalized'])).rejects.toThrow(
-      '(targets: is now sound: try //songs/creek/sound:pad-normalized)',
+    await expect(buildLabels(root, ['//songs/creek/targets:pad-eq'])).rejects.toThrow(
+      '(targets: is now sound: try //songs/creek/sound:pad-eq)',
     );
     await expect(buildLabels(root, ['//songs/creek/targets/...'])).rejects.toThrow(
       'try //songs/creek/sound/...',
@@ -270,8 +282,8 @@ describe('build', () => {
     );
     // The plural keeps its own wording: the grammar lesson is true of it
     // and false of `targets`.
-    await expect(buildLabels(root, ['//songs/creek/sounds:pad-normalized'])).rejects.toThrow(
-      'packages are singular: try //songs/creek/sound:pad-normalized',
+    await expect(buildLabels(root, ['//songs/creek/sounds:pad-eq'])).rejects.toThrow(
+      'packages are singular: try //songs/creek/sound:pad-eq',
     );
   });
 
@@ -300,50 +312,50 @@ describe('build', () => {
     const original = readFileSync(assetPath);
     writeFileSync(assetPath, Buffer.concat([original, Buffer.from([0, 0])]));
     await expect(
-      buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner),
+      buildLabels(root, ['//songs/creek/sound:pad-eq'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0); // nothing executed, nothing cached
 
     // Same-size tamper is caught by the hash, not the size.
     writeFileSync(assetPath, Buffer.from(original.map((b, i) => (i === 50 ? b ^ 0xff : b))));
     await expect(
-      buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner),
+      buildLabels(root, ['//songs/creek/sound:pad-eq'], runner),
     ).rejects.toThrow('refusing to build');
     expect(state.runs).toBe(0);
 
     // Restore the declared bytes and the build proceeds.
     writeFileSync(assetPath, original);
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(1);
-    expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
+    expect(outcomes.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(false);
   });
 
   it('treats a corrupt action entry as a cache miss and repairs it', async () => {
     const { state, runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(1);
 
     const actionsDir = join(root, '.field/cache/actions');
     const entry = readdirSync(actionsDir).find((f) => f.endsWith('.json'))!;
     writeFileSync(join(actionsDir, entry), '{"rule": "norm'); // crash mid-write
 
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(2); // re-ran instead of crashing
-    expect(outcomes.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(false);
+    expect(outcomes.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(false);
 
-    const again = await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
+    const again = await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
     expect(state.runs).toBe(2); // entry rewritten; cache healthy again
-    expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
+    expect(again.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(true);
   });
 
-  it('normalizes real audio through the daemon', async () => {
-    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-normalized']);
-    const target = outcomes.find((o) => o.label.endsWith(':pad-normalized'))!;
+  it('renders real audio through the daemon', async () => {
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-eq']);
+    const target = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(target.cached).toBe(false);
     expect(existsSync(target.outputPath!)).toBe(true);
     // Second build is a cache hit even with the real runner.
-    const again = await buildLabels(root, ['//songs/creek/sound:pad-normalized']);
-    expect(again.find((o) => o.label.endsWith(':pad-normalized'))!.cached).toBe(true);
+    const again = await buildLabels(root, ['//songs/creek/sound:pad-eq']);
+    expect(again.find((o) => o.label.endsWith(':pad-eq'))!.cached).toBe(true);
   });
 });
 
@@ -527,12 +539,12 @@ describe('play resolution', () => {
     const { state, runner } = countingRunner();
     const items = await resolvePlayables(
       root,
-      ['//songs/creek/asset:pad', '//songs/creek/sound:pad-normalized', '//songs/creek/asset:pad'],
+      ['//songs/creek/asset:pad', '//songs/creek/sound:pad-eq', '//songs/creek/asset:pad'],
       runner,
     );
     expect(items.map((i) => i.label)).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-normalized',
+      '//songs/creek/sound:pad-eq',
     ]);
     expect(items[0]!.path).toBe(join(root, 'songs/creek/audio/pad/pad.wav'));
     expect(existsSync(items[1]!.path)).toBe(true);
@@ -542,9 +554,9 @@ describe('play resolution', () => {
 
 describe('query and explain', () => {
   it('lists deps in dependency order', () => {
-    expect(queryDeps(root, 'deps(//songs/creek/sound:pad-normalized)')).toEqual([
+    expect(queryDeps(root, 'deps(//songs/creek/sound:pad-eq)')).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-normalized',
+      '//songs/creek/sound:pad-eq',
     ]);
   });
 
@@ -553,15 +565,18 @@ describe('query and explain', () => {
   });
 
   it('explains a rule target', async () => {
-    const before = await explainLabel(root, '//songs/creek/sound:pad-normalized');
-    expect(before.rule).toBe('normalize');
+    const before = await explainLabel(root, '//songs/creek/sound:pad-eq');
+    expect(before.rule).toBe('eq');
     expect(before.cached).toBe(false);
-    expect(before.parameters).toEqual({ sample_rate: 96000, bit_depth: 16 });
+    expect(before.parameters).toEqual({
+      bands: [{ type: 'lowpass', frequency: 700, gain_db: 0, bandwidth: 2 }],
+      normalize: true,
+    });
     expect(before.inputs[0]!.label).toBe('//songs/creek/asset:pad');
 
     const { runner } = countingRunner();
-    await buildLabels(root, ['//songs/creek/sound:pad-normalized'], runner);
-    const after = await explainLabel(root, '//songs/creek/sound:pad-normalized');
+    await buildLabels(root, ['//songs/creek/sound:pad-eq'], runner);
+    const after = await explainLabel(root, '//songs/creek/sound:pad-eq');
     expect(after.cached).toBe(true);
     expect(after.actionKey).toBe(before.actionKey);
     expect(after.outputs).toHaveLength(1);

@@ -485,10 +485,15 @@ describe('stemGenerator.execute', () => {
     expect([...stem.channels[1]!]).toEqual([0, 1]);
   });
 
-  it('refuses to resample implicitly', async () => {
+  it('refuses a mismatched rate the planner failed to see', async () => {
+    // The graph converts mismatched sources at the edge (multi-rate.md
+    // decision 4), so by the time execute() runs, every input should be
+    // at the stem's rate — this is the backstop for a header the planner
+    // could not read, or a file that changed under it. Driving execute()
+    // directly is exactly the planner-skipping path the guard exists for.
     const src = monoAsset([1], 44100);
     await expect(render([{}], [src])).rejects.toThrow(
-      'is 44100 Hz but the project is 48000 Hz',
+      'is 44100 Hz but "drums" renders at 48000 Hz',
     );
   });
 
@@ -705,14 +710,19 @@ describe('clips over rule outputs', () => {
     await importAsset(root, 'creek', src, 'kick');
     rmSync(src);
     mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
+    // A gain-0 bell is audibly nothing and numerically near-identity,
+    // which is what lets the placement assertions below still read the
+    // source's own samples. (This was a same-rate `normalize` wrapper
+    // until that type retired — multi-rate.md step 3.)
     writeFileSync(
-      join(root, 'songs/creek/sounds/kick-24.yaml'),
+      join(root, 'songs/creek/sounds/kick-eq.yaml'),
       [
-        'name: kick-24',
-        'type: normalize',
+        'name: kick-eq',
+        'type: eq',
         'source: kick',
-        'sample_rate: 48000',
-        'bit_depth: 24',
+        'bands:',
+        '  - type: bell',
+        '    frequency: 1000',
         '',
       ].join('\n'),
     );
@@ -722,7 +732,7 @@ describe('clips over rule outputs', () => {
         'name: drums',
         'inputs:',
         '  - id: kick-1',
-        '    sound: kick-24',
+        '    sound: kick-eq',
         '    anchor: absolute',
         '    at: 3',
         '    duration: 4',
@@ -770,12 +780,12 @@ describe('clips over rule outputs', () => {
     async () => {
       expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
         '//songs/creek/asset:kick',
-        '//songs/creek/sound:kick-24',
+        '//songs/creek/sound:kick-eq',
         '//songs/creek/track:drums',
       ]);
 
-      // Real normalize feeding the real mixer, both in the daemon now:
-      // the stem plays a render nothing ever committed.
+      // A real eq feeding the real mixer, both in the daemon: the stem
+      // plays a render nothing ever committed.
       const outcomes = await buildLabels(root, ['//songs/creek/track:drums']);
       const stem = outcomes.find((o) => o.label === '//songs/creek/track:drums')!;
       const wav = readWav(stem.outputPath!);
@@ -799,13 +809,13 @@ describe('clips over rule outputs', () => {
     };
 
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    expect(runs).toEqual(['kick-24', 'drums']);
+    expect(runs).toEqual(['kick-eq', 'drums']);
 
     runs.length = 0;
-    const soundPath = join(root, 'songs/creek/sounds/kick-24.yaml');
-    writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('bit_depth: 24', 'bit_depth: 32'));
+    const soundPath = join(root, 'songs/creek/sounds/kick-eq.yaml');
+    writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('frequency: 1000', 'frequency: 2000'));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    expect(runs).toEqual(['kick-24', 'drums']); // the edit rebuilt the render AND the stem
+    expect(runs).toEqual(['kick-eq', 'drums']); // the edit rebuilt the render AND the stem
   });
 });
 
