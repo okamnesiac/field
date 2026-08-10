@@ -388,8 +388,13 @@ export async function explain(
   // A stem is the one spec synthesized from a track file, so it is also
   // the one whose level question has an answer (nested-tracks.md §5).
   const song = project.songs.find((s) => s.dir === node.songDir);
+  // The label's package, not the spec type: a `tap:` node is planned as
+  // a stem too, but the level question belongs to the track — a tap
+  // travels nowhere but its cable, and answering with the sender's
+  // placement path would be confidently wrong for a node whose whole
+  // point is being a different signal (minjudd on #126).
   const levels =
-    node.spec.type === 'stem' && song
+    node.spec.type === 'stem' && song && node.label.pkg === `${node.songDir}/track`
       ? {
           track: node.label.name,
           reaches: reaches(song, node.label.name),

@@ -481,10 +481,13 @@ export function formatCable(cable: Cable, from: string): string {
   if (cable.sender === from) {
     return `send "${cable.label}" → track:${cable.receiver}, ${level}`;
   }
+  // A count above one marks identical placements landing together —
+  // rendered as one clip at +20·log₁₀(count) dB.
+  const spellArrival = (a: CableArrival): string => `${a.at}${a.count > 1 ? `×${a.count}` : ''}`;
   const arrivals =
     cable.arrivals.length === 1
-      ? `arrives at sample ${cable.arrivals[0]}`
-      : `${cable.arrivals.length} arrivals at samples ${cable.arrivals.join(', ')}`;
+      ? `arrives at sample ${spellArrival(cable.arrivals[0]!)}`
+      : `${cable.arrivals.length} arrivals at samples ${cable.arrivals.map(spellArrival).join(', ')}`;
   return `receive "${cable.label}" ← track:${cable.sender}, ${level}, ${arrivals}`;
 }
 

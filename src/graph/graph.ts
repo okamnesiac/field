@@ -344,6 +344,17 @@ export function buildGraph(project: LoadedProject): Graph {
         song.song?.data.length !== undefined
           ? tempoMap.ticksToSamples(song.song.data.length)
           : undefined;
+      // The song's output track carries the song's extent, the way the
+      // mix did before it retired. Which track that is, is the same
+      // convention a bare song name resolves through, read from the same
+      // constant rather than spelled twice (nested-tracks.md §1.2). One
+      // function because two node kinds need it: the stem, and a pre
+      // tap of the output track — the extent is content, not an insert,
+      // so the tap keeps it (Codex on #126).
+      const extentFor = (track: Track): { lengthSamples?: number | undefined; loop?: boolean | undefined } =>
+        track.name === SONG_OUTPUT_NAME
+          ? { lengthSamples, loop: song.song?.data.loop }
+          : {};
       const cablesByReceiver = new Map<string, Cable[]>();
       for (const cable of song.cables) {
         cablesByReceiver.set(cable.receiver, [
@@ -439,26 +450,19 @@ export function buildGraph(project: LoadedProject): Graph {
         // Every track gets a node, an empty one rendering as the silence
         // it contains — which is what lets a song answer to its own name
         // from the moment `field song create` writes its output track.
-        //
-        // The song's output track carries the song's extent, the way the
-        // mix did before it retired. Which track that is, is the same
-        // convention a bare song name resolves through, read from the same
-        // constant rather than spelled twice (nested-tracks.md §1.2).
-        const extent =
-          track.name === SONG_OUTPUT_NAME
-            ? { lengthSamples, loop: song.song?.data.loop }
-            : {};
         addRule(
           { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,
-          planFor(track, true, extent),
+          planFor(track, true, extentFor(track)),
           refLabel,
           trackRate(track),
         );
       }
       // Pre-insert taps, one per sender some cable taps pre — shared by
       // every such cable, and absent entirely when nothing taps pre, so
-      // no existing graph grows a node.
+      // no existing graph grows a node. The extent rides along: it is
+      // content, so a pre tap of the output track truncates and folds
+      // exactly as the stem does, differing only by the inserts.
       const preSenders = new Set(
         song.cables.filter((c) => c.tap === 'pre').map((c) => c.sender),
       );
@@ -467,7 +471,7 @@ export function buildGraph(project: LoadedProject): Graph {
         addRule(
           { pkg: `${pkgBase}/tap`, name },
           song.dir,
-          planFor(track, false, {}),
+          planFor(track, false, extentFor(track)),
           refLabel,
           trackRate(track),
         );

@@ -108,11 +108,13 @@ export type RenderedClip = Omit<PlacedClip, 'duration'> & { duration: number };
 // an ordinary clip playing the sender's whole render — which is the §19
 // action-key claim made literal: the receive re-keys on sender content
 // (the input hash), gain and arrivals (the clips), and tap (which ref is
-// wired).
+// wired). The shape mirrors model/cables.ts CableArrival structurally
+// rather than importing it — cables.ts imports this module's planners,
+// and a type is not worth a cycle.
 export interface CableIn {
   ref: string;
   gainDb: number;
-  arrivals: number[];
+  arrivals: { at: number; count: number }[];
 }
 
 // Every track has a stem, including an empty one — it renders as
@@ -351,15 +353,17 @@ export function planTrack(
   // no window, so a reverb tail rings as long as it rendered. A negative
   // arrival (the sender's zero preceding the receiver's) folds into the
   // read offset: content before the receiver's sample 0 has nowhere to
-  // sound, and the rest starts partway through the source.
+  // sound, and the rest starts partway through the source. A counted
+  // arrival — N identical placements landing together — is one clip at
+  // +20·log₁₀(N) dB, which sums to exactly what N copies would.
   for (const cable of cables) {
     const input = inputIndex.get(cableRefFor(cable))!;
     for (const arrival of cable.arrivals) {
       placed.push({
         input,
-        start: Math.max(0, arrival),
-        read_offset: arrival < 0 ? -arrival : 0,
-        gain_db: cable.gainDb,
+        start: Math.max(0, arrival.at),
+        read_offset: arrival.at < 0 ? -arrival.at : 0,
+        gain_db: cable.gainDb + (arrival.count > 1 ? 20 * Math.log10(arrival.count) : 0),
         fade_in: 0,
         fade_out: 0,
       });

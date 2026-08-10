@@ -595,6 +595,52 @@ describe('cables render (nested-tracks.md §19 chunk 4)', () => {
     expect(audio.channels[0]![0]).toBe(0);
   });
 
+  it('a pre tap of the output track keeps the song extent (#126 review)', async () => {
+    // The extent is content, not an insert: a pre tap of `main` must
+    // truncate and fold exactly as the stem does, differing only by
+    // the inserts it omits.
+    writeFileSync(
+      join(root, 'songs/opener/song.yaml'),
+      ['name: opener', 'length: 3840', ''].join('\n'),
+    );
+    track('main', [
+      'sends:',
+      '  verb:',
+      '    tap: pre',
+      'inserts:',
+      '  - effect: limit',
+    ]);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('album', ['inputs:', '  - track: main', '  - track: space']);
+    const specs: Record<string, unknown> = {};
+    await buildLabels(root, ['//songs/opener/track:space'], captureRunner(specs));
+    const tap = specs['//songs/opener/tap:main'] as StemSpec;
+    expect(tap.inserts).toBeUndefined();
+    expect(tap.length_samples).toBe(96000);
+  });
+
+  it('a tap node answers no level question — that answer is the track stem alone (#126 review)', async () => {
+    track('keys', [
+      'inserts:',
+      '  - effect: eq',
+      '    bands:',
+      '      - type: lowpass',
+      '        frequency: 700',
+      'sends:',
+      '  verb:',
+      '    tap: pre',
+    ]);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    // A tap travels nowhere but its cable; the sender's placement path
+    // is the stem's answer, and repeating it here would be confidently
+    // wrong about where the pre signal goes.
+    const tap = await explainLabel(root, '//songs/opener/tap:keys');
+    expect(tap.levels).toBeUndefined();
+    const stem = await explainLabel(root, '//songs/opener/track:keys');
+    expect(stem.levels?.cables).toHaveLength(1);
+  });
+
   it('explain shows the cable from either end', async () => {
     track('keys', ['sends:', '  verb:', '    gain_db: -6']);
     track('space', ['inputs:', '  - receive: verb']);
