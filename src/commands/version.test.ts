@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatVersionReport, versionReport } from './version.js';
+import { formatVersionReport, versionReport, resolveIdentity } from './version.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { SETUP_SPECS } from './generate.js';
 import {
@@ -190,5 +190,43 @@ describe('field --version', () => {
     const report = await versionReport(root);
     expect(report.daemons.find((d) => d.name === 'field-aced')!.note).toBeUndefined();
     expect(formatVersionReport(report, root)).not.toContain('!');
+  });
+});
+
+describe('resolveIdentity', () => {
+  // The artifact's baked identity wins, and drift from the checkout is
+  // surfaced rather than silently replaced — --version reported the
+  // checkout's branch while the installed dist ran another build, and
+  // the confusion cost a debugging round (2026-08-09).
+  it('reports the baked identity, noting a drifted checkout', () => {
+    const resolved = resolveIdentity(
+      { commit: 'aaaa111', branch: 'feature/x', dirtyFiles: 0 },
+      { commit: 'bbbb222', branch: 'main', dirtyFiles: 3 },
+    );
+    expect(resolved.commit).toBe('aaaa111');
+    expect(resolved.branch).toBe('feature/x');
+    expect(resolved.checkoutCommit).toBe('bbbb222');
+  });
+
+  it('stays quiet when build and checkout agree', () => {
+    const resolved = resolveIdentity(
+      { commit: 'aaaa111', branch: 'main' },
+      { commit: 'aaaa111', branch: 'main' },
+    );
+    expect(resolved.checkoutCommit).toBeUndefined();
+  });
+});
+
+describe('formatVersionReport with a drifted checkout', () => {
+  it('names both shas and the command that reconciles them', () => {
+    const text = formatVersionReport(
+      {
+        cli: { version: '0.1.0', commit: 'aaaa111', branch: 'feature/x', checkoutCommit: 'bbbb222' },
+        workerProtocol: 2,
+        daemons: [],
+      },
+      process.cwd(),
+    );
+    expect(text).toContain('aaaa111 on feature/x; checkout now at bbbb222 — pnpm build to update');
   });
 });

@@ -11,7 +11,7 @@
   },
   "packageManager": "pnpm@11.15.1",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/stamp-build.mjs",
     "prepare": "pnpm build",
     "field": "tsx src/cli.ts",
     "test": "vitest run",

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packageVersion } from '../packageVersion.js';
 import { socketPathFor } from '../socketPath.js';
@@ -40,6 +40,9 @@ export interface VersionReport {
     commit?: string | undefined;
     branch?: string | undefined;
     dirtyFiles?: number | undefined;
+    // Set when the artifact's baked identity and the checkout's HEAD
+    // disagree — the stale-dist case --version exists to catch.
+    checkoutCommit?: string | undefined;
   };
   workerProtocol: number;
   daemons: DaemonReport[];
@@ -54,11 +57,14 @@ function packageRoot(): string {
 // the thing that changed under you moved twenty minutes ago. Absent when
 // this is not a git checkout, which is honest rather than a fallback to
 // something invented.
-function buildIdentity(): {
+interface BuildIdentity {
   commit?: string | undefined;
   branch?: string | undefined;
   dirtyFiles?: number | undefined;
-} {
+  checkoutCommit?: string | undefined;
+}
+
+function liveIdentity(): BuildIdentity {
   const git = (args: string[]): string | undefined => {
     const r = spawnSync('git', ['-C', packageRoot(), ...args], { encoding: 'utf8' });
     return r.status === 0 ? r.stdout.trim() : undefined;
@@ -71,6 +77,39 @@ function buildIdentity(): {
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
     dirtyFiles: status === undefined ? undefined : status.split('\n').filter((l) => l.trim()).length,
   };
+}
+
+// The artifact reports what it was BUILT from — `pnpm build` stamps
+// dist/build-info.json (scripts/stamp-build.mjs) — because the checkout
+// moves the moment a branch is switched, and a --version that reads
+// HEAD at invocation describes code that is not running (it reported a
+// branch whose message changes the installed dist did not contain, and
+// the confusion cost a debugging round, 2026-08-09). Running from
+// source (tsx, vitest) keeps the live read: there the checkout IS the
+// code. An unstamped dist — a build from before this — falls back to
+// the live read, the old behavior rather than a crash.
+export function resolveIdentity(stamped: BuildIdentity, live: BuildIdentity): BuildIdentity {
+  return {
+    ...stamped,
+    ...(live.commit !== undefined && stamped.commit !== undefined && live.commit !== stamped.commit
+      ? { checkoutCommit: live.commit }
+      : {}),
+  };
+}
+
+function buildIdentity(): BuildIdentity {
+  const here = fileURLToPath(import.meta.url);
+  const fromDist = here.includes(`${sep}dist${sep}`);
+  if (!fromDist) return liveIdentity();
+  try {
+    const stamped = JSON.parse(
+      readFileSync(join(packageRoot(), 'dist', 'build-info.json'), 'utf8'),
+    ) as BuildIdentity;
+    if (stamped.commit === undefined) return liveIdentity();
+    return resolveIdentity(stamped, liveIdentity());
+  } catch {
+    return liveIdentity();
+  }
 }
 
 // A hello against a socket that is already there. Deliberately raw rather
@@ -203,7 +242,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
   const lines: string[] = [];
   const build = cli.commit
     ? `${cli.commit}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
-      `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}`
+      `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
+      `${cli.checkoutCommit ? `; checkout now at ${cli.checkoutCommit} — pnpm build to update` : ''}`
     : 'not a git checkout';
   lines.push(`field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);
