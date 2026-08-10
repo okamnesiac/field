@@ -497,6 +497,15 @@ export async function generateVariants(
     }
     mkdirSync(outputDir, { recursive: true });
 
+    // Every refusal above is instant — the voice-ref snapshot included,
+    // a file copy and a hash — and everything below can take real time:
+    // the first worker-emitted progress line is a daemon boot, a python
+    // import, and a model load away, a silent minute that reads as a
+    // hang (found exercising the format). So who is starting is said
+    // now, from this side, last before the slow work — a refusal never
+    // gets a stray "starting" ahead of it (Bugbot on #120).
+    // Finer-grained in-run progress is later.md's line.
+    request.onProgress?.(`starting field-${kind === 'voice' ? 'voiced' : 'aced'}`);
     const client =
       kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);
     try {

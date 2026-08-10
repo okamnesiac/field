@@ -490,9 +490,13 @@ describe('field generate: what lands on disk', () => {
     expect(raw).not.toContain('conviction');
   });
 
-  it('reports progress from the worker', async () => {
+  it('reports progress from the worker, and says who is starting first', async () => {
     const stages: string[] = [];
     await generateVariants(root, 'line', { ...voice, onProgress: (s) => stages.push(s) });
+    // The first line arrives before the worker exists: daemon boot,
+    // python import and model load can be a silent minute, and a silent
+    // minute reads as a hang (session finding).
+    expect(stages[0]).toBe('starting field-voiced');
     expect(stages).toContain('stubbing');
   });
 });
