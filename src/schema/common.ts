@@ -55,14 +55,21 @@ const musicalSpan = z.array(z.number().int().min(0)).min(1).max(3);
 export const timePosition = z.union([ticks, musicalPosition]);
 export const timeSpan = z.union([z.number().int().positive(), musicalSpan]);
 
-export const sampleRate = z.union([
-  z.literal(44100),
-  z.literal(48000),
-  z.literal(88200),
-  z.literal(96000),
-  z.literal(176400),
-  z.literal(192000),
-]);
+// The error names the set because the refusal is the documentation: a
+// raw "Invalid input" does not say what a rate may be, and `rate:` on a
+// track is now the field a person types to opt into any of the
+// multi-rate machinery (#112 review).
+export const sampleRate = z.union(
+  [
+    z.literal(44100),
+    z.literal(48000),
+    z.literal(88200),
+    z.literal(96000),
+    z.literal(176400),
+    z.literal(192000),
+  ],
+  { error: 'must be one of 44100, 48000, 88200, 96000, 176400, 192000' },
+);
 
 // The depths delivery can quantize to (`field export --bit-depth`, and
 // the daemon's normalize op behind it). It lived on the normalize sound

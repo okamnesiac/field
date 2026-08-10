@@ -56,8 +56,12 @@ describe('rate: on tracks (decision 3)', () => {
     expect(loadProject(root).diagnostics).toEqual([]);
 
     writeTrack('bed', ['rate: 49000']);
+    // The refusal names the set, like every other refusal here — a raw
+    // "Invalid input" does not say what a rate may be (#112 review).
     const messages = loadProject(root).diagnostics.map((d) => d.message);
-    expect(messages.some((m) => m.includes('rate'))).toBe(true);
+    expect(
+      messages.some((m) => m.includes('one of 44100, 48000, 88200, 96000, 176400, 192000')),
+    ).toBe(true);
   });
 
   it('refuses rate: on the song output track', () => {
