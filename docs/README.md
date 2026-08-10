@@ -46,8 +46,10 @@ the same files.
   metadata.
 - **Node** — what the build runs: a track's stem, plus the nodes the
   graph mints that no file declares — a `gen:` per inline render, a
-  `convert:` per rate edge, a `tap:` per pre send. You author tracks;
-  the engine derives nodes, so the graph is bigger than the file tree.
+  `convert:` per source-and-rate pair, a `tap:` per pre-tapped sender,
+  each shared by every placement or cable that needs it. You author
+  tracks; the engine derives nodes, so the graph is bigger than the
+  file tree.
 - **Label** — the address of something buildable: a track's stem, a gen
   node, the song's output track. For example,
   `field build //songs/opener/track:main`. See
