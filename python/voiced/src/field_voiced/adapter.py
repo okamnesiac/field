@@ -56,24 +56,34 @@ def device_preference() -> str:
     return os.environ.get("FIELD_VOICE_DEVICE", "mps")
 
 
+# The five files `from_pretrained` pulls (the module docstring pins
+# them); the cache claim below requires every one, because an
+# interrupted download leaves the repo directory present and partial —
+# exactly the retry that must keep its size warning (#118 review).
+_WEIGHT_FILES = ("ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt")
+
+
 def _weights_message() -> str:
     """What the weights step is about to do, said honestly.
 
     `from_pretrained` verifies against the machine-global Hugging Face
     cache and downloads only what is missing — but announcing a ~2 GB
     download over a warm cache reads as a per-project re-download, and
-    got a nearly-loaded run killed mid-flight. The directory name is
-    a display heuristic only (it mirrors the `ResembleAI/chatterbox`
-    repo the docstring above pins): a wrong guess mislabels a progress
+    got a nearly-loaded run killed mid-flight. `try_to_load_from_cache`
+    is the library's own per-file answer, so a partial snapshot reads as
+    cold. Display heuristic only: a wrong guess mislabels a progress
     line, never changes what loads.
     """
-    from huggingface_hub.constants import HF_HUB_CACHE
+    from huggingface_hub import try_to_load_from_cache
 
-    cached = (Path(HF_HUB_CACHE) / "models--ResembleAI--chatterbox").is_dir()
+    cached = all(
+        isinstance(try_to_load_from_cache("ResembleAI/chatterbox", name), str)
+        for name in _WEIGHT_FILES
+    )
     return (
         "loading Chatterbox weights from the machine-global cache"
         if cached
-        else "downloading Chatterbox weights (first run pulls ~2 GB)"
+        else "downloading/verifying Chatterbox weights (first run pulls ~2 GB)"
     )
 
 
