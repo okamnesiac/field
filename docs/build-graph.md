@@ -67,7 +67,7 @@ label with its punctuation flattened, minus the `songs/` prefix:
 
 ```console
 $ field export creek
-exported creek-track-main-v1.wav
+exported //songs/creek/track:main → ~/Desktop/creek-track-main-v1.wav
 ```
 
 Shared material keeps its shelf (`shared-asset-water-v1.wav`). Export
