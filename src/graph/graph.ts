@@ -99,13 +99,20 @@ export interface UngeneratedSound {
   name: string;
 }
 
-// The fill instruction is shaped to be copied: the command sits alone
-// on its own line and --seed stays out of it — omitted, generate draws
-// a seed and records it per take, so the pasteable line is complete as
-// written. The seed note rides the prose line above instead.
-const SEED_NOTE = '(--seed pins a seed; omitted, one is drawn and recorded)';
+// The fill instruction is shaped to be copied: a blank line, a
+// #-comment (itself paste-safe in a shell) carrying the seed note, and
+// the bare command — --seed stays out of it, because omitted, generate
+// draws a seed and records it per take, so the line is complete as
+// written. The exact shape is Justin's spec, verbatim.
 function fillCommand(pending: UngeneratedSound): string {
   return `field generate ${pending.song}/${pending.name}`;
+}
+function fillInstructions(pending: UngeneratedSound[]): string {
+  const plural = pending.length === 1 ? 'this command' : 'these commands';
+  return (
+    `\n\n# Use ${plural} to generate. Specify a seed with --seed <n>\n` +
+    pending.map(fillCommand).join('\n')
+  );
 }
 
 // Requires a project with no diagnostics: the graph trusts what validate
@@ -479,7 +486,7 @@ export function resolveLabel(graph: Graph, label: Label): GraphNode {
     // because every resolution comes through here.
     const pending = graph.ungenerated.get(formatted);
     if (pending !== undefined) {
-      throw new Error(`${formatted} has no takes yet ${SEED_NOTE}:\n  ${fillCommand(pending)}`);
+      throw new Error(`${formatted} has no takes yet${fillInstructions([pending])}`);
     }
     const hint = singularHint(graph, { kind: 'label', label });
     throw new Error(`no such label: ${formatted}${hint}`);
@@ -501,14 +508,13 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
     );
     if (pending.length === 1) {
       throw new Error(
-        `${formatLabel(pending[0]!.label)} has no takes yet ${SEED_NOTE}:\n  ${fillCommand(pending[0]!)}`,
+        `${formatLabel(pending[0]!.label)} has no takes yet${fillInstructions([pending[0]!])}`,
       );
     }
     if (pending.length > 1) {
       throw new Error(
         `${formatPattern(pattern)} matched ${pending.length} generative requests with no ` +
-          `takes yet ${SEED_NOTE}:\n` +
-          pending.map((p) => `  ${fillCommand(p)}`).join('\n'),
+          `takes yet${fillInstructions(pending)}`,
       );
     }
     throw new Error(
@@ -550,16 +556,14 @@ export function deps(graph: Graph, start: GraphNode): GraphNode[] {
   visit(start);
   if (pending.size === 1) {
     const [only] = pending.values();
-    throw new Error(`${formatLabel(only!.label)} has no takes yet ${SEED_NOTE}:\n  ${fillCommand(only!)}`);
+    throw new Error(`${formatLabel(only!.label)} has no takes yet${fillInstructions([only!])}`);
   }
   if (pending.size > 1) {
     // Sorted so the list is stable however the walk met them.
-    const commands = [...pending.values()]
-      .sort((a, b) => (a.name < b.name ? -1 : 1))
-      .map((p) => `  ${fillCommand(p)}`);
+    const sorted = [...pending.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
     throw new Error(
       `${formatLabel(start.label)} needs ${pending.size} generative requests that have ` +
-        `no takes yet ${SEED_NOTE}:\n${commands.join('\n')}`,
+        `no takes yet${fillInstructions(sorted)}`,
     );
   }
   return out;
