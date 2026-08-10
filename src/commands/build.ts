@@ -1,6 +1,12 @@
 import { relative, sep } from 'node:path';
 import { parseLabel, parsePattern } from '../labels.js';
-import { loadProject, type LoadedProject } from '../model/project.js';
+import {
+  diagnosticErrors,
+  diagnosticWarnings,
+  formatDiagnostic,
+  loadProject,
+  type LoadedProject,
+} from '../model/project.js';
 import { build, explain, type BuildOutcome, type Explanation, type GeneratorRunner } from '../graph/build.js';
 import { buildGraph, deps, expandPattern, resolveLabel, type Graph } from '../graph/graph.js';
 import { formatLabel } from '../labels.js';
@@ -25,21 +31,31 @@ export function projectRelative(root: string, path: string): string {
 
 // Building trusts only a valid project: schema or reference errors fail
 // fast rather than producing artifacts from a model check would reject.
-export function loadValid(root: string): { project: LoadedProject; graph: Graph } {
+// Warnings don't hold the gate — they ride back as formatted lines for
+// the caller to surface (the CLI's build prints them; query commands
+// stay quiet).
+export function loadValid(root: string): {
+  project: LoadedProject;
+  graph: Graph;
+  warnings: string[];
+} {
   const project = loadProject(root);
-  if (project.diagnostics.length > 0) {
-    const lines = project.diagnostics.map((d) => `${d.file}: ${d.message}`).join('\n');
+  if (diagnosticErrors(project.diagnostics).length > 0) {
+    const lines = project.diagnostics.map(formatDiagnostic).join('\n');
     throw new Error(`project has errors (field check):\n${lines}`);
   }
-  return { project, graph: buildGraph(project) };
+  const warnings = diagnosticWarnings(project.diagnostics).map(formatDiagnostic);
+  return { project, graph: buildGraph(project), warnings };
 }
 
 export async function buildLabels(
   root: string,
   patterns: string[],
   runner?: GeneratorRunner,
+  onWarning?: (line: string) => void,
 ): Promise<BuildOutcome[]> {
-  const { project, graph } = loadValid(root);
+  const { project, graph, warnings } = loadValid(root);
+  for (const line of warnings) onWarning?.(line);
   const nodes = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
   return build(project, graph, nodes, runner);
 }

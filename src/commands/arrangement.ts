@@ -1,4 +1,9 @@
-import { loadProject, type LoadedProject } from '../model/project.js';
+import {
+  diagnosticErrors,
+  formatDiagnostic,
+  loadProject,
+  type LoadedProject,
+} from '../model/project.js';
 import { SONG_OUTPUT_NAME } from '../labels.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
@@ -139,8 +144,8 @@ export function arrangement(root: string, songName: string): string {
   // unresolved musical time is exactly where it would: positions that
   // never resolved print as raw arrays, which read like bar numbers.
   // `build` (loadValid) and `fmt` both stop here; this was the outlier.
-  if (project.diagnostics.length > 0) {
-    const lines = project.diagnostics.map((d) => `${d.file}: ${d.message}`).join('\n');
+  if (diagnosticErrors(project.diagnostics).length > 0) {
+    const lines = project.diagnostics.map(formatDiagnostic).join('\n');
     throw new Error(`project has errors (field check):\n${lines}`);
   }
   return formatArrangement(songArrangement(project, songName), project);

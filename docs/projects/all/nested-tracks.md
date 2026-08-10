@@ -1119,6 +1119,11 @@ inputs:
 2. **A receive is an `inputs:` entry.** `- receive: <label>` joins
    §18's union beside `track:`, `audio:` and the generator entries —
    the position-domain entries place content, this one admits signal.
+   It joins as the one member carrying nothing beside its label: no
+   position (decision 9's causality rests on that), no level (decision
+   6 puts the level on the send, so there is exactly one place to write
+   it), no id. (Clause added in #125 review — decision 9 argued only
+   the position case, and the schema always enforced the whole rule.)
 
 3. **One cable: one send, one receive.** A label on two sends or two
    receives is an error; a label with one end is a warning on either
@@ -1199,6 +1204,22 @@ inputs:
    resolution is the relaxation — recorded here so it would be a
    decision rather than drift, and §6's placement-identity question
    is the same shape when it comes.
+
+   Amended in #125 review: "the common ancestor" undersold the walk. A
+   sender may join the receiver's context at several heights at once —
+   a return carrying its own dry copy of the sender hears it at zero
+   *and* again through the mix above, and both are derivable — so the
+   walk collects sender placements at every track on the receiver's
+   way up, excluding only the subtree it just climbed out of: those
+   are other instances of the containment the receiver sits in, and an
+   instance hears itself, not its siblings, which is the placed-
+   ancestor coherence above stated as a rule of the walk. Decision 4
+   reads accordingly: displacement on an up edge is legal exactly when
+   nothing joins above it. And identical landings collapse to a count
+   rather than repeating — a sender reachable N times at one offset is
+   one arrival at N times the amplitude, which is what keeps a mix
+   full of shared containment from expanding a set the mix itself
+   holds compactly.
 
 6. **The edge carries a level and never an offset** (§1.8, unchanged),
    plus one new field: `tap: pre | post`, default `post` — the send

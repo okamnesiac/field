@@ -1,7 +1,7 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs';
 import { sep } from 'node:path';
 import { parsePattern } from '../labels.js';
-import { loadProject } from '../model/project.js';
+import { diagnosticErrors, formatDiagnostic, loadProject } from '../model/project.js';
 import { build, type BuildOutcome, type GeneratorRunner } from '../graph/build.js';
 import { buildGraph, expandPattern } from '../graph/graph.js';
 
@@ -96,9 +96,15 @@ export async function watchBuild(
           continue;
         }
         if (options.signal?.aborted) return;
-        if (project.diagnostics.length > 0) {
-          hooks.onDiagnostics?.(project.diagnostics.map((d) => `${d.file}: ${d.message}`));
+        if (diagnosticErrors(project.diagnostics).length > 0) {
+          hooks.onDiagnostics?.(project.diagnostics.map(formatDiagnostic));
           continue; // wait for the next change (or the stale re-run)
+        }
+        // Warnings report and the build proceeds (model/project.ts): a
+        // half-wired cable must not stop the watch from rebuilding what
+        // did change.
+        if (project.diagnostics.length > 0) {
+          hooks.onDiagnostics?.(project.diagnostics.map(formatDiagnostic));
         }
         let outcomes: BuildOutcome[];
         try {

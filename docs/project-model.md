@@ -229,6 +229,46 @@ the level question by summing the gains along each path to a root and
 carries no level, so the only place the answer exists is spread across
 the placements above it.
 
+## Sends are cables
+
+A send is the one edge that is not containment
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19). The
+sending track declares it under `sends:`, a map keyed by label; the
+receiving track carries `- receive: <label>` among its `inputs:`; one
+label links exactly one send to exactly one receive, like a patch cable.
+The edge carries a level (`gain_db`) and a tap point (`tap: pre | post`,
+default post — after the sender's inserts) and never an offset. A
+receive admits signal, not a placement: it carries nothing but its
+label — no position, no level, no id — because the level lives on the
+send, the one place there is to write it. A bare label is a unity
+post-insert send.
+
+`field check` owns the wiring: a label on two sends or two receives is
+an error, a label with one end is a *warning* — wiring incrementally is
+normal — and cycles are checked on the combined graph, containment plus
+cables, with the locally decidable case kept as its own message (a send
+cannot reach into itself). A receive is legal only where the path from
+its track up to the cable's common ancestor is a single unshifted pass:
+`at`, `slip` and `source_offset` at their defaults and no `loop:`
+(`duration` and fades stay legal — they window and shape without moving
+anything). That rule is what lets arrival times be *derived* instead of
+invented: the walk climbs from the receiver and, at every track on the
+way up, collects the sender placements in that track's subtree — a
+sender placed twice arrives twice, and a return carrying its own dry
+copy of the sender hears it at zero *and* through the mix above. What
+the walk never collects is the subtree it just climbed out of: those
+are other instances of the containment the receiver sits in, and an
+instance hears itself, not its siblings — which is also why a placement
+*above* everything that joins may be displaced freely (the circuit
+shifts as one) while one below may not. Where the receiving track
+resolves through several parents, their views must agree, because
+arrivals bake into a render that exists once however often it is placed
+(disagreement is an error naming both paths), and identical landings
+collapse to a count rather than repeating — a doubled sender is one
+arrival at twice the amplitude. What a receive *renders* — the sender's
+signal summed at those arrivals through the receiver's inserts — lands
+with the rest of nested-tracks.md §7 chunk 4.
+
 ## Identity: names, not UUIDs
 
 Nothing in a Field project carries an opaque ID. Identity comes in three

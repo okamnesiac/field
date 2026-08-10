@@ -9,6 +9,10 @@ export interface KeyOrder {
   keys?: string[];
   children?: Record<string, KeyOrder>;
   items?: KeyOrder; // applied to each element of a sequence
+  // Applied to every value of a map whose keys the schema does not know —
+  // a record like `sends:`, keyed by author-chosen labels. `children`
+  // addresses known keys; this addresses all of them.
+  entries?: KeyOrder;
   // Musical time arrays are the one recorded exception to block style
   // (musical-time.md §1.7): a flow-flagged sequence stays inline —
   // `length: [12]`, not a block item per element.
@@ -45,7 +49,7 @@ function orderNode(node: Node | null, order: KeyOrder | undefined): void {
     });
     node.items = indexed.map((e) => e.pair);
     for (const pair of node.items) {
-      const child = order.children?.[keyName(pair) ?? ''];
+      const child = order.children?.[keyName(pair) ?? ''] ?? order.entries;
       if (child) orderNode(pair.value as Node | null, child);
     }
   } else if (isSeq(node) && order.items) {

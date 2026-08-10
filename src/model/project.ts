@@ -8,6 +8,7 @@ import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
+import { checkCables } from './cables.js';
 import { sha256File } from '../hash.js';
 import { genRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
@@ -40,6 +41,23 @@ import {
 export interface Diagnostic {
   file: string; // project-relative path
   message: string;
+  // Absent means error — the gate stays shut. A warning reports without
+  // failing anything: `check` prints it and still says ok, `build`
+  // proceeds, `watch` keeps building (nested-tracks.md §19 chunk 4,
+  // which needed the level for a dangling cable end: wiring
+  // incrementally is normal, so half a cable must not stop the mix).
+  severity?: 'warning';
+}
+
+export const diagnosticErrors = (diagnostics: Diagnostic[]): Diagnostic[] =>
+  diagnostics.filter((d) => d.severity === undefined);
+export const diagnosticWarnings = (diagnostics: Diagnostic[]): Diagnostic[] =>
+  diagnostics.filter((d) => d.severity === 'warning');
+
+// The one spelling of a diagnostic line, so `check`, `build` and `watch`
+// cannot drift on how a warning announces itself.
+export function formatDiagnostic(d: Diagnostic): string {
+  return `${d.file}: ${d.severity === 'warning' ? 'warning: ' : ''}${d.message}`;
 }
 
 // Every loaded file carries the KeyOrder it was validated under, so
@@ -353,7 +371,8 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
 // Semantic checks beyond per-file schemas: identity rules, tempo/meter
 // validity, referential integrity, and canonical formatting.
 function validate(project: LoadedProject): void {
-  const push = (file: string, message: string) => project.diagnostics.push({ file, message });
+  const push = (file: string, message: string, severity?: 'warning') =>
+    project.diagnostics.push({ file, message, ...(severity !== undefined ? { severity } : {}) });
 
   // The shared ledger validates like a song's, against its own scope root
   // (project-layout.md §1.6); its names are what //shared/asset: refs
@@ -556,7 +575,7 @@ function validate(project: LoadedProject): void {
     // (nested-tracks.md §13, #95 review).
     const timeByTrack = new Map<
       string,
-      { tempo: TempoMap | undefined; meter: MeterMap | undefined }
+      { tempo: TempoMap | undefined; meter: MeterMap | undefined; rate: number }
     >();
     const projectSampleRate = project.manifest?.data.sample_rate ?? 48000;
     for (const track of song.tracks) {
@@ -589,7 +608,7 @@ function validate(project: LoadedProject): void {
           meter = undefined;
         }
       }
-      timeByTrack.set(track.data.name, { tempo, meter });
+      timeByTrack.set(track.data.name, { tempo, meter, rate: trackSampleRate });
     }
     for (const track of song.tracks) {
       const expected = basename(track.path, '.yaml');
@@ -627,6 +646,10 @@ function validate(project: LoadedProject): void {
       // bytes, each pointing at the field that owns the name.
       const entryIds = new Set<string>();
       track.data.inputs.forEach((entry, i) => {
+        // A receive is not a placement (nested-tracks.md §19): it has no
+        // window, no fades, no time to resolve. Its checks — the ends,
+        // the path, the arrivals — are checkCables', below.
+        if (entry.receive !== undefined) return;
         // Named by id when it has one — ids are optional (§18 decision
         // 3) — else by position and target, the way placements were.
         const target =
@@ -983,6 +1006,13 @@ function validate(project: LoadedProject): void {
         );
       }
     }
+
+    // Cables (nested-tracks.md §19): both ends resolve 1:1, dangling
+    // ends warn, the receive's path up to the cable's ancestor is
+    // undisplaced, the containment paths agree on arrivals, and the
+    // combined graph — containment plus cables — stays acyclic. After
+    // the entry loop, which resolved every musical time the walk reads.
+    checkCables(song.tracks, timeByTrack, push);
 
     // Containment cycles. Sound sources already made cycles declarable
     // (effects.md §3) and this is the same detector for the same reason:

@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { allFiles, loadProject } from '../model/project.js';
+import { allFiles, diagnosticErrors, loadProject } from '../model/project.js';
 import { canonicalText } from '../yaml/emit.js';
 
 // Rewrite unformatted files to canonical form. Comments survive: fmt
@@ -9,7 +9,9 @@ import { canonicalText } from '../yaml/emit.js';
 // fmt and check can never disagree about a file's role.
 export function fmt(root: string): { formatted: string[]; errors: string[] } {
   const project = loadProject(root);
-  const errors = project.diagnostics.map((d) => `${d.file}: ${d.message}`);
+  // Errors hold the gate; a warned file is still a valid file whose
+  // formatting is worth fixing (model/project.ts).
+  const errors = diagnosticErrors(project.diagnostics).map((d) => `${d.file}: ${d.message}`);
   if (errors.length > 0) return { formatted: [], errors };
 
   const formatted: string[] = [];
