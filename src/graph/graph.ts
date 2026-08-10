@@ -524,47 +524,57 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
   return matched;
 }
 
-// Transitive dependencies of a node, dependencies first, node last.
-//
-// Takeless requests are collected across the whole walk and reported
-// together: failing on the first pending dependency means generating
-// it, waiting, and being told about the next — a session peels the
-// list one play at a time (found exercising the folded format). Other
-// resolution failures still throw where they stand, because they are
-// errors rather than work the walk can enumerate.
-export function deps(graph: Graph, start: GraphNode): GraphNode[] {
-  const out: GraphNode[] = [];
+// Every takeless request reachable from any of the starts, reported as
+// one instruction block. One walk over the whole request, because any
+// finer scope re-creates the peel it exists to end: failing on the
+// first pending dependency meant generate, wait, be told the next
+// (found exercising the folded format), and a per-target aggregate
+// alone moved the same loop up to the build queue (Codex on #119).
+// Other resolution failures still throw where they stand, because they
+// are errors rather than work a walk can enumerate.
+export function assertGenerated(graph: Graph, starts: GraphNode[]): void {
   const seen = new Set<string>();
   const pending = new Map<string, UngeneratedSound>();
   const visit = (node: GraphNode) => {
     const key = formatLabel(node.label);
     if (seen.has(key)) return;
     seen.add(key);
-    if (node.kind === 'rule') {
-      for (const dep of node.deps) {
-        const formatted = formatLabel(dep);
-        const takeless = graph.ungenerated.get(formatted);
-        if (takeless !== undefined) {
-          pending.set(formatted, takeless);
-          continue;
-        }
-        visit(resolveLabel(graph, dep));
+    if (node.kind !== 'rule') return;
+    for (const dep of node.deps) {
+      const formatted = formatLabel(dep);
+      const takeless = graph.ungenerated.get(formatted);
+      if (takeless !== undefined) {
+        pending.set(formatted, takeless);
+        continue;
       }
+      visit(resolveLabel(graph, dep));
+    }
+  };
+  for (const start of starts) visit(start);
+  if (pending.size === 0) return;
+  // Sorted so the list is stable however the walk met them.
+  const sorted = [...pending.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
+  const fact =
+    pending.size === 1
+      ? `${formatLabel(sorted[0]!.label)} has no takes yet`
+      : `${pending.size} generative requests have no takes yet`;
+  throw new Error(`${fact}${fillInstructions(sorted)}`);
+}
+
+// Transitive dependencies of a node, dependencies first, node last.
+export function deps(graph: Graph, start: GraphNode): GraphNode[] {
+  assertGenerated(graph, [start]);
+  const out: GraphNode[] = [];
+  const seen = new Set<string>();
+  const visit = (node: GraphNode) => {
+    const key = formatLabel(node.label);
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (node.kind === 'rule') {
+      for (const dep of node.deps) visit(resolveLabel(graph, dep));
     }
     out.push(node);
   };
   visit(start);
-  if (pending.size === 1) {
-    const [only] = pending.values();
-    throw new Error(`${formatLabel(only!.label)} has no takes yet${fillInstructions([only!])}`);
-  }
-  if (pending.size > 1) {
-    // Sorted so the list is stable however the walk met them.
-    const sorted = [...pending.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
-    throw new Error(
-      `${formatLabel(start.label)} needs ${pending.size} generative requests that have ` +
-        `no takes yet${fillInstructions(sorted)}`,
-    );
-  }
   return out;
 }

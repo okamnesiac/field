@@ -255,7 +255,25 @@ describe('build', () => {
       ].join('\n'),
     );
     await expect(buildLabels(root, ['//songs/tall-grass/track:main'])).rejects.toThrow(
-      /needs 2 generative requests that have no takes yet\n\n# Use these commands to generate\.[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
+      /2 generative requests have no takes yet\n\n# Use these commands to generate\.[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
+    );
+
+    // Across *independent* roots too: a queue of targets, each with its
+    // own takeless leaf, is still one session and gets one list — the
+    // per-target aggregate alone re-created the peel at the queue level
+    // (Codex on #119).
+    writeFileSync(
+      join(root, 'songs/tall-grass/tracks/verse.yaml'),
+      ['name: verse', 'inputs:', '  - track: topline', ''].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/tall-grass/tracks/chorus.yaml'),
+      ['name: chorus', 'inputs:', '  - track: bridge', ''].join('\n'),
+    );
+    await expect(
+      buildLabels(root, ['//songs/tall-grass/track:verse', '//songs/tall-grass/track:chorus']),
+    ).rejects.toThrow(
+      /2 generative requests have no takes yet[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
     );
   });
 
