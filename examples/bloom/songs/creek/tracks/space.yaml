@@ -1,0 +1,20 @@
+# the shared reverb — one room both senders sit in, fed by cables from
+# two different depths: keys is two levels down (inside phrase, placed
+# three times, so it arrives once per pass) and the vocal is one. Fully
+# wet: the dry signal arrives through the tree, this track is only the
+# room's answer.
+#
+# Placed in main and not in bed, and that is the design working: bed
+# omits the vocal, so a return that hears the vocal would hear different
+# arrivals through the two mixes — one render cannot hold both, and
+# check refuses exactly that (nested-tracks.md §19). An instrumental
+# room for bed would be its own return.
+name: space
+inserts:
+  - effect: reverb
+    mix: 1.0
+    decay: 2.5
+    predelay_ms: 20
+inputs:
+  - receive: keys-verb
+  - receive: vocal-verb

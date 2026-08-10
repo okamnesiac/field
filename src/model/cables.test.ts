@@ -6,11 +6,16 @@ import { init } from '../commands/init.js';
 import { createSong } from '../commands/create.js';
 import { check } from '../commands/check.js';
 import { fmt } from '../commands/fmt.js';
-import { buildLabels } from '../commands/build.js';
+import { buildLabels, explainLabel, queryDeps } from '../commands/build.js';
+import { importAsset } from '../commands/import.js';
+import { readWav, writeWavFloat32 } from '../audio/wav.js';
+import type { GeneratorRunner } from '../graph/build.js';
+import type { StemSpec } from '../generators/stem.js';
+import { formatLabel } from '../labels.js';
 import { TempoMap } from '../time/tempo.js';
 import { trackOrder, type InputEntry, type Track } from '../schema/index.js';
 import type { LoadedFile } from './project.js';
-import { checkCables, type TrackClock } from './cables.js';
+import { checkCables, formatCable, type TrackClock } from './cables.js';
 
 // The cable model (nested-tracks.md §19): resolution and 1:1 checks,
 // dangling-end warnings, the zero-displacement rule, arrival derivation
@@ -475,6 +480,178 @@ describe('sends and receives in the schema', () => {
       ['name: keys', 'sends:', '  verb:', '    gain_db: -6', '    tap: pre', 'inputs: []', ''].join(
         '\n',
       ),
+    );
+  });
+});
+
+describe('cables render (nested-tracks.md §19 chunk 4)', () => {
+  const captureRunner = (specs: Record<string, unknown>): GeneratorRunner =>
+    async (node, _inputs, outputPath) => {
+      specs[formatLabel(node.label)] = node.spec;
+      writeFileSync(outputPath, JSON.stringify(node.spec));
+    };
+
+  it('the receiver consumes the sender stem and sums it at each arrival', async () => {
+    track('keys', ['sends:', '  verb:', '    gain_db: -6']);
+    track('verse', ['inputs:', '  - track: keys']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', [
+      'inputs:',
+      '  - track: verse',
+      '  - track: verse',
+      '    at: 7680',
+      '  - track: space',
+    ]);
+    expect(queryDeps(root, 'deps(//songs/opener/track:space)')).toContain(
+      '//songs/opener/track:keys',
+    );
+    const specs: Record<string, unknown> = {};
+    await buildLabels(root, ['//songs/opener/track:space'], captureRunner(specs));
+    const spec = specs['//songs/opener/track:space'] as StemSpec;
+    expect(spec.sources).toEqual(['track:keys']);
+    // verse at 0 and at bar 3 (7680 ticks = 192000 samples), keys at 0
+    // inside it: two arrivals, the sender's whole render at −6 dB each.
+    expect(spec.clips).toEqual([
+      { input: 0, start: 0, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
+      { input: 0, start: 192000, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
+    ]);
+  });
+
+  it('tap: pre consumes a pre-insert tap node instead of the stem', async () => {
+    track('keys', [
+      'inserts:',
+      '  - effect: eq',
+      '    bands:',
+      '      - type: lowpass',
+      '        frequency: 700',
+      'sends:',
+      '  verb:',
+      '    tap: pre',
+    ]);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    const deps = queryDeps(root, 'deps(//songs/opener/track:space)');
+    expect(deps).toContain('//songs/opener/tap:keys');
+    expect(deps).not.toContain('//songs/opener/track:keys');
+    const specs: Record<string, unknown> = {};
+    await buildLabels(root, ['//songs/opener/track:space'], captureRunner(specs));
+    const tap = specs['//songs/opener/tap:keys'] as StemSpec;
+    const stem = specs['//songs/opener/track:space'] as StemSpec;
+    // The tap is the sender's plan minus its inserts — same clips, no
+    // inserts key — and the receiver wires the tap, not the stem.
+    expect(tap.inserts).toBeUndefined();
+    expect(stem.sources).toEqual(['tap:keys']);
+  });
+
+  it('a sender at another rate converts at the cable edge (multi-rate.md decision 4)', async () => {
+    track('keys', ['rate: 44100']);
+    track('space', ['inputs:', '  - receive: verb']);
+    // The send rides the sender file; declared after rate to stay canonical.
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      ['name: keys', 'rate: 44100', 'sends:', '  verb:', ''].join('\n'),
+    );
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    const deps = queryDeps(root, 'deps(//songs/opener/track:space)');
+    expect(deps).toContain('//songs/opener/convert:track-keys-48000');
+  });
+
+  it('a gain tweak re-keys the receiver and only the receiver', async () => {
+    track('keys', ['sends:', '  verb:', '    gain_db: -6']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    const ran: string[] = [];
+    const runner: GeneratorRunner = async (node, _inputs, outputPath) => {
+      ran.push(formatLabel(node.label));
+      writeFileSync(outputPath, JSON.stringify(node.spec));
+    };
+    await buildLabels(root, ['//songs/opener/track:space'], runner);
+    expect(ran).toEqual(['//songs/opener/track:keys', '//songs/opener/track:space']);
+    ran.length = 0;
+    track('keys', ['sends:', '  verb:', '    gain_db: -3']);
+    await buildLabels(root, ['//songs/opener/track:space'], runner);
+    // The sender's own render saw nothing change; the receive's clips did.
+    expect(ran).toEqual(['//songs/opener/track:space']);
+  });
+
+  it('the summed audio is real: an impulse arrives where the walk said (daemon render)', async () => {
+    // A one-frame impulse at the head of a one-beat asset, sent from a
+    // leaf placed at bar 1 — the receiver's render must carry it at
+    // sample 96000, scaled by the cable's −6 dB.
+    const src = join(root, '..', `field-cable-src-${Date.now()}.wav`);
+    const samples = new Float32Array(24000);
+    samples[0] = 1;
+    writeWavFloat32(src, 48000, [samples]);
+    await importAsset(root, 'opener', src, 'hit');
+    rmSync(src);
+    track('kick', ['sends:', '  verb:', '    gain_db: -6', 'inputs:', '  - audio: hit']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: kick', '    at: 3840', '  - track: space']);
+    const outcomes = await buildLabels(root, ['//songs/opener/track:space']);
+    const out = outcomes.find((o) => o.label === '//songs/opener/track:space')!;
+    const audio = readWav(out.outputPath!);
+    const gain = Math.pow(10, -6 / 20);
+    expect(audio.channels[0]![96000]).toBeCloseTo(gain, 5);
+    expect(audio.channels[0]![0]).toBe(0);
+  });
+
+  it('a pre tap of the output track keeps the song extent (#126 review)', async () => {
+    // The extent is content, not an insert: a pre tap of `main` must
+    // truncate and fold exactly as the stem does, differing only by
+    // the inserts it omits.
+    writeFileSync(
+      join(root, 'songs/opener/song.yaml'),
+      ['name: opener', 'length: 3840', ''].join('\n'),
+    );
+    track('main', [
+      'sends:',
+      '  verb:',
+      '    tap: pre',
+      'inserts:',
+      '  - effect: limit',
+    ]);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('album', ['inputs:', '  - track: main', '  - track: space']);
+    const specs: Record<string, unknown> = {};
+    await buildLabels(root, ['//songs/opener/track:space'], captureRunner(specs));
+    const tap = specs['//songs/opener/tap:main'] as StemSpec;
+    expect(tap.inserts).toBeUndefined();
+    expect(tap.length_samples).toBe(96000);
+  });
+
+  it('a tap node answers no level question — that answer is the track stem alone (#126 review)', async () => {
+    track('keys', [
+      'inserts:',
+      '  - effect: eq',
+      '    bands:',
+      '      - type: lowpass',
+      '        frequency: 700',
+      'sends:',
+      '  verb:',
+      '    tap: pre',
+    ]);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    // A tap travels nowhere but its cable; the sender's placement path
+    // is the stem's answer, and repeating it here would be confidently
+    // wrong about where the pre signal goes.
+    const tap = await explainLabel(root, '//songs/opener/tap:keys');
+    expect(tap.levels).toBeUndefined();
+    const stem = await explainLabel(root, '//songs/opener/track:keys');
+    expect(stem.levels?.cables).toHaveLength(1);
+  });
+
+  it('explain shows the cable from either end', async () => {
+    track('keys', ['sends:', '  verb:', '    gain_db: -6']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    const sender = await explainLabel(root, '//songs/opener/track:keys');
+    const receiver = await explainLabel(root, '//songs/opener/track:space');
+    expect(sender.levels?.cables).toHaveLength(1);
+    const cable = receiver.levels!.cables[0]!;
+    expect(formatCable(cable, 'keys')).toBe('send "verb" → track:space, -6.0 dB (tap post)');
+    expect(formatCable(cable, 'space')).toBe(
+      'receive "verb" ← track:keys, -6.0 dB (tap post), arrives at sample 0',
     );
   });
 });

@@ -257,6 +257,7 @@ describe('explain', () => {
     expect((await explainLabel(root, '//songs/creek/track:main')).levels).toEqual({
       track: 'main',
       reaches: [],
+      cables: [],
     });
   });
 });

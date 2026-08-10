@@ -8,11 +8,11 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has
-  shipped except sends, un-deferred by §19 and committed to land
-  before the real-time engine — chunk 4 is the remaining work, the
-  chunk 6 finale having retired `sounds/`. Stays until sessions have
-  worked the folded format, per the neighbours' precedent — the entry
-  list, gen nodes and takes machinery are where every edit now lands.
+  shipped, sends last (§19): cables validate and render offline, and
+  creek's shared reverb is fed from two depths. Stays until sessions
+  have worked the folded format and wired a cable or two in anger — the
+  entry list, gen nodes, takes machinery and now sends are where every
+  edit lands.
 - [Multi-rate](all/multi-rate.md) — all three steps shipped (#107, #108,
   #112); stays until a session has actually played through an edge
   conversion, per the neighbours' precedent — every action key moved, the

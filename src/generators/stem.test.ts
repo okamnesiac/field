@@ -242,6 +242,51 @@ describe('planTrack', () => {
   });
 });
 
+describe('planTrack: cables (nested-tracks.md §19)', () => {
+  const once = (...offsets: number[]) => offsets.map((o) => ({ at: o, count: 1 }));
+
+  it('each arrival is a clip playing the sender whole at the cable level', () => {
+    const spec = planTrack(track([]), map120, new Map(), new Map(), {}, new Map(), [
+      { ref: 'track:keys', gainDb: -6, arrivals: once(24000, 96000) },
+    ]);
+    expect(spec.sources).toEqual(['track:keys']);
+    // No duration: the render plays as long as the sender is, so a
+    // reverb tail rings past the dry window.
+    expect(spec.clips).toEqual([
+      { input: 0, start: 24000, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
+      { input: 0, start: 96000, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
+    ]);
+  });
+
+  it('a negative arrival folds into the read offset', () => {
+    const spec = planTrack(track([]), map120, new Map(), new Map(), {}, new Map(), [
+      { ref: 'track:keys', gainDb: 0, arrivals: once(-4800) },
+    ]);
+    // Content before the receiver's sample 0 has nowhere to sound; the
+    // rest starts partway through the source.
+    expect(spec.clips).toEqual([
+      { input: 0, start: 0, read_offset: 4800, gain_db: 0, fade_in: 0, fade_out: 0 },
+    ]);
+  });
+
+  it('a counted arrival is one clip at +20·log₁₀(count) dB, not repeated rows', () => {
+    const spec = planTrack(track([]), map120, new Map(), new Map(), {}, new Map(), [
+      { ref: 'track:keys', gainDb: -6, arrivals: [{ at: 24000, count: 2 }] },
+    ]);
+    expect(spec.clips).toHaveLength(1);
+    // Two identical copies sum to twice the amplitude: −6 + 20·log₁₀2.
+    expect(spec.clips[0]!.gain_db).toBeCloseTo(-6 + 20 * Math.log10(2), 10);
+  });
+
+  it('a converted cable ref rewires like any source', () => {
+    const converts = new Map([['tap:keys', { ref: 'convert:tap-keys-48000', scale: 48000 / 44100 }]]);
+    const spec = planTrack(track([]), map120, new Map(), new Map(), {}, converts, [
+      { ref: 'tap:keys', gainDb: 0, arrivals: once(0) },
+    ]);
+    expect(spec.sources).toEqual(['convert:tap-keys-48000']);
+  });
+});
+
 describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => {
   const nested = (inputs: unknown[], clips: unknown[] = []): Track =>
     trackSchema.parse({ name: 'outer', inputs: [...inputs, ...clips] }) as Track;

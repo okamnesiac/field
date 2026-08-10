@@ -22,6 +22,7 @@ import {
 } from './cliParsers.js';
 import { buildLabels, explainLabel, projectRelative, queryDeps } from './commands/build.js';
 import { formatReach, rootNote } from './model/levels.js';
+import { formatCable } from './model/cables.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
 import {
   transportCommand,
@@ -765,6 +766,12 @@ program
         }
         for (const reach of e.levels.reaches) {
           process.stdout.write(`reaches: ${formatReach(reach)}\n`);
+        }
+        // A cable appears when either end's level is questioned
+        // (nested-tracks.md §19): the edge's gain is part of the answer
+        // neither track file shows in full.
+        for (const cable of e.levels.cables) {
+          process.stdout.write(`cable: ${formatCable(cable, e.levels.track)}\n`);
         }
       }
     } catch (err) {

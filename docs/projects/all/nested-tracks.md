@@ -1,22 +1,26 @@
 ---
-status: Active
+status: Shipped
 ---
 
 # Plan: Nested tracks — one primitive for structure, time and mix
 
-**Status:** One chunk left (2026-08-10): sends, no longer deferred —
-§19 replaces §14's wait-for-the-engine with a design that renders
-offline, and chunk 4 is committed to land before the real-time engine;
-everything else is live, chunk 6's finale last. Nesting renders, `mixes/` has
+**Status:** Shipped (2026-08-10): every chunk is live. Chunk 4 landed
+last, in two slices — the schema, the warning severity and the whole
+cable rule set first, then the render: a receive is ordinary clips at
+derived arrivals, `tap: pre` is an implicit pre-insert node, and creek
+carries §8's shared reverb fed from two depths, rebuilt without
+touching another stem's cache. Sends therefore exist *before* the
+real-time engine, which §19 argued for and §9 sequenced.
+Before that: nesting renders, `mixes/` has
 retired into the output track (#81), and creek is now expressed as three
 placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
 finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
 (#76) and `field explain` now answers the level question (§12). Chunk 2
-is done too — a track carries its own tempo and meter (§13). Sends
-(chunk 4) are un-deferred: §19 derives the arrival times §14 said an
-offline renderer would have to invent, and specifies the cable model. What
-was left here was folding `sounds/` in (chunk 6), which opened with the
+is done too — a track carries its own tempo and meter (§13). §19 is the
+sends design chunk 4 shipped: it derives the arrival times §14 said an
+offline renderer would have to invent, and specifies the cable model.
+Chunk 6 folded `sounds/` in, opening with the
 clip-duration prerequisite (§15, #97) and the eq fold (§17, #100), and
 then settled the shape it was heading toward: one `inputs:` list whose
 entries place tracks, committed audio, or inline generators (§18) —
@@ -460,6 +464,13 @@ Amended 2026-08-10: the two sends clauses return. §19 un-defers chunk 4,
 so the shared reverb fed from two depths and the reach-into-itself
 message are part of this definition of done again — to be met offline,
 before the engine.
+
+Met, later the same day: creek's `space` is a fully wet reverb fed by
+`keys` (two levels down, arriving once per phrase pass) and
+`lead-vocal` (one level down), placed in `main` — and deliberately not
+in `bed`, whose vocalless arrival set would disagree, which is §19's
+agreement rule doing its job. `check` names a send that reaches into
+itself with §1.7's own message, and the sends tests cover both.
 
 ## 9 Sequencing, revised (2026-08-08)
 

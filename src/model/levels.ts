@@ -172,8 +172,9 @@ export function rootNote(trackName: string): string {
 }
 
 // Levels are authored in tenths at most, so one decimal is the whole
-// number; `-0` is a rounding artifact nobody means.
-function fmtDb(db: number): string {
+// number; `-0` is a rounding artifact nobody means. Exported for the
+// cable lines (model/cables.ts), which answer the same level question.
+export function fmtDb(db: number): string {
   const fixed = db.toFixed(1);
   const cleaned = fixed === '-0.0' ? '0.0' : fixed;
   return db > 0 ? `+${cleaned}` : cleaned;

@@ -10,23 +10,28 @@ import {
   sharedAssetName,
   SHARED_ASSETS_PKG,
   SONG_OUTPUT_NAME,
+  tapRef,
+  tapRefName,
+  trackRef,
   trackRefName,
   type Label,
   type LabelPattern,
 } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
+import type { Cable } from '../model/cables.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import type { ResampleSpec } from '../generators/resample.js';
 import { entryRef, generatorName, planTrack } from '../generators/stem.js';
 import { TempoMap } from '../time/tempo.js';
-import type { Asset } from '../schema/index.js';
+import type { Asset, Track } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention
 // (project-core.md §3.4). Node kinds: source assets (song and shared
 // ledgers), generator entries' renders (gen:), chosen takes
-// (generation), resample edges (convert:), and implicit track stems —
-// every track is buildable as //songs/<song>/track:<name>
+// (generation), resample edges (convert:), pre-insert taps (tap:,
+// nested-tracks.md §19 decision 6), and implicit track stems — every
+// track is buildable as //songs/<song>/track:<name>
 // (mix-assembly.md §3). "Node" and "rule" are deliberately the engine's
 // words (project-layout.md §4): the format speaks tracks and entries,
 // and this module realizes them. Declared sounds were a kind here until
@@ -188,6 +193,8 @@ export function buildGraph(project: LoadedProject): Graph {
       if (gen !== undefined) return { pkg: `${pkgBase}/gen`, name: gen };
       const conv = convertRefName(ref);
       if (conv !== undefined) return { pkg: `${pkgBase}/convert`, name: conv };
+      const tap = tapRefName(ref);
+      if (tap !== undefined) return { pkg: `${pkgBase}/tap`, name: tap };
       // A bare ref is committed bytes (§18: the kind lives in the field
       // name, and `audio:` is the bare-slug kind) — validate has already
       // diagnosed one the ledger does not hold.
@@ -290,7 +297,9 @@ export function buildGraph(project: LoadedProject): Graph {
       if (rateMemo.has(ref)) return rateMemo.get(ref);
       let rate: number | undefined;
       const shared = sharedAssetName(ref);
-      const placed = trackRefName(ref);
+      // A tap is the sender's stem before its inserts, so it arrives at
+      // the sender's rate exactly as the stem itself does.
+      const placed = trackRefName(ref) ?? tapRefName(ref);
       const gen = genRefName(ref);
       const asset = assetByName.get(ref);
       if (shared !== undefined) {
@@ -309,7 +318,9 @@ export function buildGraph(project: LoadedProject): Graph {
     };
     const renderable = song.tracks.map((t) => t.data);
     if (song.tempo) {
-      const tempoMap = new TempoMap(song.tempo.data.tempo, projectRate);
+      // Captured once: the narrowing does not survive into planFor.
+      const songTempoEvents = song.tempo.data.tempo;
+      const tempoMap = new TempoMap(songTempoEvents, projectRate);
       // Loops without `every` tile at the source's length, so the plan
       // needs frame counts — but only for the sources such loops touch.
       const framesBySource = new Map<string, number>();
@@ -333,19 +344,35 @@ export function buildGraph(project: LoadedProject): Graph {
         song.song?.data.length !== undefined
           ? tempoMap.ticksToSamples(song.song.data.length)
           : undefined;
-      for (const track of renderable) {
-        // Every track gets a node, an empty one rendering as the silence
-        // it contains — which is what lets a song answer to its own name
-        // from the moment `field song create` writes its output track.
-        //
-        // The song's output track carries the song's extent, the way the
-        // mix did before it retired. Which track that is, is the same
-        // convention a bare song name resolves through, read from the same
-        // constant rather than spelled twice (nested-tracks.md §1.2).
-        const extent =
-          track.name === SONG_OUTPUT_NAME
-            ? { lengthSamples, loop: song.song?.data.loop }
-            : {};
+      // The song's output track carries the song's extent, the way the
+      // mix did before it retired. Which track that is, is the same
+      // convention a bare song name resolves through, read from the same
+      // constant rather than spelled twice (nested-tracks.md §1.2). One
+      // function because two node kinds need it: the stem, and a pre
+      // tap of the output track — the extent is content, not an insert,
+      // so the tap keeps it (Codex on #126).
+      const extentFor = (track: Track): { lengthSamples?: number | undefined; loop?: boolean | undefined } =>
+        track.name === SONG_OUTPUT_NAME
+          ? { lengthSamples, loop: song.song?.data.loop }
+          : {};
+      const cablesByReceiver = new Map<string, Cable[]>();
+      for (const cable of song.cables) {
+        cablesByReceiver.set(cable.receiver, [
+          ...(cablesByReceiver.get(cable.receiver) ?? []),
+          cable,
+        ]);
+      }
+      // One planner for stems and pre-insert taps: a `tap: pre` cable
+      // consumes the sender's stem minus its inserts (nested-tracks.md
+      // §19 decision 6), and everything else about planning the sender —
+      // edge conversions, its own arriving cables, its local time — has
+      // to mean exactly what it means in the stem, or the tap would be a
+      // second copy of the law.
+      const planFor = (
+        track: Track,
+        withInserts: boolean,
+        extent: { lengthSamples?: number | undefined; loop?: boolean | undefined },
+      ) => {
         const rate = trackRate(track);
         // Rates convert at the placement (multi-rate.md decision 4): a
         // source arriving at another rate gets a resample node between it
@@ -357,12 +384,10 @@ export function buildGraph(project: LoadedProject): Graph {
         // guard is for a name crafted to collide anyway (a sound
         // literally named "track-foo"), which validate does not chase.
         const convertBySource = new Map<string, { ref: string; scale: number }>();
-        for (const entry of track.inputs) {
-          if (entry.receive !== undefined) continue; // a cable is not a source here
-          const raw = entryRef(entry, track.name);
-          if (convertBySource.has(raw)) continue;
+        const ensureConvert = (raw: string): void => {
+          if (convertBySource.has(raw)) return;
           const src = sourceRate(raw);
-          if (src === undefined || src === rate) continue;
+          if (src === undefined || src === rate) return;
           const shared = sharedAssetName(raw);
           const base = shared !== undefined ? `shared-${shared}` : raw.replace(':', '-');
           const name = `${base}-${rate}`;
@@ -381,7 +406,19 @@ export function buildGraph(project: LoadedProject): Graph {
           // meaning what it says: samples *of the source*, which the
           // converted file stores rate/src as many of.
           convertBySource.set(raw, { ref: convertRef(name), scale: rate / src });
+        };
+        for (const entry of track.inputs) {
+          if (entry.receive !== undefined) continue; // a cable is not a source here
+          ensureConvert(entryRef(entry, track.name));
         }
+        // The cables arriving here become plan inputs: the sender's stem
+        // for a post tap, the tap node for pre — converted at the edge
+        // like any source when the sender renders at another rate.
+        const cableIns = (cablesByReceiver.get(track.name) ?? []).map((cable) => {
+          const raw = cable.tap === 'pre' ? tapRef(cable.sender) : trackRef(cable.sender);
+          ensureConvert(raw);
+          return { ref: raw, gainDb: cable.gainDb, arrivals: cable.arrivals };
+        });
         // A track plans in its own time (nested-tracks.md §13). The two
         // timelines never have to be reconciled as maps: this stem's
         // positions resolve to samples here, its parent's `at` resolves to
@@ -398,13 +435,45 @@ export function buildGraph(project: LoadedProject): Graph {
           ? new TempoMap(track.time.tempo, rate)
           : rate === projectRate
             ? tempoMap
-            : new TempoMap(song.tempo.data.tempo, rate);
+            : new TempoMap(songTempoEvents, rate);
+        return planTrack(
+          withInserts ? track : { ...track, inserts: [] },
+          local,
+          sha256BySource,
+          framesBySource,
+          extent,
+          convertBySource,
+          cableIns,
+        );
+      };
+      for (const track of renderable) {
+        // Every track gets a node, an empty one rendering as the silence
+        // it contains — which is what lets a song answer to its own name
+        // from the moment `field song create` writes its output track.
         addRule(
           { pkg: `${pkgBase}/track`, name: track.name },
           song.dir,
-          planTrack(track, local, sha256BySource, framesBySource, extent, convertBySource),
+          planFor(track, true, extentFor(track)),
           refLabel,
-          rate,
+          trackRate(track),
+        );
+      }
+      // Pre-insert taps, one per sender some cable taps pre — shared by
+      // every such cable, and absent entirely when nothing taps pre, so
+      // no existing graph grows a node. The extent rides along: it is
+      // content, so a pre tap of the output track truncates and folds
+      // exactly as the stem does, differing only by the inserts.
+      const preSenders = new Set(
+        song.cables.filter((c) => c.tap === 'pre').map((c) => c.sender),
+      );
+      for (const name of preSenders) {
+        const track = trackByName.get(name)!;
+        addRule(
+          { pkg: `${pkgBase}/tap`, name },
+          song.dir,
+          planFor(track, false, extentFor(track)),
+          refLabel,
+          trackRate(track),
         );
       }
     }

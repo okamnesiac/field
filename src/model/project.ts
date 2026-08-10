@@ -8,7 +8,7 @@ import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
-import { checkCables } from './cables.js';
+import { checkCables, type Cable } from './cables.js';
 import { sha256File } from '../hash.js';
 import { genRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
@@ -84,6 +84,12 @@ export interface LoadedSong {
   // legal. (`sounds:` and its takes lived beside this until `sounds/`
   // retired — §18 decision 12, the chunk 6 finale.)
   genTakes: Map<string, LoadedFile<GenerativeTakes>>;
+  // The song's resolved cables (nested-tracks.md §19), derived by
+  // validate: complete, acyclic, arrivals agreed. The graph consumes
+  // these rather than re-walking, so check and build cannot answer
+  // "when does this signal arrive" differently. Dangling and broken
+  // cables never appear here — their diagnostics do.
+  cables: Cable[];
 }
 
 export interface LoadedProject {
@@ -237,6 +243,7 @@ export function loadProject(root: string): LoadedProject {
       tracks: [],
       takes: [],
       genTakes: new Map(),
+      cables: [],
     };
 
     // The pre-2026-08-06 layout is diagnosed, not silently ignored: a
@@ -1012,7 +1019,8 @@ function validate(project: LoadedProject): void {
     // undisplaced, the containment paths agree on arrivals, and the
     // combined graph — containment plus cables — stays acyclic. After
     // the entry loop, which resolved every musical time the walk reads.
-    checkCables(song.tracks, timeByTrack, push);
+    // The survivors ride the model into the graph.
+    song.cables = checkCables(song.tracks, timeByTrack, push);
 
     // Containment cycles. Sound sources already made cycles declarable
     // (effects.md §3) and this is the same detector for the same reason:

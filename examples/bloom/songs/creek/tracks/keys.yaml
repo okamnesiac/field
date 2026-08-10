@@ -1,4 +1,10 @@
 name: keys
+sends:
+  # into the shared room (tracks/space.yaml), post the (empty) insert
+  # chain: every pass of the phrase arrives, so the room answers all
+  # three without knowing where they are
+  keys-verb:
+    gain_db: -14
 inputs:
   # the generated four bars, exactly one pass — no loop, because the
   # phrase is the loop now. Bars 1-12 with `every: [4]` said the same
