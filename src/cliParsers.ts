@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { InvalidArgumentError } from 'commander';
 
 // Option parsers mirroring the sc-render schema: on the command whose
@@ -149,4 +150,25 @@ export function parseGenTarget(arg: string, verb: string): { song: string; name:
     name = bare;
   }
   return { song, name };
+}
+
+// A seed is provenance, not reproducibility (bloom-in-tree.md §3): every
+// take records the one it ran with, so an omitted --seed draws one. The
+// bound keeps seed+i for the variant cap comfortably inside any integer
+// range a worker might impose.
+export function drawSeed(): number {
+  return randomInt(0, 2 ** 31);
+}
+
+// The seeds line after a generate: one seed prints itself, a contiguous
+// run prints as a range, and anything else lists its members. The worker
+// protocol only promises an integer array — today's adapters return
+// seed+i, but the display must not assert contiguity the schema does not
+// (a8920be review).
+export function formatSeeds(seeds: number[]): string {
+  if (seeds.length === 1) return `seed ${seeds[0]}`;
+  const contiguous = seeds.every((s, i) => i === 0 || s === seeds[i - 1]! + 1);
+  return contiguous
+    ? `seeds ${seeds[0]}–${seeds[seeds.length - 1]}`
+    : `seeds ${seeds.join(', ')}`;
 }

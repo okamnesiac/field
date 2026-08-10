@@ -332,7 +332,10 @@ Concretely: `field generate <song>/<name>` fills the request that
 gen node name means, writing numbered variant WAVs and `variants.yaml`
 under `audio/<name>/`; with content flags and a brand-new name, it
 scaffolds a leaf track carrying the entry — the shape every request
-lives in. One verb covers both
+lives in. `--seed` is optional: an omitted seed is drawn at random and
+named in the output, and each take records the seed it ran with either
+way — a seed is provenance, not reproducibility, since inference does
+not reproduce across GPU/framework versions. One verb covers both
 generators: `--prompt` is music, through field-aced, and `--text` is a
 voice line, through field-voiced — the takes' `model:` records which
 one ran, and its flags are the ones its kind takes (a voice line has no
