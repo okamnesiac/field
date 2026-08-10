@@ -1,74 +1,28 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, sourceRef } from './common.js';
-import { eqParams, limitParams, reverbParams } from './effects.js';
 
-// songs/<song>/sounds/<name>.yaml — one defined sound per file, name
-// matching the filename like tracks and takes (project-core.md §3.4 as
-// amended by project-layout.md §1.3 and §4: the directory is the
-// package's *plural*, so sounds/<name>.yaml is
-// //songs/<song>/sound:<name> — the folder holds many, the label
-// addresses one). Audio is committed bytes; a sound is a definition — and a
-// sound wrapped in an effect is a different sound, so the algebra
-// closes. Fields are flat and strict, discriminated by `type:` (§4.2,
-// the format's discriminator convention). `source:` (§4.3) names what a
-// sound is made from: a bare slug resolves in the song's one namespace
-// (assets and sounds together), a //shared/asset:<name> label crosses
-// scope, and for supercollider a path names the program file.
+// The generative request and its takes. This file held the whole
+// `sounds/<name>.yaml` schema until `sounds/` retired (nested-tracks.md
+// §18, decision 12): an effect sound is a track with one insert, a
+// supercollider sound a leaf with a `supercollider:` entry, a
+// generative sound a leaf with a `generative:` entry — so the declared
+// forms (`type:` union, `soundOrder`, the effect/normalize schemas)
+// left with the directory, and `check` tells a surviving sounds/ where
+// each file's content moved (model/project.ts). What stays is the part
+// the entries kept using: the request fields, their refinement, and the
+// takes machinery that pins committed variants.
 
-// `type: normalize` retired with multi-rate.md step 3, split along the
-// seam §1 of that plan found: outbound formatting is `field export
-// --rate <hz> --bit-depth <depth>` (decision 1), and a rate-mismatched
-// source converts at the edge automatically (decisions 4 and 6). The
-// tombstone stays in the union so an old file gets told the move rather
-// than "invalid type" — the same courtesy every other retirement here
-// pays. Loose on purpose: whatever else the file says, the message is
-// the same, and field errors would bury it.
-const normalizeRetiredSchema = z
-  .looseObject({ type: z.literal('normalize') })
-  .superRefine((_, ctx) => {
-    ctx.addIssue({
-      code: 'custom',
-      message:
-        'type: normalize has retired (multi-rate.md §2) — delivery formatting is ' +
-        '`field export --rate <hz> --bit-depth <depth>`, and a rate-mismatched source ' +
-        'now converts at the edge automatically; delete this sound and reference its ' +
-        'source directly',
-    });
-  });
-
-export const eqSoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('eq'),
-  source: sourceRef,
-  ...eqParams,
-});
-export type EqSound = z.infer<typeof eqSoundSchema>;
-
-export const limitSoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('limit'),
-  source: sourceRef,
-  ...limitParams,
-});
-export type LimitSound = z.infer<typeof limitSoundSchema>;
-
-export const reverbSoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('reverb'),
-  source: sourceRef,
-  ...reverbParams,
-});
-export type ReverbSound = z.infer<typeof reverbSoundSchema>;
-
-// supercollider: the sound is defined by a SuperCollider program,
-// rendered offline (NRT). The program runs via sclang with FIELD_OUTPUT /
-// FIELD_SEED / FIELD_DURATION / FIELD_SAMPLE_RATE / FIELD_CHANNELS in
-// the environment; it must write FIELD_OUTPUT and exit. Determinism
-// given the seed is the program's job; the program's content hash is the
+// The spec behind a `supercollider:` entry's gen node, rendered offline
+// (NRT). The program runs via sclang with FIELD_OUTPUT / FIELD_SEED /
+// FIELD_DURATION / FIELD_SAMPLE_RATE / FIELD_CHANNELS in the
+// environment; it must write FIELD_OUTPUT and exit. Determinism given
+// the seed is the program's job; the program's content hash is the
 // cache input. `source:` is the program file — a bare filename resolves
 // on the type's home shelf, shared/instruments/ (§4); a slashed path is
-// project-relative.
+// project-relative. Never parsed from a file of its own any more: the
+// graph synthesizes it from the entry, keeping the shape (and so every
+// action key) the declared sound had.
 export const supercolliderSoundSchema = z.strictObject({
   name: labelName,
   type: z.literal('supercollider'),
@@ -85,39 +39,25 @@ export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
 // and to macOS, and the generated-voice tier replaces what it was for.
 
 // generative: deliberate generation (project-layout.md §1.2, §1.4) — a
-// sound with no in-graph Generator behind it: nothing may generate it
-// mechanically; you run it, with field generate. Model inference does not reproduce across GPU/framework
-// versions, so the outputs are content-addressed under audio/<name>/ and
-// the file is provenance plus promotion state: `field generate` writes
-// the takes and chooses the first, `field choose` switches which one, and
-// the sound's own label resolves to the chosen variant — clips reference
-// the sound by name, no ledger copy involved. Each variant is
-// additionally auditionable as //songs/<song>/sound:<name>-<n>.
+// request with no in-graph Generator behind it: nothing may generate it
+// mechanically; you run it, with field generate. Model inference does
+// not reproduce across GPU/framework versions, so the outputs are
+// content-addressed under audio/<name>/ and the takes file is
+// provenance plus promotion state: `field generate` writes the takes
+// and chooses the first, `field choose` switches which one, and the gen
+// node's label resolves to the chosen variant — placements reference
+// the track that carries the request, no ledger copy involved. Each
+// variant is additionally auditionable as //songs/<song>/gen:<name>-<n>.
 //
-// Provenance lives on the variant rather than on the sound, because it
-// describes a *run* and a sound accumulates several (bloom-in-tree.md
-// §3). Two takes made a month apart can come from different model
-// versions and certainly have different generation times; a single
-// `model`/`generated_at` pair on the sound could record only one answer
-// for the whole list. It is also what lets a recipe exist before any run
-// has happened, which is the shape an example project ships in.
+// Provenance lives on the variant rather than on the request, because
+// it describes a *run* and a request accumulates several
+// (bloom-in-tree.md §3). Two takes made a month apart can come from
+// different model versions and certainly have different generation
+// times; a single `model`/`generated_at` pair on the request could
+// record only one answer for the whole list. It is also what lets a
+// request exist before any run has happened, which is the shape an
+// example project ships in.
 const TAKES_FILE = 'variants.yaml';
-const RETIRED_TO_VARIANT =
-  'provenance describes a run and lives on each take now — copy this value ' +
-  `onto every entry in audio/<name>/${TAKES_FILE} and delete it here ` +
-  '(bloom-in-tree.md §3)';
-const RETIRED_SEED =
-  'each take already records the seed it ran with, so this one has no home ' +
-  '— delete it (bloom-in-tree.md §3)';
-// `variants` and `chosen` left the recipe entirely (bloom-in-tree.md §7).
-// A recipe is what you share; the takes and the pick are what your machine
-// made, and leaving them here meant that running `field generate` or
-// `field choose` modified a committed file — so using the tool as
-// documented dirtied the repository.
-const RETIRED_TO_TAKES =
-  `takes and the pick live beside the audio they describe, in ` +
-  `audio/<name>/${TAKES_FILE} — move this there, keeping the same shape ` +
-  '(bloom-in-tree.md §7)';
 
 export const generativeVariantSchema = z.strictObject({
   file: z.string().min(1), // song-relative, under audio/<name>/
@@ -147,12 +87,14 @@ export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
 export const generativeTakesSchema = z
   .strictObject({
     // What these takes attach to: a gen node (`gen:` — the owning
-    // track's name, or <track>-<id> when the entry carries an id), or a
-    // generative sound (`sound:`, transitional — it retires with
-    // `sounds/`). Redundant with the directory name, and checked against
-    // it for the same reason a sound's `name` is checked against its
-    // filename: a file that has been moved should say so rather than
-    // quietly describe something else.
+    // track's name, or <track>-<id> when the entry carries an id).
+    // Redundant with the directory name, and checked against it for the
+    // same reason a track's `name` is checked against its filename: a
+    // file that has been moved should say so rather than quietly
+    // describe something else. `sound:` is the pre-fold spelling —
+    // `sounds/` has retired, and the key survives only so the loader
+    // can tell an old takes file the rename instead of "unrecognized
+    // key" (model/project.ts).
     gen: labelName.optional(),
     sound: labelName.optional(),
     chosen: z.number().int().min(1).optional(), // 1-based, as played and numbered
@@ -272,111 +214,9 @@ const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
   }
 };
 
-// The request inline in a track's `inputs:` — the sound schema's
-// authored fields, minus `name` and `type`, which the entry supplies by
-// where it sits and what field it is (nested-tracks.md §18 step 3). Its
-// takes live beside the audio under the gen node's name.
+// The request inline in a track's `inputs:` — the retired sound
+// schema's authored fields, minus `name` and `type`, which the entry
+// supplies by where it sits and what field it is (nested-tracks.md §18
+// step 3). Its takes live beside the audio under the gen node's name.
 export const generativeEntrySchema = z.strictObject(generativeRecipeFields).superRefine(refineRecipe);
 export type GenerativeEntry = z.infer<typeof generativeEntrySchema>;
-
-export const generativeSoundSchema = z
-  .strictObject({
-    name: labelName,
-    type: z.literal('generative'),
-    // Retired from the sound, declared only so a recipe written before the
-    // move is told where the value went — `strictObject` would otherwise
-    // answer "Unrecognized keys", which is true and tells nobody anything.
-    // The precedent is `RETIRED_FADER` (schema/track.ts), and the reason
-    // is the same: a removal that does not forward makes the reader guess.
-    //
-    // The migration is mechanical and loses nothing. A recipe's `model`
-    // and `generated_at` describe the one run that produced every variant
-    // it lists, which is exactly what `field generate` still writes — one
-    // model and one timestamp shared by that run's takes. Copying each
-    // down onto every variant preserves what was recorded rather than
-    // inventing per-take values. `seed` needs no home: each variant has
-    // carried its own since before this change.
-    // Written for the suffix — the loader appends " at <field>".
-    model: z.never({ error: RETIRED_TO_VARIANT }).optional(),
-    seed: z.never({ error: RETIRED_SEED }).optional(),
-    generated_at: z.never({ error: RETIRED_TO_VARIANT }).optional(),
-    ...generativeRecipeFields,
-    chosen: z.never({ error: RETIRED_TO_TAKES }).optional(),
-    variants: z.never({ error: RETIRED_TO_TAKES }).optional(),
-  })
-  .superRefine(refineRecipe);
-// The recipe exactly as `sounds/<name>.yaml` carries it: the request, with
-// no takes in it.
-export type GenerativeRecipe = z.infer<typeof generativeSoundSchema>;
-
-// The sound as everything downstream sees it — the recipe merged with the
-// takes file beside its audio, which the loader does once. Splitting the
-// two on disk deliberately does not split them in memory: a sound *has*
-// variants, they are simply stored where their bytes are, so the graph,
-// `check`, `play` and the rest keep reading `sound.variants` and
-// `sound.chosen` and did not have to learn about the file layout.
-export type GenerativeSound = Omit<GenerativeRecipe, 'variants' | 'chosen'> & {
-  variants: GenerativeVariant[];
-  chosen?: number | undefined;
-};
-
-export const soundSchema = z.discriminatedUnion('type', [
-  normalizeRetiredSchema,
-  supercolliderSoundSchema,
-  generativeSoundSchema,
-  eqSoundSchema,
-  limitSoundSchema,
-  reverbSoundSchema,
-]);
-// A sound as parsed from disk. Generative members are recipes here; the
-// loader replaces them with the merged form below. The normalize
-// tombstone is excluded: its refine always fails, so no value of that
-// member ever parses — it exists for its message, not its shape.
-export type ParsedSound = Exclude<z.infer<typeof soundSchema>, { type: 'normalize' }>;
-
-// The types the graph may generate automatically — the ones with a
-// Generator (src/generators/). `generative` is deliberately excluded: its
-// generation is human-triggered, which is the §1.2 trigger policy
-// expressed in the type system, so dispatching code narrows to this
-// first.
-export type BuildableSound = Exclude<ParsedSound, GenerativeRecipe>;
-
-// What a loaded project holds: buildable sounds unchanged, generative ones
-// merged with their takes.
-export type Sound = BuildableSound | GenerativeSound;
-
-export const soundOrder: KeyOrder = {
-  keys: [
-    'name',
-    'type',
-    'source',
-    'prompt',
-    'text',
-    'voice_ref',
-    'voice_ref_sha256',
-    'exaggeration',
-    'conviction',
-    'lyrics',
-    'bpm',
-    'seed',
-    'duration',
-    'duration_seconds',
-    'bars',
-    'channels',
-    'bands',
-    'normalize',
-    'ceiling_db',
-    'lookahead_ms',
-    'release_ms',
-    'mix',
-    'decay',
-    'predelay_ms',
-    'damping',
-    'chosen',
-    'variants',
-  ],
-  children: {
-    bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } },
-    variants: { items: { keys: ['file', 'model', 'seed', 'sha256', 'generated_at'] } },
-  },
-};

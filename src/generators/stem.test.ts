@@ -306,28 +306,23 @@ describe('planTrack: a track placed in a track (nested-tracks.md §1.3)', () => 
     expect(spec.sources).toEqual(['kick', 'track:aaa']);
   });
 
-  it('folding a sound into a track cannot permute sibling wiring', () => {
-    // Buildable refs order by the name under the spelling, so `zebra`
-    // the sound and `track:zebra` the track hold the same slot beside
-    // buildable `wall`. Raw-string order would flip [wall, zebra] to
-    // [track:zebra, wall] — reversing clip indices and the dep-hash
-    // order, re-keying a parent whose children are byte-identical, which
-    // is exactly what a fold must not do (nested-tracks.md §17).
-    const asSound = planTrack(
-      nested([], [clip({ id: 'w', sound: 'wall', at: 0 }), clip({ id: 'z', sound: 'zebra', at: 960 })]),
-      map120,
-      hashes,
-    );
+  it('buildable refs order by the name under the spelling', () => {
+    // The rule that made the sounds/ folds keyless (nested-tracks.md
+    // §17), still load-bearing after them: a `track:` ref holds the slot
+    // its bare name earns beside other buildables. Raw-string order
+    // would flip [wall, zebra] to [track:zebra, wall] — reversing clip
+    // indices and the dep-hash order, re-keying a parent whose children
+    // are byte-identical.
     const asTrack = planTrack(
-      nested([], [clip({ id: 'w', sound: 'wall', at: 0 }), clip({ id: 'z', track: 'zebra', at: 960 })]),
+      nested([], [clip({ id: 'w', audio: 'wall', at: 0 }), clip({ id: 'z', track: 'zebra', at: 960 })]),
       map120,
       hashes,
     );
-    expect(asSound.sources).toEqual(['wall', 'zebra']);
     expect(asTrack.sources).toEqual(['wall', 'track:zebra']);
-    expect(asTrack.clips.map((c) => [c.input, c.start])).toEqual(
-      asSound.clips.map((c) => [c.input, c.start]),
-    );
+    expect(asTrack.clips.map((c) => [c.input, c.start])).toEqual([
+      [0, 0],
+      [1, 24000],
+    ]);
   });
 
   it('a clip playing a track shares its spelling — and its source — with a placement', () => {
@@ -709,20 +704,21 @@ describe('clips over rule outputs', () => {
     writeWavFloat32(src, 48000, [Float32Array.from([1, 0.5, 0.25, 0])]);
     await importAsset(root, 'creek', src, 'kick');
     rmSync(src);
-    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
     // A gain-0 bell is audibly nothing and numerically near-identity,
     // which is what lets the placement assertions below still read the
-    // source's own samples. (This was a same-rate `normalize` wrapper
-    // until that type retired — multi-rate.md step 3.)
+    // source's own samples. A wrapper track with one insert — the shape
+    // every effect sound folded into (nested-tracks.md §18, decision 12).
     writeFileSync(
-      join(root, 'songs/creek/sounds/kick-eq.yaml'),
+      join(root, 'songs/creek/tracks/kick-eq.yaml'),
       [
         'name: kick-eq',
-        'type: eq',
-        'source: kick',
-        'bands:',
-        '  - type: bell',
-        '    frequency: 1000',
+        'inserts:',
+        '  - effect: eq',
+        '    bands:',
+        '      - type: bell',
+        '        frequency: 1000',
+        'inputs:',
+        '  - audio: kick',
         '',
       ].join('\n'),
     );
@@ -732,7 +728,7 @@ describe('clips over rule outputs', () => {
         'name: drums',
         'inputs:',
         '  - id: kick-1',
-        '    sound: kick-eq',
+        '    track: kick-eq',
         '    anchor: absolute',
         '    at: 3',
         '    duration: 4',
@@ -750,17 +746,17 @@ describe('clips over rule outputs', () => {
     expect(() => trackSchema.parse({ name: 't', inputs: [base] })).toThrow();
   });
 
-  it('plans buildable-sound sources after hash-sorted committed ones, name-sorted', () => {
+  it('plans buildable sources after hash-sorted committed ones, name-sorted', () => {
     const spec = planTrack(
       track([
         clip({ id: 'c1', audio: 'kick' }),
-        clip({ id: 'c2', sound: 'pad-sc', at: 0 }),
-        clip({ id: 'c3', sound: 'kit-sc', at: 0 }),
+        clip({ id: 'c2', track: 'pad-sc', at: 0 }),
+        clip({ id: 'c3', track: 'kit-sc', at: 0 }),
       ]),
       map120,
       hashes, // kick has a hash; pad-sc/kit-sc are buildable
     );
-    expect(spec.sources).toEqual(['kick', 'kit-sc', 'pad-sc']);
+    expect(spec.sources).toEqual(['kick', 'track:kit-sc', 'track:pad-sc']);
     const byInput = [...spec.clips].sort((a, b) => a.input - b.input).map((c) => c.input);
     expect(byInput).toEqual([0, 1, 2]); // kick, kit-sc, pad-sc
   });
@@ -780,7 +776,7 @@ describe('clips over rule outputs', () => {
     async () => {
       expect(queryDeps(root, 'deps(//songs/creek/track:drums)')).toEqual([
         '//songs/creek/asset:kick',
-        '//songs/creek/sound:kick-eq',
+        '//songs/creek/track:kick-eq',
         '//songs/creek/track:drums',
       ]);
 
@@ -798,7 +794,7 @@ describe('clips over rule outputs', () => {
     },
   );
 
-  it('cascades a recipe edit through the stem', async () => {
+  it('cascades a wrapper edit through the stem', async () => {
     // Content tracks the spec and the inputs, so an upstream parameter
     // change flows through every downstream hash.
     const runs: string[] = [];
@@ -812,8 +808,8 @@ describe('clips over rule outputs', () => {
     expect(runs).toEqual(['kick-eq', 'drums']);
 
     runs.length = 0;
-    const soundPath = join(root, 'songs/creek/sounds/kick-eq.yaml');
-    writeFileSync(soundPath, readFileSync(soundPath, 'utf8').replace('frequency: 1000', 'frequency: 2000'));
+    const wrapperPath = join(root, 'songs/creek/tracks/kick-eq.yaml');
+    writeFileSync(wrapperPath, readFileSync(wrapperPath, 'utf8').replace('frequency: 1000', 'frequency: 2000'));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(runs).toEqual(['kick-eq', 'drums']); // the edit rebuilt the render AND the stem
   });
@@ -1019,60 +1015,26 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
     );
   });
 
-  it('folding a sound into a track is a cache hit for the render', async () => {
-    // The §18 claim made falsifiable: name and type never reach an
-    // action key, and the entry's parameters are the sound schema's
-    // fields verbatim — so the fold re-renders nothing. The counting
-    // runner writes fixed bytes, which also proves the consumer stays
-    // cached: its input hashes cannot move when the render is a hit.
+  it('a generator render is keyed by parameters, never by its name', async () => {
+    // The rule that made every sounds/ fold a cache hit (§18, proven
+    // through #100–#113): name and type never reach an action key. The
+    // transition is over, but the invariant stays load-bearing — renaming
+    // the track that owns an entry renames the gen node, and the render
+    // must be a cache hit under the new name.
     const state = { runs: [] as string[] };
     const runner: GeneratorRunner = async (node, _inputPaths, outputPath) => {
-      // Full labels: gen:kit-sc and track:kit-sc share a name, and the
-      // whole point is which of them the third run is.
       state.runs.push(formatLabel(node.label));
       writeFileSync(outputPath, 'render');
     };
-    mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
-    writeFileSync(
-      join(root, 'songs/creek/sounds/kit-sc.yaml'),
-      'name: kit-sc\ntype: supercollider\nsource: creek-kit.scd\nseed: 4096\nduration: 5\n',
-    );
-    writeTrack('drums', [
-      'inputs:',
-      '  - id: kit-1',
-      '    sound: kit-sc',
-      '    anchor: absolute',
-      '    at: 0',
-      '    duration: 4',
-    ]);
-    await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    expect(state.runs).toEqual(['//songs/creek/sound:kit-sc', '//songs/creek/track:drums']);
-
-    // The fold: the sound file becomes a leaf track, the consumer's
-    // entry changes kind. Same program, same seed, same duration.
-    rmSync(join(root, 'songs/creek/sounds/kit-sc.yaml'));
     writeTrack('kit-sc', SC_ENTRY);
-    writeTrack('drums', [
-      'inputs:',
-      '  - id: kit-1',
-      '    track: kit-sc',
-      '    anchor: absolute',
-      '    at: 0',
-      '    duration: 4',
-    ]);
-    await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    // gen:kit-sc is a cache hit under the old sound's key; the new stem
-    // wrapping it runs once; drums sees identical input bytes and params
-    // and stays cached.
-    const afterFold = [
-      '//songs/creek/sound:kit-sc',
-      '//songs/creek/track:drums',
-      '//songs/creek/track:kit-sc',
-    ];
-    expect(state.runs).toEqual(afterFold);
+    await buildLabels(root, ['//songs/creek/gen:kit-sc'], runner);
+    expect(state.runs).toEqual(['//songs/creek/gen:kit-sc']);
 
-    await buildLabels(root, ['//songs/creek/track:drums'], runner);
-    expect(state.runs).toEqual(afterFold); // all cached
+    // The rename: same program, same seed, same duration, new name.
+    rmSync(join(root, 'songs/creek/tracks/kit-sc.yaml'));
+    writeTrack('kit-punch', SC_ENTRY);
+    await buildLabels(root, ['//songs/creek/gen:kit-punch'], runner);
+    expect(state.runs).toEqual(['//songs/creek/gen:kit-sc']); // cache hit under the new label
   });
 });
 

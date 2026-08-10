@@ -1,6 +1,9 @@
 # Plan: Nested tracks — one primitive for structure, time and mix
 
-**Status:** In progress (2026-08-09). Nesting renders, `mixes/` has
+**Status:** Complete except deferred sends (2026-08-09) — every chunk
+has either shipped or moved: chunk 4 (sends) waits for the real-time
+engine by §14's argument, and everything else is live, chunk 6's finale
+last. Nesting renders, `mixes/` has
 retired into the output track (#81), and creek is now expressed as three
 placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
@@ -28,11 +31,15 @@ into `field export --rate 44100 --bit-depth 16`
 sound remains: `vocal-48k` retired with multi-rate step 3 (a track
 carries its own rate, the edge converts), and `lead-take` has folded as
 a generative leaf placed twice by `lead-vocal` — byte-identically, its
-takes directory unmoved. bloom's `sounds/` directories are gone; what
-is left of chunk 6 is retiring the machinery they no longer exercise —
-the `sound:` entry field, the `sound:` label and takes key, and the
-`sounds/` loader — behind the migration diagnostics the format owes
-departing spellings.
+takes directory unmoved. And the machinery has followed the last use
+out: the `sound:` entry field, the sound schema union, the `sounds/`
+loader, the sound-side generate/choose paths and the effect generators
+are gone, each behind a migration diagnostic — the `sounds/` directory
+itself gets the fold instructions, a `sound:` entry is forwarded to the
+track its target became, the `sound:` label forwards to `track:`
+(decision 5), and a pre-fold takes file is told the `gen:` rename.
+bloom's graph came through untouched: `field build //songs/...` after
+the retirement is entirely cache hits.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it

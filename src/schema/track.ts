@@ -13,12 +13,11 @@ import { generativeEntrySchema } from './sounds.js';
 //   - `track:` — another track's render
 //   - `audio:` — committed bytes: the song's ledger, or the one
 //     cross-scope spelling, `//shared/asset:<name>`
-//   - `sound:` — a defined sound, **transitional**: it exists exactly as
-//     long as `sounds/` does, and retires when the last sound folds into
-//     a track (§18 sequencing). It is not in §18's three kinds; it is
-//     the bridge to them, so `audio:` never quietly accepts a name that
-//     renders — that would rebuild the bytes-versus-definitions
-//     ambiguity kind-in-field exists to remove.
+//
+// `sound:` was the bridge to this list while `sounds/` still existed —
+// a defined sound, transitional by design — and retired with the last
+// fold (§18 sequencing, chunk 6 finale). The tombstone below forwards
+// an old file to the spelling its target folded into.
 //
 // Generator entries are §18's third kind: authored spec inline, the
 // render minted as its own node under `gen:` (option A — uniformly,
@@ -51,8 +50,18 @@ export type ClipLoop = Omit<ClipLoopFile, 'every'> & { every?: number | undefine
 // a file still speaking it should be told the move, not the grammar.
 const RETIRED_POSITION = 'position: is now at: (nested-tracks.md §18)';
 const RETIRED_SOURCE =
-  'source: split by kind — audio: for committed bytes, sound: for a defined ' +
-  'sound, track: for a track (nested-tracks.md §18)';
+  'source: split by kind — audio: for committed bytes, track: for a track ' +
+  '(nested-tracks.md §18)';
+// `sounds/` retired with the last fold (§18, decision 12): what a
+// sound: entry played is a track now — an effect sound a track with one
+// insert, a supercollider or generative sound a leaf track carrying the
+// entry. The forwarding names where the target went, because the fix is
+// on the other side of the reference.
+const RETIRED_SOUND =
+  'sound: retired with sounds/ — the sound is a track now, so spell the ' +
+  'placement track:<name> once it has folded (an effect sound becomes a ' +
+  'track with one insert; supercollider/generative sounds become leaf ' +
+  'tracks carrying the entry) (nested-tracks.md §18)';
 
 // The authored half of a SuperCollider render, inline: the sound schema
 // (schema/sounds.ts) minus name and type, which the entry supplies by
@@ -74,7 +83,7 @@ export const inputEntrySchema = z
     // below is the arity check.
     track: slug.optional(), // a track in this song
     audio: sourceRef.optional(), // ledger name, or //shared/asset:<name>
-    sound: slug.optional(), // transitional; retires with sounds/
+    sound: z.never({ error: RETIRED_SOUND }).optional(),
     supercollider: supercolliderEntrySchema.optional(), // an inline render
     generative: generativeEntrySchema.optional(), // a deliberate request
     anchor: z.enum(['musical', 'absolute']).default('musical'),
@@ -101,19 +110,15 @@ export const inputEntrySchema = z
     source: z.never({ error: RETIRED_SOURCE }).optional(),
   })
   .superRefine((entry, ctx) => {
-    const kinds = [
-      entry.track,
-      entry.audio,
-      entry.sound,
-      entry.supercollider,
-      entry.generative,
-    ].filter((v) => v !== undefined);
+    const kinds = [entry.track, entry.audio, entry.supercollider, entry.generative].filter(
+      (v) => v !== undefined,
+    );
     if (kinds.length !== 1) {
       ctx.addIssue({
         code: 'custom',
         message:
           'an entry plays exactly one thing — name it with track:, audio:, ' +
-          'supercollider:, generative:, or (until sounds fold) sound:',
+          'supercollider:, or generative:',
       });
     }
   });
@@ -128,7 +133,6 @@ export const inputEntryOrder: KeyOrder = {
     'id',
     'track',
     'audio',
-    'sound',
     'supercollider',
     'generative',
     'anchor',

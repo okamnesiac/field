@@ -93,7 +93,7 @@ program
 
 const sc = program.command('sc').description('SuperCollider');
 sc.command('render <program>')
-  .description('render an SC program directly (uncached, for iteration; commit it as a sound for builds)')
+  .description('render an SC program directly (uncached, for iteration; a supercollider: entry is the cached form)')
   .requiredOption('--seed <n>', 'random seed', parseSeed)
   .requiredOption('--duration <seconds>', 'render length in seconds', parseDurationSeconds)
   .option('--channels <n>', '1 or 2', parseChannels, 2)
@@ -135,8 +135,8 @@ program
   });
 program
   .command('generate <name>')
-  .description('run a deliberate generator: fills a generative entry (by its gen node name) or a sound; variants land in songs/<song>/audio/<name>/')
-  .requiredOption('--song <name>', 'song the sound belongs to (its tempo map projects --bars)')
+  .description('run a deliberate generator: fills a generative entry by its gen node name (a new name scaffolds a leaf track); variants land in songs/<song>/audio/<name>/')
+  .requiredOption('--song <name>', 'song the request belongs to (its tempo map projects --bars)')
   .option('--prompt <text>', 'what to generate — music, through field-aced')
   .option('--text <line>', 'the line to speak or sing — voice, through field-voiced')
   .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
@@ -184,7 +184,7 @@ program
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: field play ${opts.song}/${result.pkg}:${name}-1\n` +
+        `audition: field play ${opts.song}/gen:${name}-1\n` +
           `choose:   field choose ${name} --song ${opts.song} --variant <n>\n`,
       );
     } catch (err) {
@@ -193,8 +193,8 @@ program
   });
 program
   .command('choose <name>')
-  .description("repoint which committed variant a gen node's (or generate sound's) label resolves to")
-  .requiredOption('--song <name>', 'song the sound belongs to')
+  .description("repoint which committed variant a gen node's label resolves to")
+  .requiredOption('--song <name>', 'song the request belongs to')
   .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
   .action(async (name: string, opts: { song: string; variant: number }) => {
     try {
@@ -206,9 +206,7 @@ program
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
         `${moved ? 'moved' : 'chose'} ${name} → variant ${opts.variant} (${result.file})\n` +
-          (result.pkg === 'gen'
-            ? `//songs/${opts.song}/gen:${name} now plays it; every placement follows\n`
-            : `//songs/${opts.song}/sound:${name} now plays it; entries reference it as sound: ${name}\n`),
+          `//songs/${opts.song}/gen:${name} now plays it; every placement follows\n`,
       );
     } catch (err) {
       fail(err);
@@ -295,7 +293,7 @@ function buildStatus(o: BuildOutcome): string {
 
 program
   .command('build <patterns...>')
-  .description('build labels (creek/sound:pad-96k, creek/..., or a bare song for its output track)')
+  .description('build labels (creek/track:drums, creek/..., or a bare song for its output track)')
   .option('--watch', 'rebuild on project changes until ctrl-c, reporting outputs that audibly moved')
   .action(async (patterns: string[], opts: { watch?: boolean }) => {
     try {
@@ -681,7 +679,7 @@ program
 
 program
   .command('query <expr>')
-  .description("query the graph: a pattern, or deps(creek/sound:pad-96k)")
+  .description("query the graph: a pattern, or deps(creek/track:drums)")
   .action((expr: string) => {
     try {
       for (const label of queryDeps(requireRoot(), expr)) {

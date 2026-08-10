@@ -36,10 +36,9 @@ const SEVEN_EIGHT = ['time:', '  meter:', '    - at: 0', '      numerator: 7', '
 // A silent instrument for clips to point at. A bare `source:` names a
 // program on the shared instrument shelf.
 function writeSound(): void {
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
   writeFileSync(
-    join(root, 'songs/creek/sounds/kick.yaml'),
-    'name: kick\ntype: supercollider\nsource: kick.scd\nseed: 1\nduration: 2\n',
+    join(root, 'songs/creek/tracks/kick.yaml'),
+    'name: kick\ninputs:\n  - supercollider:\n      source: kick.scd\n      seed: 1\n      duration: 2\n',
   );
   mkdirSync(join(root, 'shared/instruments'), { recursive: true });
   writeFileSync(join(root, 'shared/instruments/kick.scd'), 'Out.ar(0, Silent.ar(2));\n');
@@ -57,7 +56,7 @@ describe('a track with its own time', () => {
         ...SEVEN_EIGHT,
         'inputs:',
         '  - id: hit',
-        '    sound: kick',
+        '    track: kick',
         '    at: [2]',
         '    duration: [1]',
         '',
@@ -101,7 +100,7 @@ describe('a track with its own time', () => {
         '      denominator: 8',
         'inputs:',
         '  - id: hit',
-        '    sound: kick',
+        '    track: kick',
         '    at: [2]',
         '    duration: [1]',
         '',
@@ -126,7 +125,7 @@ describe('inheritance comes from the song, not the parent', () => {
         'name: child',
         'inputs:',
         '  - id: hit',
-        '    sound: kick',
+        '    track: kick',
         '    at: [2]',
         '    duration: [1]',
         '',
@@ -193,7 +192,7 @@ describe("the stem is planned in the track's own tempo", () => {
         '      bpm: 60',
         'inputs:',
         '  - id: hit',
-        '    sound: kick',
+        '    track: kick',
         '    at: [2]',
         '    duration: [1]',
         '',
@@ -219,7 +218,7 @@ describe('composition is offset addition, not map arithmetic', () => {
         ...SEVEN_EIGHT,
         'inputs:',
         '  - id: hit',
-        '    sound: kick',
+        '    track: kick',
         '    at: [2]',
         '    duration: [1]',
         '',

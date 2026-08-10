@@ -134,28 +134,31 @@ describe('conversion at the edge (decision 4)', () => {
     ]);
   });
 
-  it('a declared sound converts when a rate: track consumes it', async () => {
-    // The sound renders once at the project rate; the 44.1 kHz consumer
+  it('a placed project-rate track converts when a rate: track consumes it', async () => {
+    // The wrapper renders once at the project rate — the shape every
+    // effect sound folded into (decision 12) — and the 44.1 kHz consumer
     // pays the conversion at its own edge rather than re-rendering it.
     await importTone('pad', 48000);
-    writeSound('pad-eq', [
-      'type: eq',
-      'source: pad',
-      'bands:',
-      '  - type: lowpass',
-      '    frequency: 700',
+    writeTrack('pad-eq', [
+      'inserts:',
+      '  - effect: eq',
+      '    bands:',
+      '      - type: lowpass',
+      '        frequency: 700',
+      'inputs:',
+      '  - audio: pad',
     ]);
     writeTrack('bed', [
       'rate: 44100',
       'inputs:',
-      '  - sound: pad-eq',
+      '  - track: pad-eq',
       '    anchor: absolute',
       '    at: 0',
     ]);
     expect(queryDeps(root, 'deps(//songs/creek/track:bed)')).toEqual([
       '//songs/creek/asset:pad',
-      '//songs/creek/sound:pad-eq',
-      '//songs/creek/convert:pad-eq-44100',
+      '//songs/creek/track:pad-eq',
+      '//songs/creek/convert:track-pad-eq-44100',
       '//songs/creek/track:bed',
     ]);
   });
@@ -282,8 +285,11 @@ describe('conversion at the edge (decision 4)', () => {
   });
 });
 
-describe('the normalize tombstone', () => {
-  it('tells an old file the move rather than "invalid type"', () => {
+describe('the sounds/ tombstone', () => {
+  it('tells an old directory the move rather than reading it', () => {
+    // A normalize (or any) sound left on the shelf gets the fold
+    // instructions — one message for the directory, since the fix is
+    // the same fold for every file in it.
     writeSound('pad-cd', [
       'type: normalize',
       'source: pad',
@@ -291,7 +297,7 @@ describe('the normalize tombstone', () => {
       'bit_depth: 16',
     ]);
     expect(loadProject(root).diagnostics.map((d) => d.message).join('\n')).toContain(
-      'type: normalize has retired',
+      'sounds/ has retired — every sound is a track now',
     );
   });
 });

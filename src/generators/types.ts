@@ -1,4 +1,4 @@
-import type { BuildableSound } from '../schema/index.js';
+import type { SupercolliderSound } from '../schema/index.js';
 import type { ResampleSpec } from './resample.js';
 import type { StemSpec } from './stem.js';
 
@@ -11,13 +11,14 @@ import type { StemSpec } from './stem.js';
 // and the mixer arrives the same way. A deliberate type (`generate`)
 // has no Generator here — its generation is human-triggered
 // (field generate), which is what BuildableSound encodes. A Generator's
-// spec is either a declared sound (sounds/<name>.yaml) or a spec
-// synthesized from the project model (stem, from track files; resample,
-// from a rate-mismatched edge). Each is typed against its own spec —
-// Generator<SupercolliderSound> and so on — so per-method "wrong type"
-// narrowing is proven by the compiler.
+// spec is synthesized from the project model — a supercollider entry's
+// render, a stem from a track file, a resample from a rate-mismatched
+// edge; declared sounds retired with `sounds/` (nested-tracks.md §18).
+// Each is typed against its own spec — Generator<SupercolliderSound>
+// and so on — so per-method "wrong type" narrowing is proven by the
+// compiler.
 
-export type GeneratorSpec = BuildableSound | StemSpec | ResampleSpec;
+export type GeneratorSpec = SupercolliderSound | StemSpec | ResampleSpec;
 
 export interface RunContext {
   root: string; // absolute project root
@@ -29,16 +30,11 @@ export interface RunContext {
 
 // The song's visible names, pre-classified for source resolution
 // (project-layout.md §4.3): a bare slug means exactly one thing in the
-// song's unified namespace, a //shared/asset: label crosses scope.
+// song's namespace, a //shared/asset: label crosses scope. Sounds lived
+// here too until `sounds/` retired (nested-tracks.md §18, decision 12);
+// what remains resolvable by bare name is committed bytes.
 export interface SourceNames {
   assets: Set<string>; // the song's ledger
-  sounds: Set<string>; // buildable sounds (have a rule)
-  chosen: Set<string>; // generate sounds with a chosen variant
-  // Two distinct ways a deliberate sound fails to resolve, kept apart
-  // because the command that fixes each is different and only one of them
-  // is a well-formed project (bloom-in-tree.md §3).
-  ungenerated: Set<string>; // no takes yet — a recipe, awaiting field generate
-  unchosen: Set<string>; // takes exist, none picked — field choose
   shared: Set<string>; // the shared ledger
 }
 

@@ -29,13 +29,14 @@ no loops shelf (looping is a clip property). `shared/assets.yaml` is the
 shared scope's ledger: one pin per committed file under `shared/`,
 labeled `//shared/asset:<name>`.
 
-Song directories are a workspace, not a library. `sounds/` holds one
-file per **defined sound** — audio is committed bytes, a sound is a
-definition, and a sound wrapped in an effect is a different sound —
-while `audio/` holds *all* of a song's committed sound: recorded,
-imported, or generated, the producer is irrelevant. Where a file lives
-declares who may see it (project-layout.md §1.5): a clip references its
-own song's names plus `//shared/asset:` pins, and nothing else.
+Song directories are a workspace, not a library. `tracks/` holds one
+file per track — every definition is a track (nested-tracks.md §18,
+decision 12): an effect is an insert on one, a render or a generative
+request is an entry in one — while `audio/` holds *all* of a song's
+committed sound: recorded, imported, or generated, the producer is
+irrelevant. Where a file lives declares who may see it
+(project-layout.md §1.5): an entry references its own song's names plus
+`//shared/asset:` pins, and nothing else.
 
 ```text
 project/
@@ -52,7 +53,6 @@ project/
 │       ├── tempo.yaml
 │       ├── markers.yaml
 │       ├── tracks/       # one file per track: inserts and its inputs
-│       ├── sounds/       # one file per defined sound (type: + source:)
 │       ├── takes/        # take manifests (see below)
 │       ├── comps/
 │       ├── midi/
@@ -74,15 +74,14 @@ Exact schemas are designed in [projects/all/project-core.md](projects/all/projec
 the layout and its vocabulary are decided in
 [projects/all/project-layout.md](projects/all/project-layout.md).
 
-A sound file is discriminated by `type:` (`supercollider`, `eq`,
-`generative`, …) and fed by `source:` — a bare name resolving in the
-song's one namespace (assets and sounds together), a
-`//shared/asset:<name>` label crossing into the shared scope, or, for
-`supercollider`, a program file (a bare filename resolves in
-`shared/instruments/`). Automatic types are generated in-graph and
-cached; the `generative` type is deliberate — its variants are committed
-under `audio/<sound>/` and `field choose` repoints which one the
-sound's label means.
+`sounds/` retired when the last sound folded into a track
+(nested-tracks.md §18, decision 12; `check` tells a surviving directory
+the move). What its `type:` union expressed lives on where it attaches:
+effects as `inserts:`, SuperCollider renders as `supercollider:`
+entries (generated in-graph and cached), generative requests as
+`generative:` entries — deliberate, their takes committed under
+`audio/<name>/` with `field choose` repointing which one the gen node's
+label means.
 
 ## Timeline and tempo
 
@@ -119,24 +118,24 @@ never in a value prefix:
 - `track: <name>` — another track's render;
 - `audio: <name>` — committed bytes, from the song's ledger or the one
   cross-scope spelling `audio: //shared/asset:<name>`;
-- `supercollider:` — an inline render: the sound schema's authored
-  fields (`source:` — the program, `seed`, `duration`, `channels`),
-  written where they play.
+- `supercollider:` — an inline render: `source:` (the program), `seed`,
+  `duration`, `channels`, written where they play.
   The render is minted as its own node, `//songs/<song>/gen:<name>`,
   named by the owning track (or `<track>-<id>` when the entry carries an
-  id — which is why a track holding two generators needs ids on them);
+  id — which is why a track holding two generators needs ids on them).
+  Playing it means the arrangement plays a render that is never
+  committed, only its definition;
 - `generative:` — a deliberate request inline: `prompt:` (music) or
-  `text:` (voice) plus the conditioning fields, exactly as a generative
-  sound carries them. It mints a `gen:` node under the same naming rule,
-  but nothing in the build may run it — the node resolves to the chosen
-  take, and its run-recorded state lives beside the audio (see
-  "Deliberate generation"). The track file never changes when audio is
-  generated or chosen;
-- `sound: <name>` — a defined sound, transitional for exactly as long as
-  `sounds/` exists. Playing a buildable sound (or a track) means the
-  arrangement plays a render that is never committed, only its
-  definition; playing a `generative` sound plays its chosen committed
-  variant.
+  `text:` (voice) plus the conditioning fields. It mints a `gen:` node
+  under the same naming rule, but nothing in the build may run it — the
+  node resolves to the chosen take, and its run-recorded state lives
+  beside the audio (see "Deliberate generation"). The track file never
+  changes when audio is generated or chosen.
+
+`sound: <name>` was the transitional fourth kind — a defined sound,
+bridging exactly as long as `sounds/` existed — and retired with the
+last fold (§18 sequencing); the schema forwards the spelling to the
+track its target folded into.
 
 Placement fields are uniform across kinds — none of them means something
 different depending on what produced the audio. An entry carries three
@@ -160,7 +159,8 @@ while planning, so it never enters the action key: "the whole of it"
 re-keys through the source's own content hash. A looping entry is the
 exception and must declare one, because a loop tiles a window and the
 source fills it — and a loop on a source whose length is unknowable
-before it builds (a track, a buildable sound) must declare `every` too.
+before it builds (anything that renders, or committed audio at another
+rate) must declare `every` too.
 
 A track carries no level at all — `gain_db` and `pan` live on the entry
 that consumes it (see below) — but it does carry `inserts:` (EQ,
@@ -235,9 +235,9 @@ Nothing in a Field project carries an opaque ID. Identity comes in three
 tiers, by how a thing gets it:
 
 - **Humans name it → the slug is the ID.** Tracks (`lead-vocal`), songs
-  (directory name), sounds, assets. Filenames are keys, and a song's
-  asset and sound names share one namespace — `source: pad` must mean
-  exactly one thing (project-layout.md §4.3), enforced by `field check`.
+  (directory name), assets. Filenames are keys, and a song's names are
+  one namespace — `audio: pad` must mean exactly one thing
+  (project-layout.md §4.3), enforced by `field check`.
   Renaming is a repo-wide, tool-assisted refactor (`field track rename`
   rewrites every reference atomically), exactly as renaming a function
   is in code.
@@ -285,20 +285,20 @@ same file, so the manifest, the LFS pointer, and the build cache share one
 identifier. Where the bytes live is a pluggable detail. **Git LFS is backend
 #1**;
 a remote store (S3-backed) is a manifest-preserving migration later, when LFS
-storage/bandwidth costs hurt. Generated variants are committed with their recipe and provenance,
-never silently regenerated — and pinned by their own sound file's
+storage/bandwidth costs hurt. Generated variants are committed with their request and provenance,
+never silently regenerated — and pinned by their own takes file's
 per-variant hashes rather than the ledger (project-layout.md §4.8), so
 every committed file is still pinned exactly once.
 
 ## Deliberate generation
 
 A deliberate generation is a request and a record, in two places. The
-request is a `generative:` entry in a track file — or, transitionally, a
-sound in `sounds/<name>.yaml` — carrying prompt or text, duration,
-conditioning. The record is `audio/<name>/variants.yaml`, where `<name>`
-is the gen node's name for an entry (the owning track's, or
-`<track>-<id>`) and the sound's name for a sound; the file's first key
-says which it attaches to (`gen:` or `sound:`). One entry per take, each
+request is a `generative:` entry in a track file, carrying prompt or
+text, duration, conditioning. The record is `audio/<name>/variants.yaml`,
+where `<name>` is the gen node's name (the owning track's, or
+`<track>-<id>`), and the file's first key attaches it (`gen:` — the
+loader forwards a pre-fold `sound:` key to the rename). One entry per
+take, each
 carrying the model name + version that produced it, its seed, its output
 hash, and when it ran — provenance sits on the take because that is what
 it describes, and a request accumulates takes from runs months and model
@@ -319,19 +319,20 @@ the artifact. (For SuperCollider the "recipe" is the program plus an
 explicit seed, and it *is* reproducible, which is why `supercollider` is
 an automatic type instead.)
 
-A sound with no takes is legal, and is how a project ships when its audio
-is not committed: there is no `variants.yaml` at all, `field check` passes —
-the project is coherent, the audio is simply absent — and `field build` or
-`field play` is what refuses, naming the sound and the `field generate`
-that fills it. Running that on an existing takeless recipe fills it in
-place, reading the request from the file instead of the command line, so
-the flags that describe content are refused there as a second answer.
+A request with no takes is legal, and is how a project ships when its
+audio is not committed: there is no `variants.yaml` at all, `field
+check` passes — the project is coherent, the audio is simply absent —
+and `field build` or `field play` is what refuses, naming the request
+and the `field generate` that fills it. Running that on an existing
+takeless request fills it in place, reading the request from the entry
+instead of the command line, so the flags that describe content are
+refused there as a second answer.
 
 Concretely: `field generate <name> --song <song>` fills the request that
-name means — a gen node's entry, or a sound — writing numbered variant
-WAVs and `variants.yaml` under `audio/<name>/`; with content flags and a
-name that is neither, it creates a new sound recipe (transitional, as
-`sounds/` is). One verb covers both
+gen node name means, writing numbered variant WAVs and `variants.yaml`
+under `audio/<name>/`; with content flags and a brand-new name, it
+scaffolds a leaf track carrying the entry — the shape every request
+lives in. One verb covers both
 generators: `--prompt` is music, through field-aced, and `--text` is a
 voice line, through field-voiced — the takes' `model:` records which
 one ran, and its flags are the ones its kind takes (a voice line has no
@@ -342,12 +343,10 @@ it for the model's own voice — an entry authors both up front, and the
 run verifies the hash rather than writing it back. Every file involved
 is schema-validated — `field check` verifies variant hashes,
 `field fmt` covers them — and each variant auditions as
-`//songs/<song>/gen:<name>-<n>` (or `sound:<name>-<n>`) via `field
-play`. Generating records
+`//songs/<song>/gen:<name>-<n>` via `field play`. Generating records
 `chosen: 1`, so the request resolves as soon as it has takes; `field choose
 <name> --variant <n>` moves `chosen:` to a different one, and from then
-on the node's own label resolves to that variant — every placement of
-the entry (or every `sound: <name>` entry, transitionally) follows a
-re-choose as a one-line diff. Nothing
+on the node's own label resolves to that variant — every placement
+follows a re-choose as a one-line diff. Nothing
 is copied into a ledger, and nothing ever regenerates mechanically:
 generating over takes that already exist is refused, not merged.

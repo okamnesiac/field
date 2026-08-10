@@ -23,12 +23,14 @@ import type { Asset } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention
-// (project-core.md §3.4). Node kinds so far: source assets (song and
-// shared ledgers), defined sounds (sounds/), and implicit track stems —
-// every audio track with clips is buildable as
-// //songs/<song>/track:<name> (mix-assembly.md §3). "Node" and "rule"
-// are deliberately the engine's words (project-layout.md §4): the
-// format speaks sounds and types, and this module realizes them.
+// (project-core.md §3.4). Node kinds: source assets (song and shared
+// ledgers), generator entries' renders (gen:), chosen takes
+// (generation), resample edges (convert:), and implicit track stems —
+// every track is buildable as //songs/<song>/track:<name>
+// (mix-assembly.md §3). "Node" and "rule" are deliberately the engine's
+// words (project-layout.md §4): the format speaks tracks and entries,
+// and this module realizes them. Declared sounds were a kind here until
+// `sounds/` retired (nested-tracks.md §18, decision 12).
 
 export interface AssetNode {
   kind: 'asset';
@@ -73,7 +75,7 @@ export type GraphNode = AssetNode | GeneratorNode | GenerationNode;
 
 export interface Graph {
   nodes: Map<string, GraphNode>; // keyed by formatted label
-  // Deliberate sounds whose recipe exists but whose takes do not
+  // Generative requests whose entry exists but whose takes do not
   // (bloom-in-tree.md §3). They mint no node: there is nothing to build,
   // because nothing may run them mechanically, and nothing committed to
   // point at either. So resolution fails — correctly — and this is what
@@ -168,50 +170,11 @@ export function buildGraph(project: LoadedProject): Graph {
       if (gen !== undefined) return { pkg: `${pkgBase}/gen`, name: gen };
       const conv = convertRefName(ref);
       if (conv !== undefined) return { pkg: `${pkgBase}/convert`, name: conv };
-      if (assetByName.has(ref)) return { pkg: `${pkgBase}/asset`, name: ref };
-      return { pkg: `${pkgBase}/sound`, name: ref };
+      // A bare ref is committed bytes (§18: the kind lives in the field
+      // name, and `audio:` is the bare-slug kind) — validate has already
+      // diagnosed one the ledger does not hold.
+      return { pkg: `${pkgBase}/asset`, name: ref };
     };
-    for (const file of song.sounds) {
-      const sound = file.data;
-      if (sound.type === 'generative') {
-        // A deliberate sound contributes committed-content nodes, never a
-        // rule node — nothing may re-run it (project-layout.md §1.2/§1.4).
-        // Its own label resolves to the chosen variant; every variant is
-        // auditionable by number.
-        if (sound.variants.length === 0) {
-          const label: Label = { pkg: `${pkgBase}/sound`, name: sound.name };
-          ungenerated.set(formatLabel(label), { label, song: song.name, name: sound.name });
-        }
-        sound.variants.forEach((variant, i) => {
-          const label: Label = { pkg: `${pkgBase}/sound`, name: `${sound.name}-${i + 1}` };
-          nodes.set(formatLabel(label), {
-            kind: 'generation',
-            label,
-            songDir: song.dir,
-            file: variant.file,
-            sha256: variant.sha256,
-          });
-        });
-        if (sound.chosen !== undefined) {
-          const variant = sound.variants[sound.chosen - 1]!;
-          const label: Label = { pkg: `${pkgBase}/sound`, name: sound.name };
-          nodes.set(formatLabel(label), {
-            kind: 'generation',
-            label,
-            songDir: song.dir,
-            file: variant.file,
-            sha256: variant.sha256,
-          });
-          sha256BySource.set(sound.name, variant.sha256);
-          fileBySource.set(sound.name, { base: song.dir, file: variant.file });
-        }
-      } else {
-        // Declared sounds belong to the song and render at the project
-        // rate — a supercollider render asks for it, and the effects
-        // process at their input's own rate without reading it.
-        addRule({ pkg: `${pkgBase}/sound`, name: sound.name }, song.dir, sound, refLabel, projectRate);
-      }
-    }
     // Generator entries mint their own nodes (nested-tracks.md §18
     // step 2, option A — uniformly, whether the entry is a leaf's sole
     // content or windowed among siblings): //songs/<song>/gen:<name>,
@@ -302,12 +265,10 @@ export function buildGraph(project: LoadedProject): Graph {
       const committed = fileBySource.get(ref);
       return committed === undefined ? undefined : headerRate(committed.base, committed.file);
     };
-    const soundByName = new Map(song.sounds.map((f) => [f.data.name, f.data]));
     const trackByName = new Map(song.tracks.map((f) => [f.data.name, f.data]));
     const rateMemo = new Map<string, number | undefined>();
     const sourceRate = (ref: string): number | undefined => {
       if (rateMemo.has(ref)) return rateMemo.get(ref);
-      rateMemo.set(ref, undefined); // settles a source cycle; check refuses them first
       let rate: number | undefined;
       const shared = sharedAssetName(ref);
       const placed = trackRefName(ref);
@@ -323,11 +284,6 @@ export function buildGraph(project: LoadedProject): Graph {
         rate = scEntryRate.get(gen) ?? committedRate(ref);
       } else if (asset !== undefined) {
         rate = asset.sample_rate ?? headerRate(song.dir, asset.file);
-      } else {
-        const sound = soundByName.get(ref);
-        if (sound?.type === 'generative') rate = committedRate(ref);
-        else if (sound?.type === 'supercollider') rate = projectRate;
-        else if (sound !== undefined) rate = sourceRate(sound.source);
       }
       rateMemo.set(ref, rate);
       return rate;
@@ -459,13 +415,10 @@ function formatPattern(pattern: LabelPattern): string {
 // package that became `sounds` in the layout migration (#31), one PR
 // before packages went singular. It had no hint of any kind, so the
 // spelling every doc and finger from that era produces was a flat dead
-// end — worse than the plural it sits beside here. It corrects straight
-// to `sound`, and says why in its own words rather than borrowing the
-// grammar lesson, which would be false for it.
+// end — worse than the plural it sits beside here.
 // `why` carries its own punctuation: the two lead-ins do not share a
 // shape, and gluing a colon on in the template gave `targets:` two.
 const PACKAGE_HINTS: Record<string, { to: string; why: string }> = {
-  sounds: { to: 'sound', why: 'packages are singular:' },
   tracks: { to: 'track', why: 'packages are singular:' },
   assets: { to: 'asset', why: 'packages are singular:' },
   // `mix:` retired with mixes/ (nested-tracks.md §7 chunk 2), so both the
@@ -474,7 +427,13 @@ const PACKAGE_HINTS: Record<string, { to: string; why: string }> = {
   // is the mistake `targets:` was already fixed for.
   mixes: { to: 'track', why: 'mix: is now track:' },
   mix: { to: 'track', why: 'mix: is now track:' },
-  targets: { to: 'sound', why: 'targets: is now sound:' },
+  // `sound:` forwards to `track:` at the finale (nested-tracks.md §18
+  // decision 5): every sound folded into a track, and labels keep their
+  // own compatibility story. The plural and `targets:` chain straight to
+  // the live package rather than to a second dead end.
+  sounds: { to: 'track', why: 'sounds folded into tracks:' },
+  sound: { to: 'track', why: 'sounds folded into tracks:' },
+  targets: { to: 'track', why: 'targets: is now track:' },
 };
 
 function singularHint(graph: Graph, pattern: LabelPattern): string {
@@ -535,7 +494,7 @@ export function expandPattern(graph: Graph, pattern: LabelPattern): GraphNode[] 
     }
     if (pending.length > 1) {
       throw new Error(
-        `${formatPattern(pattern)} matched ${pending.length} sounds with no takes yet:\n` +
+        `${formatPattern(pattern)} matched ${pending.length} generative requests with no takes yet:\n` +
           pending.map((p) => `  ${fillCommand(p)}`).join('\n'),
       );
     }

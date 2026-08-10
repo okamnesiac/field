@@ -11,8 +11,8 @@ import { init } from '../commands/init.js';
 // a placement's omitted duration means about the whole child
 // (nested-tracks.md §1.6). It was required on the argument that a clip's
 // source is committed content whose length `check` can read; that is true
-// of an asset and false of a buildable sound, whose length is exactly as
-// unknowable at plan time as a track's.
+// of an asset and false of anything that renders, whose length is exactly
+// as unknowable at plan time as a track's.
 
 let root: string;
 
@@ -20,10 +20,9 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-clip-duration-'));
   init({ dir: root, name: 'test-album' });
   createSong(root, 'creek');
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
   writeFileSync(
-    join(root, 'songs/creek/sounds/blip.yaml'),
-    'name: blip\ntype: supercollider\nsource: blip.scd\nseed: 1\nduration: 2\n',
+    join(root, 'songs/creek/tracks/blip.yaml'),
+    'name: blip\ninputs:\n  - supercollider:\n      source: blip.scd\n      seed: 1\n      duration: 2\n',
   );
   mkdirSync(join(root, 'shared/instruments'), { recursive: true });
   writeFileSync(join(root, 'shared/instruments/blip.scd'), 'Out.ar(0, Silent.ar(2));\n');
@@ -39,7 +38,7 @@ const track = (name: string, yaml: string) =>
 const clip = (extra: string[] = []) =>
   track(
     'bed',
-    ['name: bed', 'inputs:', '  - id: hit', '    sound: blip', '    at: 0', ...extra, ''].join(
+    ['name: bed', 'inputs:', '  - id: hit', '    track: blip', '    at: 0', ...extra, ''].join(
       '\n',
     ),
   );
@@ -71,13 +70,13 @@ describe('a clip with no duration', () => {
         'name: bed',
         'inputs:',
         '  - id: hit',
-        '    sound: nonexistent',
+        '    track: nonexistent',
         '    at: 0',
         '',
       ].join('\n'),
     );
     const messages = (await check(root)).diagnostics.map((d) => d.message);
-    expect(messages.join('\n')).toContain('unknown sound "nonexistent"');
+    expect(messages.join('\n')).toContain('unknown track "nonexistent"');
   });
 
   it('is refused when the clip also loops', async () => {
