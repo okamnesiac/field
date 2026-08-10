@@ -69,7 +69,9 @@ function liveIdentity(): BuildIdentity {
     const r = spawnSync('git', ['-C', packageRoot(), ...args], { encoding: 'utf8' });
     return r.status === 0 ? r.stdout.trim() : undefined;
   };
-  const commit = git(['rev-parse', '--short', 'HEAD']);
+  // Full sha, compared exactly — --short lengthens as the repo grows,
+  // so equal objects can compare unequal as strings (Bugbot on #121).
+  const commit = git(['rev-parse', 'HEAD']);
   if (commit === undefined) return {};
   const status = git(['status', '--porcelain']);
   return {
@@ -240,10 +242,13 @@ export async function versionReport(root: string): Promise<VersionReport> {
 export function formatVersionReport(report: VersionReport, root: string): string {
   const { cli } = report;
   const lines: string[] = [];
+  // Shortened at display alone; the report and the drift comparison
+  // carry full shas.
+  const short = (sha: string): string => sha.slice(0, 7);
   const build = cli.commit
-    ? `${cli.commit}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
+    ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
-      `${cli.checkoutCommit ? `; checkout now at ${cli.checkoutCommit} — pnpm build to update` : ''}`
+      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}`
     : 'not a git checkout';
   lines.push(`field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);
