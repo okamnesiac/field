@@ -1,6 +1,8 @@
-import { copyFileSync, existsSync, linkSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { copyFileSync, existsSync, linkSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
+import { hasWavSignature, readWavHeader } from '../audio/wav.js';
+import { renderInsertChain } from '../audio/render-daemon.js';
 import { sha256File } from '../hash.js';
 import { resolvePlayables, type Playable } from './play.js';
 import type { GeneratorRunner } from '../graph/build.js';
@@ -25,7 +27,11 @@ import type { GeneratorRunner } from '../graph/build.js';
 
 export interface ExportResult {
   label: string;
-  from: string; // the artifact the build produced or the source it names
+  // The artifact the build produced or the source it names — always a
+  // path that outlives the call: when delivery formatting ran, the
+  // converted bytes are at `to`, and the conversion's scratch input is
+  // gone by the time this returns.
+  from: string;
   to: string;
   version: number; // the version `to` names — existing when unchanged
   // Some version already holds these bytes, so `to` names it and nothing
@@ -39,6 +45,16 @@ export interface ExportResult {
 
 export interface ExportOptions {
   to?: string | undefined; // destination directory, default ~/Desktop
+  // Delivery formatting (multi-rate.md decision 1): rate and bit depth
+  // are export parameters, converted on the way out by the daemon's
+  // normalize op — never a node in the song. Either may be given alone;
+  // the other defaults to the source's own value where it has one — a
+  // float source (everything Field renders) has no integer depth of its
+  // own, so it must choose. Conversion always writes integer PCM at the
+  // chosen depth, exactly as a `normalize` sound did, which is what
+  // lets `loop-cd` retire into an invocation.
+  rate?: number | undefined;
+  bitDepth?: 16 | 24 | 32 | undefined;
   runner?: GeneratorRunner | undefined;
 }
 
@@ -171,78 +187,143 @@ export async function exportLabels(
     throw new Error(`no such directory: ${dir}`);
   }
   const items = await resolvePlayables(root, patterns, options.runner);
+  const convert = options.rate !== undefined || options.bitDepth !== undefined;
+  // Converted bytes are staged out of sight and versioned from there —
+  // the destination only ever sees finished files, same as writeVersion's
+  // own temp-and-link discipline.
+  const scratch = convert ? mkdtempSync(join(tmpdir(), 'field-export-')) : undefined;
+  try {
+    // Everything that can refuse the run happens before anything is
+    // written to the destination. Every check below rejects the
+    // *request*, not one item of it, and a run that half-happened before
+    // saying no is the worst outcome: a file appears on the Desktop with
+    // only an error on screen, so the one thing you can see disagrees
+    // with the one thing you were told (#39 review P3).
+    const bases = new Map<string, string>();
+    const verified: { item: Playable; path: string; base: string; sha256: string }[] = [];
+    for (const [index, item] of items.entries()) {
+      // Hash what we are about to copy, rather than trusting what the
+      // build recorded. For a committed source that record is the
+      // *declared* hash, which the build deliberately does not verify
+      // unless it consumes the file as an input — so a bounce written over
+      // an asset without re-importing would otherwise export as `current`
+      // while the exported file is different audio (#39 review P2).
+      // Verified on the original bytes: conversion must not launder drift.
+      const originalSha = await sha256File(item.path);
+      if (item.committed && originalSha !== item.sha256) {
+        throw new Error(
+          `refusing to export: ${item.label} content does not match its declared sha256 ` +
+            `(field check, then re-import or restore the file)`,
+        );
+      }
 
-  // Everything that can refuse the run happens before anything is
-  // written. Both checks below reject the *request*, not one item of it,
-  // and a run that half-happened before saying no is the worst outcome:
-  // a file appears on the Desktop with only an error on screen, so the
-  // one thing you can see disagrees with the one thing you were told
-  // (#39 review P3).
-  const bases = new Map<string, string>();
-  const verified: { item: Playable; sha256: string }[] = [];
-  for (const item of items) {
-    // Two labels flattening to one name would version each other — v1
-    // and v2 of "the same thing" that are different things. The naming
-    // makes this all but unreachable; if it ever happens, say so rather
-    // than produce a plausible lie.
-    const base = exportBaseName(item.label);
-    const first = bases.get(base);
-    if (first !== undefined) {
-      throw new Error(`${first} and ${item.label} would both export as ${base} — export them separately`);
+      // Delivery formatting (multi-rate.md decision 1): the daemon's
+      // normalize op, on the way out. A flag left off defaults to the
+      // source's own value, and the effective pair joins the export name
+      // so a converted family never versions an unconverted one — v1 at
+      // 48 k and v2 at 44.1 k of "the same thing" would be different
+      // things.
+      let path = item.path;
+      let base = exportBaseName(item.label);
+      let sha256 = originalSha;
+      if (convert) {
+        // Content decides convertibility, the same probe import uses: a
+        // WAV the ledger accepted as `.wave` (or bare) is as deliverable
+        // as one spelled `.wav`.
+        if (extname(item.path).toLowerCase() !== '.wav' && !hasWavSignature(item.path)) {
+          throw new Error(
+            `cannot convert ${item.label}: ${extname(item.path) || 'no extension'} is not a WAV`,
+          );
+        }
+        const source = readWavHeader(item.path);
+        const rate = options.rate ?? source.sampleRate;
+        let depth = options.bitDepth;
+        if (depth === undefined) {
+          // "The source's own value" — which a float source does not
+          // have: conversion writes integer PCM, and int32 is not
+          // float32's own value, it is the same width in a different
+          // encoding. Everything Field renders is float32, so `--rate`
+          // alone on a stem must choose rather than surprise (#108
+          // review).
+          if (source.format === 3) {
+            throw new Error(
+              `${item.label} is ${source.bitsPerSample}-bit float — conversion ` +
+                `writes integer PCM, so pass --bit-depth 16, 24, or 32`,
+            );
+          }
+          const own = source.bitsPerSample;
+          if (own !== 16 && own !== 24 && own !== 32) {
+            throw new Error(`${item.label} is ${own}-bit — pass --bit-depth 16, 24, or 32`);
+          }
+          depth = own;
+        }
+        path = join(scratch!, `${index}.wav`);
+        await renderInsertChain({
+          op: 'normalize',
+          input: item.path,
+          output: path,
+          sample_rate: rate,
+          bit_depth: depth,
+        });
+        // The dot cannot appear in a label (every part is a slug), so a
+        // converted family can never collide with a label that happens
+        // to end in digits — `asset:pad-44100-16` exported plain and
+        // `asset:pad` at 44100/16 are different names by construction.
+        base = `${base}.${rate}-${depth}`;
+        sha256 = await sha256File(path);
+      }
+
+      // Two labels flattening to one name would version each other — v1
+      // and v2 of "the same thing" that are different things. The naming
+      // makes this all but unreachable; if it ever happens, say so rather
+      // than produce a plausible lie.
+      const first = bases.get(base);
+      if (first !== undefined) {
+        throw new Error(
+          `${first} and ${item.label} would both export as ${base} — export them separately`,
+        );
+      }
+      bases.set(base, item.label);
+      verified.push({ item, path, base, sha256 });
     }
-    bases.set(base, item.label);
 
-    // Hash what we are about to copy, rather than trusting what the
-    // build recorded. For a committed source that record is the
-    // *declared* hash, which the build deliberately does not verify
-    // unless it consumes the file as an input — so a bounce written over
-    // an asset without re-importing would otherwise export as `current`
-    // while the exported file is different audio (#39 review P2).
-    const sha256 = await sha256File(item.path);
-    if (item.committed && sha256 !== item.sha256) {
-      throw new Error(
-        `refusing to export: ${item.label} content does not match its declared sha256 ` +
-          `(field check, then re-import or restore the file)`,
-      );
-    }
-    verified.push({ item, sha256 });
-  }
+    const results: ExportResult[] = [];
+    for (const { item, path, base, sha256 } of verified) {
+      const extension = extname(path);
+      const versions = existingVersions(dir, base, extension);
+      const newest = versions[0]?.version ?? 0;
 
-  const results: ExportResult[] = [];
-  for (const { item, sha256 } of verified) {
-    const base = exportBaseName(item.label);
-    const extension = extname(item.path);
-    const versions = existingVersions(dir, base, extension);
-    const newest = versions[0]?.version ?? 0;
+      // Every version, not just the newest: export v4, change something,
+      // export v5, change it back — this is v4 again, and filing it as v6
+      // would bury that. Newest first, so the common case (nothing changed
+      // since the last export) matches on the first comparison.
+      const existing = await findIdentical(versions, path, sha256);
+      if (existing !== undefined) {
+        results.push({
+          label: item.label,
+          from: item.path,
+          to: existing.path,
+          version: existing.version,
+          unchanged: true,
+          newest,
+        });
+        continue;
+      }
 
-    // Every version, not just the newest: export v4, change something,
-    // export v5, change it back — this is v4 again, and filing it as v6
-    // would bury that. Newest first, so the common case (nothing changed
-    // since the last export) matches on the first comparison.
-    const existing = await findIdentical(versions, item.path, sha256);
-    if (existing !== undefined) {
+      const written = writeVersion(path, dir, base, newest + 1, extension);
       results.push({
         label: item.label,
         from: item.path,
-        to: existing.path,
-        version: existing.version,
-        unchanged: true,
+        to: written.path,
+        version: written.version,
+        unchanged: false,
         newest,
       });
-      continue;
     }
-
-    const written = writeVersion(item.path, dir, base, newest + 1, extension);
-    results.push({
-      label: item.label,
-      from: item.path,
-      to: written.path,
-      version: written.version,
-      unchanged: false,
-      newest,
-    });
+    return results;
+  } finally {
+    if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
   }
-  return results;
 }
 
 // The version holding these exact bytes, if one does. Size is checked

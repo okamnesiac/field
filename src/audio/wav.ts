@@ -247,3 +247,18 @@ export function writeWavFloat32(path: string, sampleRate: number, channels: Floa
   }
   writeFileSync(path, buf);
 }
+
+// The 12-byte RIFF/WAVE signature, and nothing more — full parsing is
+// readWavHeader's. Content decides where an extension cannot be trusted:
+// import and export both probe this so a WAV named .wave (or nothing)
+// gets the same treatment a .wav does.
+export function hasWavSignature(path: string): boolean {
+  const fd = openSync(path, 'r');
+  try {
+    const bytes = Buffer.alloc(12);
+    if (readSync(fd, bytes, 0, 12, 0) !== 12) return false;
+    return bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WAVE';
+  } finally {
+    closeSync(fd);
+  }
+}

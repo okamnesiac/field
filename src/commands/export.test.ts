@@ -20,6 +20,7 @@ import {
   writeVersion,
 } from './export.js';
 import { importAsset } from './import.js';
+import { readWavHeader, writeWavFloat32 } from '../audio/wav.js';
 import { init } from './init.js';
 
 // Export is a copy with a readable name and a version number, so the
@@ -371,5 +372,102 @@ describe('exportLabels', () => {
     await expect(exportLabels(root, ['//nowhere/...'], { to: dest, runner })).rejects.toThrow(
       'matched no labels',
     );
+  });
+});
+
+describe('delivery formatting (multi-rate.md decision 1)', () => {
+  // Conversion happens on the way out, through the daemon's normalize op
+  // — the same op a `normalize` sound drove, which is what lets loop-cd
+  // retire into an export invocation. Real daemon, no stub runner: the
+  // bytes are the claim.
+
+  it('converts on the way out, naming the delivered format', async () => {
+    const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(result!.to.endsWith('creek-asset-pad.44100-16-v1.wav')).toBe(true);
+    const header = readWavHeader(result!.to);
+    expect(header.sampleRate).toBe(44100);
+    expect(header.bitsPerSample).toBe(16); // defaulted from the 16-bit source
+    expect(header.format).toBe(1); // integer PCM, as normalize always wrote
+  });
+
+  it('is bit-identical to the normalize sound it retires', async () => {
+    // The def-of-done claim: the export produces the file loop-cd used
+    // to describe. Same source, same rate and depth, one through the
+    // sound, one through the flags — same bytes.
+    writeSound(
+      'pad-cd',
+      ['name: pad-cd', 'type: normalize', 'source: pad', 'sample_rate: 44100', 'bit_depth: 16', ''].join('\n'),
+    );
+    const { buildLabels } = await import('./build.js');
+    const outcomes = await buildLabels(root, ['//songs/creek/sound:pad-cd']);
+    const rendered = outcomes.find((o) => o.label.endsWith(':pad-cd'))!.outputPath!;
+    const [result] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+      bitDepth: 16,
+    });
+    expect(readFileSync(result!.to).equals(readFileSync(rendered))).toBe(true);
+  });
+
+  it('converted exports version apart from plain ones, and deterministically', async () => {
+    const [plain] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    expect(plain!.to.endsWith('creek-asset-pad-v1.wav')).toBe(true);
+    const [converted] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(converted!.to.endsWith('creek-asset-pad.44100-16-v1.wav')).toBe(true);
+    expect(converted!.unchanged).toBe(false);
+    // The resampler is deterministic (normalize-properties), so exporting
+    // again is `current`, not a v2 — and the plain family is untouched.
+    const [again] = await exportLabels(root, ['//songs/creek/asset:pad'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(again!.unchanged).toBe(true);
+    expect(again!.version).toBe(1);
+    // `from` outlives the call even when the delivered bytes came from
+    // the conversion scratch (#108 review): it names the source
+    // artifact, and the converted bytes are at `to`.
+    expect(statSync(again!.from).isFile()).toBe(true);
+    const [plainAgain] = await exportLabels(root, ['//songs/creek/asset:pad'], { to: dest, runner });
+    expect(plainAgain!.unchanged).toBe(true);
+    expect(plainAgain!.version).toBe(1);
+  });
+
+  it('refuses --rate alone on a float source, which has no depth of its own', async () => {
+    // Everything Field renders is float32; int32 is the same width in a
+    // different encoding, not "the source's own value" (#108 review).
+    const src = join(root, '..', `field-export-f32-${Math.random()}.wav`);
+    writeWavFloat32(src, 48000, [Float32Array.from([0.5, -0.5])]);
+    await importAsset(root, 'creek', src, 'floaty');
+    rmSync(src);
+    await expect(
+      exportLabels(root, ['//songs/creek/asset:floaty'], { to: dest, rate: 44100 }),
+    ).rejects.toThrow('float — conversion writes integer PCM');
+    const [ok] = await exportLabels(root, ['//songs/creek/asset:floaty'], {
+      to: dest,
+      rate: 44100,
+      bitDepth: 16,
+    });
+    expect(ok!.to.endsWith('creek-asset-floaty.44100-16-v1.wav')).toBe(true);
+  });
+
+  it('converts a WAV the ledger holds under another extension', async () => {
+    // Import sniffs content, so a .wave asset is fully supported — the
+    // convert guard must not re-introduce the filename gate (#108 review).
+    const src = join(root, '..', `field-export-wave-${Math.random()}.wave`);
+    writeWav(src);
+    await importAsset(root, 'creek', src, 'wavey');
+    rmSync(src);
+    const [result] = await exportLabels(root, ['//songs/creek/asset:wavey'], {
+      to: dest,
+      rate: 44100,
+    });
+    expect(readWavHeader(result!.to).sampleRate).toBe(44100);
+    expect(result!.to.endsWith('creek-asset-wavey.44100-16-v1.wav')).toBe(true);
   });
 });
