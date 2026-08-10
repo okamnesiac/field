@@ -112,10 +112,12 @@ arrays single-line.
 
 The arrangement is derived, not authored (nested-tracks.md §11): a
 song's structure *is* its output track's placements, so
-`field arrangement <song>` prints the timeline — each placement's
-musical position, wall-clock time, and level — computed from the same
-resolved plan the build renders. There is no `arrangement.yaml`;
-`check` tells a leftover one the layout moved.
+`field arrangement <song>` prints the timeline — each authored
+placement's musical position, wall-clock time, and level, one line per
+entry in the output track's `inputs:`. It reads the placements as
+written, so a placement that loops prints once, as authored, not once
+per repetition. There is no `arrangement.yaml`; `check` tells a
+leftover one the layout moved.
 
 ## Entries are metadata; audio is immutable
 
@@ -141,17 +143,19 @@ field name, never in a value prefix:
   node resolves to the chosen take, and its run-recorded state lives
   beside the audio (see "Deliberate generation"). The track file never
   changes when audio is generated or chosen;
-- `receive: <label>` — the receiving end of a cable (see "Sends are
-  cables").
+- `receive: <label>` — the receiving end of a cable. A receive admits
+  signal rather than placing it, so none of the placement fields below
+  apply: it carries nothing but its label, and `check` rejects any
+  other key on it (see "Sends are cables").
 
 `sound: <name>` was a transitional kind — a defined sound, bridging
 exactly as long as `sounds/` existed — and retired with the last fold
 (§18 sequencing); the schema forwards the spelling to the track its
 target folded into.
 
-Placement fields are uniform across kinds — none of them means something
-different depending on what produced the audio. An entry carries three
-independent, non-destructive offsets:
+Placement fields are uniform across the kinds that place content — none
+of them means something different depending on what produced the audio.
+An entry carries three independent, non-destructive offsets:
 
 1. **`at`** — where the entry sits on this track's timeline (musical
    position by default). Omitted means the track's start, for every
