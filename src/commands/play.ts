@@ -133,7 +133,6 @@ export async function playThroughDaemon(
   const client = await AudiodClient.connect(root);
   try {
     if (options.device !== undefined) await client.selectDevice(options.device);
-    const sampleRate = project.manifest?.data.sample_rate ?? 48000;
 
     // --loop with a single target loops in the daemon — gapless, the
     // reader wrapping at end-of-file — and the queue walk runs once,
@@ -161,7 +160,15 @@ export async function playThroughDaemon(
         // readout has to stop: no beat past it ever sounds, whether the
         // stream wraps there or the transport stops there.
         const loaded = await client.load(loadedPath, nativeLoop);
-        const ctx: MusicalContext | undefined = musicalContext(project, songDirOfPkg(item.pkg));
+        // At the loaded file's own rate, which the load response reports:
+        // a track may render at its own rate (multi-rate.md decision 3),
+        // and both the --from locate and the beat readout below have to
+        // speak the samples the daemon is actually streaming.
+        const ctx: MusicalContext | undefined = musicalContext(
+          project,
+          songDirOfPkg(item.pkg),
+          loaded.sample_rate,
+        );
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
           await client.locate(parseMusicalPosition(options.from, ctx));
@@ -189,7 +196,7 @@ export async function playThroughDaemon(
         // drift-corrected by every fresh anchor. The daemon stays
         // musically ignorant; musical time never crosses the socket.
         const readout = beatScheduler(
-          sampleRate,
+          loaded.sample_rate,
           ctx,
           (line, at) => hooks.onPosition?.(line, at),
           loaded.samples,

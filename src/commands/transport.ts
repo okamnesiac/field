@@ -1,4 +1,5 @@
 import { relative, resolve, sep } from 'node:path';
+import { readWavHeader } from '../audio/wav.js';
 import { AudiodClient } from '../audiod/client.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import type { LoadedProject } from '../model/project.js';
@@ -17,14 +18,31 @@ export interface MusicalContext {
 export function musicalContext(
   project: LoadedProject,
   songDir: string | undefined,
+  // The rate of the file being played, which is what every projection
+  // here must speak: a track may render at its own rate (multi-rate.md
+  // decision 3), so bar 2 of a 44.1 kHz stem is sample 88200 of the file
+  // the daemon is reading — the project's rate would seek an
+  // eighth-note late (#112 review). Callers read it off the load
+  // response or the artifact's own header (playedRate).
+  sampleRate: number,
 ): MusicalContext | undefined {
   const song = project.songs.find((s) => s.dir === songDir);
   if (!song?.tempo) return undefined;
-  const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   return {
-    tempo: new TempoMap(song.tempo.data.tempo, rate),
+    tempo: new TempoMap(song.tempo.data.tempo, sampleRate),
     meter: new MeterMap(song.tempo.data.meter),
   };
+}
+
+// The played artifact's own rate, from its header — the project's only
+// when the header cannot be read, which keeps a vanished or truncated
+// file from taking the status line down with it.
+export function playedRate(project: LoadedProject, path: string): number {
+  try {
+    return readWavHeader(path).sampleRate;
+  } catch {
+    return project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  }
 }
 
 // songs/<song>/... → songs/<song> (the label package or a package prefix).
@@ -86,8 +104,8 @@ export async function transportStatusLines(
     if (status.path === null) {
       lines.push(`stopped (nothing loaded)`);
     } else {
-      const ctx = musicalContext(project, songDirOfPath(root, status.path));
-      const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+      const rate = playedRate(project, status.path);
+      const ctx = musicalContext(project, songDirOfPath(root, status.path), rate);
       const looping = status.looping === true ? '  (looping)' : '';
       lines.push(`${status.state}  ${formatPosition(status.sample, rate, ctx)}${looping}`);
       lines.push(`file: ${relative(root, status.path) || status.path}`);
@@ -113,13 +131,13 @@ export async function transportLocate(
   try {
     const status = await client.status();
     if (status.path === null) throw new Error('nothing loaded (field play something first)');
-    const ctx = musicalContext(project, songDirOfPath(root, status.path));
+    const rate = playedRate(project, status.path);
+    const ctx = musicalContext(project, songDirOfPath(root, status.path), rate);
     if (!ctx) {
       throw new Error(`cannot derive a tempo map for ${status.path}; locate needs a song artifact`);
     }
     const sample = parseMusicalPosition(position, ctx);
     await client.locate(sample);
-    const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
     return formatPosition(sample, rate, ctx);
   } finally {
     client.close();
