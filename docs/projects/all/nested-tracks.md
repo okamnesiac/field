@@ -1163,10 +1163,29 @@ inputs:
    ([multi-rate.md](multi-rate.md)) rather than summing raw sample
    counts across rates.
    One arrival per path: a sender inside `verse` placed at bars 5 and
-   13 arrives twice, which is §12's `reaches` walk on the sender side
-   only. The ancestor itself may be placed — its placements shift both
-   ends of the cable together, which is exactly the coherence §14
-   could not get while the two ends could move independently.
+   13 arrives twice — the return, sitting outside the repetition,
+   hears every pass, which is the repeated-verse-with-reverb case and
+   is §12's `reaches` walk on the sender side only. The ancestor
+   itself may be placed — its placements shift both ends of the cable
+   together, which is exactly the coherence §14 could not get while
+   the two ends could move independently; a circuit whose two ends
+   both sit inside the repeated section repeats with it, one cached
+   render played per placement.
+
+   Multiplicity belongs to the sender alone: the receiving track must
+   resolve through exactly one containment path, and a second is an
+   error naming both paths. The walk bakes arrivals into the
+   receive's render in its ancestor's clock, and a track renders once
+   however often it is placed (§13) — so a return reachable through
+   two paths would need two clocks in one stem. This refuses less
+   than it seems, since both spellings of reverb-on-every-verse live
+   above: sender-side arrivals when the return sits outside the
+   repetition, the placed-ancestor circuit when it sits inside. A
+   receive under a *displaced* path with its sender elsewhere is
+   already refused by decision 4. If reusing a return track ever
+   earns its place, per-instance resolution is the relaxation — 
+   recorded here so it would be a decision rather than drift, and
+   §6's placement-identity question is the same shape when it comes.
 
 6. **The edge carries a level and never an offset** (§1.8, unchanged),
    plus one new field: `tap: pre | post`, default `post` — the send
@@ -1207,7 +1226,8 @@ the message, the rejected alternatives — stands and governs decision
 8. §8 gets its two sends clauses back, plus the new failure modes: a
 duplicated label end (error), a dangling end (warning), a receive
 under a displaced path (error naming the entry that carries the
-offset).
+offset), a receiving track reachable through two containment paths
+(error naming both).
 
 **Chunk 4, revived.** Schema (the `sends:` map, the `receive:` entry);
 check (both ends resolve, 1:1, the zero-displacement path, cycles —
