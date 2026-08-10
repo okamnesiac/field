@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Voice generation
 
 **Status:** In flight (2026-08-07). Designed and recorded ahead of the

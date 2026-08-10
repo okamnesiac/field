@@ -1,3 +1,7 @@
+---
+status: Draft
+---
+
 # Plan: Automation
 
 **Status:** Design only (2026-08-05). The shape below was settled in a

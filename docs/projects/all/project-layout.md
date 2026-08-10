@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Project layout revision
 
 **Status:** Done (2026-08-06); the loader/CLI migration (§2.1) and the

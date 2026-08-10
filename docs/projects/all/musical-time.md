@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Musical time arrays
 
 **Status:** In progress (started 2026-08-05). Motivated by bloom's creek:

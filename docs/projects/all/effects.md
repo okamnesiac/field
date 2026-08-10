@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Offline effects
 
 **Status:** In progress (started 2026-08-05). Follows

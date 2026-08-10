@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Project core — format, CLI, build graph skeleton
 
 **Status:** Scaffold, schemas, tick/tempo math, deterministic YAML, and the

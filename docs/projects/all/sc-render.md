@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: SuperCollider offline rendering
 
 **Status:** Shipped (#7, merged 2026-08-04); demonstrated publicly by

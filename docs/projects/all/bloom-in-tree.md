@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: bloom moves into field
 
 **Status:** Done (2026-08-08). The example lives at `examples/bloom`, CI

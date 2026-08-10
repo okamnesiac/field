@@ -1,3 +1,7 @@
+---
+status: Draft
+---
+
 # Plan: Splice support
 
 **Status:** Unstarted. Sketched 2026-08-09 from a later.md line; no code, no

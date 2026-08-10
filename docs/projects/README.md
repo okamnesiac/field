@@ -70,11 +70,43 @@ entry point is `overview.md`.
 
 ## What goes in a document
 
-A `# Title`, then a `**Status:**` line, then a `**Goal:**` line. The status
-line is prose rather than a keyword, because the useful thing to say is which
-PRs carried the work and what is left — and it gets updated when that changes.
+One line of YAML frontmatter, then a `# Title`, then a `**Status:**` line,
+then a `**Goal:**` line:
 
-A plan whose status line is stale is worse than one with no status at all. No
+```markdown
+---
+status: Active
+---
+
+# Offline effects
+
+**Status:** In progress (started 2026-08-05). Follows playback.md; ...
+
+**Goal:** three offline effects — `eq`, `limit`, `reverb` — as build rules ...
+```
+
+`status:` is one keyword from a fixed set, adopted from triangle/app and
+shared across repos: `Draft` (written, implementation not started), `Active`
+(in progress), `Blocked` (waiting on a dependency or decision), `Stalled`
+(lost momentum, not formally dropped), `Shipped` (done; the document is now
+historical), `Superseded` (replaced by a newer document or approach),
+`Abandoned` (decided against; kept for the record), `Reference` (a standing
+document with no build lifecycle).
+
+The keyword and the prose split the job the status line used to do alone. The
+frontmatter carries the claim — machine-checkable, and what review tooling
+reads — while the `**Status:**` line keeps the part prose is for: which PRs
+carried the work and what is left. Both get updated when that changes, and
+the keyword is the state of record when they disagree — a disagreement being
+a bug to fix, not a nuance to preserve.
+
+`Draft` is load-bearing: it declares the plan is not yet claiming to be
+executable, so open questions in a Draft plan do not block its pull requests
+from merging. The pull request that flips a plan out of Draft is the one
+making the readiness claim, and it answers for every question still open at
+that moment.
+
+A plan whose status is stale is worse than one with no status at all. No
 status sends a reader to the code; a wrong one sends them to the code only
 after they have believed it, and a plan is read precisely when nobody yet
 knows enough to catch the lie.
