@@ -111,9 +111,11 @@ export function environmentVerdict(
   spec: WorkerSpec,
   probe: EnvironmentProbe,
 ): { ok: boolean; reason?: string } {
-  const setup =
-    `run \`field setup ${spec.packageDir}\` ` +
-    `(setup is explicit and never automatic: ace-generation.md §3.4)`;
+  // No plan citation here: this is a user-facing message, and a user
+  // cannot be sent into docs/projects/ to learn why a command refused.
+  // The explicit-never-automatic policy it enforces is
+  // ace-generation.md §3.4, cited for the next reader of this file.
+  const setup = `run \`field setup ${spec.packageDir}\``;
   // uv first: it is the launcher *and* what setup runs, so telling
   // someone to run setup when uv is missing is advice that cannot work.
   if (!probe.uvPresent) {

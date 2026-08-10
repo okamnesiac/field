@@ -63,8 +63,28 @@ class Pipeline:
         root = models_root()
         checkpoints = root / "checkpoints"
         checkpoints.mkdir(parents=True, exist_ok=True)
-        progress(0.0, "downloading/verifying ACE-Step weights (first run pulls ~10 GB)")
-        ensure_model_downloaded(get_model_name(CONFIG_PATH), str(checkpoints))
+        # `ensure_model_downloaded` verifies the machine-global home and
+        # downloads only what is missing; announcing ~10 GB over a warm
+        # cache reads as a per-project re-download (the voiced adapter's
+        # `_weights_message` records the incident). Both requested
+        # artifacts must be present — a lone metadata file from an
+        # interrupted first download must keep its size warning (#118
+        # review) — and the warm wording stays "verifying" because
+        # presence is not completeness: a verify may still fetch what a
+        # partial artifact is missing. Display heuristic only; a wrong
+        # guess mislabels a progress line, never changes what loads.
+        model_name = get_model_name(CONFIG_PATH)
+        def artifact_present(name: str) -> bool:
+            artifact = checkpoints / name
+            return artifact.is_dir() and any(artifact.iterdir())
+        cached = artifact_present(model_name) and artifact_present("vae")
+        progress(
+            0.0,
+            "verifying ACE-Step weights in the machine-global cache"
+            if cached
+            else "downloading ACE-Step weights (first run pulls ~10 GB)",
+        )
+        ensure_model_downloaded(model_name, str(checkpoints))
         ensure_model_downloaded("vae", str(checkpoints))
 
         progress(0.05, "loading models")
