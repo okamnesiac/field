@@ -273,7 +273,8 @@ each derived arrival at the cable's gain, converted at the edge if the
 sender runs at another rate, and summed through the receiver's inserts
 with everything else it plays. So the receive's action key re-keys on
 exactly what §19 names — sender content, gain, tap and arrivals — and
-on nothing else: a send-level tweak re-renders the receiver alone.
+on nothing else: a send-level tweak re-renders the receiver and
+whatever consumes it, never the sender.
 `field explain` shows a cable from either end, because the edge's gain
 is part of a level answer neither track file holds in full.
 

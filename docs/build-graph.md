@@ -229,8 +229,9 @@ it; every placement follows).
   clips placed at the derived arrivals at the cable's gain, converted
   at the edge like any source. The receive therefore re-keys on sender
   content, gain, tap and arrivals, and on nothing else: a send-level
-  tweak re-renders the receiver alone, which creek demonstrates — its
-  shared reverb rebuild leaves every other stem a cache hit. An
+  tweak re-renders the receiver and whatever consumes it, never the
+  sender — creek demonstrates it, a reverb-send tweak rebuilding
+  `space` and `main` while every other stem stays a cache hit. An
   entry's `loop:` map tiles its source to fill the window
   ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
   repetitions expand into ordinary placement-plan entries — grid-locked
