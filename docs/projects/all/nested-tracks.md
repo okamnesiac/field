@@ -24,7 +24,7 @@ node name so the audio directory never moved, and `generate`/`choose`
 resolve gen node names. `seven-eight-loop`'s wait ended the way §16 planned: `loop-cd` retired
 into `field export --rate 44100 --bit-depth 16`
 ([multi-rate.md](multi-rate.md) step 2) and the loop is a leaf track —
-`drums` re-rendered byte-identically and `main` never re-keyed. One
+`drums` re-rendered byte-identically and `main` never re-keyed. No
 sound remains: `vocal-48k` retired with multi-rate step 3 (a track
 carries its own rate, the edge converts), and `lead-take` has folded as
 a generative leaf placed twice by `lead-vocal` — byte-identically, its
