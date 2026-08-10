@@ -5,7 +5,7 @@ import { readWavHeader } from '../audio/wav.js';
 // spelling is free and only the resulting order matters, which is why
 // the buildable sort below is spelling-blind: order is the one channel
 // a spelling change could reach the key through.
-import { convertRefName, genRef, genRefName, trackRef, trackRefName } from '../labels.js';
+import { convertRefName, genRef, genRefName, tapRefName, trackRef, trackRefName } from '../labels.js';
 import type { InputEntry, Insert, Track } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
@@ -100,6 +100,20 @@ export interface PlacedClip {
 // and letting it reach the wire would make the daemon's job conditional
 // on something the control plane is supposed to have already decided.
 export type RenderedClip = Omit<PlacedClip, 'duration'> & { duration: number };
+
+// A cable arriving at this track (nested-tracks.md §19), as the planner
+// consumes it: the wiring ref the graph chose for the tap point
+// (`track:<sender>` for post, `tap:<sender>` for pre), the edge's level,
+// and the derived arrivals in this track's samples. Each arrival becomes
+// an ordinary clip playing the sender's whole render — which is the §19
+// action-key claim made literal: the receive re-keys on sender content
+// (the input hash), gain and arrivals (the clips), and tap (which ref is
+// wired).
+export interface CableIn {
+  ref: string;
+  gainDb: number;
+  arrivals: number[];
+}
 
 // Every track has a stem, including an empty one — it renders as
 // silence, which is what it contains. `field song create` writes an
@@ -259,6 +273,10 @@ export function planTrack(
   // second into a 44.1 kHz asset is sample 44100 of the original and
   // sample 48000 of what this stem consumes (#112 review, Bugbot).
   convertBySource: Map<string, { ref: string; scale: number }> = new Map(),
+  // The cables arriving here, refs pre-conversion like every entry's —
+  // the graph mints the same edge conversion for a sender at another
+  // rate that it mints for any source.
+  cables: CableIn[] = [],
 ): StemSpec {
   const refFor = (e: InputEntry): string => {
     const raw = entryRef(e, track.name);
@@ -268,17 +286,18 @@ export function planTrack(
     const scale = convertBySource.get(entryRef(e, track.name))?.scale ?? 1;
     return Math.round((e.source_offset - e.slip) * scale);
   };
-  // Receives are not placements (nested-tracks.md §19): a cable's signal
-  // joins the stem at derived arrivals, which is the next slice's work —
-  // until it lands, a receive contributes nothing to the plan.
+  // Receives are not placements (nested-tracks.md §19): their signal
+  // arrives through `cables`, at derived arrivals, rather than through
+  // the entry itself.
   const placeable = track.inputs.filter((e) => e.receive === undefined);
+  const cableRefFor = (c: CableIn): string => convertBySource.get(c.ref)?.ref ?? c.ref;
   // One list in the file (nested-tracks.md §18), one source list here.
   // A placed track is never in sha256BySource — its bytes do not exist
   // until it renders — so it sorts with the buildable sounds, by name,
   // for the same reason they do. A converted source is buildable however
   // committed its origin: the stem's input is the conversion's output,
   // whose bytes do not exist until it runs.
-  const refs = [...new Set(placeable.map(refFor))];
+  const refs = [...new Set([...placeable.map(refFor), ...cables.map(cableRefFor)])];
   const committed = refs
     .filter((r) => sha256BySource.has(r))
     .sort((a, b) => {
@@ -294,7 +313,7 @@ export function planTrack(
   // — where the two really are different sources and the order only has
   // to be deterministic.
   const buildableName = (r: string): string =>
-    trackRefName(r) ?? genRefName(r) ?? convertRefName(r) ?? r;
+    trackRefName(r) ?? genRefName(r) ?? convertRefName(r) ?? tapRefName(r) ?? r;
   const buildable = refs
     .filter((r) => !sha256BySource.has(r))
     .sort((a, b) => {
@@ -328,6 +347,24 @@ export function planTrack(
       },
     ];
   });
+  // Each arrival plays the sender's whole render at the cable's level —
+  // no window, so a reverb tail rings as long as it rendered. A negative
+  // arrival (the sender's zero preceding the receiver's) folds into the
+  // read offset: content before the receiver's sample 0 has nowhere to
+  // sound, and the rest starts partway through the source.
+  for (const cable of cables) {
+    const input = inputIndex.get(cableRefFor(cable))!;
+    for (const arrival of cable.arrivals) {
+      placed.push({
+        input,
+        start: Math.max(0, arrival),
+        read_offset: arrival < 0 ? -arrival : 0,
+        gain_db: cable.gainDb,
+        fade_in: 0,
+        fade_out: 0,
+      });
+    }
+  }
   // Canonical order: summing is commutative, so the action key must not
   // depend on YAML entry order. An absent duration sorts as -1: no real
   // window is shorter, and the comparator's job is to be total and

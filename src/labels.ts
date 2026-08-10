@@ -92,6 +92,19 @@ export function convertRefName(ref: string): string | undefined {
   return ref.startsWith(CONVERT_REF_PREFIX) ? ref.slice(CONVERT_REF_PREFIX.length) : undefined;
 }
 
+// A pre-insert tap the graph minted for a `tap: pre` send
+// (nested-tracks.md §19 decision 6): `tap:<sender>` in wiring,
+// //songs/<song>/tap:<sender> as a label — the sender's stem before its
+// inserts, which is the only tap point that is not simply the stem.
+// Never authored, like gen: and convert:.
+const TAP_REF_PREFIX = 'tap:';
+export function tapRef(name: string): string {
+  return `${TAP_REF_PREFIX}${name}`;
+}
+export function tapRefName(ref: string): string | undefined {
+  return ref.startsWith(TAP_REF_PREFIX) ? ref.slice(TAP_REF_PREFIX.length) : undefined;
+}
+
 export function formatLabel(label: Label): string {
   return `//${label.pkg}:${label.name}`;
 }
