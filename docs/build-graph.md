@@ -64,11 +64,16 @@ Outputs live under their content hash, materialized at
 wants in a Finder window or an email. `field export <patterns>` builds
 and then copies the result to `~/Desktop` (or `--to <dir>`) under the
 label with its punctuation flattened, minus the `songs/` prefix:
-`//songs/creek/track:main` becomes `creek-track-main-v1.wav`, and shared
-material keeps its shelf (`shared-asset-water-v1.wav`). Export ships
-what `play` would play, through the same resolver, and only the labels
-the patterns match — the dependencies a build prints are means, not
-products.
+
+```console
+$ field export creek
+exported //songs/creek/track:main → ~/Desktop/creek-track-main-v1.wav
+```
+
+Shared material keeps its shelf (`shared-asset-water-v1.wav`). Export
+ships what `play` would play, through the same resolver, and only the
+labels the patterns match — the dependencies a build prints are means,
+not products.
 
 The name is long deliberately. A short form (`creek-main`) reads better
 until a song has a track and a gen node of the same name — which every
@@ -77,36 +82,41 @@ want one name. A name that is sometimes scoped is worse than one that
 always is: you cannot predict the file you are about to get.
 
 **Delivery formatting belongs to export** (multi-rate.md decision 1):
-`--rate` and `--bit-depth` convert on the way out through the daemon's
-normalize op — never as a node in the song — writing integer PCM at the
-chosen depth. A flag left off defaults to the source's own value where
-it has one: a float source (everything Field renders) has no integer
-depth of its own, so `--rate` alone on a stem refuses and asks for
-`--bit-depth`. The effective pair joins the name after a dot
-(`creek-track-main.44100-16-v1.wav`) — a character no label can carry —
-so a converted family never versions an unconverted one, nor a label
-that happens to end in digits. This is what retired `loop-cd`: a CD
-deliverable is an invocation, not a node.
+
+- `--rate` and `--bit-depth` convert on the way out through the daemon's
+  normalize op — never as a node in the song — writing integer PCM at
+  the chosen depth.
+- A flag left off defaults to the source's own value where it has one. A
+  float source (everything Field renders) has no integer depth of its
+  own, so `--rate` alone on a stem refuses and asks for `--bit-depth`.
+- The effective pair joins the name after a dot
+  (`creek-track-main.44100-16-v1.wav`) — a character no label can
+  carry — so a converted family never versions an unconverted one, nor a
+  label that happens to end in digits. A CD deliverable is an
+  invocation, not a node in the song.
 
 **Exports are versioned, never overwritten.** Finishing something and
 putting it somewhere is how people mark a version, and the previous one
-is often the only copy of a decision later undone — so a second export
-is `-v2`, numbered from the highest already there (a gap means someone
-threw that version away, and minting a second `-v2` would disagree with
-them). Re-exporting something that has not changed is a no-op: the bytes
-are compared against *every* version present, newest first, and the
-command reports `current` naming the version that stands rather than
-minting an identical one. When the match is an older version — export
-v1, change something, export v2, change it back — it reports `reverted`
-and names both numbers, because the newest file in the directory is then
-no longer what you just built.
+is often the only copy of a decision later undone:
+
+- A second export is `-v2`, numbered from the highest already there. A
+  gap means someone threw that version away, and minting a second `-v2`
+  would disagree with them.
+- Re-exporting something unchanged is a no-op: the bytes are compared
+  against *every* version present, newest first, and the command reports
+  `current` naming the version that stands.
+- When the match is an older version — export v1, change something,
+  export v2, change it back — it reports `reverted` and names both
+  numbers, because the newest file in the directory is then no longer
+  what you just built.
 
 Nothing Field does removes or overwrites a file in the destination,
 including files it did not write. The copy lands on a temp name and is
 linked into place, so an interrupted export leaves debris rather than a
-truncated version (which, since nothing overwrites, would be permanent),
-and a name that merely differs in case cannot be written through on a
-case-insensitive volume — the link fails and the next number is taken.
+truncated version, and a name that merely differs in case cannot be
+written through on a case-insensitive volume — the link fails and the
+next number is taken.
+
 A committed source whose bytes have drifted from their declared hash is
 refused outright — the same guard `build` applies before consuming an
 asset as an input. Export is the command whose product leaves the
@@ -150,55 +160,39 @@ it; every placement follows).
 
 ### `stem` — every track, implicitly
 
-The first *implicit* type: every track is buildable as
-`//songs/<song>/track:<name>` without declaring anything, an empty one
-rendering as the silence it contains, because the track file **is** the
-declaration — a track file implies a `stem`.
-
-Content is the track's one `inputs:` list (nested-tracks.md §18): each
-entry places a `track:`, an `audio:` file, or an inline
-`supercollider:`/`generative:` render — minted as its own `gen:` node,
-so it caches and is addressable like any rule. A placed track is one
-more source in the same list, so a track→track edge is an ordinary graph
-edge and a track placed three times is one render placed three times.
-Placing a track pulls its whole definition into the stem's subgraph, so
-the arrangement can play audio nothing ever committed, and editing the
-definition rebuilds straight through stem and mix.
-
-A track can also be a song's *output* — the one named `main` — in which
-case it carries the song's declared `length` and `loop` and renders
-exactly that long. A bare song reference resolves to it: `creek` means
-`//songs/creek/track:main`.
+Every track is buildable as `//songs/<song>/track:<name>` without
+declaring anything, an empty one rendering as the silence it contains,
+because the track file **is** the declaration. What a track file says —
+entry kinds, placement, nesting, levels, local time and rate, sends — is
+[tracks.md](tracks.md); this section is how the graph renders one.
 
 The stem places its entries through the tempo map (`at`, source offset,
 slip, entry gain and pan, linear fades) and sums them into a pre-fader
 Float32 stereo stem in the render daemon
-([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). The
-action key hashes the *resolved placement plan* in samples, not the raw
-YAML: a tempo edit rebuilds exactly the tracks whose musical entries
-moved, reordering entries in the file changes nothing, and entry
-spelling is wiring — a ref changing kind cannot re-key a parent whose
-children are byte-identical.
+([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). A
+placed track is one more source in the same list, so a track→track edge
+is an ordinary graph edge, and a track placed three times is one render
+placed three times. The song's output track additionally renders the
+song's declared `length`, with `loop:` folding the overhang back onto
+the start.
 
-A track may declare `rate:` (multi-rate.md decision 3), the project's
-`sample_rate` otherwise — the whole file, ticks included, projects to
-samples at that rate, and a source arriving at any other rate converts
-through a `resample` node at the edge rather than being refused. What
-mix-assembly.md §4 called "never resamples implicitly" became "never
-resamples *invisibly*": the conversion is automatic, and it is a node
-you can ask about.
+The action key hashes the *resolved placement plan* in samples, not the
+raw YAML:
 
-Cables join the plan the same way
-([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19): a
-track receiving a send consumes the sender's stem — or, for `tap: pre`,
-an implicit `tap:` node, the sender's plan minus its inserts, shared by
-every pre cable from that sender — as ordinary clips placed at the
-derived arrivals at the cable's gain, converted at the edge like any
-source. The receive therefore re-keys on sender content, gain, tap and
-arrivals, and on nothing else: a send-level tweak re-renders the
-receiver and whatever consumes it, never the sender. creek demonstrates
-it — a reverb-send tweak rebuilds `space` and `main` while every other
-stem stays a cache hit.
+- A tempo edit rebuilds exactly the tracks whose musical entries moved.
+- Reordering entries in the file changes nothing.
+- Entry spelling is wiring — a ref changing kind cannot re-key a parent
+  whose children are byte-identical.
+- The cache key sees the plan but not the level applied above it, so
+  mixing decisions never invalidate rendered stems.
+
+Cables join the plan the same way (nested-tracks.md §19): a receive
+consumes the sender's stem — or, for `tap: pre`, an implicit `tap:`
+node, the sender's plan minus its inserts, shared by every pre cable
+from that sender — as ordinary clips at the derived arrivals, converted
+at the edge like any source. The receive re-keys on sender content,
+gain, tap and arrivals, and on nothing else: a send-level tweak
+re-renders the receiver and whatever consumes it, never the sender.
 
 An entry's `loop:` map tiles its source to fill the window
 ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
@@ -209,24 +203,24 @@ exist, and a loop hashes identically to its hand-tiled equivalent.
 
 ### `resample` — minted at rate edges
 
-The second implicit type, and the only one nobody can declare: when a
-source arrives at a placement at a rate other than its track's, the
-graph mints `//songs/<song>/convert:<name>-<rate>` between them
-(multi-rate.md decision 4) — one node per (source, rate) however many
-placements consume it, visible in `explain` and `deps()` like any rule.
+The one type nobody can declare: when a source arrives at a placement at
+a rate other than its track's, the graph mints
+`//songs/<song>/convert:<name>-<rate>` between them (multi-rate.md
+decision 4) — one node per (source, rate) however many placements
+consume it, visible in `explain` and `deps()` like any rule.
+
 It runs the daemon's polyphase resampler (render-pipeline.md decision 9,
 the same one `--rate` exports through) and writes float32 undithered,
 because it sits between two float stages — quantization is a delivery
-choice, made at export. The `normalize` *sound* that used to close this
-loop by hand retired with multi-rate.md step 3 — and `sounds/` entirely
-with the chunk 6 finale; the daemon op behind it survives as export's
-converter.
+choice, made at export. The conversion is automatic but never invisible:
+it is a node you can ask about.
 
 ### `supercollider`
 
 A SuperCollider program defines the sound, rendered offline via
 scsynth's NRT mode. `source:` names the program — a bare filename
 resolves in `shared/instruments/`, a slashed path is project-relative.
+
 The program is a plain `.scd` run through `sclang` with `FIELD_OUTPUT` /
 `FIELD_SEED` / `FIELD_DURATION` / `FIELD_SAMPLE_RATE` / `FIELD_CHANNELS`
 in the environment; it writes `FIELD_OUTPUT` and exits. The program's
@@ -243,44 +237,12 @@ From [projects/all/effects.md](projects/all/effects.md): Fyra's
 auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
 compensation on by default — tone changes, level doesn't), an offline
 lookahead limiter with a hard ceiling guarantee, and a deterministic
-Freeverb whose output grows by its tail. They run as `inserts:` — baked
-into the stem, on the song's output track where the master chain went —
-and chains are wrapper tracks placing wrapper tracks, cached per link: a
-track wrapped in an effect is a different track. The declared effect
-*sounds* these once were folded in with nested-tracks.md decision 12;
-`field check` names containment cycles the way it named sound→sound
-ones.
+Freeverb whose output grows by its tail.
 
-### `say` — removed
-
-Removed by render-pipeline.md chunk 5. macOS text-to-speech was an
-in-graph recipe here: `text`/`voice`/`rate` as the whole action key,
-output cached and never committed. It went for two reasons that arrived
-together — it was the last rule shelling out to a macOS binary, and the
-generated-voice tier replaces what it was actually for.
-[projects/all/voice-generation.md](projects/all/voice-generation.md) §5
-records the decision and what it costs.
-
-Worth keeping from it: `say` was this document's example of the
-*hermetic* side of the determinism boundary, and the boundary itself is
-unchanged — `supercollider`, `eq`, `limit`, `reverb`, `resample` and
-`stem` are all recipes cached under an action key, while voice
-generation is a deliberate generative sound with committed outputs on
-the other side. What `say` also demonstrated, less comfortably, is that
-a recipe can be *nearly* hermetic and that the gap is where the trouble
-lives: `voice: Siri` followed a Settings toggle the cache key could not
-see, and two consecutive CI renders of it were observed to differ.
-
-### `mix` — retired
-
-Retired by nested-tracks.md §7 chunk 2. A song's output is the track
-named `main`, and it does everything the mix rule did: sums its inputs
-applying each placement's `gain_db` and `pan`, bakes its own `inserts:`
-in where the master chain went, and renders exactly the song's declared
-`length`, with `loop:` folding the overhang back onto the start. The
-same machinery — a mix was a track that could not hold clips or nest —
-and creek renders bit-identically across the change. A `mixes/`
-directory left behind is named by `check` rather than ignored.
+They run as `inserts:` — baked into the stem, with the master chain on
+the song's output track — and chains are wrapper tracks placing wrapper
+tracks, cached per link: a track wrapped in an effect is a different
+track. `field check` names containment cycles.
 
 ## Determinism policy
 

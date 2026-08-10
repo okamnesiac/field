@@ -50,10 +50,12 @@ either stops legitimate work or trains you to expect red.
 
 **`field --version` reports the build, not the checkout.** `pnpm build`
 stamps `dist/build-info.json` with the commit, branch, and dirty count
-at build time (cleared before `tsc`, written after everything succeeds,
-so a failed build leaves no stamp), and the dist artifact reads its
-stamp. When the checkout has moved since the build, the report says so
-beside the baked identity instead of impersonating it: a new HEAD prints
+at build time — cleared before `tsc`, written after everything
+succeeds, so a failed build leaves no stamp — and the dist artifact
+reads its stamp.
+
+When the checkout has moved since the build, the report says so beside
+the baked identity instead of impersonating it: a new HEAD prints
 `checkout now at <sha> — pnpm build to update`, and edits without a
 commit print `checkout has changed since the build — pnpm build to
 update`. Running from source (tsx, vitest) keeps the live git read,

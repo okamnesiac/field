@@ -33,17 +33,21 @@ the same files.
   content-addressed audio assets. A project contains one or more songs —
   think album — plus shared instruments and samples reused across them.
   See [project-model.md](project-model.md).
-- **Song** — one piece within a project: its own arrangement, tempo map,
-  tracks, takes, and committed audio, drawing freely on the project's
-  shared material.
+- **Song** — one piece within a project: its own tempo map, tracks,
+  takes, and committed audio, drawing freely on the project's shared
+  material. A song's structure is its output track's placements.
+- **Track** — the one structural primitive. Every definition is a
+  track: an instrument is a leaf track carrying its program, an effect
+  is an insert on a track, a submix is a track placing other tracks,
+  and the song itself is the track named `main`. Structure, local time,
+  and the mixer are the same tree. See [tracks.md](tracks.md).
 - **Asset** — an immutable audio or MIDI file, referenced by content
   hash. Field never edits audio in place; all placement and editing is
   metadata.
-- **Node** — a producer or processor in the dependency graph: a recorded
-  track, a SuperCollider program, a generative sound, a plugin chain, a
-  bus.
-- **Label** — the address of something buildable: a stem, a sound, a cue
-  mix, the song's output track. For example,
+- **Node** — a producer or processor in the dependency graph: a track's
+  stem, a SuperCollider render, a generative take, a rate conversion.
+- **Label** — the address of something buildable: a track's stem, a gen
+  node, the song's output track. For example,
   `field build //songs/opener/track:main`. See
   [build-graph.md](build-graph.md).
 - **Take** — one performance of something. Recorded takes and renders of

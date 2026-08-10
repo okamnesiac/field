@@ -55,6 +55,7 @@ It builds on macOS and Linux, and CI builds it on both.
 
 - [Overview](docs/overview.md) — the thesis, core concepts, and V1 scope
 - [Architecture](docs/architecture.md) — layers, processes, and language decisions
+- [Tracks](docs/tracks.md) — the structural primitive: the track file, nesting, and cables
 - [Project model](docs/project-model.md) — the canonical on-disk representation
 - [Build graph](docs/build-graph.md) — targets, caching, freezing, determinism
 - [Audio engine](docs/audio-engine.md) — the real-time daemon (future work)
