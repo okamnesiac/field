@@ -12,7 +12,7 @@ finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
 is done too — a track carries its own tempo and meter (§13). Sends
 (chunk 4) are un-deferred: §19 derives the arrival times §14 said an
 offline renderer would have to invent, and specifies the cable model. What
-is left here is folding `sounds/` in (chunk 6), which opened with the
+was left here was folding `sounds/` in (chunk 6), which opened with the
 clip-duration prerequisite (§15, #97) and the eq fold (§17, #100), and
 then settled the shape it was heading toward: one `inputs:` list whose
 entries place tracks, committed audio, or inline generators (§18) —
@@ -1132,23 +1132,36 @@ inputs:
 4. **No track type — "live" is a situation, not a kind.** A receive is
    legal where the path from its track up to the cable's common
    ancestor accumulates zero time displacement: every entry on that
-   path has `at` and `slip` at their defaults. No `kind:` field
+   path is a single unshifted pass — `at`, `slip` and `source_offset`
+   at their defaults, and no `loop:`. No `kind:` field
    exists; decision 1 stands untouched. §14 worried that whatever made
    offline sends coherent would be "a type distinction reintroduced
    through validation" — the resolution is that the constraint was
    never about *which tracks* may receive but about *where a receive
    may sit*, checked per cable, structurally, refusing nothing by
-   name. Amplitude-domain entry fields — `duration`, fades, `loop` —
-   stay legal on the path: a fade is level automation and moves no
-   arrival (when [automation.md](automation.md) lands, a level lane
-   subsumes it); only `at` and `slip` shift the time base, and the
-   time base is what §14's ambiguity was made of.
+   name. Non-displacing fields — `duration`, fades — stay legal on
+   the path: a fade is level automation and moves no arrival (when
+   [automation.md](automation.md) lands, a level lane subsumes it),
+   and `duration` windows the output without moving it. `loop` is on
+   the time side of the line — the window is authoritative and the
+   source tiles to fill it ([clip-looping.md](clip-looping.md) §1),
+   replication in time, not level shaping — and so is
+   `source_offset`, which displaces the read on `slip`'s own axis
+   (effective read offset = source_offset − slip,
+   [project-core.md](project-core.md) §3.2). The time base is what
+   §14's ambiguity was made of, and these four fields are its only
+   spellings.
 
 5. **Arrival times are derived, not invented.** To render a receive
    offline: walk up from the receiving track to the cable's common
    ancestor — zero displacement by decision 4, so the walk up
    contributes nothing — then walk down from the ancestor to the
-   sending track accumulating `at` and `slip` through every placement.
+   sending track accumulating displacement through every placement,
+   in the ancestor's rate: the walk reads the already-converted
+   placement plan, so a path crossing a track-rate boundary converts
+   each segment's offsets at the edge exactly as playback does
+   ([multi-rate.md](multi-rate.md)) rather than summing raw sample
+   counts across rates.
    One arrival per path: a sender inside `verse` placed at bars 5 and
    13 arrives twice, which is §12's `reaches` walk on the sender side
    only. The ancestor itself may be placed — its placements shift both
@@ -1197,7 +1210,12 @@ under a displaced path (error naming the entry that carries the
 offset).
 
 **Chunk 4, revived.** Schema (the `sends:` map, the `receive:` entry);
-check (both ends resolve, 1:1, the zero-displacement path, cycles);
+check (both ends resolve, 1:1, the zero-displacement path, cycles —
+plus the severity level decision 3's warnings assume, which does not
+exist yet: `Diagnostic` is `{ file, message }` and any diagnostic
+fails `check` and `build`, so the dangling-end warning arrives only
+if this chunk builds a non-fatal level and gives it a path through
+check, build and watch);
 build (derive arrivals, then a receive renders as the sum of its
 cables' signals at their arrivals, through its inserts —
 deterministic and cacheable, keyed on sender content, gain, tap and
