@@ -11,13 +11,33 @@ import type { LoadedFile } from './project.js';
 // cycle check, and the arrival walk — so `check` and the build graph
 // cannot answer "when does this signal arrive" differently.
 //
-// Arrivals are derived, not invented (§19 decision 5): walk up from the
-// receiving track to the cable's common ancestor — zero displacement by
-// decision 4, so the walk up contributes nothing — then down from the
-// ancestor to the sender, accumulating each placement's displacement.
-// The walk runs once per containment path of the receiver, and the
-// arrival sets must agree: they bake into a render that exists once
-// however often the track is placed (§13).
+// Arrivals are derived, not invented (§19 decision 5), and "the common
+// ancestor" is really every join on the receiver's way up: a return
+// carrying its own dry copy of the sender hears it at zero *and* again
+// through the mix above (#125 review), so the walk climbs from the
+// receiver collecting, at each track, the sender placements in that
+// track's subtree — excluding the subtree it just climbed out of, whose
+// senders every instance already heard from inside: an instance hears
+// itself, not its siblings, which is the placed-ancestor coherence §19
+// states. Displacement on an up edge is legal exactly when nothing
+// joins above it (the circuit shifts as one, decision 4's rule seen
+// from the other side), and where the receiver has several parents
+// their views must agree, because arrivals bake into a render that
+// exists once however often the track is placed (§13). Both walks are
+// memoized per track, so the cost is the graph's size, not the number
+// of paths through it.
+
+// One landing of the sender's signal on the receiver's timeline, in
+// receiver-rate samples. `count` is how many identical placements land
+// there together: two placements of the sender at one position sum to
+// twice the amplitude, which one clip at +20·log₁₀(count) dB renders
+// exactly — and holding the count instead of repeating the arrival is
+// what keeps a mix full of shared containments (every level of sharing
+// multiplies the soundings) from expanding into millions of rows.
+export interface CableArrival {
+  at: number;
+  count: number;
+}
 
 export interface Cable {
   label: string;
@@ -25,10 +45,9 @@ export interface Cable {
   receiver: string;
   gainDb: number;
   tap: 'pre' | 'post';
-  // Where the sender's signal lands on the receiver's timeline:
-  // receiver-rate samples, ascending. Duplicates are real — two
-  // identical placements of the sender arrive twice and sum twice.
-  arrivals: number[];
+  // Ascending by `at`. Distinct offsets are real multiplicity — a
+  // sender placed at bars 5 and 13 arrives twice and sums twice.
+  arrivals: CableArrival[];
 }
 
 // A track's clock, as validate resolved it: its effective rate and its
@@ -136,10 +155,17 @@ export function checkCables(
   }
   for (const [label, ends] of receivesByLabel) {
     for (const end of ends.slice(1)) {
+      // Unlike sends — a map whose duplicate keys YAML itself rejects —
+      // the receive side can duplicate within one file, and a message
+      // pointing the reader at the file they are already in names
+      // nothing (#125 review).
       push(
         end.file,
-        `receive "${label}" is also declared in ${ends[0]!.file} — one cable links one send ` +
-          `to one receive (nested-tracks.md §19)`,
+        end.file === ends[0]!.file
+          ? `receive "${label}" is declared twice in this file — one cable links one send ` +
+              `to one receive (nested-tracks.md §19)`
+          : `receive "${label}" is also declared in ${ends[0]!.file} — one cable links one ` +
+              `send to one receive (nested-tracks.md §19)`,
       );
     }
     if (!sendsByLabel.has(label)) {
@@ -164,52 +190,6 @@ export function checkCables(
     for (const edge of childEdges.get(name) ?? []) {
       for (const d of descendants(edge.child)) out.add(d);
     }
-    return out;
-  };
-
-  // Every acyclic containment path from a track up to a root, as edge
-  // lists ordered from the track upward. A root yields the one empty
-  // path — the track standing for itself.
-  const pathsUp = (name: string): Edge[][] => {
-    const out: Edge[][] = [];
-    const walk = (n: string, path: Edge[], onPath: Set<string>): void => {
-      const ups = parentEdges.get(n) ?? [];
-      if (ups.length === 0) {
-        out.push([...path]);
-        return;
-      }
-      for (const edge of ups) {
-        if (onPath.has(edge.parent)) continue;
-        onPath.add(edge.parent);
-        path.push(edge);
-        walk(edge.parent, path, onPath);
-        path.pop();
-        onPath.delete(edge.parent);
-      }
-    };
-    walk(name, [], new Set([name]));
-    return out;
-  };
-
-  // Every acyclic containment path from an ancestor down to a track, as
-  // edge lists ordered from the ancestor downward.
-  const pathsDown = (from: string, to: string): Edge[][] => {
-    const out: Edge[][] = [];
-    const walk = (n: string, path: Edge[], onPath: Set<string>): void => {
-      if (n === to) {
-        out.push([...path]);
-        return;
-      }
-      for (const edge of childEdges.get(n) ?? []) {
-        if (onPath.has(edge.child)) continue;
-        onPath.add(edge.child);
-        path.push(edge);
-        walk(edge.child, path, onPath);
-        path.pop();
-        onPath.delete(edge.child);
-      }
-    };
-    walk(from, [], new Set([from]));
     return out;
   };
 
@@ -277,6 +257,19 @@ export function checkCables(
   }
   const cyclic = new Set<string>();
   for (const { label, send, receive } of complete) {
+    // Sending to your own receive is the first thing someone tries when
+    // they misread the label as a destination, so it gets its own
+    // sentence rather than `"x" is inside "x"` (#125 review).
+    if (send.track === receive.track) {
+      push(
+        send.file,
+        `"${send.track}" both sends and receives "${label}" — the label names a cable ` +
+          `between two tracks, not a destination, and a send cannot reach into itself ` +
+          `(nested-tracks.md §19)`,
+      );
+      cyclic.add(label);
+      continue;
+    }
     if (descendants(send.track).has(receive.track)) {
       push(
         send.file,
@@ -300,6 +293,32 @@ export function checkCables(
     }
   }
 
+  // Skips a cable whose derivation cannot be trusted — a containment
+  // cycle on the walk, a broken clock, unresolved musical time. Each of
+  // those already carries its own diagnostic, so the cable adds none.
+  class SkipCable extends Error {}
+
+  // Arrival multisets are offset → count maps: identical offsets
+  // collapse, which is what keeps shared containment (each level of
+  // sharing multiplies the soundings) from expanding a set the mix
+  // itself holds compactly. Offsets stay unrounded until the end so
+  // rate-ratio arithmetic dedupes exactly.
+  type Arrivals = Map<number, number>;
+  const add = (into: Arrivals, at: number, count: number): void => {
+    into.set(at, (into.get(at) ?? 0) + count);
+  };
+  const finish = (raw: Arrivals): CableArrival[] => {
+    const rounded: Arrivals = new Map();
+    for (const [at, count] of raw) add(rounded, Math.round(at), count);
+    return [...rounded]
+      .map(([at, count]) => ({ at, count }))
+      .sort((a, b) => a.at - b.at);
+  };
+  const spell = (raw: Arrivals): string =>
+    `[${finish(raw)
+      .map((a) => `${a.at}${a.count > 1 ? `×${a.count}` : ''}`)
+      .join(', ')}]`;
+
   const cables: Cable[] = [];
   const displacedDiagnosed = new Set<string>();
   for (const { label, send, receive } of complete) {
@@ -307,106 +326,132 @@ export function checkCables(
     const receiverRate = clocks.get(receive.track)?.rate;
     if (receiverRate === undefined) continue;
 
-    interface PathArrivals {
-      chain: string; // root-down node names, for the divergence message
-      arrivals: number[] | undefined; // undefined: clock unusable, skip cable
-    }
-    const results: PathArrivals[] = [];
-    let pathError = false;
-    for (const up of pathsUp(receive.track)) {
-      const nodesUp = [receive.track, ...up.map((e) => e.parent)];
-      const chain = [...nodesUp].reverse().join(' → ');
-      // The cable's ancestor on this path: the first track, walking up,
-      // whose subtree holds the sender. Above it, placements shift both
-      // ends together and cannot matter.
-      const ancestorIndex = nodesUp.findIndex((n) => descendants(n).has(send.track));
-      if (ancestorIndex === -1) {
-        // This path never meets the sender. An empty arrival set is a
-        // real answer — it diverges against any path that does hear it,
-        // which is exactly the bed-without-the-vocal case.
-        results.push({ chain, arrivals: [] });
-        continue;
+    // Sender placements inside `x`'s subtree, as arrivals in x's clock
+    // (receiver-rate samples — the clocks align wherever the answer is
+    // legal to use). Memoized per track: each subtree is one fact
+    // however many paths reach it.
+    const downMemo = new Map<string, Arrivals>();
+    const downStack = new Set<string>();
+    const compose = (into: Arrivals, edge: Edge, sub: Arrivals): void => {
+      const instances = instanceDisplacements(edge);
+      const parentRate = clocks.get(edge.parent)?.rate;
+      if (instances === undefined || parentRate === undefined) throw new SkipCable();
+      const factor = receiverRate / parentRate;
+      for (const d of instances) {
+        for (const [at, count] of sub) add(into, d * factor + at, count);
       }
-      const ancestor = nodesUp[ancestorIndex]!;
-      // Zero displacement from the receiver up to the ancestor
-      // (decision 4): every placement on the way is a single unshifted
-      // pass, or the receive has no derivable clock.
-      for (const edge of up.slice(0, ancestorIndex)) {
+    };
+    const down = (x: string): Arrivals => {
+      if (x === send.track) return new Map([[0, 1]]);
+      const seen = downMemo.get(x);
+      if (seen !== undefined) return seen;
+      if (downStack.has(x)) throw new SkipCable();
+      downStack.add(x);
+      const out: Arrivals = new Map();
+      for (const edge of childEdges.get(x) ?? []) {
+        const sub = down(edge.child);
+        if (sub.size === 0) continue;
+        compose(out, edge, sub);
+      }
+      downStack.delete(x);
+      downMemo.set(x, out);
+      return out;
+    };
+
+    // The sender placements that join at `x` when the walk arrived from
+    // the child track `via`: every subtree under x except via's — those
+    // are other instances of the containment the receiver sits in, and
+    // an instance hears itself, not its siblings (the placed-ancestor
+    // coherence, §19 decision 5).
+    const joins = (x: string, via: string | undefined): Arrivals => {
+      const out: Arrivals = new Map();
+      for (const edge of childEdges.get(x) ?? []) {
+        if (via !== undefined && edge.child === via) continue;
+        const sub = down(edge.child);
+        if (sub.size === 0) continue;
+        compose(out, edge, sub);
+      }
+      return out;
+    };
+
+    // Everything audible from `x` looking up, having climbed out of
+    // `via`: x's own joins plus whatever joins higher. A displaced up
+    // edge is legal exactly when nothing joins above it — then it
+    // shifts the whole circuit below as one (§19: the ancestor itself
+    // may be placed) — and where x has several undisplaced parents,
+    // their views must agree, because they all play the same render.
+    let anyError = false;
+    let divergenceReported = false;
+    const upMemo = new Map<string, Arrivals>();
+    const upStack = new Set<string>();
+    const arrive = (x: string, via: string | undefined): Arrivals => {
+      const key = `${x}|${via ?? ''}`;
+      const seen = upMemo.get(key);
+      if (seen !== undefined) return seen;
+      if (upStack.has(key)) throw new SkipCable();
+      upStack.add(key);
+      const result = joins(x, via);
+      let above: Arrivals | undefined;
+      let aboveVia: string | undefined;
+      for (const edge of parentEdges.get(x) ?? []) {
         if ([edge.entry.at, edge.entry.duration, edge.entry.loop?.every].some(unresolved)) {
-          results.push({ chain, arrivals: undefined });
-          pathError = true; // the unresolved time already has its diagnostic
-          break;
+          throw new SkipCable();
         }
+        const up = arrive(edge.parent, x);
         const fields = displacingFields(edge.entry);
         if (fields.length > 0) {
-          const key = `${label}|${edge.file}|${edge.index}`;
-          if (!displacedDiagnosed.has(key)) {
-            displacedDiagnosed.add(key);
+          if (up.size > 0) {
+            const dkey = `${label}|${edge.file}|${edge.index}`;
+            if (!displacedDiagnosed.has(dkey)) {
+              displacedDiagnosed.add(dkey);
+              push(
+                edge.file,
+                `${entryName(edge.entry, edge.index)} carries ${fields.join(', ')} on the ` +
+                  `path from "${receive.track}" up to "${edge.parent}" — a receive is legal ` +
+                  `only where that path is a single unshifted pass (nested-tracks.md §19)`,
+              );
+            }
+            anyError = true;
+          }
+          continue; // nothing joins above: the placement shifts the circuit as one
+        }
+        if (above === undefined) {
+          above = up;
+          aboveVia = edge.parent;
+        } else if (spell(up) !== spell(above)) {
+          if (!divergenceReported) {
+            divergenceReported = true;
             push(
-              edge.file,
-              `${entryName(edge.entry, edge.index)} carries ${fields.join(', ')} on the path ` +
-                `from "${receive.track}" up to "${ancestor}" — a receive is legal only where ` +
-                `that path is a single unshifted pass (nested-tracks.md §19)`,
+              receive.file,
+              `receive "${label}" hears different arrivals through its containment paths — ` +
+                `via ${aboveVia} → ${x} it hears ${spell(above)} but via ${edge.parent} → ` +
+                `${x} ${spell(up)} (receiver-rate samples); a track renders once however ` +
+                `often it is placed (§13), so every path must agree (nested-tracks.md §19)`,
             );
           }
-          pathError = true;
+          anyError = true;
         }
       }
-      if (pathError) break;
-      // Walk down from the ancestor to the sender, one arrival per
-      // placement instance per path — the sender's multiplicity is the
-      // point (§19 decision 5). Displacements convert straight into
-      // receiver-rate samples: the receiver's clock is the ancestor's,
-      // that being what zero displacement means.
-      let arrivals: number[] | undefined = [];
-      for (const down of pathsDown(ancestor, send.track)) {
-        let totals: number[] = [0];
-        for (const edge of down) {
-          const instances = instanceDisplacements(edge);
-          const parentRate = clocks.get(edge.parent)?.rate;
-          if (instances === undefined || parentRate === undefined) {
-            arrivals = undefined;
-            break;
-          }
-          const factor = receiverRate / parentRate;
-          totals = totals.flatMap((t) => instances.map((d) => t + d * factor));
-        }
-        if (arrivals === undefined) break;
-        arrivals.push(...totals);
-      }
-      results.push({
-        chain,
-        arrivals: arrivals?.map((a) => Math.round(a)).sort((a, b) => a - b),
-      });
+      if (above !== undefined) for (const [at, count] of above) add(result, at, count);
+      upStack.delete(key);
+      upMemo.set(key, result);
+      return result;
+    };
+
+    let raw: Arrivals;
+    try {
+      raw = arrive(receive.track, undefined);
+    } catch (err) {
+      if (err instanceof SkipCable) continue;
+      throw err;
     }
-    if (pathError || results.some((r) => r.arrivals === undefined)) continue;
-    // No containment path at all means every upward walk re-entered a
-    // containment cycle — validate's own diagnostic, already reported.
-    // Falling through would make the every-empty check below vacuously
-    // true and blame the cable for the cycle (Bugbot on #125).
-    if (results.length === 0) continue;
-    if (results.every((r) => r.arrivals!.length === 0)) {
+    if (anyError) continue;
+    if (raw.size === 0) {
       push(
         receive.file,
         `cable "${label}" joins "${send.track}" to "${receive.track}" but no track contains ` +
           `both, so the signal never arrives — place the receiving track where the sender ` +
           `is reachable (nested-tracks.md §19)`,
-      );
-      continue;
-    }
-    const spell = (arrivals: number[]) => `[${arrivals.join(', ')}]`;
-    const first = results[0]!;
-    const divergent = results.find(
-      (r) => spell(r.arrivals!) !== spell(first.arrivals!),
-    );
-    if (divergent !== undefined) {
-      push(
-        receive.file,
-        `receive "${label}" hears different arrivals through its containment paths — via ` +
-          `${first.chain} it hears ${spell(first.arrivals!)} but via ${divergent.chain} ` +
-          `${spell(divergent.arrivals!)} (receiver-rate samples); a track renders once ` +
-          `however often it is placed (§13), so every path must agree ` +
-          `(nested-tracks.md §19)`,
       );
       continue;
     }
@@ -416,7 +461,7 @@ export function checkCables(
       receiver: receive.track,
       gainDb: send.gainDb,
       tap: send.tap,
-      arrivals: first.arrivals!,
+      arrivals: finish(raw),
     });
   }
   return cables;

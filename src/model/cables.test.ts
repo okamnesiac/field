@@ -81,6 +81,10 @@ const clocksAt = (tracks: Track[], rates: Record<string, number> = {}): Map<stri
     }),
   );
 
+// Most arrivals are single landings; the counted shape exists for
+// identical placements summing together.
+const at = (...offsets: number[]) => offsets.map((o) => ({ at: o, count: 1 }));
+
 function run(tracks: Track[], rates: Record<string, number> = {}) {
   const pushed: { file: string; message: string; severity?: 'warning' }[] = [];
   const cables = checkCables(tracks.map(loaded), clocksAt(tracks, rates), (file, message, severity) =>
@@ -114,7 +118,7 @@ describe('checkCables: arrival derivation', () => {
       tap: 'post',
     });
     // verse at 0 + keys at bar 1 → 96000; verse at bar 2 + keys → 288000.
-    expect(cables[0]!.arrivals).toEqual([96000, 288000]);
+    expect(cables[0]!.arrivals).toEqual(at(96000, 288000));
   });
 
   it('a looped sender placement arrives once per repetition', () => {
@@ -133,7 +137,7 @@ describe('checkCables: arrival derivation', () => {
     const space = trackData('space', { inputs: [entry({ receive: 'verb' })] });
     const { cables, pushed } = run([kick, main, space]);
     expect(pushed).toEqual([]);
-    expect(cables[0]!.arrivals).toEqual([0, 96000]);
+    expect(cables[0]!.arrivals).toEqual(at(0, 96000));
   });
 
   it('slip and source_offset displace the sender arrival on their own axis', () => {
@@ -145,7 +149,7 @@ describe('checkCables: arrival derivation', () => {
     });
     const space = trackData('space', { inputs: [entry({ receive: 'verb' })] });
     const { cables } = run([keys, main, space]);
-    expect(cables[0]!.arrivals).toEqual([4800]);
+    expect(cables[0]!.arrivals).toEqual(at(4800));
   });
 
   it('converts arrivals across a track-rate boundary (multi-rate.md)', () => {
@@ -159,7 +163,7 @@ describe('checkCables: arrival derivation', () => {
     const space = trackData('space', { inputs: [entry({ receive: 'verb' })] });
     const { cables, pushed } = run([keys, main, space], { keys: 96000 });
     expect(pushed).toEqual([]);
-    expect(cables[0]!.arrivals).toEqual([96000]);
+    expect(cables[0]!.arrivals).toEqual(at(96000));
   });
 
   it('a receiver at its own rate hears arrivals in its own samples', () => {
@@ -171,7 +175,7 @@ describe('checkCables: arrival derivation', () => {
     // Bar 1 is 96000 samples of the 48 kHz mix = 192000 of the 96 kHz
     // receiver's clock.
     const { cables } = run([keys, main, space], { space: 96000 });
-    expect(cables[0]!.arrivals).toEqual([192000]);
+    expect(cables[0]!.arrivals).toEqual(at(192000));
   });
 
   it('a circuit inside a placed subtree derives relative to the subtree, not the root', () => {
@@ -188,7 +192,7 @@ describe('checkCables: arrival derivation', () => {
     });
     const { cables, pushed } = run([kick, space, verse, main]);
     expect(pushed).toEqual([]);
-    expect(cables[0]!.arrivals).toEqual([24000]);
+    expect(cables[0]!.arrivals).toEqual(at(24000));
   });
 
   it('a receiver inside a containment cycle is the cycle diagnostic to report, not a cable error', () => {
@@ -205,6 +209,62 @@ describe('checkCables: arrival derivation', () => {
     expect(cables).toEqual([]);
   });
 
+  it('a return carrying its own dry copy of the sender hears it at zero and through the mix (#125 review)', () => {
+    // keys sounds twice — at 0 inside the return itself, and at bar 2
+    // inside verse — and both are derivable, so both arrive. The old
+    // walk stopped at the lowest containing ancestor and silently
+    // dropped the verse sounding.
+    const keys = trackData('keys', { sends: { verb: { gain_db: 0, tap: 'post' } } });
+    const space = trackData('space', {
+      inputs: [entry({ receive: 'verb' }), entry({ track: 'keys' })],
+    });
+    const verse = trackData('verse', { inputs: [entry({ track: 'keys', at: 3840 })] });
+    const main = trackData('main', {
+      inputs: [entry({ track: 'verse' }), entry({ track: 'space' })],
+    });
+    const { cables, pushed } = run([keys, space, verse, main]);
+    expect(pushed).toEqual([]);
+    expect(cables[0]!.arrivals).toEqual(at(0, 96000));
+    // Deleting the dry line removes exactly its arrival — adding a dry
+    // copy must never *remove* one.
+    const bare = trackData('space', { inputs: [entry({ receive: 'verb' })] });
+    expect(run([keys, bare, verse, main]).cables[0]!.arrivals).toEqual(at(96000));
+  });
+
+  it('shared placements cost the graph, not the number of paths through it (#125 review)', () => {
+    // A lattice with two tracks per level, each placed in both tracks of
+    // the level above: 2^depth upward paths from the receiver. The old
+    // walk enumerated all of them; the memoized one answers per track.
+    const depth = 22;
+    const tracks: Track[] = [
+      trackData('keys', { sends: { verb: { gain_db: 0, tap: 'post' } } }),
+      trackData('space', { inputs: [entry({ receive: 'verb' })] }),
+      trackData('l0-a', { inputs: [entry({ track: 'keys' }), entry({ track: 'space' })] }),
+      trackData('l0-b', { inputs: [entry({ track: 'keys' }), entry({ track: 'space' })] }),
+    ];
+    for (let level = 1; level <= depth; level++) {
+      for (const side of ['a', 'b']) {
+        tracks.push(
+          trackData(`l${level}-${side}`, {
+            inputs: [entry({ track: `l${level - 1}-a` }), entry({ track: `l${level - 1}-b` })],
+          }),
+        );
+      }
+    }
+    const started = Date.now();
+    const { cables, pushed } = run(tracks);
+    const elapsed = Date.now() - started;
+    expect(pushed).toEqual([]);
+    expect(cables).toHaveLength(1);
+    // Every level doubles the sender's soundings (both subtrees carry
+    // it), so the count is real — 2^22 identical landings at zero —
+    // and the counted shape is what holds it as one row.
+    expect(cables[0]!.arrivals).toEqual([{ at: 0, count: 2 ** depth }]);
+    // The old walk took ~7 s at this depth; the memoized one is
+    // bounded far below any flake margin.
+    expect(elapsed).toBeLessThan(3000);
+  });
+
   it('parallel mixes hearing identical arrivals agree (§19: the bed shape)', () => {
     const keys = trackData('keys', { sends: { verb: { gain_db: 0, tap: 'post' } } });
     const verse = trackData('verse', { inputs: [entry({ track: 'keys' })] });
@@ -214,7 +274,7 @@ describe('checkCables: arrival derivation', () => {
     const bed = trackData('bed', { inputs: [...both] });
     const { cables, pushed } = run([keys, verse, space, main, bed]);
     expect(pushed).toEqual([]);
-    expect(cables[0]!.arrivals).toEqual([96000]);
+    expect(cables[0]!.arrivals).toEqual(at(96000));
   });
 });
 
@@ -269,6 +329,24 @@ describe('cables end to end (field check)', () => {
     const { result, errors } = await messages();
     expect(errors.join()).toContain('send "verb" is also declared in');
     expect(result.ok).toBe(false);
+  });
+
+  it('a receive declared twice in one file says so, not "also declared in <this file>" (#125 review)', async () => {
+    track('keys', ['sends:', '  verb:']);
+    track('space', ['inputs:', '  - receive: verb', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    const { errors } = await messages();
+    expect(errors.join()).toContain('receive "verb" is declared twice in this file');
+    expect(errors.join()).not.toContain('also declared in');
+  });
+
+  it('a track sending to its own receive gets its own sentence (#125 review)', async () => {
+    track('verse', ['sends:', '  verb:', 'inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: verse']);
+    const { errors } = await messages();
+    expect(errors.join()).toContain('"verse" both sends and receives "verb"');
+    expect(errors.join()).toContain('not a destination');
+    expect(errors.join()).not.toContain('is inside "verse"');
   });
 
   it('two receives under one label is an error', async () => {
