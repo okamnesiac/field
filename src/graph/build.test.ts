@@ -275,6 +275,31 @@ describe('build', () => {
     ).rejects.toThrow(
       /2 generative requests have no takes yet[\s\S]*\nfield generate tall-grass\/bridge\nfield generate tall-grass\/topline/,
     );
+
+    // Same *name* in two songs — reachable exactly since the walk took
+    // many starts, which may span songs. A name comparator meets two
+    // equal keys and its order collapses to walk order; the label is
+    // unique by construction, so sorting on it holds whichever way the
+    // arguments arrive (minjudd on #119).
+    createSong(root, 'alpha');
+    mkdirSync(join(root, 'songs/alpha/tracks'), { recursive: true });
+    writeFileSync(
+      join(root, 'songs/alpha/tracks/bridge.yaml'),
+      'name: bridge\ninputs:\n  - generative:\n      text: over the water\n',
+    );
+    writeFileSync(
+      join(root, 'songs/alpha/tracks/carrier.yaml'),
+      ['name: carrier', 'inputs:', '  - track: bridge', ''].join('\n'),
+    );
+    const bothWays = [
+      ['//songs/alpha/track:carrier', '//songs/tall-grass/track:chorus'],
+      ['//songs/tall-grass/track:chorus', '//songs/alpha/track:carrier'],
+    ];
+    for (const order of bothWays) {
+      await expect(buildLabels(root, order)).rejects.toThrow(
+        /\nfield generate alpha\/bridge\nfield generate tall-grass\/bridge/,
+      );
+    }
   });
 
   it('points at the singular when someone types the old plural package', async () => {

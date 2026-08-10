@@ -552,8 +552,14 @@ export function assertGenerated(graph: Graph, starts: GraphNode[]): void {
   };
   for (const start of starts) visit(start);
   if (pending.size === 0) return;
-  // Sorted so the list is stable however the walk met them.
-  const sorted = [...pending.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
+  // Sorted on the formatted label, which the map is keyed by and so is
+  // unique by construction — a *name* comparator meets two equal keys
+  // the moment starts span songs (two songs, each a takeless `bridge`)
+  // and never returns 0, collapsing the order back to walk order, the
+  // very thing the sort exists to normalize (minjudd on #119).
+  const sorted = [...pending.values()].sort((a, b) =>
+    formatLabel(a.label) < formatLabel(b.label) ? -1 : 1,
+  );
   const fact =
     pending.size === 1
       ? `${formatLabel(sorted[0]!.label)} has no takes yet`
