@@ -25,11 +25,14 @@ resolve gen node names. `seven-eight-loop`'s wait ended the way §16 planned: `l
 into `field export --rate 44100 --bit-depth 16`
 ([multi-rate.md](multi-rate.md) step 2) and the loop is a leaf track —
 `drums` re-rendered byte-identically and `main` never re-keyed. One
-sound still waits: `vocal-48k` has retired — multi-rate step 3 landed,
-a track carries its own rate and `lead-vocal` clips `lead-take`
-directly through the edge's conversion — so `lead-take` is the last
-sound standing, unblocked to fold as a generative leaf; then `sounds/`
-empties.
+sound remains: `vocal-48k` retired with multi-rate step 3 (a track
+carries its own rate, the edge converts), and `lead-take` has folded as
+a generative leaf placed twice by `lead-vocal` — byte-identically, its
+takes directory unmoved. bloom's `sounds/` directories are gone; what
+is left of chunk 6 is retiring the machinery they no longer exercise —
+the `sound:` entry field, the `sound:` label and takes key, and the
+`sounds/` loader — behind the migration diagnostics the format owes
+departing spellings.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it

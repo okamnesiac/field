@@ -27,12 +27,12 @@ inserts:
     # consonants — there are none left to place
     damping: 0.7
 inputs:
-  # The generated line, straight from the sound. Chatterbox emits 24 kHz
-  # mono, which is no project's rate — the placement edge converts it to
-  # the song's 48 kHz automatically (multi-rate.md decisions 4 and 6),
-  # where a hand-written `vocal-48k` normalize wrapper used to. What the
-  # wrapper was *for* survives it: choosing a different take still moves
-  # both clips at once, because they reference the sound, not a variant.
+  # The generated line, placed from its own leaf track — the one place
+  # the request is written (tracks/lead-take.yaml). Chatterbox emits
+  # 24 kHz mono, which is no project's rate; the leaf's own edge
+  # converts it to the song's 48 kHz automatically (multi-rate.md
+  # decisions 4 and 6). Choosing a different take still moves both
+  # placements at once, because they place the track, not a variant.
   #
   # No fade_out on either clip. The window is eight beats (5.00 s) and the
   # take is 3.12 s, so a tail fade would shape most of two seconds of
@@ -41,14 +41,14 @@ inputs:
   # final sample 0.000002), which a generated line does and a recorded
   # one would not — so re-add one if a real vocal ever replaces this.
   - id: verse-vocal-w8n2d
-    sound: lead-take
+    track: lead-take
     at: [5] # where the verse starts
     duration: [0, 8] # eight beats — room for any take, not just this one
     fade_in: 4800 # 0.1 s, softens the entrance
   # the same line again over the stripped-back third pass — just vocals
   # and keys from bar 9
   - id: build-vocal-x9k4t
-    sound: lead-take
+    track: lead-take
     at: [9]
     duration: [0, 8]
     fade_in: 4800

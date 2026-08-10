@@ -260,9 +260,10 @@ than something this section can claim.
 
 *Note (2026-08-09):* the wrapper this paragraph expects is no longer
 written. Under [multi-rate.md](multi-rate.md) decision 6 the 24 kHz
-output needs nothing authored at all — the placement edge converts it to
-the consuming track's rate automatically, which is how creek's
-`lead-vocal` plays `lead-take` today. Chunk 2's first act became writing
+output needs nothing authored at all — the edge converts it to the
+consuming track's rate automatically, which is how creek plays
+`lead-take` today: a generative leaf track whose own edge converts,
+placed twice by `lead-vocal`. Chunk 2's first act became writing
 nothing.
 
 ## 8 The delivery knobs, and one rename (2026-08-08)

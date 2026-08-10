@@ -24,13 +24,11 @@ that is the point of the example rather than a limitation of it.
 - `songs/creek/` — a declared 12-bar loop at a flat 96, an arrangement,
   and a band that exists almost entirely as recipes: a pad and a kit as
   seeded SuperCollider programs, a lead vocal generated from text by a
-  local model (clips reference **sounds**, not files), the vocal clipped
-  into the arrangement, and a `main` track that sums it all with a fader
-  on every placement
+  local model (placements reference **tracks**, not files), the vocal
+  clipped into the arrangement, and a `main` track that sums it all with
+  a fader on every placement
 - `songs/tall-grass/` — 7/8 at 132 BPM, with a MIDI track and a percussion
   loop clip that uses `slip` to drag the groove late against the grid
-- `songs/<song>/sounds/<name>.yaml` — one file per sound: what it is made
-  from (`source:`) and which generator makes it (`type:`)
 - `shared/` — three shelves shared across songs: `instruments/` (the
   SuperCollider programs), `samples/`, and `plugins/`. The sample shelf is
   empty here, because nothing recorded is committed; `field import` is what
@@ -99,13 +97,12 @@ field build tall-grass
 creek does not, and says why:
 
 ```text
-//songs/creek/sound:lead-take has no takes yet — field generate lead-take --song creek --seed <n>
+//songs/creek/gen:lead-take has no takes yet — field generate lead-take --song creek --seed <n>
 ```
 
-Two of creek's parts are model-generated, and neither ships with audio. The
-keys are a `generative:` entry — a leaf track whose one input *is* the
-request — and the vocal is still a sound (it folds when track rates land).
-Either way the file carries the prompt, the line, the delivery, and you
+Two of creek's parts are model-generated, and neither ships with audio.
+Both are `generative:` entries — leaf tracks whose one input *is* the
+request: the keys a prompt, the vocal a line and its delivery — and you
 supply the run:
 
 ```bash
@@ -123,13 +120,13 @@ and a flag repeating it is refused as a second answer.
 Then audition the takes and change your mind:
 
 ```bash
-field play //songs/creek/sound:lead-take-1
-field play //songs/creek/sound:lead-take-2
+field play //songs/creek/gen:lead-take-1
+field play //songs/creek/gen:lead-take-2
 field choose lead-take --song creek --variant 2
 ```
 
-`choose` moves what the *sound* means, so every clip follows in a one-line
-diff — nothing is copied and nothing is re-imported. Those takes are yours:
+`choose` moves what the *gen node* means, so every placement follows in a
+one-line diff — nothing is copied and nothing is re-imported. Those takes are yours:
 generation does not reproduce across GPU and framework versions, so your
 creek is not this creek, and the repository never claims otherwise.
 
@@ -142,15 +139,16 @@ not reproduce, so you regenerate and pick again.
 
 ## Building
 
-Each song declares its renders one file per sound under `sounds/`, and the
-project itself is the build graph — targets derive from the files by
-convention, Bazel-style:
+A song's renders are declared where they play — a track file implies a
+stem, an inline generator mints its own `gen:` node — and the project
+itself is the build graph: targets derive from the files by convention,
+Bazel-style:
 
 ```bash
 field build //songs/...                        # everything
 field build //songs/creek/track:lead-vocal     # one stem
 field query 'deps(//songs/creek/track:lead-vocal)'
-field explain //songs/creek/convert:lead-take-48000
+field explain //songs/creek/convert:gen-lead-take-48000
 ```
 
 The chosen take is 24 kHz mono — Chatterbox's own rate, no project's — so
@@ -161,9 +159,9 @@ the second is an action-cache hit that executes nothing. `explain` shows
 the node the edge implied, like any other:
 
 ```text
-//songs/creek/convert:lead-take-48000 (rule)
+//songs/creek/convert:gen-lead-take-48000 (rule)
 type: resample v1
-input: //songs/creek/sound:lead-take 180d928010e2
+input: //songs/creek/gen:lead-take 180d928010e2
 parameters: {"sample_rate":48000}
 action: 0f0e2880191f (cached)
 output: 4a95681045f8 (599098 bytes)
@@ -183,10 +181,10 @@ order (ctrl-c stops the queue):
 
 ```bash
 field play //songs/creek/track:pad-sc           # render the pad recipe, then hear it
-field play //songs/creek/sound:lead-take-2      # audition a take you generated
+field play //songs/creek/gen:lead-take-2        # audition a take you generated
 field play //songs/tall-grass/track:seven-eight-loop  # the 7/8 groove, rendered
-field play //songs/creek/sound:all              # every render in creek, in order
-field play //songs/...                          # every sound in the project
+field play //songs/creek/track:all              # every stem in creek, in order
+field play //songs/...                          # everything in the project
 ```
 
 Play something twice and the second run starts instantly — same
@@ -241,9 +239,9 @@ track's stem and the sum, and no other track. Even the tempo map is precise
 about blame: stems are keyed on clip placement *in samples*, so a tempo edit
 rebuilds only tracks whose musical clips actually moved.
 
-In creek, the lead vocal clips the generated sound directly: the take's
-24 kHz converts at the placement edge (see Building, above), clipped at
-bar 5 with a softened entrance (`fade_in`, in samples), and again at
+In creek, the lead vocal places the generated take's own leaf track: the
+take's 24 kHz converts at that leaf's edge (see Building, above), placed
+at bar 5 with a softened entrance (`fade_in`, in samples), and again at
 bar 9 over the stripped-back third pass. And the pad carries under the verse by clipping the same render
 twice, the second entering a beat early with fades on both sides of the
 seam — two overlapping faded clips **are** the crossfade; it is not a schema
