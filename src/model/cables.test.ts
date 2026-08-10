@@ -349,6 +349,20 @@ describe('cables end to end (field check)', () => {
     expect(errors.join()).not.toContain('is inside "verse"');
   });
 
+  it('displacing a return does not silence the divergence error (#125 review, round 2)', async () => {
+    // bed hears no keys; main does. Undisplaced, that diverges and
+    // errors. Displacing bed's placement changes nothing about what
+    // the two mixes hear — the displaced edge contributes the empty
+    // set and must still be compared, not skipped.
+    track('keys', ['sends:', '  verb:']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '  - track: space']);
+    track('bed', ['inputs:', '  - track: space', '    at: 3840']);
+    const { result, errors } = await messages();
+    expect(errors.join()).toContain('hears different arrivals');
+    expect(result.ok).toBe(false);
+  });
+
   it('two receives under one label is an error', async () => {
     track('keys', ['sends:', '  verb:']);
     track('space', ['inputs:', '  - receive: verb']);

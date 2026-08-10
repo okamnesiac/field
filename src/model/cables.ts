@@ -399,22 +399,26 @@ export function checkCables(
         }
         const up = arrive(edge.parent, x);
         const fields = displacingFields(edge.entry);
-        if (fields.length > 0) {
-          if (up.size > 0) {
-            const dkey = `${label}|${edge.file}|${edge.index}`;
-            if (!displacedDiagnosed.has(dkey)) {
-              displacedDiagnosed.add(dkey);
-              push(
-                edge.file,
-                `${entryName(edge.entry, edge.index)} carries ${fields.join(', ')} on the ` +
-                  `path from "${receive.track}" up to "${edge.parent}" — a receive is legal ` +
-                  `only where that path is a single unshifted pass (nested-tracks.md §19)`,
-              );
-            }
-            anyError = true;
+        if (fields.length > 0 && up.size > 0) {
+          const dkey = `${label}|${edge.file}|${edge.index}`;
+          if (!displacedDiagnosed.has(dkey)) {
+            displacedDiagnosed.add(dkey);
+            push(
+              edge.file,
+              `${entryName(edge.entry, edge.index)} carries ${fields.join(', ')} on the ` +
+                `path from "${receive.track}" up to "${edge.parent}" — a receive is legal ` +
+                `only where that path is a single unshifted pass (nested-tracks.md §19)`,
+            );
           }
-          continue; // nothing joins above: the placement shifts the circuit as one
+          anyError = true;
+          continue;
         }
+        // A displaced edge with nothing joining above shifts whatever
+        // sits below it as one — legal — but "shifts as one" is a
+        // claim about this parent only, so its empty contribution
+        // still answers the agreement question below: a sibling
+        // parent that does hear the sender is a divergence that
+        // displacing this edge must not hide (minjudd on #125).
         if (above === undefined) {
           above = up;
           aboveVia = edge.parent;
