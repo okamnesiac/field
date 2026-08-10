@@ -612,7 +612,7 @@ auditioning variants` — a note written two levels below the output, in a
 file nobody opens while listening to the mix:
 
 ```
-$ field generate still-water-keys --song creek --seed 1   # takes are gitignored
+$ field generate //songs/creek/gen:still-water-keys --seed 1   # takes are gitignored
 $ field explain //songs/creek/track:keys
 reaches: track:bed -4.0 dB, pan 0.2 (via track:phrase, 3 placements)
 reaches: track:main -4.0 dB, pan 0.2 (via track:phrase, 3 placements)

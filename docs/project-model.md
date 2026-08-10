@@ -345,7 +345,7 @@ is schema-validated — `field check` verifies variant hashes,
 `field fmt` covers them — and each variant auditions as
 `//songs/<song>/gen:<name>-<n>` via `field play`. Generating records
 `chosen: 1`, so the request resolves as soon as it has takes; `field choose
-<name> --variant <n>` moves `chosen:` to a different one, and from then
+<song>/<name> --variant <n>` moves `chosen:` to a different one, and from then
 on the node's own label resolves to that variant — every placement
 follows a re-choose as a one-line diff. `field explain` on the gen node
 answers which take that is: `chosen: variant 2 of 2

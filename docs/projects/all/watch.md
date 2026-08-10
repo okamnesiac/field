@@ -106,7 +106,7 @@ transport: edit a clip position (loop updates at the wrap), change a
 track fader (sum-only rebuild, updates), edit an `.scd` (render
 completes, updates one wrap later), break a YAML file (diagnostics
 print, loop keeps playing, fixing it recovers), `field fmt` (nothing
-rebuilds, nothing swaps), and `field choose <sound> --variant 2` from
+rebuilds, nothing swaps), and `field choose <song>/<sound> --variant 2` from
 another shell (the loop is A/B-ing variants live). Ctrl-C still ends
 the session cleanly.
 

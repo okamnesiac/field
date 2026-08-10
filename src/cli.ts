@@ -195,8 +195,8 @@ program
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: field play ${song}/gen:${name}-1\n` +
-          `choose:   field choose ${song}/${name} --variant <n>\n`,
+        `audition: field play //songs/${song}/gen:${name}-1\n` +
+          `choose:   field choose //songs/${song}/gen:${name} --variant <n>\n`,
       );
     } catch (err) {
       fail(err);
