@@ -62,10 +62,14 @@ move re-runs one sum. A comment edit rebuilds nothing. Freezing *is*
 caching: there is no separate freeze machinery to manage.
 
 Generation is a committed recipe, not a lost session. A seeded
-SuperCollider program rebuilds bit-for-bit on any machine; a model
-request (ACE-Step music, Chatterbox voice) commits its takes with full
-provenance — model, seed, hash — and `field choose` repoints which take
-the song plays as a one-line diff:
+SuperCollider program rebuilds bit-for-bit under the same SuperCollider
+toolchain (the program's content hash is a cache input; your sclang
+install is not); a model request (ACE-Step music, Chatterbox voice)
+records its takes with full provenance — model, seed, hash — and
+`field choose` repoints which take the song plays by moving one line in
+that record. In a project that commits its generated audio, that is a
+one-line Git diff — bloom deliberately doesn't: the recipes ship, and
+every clone generates its own takes:
 
 ```console
 $ field generate creek/still-water-keys --seed 90210 --variants 2
@@ -79,8 +83,10 @@ build, and audition a project with no DAW in the loop.
 
 ## Try it
 
-Node 24 (the version in [`.nvmrc`](.nvmrc)) and pnpm — never npm or
-yarn:
+Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm or
+yarn — and [SuperCollider](https://supercollider.github.io/): every
+render in the example project is an SC recipe, and `field build` runs
+`sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`:
 
 ```sh
 pnpm install
