@@ -2,57 +2,60 @@
 
 Field treats a project as an explicit dependency graph, Bazel-style:
 labels, dependencies, content-addressed outputs, incremental rebuilds,
-cached outputs, queries, and tests — without Bazel syntax or its
-vocabulary (project-layout.md §4: the format speaks tracks, entries, and
-inserts; the engine speaks nodes, generators, and action keys).
+cached outputs, and queries — without Bazel syntax or its vocabulary
+(project-layout.md §4: the format speaks tracks, entries, and inserts;
+the engine speaks nodes, generators, and action keys).
 
 ```bash
 field build //songs/opener/track:main
-field build //songs/opener/stems/...
-field export //songs/opener/track:main
-field test //...
-field query 'deps(//songs/opener/track:main)'
-field explain //songs/opener/track:main
+field build opener/...
+field export opener/track:main
+field query 'deps(opener/track:main)'
+field explain opener/track:main
 ```
 
 Labels address songs and shared material alike: an entry in one song
 plays `//shared/asset:rain` exactly as it plays the song's own audio.
 
-The absolute form is canonical, but the CLI accepts songs-relative shorthand
-for all of the above — `field build opener/track:main`, `field explain
-opener/...` — and a bare song name plays the song's output track: `field
-play opener` is `//songs/opener/track:main` (project-core.md §3.4, amended
-2026-08-08; `main` is a convention, and a song with no track by that name
-gets a no-such-label error). `//shared/...` material uses the full form.
+The absolute form is canonical, but the CLI accepts songs-relative
+shorthand for all of the above — `field build opener/track:main`,
+`field explain opener/...` — and a bare song name means the song's
+output track: `field play opener` is `//songs/opener/track:main`
+(project-core.md §3.4, amended 2026-08-08; `main` is a convention, and a
+song with no track by that name gets a no-such-label error).
+`//shared/...` material uses the full form.
 
 ## Caching, and freezing is caching
 
 The cache key for a node's output is the hash of its inputs: input asset
-hashes + plugin ID/version + serialized state + parameters + automation +
-render-relevant settings. Same inputs → cached artifact returned, zero
-renders.
+hashes, plugin ID and version, serialized state, parameters, automation,
+and render-relevant settings. Same inputs → cached artifact returned,
+zero renders.
 
 There is no separate freeze machinery. **A frozen track is a cached
-intermediate output**; invalidate the cache (change a parameter) and it is
-unfrozen automatically. A bounce is a cached output given a name.
+intermediate output**; invalidate the cache (change a parameter) and it
+is unfrozen automatically. A bounce is a cached output given a name.
 Outputs are stored under their content hash, so a rebuild never
-overwrites an old render — it produces a new artifact and moves a pointer.
+overwrites an old render — it produces a new artifact and moves a
+pointer.
 
 ### Watch mode
 
 The cache is what makes watching cheap
-([watch.md](projects/all/watch.md)): `field build --watch <label>`
+([watch.md](projects/all/watch.md)). `field build --watch <label>`
 rebuilds on every settled change and answers "did anything audible
-change" as an output-hash question — a fader move re-runs one sum, a
+change" as an output-hash question: a fader move re-runs one sum, and a
 comment edit or `field fmt` pass is all cache hits and reports silence.
 `check` gates every rebuild, so a red project (a half-saved file
 mid-edit — the common case) keeps its last good outputs and retries on
-the next change. `field play <song> --loop --watch` composes the same
-loop with playback: when the playing label's hash moves, the daemon
-finishes the current pass and the next wrap starts the new file. Watch
-runs `build`, and build never runs a generative request — but a
-`chosen:` repoint is just a YAML edit, so `field choose` against a
-running watch is live variant A/B-ing inside the loop.
+the next change.
+
+`field play <song> --loop --watch` composes the same loop with playback:
+when the playing label's hash moves, the daemon finishes the current
+pass and the next wrap starts the new file. Watch runs `build`, and
+build never runs a generative request — but a `chosen:` repoint is just
+a YAML edit, so `field choose` against a running watch is live variant
+A/B-ing inside the loop.
 
 ### Getting a file out
 
@@ -62,18 +65,18 @@ wants in a Finder window or an email. `field export <patterns>` builds
 and then copies the result to `~/Desktop` (or `--to <dir>`) under the
 label with its punctuation flattened, minus the `songs/` prefix:
 `//songs/creek/track:main` becomes `creek-track-main-v1.wav`, and shared
-material keeps its shelf (`shared-asset-water-v1.wav`). It exports what
-`play` would play, through the same resolver, and only the labels the
-patterns match — the dependencies a build prints are means, not
+material keeps its shelf (`shared-asset-water-v1.wav`). Export ships
+what `play` would play, through the same resolver, and only the labels
+the patterns match — the dependencies a build prints are means, not
 products.
 
 The name is long deliberately. A short form (`creek-main`) reads better
 until a song has a track and a gen node of the same name — which every
-generative leaf has by construction — at which point two different
-files want one name. A name that is sometimes scoped is worse than one
-that always is: you cannot predict the file you are about to get.
+generative leaf has by construction — at which point two different files
+want one name. A name that is sometimes scoped is worse than one that
+always is: you cannot predict the file you are about to get.
 
-**Delivery formatting is export's** (multi-rate.md decision 1):
+**Delivery formatting belongs to export** (multi-rate.md decision 1):
 `--rate` and `--bit-depth` convert on the way out through the daemon's
 normalize op — never as a node in the song — writing integer PCM at the
 chosen depth. A flag left off defaults to the source's own value where
@@ -82,8 +85,8 @@ depth of its own, so `--rate` alone on a stem refuses and asks for
 `--bit-depth`. The effective pair joins the name after a dot
 (`creek-track-main.44100-16-v1.wav`) — a character no label can carry —
 so a converted family never versions an unconverted one, nor a label
-that happens to end in digits. This is what
-retired `loop-cd`: a CD deliverable is an invocation, not a node.
+that happens to end in digits. This is what retired `loop-cd`: a CD
+deliverable is an invocation, not a node.
 
 **Exports are versioned, never overwritten.** Finishing something and
 putting it somewhere is how people mark a version, and the previous one
@@ -113,27 +116,28 @@ machine, so it must not ship audio the project does not describe.
 
 How a node's output can be produced is a declared, per-node property:
 
-- **`offline`** — renderable faster than realtime. Native AUs, SC non-realtime
-  mode, most UAD-2 plugins (UAD-2 supports faster-than-realtime bounce, capped
-  by DSP headroom).
-- **`realtime-bounce`** — renderable only at 1×: Field plays through the graph
-  and captures the result. The universal escape hatch — anything audible is
-  freezable at 1×. Used for plugins that can't render offline and for external
-  instruments (below).
-- **`live-only`** — not renderable at all, because the node's output is not a
-  pure function of the timeline: a live microphone input, a monitoring chain, a
-  SuperCollider node played by hand, MIDI sent to an external device with no
-  declared return. There is no answer to "what does this node output at bar
-  42," so there is nothing to cache. A mix depending on a live-only node
-  fails the build with a clear error: *this output doesn't exist until someone
-  performs it — capture it first.* A capture of a live-only node's output is a
-  take, and re-enters the buildable world.
+- **`offline`** — renderable faster than realtime. Native AUs, SC
+  non-realtime mode, most UAD-2 plugins (UAD-2 supports
+  faster-than-realtime bounce, capped by DSP headroom).
+- **`realtime-bounce`** — renderable only at 1×: Field plays through the
+  graph and captures the result. The universal escape hatch — anything
+  audible is freezable at 1×. Used for plugins that can't render offline
+  and for external instruments (below).
+- **`live-only`** — not renderable at all, because the node's output is
+  not a pure function of the timeline: a live microphone input, a
+  monitoring chain, a SuperCollider node played by hand, MIDI sent to an
+  external device with no declared return. There is no answer to "what
+  does this node output at bar 42," so there is nothing to cache. A mix
+  depending on a live-only node fails the build with a clear error:
+  *this output doesn't exist until someone performs it — capture it
+  first.* A capture of a live-only node's output is a take, and
+  re-enters the buildable world.
 
 **External instruments** graduate from live-only to realtime-bounce by
-declaring an audio return path ("this device's output returns on Apollo inputs
-3–4"): Field plays the MIDI at 1×, captures the return, caches it like any
-other render — and flags it nondeterministic, because knobs on hardware are
-outside the hash.
+declaring an audio return path ("this device's output returns on Apollo
+inputs 3–4"): Field plays the MIDI at 1×, captures the return, and
+caches it like any other render — flagged nondeterministic, because
+knobs on hardware are outside the hash.
 
 ## Node types and their generators
 
@@ -144,146 +148,166 @@ variants are committed under `audio/<name>/`, named by the gen node —
 and its label resolves to the chosen variant (`field choose` repoints
 it; every placement follows).
 
-- **`resample`** — the second implicit type after `stem`, and the only
-  one nobody can declare: when a source arrives at a placement at a rate
-  other than its track's, the graph mints
-  `//songs/<song>/convert:<name>-<rate>` between them (multi-rate.md
-  decision 4) — one node per (source, rate) however many placements
-  consume it, visible in `explain` and `deps()` like any rule. It runs
-  the daemon's polyphase resampler (render-pipeline.md decision 9, the
-  same one `--rate` exports through) and writes float32 undithered,
-  because it sits between two float stages — quantization is a delivery
-  choice, made at export. The `normalize` *sound* that used to close
-  this loop by hand retired with multi-rate.md step 3 — and `sounds/`
-  entirely with the chunk 6 finale; the daemon op behind it survives as
-  export's converter.
-- **`supercollider`** — a SuperCollider program defines the sound,
-  rendered offline via scsynth's NRT mode. `source:` names the program —
-  a bare filename resolves in `shared/instruments/`, a slashed path is
-  project-relative. The program is a plain `.scd` run through `sclang`
-  with `FIELD_OUTPUT` / `FIELD_SEED` / `FIELD_DURATION` /
-  `FIELD_SAMPLE_RATE` / `FIELD_CHANNELS` in the environment; it writes
-  `FIELD_OUTPUT` and exits. The program's *content hash* is a cache input,
-  so editing the code invalidates exactly its own renders; with a fixed
-  seed, renders are reproducible bit-for-bit. `field sc render` runs a
-  program directly (uncached) for iteration. Full contract:
-  [projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
-  predates the §4 rename).
-- **`say`** — **removed** (render-pipeline.md chunk 5). macOS
-  text-to-speech was an in-graph recipe here: `text`/`voice`/`rate` as
-  the whole action key, output cached and never committed. It went for
-  two reasons that arrived together — it was the last rule shelling out
-  to a macOS binary, and the generated-voice tier replaces what it was
-  actually for.
-  [projects/all/voice-generation.md](projects/all/voice-generation.md) §5
-  records the decision and what it costs.
+### `stem` — every track, implicitly
 
-  Worth keeping from it: `say` was this document's example of the
-  *hermetic* side of the determinism boundary, and the boundary itself is
-  unchanged — `supercollider`, `eq`, `limit`, `reverb`, `resample` and
-  `stem` are all still recipes cached under an action key, while voice
-  generation will be a deliberate generative sound with committed
-  outputs on the other side. What `say` also demonstrated, less
-  comfortably, is that a recipe can be *nearly* hermetic and that the
-  gap is where the trouble lives: `voice: Siri` followed a Settings
-  toggle the cache key could not see, and two consecutive CI renders of
-  it were observed to differ.
-- **`stem`** — the first *implicit* type: every track is buildable
-  as `//songs/<song>/track:<name>` without declaring anything, an empty one
-  rendering as the silence it contains, because the track file **is** the declaration — a mix file
-  defines a `mix`, a track file implies a `stem`. Content is the track's
-  one `inputs:` list (nested-tracks.md §18): each entry places a
-  `track:`, an `audio:` file, or an inline `supercollider:`/`generative:`
-  render — minted as its own `gen:` node, so it caches and is
-  addressable like any rule. A placed track is one more
-  source in the same list, so a track→track
-  edge is an ordinary graph edge and a track placed three times is one
-  render placed three times. A track can
-  also be a song's *output* — the one named `main` — in which case it
-  carries the song's declared `length` and `loop` and renders exactly that
-  long, the way the `mix` rule does. A bare song reference resolves to it:
-  `creek` means `//songs/creek/track:main`. Placing a track pulls its
-  whole definition into the stem's subgraph, so the arrangement can play
-  audio nothing ever committed, and editing the definition rebuilds
-  straight through stem and mix. It places the
-  entries through the tempo map (`at`, source offset, slip,
-  entry gain and pan, linear fades) and sums them into a pre-fader
-  Float32 stereo stem in the render daemon
-  ([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). The
-  action key hashes the *resolved placement plan* in samples, not the raw
-  YAML: a tempo edit rebuilds exactly the tracks whose musical entries
-  moved, reordering entries in the file changes nothing, and entry
-  spelling is wiring — a ref changing kind cannot re-key a parent whose
-  children are byte-identical. A track may declare `rate:`
-  (multi-rate.md decision 3), the project's `sample_rate` otherwise —
-  the whole file, ticks included, projects to samples at that rate, and
-  a source arriving at any other rate converts through a `resample`
-  node at the edge rather than being refused (what mix-assembly.md §4
-  called "never resamples implicitly" became "never resamples
-  *invisibly*": the conversion is automatic, and it is a node you can
-  ask about). Cables join the plan the same way
-  ([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19):
-  a track receiving a send consumes the sender's stem — or, for
-  `tap: pre`, an implicit `tap:` node, the sender's plan minus its
-  inserts, shared by every pre cable from that sender — as ordinary
-  clips placed at the derived arrivals at the cable's gain, converted
-  at the edge like any source. The receive therefore re-keys on sender
-  content, gain, tap and arrivals, and on nothing else: a send-level
-  tweak re-renders the receiver and whatever consumes it, never the
-  sender — creek demonstrates it, a reverb-send tweak rebuilding
-  `space` and `main` while every other stem stays a cache hit. An
-  entry's `loop:` map tiles its source to fill the window
-  ([projects/all/clip-looping.md](projects/all/clip-looping.md)):
-  repetitions expand into ordinary placement-plan entries — grid-locked
-  via `loop.every`, cut or rung-out per `loop.mode`, seams click-guarded
-  by `loop.fade` — so the renderer and action-key format don't know loops
-  exist, and a loop hashes identically to its hand-tiled equivalent.
-- **`eq` / `limit` / `reverb`** — the offline effects
-  ([projects/all/effects.md](projects/all/effects.md)): Fyra's
-  auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
-  compensation on by default — tone changes, level doesn't), an offline
-  lookahead limiter with a hard ceiling guarantee, and a deterministic
-  Freeverb whose output grows by its tail. They run as `inserts:` —
-  baked into the stem, on the song's output track where the master
-  chain went — and chains are wrapper tracks placing wrapper tracks,
-  cached per link: a track wrapped in an effect is a different track.
-  The declared effect *sounds* these once were folded in with
-  nested-tracks.md decision 12; `field check` names containment cycles
-  the way it named sound→sound ones.
-- **`mix`** — *retired* (nested-tracks.md §7 chunk 2). A song's output is
-  the track named `main`, and it does everything the mix rule did: sums its
-  inputs applying each placement's `gain_db` and `pan`, bakes its own
-  `inserts:` in where the master chain went, and renders exactly the song's
-  declared `length`, with `loop:` folding the overhang back onto the start.
-  The same machinery — a mix was a track that could not hold clips or nest —
-  and creek renders bit-identically across the change. A `mixes/` directory
-  left behind is named by `check` rather than ignored.
+The first *implicit* type: every track is buildable as
+`//songs/<song>/track:<name>` without declaring anything, an empty one
+rendering as the silence it contains, because the track file **is** the
+declaration — a track file implies a `stem`.
+
+Content is the track's one `inputs:` list (nested-tracks.md §18): each
+entry places a `track:`, an `audio:` file, or an inline
+`supercollider:`/`generative:` render — minted as its own `gen:` node,
+so it caches and is addressable like any rule. A placed track is one
+more source in the same list, so a track→track edge is an ordinary graph
+edge and a track placed three times is one render placed three times.
+Placing a track pulls its whole definition into the stem's subgraph, so
+the arrangement can play audio nothing ever committed, and editing the
+definition rebuilds straight through stem and mix.
+
+A track can also be a song's *output* — the one named `main` — in which
+case it carries the song's declared `length` and `loop` and renders
+exactly that long. A bare song reference resolves to it: `creek` means
+`//songs/creek/track:main`.
+
+The stem places its entries through the tempo map (`at`, source offset,
+slip, entry gain and pan, linear fades) and sums them into a pre-fader
+Float32 stereo stem in the render daemon
+([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). The
+action key hashes the *resolved placement plan* in samples, not the raw
+YAML: a tempo edit rebuilds exactly the tracks whose musical entries
+moved, reordering entries in the file changes nothing, and entry
+spelling is wiring — a ref changing kind cannot re-key a parent whose
+children are byte-identical.
+
+A track may declare `rate:` (multi-rate.md decision 3), the project's
+`sample_rate` otherwise — the whole file, ticks included, projects to
+samples at that rate, and a source arriving at any other rate converts
+through a `resample` node at the edge rather than being refused. What
+mix-assembly.md §4 called "never resamples implicitly" became "never
+resamples *invisibly*": the conversion is automatic, and it is a node
+you can ask about.
+
+Cables join the plan the same way
+([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19): a
+track receiving a send consumes the sender's stem — or, for `tap: pre`,
+an implicit `tap:` node, the sender's plan minus its inserts, shared by
+every pre cable from that sender — as ordinary clips placed at the
+derived arrivals at the cable's gain, converted at the edge like any
+source. The receive therefore re-keys on sender content, gain, tap and
+arrivals, and on nothing else: a send-level tweak re-renders the
+receiver and whatever consumes it, never the sender. creek demonstrates
+it — a reverb-send tweak rebuilds `space` and `main` while every other
+stem stays a cache hit.
+
+An entry's `loop:` map tiles its source to fill the window
+([projects/all/clip-looping.md](projects/all/clip-looping.md)):
+repetitions expand into ordinary placement-plan entries — grid-locked
+via `loop.every`, cut or rung-out per `loop.mode`, seams click-guarded
+by `loop.fade` — so the renderer and action-key format don't know loops
+exist, and a loop hashes identically to its hand-tiled equivalent.
+
+### `resample` — minted at rate edges
+
+The second implicit type, and the only one nobody can declare: when a
+source arrives at a placement at a rate other than its track's, the
+graph mints `//songs/<song>/convert:<name>-<rate>` between them
+(multi-rate.md decision 4) — one node per (source, rate) however many
+placements consume it, visible in `explain` and `deps()` like any rule.
+It runs the daemon's polyphase resampler (render-pipeline.md decision 9,
+the same one `--rate` exports through) and writes float32 undithered,
+because it sits between two float stages — quantization is a delivery
+choice, made at export. The `normalize` *sound* that used to close this
+loop by hand retired with multi-rate.md step 3 — and `sounds/` entirely
+with the chunk 6 finale; the daemon op behind it survives as export's
+converter.
+
+### `supercollider`
+
+A SuperCollider program defines the sound, rendered offline via
+scsynth's NRT mode. `source:` names the program — a bare filename
+resolves in `shared/instruments/`, a slashed path is project-relative.
+The program is a plain `.scd` run through `sclang` with `FIELD_OUTPUT` /
+`FIELD_SEED` / `FIELD_DURATION` / `FIELD_SAMPLE_RATE` / `FIELD_CHANNELS`
+in the environment; it writes `FIELD_OUTPUT` and exits. The program's
+*content hash* is a cache input, so editing the code invalidates exactly
+its own renders; with a fixed seed, renders are reproducible
+bit-for-bit. `field sc render` runs a program directly (uncached) for
+iteration. Full contract:
+[projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
+predates the §4 rename).
+
+### `eq` / `limit` / `reverb` — the offline effects
+
+From [projects/all/effects.md](projects/all/effects.md): Fyra's
+auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
+compensation on by default — tone changes, level doesn't), an offline
+lookahead limiter with a hard ceiling guarantee, and a deterministic
+Freeverb whose output grows by its tail. They run as `inserts:` — baked
+into the stem, on the song's output track where the master chain went —
+and chains are wrapper tracks placing wrapper tracks, cached per link: a
+track wrapped in an effect is a different track. The declared effect
+*sounds* these once were folded in with nested-tracks.md decision 12;
+`field check` names containment cycles the way it named sound→sound
+ones.
+
+### `say` — removed
+
+Removed by render-pipeline.md chunk 5. macOS text-to-speech was an
+in-graph recipe here: `text`/`voice`/`rate` as the whole action key,
+output cached and never committed. It went for two reasons that arrived
+together — it was the last rule shelling out to a macOS binary, and the
+generated-voice tier replaces what it was actually for.
+[projects/all/voice-generation.md](projects/all/voice-generation.md) §5
+records the decision and what it costs.
+
+Worth keeping from it: `say` was this document's example of the
+*hermetic* side of the determinism boundary, and the boundary itself is
+unchanged — `supercollider`, `eq`, `limit`, `reverb`, `resample` and
+`stem` are all recipes cached under an action key, while voice
+generation is a deliberate generative sound with committed outputs on
+the other side. What `say` also demonstrated, less comfortably, is that
+a recipe can be *nearly* hermetic and that the gap is where the trouble
+lives: `voice: Siri` followed a Settings toggle the cache key could not
+see, and two consecutive CI renders of it were observed to differ.
+
+### `mix` — retired
+
+Retired by nested-tracks.md §7 chunk 2. A song's output is the track
+named `main`, and it does everything the mix rule did: sums its inputs
+applying each placement's `gain_db` and `pan`, bakes its own `inserts:`
+in where the master chain went, and renders exactly the song's declared
+`length`, with `loop:` folding the overhang back onto the start. The
+same machinery — a mix was a track that could not hold clips or nest —
+and creek renders bit-identically across the change. A `mixes/`
+directory left behind is named by `check` rather than ignored.
 
 ## Determinism policy
 
-**The contract is recipe-reproducibility, not bit-reproducibility.** Plugin
-renders are not bit-identical across runs (modeled analog noise, dither,
-floating-point scheduling) but sound the same; the build system never
-re-renders unchanged inputs, so nondeterminism only surfaces on deliberate
-cold rebuilds. Seeded SC renders are deterministic; ACE with a fixed seed is
-reproducible on the same machine but not guaranteed across GPU/framework
-versions — which is why generative requests commit their takes, never
-regenerating mechanically.
+**The contract is recipe-reproducibility, not bit-reproducibility.**
+Plugin renders are not bit-identical across runs (modeled analog noise,
+dither, floating-point scheduling) but sound the same; the build system
+never re-renders unchanged inputs, so nondeterminism only surfaces on
+deliberate cold rebuilds. Seeded SC renders are deterministic; ACE with
+a fixed seed is reproducible on the same machine but not guaranteed
+across GPU/framework versions — which is why generative requests commit
+their takes, never regenerating mechanically.
 
 Nodes that can differ *audibly* between renders are flagged
 **nondeterministic**, in three tiers:
 
-1. Plugins with tempo-sync/retrigger LFO modes: Field prefers those modes and
-   stores phase/offset as an explicit parameter — deterministic.
+1. Plugins with tempo-sync/retrigger LFO modes: Field prefers those
+   modes and stores phase/offset as an explicit parameter —
+   deterministic.
 2. Free-running LFOs with an exposed rate/phase parameter: a per-plugin
    registry of known parameter mappings pins what's pinnable.
-3. Truly free-running (some vintage emulations, deliberately): flagged in
-   `field explain`; renders are handled as takes.
+3. Truly free-running (some vintage emulations, deliberately): flagged
+   in `field explain`; renders are handled as takes.
 
 **Renders of nondeterministic nodes are takes** (see
-[project-model.md](project-model.md)): numbered, auditioned, one active. A
-rebuild that would replace the active render of a nondeterministic node
-prompts first — or, in non-interactive/agent mode, auto-pins the outgoing
-artifact so nothing is ever silently lost. Pinning is a named, GC-immune
-reference to a content-addressed artifact — cheap, and reversible: repoint to
-any retained take.
+[project-model.md](project-model.md)): numbered, auditioned, one active.
+A rebuild that would replace the active render of a nondeterministic
+node prompts first — or, in non-interactive/agent mode, auto-pins the
+outgoing artifact so nothing is ever silently lost. Pinning is a named,
+GC-immune reference to a content-addressed artifact — cheap, and
+reversible: repoint to any retained take.
