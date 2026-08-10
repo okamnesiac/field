@@ -34,9 +34,26 @@ or yarn, and never generate a package-lock.json.
 
 ## Pull requests
 
-Roughly one PR per coherent chunk of a phase, not one giant phase PR. Open pull
-requests; never merge them — merging is the review checkpoint, however small the
-change. This repo's ruleset is the standard one used across these repos: main
-takes no direct pushes, history stays linear, every review thread must be
-resolved before a merge, and merges are squashed with the PR title and body
-taken as the commit message.
+Roughly one PR per coherent chunk of a phase, not one giant phase PR — and lean
+toward the larger end of that range. Review effort is charged per pull request
+and per review cycle, and it barely moves with diff size: resolving the exact
+head, building, running the suite, probing the claims and writing the review
+cost about the same for twenty lines as for three hundred. Two small pull
+requests therefore cost roughly twice what one medium one carrying both does,
+and a second review cycle on a single PR is cheaper than a second PR.
+
+Combine by default; splitting is what needs an argument. Plan sections are for
+sequencing thought, not for sizing pull requests — two changes citing different
+plans belong together when they share a rationale, when one is unusable until
+the other lands, or when verifying the second means re-running the first. #109
+was five files and twenty insertions, split from #108 only because it belonged
+to a different plan's chunk, and its one claim meant nothing without the PR
+under it. The ceiling is reviewability rather than line count: a PR is too big
+when a reviewer would be holding two unrelated arguments at once, or when half
+of it could ship and be used while the rest is still being written.
+
+Open pull requests; never merge them — merging is the review checkpoint,
+however small the change. This repo's ruleset is the standard one used across
+these repos: main takes no direct pushes, history stays linear, every review
+thread must be resolved before a merge, and merges are squashed with the PR
+title and body taken as the commit message.
