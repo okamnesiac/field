@@ -17,14 +17,17 @@ latency reporting and delay compensation, routing/buses/sends, real-time
 automation, offline rendering where supported, safe file writing, crash
 recovery, peak generation.
 
-Sends arrive here rather than in the offline renderer, and their rules are
-already decided: target anything that is not a descendant, detect cycles,
-name a send that reaches into itself, and carry a level and never an
-offset ([projects/all/nested-tracks.md](projects/all/nested-tracks.md)
-§1.7, §1.8). §14 there records why they waited — a send expresses flow,
-and offsets are how an offline model spells position, so building one
-offline means inventing arrival times that real time would immediately
-contradict.
+Sends no longer wait for this engine:
+[projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19
+specifies them to render offline first. A label links exactly one send
+to one receive, the edge carries a level and a tap point and never an
+offset, and a receive may sit only where its path to the cable's common
+ancestor accumulates zero time displacement — which is what makes
+arrival times derivable rather than invented (the ambiguity §14
+recorded). The engine inherits that schema unchanged: routing/buses/
+sends stays on the responsibility list above as the live half of the
+same design, and plugin latency compensates to the same answer the
+offline render reaches.
 
 ## Three real-time paths
 

@@ -4,19 +4,19 @@ status: Active
 
 # Plan: Nested tracks — one primitive for structure, time and mix
 
-**Status:** Complete except deferred sends (2026-08-09) — every chunk
-has either shipped or moved: chunk 4 (sends) waits for the real-time
-engine by §14's argument, and everything else is live, chunk 6's finale
-last. Nesting renders, `mixes/` has
+**Status:** One chunk left (2026-08-10): sends, no longer deferred —
+§19 replaces §14's wait-for-the-engine with a design that renders
+offline, and chunk 4 is committed to land before the real-time engine;
+everything else is live, chunk 6's finale last. Nesting renders, `mixes/` has
 retired into the output track (#81), and creek is now expressed as three
 placements of a phrase — §7 chunk 5, whose verdict is §10.
 `arrangement.yaml` has retired into `field arrangement` (§11), which
 finishes chunk 1. Chunk 3 is done: per-clip pan landed in the daemon
 (#76) and `field explain` now answers the level question (§12). Chunk 2
 is done too — a track carries its own tempo and meter (§13). Sends
-(chunk 4) are deferred to the real-time engine, which is where an edge
-that carries no offset stops needing offsets invented for it (§14). What
-is left here is folding `sounds/` in (chunk 6), which opened with the
+(chunk 4) are un-deferred: §19 derives the arrival times §14 said an
+offline renderer would have to invent, and specifies the cable model. What
+was left here was folding `sounds/` in (chunk 6), which opened with the
 clip-duration prerequisite (§15, #97) and the eq fold (§17, #100), and
 then settled the shape it was heading toward: one `inputs:` list whose
 entries place tracks, committed audio, or inline generators (§18) —
@@ -430,6 +430,7 @@ and in `mixes/` retiring as a directory.
 3. **Nested mix.** Faders, pans and inserts at every level; effective
    gain surfaced.
 4. **Sends.** The DAG, cycle detection, the reach-into-itself message.
+   Deferred by §14, revived by §19, which specifies the shape.
 5. **bloom.** Express creek with a `verse` placed twice and a vocal at
    the root, and see whether the structure reads better than the flat
    version. This is the chunk that decides whether the idea was right.
@@ -454,6 +455,11 @@ for the reason in §14. Everything else here is met: creek is three
 placements of one `phrase` (§10), the pad and the lead vocal span above
 them, and the restructure was measured against the flat version at
 −144 dBFS with the two seams accounted for.
+
+Amended 2026-08-10: the two sends clauses return. §19 un-defers chunk 4,
+so the shared reverb fed from two depths and the reach-into-itself
+message are part of this definition of done again — to be met offline,
+before the engine.
 
 ## 9 Sequencing, revised (2026-08-08)
 
@@ -792,6 +798,11 @@ alignment rules that the engine would immediately make wrong.
 until then; see the note there. What remains of this plan is chunk 6,
 folding `sounds/` in.
 
+Superseded 2026-08-10 by §19. The deferral rested on arrival times
+having to be invented; §19's walk derives them instead, and chunk 4
+proceeds before the engine. The diagnosis above stands — §19 is built
+on it.
+
 ## 15 Chunk 6 is not only a layout change (2026-08-08)
 
 §7 chunk 6 calls itself "a layout and namespace change rather than a
@@ -1053,3 +1064,194 @@ Sequencing, revising §16's tail and §17's remainder:
    §4): its step 2 frees `loop-cd`, its step 3 frees `vocal-48k`.
 5. **Finale**: `sounds/` empties, the `sound:` label forwards,
    `rg 'type: normalize' examples/bloom/songs` finds nothing.
+
+## 19 Sends without the engine (DECIDED, 2026-08-10)
+
+§14 deferred chunk 4 because an offline send needed arrival times
+invented for it. This section supersedes that deferral: the design
+below derives them, and sends are committed **before** the real-time
+engine — §9's argument applies after all, because a send is a new
+entry kind and a new edge in the model the engine will render, and
+landing it offline first means the engine arrives to a schema that
+already knows what a send is.
+
+**The shape.** A send is declared on the sending track; a receive is
+an entry in the receiving track's `inputs:`. A label — think of it as
+a patch cable, though the word appears nowhere in the schema — links
+exactly one send to exactly one receive:
+
+```yaml
+# songs/creek/tracks/verse-keys-wet.yaml — the sending end
+name: verse-keys-wet
+sends:
+  chorus-reverb:
+    gain_db: -6
+inputs:
+  - track: keys
+```
+
+```yaml
+# songs/creek/tracks/space.yaml — the receiving end. Nothing declares
+# this track special: the receive entry and its undisplaced path
+# upward are the whole story.
+name: space
+inserts:
+  - effect: reverb
+    mix: 1.0 # fully wet — the dry signal arrives through the tree
+    decay: 4
+inputs:
+  - receive: chorus-reverb
+```
+
+`space` joins the mix as a bare `- track: space` entry in its parent.
+
+**Decisions.**
+
+1. **`sends:` is a map keyed by label, not a list.** `inserts:` is a
+   list because order is the signal chain, and `inputs:` is a list
+   because placements repeat — but sends are an unordered set keyed by
+   a unique label, so the map is the semantically honest shape. YAML
+   itself enforces per-track label uniqueness, and a level tweak diffs
+   under a stable, meaningful key with no synthetic entry id. Values
+   carry `gain_db` (default 0, the spelling a placement already uses)
+   and `tap`; a unity post-insert send is the bare label.
+
+2. **A receive is an `inputs:` entry.** `- receive: <label>` joins
+   §18's union beside `track:`, `audio:` and the generator entries —
+   the position-domain entries place content, this one admits signal.
+
+3. **One cable: one send, one receive.** A label on two sends or two
+   receives is an error; a label with one end is a warning on either
+   side, because wiring incrementally is normal — patch the send in
+   and listen before building the return, or stand the return up
+   before deciding what feeds it. Labels resolve within one song, so
+   both ends of a cable share a timeline by construction. *Rejected:
+   bus semantics* (many sends summing into a label) *and mult
+   semantics* (one send splitting to many receives) — patch bays
+   half-normal in both directions because jacks are scarce, but
+   another cable here is one line of YAML, and 1:1 keeps summing where
+   it already lives: a return fed by three tracks has three `receive:`
+   entries, so one file shows everything that feeds it.
+
+4. **No track type — "live" is a situation, not a kind.** A receive is
+   legal where the path from its track up to the cable's common
+   ancestor accumulates zero time displacement: every entry on that
+   path is a single unshifted pass — `at`, `slip` and `source_offset`
+   at their defaults, and no `loop:`. No `kind:` field
+   exists; decision 1 stands untouched. §14 worried that whatever made
+   offline sends coherent would be "a type distinction reintroduced
+   through validation" — the resolution is that the constraint was
+   never about *which tracks* may receive but about *where a receive
+   may sit*, checked per cable, structurally, refusing nothing by
+   name. Non-displacing fields — `duration`, fades — stay legal on
+   the path: a fade is level automation and moves no arrival (when
+   [automation.md](automation.md) lands, a level lane subsumes it),
+   and `duration` windows the output without moving it. `loop` is on
+   the time side of the line — the window is authoritative and the
+   source tiles to fill it ([clip-looping.md](clip-looping.md) §1),
+   replication in time, not level shaping — and so is
+   `source_offset`, which displaces the read on `slip`'s own axis
+   (effective read offset = source_offset − slip,
+   [project-core.md](project-core.md) §3.2). The time base is what
+   §14's ambiguity was made of, and these four fields are its only
+   spellings.
+
+5. **Arrival times are derived, not invented.** To render a receive
+   offline: walk up from the receiving track to the cable's common
+   ancestor — zero displacement by decision 4, so the walk up
+   contributes nothing — then walk down from the ancestor to the
+   sending track accumulating displacement through every placement,
+   in the ancestor's rate: the walk reads the already-converted
+   placement plan, so a path crossing a track-rate boundary converts
+   each segment's offsets at the edge exactly as playback does
+   ([multi-rate.md](multi-rate.md)) rather than summing raw sample
+   counts across rates.
+   One arrival per path: a sender inside `verse` placed at bars 5 and
+   13 arrives twice — the return, sitting outside the repetition,
+   hears every pass, which is the repeated-verse-with-reverb case and
+   is §12's `reaches` walk on the sender side only. The ancestor
+   itself may be placed — its placements shift both ends of the cable
+   together, which is exactly the coherence §14 could not get while
+   the two ends could move independently; a circuit whose two ends
+   both sit inside the repeated section repeats with it, one cached
+   render played per placement.
+
+   Multiplicity on the receive side is bounded by what one render can
+   hold: the receiving track may resolve through several containment
+   paths, but every path must yield the same arrival set. The walk
+   bakes arrivals into the receive's render in its local clock, and a
+   track renders once however often it is placed (§13) — so paths
+   that hear the sender at different local times would need two
+   clocks in one stem, and that divergence is an error naming the
+   paths. Agreement is checked, not assumed: the same walk runs once
+   per path and the arrival sets are compared. This admits the
+   parallel-mix shape creek already uses — `bed` is deliberately a
+   subset of `main`, both placing the same subtree undisplaced, so a
+   return reachable through both hears every sender identically and
+   one baking serves both mixes — while refusing the case where the
+   subtree sits at different positions under two parents, where the
+   arrivals genuinely differ. Both spellings of
+   reverb-on-every-verse live above: sender-side arrivals when the
+   return sits outside the repetition, the placed-ancestor circuit
+   when it sits inside. A receive under a *displaced* path with its
+   sender elsewhere is already refused by decision 4. If divergent
+   placements of a return ever earn their place, per-instance
+   resolution is the relaxation — recorded here so it would be a
+   decision rather than drift, and §6's placement-identity question
+   is the same shape when it comes.
+
+6. **The edge carries a level and never an offset** (§1.8, unchanged),
+   plus one new field: `tap: pre | post`, default `post` — the send
+   taps the sender's signal after its inserts, and `pre` exists for
+   feeding a shared effect the unprocessed signal. The tap point is
+   where insert latency and the send meet, so the default is part of
+   decision 9's latency story.
+
+7. **Sends live on the track, not on the entry.** Wet here and dry
+   there is a wrapper: a track whose `inputs:` is the dry track and
+   whose `sends:` adds the cable. *Rejected for now: per-entry sends*
+   — entries stay placement-only, and since entries are already
+   objects the field is cheap to add later if wrapping chafes.
+
+8. **Cycles are checked on the combined graph** — containment plus
+   cables — and §1.7's reach-into-itself message survives verbatim.
+   §1.7's "any target that is not a descendant" stops being a named
+   rule and becomes a theorem: a cable landing in the sender's own
+   subtree is a cycle the checker reports anyway, with the
+   special-cased message for the locally decidable case.
+
+9. **§1.8's offline trap is dead, in three parts.** Causality is
+   structural: a cable carries no offset and the receive side can
+   express no position, so the schema has no spelling for a signal
+   arriving before it sounds — offline renders sends exactly as
+   causally as the engine will play them. Lookahead inside feedback,
+   the one case real time genuinely cannot match, is excluded by
+   decision 8. What remains is ordinary plugin latency, which is not a
+   sends problem: [audio-engine.md](../../audio-engine.md) owns
+   latency reporting and delay compensation, and on a cycle-free graph
+   offline and live compensate to the same answer.
+
+**What this supersedes.** §14's deferral, in full — its diagnosis was
+right, and decision 4 removes the target-side ambiguity rather than
+answering it. §1.7's targeting model (a send naming its target track)
+is replaced by the label; everything else there — the cycle analysis,
+the message, the rejected alternatives — stands and governs decision
+8. §8 gets its two sends clauses back, plus the new failure modes: a
+duplicated label end (error), a dangling end (warning), a receive
+under a displaced path (error naming the entry that carries the
+offset), a receiving track whose containment paths disagree on
+arrivals (error naming the paths).
+
+**Chunk 4, revived.** Schema (the `sends:` map, the `receive:` entry);
+check (both ends resolve, 1:1, the zero-displacement path, cycles —
+plus the severity level decision 3's warnings assume, which does not
+exist yet: `Diagnostic` is `{ file, message }` and any diagnostic
+fails `check` and `build`, so the dangling-end warning arrives only
+if this chunk builds a non-fatal level and gives it a path through
+check, build and watch);
+build (derive arrivals, then a receive renders as the sum of its
+cables' signals at their arrivals, through its inserts —
+deterministic and cacheable, keyed on sender content, gain, tap and
+arrivals); explain (a cable appears when either end's level is
+questioned). The engine, when it arrives, inherits a schema where
+sends already exist and mean the same thing live.

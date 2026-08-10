@@ -8,8 +8,9 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has
-  shipped or moved (sends wait for the real-time engine, §14), the
-  chunk 6 finale retiring `sounds/` last. Stays until sessions have
+  shipped except sends, un-deferred by §19 and committed to land
+  before the real-time engine — chunk 4 is the remaining work, the
+  chunk 6 finale having retired `sounds/`. Stays until sessions have
   worked the folded format, per the neighbours' precedent — the entry
   list, gen nodes and takes machinery are where every edit now lands.
 - [Multi-rate](all/multi-rate.md) — all three steps shipped (#107, #108,
