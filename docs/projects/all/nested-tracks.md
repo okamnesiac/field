@@ -1172,20 +1172,29 @@ inputs:
    both sit inside the repeated section repeats with it, one cached
    render played per placement.
 
-   Multiplicity belongs to the sender alone: the receiving track must
-   resolve through exactly one containment path, and a second is an
-   error naming both paths. The walk bakes arrivals into the
-   receive's render in its ancestor's clock, and a track renders once
-   however often it is placed (§13) — so a return reachable through
-   two paths would need two clocks in one stem. This refuses less
-   than it seems, since both spellings of reverb-on-every-verse live
-   above: sender-side arrivals when the return sits outside the
-   repetition, the placed-ancestor circuit when it sits inside. A
-   receive under a *displaced* path with its sender elsewhere is
-   already refused by decision 4. If reusing a return track ever
-   earns its place, per-instance resolution is the relaxation — 
-   recorded here so it would be a decision rather than drift, and
-   §6's placement-identity question is the same shape when it comes.
+   Multiplicity on the receive side is bounded by what one render can
+   hold: the receiving track may resolve through several containment
+   paths, but every path must yield the same arrival set. The walk
+   bakes arrivals into the receive's render in its local clock, and a
+   track renders once however often it is placed (§13) — so paths
+   that hear the sender at different local times would need two
+   clocks in one stem, and that divergence is an error naming the
+   paths. Agreement is checked, not assumed: the same walk runs once
+   per path and the arrival sets are compared. This admits the
+   parallel-mix shape creek already uses — `bed` is deliberately a
+   subset of `main`, both placing the same subtree undisplaced, so a
+   return reachable through both hears every sender identically and
+   one baking serves both mixes — while refusing the case where the
+   subtree sits at different positions under two parents, where the
+   arrivals genuinely differ. Both spellings of
+   reverb-on-every-verse live above: sender-side arrivals when the
+   return sits outside the repetition, the placed-ancestor circuit
+   when it sits inside. A receive under a *displaced* path with its
+   sender elsewhere is already refused by decision 4. If divergent
+   placements of a return ever earn their place, per-instance
+   resolution is the relaxation — recorded here so it would be a
+   decision rather than drift, and §6's placement-identity question
+   is the same shape when it comes.
 
 6. **The edge carries a level and never an offset** (§1.8, unchanged),
    plus one new field: `tap: pre | post`, default `post` — the send
@@ -1226,8 +1235,8 @@ the message, the rejected alternatives — stands and governs decision
 8. §8 gets its two sends clauses back, plus the new failure modes: a
 duplicated label end (error), a dangling end (warning), a receive
 under a displaced path (error naming the entry that carries the
-offset), a receiving track reachable through two containment paths
-(error naming both).
+offset), a receiving track whose containment paths disagree on
+arrivals (error naming the paths).
 
 **Chunk 4, revived.** Schema (the `sends:` map, the `receive:` entry);
 check (both ends resolve, 1:1, the zero-displacement path, cycles —
