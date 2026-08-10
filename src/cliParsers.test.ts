@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  drawSeed,
+  formatSeeds,
   parseBars,
   parseGenTarget,
   parseBpm,
@@ -111,5 +113,31 @@ describe('parseGenTarget', () => {
     expect(() => parseGenTarget('//shared/asset:pad', 'choose')).toThrow(
       'only //songs/ labels',
     );
+  });
+});
+
+describe('drawSeed', () => {
+  it('draws non-negative integers a worker accepts, and actually varies', () => {
+    const draws = Array.from({ length: 100 }, () => drawSeed());
+    for (const seed of draws) {
+      expect(Number.isInteger(seed)).toBe(true);
+      expect(seed).toBeGreaterThanOrEqual(0);
+      expect(seed).toBeLessThan(2 ** 31);
+    }
+    expect(new Set(draws).size).toBeGreaterThan(1);
+  });
+});
+
+describe('formatSeeds', () => {
+  it('prints one seed as itself and a run as a range', () => {
+    expect(formatSeeds([7])).toBe('seed 7');
+    expect(formatSeeds([7, 8, 9])).toBe('seeds 7–9');
+  });
+
+  it('lists non-contiguous seeds instead of faking a range', () => {
+    // The protocol promises an integer array, not seed+i — a worker
+    // returning [3, 9] must not be reported as "seeds 3–9", which names
+    // seeds that never ran (a8920be review).
+    expect(formatSeeds([3, 9])).toBe('seeds 3, 9');
   });
 });

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { randomInt } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
 import {
+  drawSeed,
+  formatSeeds,
   parseBars,
   parseGenTarget,
   parseBpm,
@@ -171,7 +172,7 @@ program
       // reproduce across GPU/framework versions (bloom-in-tree.md §3),
       // and every take records the seed it ran with — so an omitted
       // --seed draws one and the output names it below.
-      const seed = opts.seed ?? randomInt(0, 2 ** 31);
+      const seed = opts.seed ?? drawSeed();
       const result = await generateVariants(requireRoot(), name, {
         song,
         prompt: opts.prompt,
@@ -195,12 +196,8 @@ program
           ? `${result.durationSeconds.toFixed(1)}s` +
             `${result.bpm !== undefined ? ` @ ${result.bpm} bpm` : ''}, `
           : `voice: ${result.voiceRef ?? "the model's own"}, `;
-      const seeds =
-        result.seeds.length === 1
-          ? `seed ${result.seeds[0]}`
-          : `seeds ${result.seeds[0]}–${result.seeds[result.seeds.length - 1]}`;
       process.stdout.write(
-        `generated ${result.files.length} variants (${detail}${result.model}, ${seeds})\n`,
+        `generated ${result.files.length} variants (${detail}${result.model}, ${formatSeeds(result.seeds)})\n`,
       );
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
