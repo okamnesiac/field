@@ -347,6 +347,10 @@ is schema-validated — `field check` verifies variant hashes,
 `chosen: 1`, so the request resolves as soon as it has takes; `field choose
 <name> --variant <n>` moves `chosen:` to a different one, and from then
 on the node's own label resolves to that variant — every placement
-follows a re-choose as a one-line diff. Nothing
+follows a re-choose as a one-line diff. `field explain` on the gen node
+answers which take that is: `chosen: variant 2 of 2
+(audio/<name>/2.wav)` — the choice, the take count, and the committed
+file — while an audition label reports its own `file:` alone, being one
+take rather than the choosing. Nothing
 is copied into a ledger, and nothing ever regenerates mechanically:
 generating over takes that already exist is refused, not merged.
