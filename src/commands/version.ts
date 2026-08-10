@@ -43,6 +43,9 @@ export interface VersionReport {
     // Set when the artifact's baked identity and the checkout's HEAD
     // disagree — the stale-dist case --version exists to catch.
     checkoutCommit?: string | undefined;
+    // Set when HEAD matches but the working tree's dirty count moved
+    // since the build: edits without a commit also go stale.
+    checkoutDirtyFiles?: number | undefined;
   };
   workerProtocol: number;
   daemons: DaemonReport[];
@@ -62,6 +65,7 @@ interface BuildIdentity {
   branch?: string | undefined;
   dirtyFiles?: number | undefined;
   checkoutCommit?: string | undefined;
+  checkoutDirtyFiles?: number | undefined;
 }
 
 function liveIdentity(): BuildIdentity {
@@ -91,17 +95,32 @@ function liveIdentity(): BuildIdentity {
 // code. An unstamped dist — a build from before this — falls back to
 // the live read, the old behavior rather than a crash.
 export function resolveIdentity(stamped: BuildIdentity, live: BuildIdentity): BuildIdentity {
+  const commitDrift =
+    live.commit !== undefined && stamped.commit !== undefined && live.commit !== stamped.commit;
+  // Same commit but a different dirty count is drift too: build from a
+  // clean tree, edit without committing, and HEAD never moves while the
+  // running code goes stale (Codex on #121). The count is the affordable
+  // signal — equal counts over different edits stay invisible, which a
+  // build-input fingerprint would catch and this deliberately does not.
+  const dirtyDrift =
+    !commitDrift &&
+    live.commit !== undefined &&
+    (live.dirtyFiles ?? 0) !== (stamped.dirtyFiles ?? 0);
   return {
     ...stamped,
-    ...(live.commit !== undefined && stamped.commit !== undefined && live.commit !== stamped.commit
-      ? { checkoutCommit: live.commit }
-      : {}),
+    ...(commitDrift ? { checkoutCommit: live.commit } : {}),
+    ...(dirtyDrift ? { checkoutDirtyFiles: live.dirtyFiles ?? 0 } : {}),
   };
 }
 
 function buildIdentity(): BuildIdentity {
+  // Inside THIS package's dist directory exactly — a substring test on
+  // any `dist` path component classifies a source checkout that merely
+  // lives under some ancestor named dist as compiled output, and then a
+  // tsx run reports someone else's sha with advice to rebuild (minjudd
+  // and Codex on #121, independently).
   const here = fileURLToPath(import.meta.url);
-  const fromDist = here.includes(`${sep}dist${sep}`);
+  const fromDist = here.startsWith(join(packageRoot(), 'dist') + sep);
   if (!fromDist) return liveIdentity();
   try {
     const stamped = JSON.parse(
@@ -248,7 +267,12 @@ export function formatVersionReport(report: VersionReport, root: string): string
   const build = cli.commit
     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
-      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}`
+      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}` +
+      `${
+        cli.checkoutDirtyFiles !== undefined
+          ? `; checkout has ${cli.checkoutDirtyFiles} uncommitted file${cli.checkoutDirtyFiles === 1 ? '' : 's'} since the build — pnpm build to update`
+          : ''
+      }`
     : 'not a git checkout';
   lines.push(`field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);

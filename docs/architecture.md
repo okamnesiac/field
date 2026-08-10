@@ -36,6 +36,17 @@ is real, so we pick once. TypeScript wins on MCP SDK maturity, schema
 validation (zod), and long-running-process ergonomics. The canonical project
 format remains language-neutral regardless.
 
+**`field --version` reports the build, not the checkout.** `pnpm build`
+stamps `dist/build-info.json` with the commit, branch, and dirty count
+at build time (cleared before `tsc`, written after everything succeeds,
+so a failed build leaves no stamp), and the dist artifact reads its
+stamp. When the checkout has moved since the build — a new HEAD, or
+edits without a commit — the report says so beside the baked identity
+(`checkout now at <sha> — pnpm build to update`) instead of
+impersonating it. Running from source (tsx, vitest) keeps the live git
+read, because there the checkout is the code; an unstamped dist falls
+back to the live read.
+
 ## Native audio daemon (C++ / JUCE) — `field-audiod`
 
 All latency-sensitive and hardware-facing work: device I/O, transport,

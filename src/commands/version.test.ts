@@ -214,6 +214,18 @@ describe('resolveIdentity', () => {
       { commit: 'aaaa111', branch: 'main' },
     );
     expect(resolved.checkoutCommit).toBeUndefined();
+    expect(resolved.checkoutDirtyFiles).toBeUndefined();
+  });
+
+  it('reports edits without a commit — HEAD never moved, the code did', () => {
+    // Build from a clean tree, keep editing: the commit comparison sees
+    // nothing while the running dist goes stale (Codex on #121).
+    const resolved = resolveIdentity(
+      { commit: 'aaaa111', branch: 'main', dirtyFiles: 0 },
+      { commit: 'aaaa111', branch: 'main', dirtyFiles: 4 },
+    );
+    expect(resolved.checkoutCommit).toBeUndefined();
+    expect(resolved.checkoutDirtyFiles).toBe(4);
   });
 });
 
@@ -228,5 +240,21 @@ describe('formatVersionReport with a drifted checkout', () => {
       process.cwd(),
     );
     expect(text).toContain('aaaa111 on feature/x; checkout now at bbbb222 — pnpm build to update');
+  });
+});
+
+describe('formatVersionReport with post-build edits', () => {
+  it('names the dirty count and the reconciling command', () => {
+    const text = formatVersionReport(
+      {
+        cli: { version: '0.1.0', commit: 'aaaa111', branch: 'main', checkoutDirtyFiles: 4 },
+        workerProtocol: 2,
+        daemons: [],
+      },
+      process.cwd(),
+    );
+    expect(text).toContain(
+      'aaaa111 on main; checkout has 4 uncommitted files since the build — pnpm build to update',
+    );
   });
 });
