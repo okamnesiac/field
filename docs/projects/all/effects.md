@@ -4,11 +4,14 @@ status: Shipped
 
 # Plan: Offline effects
 
-**Status:** In progress (started 2026-08-05). Follows
-[playback.md](playback.md); inserted ahead of ACE deliberately — ACE stems
-want tone-shaping on arrival, and mixes have needed a real limiter since
-creek's sum first clipped (a master `gain_db` was hand-tuned as a stopgap
-in bloom).
+**Status:** Shipped — the rules in #14 (eq with the Fyra-derived
+auto-normalizing gain, limiter, reverb) and all three insert homes in
+#15; the hand-tuned master `gain_db` stopgap is gone and creek's sum
+runs through a real limiter. The executor has since moved per §6: the
+daemon renders the chains and `src/audio/`'s TypeScript DSP was
+deleted, its guarantees remeasured as properties of rendered output.
+Followed [playback.md](playback.md); inserted ahead of ACE
+deliberately — ACE stems want tone-shaping on arrival.
 
 **Goal:** three offline effects — `eq`, `limit`, `reverb` — as build
 rules, chainable with everything the graph already does, then usable as

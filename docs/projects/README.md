@@ -85,8 +85,8 @@ status: Active
 **Goal:** three offline effects — `eq`, `limit`, `reverb` — as build rules ...
 ```
 
-`status:` is one keyword from a fixed set, adopted from triangle/app and
-shared across repos: `Draft` (written, implementation not started), `Active`
+`status:` is one keyword from a fixed set, adopting triangle/app's set:
+`Draft` (written, implementation not started), `Active`
 (in progress), `Blocked` (waiting on a dependency or decision), `Stalled`
 (lost momentum, not formally dropped), `Shipped` (done; the document is now
 historical), `Superseded` (replaced by a newer document or approach),

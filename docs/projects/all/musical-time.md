@@ -4,10 +4,12 @@ status: Shipped
 
 # Plan: Musical time arrays
 
-**Status:** In progress (started 2026-08-05). Motivated by bloom's creek:
-`length: 46080` and `every: 15360` are tick math a human authors by
-calculator — the project files should accept the numbers musicians think
-in.
+**Status:** Shipped — #24 landed the arrays and bloom converted with
+it: creek is authored in `[bar, beat?, tick?]` notation (`at: [1]`,
+`every: [2]`), meeting §2's definition of done. Motivated by bloom's
+creek: `length: 46080` and `every: 15360` are tick math a human
+authors by calculator — the project files now accept the numbers
+musicians think in.
 
 **Goal:** time fields in project YAML accept musical notation — bars,
 beats, ticks — resolved through the song's meter map, without changing

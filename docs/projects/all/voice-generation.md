@@ -4,16 +4,17 @@ status: Shipped
 
 # Plan: Voice generation
 
-**Status:** In flight (2026-08-07). Designed and recorded ahead of the
-build (2026-08-06), then queued behind other work until `say`'s removal
-made it the thing bloom needs. Chunk 1 is complete — schema (#58),
-worker lifecycle (#59), `field-voiced` (#60), CLI seam (#61) — and
-nothing here has yet loaded the model: chunk 2 is the first real
-generation. Written before
-[project-layout.md](project-layout.md) §4: where this plan says
-`generation/<name>.yaml` and recipe fields, read a `generate` sound in
-`sounds/<name>.yaml` (`type:`/`source:` spellings, §4.3), with choosing
-as repointing (§4.8). The other side of the determinism boundary from
+**Status:** Shipped — creek sings. Chunk 1 landed as schema (#58),
+worker lifecycle (#59), `field-voiced` (#60) and the CLI seam (#61);
+chunk 2 put the worker against the actual model (#64) and gave the
+recipe its delivery knobs (#65). The spoken `say` line is gone:
+`lead-take` is a generative leaf placed by `lead-vocal` (#113), its
+takes riding the same variant machinery ACE established. Stays listed
+in [now.md](../now.md) until more songs have used it. Written before
+the `sounds/` fold: where this plan says `generation/<name>.yaml`, a
+`generate` sound, or recipe fields, read a `generative:` entry on a
+leaf track ([nested-tracks.md](nested-tracks.md) §18), takes keyed by
+gen node name. The other side of the determinism boundary from
 the `say` rule (#27), kept separate by design — "got to keep them
 separated."
 
