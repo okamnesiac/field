@@ -712,7 +712,7 @@ function validate(project: LoadedProject): void {
           if (takes !== undefined && takes.chosen === undefined && takes.variants.length > 0) {
             push(
               track.path,
-              `${what} has takes but no chosen variant yet — field choose ${gname} first`,
+              `${what} has takes but no chosen variant yet — field choose ${song.name}/${gname} first`,
             );
           }
         }

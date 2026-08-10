@@ -113,3 +113,40 @@ export function parseChannels(value: string): 1 | 2 {
   }
   return n;
 }
+
+// choose and generate address a generative request by its gen node
+// name, and the song rides in the argument the way every command spells
+// labels: `creek/still-water-keys`, `creek/gen:still-water-keys`, or
+// the full `//songs/creek/gen:…` that explain prints. There is no
+// --song beside it: two ways to say one thing is a search path over
+// flags — project-core.md §3.4's rule, applied to the CLI's own
+// grammar — so the flag refuses with the move instead (cli.ts).
+export function parseGenTarget(arg: string, verb: string): { song: string; name: string } {
+  let rest = arg;
+  if (rest.startsWith('//')) {
+    if (!rest.startsWith('//songs/')) {
+      throw new InvalidArgumentError(`only //songs/ labels name generative requests (got "${arg}")`);
+    }
+    rest = rest.slice('//songs/'.length);
+  }
+  const slash = rest.indexOf('/');
+  if (slash < 0) {
+    throw new InvalidArgumentError(
+      `give the song in the name — field ${verb} <song>/${rest.replace(/^gen:/, '')}`,
+    );
+  }
+  const song = rest.slice(0, slash);
+  let name = rest.slice(slash + 1);
+  const colon = name.indexOf(':');
+  if (colon >= 0) {
+    const pkg = name.slice(0, colon);
+    const bare = name.slice(colon + 1);
+    if (pkg !== 'gen') {
+      throw new InvalidArgumentError(
+        `${verb} addresses a gen node — spell it ${song}/${bare} or ${song}/gen:${bare}, not ${pkg}:`,
+      );
+    }
+    name = bare;
+  }
+  return { song, name };
+}

@@ -5,6 +5,7 @@ import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
 import {
   parseBars,
+  parseGenTarget,
   parseBpm,
   parseChannels,
   parseConviction,
@@ -134,9 +135,9 @@ program
     }
   });
 program
-  .command('generate <name>')
-  .description('run a deliberate generator: fills a generative entry by its gen node name (a new name scaffolds a leaf track); variants land in songs/<song>/audio/<name>/')
-  .requiredOption('--song <name>', 'song the request belongs to (its tempo map projects --bars)')
+  .command('generate <target>')
+  .description('run a deliberate generator: fills a generative entry as <song>/<name> (a new name scaffolds a leaf track); variants land in songs/<song>/audio/<name>/')
+  .option('--song <name>', 'retired — the song rides in the name (creek/lead-take)')
   .option('--prompt <text>', 'what to generate — music, through field-aced')
   .option('--text <line>', 'the line to speak or sing — voice, through field-voiced')
   .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
@@ -148,15 +149,25 @@ program
   .option('--voice-ref <asset>', "voice: the committed recording that defines the voice (omit for the model's own)")
   .option('--exaggeration <n>', 'voice: expressive intensity, 0.25-2 (lower is calmer and slower)', parseExaggeration)
   .option('--conviction <n>', 'voice: how hard it commits to the on-text reading, 0.1-1 (lower lingers)', parseConviction)
-  .action(async (name: string, opts: {
-    song: string; prompt?: string; text?: string; seed: number; bars?: number; duration?: number;
+  .action(async (target: string, opts: {
+    song?: string; prompt?: string; text?: string; seed: number; bars?: number; duration?: number;
     variants: number; lyrics?: string; bpm?: number; voiceRef?: string;
     exaggeration?: number; conviction?: number;
   }) => {
     try {
+      // The song rides in the name like every other command's labels;
+      // the flag survives only to say so, concretely, to fingers and
+      // docs that learned the old spelling.
+      if (opts.song !== undefined) {
+        throw new Error(
+          `--song has retired — the song rides in the name: ` +
+            `field generate ${opts.song}/${target} …`,
+        );
+      }
+      const { song, name } = parseGenTarget(target, 'generate');
       const { generateVariants } = await import('./commands/generate.js');
       const result = await generateVariants(requireRoot(), name, {
-        song: opts.song,
+        song,
         prompt: opts.prompt,
         text: opts.text,
         seed: opts.seed,
@@ -184,29 +195,36 @@ program
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
       process.stdout.write(
-        `audition: field play ${opts.song}/gen:${name}-1\n` +
-          `choose:   field choose ${name} --song ${opts.song} --variant <n>\n`,
+        `audition: field play ${song}/gen:${name}-1\n` +
+          `choose:   field choose ${song}/${name} --variant <n>\n`,
       );
     } catch (err) {
       fail(err);
     }
   });
 program
-  .command('choose <name>')
-  .description("repoint which committed variant a gen node's label resolves to")
-  .requiredOption('--song <name>', 'song the request belongs to')
+  .command('choose <target>')
+  .description("repoint which committed variant a gen node's label resolves to (<song>/<name>)")
+  .option('--song <name>', 'retired — the song rides in the name (creek/still-water-keys)')
   .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
-  .action(async (name: string, opts: { song: string; variant: number }) => {
+  .action(async (target: string, opts: { song?: string; variant: number }) => {
     try {
+      if (opts.song !== undefined) {
+        throw new Error(
+          `--song has retired — the song rides in the name: ` +
+            `field choose ${opts.song}/${target} --variant ${opts.variant}`,
+        );
+      }
+      const { song, name } = parseGenTarget(target, 'choose');
       const { chooseVariant } = await import('./commands/generate.js');
       const result = await chooseVariant(requireRoot(), name, {
-        song: opts.song,
+        song,
         variant: opts.variant,
       });
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
         `${moved ? 'moved' : 'chose'} ${name} → variant ${opts.variant} (${result.file})\n` +
-          `//songs/${opts.song}/gen:${name} now plays it; every placement follows\n`,
+          `//songs/${song}/gen:${name} now plays it; every placement follows\n`,
       );
     } catch (err) {
       fail(err);

@@ -328,7 +328,7 @@ takeless request fills it in place, reading the request from the entry
 instead of the command line, so the flags that describe content are
 refused there as a second answer.
 
-Concretely: `field generate <name> --song <song>` fills the request that
+Concretely: `field generate <song>/<name>` fills the request that
 gen node name means, writing numbered variant WAVs and `variants.yaml`
 under `audio/<name>/`; with content flags and a brand-new name, it
 scaffolds a leaf track carrying the entry — the shape every request

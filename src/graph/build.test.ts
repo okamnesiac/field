@@ -213,7 +213,7 @@ describe('build', () => {
     // typo in a name that is spelled correctly and sitting on disk.
     writeTrack('topline', 'name: topline\ninputs:\n  - generative:\n      text: the water knows the way\n');
     await expect(buildLabels(root, ['//songs/creek/gen:topline'])).rejects.toThrow(
-      'has no takes yet — field generate topline --song creek --seed <n>',
+      'has no takes yet — field generate creek/topline --seed <n>',
     );
     // The same answer when it is reached as somebody else's dependency,
     // which is how a project actually hits this. Different code path:
@@ -236,7 +236,7 @@ describe('build', () => {
       );
     }
     await expect(buildLabels(root, ['//songs/tall-grass/gen/...'])).rejects.toThrow(
-      /2 generative requests with no takes yet:[\s\S]*field generate bridge[\s\S]*field generate topline/,
+      /2 generative requests with no takes yet:[\s\S]*field generate tall-grass\/bridge[\s\S]*field generate tall-grass\/topline/,
     );
   });
 

@@ -1011,7 +1011,7 @@ describe('generator entries (nested-tracks.md §18 step 2)', () => {
       writeFileSync(outputPath, 'render');
     };
     await expect(buildLabels(root, ['//songs/creek/track:rain-pad'], runner)).rejects.toThrow(
-      /gen:rain-pad has no takes yet — field generate rain-pad --song creek/,
+      /gen:rain-pad has no takes yet — field generate creek\/rain-pad/,
     );
   });
 
