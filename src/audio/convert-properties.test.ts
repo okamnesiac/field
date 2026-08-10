@@ -1,67 +1,67 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readWav, readWavHeader, writeWavFloat32 } from '../audio/wav.js';
-import { buildLabels } from '../commands/build.js';
-import { createSong } from '../commands/create.js';
-import { importAsset } from '../commands/import.js';
-import { init } from '../commands/init.js';
+import { readWav, readWavHeader, writeWavFloat32 } from './wav.js';
+import { renderInsertChain } from './render-daemon.js';
 
-// Properties of `normalize` — sample-rate conversion and bit-depth
-// reduction in the daemon's built-in tier (render-pipeline.md decisions 9
-// and 10), measured from rendered output through the build rules, the
-// same rule the effect properties follow.
+// Properties of the daemon's two conversion ops — `normalize` (rate plus
+// integer quantization, behind `field export --rate/--bit-depth`) and
+// `resample` (rate alone, float out, the edge conversion multi-rate.md
+// decision 4 mints). They share one resampler (render-pipeline.md §2.9),
+// so the band properties are asserted once, on normalize, and resample
+// adds only what distinguishes it: float32 out, no dither.
 //
-// This file matters more than most. Every other rule in this migration
-// was a transliteration with a reference implementation to diff against,
-// so byte-identity carried the correctness argument. `normalize` replaced
-// a macOS binary we cannot diff against and never could, so there is no
-// oracle: what the resampler must do is *only* what these properties say
-// it does.
+// This file matters more than most. Every other rule in the daemon
+// migration was a transliteration with a reference implementation to
+// diff against, so byte-identity carried the correctness argument. The
+// resampler replaced a macOS binary we cannot diff against and never
+// could, so there is no oracle: what it must do is *only* what these
+// properties say it does. Until multi-rate.md step 3 they were driven
+// through `type: normalize` sounds; the sound retired, the properties
+// did not, so they drive the ops directly now.
 
 vi.setConfig({ testTimeout: 30_000 });
 
-let root: string;
+let dir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'field-normalize-props-'));
-  init({ dir: root, name: 'test-album' });
-  createSong(root, 'creek');
+  dir = mkdtempSync(join(tmpdir(), 'field-convert-props-'));
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true });
 });
 
-function writeSound(name: string, lines: string[]): void {
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
-  writeFileSync(
-    join(root, `songs/creek/sounds/${name}.yaml`),
-    [`name: ${name}`, ...lines, ''].join('\n'),
-  );
-}
+let counter = 0;
 
-async function importTone(name: string, rate: number, frequency: number, seconds: number) {
+function writeTone(rate: number, frequency: number, seconds: number): string {
   const n = Math.round(rate * seconds);
   const samples = new Float32Array(n);
   for (let i = 0; i < n; i++) samples[i] = 0.5 * Math.sin((2 * Math.PI * frequency * i) / rate);
-  const src = join(root, '..', `field-normalize-src-${name}.wav`);
-  writeWavFloat32(src, rate, [samples]);
-  // These fixtures import off-rate sources on purpose — the resampler is
-  // the thing under test — so the mismatch is acknowledged, as decision 5
-  // asks of anyone doing this deliberately.
-  await importAsset(root, 'creek', src, name, { allowMismatch: true });
-  rmSync(src);
+  return writeSamples(rate, samples);
 }
 
-async function renderPath(label: string): Promise<string> {
-  const outcomes = await buildLabels(root, [`//songs/creek/sound:${label}`]);
-  return outcomes.find((o) => o.label.endsWith(`:${label}`))!.outputPath!;
+function writeSamples(rate: number, samples: Float32Array): string {
+  const path = join(dir, `src-${counter++}.wav`);
+  writeWavFloat32(path, rate, [samples]);
+  return path;
 }
 
-async function render(label: string) {
-  return readWav(await renderPath(label));
+async function normalize(
+  input: string,
+  sample_rate: number,
+  bit_depth: 16 | 24 | 32,
+): Promise<string> {
+  const output = join(dir, `out-${counter++}.wav`);
+  await renderInsertChain({ op: 'normalize', input, output, sample_rate, bit_depth });
+  return output;
+}
+
+async function resample(input: string, sample_rate: number): Promise<string> {
+  const output = join(dir, `out-${counter++}.wav`);
+  await renderInsertChain({ op: 'resample', input, output, sample_rate });
+  return output;
 }
 
 // Coherent amplitude at one frequency: every probe sits on a DFT bin
@@ -85,9 +85,7 @@ describe('normalize properties', () => {
     // The passband claim, end to end: a 1 kHz tone at 44.1k becomes a
     // 1 kHz tone at 48k at the same amplitude, and the file is as long
     // in seconds as it was.
-    await importTone('src', 44100, 1000, 2);
-    writeSound('up', ['type: normalize', 'source: src', 'sample_rate: 48000', 'bit_depth: 32']);
-    const wav = await render('up');
+    const wav = readWav(await normalize(writeTone(44100, 1000, 2), 48000, 32));
 
     expect(wav.sampleRate).toBe(48000);
     expect(wav.channels[0]!.length).toBe(96000);
@@ -106,15 +104,7 @@ describe('normalize properties', () => {
     // Each probe is its own render because two tones in one source would
     // let intermodulation, not the filter, explain a level change.
     for (const frequency of [10000, 15000, 19000]) {
-      const label = `p${frequency}`;
-      await importTone(`src${frequency}`, 44100, frequency, 2);
-      writeSound(label, [
-        'type: normalize',
-        `source: src${frequency}`,
-        'sample_rate: 48000',
-        'bit_depth: 32',
-      ]);
-      const wav = await render(label);
+      const wav = readWav(await normalize(writeTone(44100, frequency, 2), 48000, 32));
       const settled = wav.channels[0]!.subarray(48000);
       const db = 20 * Math.log10(magnitudeAt(settled, frequency, 48000, 1) / 0.5);
       expect(db, `${frequency} Hz`).toBeGreaterThan(-0.2);
@@ -122,23 +112,16 @@ describe('normalize properties', () => {
     }
   });
 
-  it('writes integer PCM at the depth the sound declared', async () => {
+  it('writes integer PCM at the depth it was asked for', async () => {
     // The format tag, not the decoded values. `normalize` promised
     // `LEI<depth>` when it was afconvert and still promises it; a decoded
     // sample sits on the same grid whether the file says PCM or float, so
     // the grid test cannot tell the two writers apart — routing 16-bit
     // through the float writer left all six properties green (#57
     // review). 32 is included because that is the one that regressed.
-    await importTone('src', 48000, 1000, 1);
+    const src = writeTone(48000, 1000, 1);
     for (const depth of [16, 24, 32] as const) {
-      const label = `fmt${depth}`;
-      writeSound(label, [
-        'type: normalize',
-        'source: src',
-        'sample_rate: 48000',
-        `bit_depth: ${depth}`,
-      ]);
-      const header = readWavHeader(await renderPath(label));
+      const header = readWavHeader(await normalize(src, 48000, depth));
       expect(header.format, `${depth}-bit format tag`).toBe(1); // 1 = integer PCM
       expect(header.bitsPerSample, `${depth}-bit width`).toBe(depth);
     }
@@ -149,14 +132,8 @@ describe('normalize properties', () => {
     // that zero, so a short one-shot rendered as an empty file and the
     // action key said it had worked (#57 review). Whole-second fixtures
     // are exactly the ones that cannot see this.
-    const samples = Float32Array.from([0.5, -0.5]);
-    const src = join(root, '..', 'field-normalize-src-short.wav');
-    writeWavFloat32(src, 96000, [samples]);
-    await importAsset(root, 'creek', src, 'short', { allowMismatch: true });
-    rmSync(src);
-
-    writeSound('tiny2', ['type: normalize', 'source: short', 'sample_rate: 44100', 'bit_depth: 32']);
-    const wav = await render('tiny2');
+    const src = writeSamples(96000, Float32Array.from([0.5, -0.5]));
+    const wav = readWav(await normalize(src, 44100, 32));
     expect(wav.channels[0]!.length).toBeGreaterThan(0);
   });
 
@@ -171,9 +148,7 @@ describe('normalize properties', () => {
     // = 14.1 kHz, loud and in the middle of the band. So the assertion is
     // about the *alias*, not about the original: if 14.1 kHz shows up,
     // something folded.
-    await importTone('hf', 96000, 30000, 2);
-    writeSound('down', ['type: normalize', 'source: hf', 'sample_rate: 44100', 'bit_depth: 32']);
-    const wav = await render('down');
+    const wav = readWav(await normalize(writeTone(96000, 30000, 2), 44100, 32));
 
     expect(wav.sampleRate).toBe(44100);
     const settled = wav.channels[0]!.subarray(44100);
@@ -186,9 +161,7 @@ describe('normalize properties', () => {
     // 16-bit means the samples are multiples of 2^-15 — the grid, not
     // merely "quieter" or "rounded somehow". A renderer that wrote float
     // and relabelled the header would pass a length check and fail this.
-    await importTone('src', 48000, 1000, 1);
-    writeSound('depth16', ['type: normalize', 'source: src', 'sample_rate: 48000', 'bit_depth: 16']);
-    const wav = await render('depth16');
+    const wav = readWav(await normalize(writeTone(48000, 1000, 1), 48000, 16));
 
     const step = Math.pow(2, -15);
     for (const v of wav.channels[0]!) {
@@ -210,13 +183,8 @@ describe('normalize properties', () => {
     const amplitude = Math.pow(2, -16) * 0.4; // well under 1 LSB at 16-bit
     const samples = new Float32Array(n);
     for (let i = 0; i < n; i++) samples[i] = amplitude * Math.sin((2 * Math.PI * 997 * i) / rate);
-    const src = join(root, '..', 'field-normalize-src-tiny.wav');
-    writeWavFloat32(src, rate, [samples]);
-    await importAsset(root, 'creek', src, 'tiny');
-    rmSync(src);
 
-    writeSound('quiet', ['type: normalize', 'source: tiny', 'sample_rate: 48000', 'bit_depth: 16']);
-    const wav = await render('quiet');
+    const wav = readWav(await normalize(writeSamples(rate, samples), 48000, 16));
 
     const out = wav.channels[0]!;
     expect(out.some((v) => v !== 0)).toBe(true);
@@ -247,13 +215,8 @@ describe('normalize properties', () => {
     // with its own reader.
     const samples = new Float32Array(27);
     for (let i = 0; i < 27; i++) samples[i] = 0.25 * Math.sin(i);
-    const src = join(root, '..', 'field-normalize-src-odd.wav');
-    writeWavFloat32(src, 48000, [samples]);
-    await importAsset(root, 'creek', src, 'odd');
-    rmSync(src);
 
-    writeSound('odd24', ['type: normalize', 'source: odd', 'sample_rate: 48000', 'bit_depth: 24']);
-    const path = await renderPath('odd24');
+    const path = await normalize(writeSamples(48000, samples), 48000, 24);
     const bytes = readFileSync(path);
 
     // 27 frames × 1 channel × 3 bytes = 81, odd by construction.
@@ -268,12 +231,11 @@ describe('normalize properties', () => {
 
   it('is deterministic, dither and all', async () => {
     // Same key, same bytes — the guarantee decision 10 says the PRNG must
-    // not break. Two renders of the same recipe into different projects
-    // must agree sample for sample.
-    await importTone('src', 44100, 440, 1);
-    writeSound('a', ['type: normalize', 'source: src', 'sample_rate: 48000', 'bit_depth: 16']);
-    writeSound('b', ['type: normalize', 'source: src', 'sample_rate: 48000', 'bit_depth: 16']);
-    const [a, b] = [await render('a'), await render('b')];
+    // not break. Two renders of the same source must agree sample for
+    // sample.
+    const src = writeTone(44100, 440, 1);
+    const a = readWav(await normalize(src, 48000, 16));
+    const b = readWav(await normalize(src, 48000, 16));
     expect([...a.channels[0]!]).toEqual([...b.channels[0]!]);
   });
 
@@ -287,9 +249,7 @@ describe('normalize properties', () => {
     // at 32-bit is 2^-31, and a filter that actually ran would miss by
     // orders of magnitude more than that — the bound still catches the
     // thing the property exists to catch.
-    await importTone('src', 48000, 1000, 1);
-    writeSound('same', ['type: normalize', 'source: src', 'sample_rate: 48000', 'bit_depth: 32']);
-    const wav = await render('same');
+    const wav = readWav(await normalize(writeTone(48000, 1000, 1), 48000, 32));
 
     const n = 48000;
     const expected = new Float32Array(n);
@@ -299,5 +259,51 @@ describe('normalize properties', () => {
       worst = Math.max(worst, Math.abs(wav.channels[0]![i]! - expected[i]!));
     }
     expect(worst).toBeLessThanOrEqual(Math.pow(2, -31));
+  });
+});
+
+describe('resample properties', () => {
+  it('converts the rate and writes float32, undithered', async () => {
+    // What separates the edge op from normalize: the output stays float
+    // (format tag 3), because it sits between two float stages and a
+    // quantization there would clip a stem legitimately above 0 dBFS.
+    // The band itself is the same resampler the normalize properties
+    // pin, so one passband probe is a wiring check, not a second oracle.
+    const path = await resample(writeTone(44100, 1000, 2), 48000);
+    const header = readWavHeader(path);
+    expect(header.format).toBe(3); // 3 = IEEE float
+    expect(header.bitsPerSample).toBe(32);
+    expect(header.sampleRate).toBe(48000);
+
+    const wav = readWav(path);
+    expect(wav.channels[0]!.length).toBe(96000);
+    const settled = wav.channels[0]!.subarray(48000);
+    expect(magnitudeAt(settled, 1000, 48000, 1)).toBeCloseTo(0.5, 2);
+  });
+
+  it('passes a same-rate source through bit-exactly', async () => {
+    // Float in, float out, 1:1 ratio: nothing between input and output —
+    // no filter, no dither, no quantization. Bit-exact is the honest
+    // assertion here in a way it stopped being for normalize.
+    const samples = new Float32Array(4801);
+    for (let i = 0; i < samples.length; i++) samples[i] = Math.sin(i * 0.37) * 0.9;
+    const src = writeSamples(48000, samples);
+    const wav = readWav(await resample(src, 48000));
+    expect([...wav.channels[0]!]).toEqual([...samples]);
+  });
+
+  it('does not clip a signal above 0 dBFS', async () => {
+    // The reason the op exists at all. A stem above full scale is legal
+    // float audio — the edge gain that tames it applies downstream — and
+    // routing the conversion through normalize's int PCM would flatten
+    // it at ±1.0 before that gain ever saw it.
+    const rate = 48000;
+    const n = rate * 2; // settle a second, then measure a whole second
+    const samples = new Float32Array(n);
+    for (let i = 0; i < n; i++) samples[i] = 1.5 * Math.sin((2 * Math.PI * 1000 * i) / rate);
+
+    const wav = readWav(await resample(writeSamples(rate, samples), 44100));
+    const settled = wav.channels[0]!.subarray(44100);
+    expect(magnitudeAt(settled, 1000, 44100, 1)).toBeCloseTo(1.5, 2);
   });
 });

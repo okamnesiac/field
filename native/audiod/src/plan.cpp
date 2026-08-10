@@ -411,6 +411,21 @@ void validatePlan (const juce::var& plan)
         validateSampleRate (plan, path);
         validateBitDepth (plan, path);
     }
+    else if (op == "resample")
+    {
+        // Rate and nothing else: the float edge conversion (render.cpp
+        // says why it neither dithers nor takes a depth). Same no-chain
+        // rule as normalize, enforced the same way — by checkObject
+        // refusing unknown keys.
+        checkObject (plan,
+                     path,
+                     { { "version", Kind::integer, true },
+                       { "op", Kind::string, true },
+                       { "input", Kind::string, true },
+                       { "output", Kind::string, true },
+                       { "sample_rate", Kind::integer, true, 1.0 } });
+        validateSampleRate (plan, path);
+    }
     else
     {
         fail (path + ".op", "unknown render op \"" + op.toStdString() + "\"");

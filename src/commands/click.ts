@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import { sha256FileSync } from '../hash.js';
+import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { beatTicks } from '../time/tempo.js';
 import type { LoadedProject } from '../model/project.js';
 import { musicalContext, songDirOfPkg, type MusicalContext } from './transport.js';
@@ -76,7 +77,13 @@ export function withClick(root: string, ctx: MusicalContext, item: Playable): Pl
 // (no tempo map) is a clear error rather than a silent no-click.
 export function applyClick(root: string, project: LoadedProject, items: Playable[]): Playable[] {
   return items.map((item) => {
-    const ctx = musicalContext(project, songDirOfPkg(item.pkg));
+    // Any rate serves here — beatGrid normalizes through seconds against
+    // the clicked file's own header — so the project's is fine.
+    const ctx = musicalContext(
+      project,
+      songDirOfPkg(item.pkg),
+      project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE,
+    );
     if (!ctx) throw new Error(`--click needs a song's tempo map; ${item.label} has none`);
     return withClick(root, ctx, item);
   });

@@ -9,9 +9,10 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; sequenced before
   the real-time engine because it changes the model the engine renders.
-- [Multi-rate](all/multi-rate.md) — sample rate becomes a track property,
-  converted at edges; unblocks the `normalize` half of nested-tracks
-  chunk 6, which forked on this decision.
+- [Multi-rate](all/multi-rate.md) — all three steps shipped (#107, #108,
+  #112); stays until a session has actually played through an edge
+  conversion, per the neighbours' precedent — every action key moved, the
+  plan version bumped, and conversions now appear at edges nobody typed.
 - [Voice generation](all/voice-generation.md) — committed vocals from
   text; creek sings, and it stays here until more songs have used it.
 - [Watch mode](all/watch.md) — both chunks shipped (#34, #35); stays

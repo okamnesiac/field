@@ -442,6 +442,47 @@ describe.skipIf(!binary)('field play through the daemon', () => {
     await playing; // the blocking play sees 'stopped' and returns
   });
 
+  it('locates in the played file\'s rate, not the project\'s', { timeout: 10_000 }, async () => {
+    // A 44.1 kHz asset in this 48 kHz project: beat 2 at 120 bpm is
+    // 0.5 s — sample 22050 of the file the daemon is streaming. Before
+    // the fix, --from and transport locate projected through the
+    // manifest rate and seeked to 24000, an eighth-note late (#112
+    // review, Codex). The formatted answer cannot catch this — parsing
+    // and formatting at the same wrong rate cancels — so the assertion
+    // is the daemon's own sample position.
+    const src = join(root, '..', `field-play-441-${Math.random()}.wav`);
+    writeWavFloat32(src, 44100, [new Float32Array(441000).fill(0.1)]); // 10 s
+    await importAsset(root, 'creek', src, 'wide', { allowMismatch: true });
+    rmSync(src);
+    project = loadProject(root);
+    const items = await resolvePlayables(root, ['//songs/creek/asset:wide']);
+    const playing = playThroughDaemon(root, project, items, {}, {});
+
+    await new Promise<void>((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      const poll = async () => {
+        try {
+          const lines = await transportStatusLines(root, project);
+          if (lines[0]?.startsWith('playing')) return resolve();
+        } catch {
+          // daemon still starting
+        }
+        if (Date.now() > deadline) reject(new Error('never started playing'));
+        else setTimeout(poll, 100);
+      };
+      void poll();
+    });
+
+    await transportCommand(root, 'pause');
+    expect(await transportLocate(root, project, '1.2.1')).toBe('1.2.1 (0:00.5)');
+    const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
+    expect((await client.status()).sample).toBe(22050);
+    client.close();
+
+    await transportCommand(root, 'stop');
+    await playing;
+  });
+
   it('transport without a daemon is a clear error', async () => {
     const bare = mkdtempSync(join(tmpdir(), 'field-notransport-'));
     try {

@@ -1,5 +1,5 @@
 import { eqGenerator, limitGenerator, reverbGenerator } from './effects.js';
-import { normalizeGenerator } from './normalize.js';
+import { resampleGenerator } from './resample.js';
 import { supercolliderGenerator } from './supercollider.js';
 import { stemGenerator } from './stem.js';
 import type { Generator, GeneratorSpec } from './types.js';
@@ -18,7 +18,7 @@ import type { Generator, GeneratorSpec } from './types.js';
 const RULES = {
   eq: eqGenerator,
   limit: limitGenerator,
-  normalize: normalizeGenerator,
+  resample: resampleGenerator,
   reverb: reverbGenerator,
   supercollider: supercolliderGenerator,
   stem: stemGenerator,

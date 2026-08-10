@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { parseDocument } from 'yaml';
 import type { z } from 'zod';
 import { PROJECT_MANIFEST } from '../constants.js';
-import { readWavHeader, wavFrameCount } from '../audio/wav.js';
+import { readWavHeader } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
@@ -742,13 +742,24 @@ function validate(project: LoadedProject): void {
       string,
       { tempo: TempoMap | undefined; meter: MeterMap | undefined }
     >();
+    const projectSampleRate = project.manifest?.data.sample_rate ?? 48000;
     for (const track of song.tracks) {
-      let tempo = tempoMap;
+      // At the track's effective rate (multi-rate.md decision 3): the
+      // sample-domain checks below — fade fit, loop expansion — have to
+      // project ticks exactly as the plan will, and a 44.1 kHz track's
+      // bar is fewer samples than the song's. The song's own map serves
+      // any track at the project rate, which is every track without a
+      // `rate:`.
+      const trackSampleRate = track.data.rate ?? projectSampleRate;
+      let tempo =
+        trackSampleRate === projectSampleRate || song.tempo === undefined || tempoMap === undefined
+          ? tempoMap
+          : new TempoMap(song.tempo.data.tempo, trackSampleRate);
       let meter = meterMap;
       const time = track.data.time;
       if (time?.tempo) {
         try {
-          tempo = new TempoMap(time.tempo, project.manifest?.data.sample_rate ?? 48000);
+          tempo = new TempoMap(time.tempo, trackSampleRate);
         } catch (err) {
           push(track.path, `local tempo: ${(err as Error).message}`);
           tempo = undefined;
@@ -768,6 +779,19 @@ function validate(project: LoadedProject): void {
       const expected = basename(track.path, '.yaml');
       if (track.data.name !== expected) {
         push(track.path, `name "${track.data.name}" must match filename "${expected}"`);
+      }
+      // The output track is the song, and the song's rate is
+      // project.yaml's `sample_rate` (multi-rate.md decision 3) — a
+      // `rate:` here could only restate it or contradict it, and a field
+      // with one correct value should not exist (the argument that
+      // retired the normalize insert).
+      const trackSampleRate = track.data.rate ?? projectSampleRate;
+      if (track.data.name === SONG_OUTPUT_NAME && track.data.rate !== undefined) {
+        push(
+          track.path,
+          `the song's output renders at the project rate — sample_rate in project.yaml ` +
+            `is that choice (multi-rate.md decision 3); delete rate: here`,
+        );
       }
 
       // A track's own timeline (nested-tracks.md §1.5, §13). Everything in
@@ -983,7 +1007,23 @@ function validate(project: LoadedProject): void {
               const resolved = resolveAssetFile(project.root, committed.base, committed.file);
               if (resolved.path) {
                 try {
-                  frames = wavFrameCount(resolved.path);
+                  const header = readWavHeader(resolved.path);
+                  if (header.sampleRate !== trackSampleRate) {
+                    // The edge conversion (multi-rate.md decision 4)
+                    // changes the source's length, so tiling at "its"
+                    // length would tile at the wrong one — the converted
+                    // count exists only after the conversion renders,
+                    // which is the same reason a buildable demands every.
+                    sourceUnreadable = true;
+                    push(
+                      track.path,
+                      `${what} loops a ${header.sampleRate} Hz source on a ` +
+                        `${trackSampleRate} Hz track — set loop.every: the edge ` +
+                        `conversion changes its length, which is unknown before it builds`,
+                    );
+                  } else {
+                    frames = header.frames;
+                  }
                 } catch (err) {
                   sourceUnreadable = true;
                   push(track.path, `${what} loop source: ${(err as Error).message}`);

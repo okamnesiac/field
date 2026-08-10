@@ -23,7 +23,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 6;
+constexpr int renderPlanVersion = 7;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -347,6 +347,22 @@ std::string runRender (const std::string& planPath)
             // existing schema value under a version bump that only claims
             // to change the bytes (#57 review).
             dsp::writeWavInt (output, rate, channels, bitDepth);
+        }
+        else if (op == "resample")
+        {
+            // resample: rate and nothing else — the edge conversion the
+            // graph mints when a source's rate differs from its consuming
+            // track's (multi-rate.md decision 4). Same resampler as
+            // normalize (render-pipeline.md §2.9 keeps exactly one), but
+            // float32 out and no dither: this op sits between two float
+            // stages, and quantizing here would clip a stem legitimately
+            // above 0 dBFS before its edge gain is applied. normalize
+            // stays what it is — quantization is a delivery choice, made
+            // at export.
+            auto wav = dsp::readWav (requireString (plan, "input", "render plan"));
+            const double rate = requireNumber (plan, "sample_rate", "render plan");
+            auto channels = dsp::resample (wav.channels, wav.sampleRate, rate);
+            dsp::writeWavFloat32 (output, rate, channels);
         }
         else
         {

@@ -25,10 +25,11 @@ resolve gen node names. `seven-eight-loop`'s wait ended the way §16 planned: `l
 into `field export --rate 44100 --bit-depth 16`
 ([multi-rate.md](multi-rate.md) step 2) and the loop is a leaf track —
 `drums` re-rendered byte-identically and `main` never re-keyed. One
-sound still waits, for the reason a sound cannot see a track:
-`lead-take` is sourced by `vocal-48k`, which retires at multi-rate
-step 3 when a track carries its own rate — then the last sound folds
-and `sounds/` empties.
+sound still waits: `vocal-48k` has retired — multi-rate step 3 landed,
+a track carries its own rate and `lead-vocal` clips `lead-take`
+directly through the edge's conversion — so `lead-take` is the last
+sound standing, unblocked to fold as a generative leaf; then `sounds/`
+empties.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it
@@ -678,6 +679,14 @@ two meters — a conversion that has no meaning anyway, since the two
 timelines are not measuring the same thing. Everything in one track file,
 its clips and the `at` of every track it places, is in that one track's
 time.
+
+*Amended 2026-08-09 (multi-rate.md §3): offsets add within a rate.* A
+track may now declare `rate:`, and its whole file — ticks included —
+projects to samples at that rate, so the parent computes its offset in
+its own rate and the child's stem passes through the edge's resample
+node before the sum. The addition itself is untouched: every stem the
+daemon sums arrived at the summing track's rate, and the tick layer
+never was rate-dependent.
 
 The unit is the *track*, though, not quite the file. A take under
 `takes/<track>/` is a recording on that track, so its ticks are in that

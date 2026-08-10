@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
-import { labelName, sampleRate, sourceRef } from './common.js';
+import { labelName, sourceRef } from './common.js';
 import { eqParams, limitParams, reverbParams } from './effects.js';
 
 // songs/<song>/sounds/<name>.yaml — one defined sound per file, name
@@ -16,14 +16,26 @@ import { eqParams, limitParams, reverbParams } from './effects.js';
 // (assets and sounds together), a //shared/asset:<name> label crosses
 // scope, and for supercollider a path names the program file.
 
-export const normalizeSoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('normalize'),
-  source: sourceRef,
-  sample_rate: sampleRate,
-  bit_depth: z.union([z.literal(16), z.literal(24), z.literal(32)]),
-});
-export type NormalizeSound = z.infer<typeof normalizeSoundSchema>;
+// `type: normalize` retired with multi-rate.md step 3, split along the
+// seam §1 of that plan found: outbound formatting is `field export
+// --rate <hz> --bit-depth <depth>` (decision 1), and a rate-mismatched
+// source converts at the edge automatically (decisions 4 and 6). The
+// tombstone stays in the union so an old file gets told the move rather
+// than "invalid type" — the same courtesy every other retirement here
+// pays. Loose on purpose: whatever else the file says, the message is
+// the same, and field errors would bury it.
+const normalizeRetiredSchema = z
+  .looseObject({ type: z.literal('normalize') })
+  .superRefine((_, ctx) => {
+    ctx.addIssue({
+      code: 'custom',
+      message:
+        'type: normalize has retired (multi-rate.md §2) — delivery formatting is ' +
+        '`field export --rate <hz> --bit-depth <depth>`, and a rate-mismatched source ' +
+        'now converts at the edge automatically; delete this sound and reference its ' +
+        'source directly',
+    });
+  });
 
 export const eqSoundSchema = z.strictObject({
   name: labelName,
@@ -309,7 +321,7 @@ export type GenerativeSound = Omit<GenerativeRecipe, 'variants' | 'chosen'> & {
 };
 
 export const soundSchema = z.discriminatedUnion('type', [
-  normalizeSoundSchema,
+  normalizeRetiredSchema,
   supercolliderSoundSchema,
   generativeSoundSchema,
   eqSoundSchema,
@@ -317,8 +329,10 @@ export const soundSchema = z.discriminatedUnion('type', [
   reverbSoundSchema,
 ]);
 // A sound as parsed from disk. Generative members are recipes here; the
-// loader replaces them with the merged form below.
-export type ParsedSound = z.infer<typeof soundSchema>;
+// loader replaces them with the merged form below. The normalize
+// tombstone is excluded: its refine always fails, so no value of that
+// member ever parses — it exists for its message, not its shape.
+export type ParsedSound = Exclude<z.infer<typeof soundSchema>, { type: 'normalize' }>;
 
 // The types the graph may generate automatically — the ones with a
 // Generator (src/generators/). `generative` is deliberately excluded: its
@@ -349,8 +363,6 @@ export const soundOrder: KeyOrder = {
     'duration_seconds',
     'bars',
     'channels',
-    'sample_rate',
-    'bit_depth',
     'bands',
     'normalize',
     'ceiling_db',

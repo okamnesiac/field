@@ -56,8 +56,8 @@ export function validateSingleInput(spec: SingleInputSpec, ctx: ValidateContext)
 }
 
 // Effects process at the file's own rate — they are rate-agnostic DSP;
-// normalize is the rate converter, and stems are where the project rate
-// gets enforced. Channel count passes through.
+// the edge's resample node is the rate converter, and stems are where a
+// track's effective rate gets enforced. Channel count passes through.
 export function transformAudio(
   inputPath: string,
   outputPath: string,

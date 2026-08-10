@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
-import { labelName, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
+import { labelName, sampleRate, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 import { meterEventSchema, tempoEventSchema } from './song.js';
 import { generativeEntrySchema } from './sounds.js';
@@ -224,6 +224,13 @@ const RETIRED_CLIPS =
 export const trackSchema = z.strictObject({
   name: labelName,
   type: z.never({ error: RETIRED_TYPE }).optional(),
+  // The rate this track renders at (multi-rate.md decision 3). Omitted
+  // means the project's — the same inheritance shape as `time:`, and from
+  // the song for the same reason: a track may have two parents and
+  // renders exactly once, so its rate has to mean one thing no matter who
+  // consumes it. Where a parent's rate differs, the edge converts
+  // (decision 4); nothing here needs to know who is listening.
+  rate: sampleRate.optional(),
   // Omitted means the song's maps, which is every track today.
   time: trackTimeSchema.optional(),
   gain_db: z.never({ error: RETIRED_FADER }).optional(),
@@ -239,7 +246,7 @@ export type Track = Omit<TrackFile, 'inputs'> & {
   inputs: InputEntry[];
 };
 export const trackOrder: KeyOrder = {
-  keys: ['name', 'time', 'inserts', 'inputs'],
+  keys: ['name', 'rate', 'time', 'inserts', 'inputs'],
   children: {
     // Same shape and order as tempo.yaml's, so a local map reads like the
     // song map it overrides rather than like a different kind of thing.

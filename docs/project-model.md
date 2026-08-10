@@ -110,7 +110,8 @@ keeping arrays single-line.
 ## Entries are metadata; audio is immutable
 
 Audio files are never edited in place. A track file is a name, an
-optional `time:`, optional `inserts:`, and one list: `inputs:`
+optional `rate:`, an optional `time:`, optional `inserts:`, and one
+list: `inputs:`
 (nested-tracks.md §18). Every entry places one thing on the track's
 timeline, named by the entry's field — the kind lives in the field name,
 never in a value prefix:
@@ -195,6 +196,18 @@ The two timelines are never reconciled as maps. A track renders to
 samples in its own time from its own sample 0; its parent's `at` resolves
 to samples under the parent's map; the daemon sums by sample offset. So
 placing a 7/8 child in a 4/4 parent is an addition, not a conversion.
+
+A track may also carry its own `rate:` (multi-rate.md decision 3), the
+project's `sample_rate` otherwise — the same inheritance shape as
+`time:`, from the song and never from the placing parent, because a
+track renders once. Rates convert only at edges: where a source's rate
+differs from its track's — a 24 kHz generated take, a 44.1 kHz import,
+a child tracked at 96 kHz — the graph mints a conversion node at the
+placement (decision 4), content-addressed and shared by every placement
+of that source at that rate, visible in `explain` and `deps()`. The
+song's output track is the song, so it renders at the project rate and
+refuses a `rate:` of its own; delivery at another rate is `field export
+--rate` (decision 1), not a node in the song.
 
 A placement also carries the level — `gain_db` and `pan` — and that is
 where a level lives, rather than on the track. The two are one gain stage
