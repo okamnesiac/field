@@ -8,7 +8,7 @@ in scripts, y/N interactively. Step 2 (export grows `--rate` /
 `--bit-depth`, decision 1) is implemented: conversion on the way out
 through the daemon's normalize op, proven bit-identical to `loop-cd`'s
 render before that sound retired. Step 3 unstarted; the
-`seven-eight-loop` fold it unblocked belongs to nested-tracks chunk 6.
+`seven-eight-loop` fold it unblocked has landed (nested-tracks chunk 6).
 Written because
 chunk 6 of [nested-tracks.md](nested-tracks.md) hit `normalize` and
 found two features sharing its schema (§1), and the inbound half's

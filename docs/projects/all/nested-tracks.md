@@ -21,15 +21,14 @@ tracks whose renders are `gen:` nodes cached under their old sound keys.
 `generative:` entries have landed too (§18 step 3, decision 3 as
 amended): `still-water-keys` is a leaf track, its takes keyed by gen
 node name so the audio directory never moved, and `generate`/`choose`
-resolve gen node names. Two sounds wait with the normalizes, for the
-same reason: a sound cannot see a track. `seven-eight-loop` is sourced
-by `loop-cd` and both retire together at
-[multi-rate.md](multi-rate.md) step 2 (§16); `lead-take` is sourced by
-`vocal-48k`, which retires at multi-rate step 3 when a track carries
-its own rate — then the last sound folds and `sounds/` empties.
-`loop-cd` has retired into `field export --rate 44100 --bit-depth 16`
-(multi-rate step 2), so `seven-eight-loop`'s fold is unblocked and
-next.
+resolve gen node names. `seven-eight-loop`'s wait ended the way §16 planned: `loop-cd` retired
+into `field export --rate 44100 --bit-depth 16`
+([multi-rate.md](multi-rate.md) step 2) and the loop is a leaf track —
+`drums` re-rendered byte-identically and `main` never re-keyed. One
+sound still waits, for the reason a sound cannot see a track:
+`lead-take` is sourced by `vocal-48k`, which retires at multi-rate
+step 3 when a track carries its own rate — then the last sound folds
+and `sounds/` empties.
 The chunk order changed on the way in; §9
 records what and why. Sequenced deliberately **before** the
 real-time engine ([audio-engine.md](../../audio-engine.md)), because it

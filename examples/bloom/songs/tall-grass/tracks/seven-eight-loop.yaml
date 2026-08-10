@@ -1,12 +1,15 @@
 # the 7/8 groove. This was a committed recording in the standalone repo;
 # here it is a seeded program, because the example commits no audio
 # (bloom-in-tree.md §4) and a SuperCollider render is a promise the build
-# can keep — same bytes every time, so nothing needs storing.
+# can keep — same bytes every time, so nothing needs storing. A leaf
+# track whose one entry is the program, since sounds folded into tracks
+# (nested-tracks.md §18).
 #
 # 3.182s is two bars of 7/8 at 132, which is what drums.yaml asks for.
 name: seven-eight-loop
-type: supercollider
-source: seven-eight-loop.scd
-seed: 7801
-duration: 3.182
-channels: 2
+inputs:
+  - supercollider:
+      source: seven-eight-loop.scd
+      seed: 7801
+      duration: 3.182
+      channels: 2
