@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { randomInt } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 import { Command } from 'commander';
@@ -140,7 +141,7 @@ program
   .option('--song <name>', 'retired — the song rides in the name (creek/lead-take)')
   .option('--prompt <text>', 'what to generate — music, through field-aced')
   .option('--text <line>', 'the line to speak or sing — voice, through field-voiced')
-  .requiredOption('--seed <n>', 'base seed; variant i uses seed+i', parseSeed)
+  .option('--seed <n>', 'base seed; variant i uses seed+i (default: random, recorded per take)', parseSeed)
   .option('--bars <n>', 'music: length in bars at the song tempo (or use --duration)', parseBars)
   .option('--duration <seconds>', 'music: length in seconds (or use --bars)', parseDurationSeconds)
   .option('--variants <n>', 'how many variants (1-8)', parseVariants, 2)
@@ -150,7 +151,7 @@ program
   .option('--exaggeration <n>', 'voice: expressive intensity, 0.25-2 (lower is calmer and slower)', parseExaggeration)
   .option('--conviction <n>', 'voice: how hard it commits to the on-text reading, 0.1-1 (lower lingers)', parseConviction)
   .action(async (target: string, opts: {
-    song?: string; prompt?: string; text?: string; seed: number; bars?: number; duration?: number;
+    song?: string; prompt?: string; text?: string; seed?: number; bars?: number; duration?: number;
     variants: number; lyrics?: string; bpm?: number; voiceRef?: string;
     exaggeration?: number; conviction?: number;
   }) => {
@@ -166,11 +167,16 @@ program
       }
       const { song, name } = parseGenTarget(target, 'generate');
       const { generateVariants } = await import('./commands/generate.js');
+      // A seed is provenance, not reproducibility — inference does not
+      // reproduce across GPU/framework versions (bloom-in-tree.md §3),
+      // and every take records the seed it ran with — so an omitted
+      // --seed draws one and the output names it below.
+      const seed = opts.seed ?? randomInt(0, 2 ** 31);
       const result = await generateVariants(requireRoot(), name, {
         song,
         prompt: opts.prompt,
         text: opts.text,
-        seed: opts.seed,
+        seed,
         bars: opts.bars,
         durationSeconds: opts.duration,
         variants: opts.variants,
@@ -189,8 +195,12 @@ program
           ? `${result.durationSeconds.toFixed(1)}s` +
             `${result.bpm !== undefined ? ` @ ${result.bpm} bpm` : ''}, `
           : `voice: ${result.voiceRef ?? "the model's own"}, `;
+      const seeds =
+        result.seeds.length === 1
+          ? `seed ${result.seeds[0]}`
+          : `seeds ${result.seeds[0]}–${result.seeds[result.seeds.length - 1]}`;
       process.stdout.write(
-        `generated ${result.files.length} variants (${detail}${result.model})\n`,
+        `generated ${result.files.length} variants (${detail}${result.model}, ${seeds})\n`,
       );
       for (const file of result.files) process.stdout.write(`  ${file}\n`);
       process.stdout.write(`recipe: ${result.recipePath}\n`);
