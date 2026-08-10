@@ -63,7 +63,19 @@ class Pipeline:
         root = models_root()
         checkpoints = root / "checkpoints"
         checkpoints.mkdir(parents=True, exist_ok=True)
-        progress(0.0, "downloading/verifying ACE-Step weights (first run pulls ~10 GB)")
+        # `ensure_model_downloaded` verifies the machine-global home and
+        # downloads only what is missing; announcing ~10 GB over a warm
+        # cache reads as a per-project re-download (the voiced adapter's
+        # `_weights_message` records the incident). Non-empty is a
+        # display heuristic only — a wrong guess mislabels a progress
+        # line, never changes what loads.
+        cached = any(checkpoints.iterdir())
+        progress(
+            0.0,
+            "verifying ACE-Step weights in the machine-global cache"
+            if cached
+            else "downloading ACE-Step weights (first run pulls ~10 GB)",
+        )
         ensure_model_downloaded(get_model_name(CONFIG_PATH), str(checkpoints))
         ensure_model_downloaded("vae", str(checkpoints))
 
