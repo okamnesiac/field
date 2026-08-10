@@ -39,8 +39,6 @@ costs nothing. See [README](README.md) for how these lists work.
   audition, choosing commits the sample with the recipe of how it was
   found — which pays for per-song listing and kept licenses
   ([splice.md](all/splice.md)).
-- **Generation progress** — the workers emit coarse stages and a
-  minutes-long generate is one silent "generating"; real progress (ACE
-  step counts, Chatterbox chunking) rides the existing progress events
-  when someone commits to it. The immediate "starting field-aced" line
-  is already in; this is the rest.
+- **Generation progress** — real per-step progress from the workers
+  (ACE step counts, Chatterbox chunking) over the existing progress
+  events; today a minutes-long generate is one silent "generating".

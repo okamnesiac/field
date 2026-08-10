@@ -496,7 +496,7 @@ describe('field generate: what lands on disk', () => {
     // The first line arrives before the worker exists: daemon boot,
     // python import and model load can be a silent minute, and a silent
     // minute reads as a hang (session finding).
-    expect(stages[0]).toBe('starting field-voiced — the first progress line can take a minute');
+    expect(stages[0]).toBe('starting field-voiced');
     expect(stages).toContain('stubbing');
   });
 });

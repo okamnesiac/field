@@ -473,14 +473,6 @@ export async function generateVariants(
   // because a voice generate that guesses is one that commits audio in a
   // voice nobody asked for.
   //
-  // Every refusal above is instant; everything below can take real time.
-  // The first worker-emitted progress line is a daemon boot, a python
-  // import, and a model load away — a silent minute that reads as a hang
-  // (found exercising the format) — so who is starting is said now,
-  // from this side. Finer-grained in-run progress is later.md's line.
-  request.onProgress?.(
-    `starting field-${kind === 'voice' ? 'voiced' : 'aced'} — the first progress line can take a minute`,
-  );
   // Outside the project deliberately: the snapshot is scaffolding for one
   // run, and a stray copy under songs/ would be a file `field check` has
   // opinions about and a person would have to delete.
@@ -505,6 +497,15 @@ export async function generateVariants(
     }
     mkdirSync(outputDir, { recursive: true });
 
+    // Every refusal above is instant — the voice-ref snapshot included,
+    // a file copy and a hash — and everything below can take real time:
+    // the first worker-emitted progress line is a daemon boot, a python
+    // import, and a model load away, a silent minute that reads as a
+    // hang (found exercising the format). So who is starting is said
+    // now, from this side, last before the slow work — a refusal never
+    // gets a stray "starting" ahead of it (Bugbot on #120).
+    // Finer-grained in-run progress is later.md's line.
+    request.onProgress?.(`starting field-${kind === 'voice' ? 'voiced' : 'aced'}`);
     const client =
       kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);
     try {
