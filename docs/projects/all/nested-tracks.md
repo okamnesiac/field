@@ -1,3 +1,7 @@
+---
+status: Active
+---
+
 # Plan: Nested tracks — one primitive for structure, time and mix
 
 **Status:** Complete except deferred sends (2026-08-09) — every chunk

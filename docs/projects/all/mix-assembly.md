@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Offline mix assembly
 
 **Status:** Shipped (#9–#11, merged 2026-08-05). Follows

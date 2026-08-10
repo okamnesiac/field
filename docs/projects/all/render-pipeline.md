@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: One rendering pipeline
 
 **Status:** Shipped, chunks 1–6 (#50, #53, #54, #55 and chunk 5 here),

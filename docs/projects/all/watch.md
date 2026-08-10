@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Watch mode — the loop follows the project
 
 **Status:** Implemented (2026-08-06). Chunk 1 — the daemon `reload` op

@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Playback
 
 **Status:** Shipped (#12–#13, merged 2026-08-05): the daemon, the socket,

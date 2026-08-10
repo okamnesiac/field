@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: ACE generation
 
 **Status:** Complete (2026-08-05, #17 + #18). Both chunks shipped; bloom

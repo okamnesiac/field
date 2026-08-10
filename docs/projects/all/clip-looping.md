@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Clip looping
 
 **Status:** Complete. Clip looping shipped in #21; #23 extended looping

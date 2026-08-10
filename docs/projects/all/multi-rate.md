@@ -1,3 +1,7 @@
+---
+status: Shipped
+---
+
 # Plan: Sample rate is a property of the track, converted at the edge
 
 **Status:** Complete (2026-08-09), all three steps. Step 1 (import
