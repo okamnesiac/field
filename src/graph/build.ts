@@ -169,12 +169,21 @@ function outPath(project: LoadedProject, node: GeneratorNode): string {
   return join(project.root, '.field', 'out', node.label.pkg, `${node.label.name}.wav`);
 }
 
+// Temporary paths carry a process-unique suffix: two builds can run in
+// one process — the watch loop's recompile beside its background stem
+// build — and identical actions sharing a literal `<key>.out` (or two
+// materializations sharing `.tmp-<pid>`) would race their renames.
+// Duplicate concurrent work is merely wasteful; the CAS write and
+// rename are idempotent for identical content.
+let nextTmp = 0;
+
 async function buildNode(
   project: LoadedProject,
   graph: Graph,
   node: GraphNode,
   runner: GeneratorRunner,
   built: Map<string, BuildOutcome>,
+  signal?: AbortSignal,
 ): Promise<BuildOutcome> {
   if (node.kind === 'asset') {
     // Source targets: the declared hash is the identity; check verifies
@@ -227,7 +236,7 @@ async function buildNode(
     // may be streaming the previous artifact from this very path, and an
     // in-place copy truncates under its reader. A fresh inode leaves the
     // playing pass untouched until the swap (watch.md §1.6).
-    const tmp = `${out}.tmp-${process.pid}`;
+    const tmp = `${out}.tmp-${process.pid}-${nextTmp++}`;
     copyFileSync(casPath(project, sha256), tmp);
     renameSync(tmp, out);
     return out;
@@ -280,8 +289,12 @@ async function buildNode(
   );
   const tmpDir = join(cacheDir(project), 'tmp');
   mkdirSync(tmpDir, { recursive: true });
-  const tmpOut = join(tmpDir, `${key}.out`);
-  await runner(node, inputPaths, tmpOut, { root: project.root, sampleRate: node.sampleRate });
+  const tmpOut = join(tmpDir, `${key}.out-${process.pid}-${nextTmp++}`);
+  await runner(node, inputPaths, tmpOut, {
+    root: project.root,
+    sampleRate: node.sampleRate,
+    ...(signal !== undefined ? { signal } : {}),
+  });
   if (!existsSync(tmpOut)) {
     throw new Error(`type "${node.spec.type}" produced no output for ${formatLabel(node.label)}`);
   }
@@ -310,6 +323,7 @@ export async function build(
   graph: Graph,
   nodes: GraphNode[],
   runner: GeneratorRunner = defaultRunner,
+  signal?: AbortSignal,
 ): Promise<BuildOutcome[]> {
   // Across every requested target at once, before any per-target walk:
   // a queue where each target hides its own takeless request must
@@ -319,9 +333,10 @@ export async function build(
   const built = new Map<string, BuildOutcome>();
   for (const start of nodes) {
     for (const node of deps(graph, start)) {
+      if (signal?.aborted) throw new Error('build aborted');
       const label = formatLabel(node.label);
       if (built.has(label)) continue;
-      const outcome = await buildNode(project, graph, node, runner, built);
+      const outcome = await buildNode(project, graph, node, runner, built, signal);
       built.set(label, outcome);
       outcomes.push(outcome);
     }

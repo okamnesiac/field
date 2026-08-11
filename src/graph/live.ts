@@ -354,24 +354,22 @@ export async function compileSession(
     }
   }
   const output = shapes.get('main')!;
-  if (options.loop === true && output.spec.length_samples === undefined) {
-    throw new Error(
-      `--loop wraps at the song's declared extent and "${songName}" declares none — ` +
-        'set length: in its song.yaml',
-    );
-  }
+  // The session is always bounded: the declared extent when the song
+  // has one, the output's natural length — content end plus chain
+  // growth, exactly where the artifact ends — when it does not
+  // (Codex's finding: an unbounded session played silence forever
+  // after the content ran out). The authored `loop:` never reaches
+  // the transport — it is a render-shape declaration, the fold
+  // (clip-looping.md: "one seamless pass of the infinite
+  // performance") — and player repetition is `field play --loop`,
+  // which wraps at the same extent the length picks.
+  const extent = output.spec.length_samples ?? postLength.get('main')!;
   const session: Session = {
     version: SESSION_VERSION,
     song: songName,
     rate: output.rate,
-    ...(output.spec.length_samples !== undefined
-      ? { length_samples: output.spec.length_samples }
-      : {}),
-    ...(options.loop === true
-      ? { loop: true }
-      : output.spec.loop !== undefined
-        ? { loop: output.spec.loop }
-        : {}),
+    ...(extent > 0 ? { length_samples: extent } : {}),
+    ...(options.loop === true ? { loop: true } : {}),
     output: 'main',
     tracks: [...compiled.values()],
   };

@@ -280,6 +280,22 @@ stands as drafted; its list line waits in later.md.
    lands, and the explicit artifact spelling remains the answer on a
    device that cannot switch.
 
+   *Amended 2026-08-11 (review of the first implementation):* the
+   authored `loop:` never reaches the transport — it is the fold,
+   clip-looping.md's one seamless pass — so a bare play of a
+   loop-shaped song plays one pass and stops, and repetition stays
+   `field play --loop`, wrapping at the declared extent or, on a song
+   that declares none, at the output's natural length; sessions are
+   always bounded now, because an unbounded one played silence forever
+   past its content. `--from --loop` — the region loop — is refused on
+   the live path and pointed at the artifact spelling until the engine
+   grows a loop-start; that wiring is owed alongside the streaming
+   rings. The background freeze rides the watch's abort signal down
+   into the render subprocess, so ctrl-c ends a mid-freeze build at
+   once instead of when the stem finishes, and build temporary paths
+   are process-unique because the freeze legitimately put two builds
+   in one process.
+
 ## 8 Open questions
 
 None right now. The three the first draft carried — the golden test's

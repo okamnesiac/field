@@ -377,6 +377,17 @@ export async function playLiveSession(
   } = {},
   hooks: PlayHooks = {},
 ): Promise<void> {
+  if (options.from !== undefined && options.loop === true) {
+    // A region loop: the artifact path requeues from the position each
+    // pass, but the live wrap returns to the top — the engine has no
+    // loop-start yet (realtime.md chunk 4 amendment) — so refusing is
+    // honest where silently looping the wrong region is not (Codex's
+    // finding).
+    throw new Error(
+      `--from with --loop is a region loop, which rides file playback: ` +
+        `field play ${song}/track:main --from <position> --loop`,
+    );
+  }
   const { compileSession } = await import('../graph/live.js');
   const compiled = await compileSession(root, song, {
     ...(options.loop === true ? { loop: true } : {}),

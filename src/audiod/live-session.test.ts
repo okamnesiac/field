@@ -299,6 +299,31 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     }
   });
 
+  it('the authored loop is the fold; the transport loop is the flag; the extent is finite', async () => {
+    await scaffold(root);
+    const songPath = join(root, 'songs/opener/song.yaml');
+    const songYaml = readFileSync(songPath, 'utf8');
+
+    // `loop: true` in song.yaml shapes the render — the fold, one
+    // seamless pass (clip-looping.md) — and never reaches the
+    // transport; repetition is the --loop flag (Codex's finding: a
+    // bare play of a declared-loop song repeated forever).
+    writeFileSync(songPath, songYaml.replace('length: 72000', 'length: 72000\nloop: true'));
+    const declared = await compileSession(root, 'opener');
+    expect(declared.session.loop).toBeUndefined();
+    expect(declared.session.length_samples).toBe(1_800_000);
+    const forced = await compileSession(root, 'opener', { loop: true });
+    expect(forced.session.loop).toBe(true);
+
+    // No declared extent: the session bounds itself at the output's
+    // natural length — content end plus chain growth, where the
+    // artifact ends — instead of playing silence forever (Codex's
+    // finding).
+    writeFileSync(songPath, songYaml.replace('length: 72000\n', ''));
+    const natural = await compileSession(root, 'opener');
+    expect(natural.session.length_samples).toBeGreaterThanOrEqual(54000);
+  });
+
   it('the cache is the freeze (realtime.md chunk 4)', async () => {
     await scaffold(root);
     // Cold cache: nothing freezes. The output can never freeze and

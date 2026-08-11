@@ -63,7 +63,11 @@ export async function watchLiveSession(
   const refreeze = (dirty: string[]): void => {
     if (dirty.length === 0 || freezing || (options.signal?.aborted ?? false)) return;
     freezing = true;
-    void buildLabels(root, dirty).then(
+    // The signal rides into the build and kills its render subprocess:
+    // a ctrl-c mid-freeze must end the process now, not when the stem
+    // finishes (Codex's finding). An abort surfaces as a rejection
+    // here, which is the loop ending, not an error to report.
+    void buildLabels(root, dirty, undefined, undefined, options.signal).then(
       () => {
         freezing = false;
         if (options.signal?.aborted ?? false) return;
@@ -72,6 +76,7 @@ export async function watchLiveSession(
       },
       (err: unknown) => {
         freezing = false;
+        if (options.signal?.aborted ?? false) return;
         hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
       },
     );

@@ -53,11 +53,12 @@ export async function buildLabels(
   patterns: string[],
   runner?: GeneratorRunner,
   onWarning?: (line: string) => void,
+  signal?: AbortSignal,
 ): Promise<BuildOutcome[]> {
   const { project, graph, warnings } = loadValid(root);
   for (const line of warnings) onWarning?.(line);
   const nodes = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
-  return build(project, graph, nodes, runner);
+  return build(project, graph, nodes, runner, signal);
 }
 
 export function queryDeps(root: string, query: string): string[] {
