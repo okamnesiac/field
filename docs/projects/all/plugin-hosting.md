@@ -37,7 +37,8 @@ chosen over Swift and Rust largely for hosting
 ([architecture.md](../../architecture.md) records the decision — out-of-process
 scanning, editor windows, state-serialization quirks, delay
 compensation); the single-executor render pipeline was forced by AU
-chains (render-pipeline.md); and the determinism policy in
+chains ([render-pipeline.md](render-pipeline.md) §2 decision 1); and
+the determinism policy in
 [build-graph.md](../../build-graph.md) was written with plugins as its
 subject. This plan implements those decisions; it does not reopen
 them.
@@ -66,7 +67,12 @@ Decided elsewhere, restated here as constraints:
 - **A machine without the plugin still builds from cache.** Stems are
   content; only a *rebuild* of a node needs its plugin installed, and
   that build fails at the node with the plugin's name and version.
-  Freezing is the collaboration story, not an optimization.
+  Said precisely: the action key stays computable from the repository
+  alone, so any machine *holding the artifact* serves it without the
+  plugin — today that means the machine that rendered it, because the
+  cache is local and unversioned, and the remote asset store
+  (later.md) is what turns this into a cross-machine story. Freezing
+  is the collaboration story, not an optimization.
 
 ## 3 Decisions (DECIDED, 2026-08-11)
 
@@ -85,7 +91,13 @@ Decided elsewhere, restated here as constraints:
    same write-back channel the knobs use, so the file self-pins the
    way a lockfile would, inline and readable. A name whose id
    resolves to a differently named plugin is a `check` warning with
-   an offered fix in either direction.
+   an offered fix in either direction. A product installed as both
+   AU and VST3 matches one name twice; resolution is deterministic —
+   AU on macOS, VST3 elsewhere — and never silent, because the pin
+   *is* the disclosure: the field name the tool writes says which
+   format won, and repinning to the other is a tool gesture
+   (`field plugins pin <track>/<handle> --vst3`) rather than a UID
+   typed by hand.
 3. **Parameters are a `params:` map in the plugin's own natural
    units, under the plugin's own parameter names.** The point of the
    file is human-readable diffs, and normalized floats are not that.
@@ -101,9 +113,20 @@ Decided elsewhere, restated here as constraints:
    deliberate gesture or hand edit (minjudd caught the unscoped
    draft, where a cosmetic rewrite of a hand-typed value would have
    re-keyed the node and, on a tier-3 plugin, minted a take nobody
-   asked for). The cost, stated plainly: for plugins with lossy
-   conversions the file is truth within a float ulp rather than
-   bit-exact truth — inaudible by construction. A param name the plugin does not have
+   asked for). The values are the plugin's *plain numeric* values,
+   never display strings — a formatter that rounds 3.14 ms to
+   "3.1 ms" must not launder the number (Codex caught the draft
+   claiming a blanket float-ulp bound that display-style conversions
+   do not honor) — and write-back stores the plain value the plugin
+   itself reports for the state it is in, verifying the round-trip
+   (set, read back, compare) at write time; a plugin whose
+   conversion cannot round-trip gets that one param stored in
+   normalized form, a `check`-visible fallback rather than a silent
+   drift. Display names are not guaranteed unique, so the stable
+   parameter ID is load-bearing underneath: the YAML key is the
+   display name while unique, and a plugin exposing duplicates gets
+   tool-written `Name#<id>` keys — the same you-write-the-name,
+   the-tool-writes-the-identity split as decision 2. A param name the plugin does not have
    is a `check` error when the plugin is installed (the typo guard);
    an uninstalled plugin defers validation to the machine that can
    perform it.
@@ -124,7 +147,19 @@ Decided elsewhere, restated here as constraints:
    `check`, collected only by an explicit GC. YAML carries the short
    hash (a line a human owns); the filename carries the full one, and
    the action key uses the full hash from the file, so truncation
-   never weakens the key. Ambiguous prefixes refuse loudly.
+   never weakens the key. Ambiguous prefixes refuse loudly. Two
+   boundaries, recorded rather than discovered: `shared/plugins/` is
+   a deliberate exception to project-model.md's one-pin-per-file
+   ledger contract — a ledger row would duplicate what the filename
+   already is, and the drift guard here is intrinsic where the pin
+   exists to add one — and project-model.md gains that exception in
+   chunk 1's diff, when the behavior lands. And the blob hashes what
+   the plugin *serializes*: a plugin whose state references sample
+   libraries or IR files by path (Kontakt is the honest example)
+   keeps those bytes outside the key — the boundary external
+   instruments already live with, "knobs on hardware are outside the
+   hash" (build-graph.md) — flagged through the same per-plugin
+   registry as tier 2, not solved by importing gigabytes.
 5. **Restore order is blob, then params.** The chunk loads first and
    the YAML params overlay it — the order every DAW already applies
    state and automation in. "Who wins on disagreement" is thereby an
@@ -158,7 +193,18 @@ Decided elsewhere, restated here as constraints:
    as program-change or restart notifications, or as nothing; on
    those signals, and as a backstop a chunk-hash check at session
    close, field captures a *new* state blob and repoints the
-   `state:` line — the old blob stays, per decision 4. The editor
+   `state:` line — the old blob stays, per decision 4. A recapture
+   rewrites the `params:` map in the same diff, from the plugin's
+   current values: a preset load is a param edit *and* a state edit,
+   and decision 5's overlay must overlay the preset's values —
+   leaving the old map in place would silently revert every
+   parameter the preset moved on the next load (Codex caught this
+   interaction). The owner-attached rule is transactional, not
+   advisory: the daemon holds each gesture's value until the owner
+   acknowledges the file write, and on a detach — the owner dying
+   between the knob and the write — rolls unacknowledged values back
+   to the last acknowledged state before closing the window, so the
+   chain is never left ahead of a file nobody can persist. The editor
    session binds to a chain position at `field open` and re-binds by
    `id` if the file changes under it, which is the second reason
    decision 6 insists on ids for duplicates: position alone cannot
@@ -174,13 +220,22 @@ Decided elsewhere, restated here as constraints:
    plugin-canonical values would need an instantiation to obtain.
    Two spellings of one knob position therefore key differently —
    a re-render that sounds the same — which decision 3's
-   gesture-scoping confines to edits somebody actually made.
+   gesture-scoping confines to edits somebody actually made. The
+   declared `tail:` and `latency:` lines join the key too — both
+   change the rendered bytes (the ring-out retained, the alignment
+   trimmed), so a cached artifact must not survive an edit to
+   either.
 9. **`version:` lives in the YAML, per entry, and a mismatch is a
    refusal with an offer.** The installed plugin moving from 11.2.0
    to 11.3.0 does not silently re-key every song the morning after
    an installer runs; field refuses, offers to update the line, and
    accepting is a visible diff that deliberately invalidates the
    renders — with the takes machinery catching anything replaced.
+   The refusal sits at instantiation, *after* cache lookup: §2 says
+   only a rebuild needs the plugin, so a fully cached song plays and
+   builds regardless of what the machine has installed — the gate is
+   on rendering with the wrong plugin, never on serving bytes the
+   key already names.
 10. **Both formats from day one, via JUCE's format manager.** AU is
     the Mac-first instinct but `AudioPluginFormatManager` gives AU
     and VST3 through one abstraction at near-zero marginal cost, and
@@ -208,6 +263,20 @@ Decided elsewhere, restated here as constraints:
     write-back and byte-determinism are all testable without a
     commercial plugin installed. Third-party plugins are exercised
     by hand on real sessions; the fixture is what the suite owns.
+13. **The host supplies transport context, identically on both
+    paths.** Tempo-synced plugins read the playhead — position,
+    tempo, meter — and a host that supplies it only live, or only a
+    default 120, breaks the determinism policy where it is hardest
+    to hear. Both render paths supply the same track-local context:
+    sample position from the chain's own clock (the axis the
+    reverbs' LFO decision already rides), tempo and meter from the
+    track's resolved `time:`. That context is an input, so the
+    resolved time map joins the hosted-insert action key — a tempo
+    edit re-renders a tempo-synced chain, which is what correct
+    means here. No loop or play/stop state is exposed: a stem
+    renders as one linear pass, and that is the timeline contract
+    both paths share. The fixture plugin includes a tempo-reading
+    behavior so CI owns this rather than hoping.
 
 ## 4 The YAML, concretely
 
@@ -262,7 +331,8 @@ these; the two discriminants coexist in one chain.
    the single executor; the `plugin:` schema/session/plan arms on
    both sides; name→id resolution with the self-pinning write-back;
    state assets with hash resolution and the `check` tidy; action
-   keys per decision 8; the fixture plugin and its CI suite;
+   keys per decision 8; the fixture plugin and its CI suite,
+   tempo-reading behavior included (decision 13);
    RENDER_PLAN_VERSION bump with existing songs proven pure cache
    hits.
 2. **Live.** A hosted insert in the live chain: delay compensation
@@ -270,7 +340,8 @@ these; the two discriminants coexist in one chain.
    existing −60 dB bound — byte-identity offline-vs-live is
    explicitly *not* claimed for hosted inserts (the golden stays a
    built-ins contract; the freeze handoff leans on the warmup bound
-   instead), and the version-refusal flow runs live.
+   instead), transport context supplied identically to offline
+   (decision 13), and the version-refusal flow runs live.
 3. **Editor sessions and write-back.** `field open <track>/<handle>`,
    the `param_changed` protocol message, gesture-quantum file
    writes, blob recapture on non-param signals, id re-binding, the
@@ -307,7 +378,9 @@ A real third-party AU on creek's lead-vocal renders offline and plays
 live through the freeze; under `field play creek --watch`, `field
 open` shows the editor, a knob twist is heard immediately and lands
 as a one-line YAML diff that re-freezes behind the play; a stateful
-plugin captures a blob a collaborator's clone resolves by hash and
-builds from cache without the plugin installed; the fixture-plugin
-suite is green in CI on both formats; and every existing project
-rebuilds as pure cache hits.
+plugin captures a blob a fresh clone resolves by hash, and the
+rendering machine with that plugin removed still builds the song as
+pure cache hits — the cross-machine version of that story waits on
+the remote asset store (later.md); the fixture-plugin suite is green
+in CI on both formats; and every existing project rebuilds as pure
+cache hits.
