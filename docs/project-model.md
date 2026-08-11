@@ -22,7 +22,6 @@ library; build labels address both (`//songs/opener/track:main`,
 ```text
 project/
 ├── field.yaml            # project manifest: name, engine versions
-├── field.lock            # locked environment: plugin versions, model versions
 ├── shared/               # material reused across songs, by contract
 │   ├── instruments/      # definitions that make sound (.scd, model defs, AU)
 │   ├── samples/          # committed sound that just is
