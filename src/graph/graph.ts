@@ -151,6 +151,10 @@ export function buildGraph(project: LoadedProject): Graph {
 
   for (const song of project.songs) {
     const pkgBase = song.dir;
+    // The song's rate (multi-rate.md decision 3, amended 2026-08-10):
+    // what its output renders at and what every track without a `rate:`
+    // inherits.
+    const songRate = song.song?.data.rate ?? projectRate;
     // Keyed by ref string — bare names in the song's namespace, full
     // //shared/asset: labels for shared pins — matching what entries
     // carry. Chosen generate variants are committed content, so they
@@ -206,10 +210,10 @@ export function buildGraph(project: LoadedProject): Graph {
     // request with no takes joins `ungenerated` so resolution fails
     // naming the command that fills it.
     // A track's effective rate (multi-rate.md decision 3): its own, or
-    // the project's — never the placing parent's, because a track renders
+    // the song's — never the placing parent's, because a track renders
     // once.
     const trackRate = (track: { rate?: number | undefined }): number =>
-      track.rate ?? projectRate;
+      track.rate ?? songRate;
     // Entry generators render at their owner's rate — the render is the
     // track's own content, so producing it at the project rate only to
     // convert it back at the edge would be a conversion nobody asked for.
@@ -307,10 +311,10 @@ export function buildGraph(project: LoadedProject): Graph {
       return rate;
     };
     const renderable = song.tracks.map((t) => t.data);
-    if (song.tempo) {
+    if (song.time) {
       // Captured once: the narrowing does not survive into planFor.
-      const songTempoEvents = song.tempo.data.tempo;
-      const tempoMap = new TempoMap(songTempoEvents, projectRate);
+      const songTempoEvents = song.time.tempo;
+      const tempoMap = new TempoMap(songTempoEvents, songRate);
       // Loops without `every` tile at the source's length, so the plan
       // needs frame counts — but only for the sources such loops touch.
       const framesBySource = new Map<string, number>();
@@ -419,11 +423,11 @@ export function buildGraph(project: LoadedProject): Graph {
         //
         // The song's map when the track declares none — at the track's
         // rate, because ticks project to samples differently at 96 kHz
-        // than at 48; a track at the project rate keeps the song's own
+        // than at 48; a track at the song rate keeps the song's own
         // map, so nothing that exists now changes key.
         const local = track.time?.tempo
           ? new TempoMap(track.time.tempo, rate)
-          : rate === projectRate
+          : rate === songRate
             ? tempoMap
             : new TempoMap(songTempoEvents, rate);
         return planTrack(

@@ -175,9 +175,10 @@ resolves to samples under the parent's map; the daemon sums by sample
 offset. Placing a 7/8 child in a 4/4 parent is an addition, not a
 conversion.
 
-`rate:` follows the same inheritance shape (multi-rate.md decision 3):
-a track renders at its declared rate, the project's `sample_rate`
-otherwise, from the song and never from the placing parent. Rates
+`rate:` follows the same inheritance shape (multi-rate.md decision 3,
+amended): a track renders at its declared rate, otherwise the song's
+`rate:`, otherwise the project's `sample_rate` — from the song and
+never from the placing parent. Rates
 convert only at edges — where a source's rate differs from its track's,
 the graph mints a conversion node at the placement, shared by every
 placement of that source at that rate and visible in `explain` and
@@ -190,9 +191,10 @@ The track named `main` is the song's output. It carries the song's
 declared `length` and `loop` and renders exactly that long, with `loop:`
 folding the overhang back onto the start. A bare song reference resolves
 to it: `field play creek` plays `//songs/creek/track:main`. Because the
-output track is the song, it renders at the project rate and refuses a
-`rate:` of its own; delivery at another rate is `field export --rate`,
-not a node in the song.
+output track is the song, it renders at the song's rate — its `rate:`,
+or the project's `sample_rate` — and refuses a `rate:` of its own;
+delivery at another rate is `field export --rate`, not a node in the
+song.
 
 The song's structure *is* the output track's placements:
 `field arrangement <song>` prints them as a timeline, one line per

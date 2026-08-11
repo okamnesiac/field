@@ -29,8 +29,7 @@ project/
 │   └── assets.yaml       # the shared ledger: //shared/asset:<name>
 ├── songs/
 │   └── <song>/
-│       ├── song.yaml
-│       ├── tempo.yaml
+│       ├── song.yaml     # name, time (tempo + meter), rate, length, loop
 │       ├── tracks/       # one file per track: inserts and its inputs
 │       ├── audio/        # ALL committed song sound (LFS): recorded,
 │       │                 # imported, generated — a directory per item
@@ -186,7 +185,7 @@ and size, plus, for WAVs, the header's facts (`sample_rate`,
 `check` against the file it already hashes (multi-rate.md decision 5).
 
 `field import <file>` is what writes a ledger entry. Importing a rate
-the project does not run at asks first, because a mismatch is a
+the song does not run at asks first, because a mismatch is a
 conversion cost someone should pay knowingly.
 
 Entries and takes reference assets **by name**, so human-edited files

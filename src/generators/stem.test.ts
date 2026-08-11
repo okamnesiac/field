@@ -620,8 +620,8 @@ describe('track stems in the build graph', () => {
     expect(state.runs).toBe(1);
 
     // A tempo edit moves the musical clip → rebuild.
-    const tempoPath = join(root, 'songs/creek/tempo.yaml');
-    writeFileSync(tempoPath, readFileSync(tempoPath, 'utf8').replace('bpm: 120', 'bpm: 90'));
+    const songPath = join(root, 'songs/creek/song.yaml');
+    writeFileSync(songPath, readFileSync(songPath, 'utf8').replace('bpm: 120', 'bpm: 90'));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(2);
 
@@ -632,7 +632,7 @@ describe('track stems in the build graph', () => {
     );
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(3);
-    writeFileSync(tempoPath, readFileSync(tempoPath, 'utf8').replace('bpm: 90', 'bpm: 240'));
+    writeFileSync(songPath, readFileSync(songPath, 'utf8').replace('bpm: 90', 'bpm: 240'));
     await buildLabels(root, ['//songs/creek/track:drums'], runner);
     expect(state.runs).toBe(3); // cache hit despite the tempo change
   });
@@ -1389,7 +1389,19 @@ describe('a track as the song output (nested-tracks.md §7 chunk 2)', () => {
   function declareSong(fields: string[]): void {
     writeFileSync(
       join(root, 'songs/creek/song.yaml'),
-      ['name: creek', ...fields, ''].join('\n'),
+      [
+        'name: creek',
+        ...fields,
+        'time:',
+        '  tempo:',
+        '    - at: 0',
+        '      bpm: 120',
+        '  meter:',
+        '    - at: 0',
+        '      numerator: 4',
+        '      denominator: 4',
+        '',
+      ].join('\n'),
     );
   }
 

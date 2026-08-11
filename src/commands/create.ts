@@ -3,14 +3,7 @@ import { join } from 'node:path';
 import { parseDocument, isSeq } from 'yaml';
 import { isSlug } from '../ids.js';
 import { RESERVED_LABEL_NAME, SONG_OUTPUT_NAME } from '../labels.js';
-import {
-  songOrder,
-  songSchema,
-  tempoFileOrder,
-  tempoFileSchema,
-  trackOrder,
-  trackSchema,
-} from '../schema/index.js';
+import { songOrder, songSchema, trackOrder, trackSchema } from '../schema/index.js';
 import { canonicalizeDocument, stringifyCanonical, stringifyDocument } from '../yaml/emit.js';
 
 export function createSong(root: string, name: string): string {
@@ -24,14 +17,6 @@ export function createSong(root: string, name: string): string {
   writeFileSync(join(dir, 'tracks', '.gitkeep'), '');
   writeFileSync(join(dir, 'audio', '.gitkeep'), '');
 
-  // song.yaml is the existence marker the guard above checks, so it is
-  // written last: a partial failure leaves a directory that createSong can
-  // still be re-run against.
-  const tempo = tempoFileSchema.parse({
-    tempo: [{ at: 0, bpm: 120 }],
-    meter: [{ at: 0, numerator: 4, denominator: 4 }],
-  });
-  writeFileSync(join(dir, 'tempo.yaml'), stringifyCanonical(tempo, tempoFileOrder));
   // Every song has an output from birth, and it is a track now: the bare
   // song name resolves to //songs/<name>/track:main (labels.ts
   // SONG_OUTPUT_NAME), so the thing that label points at has to be what
@@ -57,7 +42,17 @@ export function createSong(root: string, name: string): string {
     join(dir, 'tracks', `${SONG_OUTPUT_NAME}.yaml`),
     stringifyCanonical({ name: SONG_OUTPUT_NAME, inputs: [] }, trackOrder),
   );
-  writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(songSchema.parse({ name }), songOrder));
+  // song.yaml is the existence marker the guard above checks, so it is
+  // written last: a partial failure leaves a directory that createSong can
+  // still be re-run against.
+  const song = songSchema.parse({
+    name,
+    time: {
+      tempo: [{ at: 0, bpm: 120 }],
+      meter: [{ at: 0, numerator: 4, denominator: 4 }],
+    },
+  });
+  writeFileSync(join(dir, 'song.yaml'), stringifyCanonical(song, songOrder));
   return dir;
 }
 

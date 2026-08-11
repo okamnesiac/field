@@ -22,8 +22,6 @@ import {
   generativeTakesOrder,
   generativeTakesSchema,
   TAKES_FILENAME,
-  tempoFileOrder,
-  tempoFileSchema,
   trackOrder,
   trackSchema,
   type Asset,
@@ -31,7 +29,7 @@ import {
   type GenerativeTakes,
   type Project,
   type Song,
-  type TempoFile,
+  type SongTime,
   type Track,
 } from '../schema/index.js';
 
@@ -70,7 +68,8 @@ export interface LoadedSong {
   name: string;
   dir: string; // project-relative
   song?: LoadedFile<Song> | undefined;
-  tempo?: LoadedFile<TempoFile> | undefined;
+  // song.yaml's `time:`, surfaced beside the file it rides in.
+  time?: SongTime | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
   tracks: LoadedFile<Track>[];
   // Run-recorded state for `generative:` entries, keyed by gen node
@@ -276,11 +275,11 @@ export function loadProject(root: string): LoadedProject {
       project.diagnostics.push({ file: song.dir, message: 'missing song.yaml' });
     }
 
-    const tempoYaml = join(dir, 'tempo.yaml');
-    if (existsSync(tempoYaml)) {
-      song.tempo = loadFile(project, tempoYaml, { schema: tempoFileSchema, order: tempoFileOrder });
-    } else {
-      project.diagnostics.push({ file: song.dir, message: 'missing tempo.yaml' });
+    // The song's maps ride song.yaml; `time` here is the loaded copy so
+    // consumers never reach through the file shape.
+    song.time = song.song?.data.time;
+    if (song.song && song.time === undefined) {
+      project.diagnostics.push({ file: song.song.path, message: 'missing time: (tempo and meter)' });
     }
 
 
@@ -325,7 +324,6 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
     project.shared,
     ...project.songs.flatMap((s): (LoadedFile<unknown> | undefined)[] => [
       s.song,
-      s.tempo,
       s.assets,
       ...s.genTakes.values(),
       ...s.tracks,
@@ -373,18 +371,23 @@ function validate(project: LoadedProject): void {
       push(song.song.path, 'loop needs a declared length — the loop point is the length');
     }
 
+    // The song's rate: what its output renders at and what every track
+    // without a `rate:` inherits (multi-rate.md decision 3, amended
+    // 2026-08-10 — track.rate ?? song.rate ?? project sample_rate).
+    const songRate =
+      song.song?.data.rate ?? project.manifest?.data.sample_rate ?? 48000;
     let tempoMap: TempoMap | undefined;
     let meterMap: MeterMap | undefined;
-    if (song.tempo) {
+    if (song.time && song.song) {
       try {
-        tempoMap = new TempoMap(song.tempo.data.tempo, project.manifest?.data.sample_rate ?? 48000);
+        tempoMap = new TempoMap(song.time.tempo, songRate);
       } catch (err) {
-        push(song.tempo.path, (err as Error).message);
+        push(song.song.path, (err as Error).message);
       }
       try {
-        meterMap = new MeterMap(song.tempo.data.meter);
+        meterMap = new MeterMap(song.time.meter);
       } catch (err) {
-        push(song.tempo.path, (err as Error).message);
+        push(song.song.path, (err as Error).message);
       }
     }
 
@@ -404,7 +407,7 @@ function validate(project: LoadedProject): void {
       // track's own (nested-tracks.md §13). Passed rather than defaulted:
       // `undefined` means *no valid map applies*, which a track with a
       // broken local map reaches as surely as a song with a broken
-      // tempo.yaml. Falling back to the song's there would resolve the
+      // time:. Falling back to the song's there would resolve the
       // positions against a map the author did not write, inventing
       // numbers on top of an error that was already reported.
       meter: MeterMap | undefined,
@@ -503,19 +506,18 @@ function validate(project: LoadedProject): void {
       string,
       { tempo: TempoMap | undefined; meter: MeterMap | undefined; rate: number }
     >();
-    const projectSampleRate = project.manifest?.data.sample_rate ?? 48000;
     for (const track of song.tracks) {
       // At the track's effective rate (multi-rate.md decision 3): the
       // sample-domain checks below — fade fit, loop expansion — have to
       // project ticks exactly as the plan will, and a 44.1 kHz track's
       // bar is fewer samples than the song's. The song's own map serves
-      // any track at the project rate, which is every track without a
+      // any track at the song rate, which is every track without a
       // `rate:`.
-      const trackSampleRate = track.data.rate ?? projectSampleRate;
+      const trackSampleRate = track.data.rate ?? songRate;
       let tempo =
-        trackSampleRate === projectSampleRate || song.tempo === undefined || tempoMap === undefined
+        trackSampleRate === songRate || song.time === undefined || tempoMap === undefined
           ? tempoMap
-          : new TempoMap(song.tempo.data.tempo, trackSampleRate);
+          : new TempoMap(song.time.tempo, trackSampleRate);
       let meter = meterMap;
       const time = track.data.time;
       if (time?.tempo) {
@@ -541,17 +543,18 @@ function validate(project: LoadedProject): void {
       if (track.data.name !== expected) {
         push(track.path, `name "${track.data.name}" must match filename "${expected}"`);
       }
-      // The output track is the song, and the song's rate is
-      // project.yaml's `sample_rate` (multi-rate.md decision 3) — a
+      // The output track is the song, and the song's rate is song.yaml's
+      // `rate:` (falling back to project.yaml's `sample_rate`) — a
       // `rate:` here could only restate it or contradict it, and a field
       // with one correct value should not exist (the argument that
       // retired the normalize insert).
-      const trackSampleRate = track.data.rate ?? projectSampleRate;
+      const trackSampleRate = track.data.rate ?? songRate;
       if (track.data.name === SONG_OUTPUT_NAME && track.data.rate !== undefined) {
         push(
           track.path,
-          `the song's output renders at the project rate — sample_rate in project.yaml ` +
-            `is that choice (multi-rate.md decision 3); delete rate: here`,
+          `the song's output renders at the song's rate — rate: in song.yaml ` +
+            `(or sample_rate in project.yaml) is that choice (multi-rate.md decision 3); ` +
+            `delete rate: here`,
         );
       }
 

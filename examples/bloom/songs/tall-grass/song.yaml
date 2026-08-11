@@ -1,1 +1,10 @@
 name: tall-grass
+# tall-grass is in 7/8 throughout — one bar is 3360 ticks (7 x 480).
+time:
+  tempo:
+    - at: 0
+      bpm: 132
+  meter:
+    - at: 0
+      numerator: 7
+      denominator: 8

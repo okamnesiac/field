@@ -27,21 +27,22 @@ export function musicalContext(
   sampleRate: number,
 ): MusicalContext | undefined {
   const song = project.songs.find((s) => s.dir === songDir);
-  if (!song?.tempo) return undefined;
+  if (!song?.time) return undefined;
   return {
-    tempo: new TempoMap(song.tempo.data.tempo, sampleRate),
-    meter: new MeterMap(song.tempo.data.meter),
+    tempo: new TempoMap(song.time.tempo, sampleRate),
+    meter: new MeterMap(song.time.meter),
   };
 }
 
-// The played artifact's own rate, from its header — the project's only
-// when the header cannot be read, which keeps a vanished or truncated
-// file from taking the status line down with it.
+// The played artifact's own rate, from its header — the song's (then
+// the project's) only when the header cannot be read, which keeps a
+// vanished or truncated file from taking the status line down with it.
 export function playedRate(project: LoadedProject, path: string): number {
   try {
     return readWavHeader(path).sampleRate;
   } catch {
-    return project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+    const song = project.songs.find((s) => s.dir === songDirOfPath(project.root, path));
+    return song?.song?.data.rate ?? project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   }
 }
 

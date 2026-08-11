@@ -81,6 +81,13 @@ an insert that can only restate `project.yaml` should not exist.
    track renders once. `project.yaml`'s `sample_rate` stays, demoted from
    "the rate" to the default rate and the rate of every song output.
 
+   *Amended 2026-08-10 (the song.yaml fold):* a song may declare its own
+   `rate:` in song.yaml, so the hierarchy is track `rate:` ?? song
+   `rate:` ?? project `sample_rate`, and a song's output renders at the
+   song's rate. What this decision fixed — inheritance from the song's
+   scope, never the placing parent — is unchanged; the song scope simply
+   gained a place to say it.
+
 4. **Rates convert at the placement, automatically, as a graph node.**
    When a child's rate differs from its parent's, the edge implies a
    conversion node: content-addressed, cached once, shared by every
