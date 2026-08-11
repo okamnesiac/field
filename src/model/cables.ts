@@ -77,9 +77,9 @@ interface Edge {
 // while that promise is still being kept.
 const unresolved = (v: unknown): boolean => Array.isArray(v);
 
-// How validate names an entry in a diagnostic, reproduced so a cable
-// message points at the same spelling the entry's other messages use.
-function entryName(entry: InputEntry, index: number): string {
+// How an entry is named in a diagnostic — one function, imported by
+// validate too, so every message points at the same spelling.
+export function entryName(entry: InputEntry, index: number): string {
   if (entry.id !== undefined) return `input "${entry.id}"`;
   const target =
     entry.track ??

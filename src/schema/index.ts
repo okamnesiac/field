@@ -10,6 +10,5 @@ export * from './manifest.js';
 export * from './song.js';
 export * from './assets.js';
 export * from './effects.js';
-export * from './sounds.js';
+export * from './generative.js';
 export * from './track.js';
-export * from './take.js';

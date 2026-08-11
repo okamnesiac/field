@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
 
-// Effect parameters are defined once and appear in three positions:
-// standalone targets (targets.ts), track inserts, and the mix master
-// chain (effects.md §5) — same fields, same semantics, everywhere.
+// Effect parameters for `inserts:` entries (effects.md §5) — on any
+// track, the song's master chain included, since that is the output
+// track's inserts.
 
 // eq: RBJ biquads with Fyra's parameterization — bandwidth in octaves —
 // and Fyra's response-based auto-gain on by default (effects.md §2):

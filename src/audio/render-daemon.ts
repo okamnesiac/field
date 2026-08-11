@@ -34,27 +34,21 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 7;
+export const RENDER_PLAN_VERSION = 8;
 
 export class RenderUnavailableError extends Error {}
 
-// The four shapes the daemon renders, discriminated on `op` exactly as
-// the rules are. Each carries the schema's own objects verbatim — inserts,
-// placed clips, faders — so `src/schema/` and `stem.ts`'s `RenderedClip`
-// stay the wire format and there is no translation layer to drift.
+// The three shapes the daemon renders, discriminated on `op` exactly as
+// the rules are. Each carries the schema's own objects verbatim —
+// inserts, placed clips — so `src/schema/` and `stem.ts`'s
+// `RenderedClip` stay the wire format and there is no translation layer
+// to drift.
 //
 // Musical time is absent by construction (decision 7): clips arrive as
 // sample offsets the control plane already resolved, which is what keeps
 // the daemon's one-sentence description true while it renders. A window
 // length is resolved the same way and for the same reason: `PlacedClip`
 // may leave one open, `RenderedClip` may not.
-
-export interface EffectsPlan {
-  op: 'effects';
-  input: string;
-  output: string;
-  inserts: readonly Insert[];
-}
 
 export interface StemPlan {
   op: 'stem';
@@ -63,28 +57,6 @@ export interface StemPlan {
   inputs: readonly string[];
   clips: readonly RenderedClip[];
   inserts?: readonly Insert[];
-  length_samples?: number;
-  loop?: boolean;
-}
-
-// Nothing in the control plane produces one of these any more: `mixes/`
-// retired with the output track (nested-tracks.md §7 chunk 2). The daemon
-// still speaks the op, so the shape stays until that half is removed —
-// deleting the type while the binary answers to `op: "mix"` would leave a
-// wire format nothing describes.
-interface Fader {
-  gain_db: number;
-  pan: number;
-}
-
-export interface MixPlan {
-  op: 'mix';
-  output: string;
-  sample_rate: number;
-  inputs: readonly string[];
-  faders: readonly Fader[];
-  gain_db: number;
-  master?: readonly Insert[];
   length_samples?: number;
   loop?: boolean;
 }
@@ -112,7 +84,7 @@ export interface ResamplePlan {
   sample_rate: number;
 }
 
-export type RenderPlan = EffectsPlan | StemPlan | MixPlan | NormalizePlan | ResamplePlan;
+export type RenderPlan = StemPlan | NormalizePlan | ResamplePlan;
 
 // Resolved per call rather than cached: the binary can be built partway
 // through a session, and a stale "missing" answer would outlive it.

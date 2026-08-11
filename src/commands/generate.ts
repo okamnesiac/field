@@ -711,16 +711,12 @@ export async function chooseVariant(
     );
   }
   // The attachment must be the gen node this path resolved. Without
-  // this, a stale pre-fold `sound:` file gets `chosen` rewritten and a
+  // this, a misattached takes file gets `chosen` rewritten and a
   // success report while the loader rejects the file and the graph
-  // never sees the choice — check's rename diagnostic owns the fix, so
-  // the refusal points there.
+  // never sees the choice.
   if (takes.gen !== name) {
     throw new Error(
-      takes.sound !== undefined
-        ? `the takes in audio/${name}/ still attach to sound: — rename sound: to ` +
-          `gen: first (field check)`
-        : `the takes in audio/${name}/ attach to gen "${takes.gen}", not "${name}" (field check)`,
+      `the takes in audio/${name}/ attach to gen "${takes.gen}", not "${name}" (field check)`,
     );
   }
   const variant = takes.variants[options.variant - 1];

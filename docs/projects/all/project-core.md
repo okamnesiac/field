@@ -98,6 +98,14 @@ The load-bearing schema decisions, recorded as `(DECIDED)` with alternatives:
    slug-plus-short-random for clips (`chorus-vox-x7f3q`, referenced stably
    by automation). The full argument — the case against, and why it lost —
    is recorded in §6 so it never has to be re-litigated.
+
+   Amended 2026-08-11: entry ids are *author-written* slugs — the
+   slug-plus-short-random spelling stays the convention, but nothing mints
+   one, and the unused minter was removed rather than kept as aspiration
+   (it never had a caller in its life). The three tiers stand; what
+   changed is that tier 3 covers takes alone until automation actually
+   wants minted entry ids, at which point the minter returns with its
+   first caller.
 4. **Label grammar (DECIDED).** The project model *is* the build file — no
    separate `BUILD` files, which would only re-declare structure the
    manifests already express. Targets derive by convention:

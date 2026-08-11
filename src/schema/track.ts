@@ -3,7 +3,7 @@ import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, sampleRate, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
 import { meterEventSchema, tempoEventSchema } from './song.js';
-import { generativeEntrySchema } from './sounds.js';
+import { generativeEntrySchema } from './generative.js';
 
 // One list (nested-tracks.md §18): a track file is a name, an optional
 // `time:`, optional `inserts:`, and `inputs:`. Every entry places one
@@ -13,11 +13,6 @@ import { generativeEntrySchema } from './sounds.js';
 //   - `track:` — another track's render
 //   - `audio:` — committed bytes: the song's ledger, or the one
 //     cross-scope spelling, `//shared/asset:<name>`
-//
-// `sound:` was the bridge to this list while `sounds/` still existed —
-// a defined sound, transitional by design — and retired with the last
-// fold (§18 sequencing, chunk 6 finale). The tombstone below forwards
-// an old file to the spelling its target folded into.
 //
 // Generator entries are §18's third kind: authored spec inline, the
 // render minted as its own node under `gen:` (option A — uniformly,
@@ -45,29 +40,8 @@ export const clipLoopSchema = z.strictObject({
 type ClipLoopFile = z.infer<typeof clipLoopSchema>;
 export type ClipLoop = Omit<ClipLoopFile, 'every'> & { every?: number | undefined };
 
-// Retired spellings forward rather than answering "Unrecognized key":
-// the two-list format merged into `inputs:` (nested-tracks.md §18), and
-// a file still speaking it should be told the move, not the grammar.
-const RETIRED_POSITION = 'position: is now at: (nested-tracks.md §18)';
-const RETIRED_SOURCE =
-  'source: split by kind — audio: for committed bytes, track: for a track ' +
-  '(nested-tracks.md §18)';
-// `sounds/` retired with the last fold (§18, decision 12): what a
-// sound: entry played is a track now — an effect sound a track with one
-// insert, a supercollider or generative sound a leaf track carrying the
-// entry. The forwarding names where the target went, because the fix is
-// on the other side of the reference.
-const RETIRED_SOUND =
-  'sound: retired with sounds/ — the sound is a track now, so spell the ' +
-  'placement track:<name> once it has folded (an effect sound becomes a ' +
-  'track with one insert; supercollider/generative sounds become leaf ' +
-  'tracks carrying the entry) (nested-tracks.md §18)';
-
-// The authored half of a SuperCollider render, inline: the sound schema
-// (schema/sounds.ts) minus name and type, which the entry supplies by
-// where it sits and what field it is. Same fields, same meanings, same
-// defaults — the action key sees identical parameters, which is what
-// makes folding a sound into a track a cache hit rather than a render.
+// The authored half of a SuperCollider render, inline: name and type
+// are supplied by where the entry sits and what field it is.
 export const supercolliderEntrySchema = z.strictObject({
   source: z.string().min(1), // the program; bare names resolve in shared/instruments/
   seed: z.number().int().min(0),
@@ -102,7 +76,6 @@ const inputEntryFields = z
     // below is the arity check.
     track: slug.optional(), // a track in this song
     audio: sourceRef.optional(), // ledger name, or //shared/asset:<name>
-    sound: z.never({ error: RETIRED_SOUND }).optional(),
     supercollider: supercolliderEntrySchema.optional(), // an inline render
     generative: generativeEntrySchema.optional(), // a deliberate request
     receive: labelName.optional(), // a cable's label (nested-tracks.md §19)
@@ -126,8 +99,6 @@ const inputEntryFields = z
     pan: z.number().min(-1).max(1).default(0),
     fade_in: samples.default(0),
     fade_out: samples.default(0),
-    position: z.never({ error: RETIRED_POSITION }).optional(),
-    source: z.never({ error: RETIRED_SOURCE }).optional(),
   })
   .superRefine((entry, ctx) => {
     const kinds = [
@@ -243,34 +214,10 @@ export type TrackTime = z.infer<typeof trackTimeSchema>;
 //
 // No `gain_db` or `pan` here. A level lives on the placement that consumes
 // this track (nested-tracks.md §1.13), where it can differ per parent —
-// which a field on the track cannot do, and which is why these retired
-// with the mix rule that used to apply them.
-// Written for the suffix, like every other message here: the loader
-// appends " at <field>", so the sentence has to end before the name rather
-// than open with a verb whose subject arrives at the far end of it.
-const RETIRED_FADER =
-  'a level lives on the placement that consumes this track — put it on the ' +
-  '`inputs:` entry that places this track, and delete it here ' +
-  '(nested-tracks.md §1.13)';
-// `type:` retired with the one-list format (nested-tracks.md §18): every
-// track is audio, and `midi` was a kind that rendered nothing, placed
-// nothing, and was placed by nothing. When MIDI becomes real it arrives
-// as an entry kind — content a track plays — not as a track species.
-const RETIRED_TYPE =
-  'every track is audio — delete type:; midi returns as an inputs: entry ' +
-  'kind when it is real (nested-tracks.md §18)';
-// `clips:` merged into `inputs:` (nested-tracks.md §18): a clip was a
-// placement wearing a second spelling, and the planner sorted the two
-// lists as one all along. The forwarding names the field moves so a file
-// mid-migration is told what to do, the way mixes/ was.
-const RETIRED_CLIPS =
-  'clips: merged into inputs: — move each clip there, renaming position: ' +
-  'to at: and source: to audio:/sound:/track: by what it names ' +
-  '(nested-tracks.md §18)';
+// which a field on the track cannot do.
 
 export const trackSchema = z.strictObject({
   name: labelName,
-  type: z.never({ error: RETIRED_TYPE }).optional(),
   // The rate this track renders at (multi-rate.md decision 3). Omitted
   // means the project's — the same inheritance shape as `time:`, and from
   // the song for the same reason: a track may have two parents and
@@ -280,8 +227,6 @@ export const trackSchema = z.strictObject({
   rate: sampleRate.optional(),
   // Omitted means the song's maps, which is every track today.
   time: trackTimeSchema.optional(),
-  gain_db: z.never({ error: RETIRED_FADER }).optional(),
-  pan: z.never({ error: RETIRED_FADER }).optional(),
   // Inserts are content, not mix parameters: they bake into the stem, so
   // an insert edit re-renders it — the accepted cost model (effects.md §5).
   inserts: z.array(insertSchema).default([]),
@@ -290,7 +235,6 @@ export const trackSchema = z.strictObject({
   // label uniqueness, and a level tweak diffs under a stable key.
   sends: z.record(labelName, sendSchema).default({}),
   inputs: z.array(inputEntrySchema).default([]),
-  clips: z.never({ error: RETIRED_CLIPS }).optional(),
 });
 type TrackFile = z.infer<typeof trackSchema>;
 export type Track = Omit<TrackFile, 'inputs'> & {

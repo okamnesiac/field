@@ -11,8 +11,7 @@ import { assetsFileSchema, trackSchema, type InputEntry } from '../schema/index.
 // instead of a check-red project after the work — and the
 // model-minutes — are already spent. Unparseable files contribute
 // nothing: pre-flight must never crash on a file field check owns
-// diagnosing. (Sound names and their audition labels lived here until
-// `sounds/` retired — nested-tracks.md §18, decision 12.)
+// diagnosing.
 export function takenSongNames(songDir: string): Set<string> {
   const taken = new Set<string>();
   const assetsPath = join(songDir, 'assets.yaml');

@@ -2,41 +2,8 @@ import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, sourceRef } from './common.js';
 
-// The generative request and its takes. This file held the whole
-// `sounds/<name>.yaml` schema until `sounds/` retired (nested-tracks.md
-// §18, decision 12): an effect sound is a track with one insert, a
-// supercollider sound a leaf with a `supercollider:` entry, a
-// generative sound a leaf with a `generative:` entry — so the declared
-// forms (`type:` union, `soundOrder`, the effect/normalize schemas)
-// left with the directory, and `check` tells a surviving sounds/ where
-// each file's content moved (model/project.ts). What stays is the part
-// the entries kept using: the request fields, their refinement, and the
-// takes machinery that pins committed variants.
-
-// The spec behind a `supercollider:` entry's gen node, rendered offline
-// (NRT). The program runs via sclang with FIELD_OUTPUT / FIELD_SEED /
-// FIELD_DURATION / FIELD_SAMPLE_RATE / FIELD_CHANNELS in the
-// environment; it must write FIELD_OUTPUT and exit. Determinism given
-// the seed is the program's job; the program's content hash is the
-// cache input. `source:` is the program file — a bare filename resolves
-// on the type's home shelf, shared/instruments/ (§4); a slashed path is
-// project-relative. Never parsed from a file of its own any more: the
-// graph synthesizes it from the entry, keeping the shape (and so every
-// action key) the declared sound had.
-export const supercolliderSoundSchema = z.strictObject({
-  name: labelName,
-  type: z.literal('supercollider'),
-  source: z.string().min(1),
-  seed: z.number().int().min(0),
-  duration: z.number().positive().max(3600), // seconds
-  channels: z.union([z.literal(1), z.literal(2)]).default(2),
-});
-export type SupercolliderSound = z.infer<typeof supercolliderSoundSchema>;
-
-// `say` was here — macOS text-to-speech as an in-graph recipe. Removed
-// in render-pipeline.md chunk 5; voice-generation.md §5 records why.
-// Short version: it was the last thing tying the build to `afconvert`
-// and to macOS, and the generated-voice tier replaces what it was for.
+// The generative request and its takes: the request fields, their
+// refinement, and the takes machinery that pins committed variants.
 
 // generative: deliberate generation (project-layout.md §1.2, §1.4) — a
 // request with no in-graph Generator behind it: nothing may generate it
@@ -71,7 +38,7 @@ export type GenerativeVariant = z.infer<typeof generativeVariantSchema>;
 // What a run produced, and which take you kept — `audio/<name>/variants.yaml`,
 // beside the WAVs it pins (bloom-in-tree.md §7).
 //
-// It sits there rather than in `sounds/<name>.yaml` because generating and
+// It sits there rather than in the track file because generating and
 // choosing are things *your* machine did, and a recipe is what you share.
 // With them in the recipe, following the documented workflow modified a
 // committed file: clone the example, run `field generate`, and the working
@@ -91,24 +58,17 @@ export const generativeTakesSchema = z
     // Redundant with the directory name, and checked against it for the
     // same reason a track's `name` is checked against its filename: a
     // file that has been moved should say so rather than quietly
-    // describe something else. `sound:` is the pre-fold spelling —
-    // `sounds/` has retired, and the key survives only so the loader
-    // can tell an old takes file the rename instead of "unrecognized
-    // key" (model/project.ts).
-    gen: labelName.optional(),
-    sound: labelName.optional(),
+    // describe something else.
+    gen: labelName,
     chosen: z.number().int().min(1).optional(), // 1-based, as played and numbered
     // Defaulted rather than merely allowed to be empty: omitting the key and
     // writing `variants: []` would otherwise be different failures, and a
     // hand-written file does the former.
     variants: z.array(generativeVariantSchema).default([]),
-  })
-  .refine((takes) => (takes.gen !== undefined) !== (takes.sound !== undefined), {
-    error: 'takes attach to exactly one thing — `gen:` (or `sound:`, until sounds fold)',
   });
 export type GenerativeTakes = z.infer<typeof generativeTakesSchema>;
 export const generativeTakesOrder: KeyOrder = {
-  keys: ['gen', 'sound', 'chosen', 'variants'],
+  keys: ['gen', 'chosen', 'variants'],
   children: {
     variants: { items: { keys: ['file', 'model', 'seed', 'sha256', 'generated_at'] } },
   },
@@ -127,10 +87,6 @@ export const TAKES_FILENAME = TAKES_FILE;
 // A voice line has no `duration_seconds`: its length follows from the
 // text, and the committed variant WAV is its own record of what came out.
 //
-// The request fields and their refinement are shared verbatim with the
-// `generative:` entry (nested-tracks.md §18 step 3): same fields, same
-// bounds, same messages, so folding a sound into a track moves where the
-// recipe lives and changes nothing about what it may say.
 const generativeRecipeFields = {
   prompt: z.string().min(1).optional(),
   text: z.string().min(1).optional(),
@@ -163,9 +119,9 @@ type RecipeFields = {
 // can be a chimera of both kinds or neither, and the generator would
 // have to guess which one it was looking at — the same failure the
 // clip asset-vs-target precedent rules out.
-const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
-  const isMusic = sound.prompt !== undefined;
-  const isVoice = sound.text !== undefined;
+const refineRecipe = (recipe: RecipeFields, ctx: z.RefinementCtx): void => {
+  const isMusic = recipe.prompt !== undefined;
+  const isVoice = recipe.text !== undefined;
   if (isMusic === isVoice) {
     ctx.addIssue({
       code: 'custom',
@@ -179,7 +135,7 @@ const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
   const musicOnly = ['lyrics', 'bpm', 'bars', 'duration_seconds'] as const;
   const voiceOnly = ['voice_ref', 'voice_ref_sha256', 'exaggeration', 'conviction'] as const;
   for (const key of isVoice ? musicOnly : voiceOnly) {
-    if (sound[key] !== undefined) {
+    if (recipe[key] !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: [key],
@@ -195,7 +151,7 @@ const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
   // once a recipe can exist before its takes, that is reachable by
   // writing one. Caught here so `check` says it, rather than at fill
   // time where the advice would name flags that filling refuses.
-  if (isMusic && sound.bars === undefined && sound.duration_seconds === undefined) {
+  if (isMusic && recipe.bars === undefined && recipe.duration_seconds === undefined) {
     ctx.addIssue({
       code: 'custom',
       path: ['duration_seconds'],
@@ -205,7 +161,7 @@ const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
   // The reference recording is the voice, so its identity is part of
   // the recipe's provenance (§1.3): name alone would let the bytes
   // change under a recipe that still claims to describe them.
-  if (isVoice && (sound.voice_ref === undefined) !== (sound.voice_ref_sha256 === undefined)) {
+  if (isVoice && (recipe.voice_ref === undefined) !== (recipe.voice_ref_sha256 === undefined)) {
     ctx.addIssue({
       code: 'custom',
       path: ['voice_ref'],
@@ -214,9 +170,8 @@ const refineRecipe = (sound: RecipeFields, ctx: z.RefinementCtx): void => {
   }
 };
 
-// The request inline in a track's `inputs:` — the retired sound
-// schema's authored fields, minus `name` and `type`, which the entry
-// supplies by where it sits and what field it is (nested-tracks.md §18
-// step 3). Its takes live beside the audio under the gen node's name.
+// The request inline in a track's `inputs:` — `name` and `type` are
+// supplied by where the entry sits and what field it is. Its takes live
+// beside the audio under the gen node's name.
 export const generativeEntrySchema = z.strictObject(generativeRecipeFields).superRefine(refineRecipe);
 export type GenerativeEntry = z.infer<typeof generativeEntrySchema>;

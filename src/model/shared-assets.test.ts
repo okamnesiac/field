@@ -173,19 +173,4 @@ describe('cross-scope clip references', () => {
   });
 });
 
-describe('the old layout is diagnosed, not ignored', () => {
-  it('names each legacy file and where its contents went', () => {
-    writeFileSync(join(root, 'songs/creek/targets.yaml'), 'targets: []\n');
-    writeFileSync(join(root, 'songs/creek/mix.yaml'), 'mixes: []\n');
-    mkdirSync(join(root, 'songs/creek/generation'), { recursive: true });
-    const messages = loadProject(root).diagnostics.map((d) => `${d.file}: ${d.message}`);
-    expect(messages.some((m) => m.includes('targets.yaml') && m.includes('sounds/'))).toBe(true);
-    // Still named, now pointed at the output track: mixes/ retired too, so
-    // the old advice would have been a second dead end.
-    expect(messages.some((m) => m.includes('mix.yaml') && m.includes('track named "main"'))).toBe(
-      true,
-    );
-    expect(messages.some((m) => m.includes('generation') && m.includes('audio/'))).toBe(true);
-  });
-});
 

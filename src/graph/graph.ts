@@ -34,8 +34,7 @@ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 // track is buildable as //songs/<song>/track:<name>
 // (mix-assembly.md §3). "Node" and "rule" are deliberately the engine's
 // words (project-layout.md §4): the format speaks tracks and entries,
-// and this module realizes them. Declared sounds were a kind here until
-// `sounds/` retired (nested-tracks.md §18, decision 12).
+// and this module realizes them.
 
 export interface AssetNode {
   kind: 'asset';
@@ -50,24 +49,23 @@ export interface GeneratorNode {
   kind: 'rule';
   label: Label;
   songDir: string;
-  // A declared sound, or a spec synthesized from the model (stem,
-  // resample).
+  // A spec synthesized from the model (stem, resample, supercollider).
   spec: GeneratorSpec;
   deps: Label[];
   // The rate this node renders at (multi-rate.md decision 3): the owning
   // track's effective rate for stems and entry generators, the target
-  // rate for a resample edge, the project rate for declared sounds. It
-  // reaches the action key and the run context, which is what makes a
-  // `rate:` edit re-render exactly the tracks it moved.
+  // rate for a resample edge. It reaches the action key and the run
+  // context, which is what makes a `rate:` edit re-render exactly the
+  // tracks it moved.
   sampleRate: number;
 }
 
-// A deliberate sound's committed audio (project-layout.md §1.4):
-// content-addressed like an asset. The sound's own label
-// (//songs/<song>/sound:<name>) resolves to its *chosen* variant — that
+// A deliberate request's committed audio (project-layout.md §1.4):
+// content-addressed like an asset. The gen node's label
+// (//songs/<song>/gen:<name>) resolves to its *chosen* variant — that
 // node is what clips and rules consume — while every variant is
 // additionally auditionable as :<name>-<n>. `field choose` repoints
-// which variant the sound's label means; nothing is ever re-run.
+// which variant the label means; nothing is ever re-run.
 export interface GenerationNode {
   kind: 'generation';
   label: Label;
@@ -154,9 +152,9 @@ export function buildGraph(project: LoadedProject): Graph {
   for (const song of project.songs) {
     const pkgBase = song.dir;
     // Keyed by ref string — bare names in the song's namespace, full
-    // //shared/asset: labels for shared pins — matching what clips and
-    // sounds carry. Chosen generate variants are committed content, so
-    // they join the map; a ref absent here is a buildable sound.
+    // //shared/asset: labels for shared pins — matching what entries
+    // carry. Chosen generate variants are committed content, so they
+    // join the map; a ref absent here is something that renders.
     const sha256BySource = new Map<string, string>();
     const assetByName = new Map<string, Asset>();
     for (const [name, asset] of sharedByName) {
@@ -171,7 +169,9 @@ export function buildGraph(project: LoadedProject): Graph {
       }
     }
     // Where a committed source's bytes live, for loop tiling and for
-    // materializing generation inputs.
+    // materializing generation inputs. validate builds the same relation
+    // lazily (project.ts fileBySource) — the two must answer alike,
+    // since loop tiling validated there is planned here.
     const fileBySource = new Map<string, { base: string; file: string }>();
     for (const [name, asset] of sharedByName) {
       fileBySource.set(`//${SHARED_ASSETS_PKG}:${name}`, { base: 'shared', file: asset.file });
@@ -344,8 +344,8 @@ export function buildGraph(project: LoadedProject): Graph {
         song.song?.data.length !== undefined
           ? tempoMap.ticksToSamples(song.song.data.length)
           : undefined;
-      // The song's output track carries the song's extent, the way the
-      // mix did before it retired. Which track that is, is the same
+      // The song's output track carries the song's extent. Which track
+      // that is, is the same
       // convention a bare song name resolves through, read from the same
       // constant rather than spelled twice (nested-tracks.md §1.2). One
       // function because two node kinds need it: the stem, and a pre
@@ -490,11 +490,10 @@ function formatPattern(pattern: LabelPattern): string {
   return pattern.pkg === '' ? '//...' : `//${pattern.pkg}/...`;
 }
 
-// Packages went singular in the same change that made them read like
-// what they address ("the keys track"), and the plural is what fingers
-// and old docs still type. A bare "no such label" is a bad way to learn
-// that, so a pattern that would have matched under the old spelling says
-// so — for as long as anyone is still typing it.
+// Packages are singular so they read like what they address ("the keys
+// track"), and the plural is what fingers type. A bare "no such label"
+// is a bad way to learn that, so a pattern that would have matched
+// under the plural says so.
 //
 // The suggestion keeps the shape it was given: a tree pattern is
 // answered with a tree pattern, `:all` with `:all`, a label with that
@@ -510,19 +509,6 @@ function formatPattern(pattern: LabelPattern): string {
 const PACKAGE_HINTS: Record<string, { to: string; why: string }> = {
   tracks: { to: 'track', why: 'packages are singular:' },
   assets: { to: 'asset', why: 'packages are singular:' },
-  // `mix:` retired with mixes/ (nested-tracks.md §7 chunk 2), so both the
-  // plural and the singular now point at the track that replaced them —
-  // correcting `mixes:` to `mix:` would hand back a second dead end, which
-  // is the mistake `targets:` was already fixed for.
-  mixes: { to: 'track', why: 'mix: is now track:' },
-  mix: { to: 'track', why: 'mix: is now track:' },
-  // `sound:` forwards to `track:` at the finale (nested-tracks.md §18
-  // decision 5): every sound folded into a track, and labels keep their
-  // own compatibility story. The plural and `targets:` chain straight to
-  // the live package rather than to a second dead end.
-  sounds: { to: 'track', why: 'sounds folded into tracks:' },
-  sound: { to: 'track', why: 'sounds folded into tracks:' },
-  targets: { to: 'track', why: 'targets: is now track:' },
 };
 
 function singularHint(graph: Graph, pattern: LabelPattern): string {
