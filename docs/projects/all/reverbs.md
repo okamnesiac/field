@@ -56,8 +56,12 @@ mix. This plan is the parametric pair.
    one sheet of metal); the taps are what make it wide.
 3. **`hall` is a Jot FDN: eight delay lines, Householder feedback,
    per-band T60.** Line lengths are mutually prime, scaled by
-   `size`; the feedback matrix is Householder (O(N) — subtract the
-   mean, negate), so stability is algebraic, not tuned. Each line
+   `size`; the feedback matrix is the Householder reflection
+   I − (2/N)·11ᵀ, applied in O(N) as y = x − 2·mean(x) — the factor
+   of two is what makes it a reflection and therefore orthogonal
+   (Codex caught the draft describing mean(x) − x, which annihilates
+   the common mode and is not lossless) — so stability is algebraic,
+   not tuned. Each line
    carries an absorptive filter deriving per-band decay from three
    numbers: `decay` (mid T60), `decay_low` and `decay_high`
    (multipliers) — rooms keep their lows and lose their highs, and
@@ -71,15 +75,31 @@ mix. This plan is the parametric pair.
    modulate delay interpolation points with fixed-rate sinusoidal
    LFOs (per-branch rates detuned, published in the header), linear
    interpolation, depth from `modulation`. The LFO phase is a pure
-   function of the absolute sample index — a per-sample counter in
-   state, seeded by `locate` with the position it lands on — so the
-   same position always hears the same phase: block-invariant,
-   golden-clean, and a seek matches a from-the-top render exactly.
-   `modulation: 0` is bit-frozen and is the dsp-check fixture's
-   default case.
+   function of the engine's *unwrapped* input-timeline index — the
+   `clock` renderBlock already maintains and `locate` already sets,
+   the same axis the limiter's ramps ride. The streaming class
+   carries it as a counter initialized to wherever the chain starts
+   rendering: zero offline and at load, the *warmup start* at a
+   locate (minjudd caught the draft seeding the landing position,
+   which would have left a permanent phase error the size of the
+   warmup). From there counter and clock advance together, so by the
+   time the audible position arrives the phase equals a from-the-top
+   render's — block-invariant and golden-clean. Two bounds said
+   plainly: the *state* after a far seek matches a from-the-top
+   render within the warmup's −60 dB threshold, the bound every
+   chain already has at locate (realtime.md chunk 4) — exact
+   equality holds from the top, where the golden compares; and under
+   `loop` the unwrapped clock keeps counting across the wrap, so
+   pass two deliberately does not repeat pass one's phase — a tail
+   identical every pass is the static-ring disease this plan exists
+   to cure. `modulation: 0` is bit-frozen and is the dsp-check
+   fixture's default case.
 5. **Tails stay compiler arithmetic.** `plate`: growth = predelay +
-   decay·rate. `hall`: growth = predelay + decay·max(1, decay_low)
-   ·rate (the longest band governs). Both formulas live beside
+   decay·rate. `hall`: growth = predelay + decay·max(1, decay_low,
+   decay_high)·rate — the longest band governs, whichever it is; the
+   schema constrains neither multiplier, so the formula must not
+   assume the low band wins (minjudd and Codex both caught the draft
+   truncating a bright room). Both formulas live beside
    chainGrowth's reverb arm in the compiler and in the engine's
    warmup, the pair that must always agree.
 6. **Each chunk bumps RENDER_PLAN_VERSION and rides the session
