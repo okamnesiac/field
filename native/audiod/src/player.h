@@ -170,6 +170,7 @@ private:
     juce::CriticalSection liveLock;
     std::atomic<bool> livePlaying { false };
     juce::int64 liveLength = 0;
+    juce::String liveSong;
     bool liveLoop = false;
     int liveRate = 0;
     bool liveEverStarted = false;

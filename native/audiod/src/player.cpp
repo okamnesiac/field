@@ -210,19 +210,20 @@ void Player::maybeMatchDeviceRate (double fileRate)
 juce::var Player::load (const juce::File& file, bool loop)
 {
     auto result = obj();
-    // One source of audio at a time: a file load drops any live session,
-    // as loadSession drops the file.
-    {
-        const juce::ScopedLock guard (liveLock);
-        livePlaying = false;
-        liveEverStarted = false;
-        liveSession.reset();
-    }
     std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
     if (reader == nullptr)
     {
         result->setProperty ("error", "cannot read audio file: " + file.getFullPathName());
         return juce::var (result.get());
+    }
+    // One source of audio at a time: a *valid* file load drops any live
+    // session — an unreadable path must not leave the player empty
+    // (Codex's finding on this PR).
+    {
+        const juce::ScopedLock guard (liveLock);
+        livePlaying = false;
+        liveEverStarted = false;
+        liveSession.reset();
     }
 
     transport.stop();
@@ -378,8 +379,34 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         liveRate = next->sessionRate();
         liveLength = next->lengthSamples();
         liveLoop = next->looping();
+        liveSong = session.getProperty ("song", juce::var()).toString();
+        // A queued file takeover must not land on top of a session.
+        pendingReload.reset();
+        stopTimer();
         liveSession = std::move (next);
         maybeMatchDeviceRate ((double) liveRate);
+
+        // The live path writes session frames one-for-one to the device —
+        // there is no AudioTransportSource resampling it. Refusing beats
+        // playing fast and sharp (Codex's finding); live resampling lands
+        // with the cross-rate wiring.
+        const double deviceRate = nullMode
+                                      ? nullSampleRate
+                                      : (deviceManager.getCurrentAudioDevice() != nullptr
+                                             ? deviceManager.getCurrentAudioDevice()
+                                                   ->getCurrentSampleRate()
+                                             : 0.0);
+        if (deviceRate > 0.0 && ! juce::exactlyEqual (deviceRate, (double) liveRate))
+        {
+            liveSession.reset();
+            auto err = obj();
+            err->setProperty ("error",
+                              "the device runs at " + juce::String (deviceRate)
+                                  + " Hz and cannot switch to the session's "
+                                  + juce::String (liveRate)
+                                  + " — live resampling lands with the cross-rate wiring");
+            return juce::var (err.get());
+        }
     }
     catch (const std::exception& e)
     {
@@ -513,6 +540,9 @@ juce::var Player::status()
         result->setProperty ("looping", liveLoop);
         result->setProperty ("path", juce::var());
         result->setProperty ("live", true);
+        if (liveSong.isNotEmpty())
+            result->setProperty ("song", liveSong);
+        result->setProperty ("sample_rate", liveRate);
     }
     else
     {

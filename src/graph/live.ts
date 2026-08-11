@@ -196,12 +196,14 @@ export async function compileSession(root: string, songName: string): Promise<Se
       }
     }
 
-    // Delay compensation at this summing point (realtime.md chunk 2):
-    // every input arrives as late as the latest.
-    for (const { index, ownLatency } of pending) {
-      const window = inputs[index]!;
-      if ('comp_delay' in window) window.comp_delay = maxInputLatency - ownLatency;
-    }
+    // comp_delay stays zero (Codex caught the double-compensation): the
+    // engine's buffers are timeline-aligned — a chain's stream lag is
+    // availability, not shift, because emitted sample i pairs with input
+    // sample i — so subtracting latency again would slide content. The
+    // field exists for the day a source's future does not (recording),
+    // and the latency arithmetic above still feeds the track's reported
+    // latency.
+    void pending;
 
     const pre = contentEnd;
     let post = pre + chainGrowth(chain, shape.rate);
@@ -221,10 +223,21 @@ export async function compileSession(root: string, songName: string): Promise<Se
 
   for (const name of shapes.keys()) compile(name, []);
 
+  for (const shape of shapes.values()) {
+    const sessionRate = shapes.get('main')?.rate;
+    if (sessionRate !== undefined && shape.rate !== sessionRate) {
+      throw new Error(
+        `track "${shape.name}" renders at ${shape.rate} Hz in a ${sessionRate} Hz session — ` +
+          'cross-rate live sessions land with the resampler wiring (realtime.md decision 7); ' +
+          'build and play the artifact meanwhile',
+      );
+    }
+  }
   const output = shapes.get('main');
   if (!output) throw new Error(`song "${songName}" has no track named "main"`);
   return {
     version: SESSION_VERSION,
+    song: songName,
     rate: output.rate,
     ...(output.spec.length_samples !== undefined
       ? { length_samples: output.spec.length_samples }

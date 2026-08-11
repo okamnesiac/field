@@ -58,6 +58,8 @@ export const statusResponseSchema = z.object({
   resampling: z.boolean(),
   looping: z.boolean().optional(), // daemon >= 0.3
   live: z.boolean().optional(), // a live session is loaded (daemon feature "session")
+  song: z.string().optional(), // the live session's song (live only)
+  sample_rate: z.number().optional(), // the live session's rate (live only)
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });
