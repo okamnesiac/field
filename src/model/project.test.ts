@@ -18,7 +18,7 @@ import { fmt } from '../commands/fmt.js';
 import { importAsset } from '../commands/import.js';
 import { sha256Text } from '../hash.js';
 import { writeWavFloat32 } from '../audio/wav.js';
-import { findProjectRoot, loadProject } from './project.js';
+import { committedFileResolver, findProjectRoot, loadProject } from './project.js';
 
 let root: string;
 
@@ -1287,6 +1287,39 @@ describe('one audio/ directory per name (nested-tracks.md §18 step 3)', () => {
       "already a generator's name",
     );
     rmSync(src);
+  });
+});
+
+describe('committedFileResolver: one relation for validate and the graph', () => {
+  // Both passes import this one resolver, so the answers below are the
+  // answers everywhere — a ref that resolves here tiles in check and
+  // plans in build identically, which is the invariant the #58 asset
+  // readings lost by existing twice.
+  it('resolves ledger names and chosen takes; nothing that renders', async () => {
+    createSong(root, 'opener');
+    createTrack(root, 'opener', 'vox');
+    const src = sourceFile();
+    await importAsset(root, 'opener', src, 'hit');
+    writeFileSync(
+      join(root, 'songs/opener/tracks/rain-pad.yaml'),
+      'name: rain-pad\ninputs:\n  - generative:\n      prompt: rain\n      bpm: 96\n      duration_seconds: 10\n',
+    );
+    mkdirSync(join(root, 'songs/opener/audio/rain-pad'), { recursive: true });
+    writeFileSync(join(root, 'songs/opener/audio/rain-pad/1.wav'), 'take one');
+    writeFileSync(
+      join(root, 'songs/opener/audio/rain-pad/variants.yaml'),
+      `gen: rain-pad\nchosen: 1\nvariants:\n  - file: audio/rain-pad/1.wav\n    model: acestep-v15-turbo\n    seed: 7\n    sha256: ${sha256Text('take one')}\n    generated_at: 2026-08-05T21:00:00.000Z\n`,
+    );
+
+    const project = loadProject(root);
+    const song = project.songs[0]!;
+    const resolve = committedFileResolver(project, song);
+
+    expect(resolve('hit')).toEqual({ base: 'songs/opener', file: expect.stringContaining('audio/hit/') });
+    expect(resolve('gen:rain-pad')).toEqual({ base: 'songs/opener', file: 'audio/rain-pad/1.wav' });
+    // A placed track renders; it has no committed bytes to resolve.
+    expect(resolve('track:vox')).toBeUndefined();
+    expect(resolve('ghost')).toBeUndefined();
   });
 });
 

@@ -195,6 +195,39 @@ function loadEntryTakes(
   return loaded;
 }
 
+// Where a committed source's bytes live (undefined for anything that
+// renders): the song's ledger, the shared ledger, or a generative
+// entry's chosen take. The one resolver for both passes — validate's
+// loop tiling and buildGraph's planning must answer alike, and two
+// constructions of one relation is how the #58 asset readings came to
+// disagree. `base` is the project-relative root the file resolves
+// against (the song's directory, or shared).
+export function committedFileResolver(
+  project: LoadedProject,
+  song: LoadedSong,
+): (ref: string) => { base: string; file: string } | undefined {
+  const sharedFileByName = new Map(project.shared?.data.assets.map((a) => [a.name, a.file]) ?? []);
+  const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
+  return (ref) => {
+    const shared = sharedAssetName(ref);
+    if (shared !== undefined) {
+      const file = sharedFileByName.get(shared);
+      return file !== undefined ? { base: 'shared', file } : undefined;
+    }
+    const asset = assetFileByName.get(ref);
+    if (asset !== undefined) return { base: song.dir, file: asset };
+    // A generative entry's chosen take is committed content under its
+    // gen node's name.
+    const gen = genRefName(ref);
+    if (gen !== undefined) {
+      const takes = song.genTakes.get(gen)?.data;
+      const variant = takes?.chosen !== undefined ? takes.variants[takes.chosen - 1] : undefined;
+      if (variant) return { base: song.dir, file: variant.file };
+    }
+    return undefined;
+  };
+}
+
 export function loadProject(root: string): LoadedProject {
   const project: LoadedProject = { root: resolve(root), songs: [], diagnostics: [] };
 
@@ -445,30 +478,7 @@ function validate(project: LoadedProject): void {
     // namespace (nested-tracks.md §18) — the whole visibility rule
     // (project-layout.md §1.5) is that no spelling reaches another song,
     // and the one cross-scope spelling is `audio: //shared/asset:`.
-    const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
-    // Where a committed source's bytes live (undefined for anything that
-    // renders): the ledger file, the shared file, or a chosen take.
-    // graph.ts builds the same relation eagerly for the build pass
-    // (buildGraph's fileBySource) — the two must answer alike, since
-    // loop tiling validated here is planned there.
-    const fileBySource = (ref: string): { base: string; file: string } | undefined => {
-      const shared = sharedAssetName(ref);
-      if (shared !== undefined) {
-        const file = sharedFileByName.get(shared);
-        return file !== undefined ? { base: 'shared', file } : undefined;
-      }
-      const asset = assetFileByName.get(ref);
-      if (asset !== undefined) return { base: song.dir, file: asset };
-      // A generative entry's chosen take is committed content under its
-      // gen node's name.
-      const gen = genRefName(ref);
-      if (gen !== undefined) {
-        const takes = song.genTakes.get(gen)?.data;
-        const variant = takes?.chosen !== undefined ? takes.variants[takes.chosen - 1] : undefined;
-        if (variant) return { base: song.dir, file: variant.file };
-      }
-      return undefined;
-    };
+    const fileBySource = committedFileResolver(project, song);
     // Names first, in full: a track may place a track declared in any
     // file, and a forward reference is fine.
     const trackByName = new Map(song.tracks.map((t) => [t.data.name, t.data]));

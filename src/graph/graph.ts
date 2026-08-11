@@ -17,7 +17,7 @@ import {
   type Label,
   type LabelPattern,
 } from '../labels.js';
-import type { LoadedProject } from '../model/project.js';
+import { committedFileResolver, type LoadedProject } from '../model/project.js';
 import type { Cable } from '../model/cables.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import type { ResampleSpec } from '../generators/resample.js';
@@ -169,18 +169,9 @@ export function buildGraph(project: LoadedProject): Graph {
       }
     }
     // Where a committed source's bytes live, for loop tiling and for
-    // materializing generation inputs. validate builds the same relation
-    // lazily (project.ts fileBySource) — the two must answer alike,
-    // since loop tiling validated there is planned here.
-    const fileBySource = new Map<string, { base: string; file: string }>();
-    for (const [name, asset] of sharedByName) {
-      fileBySource.set(`//${SHARED_ASSETS_PKG}:${name}`, { base: 'shared', file: asset.file });
-    }
-    if (song.assets) {
-      for (const asset of song.assets.data.assets) {
-        fileBySource.set(asset.name, { base: song.dir, file: asset.file });
-      }
-    }
+    // materializing generation inputs — the same resolver validate uses,
+    // so the tiling validated there cannot be planned differently here.
+    const fileBySource = committedFileResolver(project, song);
     const refLabel = (ref: string): Label => {
       const shared = sharedAssetName(ref);
       if (shared !== undefined) return { pkg: SHARED_ASSETS_PKG, name: shared };
@@ -265,7 +256,6 @@ export function buildGraph(project: LoadedProject): Graph {
               choice: { chosen: takes.chosen, takes: variants.length },
             });
             sha256BySource.set(genRef(name), variant.sha256);
-            fileBySource.set(genRef(name), { base: song.dir, file: variant.file });
           }
         }
       }
@@ -288,7 +278,7 @@ export function buildGraph(project: LoadedProject): Graph {
       }
     };
     const committedRate = (ref: string): number | undefined => {
-      const committed = fileBySource.get(ref);
+      const committed = fileBySource(ref);
       return committed === undefined ? undefined : headerRate(committed.base, committed.file);
     };
     const trackByName = new Map(song.tracks.map((f) => [f.data.name, f.data]));
@@ -328,7 +318,7 @@ export function buildGraph(project: LoadedProject): Graph {
         for (const entry of track.inputs) {
           if (entry.loop?.enabled && entry.loop.every === undefined) {
             const ref = entryRef(entry, track.name);
-            const committed = fileBySource.get(ref);
+            const committed = fileBySource(ref);
             if (committed !== undefined && !framesBySource.has(ref)) {
               framesBySource.set(
                 ref,
