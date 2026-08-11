@@ -125,6 +125,18 @@ library, and the build cache doubling as automatic track freezing.
    re-render-and-swap fallback for foreign-rate dirty tracks (a
    permanent behavioral cliff, built to avoid a fourth instance of
    a pattern this plan already commits to three times).
+
+   *Amended 2026-08-11 ([cross-rate-live.md](cross-rate-live.md)):*
+   the "reported into delay compensation" clause described a causal
+   streaming edge the engine never runs. The engine materializes
+   (chunk 2's amendment), so an edge converts the child's whole
+   buffer through the wrapper, whose emission is timeline-aligned —
+   the taps/2 group delay is internal accounting, and what remains
+   is availability, not shift, the same resolution that keeps
+   comp_delay zero. Under streaming rings the producer runs ahead
+   of the playhead by at least the kernel window, so the aligned
+   form survives there too. The one place the streaming delay is
+   physically real is device delivery, which is outside the golden.
 8. **Live evaluation arrives behind `--live` and becomes the
    meaning of song playback when the freeze lands.** While chunks
    2–3 are landing, `field play <song> --live` is the explicitly
