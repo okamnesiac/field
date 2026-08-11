@@ -29,7 +29,19 @@ export const pluginInfoSchema = z.object({
   manufacturer: z.string(),
   path: z.string(),
   latency: z.number().int(),
-  params: z.array(z.object({ id: z.string(), name: z.string(), label: z.string() })),
+  params: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      label: z.string(),
+      // Optional so an inventory scanned before these fields existed
+      // still reads; validation defers where they are absent, the same
+      // rule as having no scan at all.
+      discrete: z.boolean().optional(),
+      steps: z.number().int().optional(),
+      labels: z.array(z.string()).optional(),
+    }),
+  ),
 });
 export type PluginInfo = z.infer<typeof pluginInfoSchema>;
 

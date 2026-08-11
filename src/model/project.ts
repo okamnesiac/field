@@ -980,6 +980,31 @@ function validate(project: LoadedProject): void {
               `param "${key}": id ${paramId} is named "${matches[0]!.name}", not "${name}"`,
             );
           }
+          // Decision 3's split, enforced where the scan can judge it: a
+          // string is legal only on a labeled (discrete) parameter, and
+          // only as a label the plugin offers. An inventory scanned
+          // before discreteness was recorded defers, like no scan.
+          const value = insert.params?.[key];
+          const info = matches.length === 1 ? matches[0]! : undefined;
+          if (typeof value === 'string' && info !== undefined) {
+            if (info.discrete === false) {
+              push(
+                trackFile.path,
+                `param "${key}" takes a number — string spellings are for labeled ` +
+                  `parameters (plugin-hosting.md decision 3)`,
+              );
+            } else if (
+              info.discrete === true &&
+              info.labels !== undefined &&
+              info.labels.length > 0 &&
+              !info.labels.includes(value)
+            ) {
+              push(
+                trackFile.path,
+                `param "${key}": "${value}" is not one of ${info.labels.join(', ')}`,
+              );
+            }
+          }
         }
       }
     }

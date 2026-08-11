@@ -87,6 +87,24 @@ namespace
             param->setProperty ("id", hosted->getParameterID());
             param->setProperty ("name", hosted->getName (512));
             param->setProperty ("label", hosted->getLabel());
+            // Discreteness and the label set, so check can enforce
+            // decision 3's split: strings only where the plugin offers
+            // labels, and only labels it offers. Bounded — an int
+            // parameter with hundreds of steps records its count, not a
+            // label list nobody would type.
+            param->setProperty ("discrete", hosted->isDiscrete());
+            param->setProperty ("steps", hosted->getNumSteps());
+            if (hosted->isDiscrete() && hosted->getNumSteps() >= 2 && hosted->getNumSteps() <= 32)
+            {
+                // Built by hand: getAllValueStrings() comes back empty
+                // through the VST3 wrapper (measured), but getText per
+                // step is the same information.
+                juce::Array<juce::var> labels;
+                const auto steps = hosted->getNumSteps();
+                for (int step = 0; step < steps; ++step)
+                    labels.add (hosted->getText (float (step) / float (steps - 1), 512));
+                param->setProperty ("labels", labels);
+            }
             params.add (juce::var (param));
         }
         object->setProperty ("params", params);
@@ -368,6 +386,16 @@ namespace
                                           + wantId.toStdString() + " is named \""
                                           + target->getName (512).toStdString() + "\", not \""
                                           + wantName.toStdString() + "\"");
+
+            // Decision 3's split holds here too, scan or no scan: a
+            // string spelling is only for labeled parameters. A display
+            // string on a continuous parameter is the laundering the
+            // decision forbids.
+            if (value.isString() && ! target->isDiscrete())
+                throw std::runtime_error (displayName.toStdString() + " param \""
+                                          + wantName.toStdString()
+                                          + "\" takes a number — string spellings are for "
+                                            "labeled parameters");
 
             const auto text = value.isString() ? value.toString()
                                                : juce::String (double (value), 12);

@@ -139,6 +139,16 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
     expect(trims).toHaveLength(2);
     expect(new Set(trims.map((t) => t.id)).size).toBe(2);
     expect(fixture.params.some((p) => p.name === 'Gain')).toBe(true);
+    // Discreteness and labels ride the scan (decision 3's split).
+    const ratio = fixture.params.find((p) => p.name === 'Ratio');
+    expect(ratio?.discrete).toBe(true);
+    expect(ratio?.labels).toContain('4:1');
+  });
+
+  it('refuses a string spelling on a continuous parameter (decision 3, minjudd)', async () => {
+    await expect(
+      render(pluginInsert({ params: [{ name: 'Gain', value: '3.1 ms' }] })),
+    ).rejects.toThrow(/takes a number/);
   });
 
   it('renders deterministically and applies natural-unit params', async () => {

@@ -131,7 +131,16 @@ Decided elsewhere, restated here as constraints:
    (set, read back, compare) at write time; a plugin whose
    conversion cannot round-trip gets that one param stored in
    normalized form, a `check`-visible fallback rather than a silent
-   drift. Display names are not guaranteed unique, so the stable
+   drift. Labeled parameters are the deliberate exception to
+   never-display-strings: a discrete parameter whose natural spelling
+   *is* a label (`Ratio: "4:1"`, a mode named `Vintage`) takes
+   exactly the label the plugin offers, as a string — the scan
+   records discreteness and the label set, check enforces both where
+   a scan exists, and the render verifies by display round-trip —
+   while a continuous parameter never takes a string, which keeps
+   the no-laundering rule above true as written (minjudd caught the
+   widened schema accepting both without a distinction). Display
+   names are not guaranteed unique, so the stable
    parameter ID is load-bearing underneath: the YAML key is the
    display name while unique, and a plugin exposing duplicates gets
    tool-written `Name#<id>` keys — the same you-write-the-name,

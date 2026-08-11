@@ -125,8 +125,10 @@ export const pluginInsertSchema = z
       .string()
       .regex(/^[0-9a-f]{8,64}$/, 'a state ref is 8–64 lowercase hex chars of the blob hash')
       .optional(),
-    // Numbers in the plugin's natural units; strings for labeled
-    // parameters ("4:1") — the plugin's own display spelling.
+    // Numbers in the plugin's natural units; strings only for labeled
+    // (discrete) parameters, and only as a label the plugin offers
+    // ("4:1") — check enforces the split where a scan exists, and the
+    // render verifies by display round-trip (decision 3).
     params: z.record(z.string(), z.union([z.number(), z.string().min(1)])).optional(),
   })
   .refine((entry) => entry.au === undefined || entry.vst3 === undefined, {

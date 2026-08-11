@@ -27,9 +27,10 @@ const inventory: PluginInventory = {
       path: '/somewhere/Field Fixture.vst3',
       latency: 0,
       params: [
-        { id: '3165055', name: 'Gain', label: 'dB' },
-        { id: '110628959', name: 'Trim', label: 'dB' },
-        { id: '110628960', name: 'Trim', label: 'dB' },
+        { id: '3165055', name: 'Gain', label: 'dB', discrete: false, steps: 0 },
+        { id: '110628959', name: 'Trim', label: 'dB', discrete: false, steps: 0 },
+        { id: '110628960', name: 'Trim', label: 'dB', discrete: false, steps: 0 },
+        { id: '7891011', name: 'Ratio', label: '', discrete: true, steps: 3, labels: ['2:1', '4:1', '8:1'] },
       ],
     },
   ],
@@ -288,6 +289,34 @@ describe('hosted-insert check rules', () => {
     expect(
       messages.some((m) => m.includes('spell it Trim#110628959 or Trim#110628960')),
     ).toBe(true);
+  });
+
+  it('strings are for labels the plugin offers, numbers for the rest (decision 3, minjudd)', () => {
+    writeInventory();
+    writeTrack(
+      [
+        'name: lead',
+        'inserts:',
+        '  - plugin: Field Fixture',
+        '    vst3: 1beeb215',
+        '    version: 1.0.0',
+        '    params:',
+        '      Gain: 3.1 ms',
+        '      Ratio: 9:1',
+        'inputs: []',
+        '',
+      ].join('\n'),
+    );
+    const messages = loadProject(root).diagnostics.map((d) => d.message);
+    expect(
+      messages.some((m) => m.includes('param "Gain" takes a number')),
+    ).toBe(true);
+    expect(messages.some((m) => m.includes('"9:1" is not one of 2:1, 4:1, 8:1'))).toBe(true);
+
+    writeTrack(
+      'name: lead\ninserts:\n  - plugin: Field Fixture\n    vst3: 1beeb215\n    version: 1.0.0\n    params:\n      Ratio: 4:1\ninputs: []\n',
+    );
+    expect(loadProject(root).diagnostics).toEqual([]);
   });
 
   it('warns on version drift against the inventory without failing the gate (decision 9)', () => {
