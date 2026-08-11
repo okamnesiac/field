@@ -8,12 +8,13 @@ status: Shipped
 (takeover at the wrap, daemon 0.4) and `field build --watch` — landed
 in #34; chunk 2 — `play --loop --watch`, the §3 walk run against bloom
 (scripted, null output; every step behaved), and the docs paragraphs —
-landed in #35, since amended by #37, #38 and the #44 rename. Two things
-are open, and one of them is audible: §6 records the hiccup at every
-reload takeover, diagnosed and deliberately deferred because the
-real-time engine deletes the mechanism; §5's `status`-visibility
-question remains a design question. Written against the
-layout-migration vocabulary (project-layout.md §4, landed in #31).
+landed in #35, since amended by #37, #38 and the #44 rename. One thing
+is open: §5's `status`-visibility question remains a design question.
+§6 recorded an audible hiccup at every reload takeover, deliberately
+deferred because the real-time engine would delete the mechanism —
+realtime chunk 3 did (2026-08-10), and the hiccup went with it. Written
+against the layout-migration vocabulary (project-layout.md §4, landed
+in #31).
 
 **Goal:** `field play <song> --loop --watch` keeps the loop playing
 while the project changes underneath it: edit a clip, nudge a fader,
@@ -182,3 +183,11 @@ variants is core — but this mechanism does not. Justin's call
 two measurements are the acceptance test: 200 ms must not sound worse
 than 20 ms, because with the swap at the boundary the poll would be gone
 entirely.
+
+**Resolved by deletion (2026-08-10).** Realtime chunk 3 retired the
+takeover whole — `play --watch` rides the live engine now, where a gain
+edit ramps at the next block and a structural edit swaps the session
+with the transport carried, so no file is reloaded at a wrap and the
+mechanism this section diagnoses no longer exists. The expiry date
+above arrived exactly as written. The measurements stay as the record
+of why nobody built the lock-free handoff.
