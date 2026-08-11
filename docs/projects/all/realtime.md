@@ -65,8 +65,8 @@ library, and the build cache doubling as automatic track freezing.
    mix path decision 1 keeps — and is not touched here.
    The property is enforced, not hoped for: a golden equivalence test
    renders the same subgraph offline and through the engine at
-   several block sizes and diffs the output (§8 decides the
-   tolerance).
+   several block sizes and diffs the output (decision 6 sets the
+   tolerance: bit-identity).
 4. **The cache is the freeze.** Because live and offline are
    sample-identical, the engine plays the cached stem for any clean
    subgraph and evaluates live only what is dirty — automatic track
@@ -82,6 +82,48 @@ library, and the build cache doubling as automatic track freezing.
    boundary without stopping the transport. The CLI decides which is
    which by diffing the compiled session graph — the daemon never
    sees YAML.
+6. **The golden test demands bit-identity, engineered rather than
+   hoped for.** Both paths run the same compiled functions;
+   recurrences carry state exactly, so block boundaries cannot
+   reorder them; the summing order is fixed by the graph. The two
+   landmines are named so they get defused up front: the stem op
+   must match the callback's floating-point environment (flush-to-
+   zero on both sides, or neither — denormal handling alone breaks
+   identity in reverb tails), and the limiter's causal twin must run
+   the same backward recurrence over a two-ramp buffer rather than
+   computing ramps by multiplication, because chained addition
+   rounds differently. The test is then a hash comparison — the
+   live engine's output for a clean subgraph *is* the cached
+   artifact in the content-addressed sense the repo already runs
+   on. A per-processor epsilon is the documented fallback if
+   evidence forces one; it is not adopted in advance. Rejected: a
+   blanket epsilon (custom comparison machinery, admits drift, and
+   surrenders the hash-equality property for free).
+7. **The resampler is the fourth repackaging — there is never a
+   second SRC.** The offline converter is a fixed-ratio polyphase
+   windowed sinc whose inner loop is already per-output-sample
+   (resample.cpp), so a streaming form is the same kernel fed by a
+   ring of input history, primed with the zeros the offline edge
+   implies, with the group delay the code already computes
+   (`taps / 2` = 64 input samples, ~1.4 ms) reported into delay
+   compensation. A foreign-rate dirty track therefore runs live
+   like every other track. Rejected: a cheap realtime interpolator
+   (a second SRC implementation with a different sound — the
+   two-implementations disease decision 2 exists to kill), and a
+   re-render-and-swap fallback for foreign-rate dirty tracks (a
+   permanent behavioral cliff, built to avoid a fourth instance of
+   a pattern this plan already commits to three times).
+8. **Live evaluation arrives behind `--live` and becomes the
+   meaning of song playback when the freeze lands.** While chunks
+   2–3 are landing, `field play <song> --live` is the explicitly
+   experimental path and artifact playback stays the known-good
+   reference. When chunk 4 makes cost scale with dirt rather than
+   session size, live evaluation becomes what playing a song *is*,
+   and the artifact path for song playback retires — two permanent
+   surfaces would be a standing divergence risk. Playing an explicit
+   artifact stays file playback. This is the arc playback.md already
+   walked with afplay: fallback until the new path soaked, then
+   retired.
 
 ## 3 The session graph
 
@@ -158,35 +200,32 @@ stands as drafted; its list line waits in later.md.
    ever reaches one attack ramp back (limiter.h:13 — "the 'lookahead'
    is the attack ramp length"), so a causal twin that delays by one
    ramp sees exactly the window the backward pass consulted and
-   computes the identical gain curve left-to-right. Latency reporting
-   per processor (the PDC groundwork; the stem op trims the limiter's
-   fixed offset), and the golden equivalence harness at multiple
-   block sizes — which therefore covers all three processors as
-   repackagings. `field build` output should not change at all; the
-   golden test is what proves it did not.
+   computes the identical gain curve left-to-right. The resampler
+   joins as the fourth repackaging (decision 7): the same polyphase
+   kernel fed streaming, its `taps / 2` delay reported. Latency
+   reporting per processor (the PDC groundwork; the stem op trims
+   the fixed offsets), matched floating-point environment across
+   both paths (decision 6), and the golden equivalence harness at
+   multiple block sizes — four processors, all repackagings.
+   `field build` output should not change at all; the golden test is
+   what proves it did not.
 2. **The live graph** — the session message set and schema, clip
-   streaming with loops and fades, per-track chains, sends with
-   delay compensation, nested summing, level/pan/send ramps over the
-   socket; `features` gating in hello.
+   streaming with loops and fades, per-track chains, live rate
+   conversion at the edges that declare it, sends with delay
+   compensation, nested summing, level/pan/send ramps over the
+   socket; `features` gating in hello; all behind `field play
+   <song> --live` (decision 8).
 3. **Edits land mid-play** — the CLI compiles and diffs on file
    change, ramps vs. subgraph swaps, watch integration; the loop-wrap
    takeover machinery retires.
 4. **The cache is the freeze** — the compiler sends cached stems for
    clean subgraphs, the engine swaps a track between cached and live
    as dirtiness changes, and CPU stops scaling with session size.
+   Live evaluation becomes the default for song playback and the
+   `--live` flag and the artifact path for songs retire (decision 8).
 
 ## 8 Open questions
 
-- The golden test's tolerance: strict bit-identity, or an epsilon that
-  admits float summation-order differences? Bit-identity is the
-  stronger claim and worth attempting first; the reverb's feedback
-  state is where it will be hardest.
-- Live rate conversion: a dirty track at its own rate
-  (multi-rate.md decision 3) needs sample-rate conversion in the
-  callback that the offline resample op does with a windowed-sinc
-  pass today. Clean tracks dodge this via the cache (the convert
-  node's artifact is cacheable), so V1 may accept "a track being
-  edited plays at the session rate" — decide when chunk 2 meets it.
-- The CLI surface: does live evaluation hide behind `field play`
-  once it exists, or arrive as an explicit flag until the freeze
-  chunk makes it always-cheap?
+None right now. The three the first draft carried — the golden test's
+tolerance, live rate conversion, the CLI surface — were discussed and
+decided 2026-08-10, and live as decisions 6–8 in §2.
