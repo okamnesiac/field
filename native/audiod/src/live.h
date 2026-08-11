@@ -127,6 +127,14 @@ private:
 
     void produceUntil (int trackIndex, juce::int64 outputSamples);
     void buildChain (Track& track) const;
+    // The history the output chain must hear for its state at a
+    // position to be right within the design's audibility threshold —
+    // what locate renders and discards after a rebuild.
+    juce::int64 chainWarmup (const Track& track) const;
+    // Render forward to `sample`, discarding the audio: the chain hears
+    // exactly what it would have, so its state afterwards is not an
+    // approximation.
+    void discardUntil (juce::int64 sample);
     // `absoluteFrom` is the unwrapped timeline position of `from` — the
     // output track mixes in wrapped time but ramps glide on real time,
     // so a fader move never reverses after a loop wrap.

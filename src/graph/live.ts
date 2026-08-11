@@ -121,11 +121,14 @@ export async function compileSession(root: string, songName: string): Promise<Se
   const toBuild = [
     ...new Set([...shapes.values()].flatMap((s) => s.deps.filter((d) => !isLive(d)))),
   ];
-  const pathByLabel = new Map<string, string>();
+  const fileByLabel = new Map<string, { path: string; sha256: string }>();
   if (toBuild.length > 0) {
     for (const outcome of await buildLabels(root, toBuild)) {
       if (outcome.outputPath !== undefined)
-        pathByLabel.set(outcome.label, relative(root, outcome.outputPath));
+        fileByLabel.set(outcome.label, {
+          path: relative(root, outcome.outputPath),
+          sha256: outcome.sha256,
+        });
     }
   }
 
@@ -187,12 +190,12 @@ export async function compileSession(root: string, songName: string): Promise<Se
             : { track: child, ...base, duration, comp_delay: 0 },
         );
       } else {
-        const path = pathByLabel.get(dep);
-        if (path === undefined) throw new Error(`unbuilt source ${dep} for "${name}"`);
-        const frames = wavFrameCount(join(root, path));
+        const built = fileByLabel.get(dep);
+        if (built === undefined) throw new Error(`unbuilt source ${dep} for "${name}"`);
+        const frames = wavFrameCount(join(root, built.path));
         const duration = clip.duration ?? Math.max(0, frames - clip.read_offset);
         contentEnd = Math.max(contentEnd, clip.start + duration);
-        inputs.push({ file: path, ...base, duration });
+        inputs.push({ file: built.path, sha256: built.sha256, ...base, duration });
       }
     }
 
@@ -246,4 +249,51 @@ export async function compileSession(root: string, songName: string): Promise<Se
     output: 'main',
     tracks: [...compiled.values()],
   };
+}
+
+
+// The edit classifier (realtime.md decision 5): two compiled sessions,
+// one verdict. Sessions identical except window gains become ramps — the
+// mixer surface, landing next block with no interruption; anything else
+// is structural and swaps the whole session, which the daemon does at a
+// block boundary while the old one keeps playing through the compile.
+export type SessionEdit =
+  | { kind: 'same' }
+  | { kind: 'ramps'; ramps: { track: string; input: number; gain_db: number }[] }
+  | { kind: 'swap' };
+
+export function diffSessions(prev: Session, next: Session): SessionEdit {
+  // Only the output track's window gains can ramp: every other track
+  // pre-renders at load with its gains baked into the buffers, so a
+  // ramp there would report success and change nothing (live.cpp says
+  // as much where it lands ramps), and a chain setting that happens to
+  // be spelled gain_db — an eq band — is an edited chain, decision 5's
+  // structural case. So the mask is by position, not by name: exactly
+  // the gains the ramp verb reaches go blank, and any other gain_db
+  // stays visible to the comparison and falls through to swap.
+  // (Decision 5 lists pan beside gain; rampRequestSchema carries no pan
+  // yet, so a pan edit swaps — the safe direction — until the verb
+  // grows one.)
+  const shapeOf = (s: Session): string =>
+    JSON.stringify({
+      ...s,
+      tracks: s.tracks.map((t) =>
+        t.name === s.output
+          ? { ...t, inputs: t.inputs.map((i) => ({ ...i, gain_db: 0 })) }
+          : t,
+      ),
+    });
+  if (shapeOf(prev) !== shapeOf(next)) return { kind: 'swap' };
+
+  // Same shape guarantees the same output track with the same inputs on
+  // both sides; only its gains can differ here.
+  const before = prev.tracks.find((t) => t.name === prev.output)!;
+  const after = next.tracks.find((t) => t.name === next.output)!;
+  const ramps: { track: string; input: number; gain_db: number }[] = [];
+  for (let i = 0; i < after.inputs.length; i++) {
+    if (before.inputs[i]!.gain_db !== after.inputs[i]!.gain_db) {
+      ramps.push({ track: after.name, input: i, gain_db: after.inputs[i]!.gain_db });
+    }
+  }
+  return ramps.length > 0 ? { kind: 'ramps', ramps } : { kind: 'same' };
 }

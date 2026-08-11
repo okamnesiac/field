@@ -206,13 +206,17 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "field-audiod");
-        ok->setProperty ("version", "0.5.0"); // 0.5: live sessions
+        ok->setProperty ("version", "0.6.0"); // 0.6: edits land mid-play; the wrap takeover retires
         // Capability names (realtime.md §3): clients gate on these, not
         // on parsing the version string.
         juce::Array<juce::var> features;
         features.add ("loop");
-        features.add ("reload");
         features.add ("session");
+        // The session verb replaces mid-play with the transport carried
+        // (chunk 3). 0.5 advertised `session` too, with a swap that
+        // stopped and rewound — so the watch path gates on this feature,
+        // not that one (Codex's finding).
+        features.add ("swap");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -233,16 +237,6 @@ juce::String Server::dispatch (const juce::var& request)
         auto path = request.getProperty ("path", juce::var()).toString();
         auto loop = (bool) request.getProperty ("loop", false);
         auto info = player.load (juce::File (path), loop);
-        if (info.getProperty ("error", juce::var()).isString())
-            return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
-        if (auto* o = info.getDynamicObject())
-            for (auto& prop : o->getProperties())
-                ok->setProperty (prop.name, prop.value);
-    }
-    else if (op == "reload")
-    {
-        auto path = request.getProperty ("path", juce::var()).toString();
-        auto info = player.reload (juce::File (path));
         if (info.getProperty ("error", juce::var()).isString())
             return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
         if (auto* o = info.getDynamicObject())

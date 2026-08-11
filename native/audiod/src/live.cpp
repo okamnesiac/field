@@ -454,13 +454,61 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
     }
 }
 
+// How much history the chain must hear before its state at a position
+// matches a from-the-start render within the design's own audibility
+// threshold — 60 dB, the figure the limiter horizon and a reverb's T60
+// already rest on. A reverb remembers one tail, a limiter one window,
+// and a biquad's ring-down at audio settings sits well inside the
+// second an eq stage is allowed here.
+juce::int64 LiveSession::chainWarmup (const Track& track) const
+{
+    juce::int64 warmup = 0;
+    for (const auto& stage : track.chain)
+    {
+        if (stage.reverb != nullptr)
+            warmup += stage.reverb->tailSamples();
+        else if (stage.limiter != nullptr)
+            warmup += stage.limiter->latencySamples();
+        else
+            warmup += rate;
+    }
+    return warmup;
+}
+
+void LiveSession::discardUntil (juce::int64 sample)
+{
+    std::vector<std::vector<float>> sink (2, std::vector<float> ((size_t) engineBlock, 0.0f));
+    float* outs[2] = { sink[0].data(), sink[1].data() };
+    while (delivered < sample)
+        renderBlock (outs, 2, (int) std::min<juce::int64> (engineBlock, sample - delivered));
+}
+
 void LiveSession::locate (juce::int64 sample)
 {
-    clock = sample;
-    delivered = sample;
-    // A seek does not inherit the previous position's tails: the output
-    // chain rebuilds from its specs, state zeroed (Codex's finding).
-    buildChain (tracks[(size_t) outputTrack]);
+    // A short forward move keeps the chain and just renders up to the
+    // target — real state, not approximation. This is the swap's second
+    // locate (the drift between the pre-roll outside the lock and the
+    // transport read under it), and a nearby manual seek gets the same
+    // continuity for free.
+    Track& output = tracks[(size_t) outputTrack];
+    const juce::int64 warmup = chainWarmup (output);
+    if (sample < delivered || sample - delivered > warmup)
+    {
+        // A far seek does not inherit the previous position's tails:
+        // the chain rebuilds from its specs, state zeroed (Codex's
+        // finding on #138) — and then warms up, rendering the warmup
+        // span into the void so the first audible samples carry the
+        // reverb tails and limiter state the position implies instead
+        // of a cold start's discontinuity (Codex's finding on #139).
+        // Clamped at zero: state before the top does not exist, and a
+        // looping session's wrap is close enough to a top for a carry
+        // landing just past it.
+        buildChain (output);
+        const juce::int64 from = std::max<juce::int64> (0, sample - warmup);
+        clock = from;
+        delivered = from;
+    }
+    discardUntil (sample);
 }
 
 void LiveSession::ramp (const std::string& trackName, int input, double gainDb, double rampMs)

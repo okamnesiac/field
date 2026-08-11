@@ -51,7 +51,6 @@ Player::Player (bool useNullOutput) : nullMode (useNullOutput)
 
 Player::~Player()
 {
-    stopTimer();
     removeHardwareListeners();
     if (nullClockRunning.exchange (false) && nullClock.joinable())
         nullClock.join();
@@ -229,10 +228,6 @@ juce::var Player::load (const juce::File& file, bool loop)
     transport.stop();
     transport.setSource (nullptr);
     readerSource.reset();
-    // A fresh load supersedes any queued takeover — it was aimed at the
-    // stream that just ended.
-    pendingReload.reset();
-    stopTimer();
 
     fileSampleRate = reader->sampleRate;
     fileLengthSamples = reader->lengthInSamples;
@@ -256,117 +251,74 @@ juce::var Player::load (const juce::File& file, bool loop)
     return juce::var (result.get());
 }
 
-juce::var Player::reload (const juce::File& file)
-{
-    auto result = obj();
-    if (readerSource == nullptr)
-    {
-        result->setProperty ("error", "nothing loaded");
-        return juce::var (result.get());
-    }
-    if (! looping)
-    {
-        result->setProperty ("error", "reload needs a looping stream (load with loop first)");
-        return juce::var (result.get());
-    }
-    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
-    if (reader == nullptr)
-    {
-        result->setProperty ("error", "cannot read audio file: " + file.getFullPathName());
-        return juce::var (result.get());
-    }
-
-    auto pending = std::make_unique<PendingReload>();
-    pending->path = file.getFullPathName();
-    pending->sampleRate = reader->sampleRate;
-    pending->length = reader->lengthInSamples;
-    pending->channels = (int) reader->numChannels;
-    pending->source = std::make_unique<juce::AudioFormatReaderSource> (reader.release(), true);
-    pending->source->setLooping (true);
-
-    // Latest wins: a second reload before the wrap replaces the first —
-    // the watcher's coalescing means only the freshest build matters.
-    pendingReload = std::move (pending);
-    result->setProperty ("samples", pendingReload->length);
-    result->setProperty ("sample_rate", pendingReload->sampleRate);
-    result->setProperty ("channels", pendingReload->channels);
-
-    // A stopped transport has no pass in progress and no position worth
-    // keeping: swap now. A paused one holds a human's position — the
-    // takeover stays queued and lands at the wrap after resume (#34
-    // review: reload must never turn a pause into a rewound stop).
-    if (transportState() == "stopped")
-    {
-        applyReload();
-    }
-    else
-    {
-        reloadPollPosition = positionSamples();
-        startTimer (20);
-    }
-    return juce::var (result.get());
-}
-
-void Player::timerCallback()
-{
-    if (pendingReload == nullptr)
-    {
-        stopTimer();
-        return;
-    }
-    if (! transport.isPlaying())
-    {
-        if (transportState() == "stopped")
-            applyReload(); // stopped mid-wait: nothing left to finish
-        return; // paused: hold the position, swap at the wrap after resume
-    }
-    auto pos = positionSamples();
-    // Backwards is the reader wrapping (a backwards locate lands the swap
-    // early — harmless, and the CLI never locates a watched loop).
-    if (pos < reloadPollPosition)
-        applyReload();
-    else
-        reloadPollPosition = pos;
-}
-
-void Player::applyReload()
-{
-    stopTimer();
-    auto pending = std::move (pendingReload);
-    if (pending == nullptr)
-        return;
-
-    const bool wasPlaying = transport.isPlaying();
-    transport.stop();
-    transport.setSource (nullptr);
-    readerSource = std::move (pending->source);
-
-    fileSampleRate = pending->sampleRate;
-    fileLengthSamples = pending->length;
-    fileChannels = pending->channels;
-    loadedPath = pending->path;
-    looping = true;
-
-    maybeMatchDeviceRate (fileSampleRate);
-    transport.setSource (readerSource.get(), 1 << 15, &readThread, fileSampleRate);
-    transport.setPosition (0.0);
-    if (wasPlaying)
-        transport.start();
-    reloadedPath = loadedPath;
-}
-
-juce::String Player::takeReloadedPath()
-{
-    return std::exchange (reloadedPath, {});
-}
-
 juce::var Player::loadSession (const juce::var& session, const juce::File& projectRoot)
 {
     auto result = obj();
+    // Freed after the lock releases: a session owns preloaded files and
+    // full-length child buffers, and destroying that much under liveLock
+    // would hand the callback silent blocks for the whole teardown —
+    // pullAudio try-locks and pads on a miss (Codex's finding).
+    std::unique_ptr<field::LiveSession> retired;
     try
     {
+        // Construction — parsing, preloading, pre-rendering children —
+        // happens before the lock: the old session keeps playing through
+        // the whole compile, and the swap itself is one pointer move at
+        // a block boundary (realtime.md decision 5, chunk 3).
         auto next = std::make_unique<field::LiveSession> (session, projectRoot);
+        // Pre-roll outside the lock too: a swap lands at the old
+        // session's position, and warming the replacement's chain there
+        // (LiveSession::locate) renders seconds of discarded audio —
+        // under the lock, that long a hold is a silent gap. The drift
+        // between this prediction and the transport read again below is
+        // a few blocks, which the second locate rolls forward through a
+        // chain that keeps its state.
+        {
+            juce::int64 predicted = -1;
+            {
+                const juce::ScopedLock guard (liveLock);
+                if (liveSession != nullptr)
+                    predicted = liveSession->position();
+            }
+            if (predicted >= 0)
+            {
+                if (next->looping() && next->lengthSamples() > 0)
+                    predicted %= next->lengthSamples();
+                else if (next->lengthSamples() > 0)
+                    predicted = std::min (predicted, next->lengthSamples());
+                next->locate (predicted);
+            }
+        }
         const juce::ScopedLock guard (liveLock);
+        // The rate guard runs before anything is touched (cursor's
+        // finding): a swap the device cannot serve leaves the old
+        // session exactly as it was — playing.
+        maybeMatchDeviceRate ((double) next->sessionRate());
+        {
+            const double deviceRate = nullMode
+                                          ? nullSampleRate
+                                          : (deviceManager.getCurrentAudioDevice() != nullptr
+                                                 ? deviceManager.getCurrentAudioDevice()
+                                                       ->getCurrentSampleRate()
+                                                 : 0.0);
+            if (deviceRate > 0.0
+                && ! juce::exactlyEqual (deviceRate, (double) next->sessionRate()))
+            {
+                auto err = obj();
+                err->setProperty ("error",
+                                  "the device runs at " + juce::String (deviceRate)
+                                      + " Hz and cannot switch to the session's "
+                                      + juce::String (next->sessionRate())
+                                      + " — live resampling lands with the cross-rate wiring");
+                return juce::var (err.get());
+            }
+        }
+        // A swap mid-play carries the transport: latest compile wins and
+        // the play never stops. A fresh load (no session before) starts
+        // stopped at zero, as ever.
+        const bool hadSession = liveSession != nullptr;
+        const bool wasPlaying = livePlaying.load();
+        juce::int64 carry = hadSession ? liveSession->position() : 0;
         // The session replaces whatever file was loaded — one source of
         // audio at a time, whichever arrived last.
         transport.stop();
@@ -375,38 +327,24 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         loadedPath.clear();
         everStarted = false;
         livePlaying = false;
-        liveEverStarted = false;
+        if (! hadSession)
+            liveEverStarted = false;
         liveRate = next->sessionRate();
         liveLength = next->lengthSamples();
         liveLoop = next->looping();
         liveSong = session.getProperty ("song", juce::var()).toString();
-        // A queued file takeover must not land on top of a session.
-        pendingReload.reset();
-        stopTimer();
+        retired = std::move (liveSession);
         liveSession = std::move (next);
-        maybeMatchDeviceRate ((double) liveRate);
-
-        // The live path writes session frames one-for-one to the device —
-        // there is no AudioTransportSource resampling it. Refusing beats
-        // playing fast and sharp (Codex's finding); live resampling lands
-        // with the cross-rate wiring.
-        const double deviceRate = nullMode
-                                      ? nullSampleRate
-                                      : (deviceManager.getCurrentAudioDevice() != nullptr
-                                             ? deviceManager.getCurrentAudioDevice()
-                                                   ->getCurrentSampleRate()
-                                             : 0.0);
-        if (deviceRate > 0.0 && ! juce::exactlyEqual (deviceRate, (double) liveRate))
+        if (hadSession)
         {
-            liveSession.reset();
-            auto err = obj();
-            err->setProperty ("error",
-                              "the device runs at " + juce::String (deviceRate)
-                                  + " Hz and cannot switch to the session's "
-                                  + juce::String (liveRate)
-                                  + " — live resampling lands with the cross-rate wiring");
-            return juce::var (err.get());
+            if (liveLoop && liveLength > 0)
+                carry %= liveLength;
+            else if (liveLength > 0)
+                carry = std::min (carry, liveLength);
+            liveSession->locate (carry);
+            livePlaying = wasPlaying;
         }
+
     }
     catch (const std::exception& e)
     {

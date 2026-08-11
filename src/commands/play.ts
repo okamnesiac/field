@@ -4,7 +4,7 @@ import { parsePattern } from '../labels.js';
 import { formatLabel } from '../labels.js';
 import { build, type GeneratorRunner } from '../graph/build.js';
 import { expandPattern } from '../graph/graph.js';
-import type { LoadedProject } from '../model/project.js';
+import { loadProject, type LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
 import { beatTicks } from '../time/tempo.js';
 import {
@@ -91,17 +91,11 @@ export interface PlayOptions {
   from?: string | undefined; // bar[.beat[.tick]], musical time — CLI-side only
   device?: string | undefined;
   loop?: boolean | undefined; // replay the queue until interrupted
-  // Watch mode's freshest artifact for the (single) looped item: consulted
-  // at every load, so a requeue-path loop (--from) picks up a swap on its
-  // next pass (watch.md §2). The native loop loads once and swaps through
-  // the daemon's reload op instead.
-  currentPath?: (() => string | undefined) | undefined;
 }
 
 export interface PlayHooks {
-  // `path` is the file this pass actually loaded — the requeue path
-  // consults currentPath at every load, so the watch display correlates
-  // a pass against what it queued, never against a stale snapshot.
+  // `path` is the file this pass loaded (empty for a live session,
+  // which has no artifact).
   onItem?: (label: string, note: string, path: string) => void;
   // `at` locates the printed position on a per-pass monotonic axis (the
   // beat's tick under a tempo map, the raw sample without one): a value
@@ -110,9 +104,9 @@ export interface PlayHooks {
   onPosition?: (line: string, at?: number) => void;
   // The output moved mid-play (default-follow or a vanished device).
   onDevice?: (name: string) => void;
-  // A queued reload took over at the loop wrap (daemon >= 0.4) — fires
-  // when the swap actually sounds, not when it was requested.
-  onReloaded?: (path: string) => void;
+  // A live-watch edit landed (realtime.md chunk 3): ramps sent or the
+  // session swapped; `note` says which, for the display.
+  onReloaded?: (note: string) => void;
   // Wired to SIGINT by the CLI: stop the daemon and end the queue.
   interrupted?: () => boolean;
 }
@@ -153,7 +147,7 @@ export async function playThroughDaemon(
     do {
       for (const item of items) {
         if (hooks.interrupted?.()) break;
-        const loadedPath = options.currentPath?.() ?? item.path;
+        const loadedPath = item.path;
         // The load answers with the file's length, which is where the
         // readout has to stop: no beat past it ever sounds, whether the
         // stream wraps there or the transport stops there.
@@ -204,18 +198,6 @@ export async function playThroughDaemon(
             client,
             readout.onSample,
             (name) => hooks.onDevice?.(name),
-            (path) => {
-              hooks.onReloaded?.(path);
-              // The file changed under the readout, so its length did
-              // too. status() reports the loaded file's length, and a
-              // failure here (a teardown racing the swap) only leaves
-              // the previous bound in place — the same state as before
-              // the swap, never a broken readout.
-              void client.status().then(
-                (s) => readout.setEnd(s.samples),
-                () => undefined,
-              );
-            },
           );
         } finally {
           readout.cancel();
@@ -339,7 +321,6 @@ function waitForStop(
   client: AudiodClient,
   onPosition: (sample: number) => void,
   onDevice?: (name: string) => void,
-  onReloaded?: (path: string) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const finish = (err?: Error) => {
@@ -360,7 +341,6 @@ function waitForStop(
     }) => {
       if (e.event === 'position' && e.sample !== undefined) onPosition(e.sample);
       if (e.event === 'device' && e.name !== undefined) onDevice?.(e.name);
-      if (e.event === 'reloaded' && e.path !== undefined) onReloaded?.(e.path);
       if (e.event === 'state' && e.state === 'stopped') finish();
     };
     const onClose = () => finish(new Error('field-audiod connection closed'));
@@ -388,7 +368,7 @@ export async function playLiveSession(
   root: string,
   project: LoadedProject,
   song: string,
-  options: { device?: string } = {},
+  options: { device?: string; watch?: boolean; signal?: AbortSignal } = {},
   hooks: PlayHooks = {},
 ): Promise<void> {
   const { compileSession } = await import('../graph/live.js');
@@ -401,11 +381,62 @@ export async function playLiveSession(
           'field transport quit, then play again (it respawns on the new build)',
       );
     }
+    // `session` is not enough for the watch: a 0.5 daemon advertises it,
+    // but its swap stopped and rewound the transport, so a structural
+    // edit against one would halt the play it was supposed to carry
+    // (Codex's finding). The chunk-3 daemon says so explicitly.
+    if (options.watch === true && !client.supports('swap')) {
+      throw new Error(
+        `field-audiod ${client.daemonVersion} predates mid-play edits — ` +
+          'field transport quit, then play again (it respawns on the new build)',
+      );
+    }
     if (options.device !== undefined) await client.selectDevice(options.device);
     const loaded = await client.session(session);
-    const ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
+    let ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
     await client.play();
     hooks.onItem?.(`${song} (live)`, session.loop === true ? 'looping' : '', '');
+
+    // The chunk-3 loop (realtime.md decision 5): recompile on change,
+    // ramps for gain edits, a session swap — transport carried — for
+    // everything else. The loop-wrap takeover this replaces waited for
+    // the wrap; a ramp lands next block and a swap lands as soon as the
+    // compile does.
+    // The watch ends when playback does, however playback ends — a
+    // signal only the caller aborts would leave the watcher (and the
+    // process) waiting forever on a natural stop (cursor's finding).
+    const watchAbort = new AbortController();
+    options.signal?.addEventListener('abort', () => watchAbort.abort(), { once: true });
+    let watchDone: Promise<void> | undefined;
+    if (options.watch === true) {
+      const { watchLiveSession } = await import('./watch-live.js');
+      watchDone = watchLiveSession(
+        root,
+        song,
+        session,
+        { signal: watchAbort.signal },
+        {
+          onEdit: async (edit, fresh) => {
+            if (edit.kind === 'ramps') {
+              for (const ramp of edit.ramps) {
+                await client.ramp(ramp.track, ramp.input, ramp.gain_db);
+              }
+              hooks.onReloaded?.(`${edit.ramps.length} level${edit.ramps.length === 1 ? '' : 's'} ramped`);
+            } else if (edit.kind === 'swap') {
+              const swapped = await client.session(fresh);
+              // The swap may have moved the tempo map; the readout must
+              // not keep spelling bars from the old one for the rest of
+              // the session (Codex's finding). The compile that produced
+              // `fresh` just proved the project loads clean.
+              ctx = musicalContext(loadProject(root), `songs/${song}`, swapped.sample_rate);
+              hooks.onReloaded?.('session swapped');
+            }
+          },
+          onError: (err) => hooks.onPosition?.(`watch: ${err.message}`),
+        },
+      );
+    }
+
     for (;;) {
       if (hooks.interrupted?.() === true) break;
       const status = await client.status();
@@ -414,6 +445,8 @@ export async function playLiveSession(
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     await client.stop().catch(() => {});
+    watchAbort.abort();
+    await watchDone?.catch(() => {});
   } finally {
     client.close();
   }

@@ -116,8 +116,8 @@ export async function watchBuild(
           continue;
         }
         // An abort landing mid-build must not report: the session is
-        // over, and play --watch's reload socket is already closed —
-        // edit-then-ctrl-c is an ordinary way to quit (#35 review).
+        // over — edit-then-ctrl-c is an ordinary way to quit (#35
+        // review).
         if (options.signal?.aborted) return;
         if (stale) continue; // a mid-build change: report nothing, go again
         const changed = outcomes.filter((o) => {
