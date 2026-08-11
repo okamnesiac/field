@@ -5,8 +5,10 @@ status: Draft
 # Plan: Recording
 
 **Status:** Draft (written 2026-08-10), unstarted — no PR has carried
-implementation. §11's open questions are open on purpose; the PR that
-flips this Active answers them.
+implementation, and it waits behind [realtime.md](realtime.md), whose
+live graph makes capture an input node rather than a second transport
+(realtime.md §6). §11's open questions are open on purpose; the PR
+that flips this Active answers them.
 
 **Goal:** `field record` — capture a live performance into a track as
 takes, through the same daemon that plays: armed, crash-safe,

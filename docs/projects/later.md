@@ -9,7 +9,12 @@ costs nothing. See [README](README.md) for how these lists work.
 - **Audible loop takeover** — every `--loop --watch` reload hiccups at
   the seam, from poll lag and transport teardown together; deferred
   because the real-time engine deletes the mechanism
-  ([watch.md](all/watch.md) §6 has the diagnosis).
+  ([watch.md](all/watch.md) §6 has the diagnosis;
+  [realtime.md](all/realtime.md) §4 is the deletion).
+- [Recording](all/recording.md) — capture into a track as takes: the
+  generative pattern with a human where the model was. Plan drafted;
+  waits behind [realtime](all/realtime.md), which makes capture an
+  input node in a graph that already runs live.
 - **Automation** — breakpoint lanes + control-rate generators (LFO first),
   one compile target, realtime-evaluable by design; audio-rate stays SC's
   job ([automation.md](all/automation.md) records the decided shape).
