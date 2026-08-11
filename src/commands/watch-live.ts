@@ -1,7 +1,8 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs';
 import { sep } from 'node:path';
 import type { Session } from '../audiod/session.js';
-import { compileSession, diffSessions, type SessionEdit } from '../graph/live.js';
+import { compileSession, diffSessions, type CompiledSession, type SessionEdit } from '../graph/live.js';
+import { buildLabels } from './build.js';
 
 // The live half of watching (realtime.md chunk 3): recompile the song's
 // session on every project change and classify the edit — the successor
@@ -9,6 +10,13 @@ import { compileSession, diffSessions, type SessionEdit } from '../graph/live.js
 // needs. Structured like watchBuild (watch.md §2): debounced, one
 // compile in flight, stale re-runs, and a session that never dies on a
 // mid-edit tree — a half-saved file reports and waits.
+//
+// This loop also runs the background half of the freeze (chunk 4,
+// decision 4): whenever a compile reports dirty tracks — freeze
+// candidates whose stems missed the cache — their stems rebuild behind
+// the play, and the recompile that follows serves them as cached files.
+// That swap is inaudible because live and offline are bit-identical,
+// which is the whole point of decision 3.
 
 export interface WatchLiveHooks {
   // A compile succeeded and the edit is classified. `session` is the
@@ -17,6 +25,9 @@ export interface WatchLiveHooks {
   // The project failed to compile — diagnostics, a build error, a bad
   // tree. Last good session keeps playing; the next change retries.
   onError?: (err: Error) => void;
+  // A background stem build finished and the next compile will freeze
+  // what it built — the note the display prints, nothing more.
+  onFroze?: (labels: string[]) => void;
 }
 
 function relevant(filename: string): boolean {
@@ -27,20 +38,44 @@ function relevant(filename: string): boolean {
 export async function watchLiveSession(
   root: string,
   song: string,
-  baseline: Session,
-  options: { debounceMs?: number; signal?: AbortSignal } = {},
+  baseline: CompiledSession,
+  options: { debounceMs?: number; loop?: boolean; signal?: AbortSignal } = {},
   hooks: WatchLiveHooks = {},
 ): Promise<void> {
   const debounceMs = options.debounceMs ?? 300;
-  let current = baseline;
+  let current = baseline.session;
   let compiling = false;
   let stale = false;
+  let freezing = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let watcher: FSWatcher | undefined;
   let finish!: () => void;
   const done = new Promise<void>((resolve) => {
     finish = resolve;
   });
+
+  // Rebuild the dirty stems behind the play, then recompile: the next
+  // compile finds them cached and freezes them. compileSession's dirty
+  // list never names a track that cannot freeze (the output, a pre-tap
+  // sender), so this converges — the compile after a successful build
+  // reports the list empty. One build in flight; a failure reports and
+  // waits for the next change rather than retrying into the same error.
+  const refreeze = (dirty: string[]): void => {
+    if (dirty.length === 0 || freezing || (options.signal?.aborted ?? false)) return;
+    freezing = true;
+    void buildLabels(root, dirty).then(
+      () => {
+        freezing = false;
+        if (options.signal?.aborted ?? false) return;
+        hooks.onFroze?.(dirty);
+        onChange(null);
+      },
+      (err: unknown) => {
+        freezing = false;
+        hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  };
 
   const runBody = async (): Promise<void> => {
     if (compiling) {
@@ -51,23 +86,26 @@ export async function watchLiveSession(
     try {
       do {
         stale = false;
-        let session: Session;
+        let compiled: CompiledSession;
         try {
-          session = await compileSession(root, song);
+          compiled = await compileSession(root, song, {
+            ...(options.loop === true ? { loop: true } : {}),
+          });
         } catch (err) {
           hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
           continue;
         }
         if (options.signal?.aborted) return;
         if (stale) continue;
-        const edit = diffSessions(current, session);
+        const edit = diffSessions(current, compiled.session);
         try {
-          await hooks.onEdit?.(edit, session);
+          await hooks.onEdit?.(edit, compiled.session);
           // The baseline advances only once the daemon accepted the edit
           // (cursor's finding): a failed send keeps diffing against what
           // is actually playing, so the next change re-sends everything
           // outstanding — a ramp re-sent to its current value is a no-op.
-          current = session;
+          current = compiled.session;
+          refreeze(compiled.dirty);
         } catch (err) {
           hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
         }
@@ -99,6 +137,9 @@ export async function watchLiveSession(
   options.signal?.addEventListener('abort', close, { once: true });
 
   watcher = fsWatch(root, { recursive: true }, (_event, filename) => onChange(filename));
+  // The play may have started with dirty tracks — freeze them without
+  // waiting for an edit.
+  refreeze(baseline.dirty);
   // An edit between the caller's baseline compile and this watcher
   // opening — a window that includes daemon connection and session
   // preloading — would otherwise wait for an unrelated later change

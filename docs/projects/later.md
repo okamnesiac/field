@@ -8,8 +8,9 @@ costs nothing. See [README](README.md) for how these lists work.
 
 - [Recording](all/recording.md) — capture into a track as takes: the
   generative pattern with a human where the model was. Plan drafted;
-  waits behind [realtime](all/realtime.md), which makes capture an
-  input node in a graph that already runs live.
+  the [realtime](all/realtime.md) engine it waited behind shipped
+  2026-08-11, so capture is now an input node away from a graph that
+  already runs live.
 - **Automation** — breakpoint lanes + control-rate generators (LFO first),
   one compile target, realtime-evaluable by design; audio-rate stays SC's
   job ([automation.md](all/automation.md) records the decided shape).

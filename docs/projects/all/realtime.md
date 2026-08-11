@@ -1,5 +1,5 @@
 ---
-status: Active
+status: Shipped
 ---
 
 # Plan: Realtime
@@ -253,6 +253,32 @@ stands as drafted; its list line waits in later.md.
    as dirtiness changes, and CPU stops scaling with session size.
    Live evaluation becomes the default for song playback and the
    `--live` flag and the artifact path for songs retire (decision 8).
+
+   *Amended 2026-08-11 (the implementation):* the cached form needed
+   no new session vocabulary — a frozen track is an ordinary track
+   whose inputs are one file window over the stem at unity, chain
+   empty — so the engine did not change at all and the freeze swap is
+   a plain session swap, inaudible because the golden proves the stem
+   and the live evaluation are the same bytes. Two kinds of track
+   never freeze: the output — its windows are the ramp surface, and
+   under loop the artifact is a fold where the live wrap is a
+   performance, so swapping it would be audible — and any pre-tap
+   sender, conservatively (a stem is post-chain; the cable reads the
+   pre ring), which is also what §5's "one live chain plus file
+   streaming" already said. Tracks nothing reaches once their
+   consumers freeze drop from the session instead of pre-rendering
+   for nobody. The compile reports its dirty list — reachable freeze
+   candidates that missed the cache — and the watch loop rebuilds
+   exactly that list behind the play, freezing it on the next
+   compile; the list never names a track that cannot freeze, which is
+   what makes the loop converge. An unwatched play simply plays its
+   dirt live. Two costs recorded: every compile re-materializes
+   frozen stems out of the CAS (a copy per stem, cheap next to a
+   build but not free), and `field play <song>` now needs the device
+   to serve the session's rate — the artifact path resampled in the
+   transport, live playback does not until the cross-rate wiring
+   lands, and the explicit artifact spelling remains the answer on a
+   device that cannot switch.
 
 ## 8 Open questions
 

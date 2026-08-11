@@ -10,7 +10,9 @@ import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { compileSession, diffSessions } from '../graph/live.js';
+import { watchLiveSession } from '../commands/watch-live.js';
 import { AudiodClient, daemonBinary } from './client.js';
+import type { Session } from './session.js';
 
 // Chunk 2's definition of correct (realtime.md decision 3 at graph
 // level): a non-looping session rendered by the live engine is
@@ -161,7 +163,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     const offline = await buildLabels(root, ['//songs/opener/track:main']);
     const artifact = offline.find((o) => o.label.endsWith('track:main'))!.outputPath!;
 
-    const session = await compileSession(root, 'opener');
+    const { session } = await compileSession(root, 'opener');
     const sessionPath = join(root, 'session.json');
     writeFileSync(sessionPath, JSON.stringify(session));
     const livePath = join(root, 'live.wav');
@@ -175,7 +177,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
 
   it('loads, plays, ramps, and locates a session over the socket', async () => {
     await scaffold(root);
-    const session = await compileSession(root, 'opener');
+    const { session } = await compileSession(root, 'opener');
 
     const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
     try {
@@ -212,12 +214,12 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
 
   it('classifies edits: gain moves ramp, structure swaps', async () => {
     await scaffold(root);
-    const before = await compileSession(root, 'opener');
+    const { session: before } = await compileSession(root, 'opener');
 
     const mainPath = join(root, 'songs/opener/tracks/main.yaml');
     const mainYaml = readFileSync(mainPath, 'utf8');
     writeFileSync(mainPath, mainYaml.replace('gain_db: -6', 'gain_db: -12'));
-    const gained = await compileSession(root, 'opener');
+    const { session: gained } = await compileSession(root, 'opener');
     const rampEdit = diffSessions(before, gained);
     expect(rampEdit).toEqual({
       kind: 'ramps',
@@ -225,7 +227,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     });
 
     writeFileSync(mainPath, mainYaml.replace('at: 30000', 'at: 36000'));
-    const moved = await compileSession(root, 'opener');
+    const { session: moved } = await compileSession(root, 'opener');
     expect(diffSessions(before, moved)).toEqual({ kind: 'swap' });
     writeFileSync(mainPath, mainYaml);
 
@@ -236,14 +238,14 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     const voicePath = join(root, 'songs/opener/tracks/voice.yaml');
     const voiceYaml = readFileSync(voicePath, 'utf8');
     writeFileSync(voicePath, voiceYaml.replace('gain_db: 3', 'gain_db: 6'));
-    const chained = await compileSession(root, 'opener');
+    const { session: chained } = await compileSession(root, 'opener');
     expect(diffSessions(before, chained)).toEqual({ kind: 'swap' });
 
     // A window gain on a non-output track swaps too: children bake
     // their gains into buffers pre-rendered at load, so a ramp there
     // would report success and change nothing (Codex's finding).
     writeFileSync(voicePath, voiceYaml.replace('    at: 0', '    at: 0\n    gain_db: -3'));
-    const childGained = await compileSession(root, 'opener');
+    const { session: childGained } = await compileSession(root, 'opener');
     expect(diffSessions(before, childGained)).toEqual({ kind: 'swap' });
 
     expect(diffSessions(before, before)).toEqual({ kind: 'same' });
@@ -251,7 +253,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
 
   it('a session swap carries the transport (realtime.md chunk 3)', async () => {
     await scaffold(root);
-    const session = await compileSession(root, 'opener');
+    const { session } = await compileSession(root, 'opener');
     const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
     try {
       await client.session(session);
@@ -270,7 +272,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
         mainPath,
         readFileSync(mainPath, 'utf8').replace('at: 30000', 'at: 36000'),
       );
-      const swapped = await compileSession(root, 'opener');
+      const { session: swapped } = await compileSession(root, 'opener');
       expect(diffSessions(session, swapped)).toEqual({ kind: 'swap' });
       await client.session(swapped);
       const after = await client.status();
@@ -295,5 +297,75 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
       }
       client.close();
     }
+  });
+
+  it('the cache is the freeze (realtime.md chunk 4)', async () => {
+    await scaffold(root);
+    // Cold cache: nothing freezes. The output can never freeze and
+    // voice feeds a pre-tap cable; wash is the one candidate, dirty.
+    const cold = await compileSession(root, 'opener');
+    expect(cold.dirty).toEqual(['//songs/opener/track:wash']);
+    expect(cold.session.tracks.find((t) => t.name === 'wash')!.chain.length).toBeGreaterThan(0);
+
+    // One build later the same compile serves wash as its cached stem —
+    // one file window at unity, no chain — and reports nothing dirty.
+    await buildLabels(root, ['//songs/opener/track:main']);
+    const warm = await compileSession(root, 'opener');
+    expect(warm.dirty).toEqual([]);
+    const wash = warm.session.tracks.find((t) => t.name === 'wash')!;
+    expect(wash.chain).toEqual([]);
+    expect(wash.inputs).toHaveLength(1);
+    expect(wash.inputs[0]).toMatchObject({ start: 0, read_offset: 0, gain_db: 0 });
+    expect('file' in wash.inputs[0]!).toBe(true);
+    // A pre-tapped sender stays live even when clean: its stem is
+    // post-chain, and the cable reads the pre ring.
+    expect(warm.session.tracks.find((t) => t.name === 'voice')!.chain.length).toBeGreaterThan(0);
+    // Freeze and thaw are structural, so the watch swaps them.
+    expect(diffSessions(cold.session, warm.session)).toEqual({ kind: 'swap' });
+
+    // The decision-4 golden: the frozen session renders byte-identically
+    // to the offline artifact — the swap between cached and live is
+    // inaudible because there is no difference to hear.
+    const offline = await buildLabels(root, ['//songs/opener/track:main']);
+    const artifact = offline.find((o) => o.label.endsWith('track:main'))!.outputPath!;
+    const sessionPath = join(root, 'frozen-session.json');
+    writeFileSync(sessionPath, JSON.stringify(warm.session));
+    const livePath = join(root, 'frozen-live.wav');
+    await execFileAsync(binary!, ['--render-live', sessionPath, livePath], { cwd: root });
+    expect(wavData(livePath).equals(wavData(artifact))).toBe(true);
+  });
+
+  it('the watch rebuilds dirty stems behind the play and freezes them', async () => {
+    await scaffold(root);
+    const baseline = await compileSession(root, 'opener');
+    expect(baseline.dirty).toEqual(['//songs/opener/track:wash']);
+
+    const abort = new AbortController();
+    const froze: string[][] = [];
+    const swaps: Session[] = [];
+    const done = watchLiveSession(
+      root,
+      'opener',
+      baseline,
+      { debounceMs: 50, signal: abort.signal },
+      {
+        onEdit: (edit, session) => {
+          if (edit.kind === 'swap') swaps.push(session);
+        },
+        onFroze: (labels) => froze.push(labels),
+      },
+    );
+    // The refreeze starts with the watch: wash's stem builds in the
+    // background, and the compile that follows swaps the frozen form in.
+    const deadline = Date.now() + 30_000;
+    while ((froze.length === 0 || swaps.length === 0) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    abort.abort();
+    await done;
+    expect(froze).toEqual([['//songs/opener/track:wash']]);
+    const last = swaps.at(-1)!;
+    expect(last.tracks.find((t) => t.name === 'wash')!.chain).toEqual([]);
+    expect(last.tracks.find((t) => t.name === 'voice')!.chain.length).toBeGreaterThan(0);
   });
 });

@@ -360,19 +360,28 @@ function waitForStop(
 }
 
 // Live evaluation (realtime.md decision 8): compile the song's graph into
-// a session, load it into the engine, and block. Explicitly experimental
-// while chunks 2-3 land; the artifact path stays the default until the
-// freeze chunk makes live evaluation always-cheap, and then this is what
-// playing a song means.
+// a session, load it into the engine, and block. Since the freeze
+// (chunk 4) this is what playing a song *is*: clean subgraphs arrive as
+// cached stem files, dirty ones evaluate live, and under --watch the
+// dirty stems rebuild behind the play and freeze on the next compile.
 export async function playLiveSession(
   root: string,
   project: LoadedProject,
   song: string,
-  options: { device?: string; watch?: boolean; signal?: AbortSignal } = {},
+  options: {
+    device?: string;
+    watch?: boolean;
+    from?: string;
+    loop?: boolean;
+    signal?: AbortSignal;
+  } = {},
   hooks: PlayHooks = {},
 ): Promise<void> {
   const { compileSession } = await import('../graph/live.js');
-  const session = await compileSession(root, song);
+  const compiled = await compileSession(root, song, {
+    ...(options.loop === true ? { loop: true } : {}),
+  });
+  const session = compiled.session;
   const client = await AudiodClient.connect(root);
   try {
     if (!client.supports('session')) {
@@ -394,6 +403,15 @@ export async function playLiveSession(
     if (options.device !== undefined) await client.selectDevice(options.device);
     const loaded = await client.session(session);
     let ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
+    if (options.from !== undefined) {
+      if (ctx === undefined) {
+        throw new Error(`--from is musical time and "${song}" has no tempo map`);
+      }
+      // Musical time never crosses the socket (playback.md §3.6): the
+      // position resolves to a sample here, and locating before play
+      // also pre-rolls the chain there (live.cpp's warmup).
+      await client.locate(parseMusicalPosition(options.from, ctx));
+    }
     await client.play();
     hooks.onItem?.(`${song} (live)`, session.loop === true ? 'looping' : '', '');
 
@@ -413,8 +431,11 @@ export async function playLiveSession(
       watchDone = watchLiveSession(
         root,
         song,
-        session,
-        { signal: watchAbort.signal },
+        compiled,
+        {
+          signal: watchAbort.signal,
+          ...(options.loop === true ? { loop: true } : {}),
+        },
         {
           onEdit: async (edit, fresh) => {
             if (edit.kind === 'ramps') {
@@ -433,6 +454,8 @@ export async function playLiveSession(
             }
           },
           onError: (err) => hooks.onPosition?.(`watch: ${err.message}`),
+          onFroze: (labels) =>
+            hooks.onReloaded?.(`froze ${labels.length} stem${labels.length === 1 ? '' : 's'}`),
         },
       );
     }

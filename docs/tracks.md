@@ -190,7 +190,9 @@ generators").
 The track named `main` is the song's output. It carries the song's
 declared `length` and `loop` and renders exactly that long, with `loop:`
 folding the overhang back onto the start. A bare song reference resolves
-to it: `field play creek` plays `//songs/creek/track:main`. Because the
+to it: `field play creek` evaluates the song live in the engine rooted
+at `main` (realtime.md decision 8), and `field play creek/track:main`
+plays the built artifact of the same tree. Because the
 output track is the song, it renders at the song's rate — its `rate:`,
 or the project's `sample_rate` — and refuses a `rate:` of its own;
 delivery at another rate is `field export --rate`, not a node in the
