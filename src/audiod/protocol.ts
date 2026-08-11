@@ -57,6 +57,7 @@ export const statusResponseSchema = z.object({
   device: z.object({ name: z.string(), sample_rate: z.number() }).optional(),
   resampling: z.boolean(),
   looping: z.boolean().optional(), // daemon >= 0.3
+  live: z.boolean().optional(), // a live session is loaded (daemon feature "session")
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });
