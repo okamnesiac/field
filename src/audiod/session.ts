@@ -101,6 +101,15 @@ export const sessionInsertSchema = z.discriminatedUnion('effect', [
     predelay_ms: z.number().min(0),
     damping: z.number().min(0).max(1),
   }),
+  z.strictObject({
+    effect: z.literal('plate'),
+    mix: z.number().min(0).max(1),
+    decay: z.number().positive(),
+    predelay_ms: z.number().min(0),
+    damping: z.number().min(0).max(1),
+    diffusion: z.number().min(0).max(1),
+    modulation: z.number().min(0).max(1),
+  }),
 ]);
 
 export const sessionTrackSchema = z.strictObject({

@@ -105,11 +105,12 @@ export function convertedLength(frames: number, from: number, to: number): numbe
   return Math.max(1, Math.floor((frames * phases + Math.floor(stride / 2)) / stride));
 }
 
-// How much a chain grows its input: each reverb appends predelay + T60.
+// How much a chain grows its input: each reverb appends predelay + T60
+// (the plate's tail is the same arithmetic — reverbs.md decision 5).
 function chainGrowth(chain: SessionInsert[], rate: number): number {
   let growth = 0;
   for (const insert of chain) {
-    if (insert.effect === 'reverb') {
+    if (insert.effect === 'reverb' || insert.effect === 'plate') {
       growth +=
         Math.round((insert.predelay_ms / 1000) * rate) + Math.round(insert.decay * rate);
     }

@@ -166,6 +166,17 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 spec.reverb.damping = requireNumber (insert, "damping", "reverb insert");
                 spec.reverb.sampleRate = (double) track.rate;
             }
+            else if (effect == "plate")
+            {
+                spec.kind = 3;
+                spec.plate.mix = requireNumber (insert, "mix", "plate insert");
+                spec.plate.decaySeconds = requireNumber (insert, "decay", "plate insert");
+                spec.plate.predelayMs = requireNumber (insert, "predelay_ms", "plate insert");
+                spec.plate.damping = requireNumber (insert, "damping", "plate insert");
+                spec.plate.diffusion = requireNumber (insert, "diffusion", "plate insert");
+                spec.plate.modulation = requireNumber (insert, "modulation", "plate insert");
+                spec.plate.sampleRate = (double) track.rate;
+            }
             else
             {
                 throw std::runtime_error ("unknown insert effect \"" + effect + "\"");
@@ -188,8 +199,12 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
         track.preLength = contentEnd;
         juce::int64 growth = 0;
         for (const auto& stage : track.chain)
+        {
             if (stage.reverb != nullptr)
                 growth += stage.reverb->tailSamples();
+            else if (stage.plate != nullptr)
+                growth += stage.plate->tailSamples();
+        }
         track.postLength = contentEnd + growth;
         if (t != outputTrack)
         {
@@ -226,7 +241,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
 }
 
 
-void LiveSession::buildChain (Track& track) const
+void LiveSession::buildChain (Track& track, juce::int64 startClock) const
 {
     track.chain.clear();
     for (const auto& spec : track.chainSpecs)
@@ -241,8 +256,13 @@ void LiveSession::buildChain (Track& track) const
         else if (spec.kind == 1)
             stage.limiter = std::make_unique<dsp::Limiter> (spec.limiter, (size_t) 2,
                                                             spec.horizonDb);
-        else
+        else if (spec.kind == 2)
             stage.reverb = std::make_unique<dsp::Reverb> (spec.reverb, (size_t) 2);
+        else
+        {
+            stage.plate = std::make_unique<dsp::Plate> (spec.plate, (size_t) 2);
+            stage.plate->startAt (startClock);
+        }
         track.chain.push_back (std::move (stage));
     }
 }
@@ -416,6 +436,8 @@ void LiveSession::runChain (Track& track, std::vector<std::vector<float>>& worki
             stage.eq->process (working);
         else if (stage.reverb != nullptr)
             stage.reverb->process (working);
+        else if (stage.plate != nullptr)
+            stage.plate->process (working);
         else if (stage.limiter != nullptr)
         {
             std::vector<std::vector<float>> out (2);
@@ -508,6 +530,8 @@ juce::int64 LiveSession::chainWarmup (const Track& track) const
     {
         if (stage.reverb != nullptr)
             warmup += stage.reverb->tailSamples();
+        else if (stage.plate != nullptr)
+            warmup += stage.plate->tailSamples();
         else if (stage.limiter != nullptr)
             warmup += stage.limiter->latencySamples();
         else
@@ -544,8 +568,8 @@ void LiveSession::locate (juce::int64 sample)
         // Clamped at zero: state before the top does not exist, and a
         // looping session's wrap is close enough to a top for a carry
         // landing just past it.
-        buildChain (output);
         const juce::int64 from = std::max<juce::int64> (0, sample - warmup);
+        buildChain (output, from);
         clock = from;
         delivered = from;
     }

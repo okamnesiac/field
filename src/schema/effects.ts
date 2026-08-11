@@ -37,6 +37,23 @@ export const reverbParams = {
   damping: z.number().min(0).max(1).default(0.5),
 };
 
+// plate: Dattorro's 1997 figure-8 tank (reverbs.md decision 2); decay
+// is T60 in seconds and the output grows by the tail, like reverb's.
+export const plateParams = {
+  mix: z.number().min(0).max(1).default(0.3),
+  // Floored at 1: the tank's fixed diffusion allpasses ring for
+  // ~0.9 s at the published coefficients, so a shorter T60 would
+  // out-ring the analytic tail the compiler counts on.
+  decay: z.number().min(1).max(30).default(2), // seconds to −60 dB
+  predelay_ms: z.number().min(0).max(500).default(0),
+  damping: z.number().min(0).max(1).default(0.5),
+  // Input diffusion 1 directly (#2 rides at 5/6 of it); the default is
+  // the paper's published pair. Capped shy of 1, where an allpass
+  // stops decaying and the tail stops being computable.
+  diffusion: z.number().min(0).max(0.98).default(0.75),
+  modulation: z.number().min(0).max(1).default(0.3), // tail motion; 0 = frozen
+};
+
 // Insert entries — discriminated on `effect:` so the AU-hosting era can
 // add an `au:` variant additively instead of reshaping track files (the
 // obligation recorded in effects.md §1).
@@ -44,6 +61,7 @@ export const insertSchema = z.discriminatedUnion('effect', [
   z.strictObject({ effect: z.literal('eq'), ...eqParams }),
   z.strictObject({ effect: z.literal('limit'), ...limitParams }),
   z.strictObject({ effect: z.literal('reverb'), ...reverbParams }),
+  z.strictObject({ effect: z.literal('plate'), ...plateParams }),
 ]);
 export type Insert = z.infer<typeof insertSchema>;
 
@@ -59,6 +77,8 @@ export const insertOrder: KeyOrder = {
     'decay',
     'predelay_ms',
     'damping',
+    'diffusion',
+    'modulation',
   ],
   children: { bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } } },
 };

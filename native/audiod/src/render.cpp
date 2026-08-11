@@ -3,6 +3,7 @@
 #include "dsp/biquad.h"
 #include "dsp/limiter.h"
 #include "dsp/mixdown.h"
+#include "dsp/plate.h"
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
 #include "dsp/wavfile.h"
@@ -23,7 +24,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 8;
+constexpr int renderPlanVersion = 9; // 9: the plate insert (reverbs.md chunk 1)
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -139,6 +140,18 @@ void applyInsert (const juce::var& insert,
         settings.damping = requireNumber (insert, "damping", "reverb insert");
         settings.sampleRate = sampleRate;
         channels = dsp::reverb (channels, settings);
+    }
+    else if (effect == "plate")
+    {
+        dsp::PlateSettings settings;
+        settings.mix = requireNumber (insert, "mix", "plate insert");
+        settings.decaySeconds = requireNumber (insert, "decay", "plate insert");
+        settings.predelayMs = requireNumber (insert, "predelay_ms", "plate insert");
+        settings.damping = requireNumber (insert, "damping", "plate insert");
+        settings.diffusion = requireNumber (insert, "diffusion", "plate insert");
+        settings.modulation = requireNumber (insert, "modulation", "plate insert");
+        settings.sampleRate = sampleRate;
+        channels = dsp::plate (channels, settings);
     }
     else
     {
