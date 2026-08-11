@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { KeyOrder } from '../yaml/emit.js';
 import { labelName, sampleRate, samples, slug, sourceRef, timePosition, timeSpan } from './common.js';
 import { insertOrder, insertSchema } from './effects.js';
-import { meterEventSchema, tempoEventSchema } from './song.js';
+import { meterEventSchema, tempoEventSchema, timeOrder } from './song.js';
 import { generativeEntrySchema } from './generative.js';
 
 // One list (nested-tracks.md §18): a track file is a name, an optional
@@ -245,15 +245,9 @@ export const trackOrder: KeyOrder = {
   children: {
     // The labels are the author's; only the values have known keys.
     sends: { entries: { keys: ['gain_db', 'tap'] } },
-    // Same shape and order as tempo.yaml's, so a local map reads like the
-    // song map it overrides rather than like a different kind of thing.
-    time: {
-      keys: ['tempo', 'meter'],
-      children: {
-        tempo: { items: { keys: ['at', 'bpm', 'ramp'] } },
-        meter: { items: { keys: ['at', 'numerator', 'denominator'] } },
-      },
-    },
+    // The song's `time:` order, so a local map reads like the song map
+    // it overrides rather than like a different kind of thing.
+    time: timeOrder,
     inserts: { items: insertOrder },
     inputs: { items: inputEntryOrder },
   },

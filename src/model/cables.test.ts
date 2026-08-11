@@ -601,7 +601,19 @@ describe('cables render (nested-tracks.md §19 chunk 4)', () => {
     // the inserts it omits.
     writeFileSync(
       join(root, 'songs/opener/song.yaml'),
-      ['name: opener', 'length: 3840', ''].join('\n'),
+      [
+        'name: opener',
+        'length: 3840',
+        'time:',
+        '  tempo:',
+        '    - at: 0',
+        '      bpm: 120',
+        '  meter:',
+        '    - at: 0',
+        '      numerator: 4',
+        '      denominator: 4',
+        '',
+      ].join('\n'),
     );
     track('main', [
       'sends:',

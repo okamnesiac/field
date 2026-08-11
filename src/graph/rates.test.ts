@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -57,12 +57,32 @@ describe('rate: on tracks (decision 3)', () => {
   });
 
   it('refuses rate: on the song output track', () => {
-    // The output is the song, and the song's rate is project.yaml's —
-    // a field with one correct value should not exist.
+    // The output is the song, and the song's rate is song.yaml's (or
+    // project.yaml's) — a field with one correct value should not exist.
     writeTrack('main', ['rate: 44100']);
     expect(loadProject(root).diagnostics.map((d) => d.message).join('\n')).toContain(
-      'sample_rate in project.yaml is that choice',
+      'rate: in song.yaml (or sample_rate in project.yaml) is that choice',
     );
+  });
+
+  it('song rate: sits between the track and the project (decision 3, amended)', async () => {
+    // Hierarchy track.rate ?? song.rate ?? project sample_rate: the
+    // project scaffolds at 48 kHz and the song declares 44.1, so a
+    // 48 kHz import becomes the foreign rate — the edge converts to the
+    // song's 44100, not the project's 48000, for a track with no
+    // `rate:` of its own.
+    const song = readFileSync(join(root, 'songs/creek/song.yaml'), 'utf8');
+    writeFileSync(
+      join(root, 'songs/creek/song.yaml'),
+      song.replace('name: creek', 'name: creek\nrate: 44100'),
+    );
+    await importTone('pad', 48000);
+    writeTrack('bed', ['inputs:', '  - audio: pad', '    anchor: absolute', '    at: 0']);
+    expect(queryDeps(root, 'deps(//songs/creek/track:bed)')).toEqual([
+      '//songs/creek/asset:pad',
+      '//songs/creek/convert:pad-44100',
+      '//songs/creek/track:bed',
+    ]);
   });
 
   it('projects musical time at the track rate, not the project rate', async () => {

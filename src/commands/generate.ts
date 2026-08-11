@@ -149,12 +149,13 @@ interface SongTime {
 function songTime(project: LoadedProject, songName: string): SongTime {
   const song = project.songs.find((s) => s.name === songName);
   if (!song) throw new Error(`no such song "${songName}"`);
-  if (!song.tempo) throw new Error(`song "${songName}" has no tempo.yaml`);
-  const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  if (!song.time) throw new Error(`song "${songName}" has no time: in song.yaml`);
+  const rate =
+    song.song?.data.rate ?? project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   return {
-    tempoMap: new TempoMap(song.tempo.data.tempo, rate),
-    initialBpm: song.tempo.data.tempo[0]!.bpm,
-    ticksPerBar: barTicks(song.tempo.data.meter[0]!),
+    tempoMap: new TempoMap(song.time.tempo, rate),
+    initialBpm: song.time.tempo[0]!.bpm,
+    ticksPerBar: barTicks(song.time.meter[0]!),
   };
 }
 

@@ -29,8 +29,7 @@ project/
 │   └── assets.yaml       # the shared ledger: //shared/asset:<name>
 ├── songs/
 │   └── <song>/
-│       ├── song.yaml
-│       ├── tempo.yaml
+│       ├── song.yaml     # name, time (tempo + meter), rate, length, loop
 │       ├── tracks/       # one file per track: inserts and its inputs
 │       ├── audio/        # ALL committed song sound (LFS): recorded,
 │       │                 # imported, generated — a directory per item

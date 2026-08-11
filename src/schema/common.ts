@@ -45,7 +45,8 @@ export const samples = z.number().int().min(0);
 // (samples on absolute clips); arrays are musical. Positions are ordinal
 // and 1-indexed — [9, 2] is bar 9, beat 2 — and spans are cardinal counts
 // where zero is legal — [0, 2] is two beats. The schema validates shape
-// only: legal beat and tick ranges depend on the meter map (tempo.yaml),
+// only: legal beat and tick ranges depend on the meter map (the song's
+// time:),
 // so resolution and range diagnostics live in the model layer
 // (model/project.ts), which rewrites arrays to tick scalars at load — the
 // build graph never sees an array, and either spelling of a time produces

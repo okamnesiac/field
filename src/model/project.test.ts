@@ -87,8 +87,8 @@ describe('song and track creation', () => {
 
   it('recovers from a partially created song', async () => {
     createSong(root, 'opener');
-    // Simulate a crash between tempo.yaml and song.yaml: the existence
-    // marker (song.yaml) is missing, so createSong must succeed again.
+    // Simulate a crash mid-scaffold: the existence marker (song.yaml)
+    // is missing, so createSong must succeed again.
     rmSync(join(root, 'songs/opener/song.yaml'));
     expect(() => createSong(root, 'opener')).not.toThrow();
     expect((await check(root)).ok).toBe(true);
@@ -534,18 +534,20 @@ describe('check', () => {
   it('flags meter changes off the bar boundary', async () => {
     createSong(root, 'opener');
     writeFileSync(
-      join(root, 'songs/opener/tempo.yaml'),
+      join(root, 'songs/opener/song.yaml'),
       [
-        'tempo:',
-        '  - at: 0',
-        '    bpm: 120',
-        'meter:',
-        '  - at: 0',
-        '    numerator: 4',
-        '    denominator: 4',
-        '  - at: 100',
-        '    numerator: 3',
-        '    denominator: 4',
+        'name: opener',
+        'time:',
+        '  tempo:',
+        '    - at: 0',
+        '      bpm: 120',
+        '  meter:',
+        '    - at: 0',
+        '      numerator: 4',
+        '      denominator: 4',
+        '    - at: 100',
+        '      numerator: 3',
+        '      denominator: 4',
         '',
       ].join('\n'),
     );
@@ -570,7 +572,7 @@ describe('musical time (musical-time.md)', () => {
     createSong(root, 'opener');
     writeFileSync(
       join(root, 'songs/opener/song.yaml'),
-      'name: opener\nlength: [12]\nloop: true\n',
+      'name: opener\nlength: [12]\nloop: true\ntime:\n  tempo:\n    - at: 0\n      bpm: 120\n  meter:\n    - at: 0\n      numerator: 4\n      denominator: 4\n',
     );
     writeFileSync(
       join(root, 'songs/opener/tracks/keys.yaml'),
@@ -618,7 +620,7 @@ describe('musical time (musical-time.md)', () => {
       createSong(other, 'opener');
       writeFileSync(
         join(other, 'songs/opener/song.yaml'),
-        `name: opener\nlength: ${BAR * 12}\nloop: true\n`,
+        `name: opener\nlength: ${BAR * 12}\nloop: true\ntime:\n  tempo:\n    - at: 0\n      bpm: 120\n  meter:\n    - at: 0\n      numerator: 4\n      denominator: 4\n`,
       );
       writeFileSync(
         join(other, 'songs/opener/tracks/keys.yaml'),
@@ -724,18 +726,22 @@ describe('musical time (musical-time.md)', () => {
     writeMusicalSong();
     await importHit();
     writeFileSync(
-      join(root, 'songs/opener/tempo.yaml'),
+      join(root, 'songs/opener/song.yaml'),
       [
-        'tempo:',
-        '  - at: 0',
-        '    bpm: 120',
-        'meter:',
-        '  - at: 0',
-        '    numerator: 4',
-        '    denominator: 4',
-        '  - at: 2880', // off the bar boundary: the map will not construct
-        '    numerator: 3',
-        '    denominator: 4',
+        'name: opener',
+        'length: [12]',
+        'loop: true',
+        'time:',
+        '  tempo:',
+        '    - at: 0',
+        '      bpm: 120',
+        '  meter:',
+        '    - at: 0',
+        '      numerator: 4',
+        '      denominator: 4',
+        '    - at: 2880', // off the bar boundary: the map will not construct
+        '      numerator: 3',
+        '      denominator: 4',
         '',
       ].join('\n'),
     );

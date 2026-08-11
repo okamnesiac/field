@@ -30,7 +30,7 @@ const track = (name: string, yaml: string) =>
 function threePasses(): void {
   // `field song create` scaffolds no length; the header only has something
   // to report when the song declares one.
-  writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [12]\nloop: true\n');
+  writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [12]\nloop: true\ntime:\n  tempo:\n    - at: 0\n      bpm: 120\n  meter:\n    - at: 0\n      numerator: 4\n      denominator: 4\n');
   track('phrase', 'name: phrase\n');
   track('vox', 'name: vox\n');
   track(
@@ -102,7 +102,7 @@ describe('field arrangement', () => {
     // absolute. Formatting samples through the meter map is not a rounding
     // error: 48000 samples is one second, and it came out as bar 13 of an
     // eight-bar song — the same class of lie this command exists to stop.
-    writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [8]\nloop: true\n');
+    writeFileSync(join(root, 'songs/creek/song.yaml'), 'name: creek\nlength: [8]\nloop: true\ntime:\n  tempo:\n    - at: 0\n      bpm: 120\n  meter:\n    - at: 0\n      numerator: 4\n      denominator: 4\n');
     track('child', 'name: child\n');
     track(
       'main',
@@ -129,8 +129,8 @@ describe('field arrangement', () => {
     // stop on diagnostics; this used to be the outlier.
     threePasses();
     writeFileSync(
-      join(root, 'songs/creek/tempo.yaml'),
-      'tempo:\n  - at: 0\n    bpm: 120\nmeter:\n  - at: [5]\n    numerator: 4\n    denominator: 4\n',
+      join(root, 'songs/creek/song.yaml'),
+      'name: creek\ntime:\n  tempo:\n    - at: 0\n      bpm: 120\n  meter:\n    - at: [5]\n      numerator: 4\n      denominator: 4\n',
     );
     expect(() => arrangement(root, 'creek')).toThrow('project has errors (field check)');
   });
@@ -141,18 +141,22 @@ describe('field arrangement', () => {
     // checked ok — the one number not computed from the map being wrong.
     threePasses();
     writeFileSync(
-      join(root, 'songs/creek/tempo.yaml'),
+      join(root, 'songs/creek/song.yaml'),
       [
-        'tempo:',
-        '  - at: 0',
-        '    bpm: 120',
-        'meter:',
-        '  - at: 0',
-        '    numerator: 4',
-        '    denominator: 4',
-        '  - at: 7680', // bar 3 in 4/4 at 960 ticks a quarter
-        '    numerator: 3',
-        '    denominator: 4',
+        'name: creek',
+        'length: [12]',
+        'loop: true',
+        'time:',
+        '  tempo:',
+        '    - at: 0',
+        '      bpm: 120',
+        '  meter:',
+        '    - at: 0',
+        '      numerator: 4',
+        '      denominator: 4',
+        '    - at: 7680', // bar 3 in 4/4 at 960 ticks a quarter
+        '      numerator: 3',
+        '      denominator: 4',
         '',
       ].join('\n'),
     );

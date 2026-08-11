@@ -46,9 +46,10 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
         `track (nested-tracks.md §7 chunk 2)`,
     );
   }
-  const meter = song.tempo ? new MeterMap(song.tempo.data.meter) : undefined;
-  const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
-  const tempo = song.tempo ? new TempoMap(song.tempo.data.tempo, rate) : undefined;
+  const meter = song.time ? new MeterMap(song.time.meter) : undefined;
+  const rate =
+    song.song?.data.rate ?? project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  const tempo = song.time ? new TempoMap(song.time.tempo, rate) : undefined;
   const placements: Placement[] = [];
   for (const entry of output.data.inputs ?? []) {
     // Structure means placed *tracks* (nested-tracks.md §18): an audio or
@@ -78,8 +79,9 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
 
 export function formatArrangement(view: ArrangementView, project: LoadedProject): string {
   const song = project.songs.find((s) => s.name === view.song);
-  const rate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
-  const tempo = song?.tempo ? new TempoMap(song.tempo.data.tempo, rate) : undefined;
+  const rate =
+    song?.song?.data.rate ?? project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  const tempo = song?.time ? new TempoMap(song.time.tempo, rate) : undefined;
   const lines: string[] = [];
   // A length is a span, not a position. Formatting it as bar.beat.tick
   // prints the downbeat *after* the song — creek's twelve bars come out as
@@ -92,7 +94,7 @@ export function formatArrangement(view: ArrangementView, project: LoadedProject)
   // by the first one printed 10 for creek's twelve bars on a project that
   // checked ok — the one number not computed from the map being the one
   // that was wrong.
-  const meter = song?.tempo ? new MeterMap(song.tempo.data.meter) : undefined;
+  const meter = song?.time ? new MeterMap(song.time.meter) : undefined;
   const length =
     view.lengthTicks !== undefined && meter
       ? ` (${fmtSpan(meter.format(view.lengthTicks))})`

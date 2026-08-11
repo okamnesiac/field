@@ -175,9 +175,10 @@ resolves to samples under the parent's map; the daemon sums by sample
 offset. Placing a 7/8 child in a 4/4 parent is an addition, not a
 conversion.
 
-`rate:` follows the same inheritance shape (multi-rate.md decision 3):
-a track renders at its declared rate, the project's `sample_rate`
-otherwise, from the song and never from the placing parent. Rates
+`rate:` follows the same inheritance shape (multi-rate.md decision 3,
+amended): a track renders at its declared rate, otherwise the song's
+`rate:`, otherwise the project's `sample_rate` — from the song and
+never from the placing parent. Rates
 convert only at edges — where a source's rate differs from its track's,
 the graph mints a conversion node at the placement, shared by every
 placement of that source at that rate and visible in `explain` and

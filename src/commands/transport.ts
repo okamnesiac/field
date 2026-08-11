@@ -27,10 +27,10 @@ export function musicalContext(
   sampleRate: number,
 ): MusicalContext | undefined {
   const song = project.songs.find((s) => s.dir === songDir);
-  if (!song?.tempo) return undefined;
+  if (!song?.time) return undefined;
   return {
-    tempo: new TempoMap(song.tempo.data.tempo, sampleRate),
-    meter: new MeterMap(song.tempo.data.meter),
+    tempo: new TempoMap(song.time.tempo, sampleRate),
+    meter: new MeterMap(song.time.meter),
   };
 }
 
