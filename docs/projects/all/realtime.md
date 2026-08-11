@@ -4,9 +4,9 @@ status: Draft
 
 # Plan: Realtime
 
-**Status:** Draft (written 2026-08-10, the day its decisions were made),
-unstarted — no PR has carried implementation. §8's open questions are
-open on purpose; the PR that flips this Active answers them.
+**Status:** Written 2026-08-10, the day its decisions were settled in
+discussion. §8's open questions are open on purpose; the PR that flips
+this Active answers them.
 
 **Goal:** the graph runs live — edit YAML while the song plays and hear
 it next block — while `field build` stays exactly what it is: stems,
