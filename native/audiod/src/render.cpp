@@ -1,7 +1,6 @@
 #include "render.h"
 
 #include "dsp/biquad.h"
-#include "dsp/denormals.h"
 #include "dsp/limiter.h"
 #include "dsp/mixdown.h"
 #include "dsp/resample.h"
@@ -214,10 +213,11 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
 
 std::string runRender (const std::string& planPath)
 {
-    // The callback's floating-point environment, here too (decision 6 in
-    // realtime.md; dsp/denormals.h has the argument for why this is
-    // output-invariant today).
-    dsp::ScopedFlushDenormals flushDenormals;
+    // Default floating-point environment, deliberately: no flush-to-zero
+    // here, and none in the live callback either (realtime.md decision 6,
+    // resolved 2026-08-10 — flushing zeroes subnormal float32 input
+    // samples and moves decaying filter tails, and the double state makes
+    // denormal stalls unreachable).
     try
     {
         const juce::File planFile { juce::String (planPath) };

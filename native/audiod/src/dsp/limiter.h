@@ -42,9 +42,11 @@ struct LimiterSettings
 // appends every sample whose gain is final to `out`, which lags the
 // input by up to latencySamples(); flush() drains the rest, so wrapper
 // output aligns sample-for-sample with input. The pending window covers
-// 240 dB of reduction depth — four attack ramps — beyond which a ramp
-// would start late; no real signal reaches a quarter of that, and the
-// render goldens would say so if one did.
+// the deepest reduction any finite float input can demand (FLT_MAX over
+// the ceiling), so the streaming curve is the whole-buffer sweep's for
+// every finite signal; infinities clamp to FLT_MAX. That sizes the
+// window for exactness, not for monitoring — a live construction may
+// later choose a shallower horizon knowingly, which is chunk 2's call.
 class Limiter
 {
 public:

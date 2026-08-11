@@ -11,7 +11,6 @@
 // where and exits 1.
 
 #include "dsp/biquad.h"
-#include "dsp/denormals.h"
 #include "dsp/limiter.h"
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
@@ -56,6 +55,10 @@ Buffer testSignal (size_t frames)
         channel[frames / 3] = 8.0f; // ~18 dB over a −1 dB ceiling
         for (size_t i = frames / 2; i < frames / 2 + frames / 8 && i < frames; ++i)
             channel[i] = 0.0f;
+        // Subnormal inputs are data (realtime.md decision 6): they must
+        // stream through every processor the same way at every block size.
+        channel[frames / 2 + 2] = 1e-40f;
+        channel[frames / 2 + 3] = -3e-39f;
     }
     return signal;
 }
@@ -175,13 +178,19 @@ bool checkReverb (const Buffer& signal)
     });
 }
 
-bool checkLimiter (const Buffer& signal)
+bool checkLimiter (const Buffer& input)
 {
     field::dsp::LimiterSettings settings;
     settings.ceilingDb = -1.0;
     settings.lookaheadMs = 5.0;
     settings.releaseMs = 80.0;
     settings.sampleRate = 48000.0;
+
+    // Plus a peak near the top of float's range, so the window's
+    // full-depth sizing is exercised rather than assumed.
+    Buffer signal = input;
+    for (auto& channel : signal)
+        channel[channel.size() / 4] = 1e20f;
 
     Buffer whole = signal;
     field::dsp::limit (whole, settings);
@@ -221,9 +230,8 @@ bool checkResampler (const Buffer& signal, double inRate, double outRate)
 
 int main()
 {
-    // The production floating-point environment (dsp/denormals.h).
-    field::dsp::ScopedFlushDenormals flushDenormals;
-
+    // Default floating-point environment, matching both render paths
+    // (realtime.md decision 6, resolved: no flush-to-zero anywhere).
     const Buffer signal = testSignal (48000);
 
     bool ok = checkEq (signal);

@@ -19,8 +19,13 @@ Limiter::Limiter (const LimiterSettings& settings, size_t channels) : numChannel
     attackSlope = 60.0 / window;
     releaseSlope = 60.0 / std::max (1.0, (settings.releaseMs / 1000.0) * settings.sampleRate);
 
-    // Four attack ramps: 240 dB of reach (see the header).
-    capacity = (size_t) std::ceil (4.0 * window) + 1;
+    // The pending window out-reaches the deepest ramp any float input
+    // can demand: FLT_MAX over the ceiling (about 771 dB − ceilingDb) at
+    // attackSlope dB per sample — so the incremental propagation sees
+    // everything the whole-buffer sweep saw, for every finite input.
+    const double deepest
+        = 20.0 * std::log10 ((double) std::numeric_limits<float>::max()) - settings.ceilingDb;
+    capacity = (size_t) std::ceil (deepest / attackSlope) + 1;
     pending.assign (channels, std::vector<float> (capacity, 0.0f));
     gainDb.assign (capacity, 0.0);
     previousOut = std::numeric_limits<double>::infinity();
@@ -41,6 +46,10 @@ void Limiter::push (const std::vector<std::vector<float>>& block,
         pending[c][at] = sample;
         peak = std::max (peak, std::abs ((double) sample));
     }
+    // An infinite sample clamps to FLT_MAX so its ramp stays inside the
+    // window — the one divergence from the whole-buffer sweep, whose
+    // reach on an infinite peak was the buffer itself.
+    peak = std::min (peak, (double) std::numeric_limits<float>::max());
     gainDb[at] = peak > ceiling ? 20.0 * std::log10 (ceiling / peak) : 0.0;
     ++count;
 
