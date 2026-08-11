@@ -227,6 +227,21 @@ void validateInsert (const juce::var& insert, const std::string& path)
                        { "diffusion", Kind::number, true, limits::plateDiffusionMin, limits::plateDiffusionMax },
                        { "modulation", Kind::number, true, limits::plateModulationMin, limits::plateModulationMax } });
     }
+    else if (effect == "hall")
+    {
+        checkObject (insert,
+                     path,
+                     { { "effect", Kind::string, true },
+                       { "mix", Kind::number, true, limits::hallMixMin, limits::hallMixMax },
+                       { "decay", Kind::number, true, limits::hallDecayMin, limits::hallDecayMax },
+                       { "decay_low", Kind::number, true, limits::hallDecayLowMin, limits::hallDecayLowMax },
+                       { "decay_high", Kind::number, true, limits::hallDecayHighMin, limits::hallDecayHighMax },
+                       { "size", Kind::number, true, limits::hallSizeMin, limits::hallSizeMax },
+                       { "predelay_ms", Kind::number, true, limits::hallPredelayMsMin, limits::hallPredelayMsMax },
+                       { "diffusion", Kind::number, true, limits::hallDiffusionMin, limits::hallDiffusionMax },
+                       { "modulation", Kind::number, true, limits::hallModulationMin, limits::hallModulationMax },
+                       { "width", Kind::number, true, limits::hallWidthMin, limits::hallWidthMax } });
+    }
     else
     {
         fail (path + ".effect", "unknown insert effect \"" + effect.toStdString() + "\"");

@@ -177,6 +177,20 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 spec.plate.modulation = requireNumber (insert, "modulation", "plate insert");
                 spec.plate.sampleRate = (double) track.rate;
             }
+            else if (effect == "hall")
+            {
+                spec.kind = 4;
+                spec.hall.mix = requireNumber (insert, "mix", "hall insert");
+                spec.hall.decaySeconds = requireNumber (insert, "decay", "hall insert");
+                spec.hall.decayLow = requireNumber (insert, "decay_low", "hall insert");
+                spec.hall.decayHigh = requireNumber (insert, "decay_high", "hall insert");
+                spec.hall.size = requireNumber (insert, "size", "hall insert");
+                spec.hall.predelayMs = requireNumber (insert, "predelay_ms", "hall insert");
+                spec.hall.diffusion = requireNumber (insert, "diffusion", "hall insert");
+                spec.hall.modulation = requireNumber (insert, "modulation", "hall insert");
+                spec.hall.width = requireNumber (insert, "width", "hall insert");
+                spec.hall.sampleRate = (double) track.rate;
+            }
             else
             {
                 throw std::runtime_error ("unknown insert effect \"" + effect + "\"");
@@ -204,6 +218,8 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 growth += stage.reverb->tailSamples();
             else if (stage.plate != nullptr)
                 growth += stage.plate->tailSamples();
+            else if (stage.hall != nullptr)
+                growth += stage.hall->tailSamples();
         }
         track.postLength = contentEnd + growth;
         if (t != outputTrack)
@@ -258,10 +274,15 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
                                                             spec.horizonDb);
         else if (spec.kind == 2)
             stage.reverb = std::make_unique<dsp::Reverb> (spec.reverb, (size_t) 2);
-        else
+        else if (spec.kind == 3)
         {
             stage.plate = std::make_unique<dsp::Plate> (spec.plate, (size_t) 2);
             stage.plate->startAt (startClock);
+        }
+        else
+        {
+            stage.hall = std::make_unique<dsp::Hall> (spec.hall, (size_t) 2);
+            stage.hall->startAt (startClock);
         }
         track.chain.push_back (std::move (stage));
     }
@@ -438,6 +459,8 @@ void LiveSession::runChain (Track& track, std::vector<std::vector<float>>& worki
             stage.reverb->process (working);
         else if (stage.plate != nullptr)
             stage.plate->process (working);
+        else if (stage.hall != nullptr)
+            stage.hall->process (working);
         else if (stage.limiter != nullptr)
         {
             std::vector<std::vector<float>> out (2);
@@ -532,6 +555,8 @@ juce::int64 LiveSession::chainWarmup (const Track& track) const
             warmup += stage.reverb->tailSamples();
         else if (stage.plate != nullptr)
             warmup += stage.plate->tailSamples();
+        else if (stage.hall != nullptr)
+            warmup += stage.hall->tailSamples();
         else if (stage.limiter != nullptr)
             warmup += stage.limiter->latencySamples();
         else

@@ -745,6 +745,136 @@ describe('plate properties', () => {
   });
 });
 
+describe('hall properties', () => {
+  const impulse = (seconds: number) => {
+    const samples = new Float32Array(seconds * RATE);
+    samples[0] = 1;
+    return samples;
+  };
+
+  // Least-squares dB slope over the 10–90% tail, the reverb and plate
+  // tests' measurement.
+  function tailSlope(rendered: Float32Array, t60: number): number {
+    const window = Math.round(0.05 * RATE);
+    const points: { t: number; db: number }[] = [];
+    for (let t = Math.round(0.1 * t60 * RATE); t < 0.9 * t60 * RATE; t += window) {
+      const level = rms(rendered, t, t + window);
+      if (level > 0) points.push({ t: t / RATE, db: 20 * Math.log10(level) });
+    }
+    const meanT = points.reduce((s, p) => s + p.t, 0) / points.length;
+    const meanDb = points.reduce((s, p) => s + p.db, 0) / points.length;
+    return (
+      points.reduce((s, p) => s + (p.t - meanT) * (p.db - meanDb), 0) /
+      points.reduce((s, p) => s + (p.t - meanT) ** 2, 0)
+    );
+  }
+
+  it('the mid band decays 60 dB per decay-second', async () => {
+    // With both multipliers at 1 the tilts are identity and the FDN's
+    // T60 is analytic: per-line feedback from that line's actual prime
+    // length, Householder lossless — no calibration constant, unlike
+    // the plate's tank.
+    const decay = 2;
+    await importSource('imp', impulse(1));
+    writeSound('hmid', [
+      'type: hall',
+      'source: imp',
+      `decay: ${decay}`,
+      'decay_low: 1',
+      'decay_high: 1',
+      'mix: 1',
+      'modulation: 0',
+    ]);
+    const slope = tailSlope(await render('hmid'), decay);
+    expect(slope * decay).toBeGreaterThan(-63);
+    expect(slope * decay).toBeLessThan(-57);
+  });
+
+  it('each band decays at its own T60: decay_low and decay_high mean it', async () => {
+    // The per-band claim measured per band: isolate the low band with
+    // a cascaded one-pole lowpass at 80 Hz (well under the 300 Hz
+    // crossover) and the high band with cascaded highpasses at 14 kHz
+    // (well over 4 kHz), and each band's slope must land on its own
+    // T60 = decay·multiplier. The window is a dB wider than the
+    // broadband tests' because the isolation filters spend some of it.
+    const decay = 2;
+    const low = 1.5;
+    const high = 0.4;
+    await importSource('imp', impulse(1));
+    writeSound('hband', [
+      'type: hall',
+      'source: imp',
+      `decay: ${decay}`,
+      `decay_low: ${low}`,
+      `decay_high: ${high}`,
+      'mix: 1',
+      'modulation: 0',
+    ]);
+    const rendered = await render('hband');
+
+    const lowpass = (x: Float32Array, fc: number): Float32Array => {
+      const a = Math.exp((-2 * Math.PI * fc) / RATE);
+      const y = new Float32Array(x.length);
+      let s = 0;
+      for (let i = 0; i < x.length; i++) {
+        s = a * s + (1 - a) * x[i]!;
+        y[i] = s;
+      }
+      return y;
+    };
+    const highpass = (x: Float32Array, fc: number): Float32Array => {
+      const l = lowpass(x, fc);
+      const y = new Float32Array(x.length);
+      for (let i = 0; i < x.length; i++) y[i] = x[i]! - l[i]!;
+      return y;
+    };
+
+    const lowBand = lowpass(lowpass(rendered, 80), 80);
+    const highBand = highpass(highpass(highpass(rendered, 14000), 14000), 14000);
+    const lowT60 = decay * low;
+    const highT60 = decay * high;
+    expect(tailSlope(lowBand, lowT60) * lowT60).toBeGreaterThan(-66);
+    expect(tailSlope(lowBand, lowT60) * lowT60).toBeLessThan(-54);
+    expect(tailSlope(highBand, highT60) * highT60).toBeGreaterThan(-66);
+    expect(tailSlope(highBand, highT60) * highT60).toBeLessThan(-54);
+  });
+
+  it('modulation is deterministic, and zero is frozen', async () => {
+    await importSource('imp', impulse(1));
+    for (const name of ['hmoda', 'hmodb']) {
+      writeSound(name, ['type: hall', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0.4']);
+    }
+    writeSound('hfroz', ['type: hall', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0']);
+    const [a, b, frozen] = [await render('hmoda'), await render('hmodb'), await render('hfroz')];
+    expect(
+      Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(
+        Buffer.from(b.buffer, b.byteOffset, b.byteLength),
+      ),
+    ).toBe(true);
+    const from = Math.round(0.4 * RATE);
+    let moved = 0;
+    for (let i = from; i < from + 2400; i++) if (a[i] !== frozen[i]) moved++;
+    expect(moved).toBeGreaterThan(2000);
+  });
+
+  it('width is the stereo: 0 collapses to mid bit-exactly, 1 decorrelates the taps', async () => {
+    await importSource('imp', impulse(1), impulse(1));
+    writeSound('hmono', ['type: hall', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0', 'width: 0']);
+    writeSound('hwide', ['type: hall', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0', 'width: 1']);
+    const [monoL, monoR] = await renderChannels('hmono');
+    expect(
+      Buffer.from(monoL!.buffer, monoL!.byteOffset, monoL!.byteLength).equals(
+        Buffer.from(monoR!.buffer, monoR!.byteOffset, monoR!.byteLength),
+      ),
+    ).toBe(true);
+    const [wideL, wideR] = await renderChannels('hwide');
+    let same = 0;
+    const from = Math.round(0.4 * RATE);
+    for (let i = from; i < from + 2400; i++) if (wideL![i] === wideR![i]) same++;
+    expect(same).toBe(0);
+  });
+});
+
 describe('limit properties', () => {
   // One float32 ulp, relative. The gain curve pins every peak to the
   // ceiling exactly in double precision; storing the result as float32

@@ -11,6 +11,7 @@
 // where and exits 1.
 
 #include "dsp/biquad.h"
+#include "dsp/hall.h"
 #include "dsp/limiter.h"
 #include "dsp/plate.h"
 #include "dsp/resample.h"
@@ -220,6 +221,47 @@ bool checkPlate (const Buffer& signal, double modulation)
     });
 }
 
+// Same pair of modulation cases as the plate, for the same reason.
+bool checkHall (const Buffer& signal, double modulation)
+{
+    field::dsp::HallSettings settings;
+    settings.mix = 0.4;
+    settings.decaySeconds = 1.2;
+    settings.decayLow = 1.3;
+    settings.decayHigh = 0.4;
+    settings.size = 0.8;
+    settings.predelayMs = 10.0;
+    settings.diffusion = 0.8;
+    settings.modulation = modulation;
+    settings.width = 1.0;
+    settings.sampleRate = 48000.0;
+
+    Buffer extended = signal;
+    {
+        field::dsp::Hall probe (settings, signal.size());
+        for (auto& channel : extended)
+            channel.resize (channel.size() + (size_t) probe.tailSamples(), 0.0f);
+    }
+
+    Buffer whole = extended;
+    field::dsp::Hall (settings, whole.size()).process (whole);
+
+    const std::string what = "hall mod=" + std::to_string (modulation);
+    return check (what.c_str(), whole, [&] (long blockSize) {
+        Buffer out (extended.size());
+        field::dsp::Hall processor (settings, extended.size());
+        for (size_t at = 0; at < extended[0].size(); at += (size_t) blockSize)
+        {
+            const size_t count = std::min ((size_t) blockSize, extended[0].size() - at);
+            Buffer block = slice (extended, at, count);
+            processor.process (block);
+            for (size_t c = 0; c < out.size(); ++c)
+                out[c].insert (out[c].end(), block[c].begin(), block[c].end());
+        }
+        return out;
+    });
+}
+
 bool checkLimiter (const Buffer& input)
 {
     field::dsp::LimiterSettings settings;
@@ -280,6 +322,8 @@ int main()
     ok = ok && checkReverb (signal);
     ok = ok && checkPlate (signal, 0.0);
     ok = ok && checkPlate (signal, 0.3);
+    ok = ok && checkHall (signal, 0.0);
+    ok = ok && checkHall (signal, 0.3);
     ok = ok && checkLimiter (signal);
     ok = ok && checkResampler (signal, 44100.0, 48000.0);
     ok = ok && checkResampler (signal, 48000.0, 44100.0);

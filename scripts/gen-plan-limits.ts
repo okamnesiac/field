@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { eqBandSchema, eqParams, limitParams, plateParams, reverbParams } from '../src/schema/effects.js';
+import { eqBandSchema, eqParams, hallParams, limitParams, plateParams, reverbParams } from '../src/schema/effects.js';
 import { bitDepth, sampleRate } from '../src/schema/common.js';
 
 // Emits native/audiod/src/plan-limits.h from the zod schemas.
@@ -66,6 +66,15 @@ pair('platePredelayMs', objectBounds(plateParams, 'predelay_ms'));
 pair('plateDamping', objectBounds(plateParams, 'damping'));
 pair('plateDiffusion', objectBounds(plateParams, 'diffusion'));
 pair('plateModulation', objectBounds(plateParams, 'modulation'));
+pair('hallMix', objectBounds(hallParams, 'mix'));
+pair('hallDecay', objectBounds(hallParams, 'decay'));
+pair('hallDecayLow', objectBounds(hallParams, 'decay_low'));
+pair('hallDecayHigh', objectBounds(hallParams, 'decay_high'));
+pair('hallSize', objectBounds(hallParams, 'size'));
+pair('hallPredelayMs', objectBounds(hallParams, 'predelay_ms'));
+pair('hallDiffusion', objectBounds(hallParams, 'diffusion'));
+pair('hallModulation', objectBounds(hallParams, 'modulation'));
+pair('hallWidth', objectBounds(hallParams, 'width'));
 
 // Cardinality of the band array, read the same way.
 const bandsJson = z.toJSONSchema(z.object({ bands: eqParams.bands })) as {
