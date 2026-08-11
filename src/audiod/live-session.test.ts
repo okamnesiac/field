@@ -436,6 +436,72 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     }
   });
 
+  it('a swap keeps converted delivery seamless: the queued tail survives', async () => {
+    // Swap-with-carry under conversion (cross-rate-live.md decision 3,
+    // minjudd's finding on #143): the FIFO holds already-converted
+    // audio the ear has not heard yet, and a swap that keeps the rate
+    // pair must keep it — dropping it skips 10–20 ms on every
+    // live-watch edit.
+    init({ dir: root, name: 'fortyfour', sampleRate: 44100 });
+    createSong(root, 'opener');
+    const tone = join(tmpdir(), `ff-swap-${process.pid}.wav`);
+    const frames = 88200; // two seconds: room to pause mid-stream
+    const mono = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) mono[i] = 0.4 * Math.sin((2 * Math.PI * 261 * i) / 44100);
+    writeWavFloat32(tone, 44100, [mono, mono]);
+    await importAsset(root, 'opener', tone, 'tone');
+    rmSync(tone);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
+    );
+
+    const { session } = await compileSession(root, 'opener');
+    const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    try {
+      await client.session(session);
+      await client.play();
+      // Pause mid-stream with converted audio in flight. The fill loop
+      // overshoots the device block, so the FIFO is almost always
+      // non-empty at a pause; retry the rare exact-drain landing.
+      let queued = 0;
+      let before = 0;
+      for (let attempt = 0; attempt < 10 && queued === 0; attempt++) {
+        await new Promise((r) => setTimeout(r, 150));
+        await client.pause();
+        await new Promise((r) => setTimeout(r, 50)); // let the last callback finish
+        const paused = await client.status();
+        queued = paused.conv_queued ?? 0;
+        before = paused.sample;
+        if (queued === 0) await client.play();
+      }
+      expect(queued).toBeGreaterThan(0);
+      // The swap: same song recompiled, same rate pair. The converter,
+      // its queued frames, and the carried position all survive.
+      await client.session(session);
+      const after = await client.status();
+      expect(after.conv_queued).toBe(queued);
+      expect(after.sample).toBe(before);
+      // And the stream still ends itself through the kept converter:
+      // the extent flush and the drain wait are unaffected by the swap.
+      await client.play();
+      const deadline = Date.now() + 15_000;
+      let state = 'playing';
+      while (state !== 'stopped' && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        state = (await client.status()).state;
+      }
+      expect(state).toBe('stopped');
+    } finally {
+      try {
+        await client.quit();
+      } catch {
+        // already gone
+      }
+      client.close();
+    }
+  });
+
   it('the cache is the freeze (realtime.md chunk 4)', async () => {
     await scaffold(root);
     // Cold cache: nothing freezes. The output can never freeze and

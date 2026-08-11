@@ -289,12 +289,37 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
                 next->locate (predicted);
             }
         }
-        const juce::ScopedLock guard (liveLock);
         // Prefer running the device at the session's rate (bit-perfect
-        // delivery); when it cannot switch, rebuildLiveConverter below
+        // delivery); when it cannot switch, the prepared converter below
         // sets up converted delivery instead of refusing
-        // (cross-rate-live.md decision 3).
+        // (cross-rate-live.md decision 3). Outside the lock: a switch
+        // restarts the device, and the callback keeps pulling the old
+        // session while it happens.
         maybeMatchDeviceRate ((double) next->sessionRate());
+        // Conversion state is prepared out here too (Codex's finding on
+        // this PR): the kernel design and the FIFO reservation are
+        // exactly the work pullAudio's try-lock would wait out as a
+        // silent block. Whether to *install* it is decided under the
+        // lock — a swap that keeps the rate pair keeps the converter
+        // and its queued audio outright (minjudd's finding: the FIFO
+        // holds the next thing the ear should hear, and dropping it
+        // skipped 10–20 ms on every live-watch edit). Decision 3's
+        // reset cases stay: locate, stop, device start, and a swap
+        // that actually moves the pair.
+        const double nextRate = (double) next->sessionRate();
+        const double devRate = currentDeviceRate();
+        const bool wantConverter = devRate > 0.0 && ! juce::exactlyEqual (devRate, nextRate);
+        std::unique_ptr<field::dsp::Resampler> prepared;
+        std::vector<std::vector<float>> preparedIn (2), preparedOut (2);
+        if (wantConverter)
+        {
+            prepared = std::make_unique<field::dsp::Resampler> (nextRate, devRate, 2);
+            for (auto& ch : preparedIn)
+                ch.reserve (512);
+            for (auto& ch : preparedOut)
+                ch.reserve (1 << 16);
+        }
+        const juce::ScopedLock guard (liveLock);
         // A swap mid-play carries the transport: latest compile wins and
         // the play never stops. A fresh load (no session before) starts
         // stopped at zero, as ever.
@@ -326,7 +351,25 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveSession->locate (carry);
             livePlaying = wasPlaying;
         }
-        rebuildLiveConverter();
+        // Install the prepared conversion only when the state cannot
+        // carry: a fresh start, a moved rate pair, or a stream already
+        // flushed (a natural end racing the swap — the old converter
+        // cannot take more input). Otherwise the converter, its FIFO,
+        // and its filter history all survive — the delivered stream
+        // really is continuous across a same-pair swap.
+        if (! hadSession || convFlushed
+            || ! juce::exactlyEqual (nextRate, convLiveRate)
+            || ! juce::exactlyEqual (devRate, convDeviceRate))
+        {
+            liveConverter = std::move (prepared);
+            convIn = std::move (preparedIn);
+            convOut = std::move (preparedOut);
+            convOutRead = 0;
+            convFlushed = false;
+            convQueued.store (0);
+            convLiveRate = nextRate;
+            convDeviceRate = devRate;
+        }
     }
     catch (const std::exception& e)
     {
@@ -430,14 +473,24 @@ juce::int64 Player::positionSamples() const
 bool Player::streamFinished() const
 {
     if (liveSession != nullptr)
+    {
         // The session position runs ahead of the ear when delivery
         // converts (it counts what entered the converter), so finished
-        // also waits for the converted FIFO to drain — the last taps/2
-        // of tail are heard before the transport reports done
-        // (cross-rate-live.md decision 3).
+        // also waits for the flush and the converted FIFO's drain —
+        // the last taps/2 of tail are heard before the transport
+        // reports done (cross-rate-live.md decision 3). Checked under
+        // liveLock: the callback that crosses the extent updates
+        // position, flushes, and queues the tail while holding it, so
+        // the heartbeat sees that callback's state whole or not at
+        // all — a lockless read could catch position past the extent
+        // with the tail not yet counted, and stop() would drop it
+        // (Codex's finding on this PR).
+        const juce::ScopedLock guard (liveLock);
+        const bool drained = liveConverter == nullptr
+                             || (convFlushed && convOut[0].size() == convOutRead);
         return liveEverStarted && ! liveLoop && liveLength > 0
-               && liveSession->position() >= liveLength
-               && convQueued.load() == 0;
+               && liveSession->position() >= liveLength && drained;
+    }
     // A looping stream never finishes; stop is the only way out.
     return readerSource != nullptr && everStarted && ! looping && transport.hasStreamFinished();
 }
@@ -474,6 +527,10 @@ juce::var Player::status()
         if (liveSong.isNotEmpty())
             result->setProperty ("song", liveSong);
         result->setProperty ("sample_rate", liveRate);
+        // The in-flight converted audio decision 3's skew bound talks
+        // about: already-converted frames the ear has not heard yet.
+        // Zero when delivery is not converting.
+        result->setProperty ("conv_queued", convQueued.load());
     }
     else
     {
@@ -501,6 +558,14 @@ juce::var Player::status()
     return juce::var (result.get());
 }
 
+double Player::currentDeviceRate() const
+{
+    return nullMode ? nullSampleRate
+                    : (deviceManager.getCurrentAudioDevice() != nullptr
+                           ? deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()
+                           : 0.0);
+}
+
 // Reset-and-rebuild for delivery conversion; callers hold liveLock.
 // Building fresh *is* the reset the plan specifies: the resampler's
 // primed-with-zeros starting state, an empty FIFO, nothing queued.
@@ -511,14 +576,11 @@ void Player::rebuildLiveConverter()
     convOutRead = 0;
     convFlushed = false;
     convQueued.store (0);
+    convLiveRate = liveSession != nullptr ? (double) liveRate : 0.0;
+    convDeviceRate = currentDeviceRate();
     if (liveSession == nullptr || liveRate <= 0)
         return;
-    const double deviceRate = nullMode
-                                  ? nullSampleRate
-                                  : (deviceManager.getCurrentAudioDevice() != nullptr
-                                         ? deviceManager.getCurrentAudioDevice()
-                                               ->getCurrentSampleRate()
-                                         : 0.0);
+    const double deviceRate = convDeviceRate;
     if (deviceRate <= 0.0 || juce::exactlyEqual (deviceRate, (double) liveRate))
         return;
     liveConverter = std::make_unique<field::dsp::Resampler> ((double) liveRate, deviceRate, 2);
@@ -563,11 +625,26 @@ void Player::pullAudio (float* const* out, int numChannels, int n)
                 while ((juce::int64) (convOut[0].size() - convOutRead) < (juce::int64) n
                        && ! convFlushed)
                 {
-                    for (auto& ch : convIn)
-                        ch.assign ((size_t) step, 0.0f);
-                    float* ins[2] = { convIn[0].data(), convIn[1].data() };
-                    liveSession->renderBlock (ins, 2, step);
-                    liveConverter->process (convIn, convOut);
+                    // The final block stops at the extent: the input
+                    // past it is padding the flush already provides,
+                    // and converting it too would deliver frames
+                    // beyond the declared conversion — a late natural
+                    // stop by up to a block (Codex's finding on this
+                    // PR). Total input is then exactly the extent, so
+                    // total output is exactly its convertedLength.
+                    juce::int64 render = step;
+                    if (! liveLoop && liveLength > 0)
+                        render = std::min (render,
+                                           std::max<juce::int64> (0, liveLength
+                                                                         - liveSession->position()));
+                    if (render > 0)
+                    {
+                        for (auto& ch : convIn)
+                            ch.assign ((size_t) render, 0.0f);
+                        float* ins[2] = { convIn[0].data(), convIn[1].data() };
+                        liveSession->renderBlock (ins, 2, (int) render);
+                        liveConverter->process (convIn, convOut);
+                    }
                     if (! liveLoop && liveLength > 0
                         && liveSession->position() >= liveLength)
                     {
