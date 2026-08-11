@@ -59,3 +59,18 @@ target_link_libraries(field-audiod PRIVATE
   juce::juce_recommended_config_flags
   juce::juce_recommended_warning_flags
 )
+
+# Block-size invariance for the streaming DSP classes (realtime.md
+# decision 3). Pure C++ over src/dsp — no JUCE — so it builds in moments
+# and runs in CI wherever the daemon does; src/audio/dsp-check.test.ts is
+# the caller.
+add_executable(field-dsp-check
+  src/dsp-check.cpp
+  src/dsp/biquad.cpp
+  src/dsp/limiter.cpp
+  src/dsp/resample.cpp
+  src/dsp/reverb.cpp
+)
+target_compile_options(field-dsp-check PRIVATE
+  $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-ffp-contract=off>
+)

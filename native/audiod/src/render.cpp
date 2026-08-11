@@ -1,6 +1,7 @@
 #include "render.h"
 
 #include "dsp/biquad.h"
+#include "dsp/denormals.h"
 #include "dsp/limiter.h"
 #include "dsp/mixdown.h"
 #include "dsp/resample.h"
@@ -116,23 +117,10 @@ void applyInsert (const juce::var& insert,
             bands.push_back (band);
         }
 
-        for (const auto& band : bands)
-        {
-            const auto biquad = dsp::design (band, sampleRate);
-            for (auto& channel : channels)
-                dsp::processBiquad (channel.data(), (int) channel.size(), biquad);
-        }
-
         const auto normalize = insert.getProperty ("normalize", juce::var());
         if (normalize.isVoid())
             throw std::runtime_error ("eq insert is missing \"normalize\"");
-        if ((bool) normalize)
-        {
-            const double gain = std::pow (10.0, dsp::autoGainDb (bands, sampleRate) / 20.0);
-            for (auto& channel : channels)
-                for (auto& sample : channel)
-                    sample = (float) ((double) sample * gain);
-        }
+        dsp::eq (channels, bands, (bool) normalize, sampleRate);
     }
     else if (effect == "limit")
     {
@@ -226,6 +214,10 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
 
 std::string runRender (const std::string& planPath)
 {
+    // The callback's floating-point environment, here too (decision 6 in
+    // realtime.md; dsp/denormals.h has the argument for why this is
+    // output-invariant today).
+    dsp::ScopedFlushDenormals flushDenormals;
     try
     {
         const juce::File planFile { juce::String (planPath) };

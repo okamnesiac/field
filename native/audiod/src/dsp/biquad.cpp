@@ -138,4 +138,51 @@ void processBiquad (float* samples, int numSamples, const Biquad& biquad)
     }
 }
 
+Eq::Eq (const std::vector<Band>& bands, bool normalize, double sampleRate, size_t channels)
+    : applyGain (normalize), numChannels (channels)
+{
+    sections.reserve (bands.size());
+    for (const auto& band : bands)
+        sections.push_back (design (band, sampleRate));
+    if (normalize)
+        gain = std::pow (10.0, autoGainDb (bands, sampleRate) / 20.0);
+    states.assign (sections.size() * channels, {});
+}
+
+void Eq::process (std::vector<std::vector<float>>& block)
+{
+    // Section-by-section over the block, channel inner — the same
+    // per-sample sequence as processBiquad over a whole buffer, with the
+    // section's state carried instead of reset.
+    for (size_t s = 0; s < sections.size(); ++s)
+    {
+        const Biquad& biquad = sections[s];
+        for (size_t c = 0; c < block.size() && c < numChannels; ++c)
+        {
+            State& state = states[s * numChannels + c];
+            for (auto& sample : block[c])
+            {
+                const double x = (double) sample;
+                const double y = biquad.b0 * x + state.z1;
+                state.z1 = biquad.b1 * x - biquad.a1 * y + state.z2;
+                state.z2 = biquad.b2 * x - biquad.a2 * y;
+                sample = (float) y;
+            }
+        }
+    }
+    if (applyGain)
+        for (auto& channel : block)
+            for (auto& sample : channel)
+                sample = (float) ((double) sample * gain);
+}
+
+void eq (std::vector<std::vector<float>>& channels,
+         const std::vector<Band>& bands,
+         bool normalize,
+         double sampleRate)
+{
+    Eq processor (bands, normalize, sampleRate, channels.size());
+    processor.process (channels);
+}
+
 } // namespace field::dsp

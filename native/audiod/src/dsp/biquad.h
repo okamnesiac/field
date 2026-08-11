@@ -18,6 +18,13 @@
 namespace field::dsp
 {
 
+// Streaming interfaces (realtime.md decision 3): every processor here is
+// a stateful class whose per-sample arithmetic is the whole-buffer
+// function's exactly, with filter state carried across blocks — so a
+// callback processing 128 frames emits the same bits as one offline pass.
+// The whole-buffer free functions are thin wrappers over these classes,
+// which is what keeps the render goldens the proof that nothing moved.
+
 struct Band
 {
     std::string type; // highpass | lowshelf | bell | highshelf | lowpass
@@ -47,5 +54,38 @@ double autoGainDb (const std::vector<Band>& bands, double sampleRate);
 // One section over one channel, in place. Transposed direct form II with
 // double state, matching the reference exactly.
 void processBiquad (float* samples, int numSamples, const Biquad& biquad);
+
+// The eq insert as a streaming processor: the declared bands as one
+// cascade with per-band, per-channel filter state carried across blocks,
+// and the normalize compensation folded in as the final gain stage.
+// Samples round to float between sections, exactly as the whole-buffer
+// path always has. Zero latency; any block partitioning emits the same
+// bits.
+class Eq
+{
+public:
+    Eq (const std::vector<Band>& bands, bool normalize, double sampleRate, size_t numChannels);
+    // In place; block sizes are the caller's business.
+    void process (std::vector<std::vector<float>>& block);
+    long latencySamples() const { return 0; }
+
+private:
+    std::vector<Biquad> sections;
+    bool applyGain = false;
+    double gain = 1.0; // normalize compensation
+    struct State
+    {
+        double z1 = 0.0, z2 = 0.0;
+    };
+    std::vector<State> states; // [section * numChannels + channel]
+    size_t numChannels = 0;
+};
+
+// The whole-buffer form render.cpp's eq insert uses: one Eq over the
+// entire signal.
+void eq (std::vector<std::vector<float>>& channels,
+         const std::vector<Band>& bands,
+         bool normalize,
+         double sampleRate);
 
 } // namespace field::dsp

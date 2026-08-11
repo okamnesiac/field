@@ -35,6 +35,39 @@ struct Ratio
 
 Ratio ratioFor (double inRate, double outRate);
 
+// The converter as a streaming processor (realtime.md decision 7): the
+// same polyphase kernel fed by a taps-wide ring of input history, primed
+// with the zeros before the source. process() appends every output whose
+// window is complete — the stream lags the input by latencySamples()
+// (the prototype's taps/2 group delay) — and flush() emits the rest,
+// reading silence past the end, honouring the whole-buffer length rule
+// (round, and never round a non-empty source to zero). Any block
+// partitioning emits the same bits. A 1:1 ratio is passthrough(); the
+// caller skips the filter entirely, as the whole-buffer form always has.
+class Resampler
+{
+public:
+    Resampler (double inRate, double outRate, size_t numChannels);
+    bool passthrough() const { return phases == 1 && stride == 1; }
+    void process (const std::vector<std::vector<float>>& block,
+                  std::vector<std::vector<float>>& out);
+    void flush (std::vector<std::vector<float>>& out);
+    long latencySamples() const;
+
+private:
+    void emitReady (std::vector<std::vector<float>>& out, long inputLimit);
+
+    long phases = 1;
+    long stride = 1;
+    long taps = 0;
+    long delay = 0;
+    std::vector<double> rows;
+    std::vector<std::vector<float>> history; // [channel][taps ring]
+    size_t numChannels = 0;
+    long consumed = 0; // input samples seen
+    long emitted = 0; // output samples emitted
+};
+
 // Resamples every channel. Returns the input untouched when the rates
 // match — not an optimisation but a correctness requirement, since a
 // same-rate "conversion" must not run a filter over the signal.
