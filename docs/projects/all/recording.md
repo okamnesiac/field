@@ -4,6 +4,10 @@ status: Draft
 
 # Plan: Recording
 
+**Status:** Draft (written 2026-08-10), unstarted — no PR has carried
+implementation. §11's open questions are open on purpose; the PR that
+flips this Active answers them.
+
 **Goal:** `field record` — capture a live performance into a track as
 takes, through the same daemon that plays: armed, crash-safe,
 latency-placed, and committed beside its bytes the way every take
@@ -53,53 +57,84 @@ The seams this phase opens, verified against main (01d4fe6):
   chunk 1 opens for the duplex device.
   [audio-engine.md](../../audio-engine.md) defines the vocabulary; this
   phase is where it becomes observable numbers instead of prose.
-- `field click` is CLI-side TypeScript DSP (click.ts, 90 lines) and the
-  sole production caller of the whole-file WAV codec. The count-in and
-  metronome a tracking session needs belong in the engine's callback,
-  which is what retires it (§7).
+- The metronome is `field play --click` (cli.ts:434), CLI-side
+  TypeScript DSP (click.ts, 90 lines) baking ticks into a temp file —
+  the sole production caller of the whole-file WAV codec, and the
+  reason `--click` refuses to compose with `--watch` (cli.ts:456). The
+  count-in and metronome a tracking session needs belong in the
+  engine's callback, which is what retires the DSP and dissolves the
+  refusal (§7).
 
 ## 3 The take on disk
 
 Generated takes today are numbered WAVs with `variants.yaml` beside
-them binding bytes to recipe. Recorded takes mirror the shape
-file-for-file — `audio/<name>/takes.yaml`:
+them binding bytes to recipe. Recorded takes keep the shape — record
+beside bytes, a `chosen`, one row per take — and differ exactly where
+settled decisions say they differ: timestamp names instead of numbers,
+and the pin in the ledger instead of the row. `audio/<name>/takes.yaml`:
 
 ```yaml
 record: lead-vocal
-chosen: 2
+chosen: take-20260812-210638
 takes:
-  - file: audio/lead-vocal/1.wav
-    recorded_at: 2026-08-12T21:04:11.402Z
-    at: [17]
+  - asset: take-20260812-210411
+    started_at_samples: 806400
+    musical_position: [17]
     device: Apollo Twin X
     input: 1
-    sample_rate: 48000
     latency: 142
-    sha256: 9c1f0b537b698fcad138b45c34caf3d78af4f55ee1c808c81fe2365bc9ffdd41
-  - file: audio/lead-vocal/2.wav
-    recorded_at: 2026-08-12T21:06:38.114Z
-    at: [17]
+    monitoring: apollo-direct
+    console_preset: vocal-tracking
+  - asset: take-20260812-210638
+    started_at_samples: 806400
+    musical_position: [17]
     device: Apollo Twin X
     input: 1
-    sample_rate: 48000
     latency: 142
-    sha256: 4694165412616825f04f89574e775687e3e887a11d2e5b05f625b3b3a8d7fed8
+    monitoring: apollo-direct
+    console_preset: vocal-tracking
 ```
 
-- `at` is the timeline position capture started against; `latency` is
-  the samples the captured audio ran behind that position, as the
-  device reported it. Together they are the whole placement story:
-  playback compensates by exactly what capture recorded, and both
-  numbers are inspectable forever. The exact compensation arithmetic
-  (input vs. round-trip, and a loopback measurement to check the
-  device's claim) is settled in the first chunk against real hardware,
-  not in this plan.
+and finalize pins the bytes where recorded audio pins — the song's
+ledger ([project-layout.md](project-layout.md) §1.6's split: imported
+and recorded audio pin in the ledger; only generated variants pin in
+their spec):
+
+```yaml
+# songs/creek/assets.yaml — the row finalize adds
+take-20260812-210411:
+  file: audio/lead-vocal/take-20260812-210411.wav
+  sha256: 9c1f0b537b698fcad138b45c34caf3d78af4f55ee1c808c81fe2365bc9ffdd41
+  size: 8294492
+  sample_rate: 48000
+  channels: 1
+```
+
+- Take files carry timestamp names, not numbers —
+  [project-model.md](../../project-model.md)'s identity tiers give
+  recorded takes sortable, merge-safe timestamps
+  (`take-20260812-210411`) where generated takes count within their
+  request, so two clones recording independently can never mint the
+  same path.
+- `started_at_samples` is authoritative; `musical_position` records
+  what the tempo map said at capture and is never used for placement
+  arithmetic — the authority rule project-model.md "Timeline and
+  tempo" demands of anything storing both. `latency` is the samples
+  the captured audio ran behind the start, as the device reported it.
+  Samples plus latency are the whole placement story; the exact
+  compensation arithmetic (input vs. round-trip, and a loopback
+  measurement to check the device's claim) is settled in the first
+  chunk against real hardware, not in this plan.
 - Bytes stay pure: the file is what the converter produced, at the
-  device's rate. If the track renders at another rate, the edge
-  converts ([multi-rate.md](multi-rate.md) decision 4) exactly as for
-  any other source — no resample at finalize, ever.
-- `chosen` means what it means for variants, and `field choose` moves
-  it the same way.
+  device's rate the ledger row records. If the track renders at
+  another rate, the edge converts ([multi-rate.md](multi-rate.md)
+  decision 4) exactly as for any other source — no resample at
+  finalize, ever.
+- `monitoring` and `console_preset` are the monitoring context
+  audio-engine.md's take manifest requires: a clone can tell how a dry
+  take was heard when it was sung.
+- `chosen` names a take, and `field choose` moves it the same way it
+  moves a variant.
 
 ## 4 Arming: the record entry
 
@@ -124,6 +159,15 @@ committed `hardware/` file binds per machine (the story playback.md
 §3.4 deferred to this phase), `count_in`, a punch region. Each starts
 as a CLI flag and moves into the entry only if committing it proves
 out.
+
+A record entry with no takes yet builds as **silence**, with `field
+check` saying so (`lead-vocal: no takes yet`) — not the refusal an
+ungenerated generative entry gets (`assertGenerated`, graph.ts:581).
+The difference is the point of the entry: §9's flow places the track
+and loops the mix *before* the first take exists, which a refusal
+makes impossible. A generative entry without variants is a build
+that forgot a step; a record entry without takes is a session that
+has not happened yet.
 
 ## 5 Capture in the daemon
 
@@ -164,16 +208,26 @@ CLI projects the tempo map into a click *schedule* — sample positions
 with accent flags — and hands it over the socket; the engine
 synthesizes the ticks in the callback, sample-accurate against the
 same clock the capture uses. Count-in is the schedule starting before
-`at`. This retires click.ts's offline DSP and its whole-file WAV
-codec use; `field click` stays as a command, now asking the engine.
+the record position. This retires click.ts's offline DSP and its
+whole-file WAV codec use; the surface stays `field play --click`
+(cli.ts:434), now routed to the engine — and `--click` with `--watch`
+stops being refused (cli.ts:456), because there is no baked temp file
+for a swap to drop.
 
 ## 8 Monitoring
 
 V1 monitoring is Apollo-direct, configured manually in Console, and
 capture is dry — both already decided in audio-engine.md. This plan
-builds no monitor path. Host monitoring (input through Field's engine
-and effects, with the latency policy beside it) is real future work
-and stays out of scope here.
+builds no monitor path. What it does commit is the context a take was
+monitored under: each take row records `monitoring:` and
+`console_preset:` (§3), the expected-preset contract audio-engine.md
+already states, so a clone can tell how a dry take was heard. The
+committed `hardware/` file that would bind inputs and presets per
+machine — the story playback.md §3.4 deferred to this phase — is an
+open question (§11): its schema wants deciding from a real Apollo
+session, not invented here. Host monitoring (input through Field's
+engine and effects, with the latency policy beside it) is real future
+work and stays out of scope.
 
 ## 9 Definition of done
 
@@ -189,10 +243,11 @@ compensated, so what comes back sits where it was sung.
    arm/record/stop verbs, transactional capture with journal and crash
    recovery, idle-exit pinning, `features` in hello with the two semver
    gates migrated.
-2. **The take lands** — finalize into `audio/<name>/` + `takes.yaml`,
-   the `record:` entry and its schema, resolver arm for recorded takes,
-   latency-compensated placement verified by loopback on real hardware,
-   blocking `field record`.
+2. **The take lands** — finalize into `audio/<name>/` (timestamp
+   names) plus the ledger row plus `takes.yaml`, the `record:` entry
+   and its schema with takeless-builds-as-silence, resolver arm for
+   recorded takes, latency-compensated placement verified by loopback
+   on real hardware, blocking `field record`.
 3. **Count-in and click** — the click schedule over the socket, engine
    ticks, click.ts retired.
 4. **Punch and loop takes** — punch in/out against a region, loop
@@ -209,9 +264,14 @@ compensated, so what comes back sits where it was sung.
 - The record file: `takes.yaml` with a `takes:` list as above, or reuse
   the `variants.yaml` name and `variants:` key so both kinds of take
   share one filename? Separate names say what happened; one name says
-  they are the same machinery.
+  they are the same machinery — though less of it is shared than it
+  was, now that recorded rows pin in the ledger while variant rows
+  pin in-file.
 - Does stop auto-choose the new take, the way generation chooses its
   first variant? Tracking says yes — you want to hear what you just
   sang; a later take overwriting your chosen comp says no.
 - Are meters needed for the V1 CLI, or is the widget their first real
   consumer?
+- The committed `hardware/` file's schema — what binds a named input
+  and an expected Console preset per machine class (§8) — decided
+  from a real Apollo session rather than invented in this plan.
