@@ -89,13 +89,21 @@ Decided elsewhere, restated here as constraints:
 3. **Parameters are a `params:` map in the plugin's own natural
    units, under the plugin's own parameter names.** The point of the
    file is human-readable diffs, and normalized floats are not that.
-   Values round-trip through the plugin's conversion, so hand-typed
-   values are canonicalized by the next editor session — type
-   `Attack: 5.95`, the plugin snaps to its detented 6, the file
-   learns 6: truth flows toward what the plugin actually does. The
-   cost, stated plainly: for plugins with lossy conversions the file
-   is truth within a float ulp rather than bit-exact truth —
-   inaudible by construction. A param name the plugin does not have
+   Values round-trip through the plugin's conversion, and
+   canonicalization is **gesture-scoped**: write-back rewrites only
+   the params a session actually gestured, so touching the Attack
+   knob writes the plugin's own detented 6 where the file said
+   `5.95`, and a param the editor never touches stays as authored,
+   the plugin interpreting it at load. The file converges toward
+   what the plugin does knob by knob, and — the reason the scoping
+   is a decision rather than a nicety — never rewrites anything
+   spontaneously, so every re-key under decision 8 traces to a
+   deliberate gesture or hand edit (minjudd caught the unscoped
+   draft, where a cosmetic rewrite of a hand-typed value would have
+   re-keyed the node and, on a tier-3 plugin, minted a take nobody
+   asked for). The cost, stated plainly: for plugins with lossy
+   conversions the file is truth within a float ulp rather than
+   bit-exact truth — inaudible by construction. A param name the plugin does not have
    is a `check` error when the plugin is installed (the typo guard);
    an uninstalled plugin defers validation to the machine that can
    perform it.
@@ -159,7 +167,14 @@ Decided elsewhere, restated here as constraints:
 8. **The action key hashes identity + version + full state hash +
    the params map canonicalized** (sorted by name, so reordering
    lines never re-keys), plus the ordinary chain inputs. The display
-   name is never keyed.
+   name is never keyed. The hashed values are the **authored** ones,
+   exactly as written in the file — §2 forces this: a machine
+   without the plugin finds a cached stem by computing its action
+   key, so the key must be computable from the repository alone, and
+   plugin-canonical values would need an instantiation to obtain.
+   Two spellings of one knob position therefore key differently —
+   a re-render that sounds the same — which decision 3's
+   gesture-scoping confines to edits somebody actually made.
 9. **`version:` lives in the YAML, per entry, and a mismatch is a
    refusal with an offer.** The installed plugin moving from 11.2.0
    to 11.3.0 does not silently re-key every song the morning after
@@ -172,12 +187,20 @@ Decided elsewhere, restated here as constraints:
     VST3 is the entire Linux/Windows story. CLAP is deferred: JUCE
     does not host it natively yet.
 11. **Latency and tails stay compiler arithmetic, with plugin-shaped
-    inputs.** Reported latency is taken as-is into `insertLatency`;
-    tails come from a declared `tail:` override or a capped ring-out
-    detection at −60 dB during offline render — reported tail times
-    are the one thing plugins lie about consistently. The analytic
-    requirement was realtime.md's, for effects we author; hosted
-    plugins get the measured version.
+    inputs.** `insertLatency` is arithmetic over the session's own
+    fields, and reported latency is only knowable by asking the
+    plugin — so **`latency:` joins `version:` as a line the tool
+    writes back** at first resolve (omitted when zero), keeping the
+    compile computable from the repository alone, the same property
+    decision 8 leans on. The daemon verifies it at instantiation;
+    drift — a latency-changing param like an oversampling toggle —
+    is updated through the write-back channel in the same session
+    diff as the gesture that caused it, visible and re-keying
+    deliberately. Tails come from a declared `tail:` override or a
+    capped ring-out detection at −60 dB during offline render —
+    reported tail times are the one thing plugins lie about
+    consistently. The analytic requirement was realtime.md's, for
+    effects we author; hosted plugins get the measured version.
 12. **CI tests hosting against an in-repo fixture plugin.** A tiny
     JUCE plugin built in this repo — deterministic gain, delay,
     latency reporting, and a state chunk — built as both AU and VST3
@@ -212,6 +235,7 @@ inserts:
   - plugin: Altiverb 8
     au: aufx/Alt8/AudE
     version: 8.4.1
+    latency: 512        # tool-written, like version; absent when zero
     state: 3f9c2a81d4e0
     params:
       Reverb Time: 1.4
