@@ -129,7 +129,7 @@ for every clean subgraph.
   the build still runs (it feeds the cache and the freeze), but
   playback no longer waits on it.
 - The limiter's backward-pass implementation, once the golden test
-  says its causal successor holds the same ceiling — the
+  says its causal twin matches it sample-for-sample — the
   implementation retires, not the offline render path (decision 1
   keeps that, loop fold and all).
 
@@ -153,14 +153,17 @@ stands as drafted; its list line waits in later.md.
 ## 7 Chunks
 
 1. **The causal DSP library** — streaming interfaces for `eq` and
-   `reverb` (state across blocks; same algorithms), a causal successor
-   for `limit` (a new algorithm), wired into the stem op; latency
-   reporting per processor (the PDC groundwork); the golden
-   equivalence harness at multiple block sizes — checking a
-   repackaging for two of the three and a replacement for the third.
-   Ships alone: `field build` output changes audibly here (the
-   backward-pass limiter is gone), so this chunk is where that is
-   heard and judged.
+   `reverb` (state across blocks; same algorithms), and the limiter
+   restructured around its own bounded window: the backward pass only
+   ever reaches one attack ramp back (limiter.h:13 — "the 'lookahead'
+   is the attack ramp length"), so a causal twin that delays by one
+   ramp sees exactly the window the backward pass consulted and
+   computes the identical gain curve left-to-right. Latency reporting
+   per processor (the PDC groundwork; the stem op trims the limiter's
+   fixed offset), and the golden equivalence harness at multiple
+   block sizes — which therefore covers all three processors as
+   repackagings. `field build` output should not change at all; the
+   golden test is what proves it did not.
 2. **The live graph** — the session message set and schema, clip
    streaming with loops and fades, per-track chains, sends with
    delay compensation, nested summing, level/pan/send ramps over the
@@ -178,12 +181,14 @@ stands as drafted; its list line waits in later.md.
   admits float summation-order differences? Bit-identity is the
   stronger claim and worth attempting first; the reverb's feedback
   state is where it will be hardest.
-- The causal limiter's sound versus the backward-pass one: chunk 1
-  replaces a mastering trick with a look-ahead design, and the
-  acceptance test is ears on real songs — creek is the material.
-  If the offline trick turns out to matter musically, it can return
-  as an explicit print effect outside the shared library, but that is
-  a decision for evidence, not for this plan.
+- Whether tracking mode bypasses the limiter or substitutes a
+  zero-lookahead one while recording: its buffered window is
+  milliseconds — nothing during playback, where PDC absorbs it, but
+  monitoring while singing cannot wait even that plus the buffer.
+  audio-engine.md's latency policy already reserves bypass-and-report
+  for exactly this; deciding its default is recording.md's problem,
+  noted here because the limiter's latency is where it will first
+  bite.
 - Live rate conversion: a dirty track at its own rate
   (multi-rate.md decision 3) needs sample-rate conversion in the
   callback that the offline resample op does with a windowed-sinc
