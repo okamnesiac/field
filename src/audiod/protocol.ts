@@ -21,6 +21,10 @@ export const helloResponseSchema = z.object({
   protocol: z.number().int(),
   daemon: z.string(),
   version: z.string(),
+  // Capability names (realtime.md §3): clients gate on these rather
+  // than parsing `version`. Absent from daemons that predate the field;
+  // the default keeps them meaning "none of the newer verbs".
+  features: z.array(z.string()).default([]),
 });
 
 export const deviceSchema = z.object({
