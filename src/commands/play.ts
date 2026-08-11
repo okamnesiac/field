@@ -382,6 +382,16 @@ export async function playLiveSession(
           'field transport quit, then play again (it respawns on the new build)',
       );
     }
+    // `session` is not enough for the watch: a 0.5 daemon advertises it,
+    // but its swap stopped and rewound the transport, so a structural
+    // edit against one would halt the play it was supposed to carry
+    // (Codex's finding). The chunk-3 daemon says so explicitly.
+    if (options.watch === true && !client.supports('swap')) {
+      throw new Error(
+        `field-audiod ${client.daemonVersion} predates mid-play edits — ` +
+          'field transport quit, then play again (it respawns on the new build)',
+      );
+    }
     if (options.device !== undefined) await client.selectDevice(options.device);
     const loaded = await client.session(session);
     const ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);

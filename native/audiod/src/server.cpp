@@ -212,6 +212,11 @@ juce::String Server::dispatch (const juce::var& request)
         juce::Array<juce::var> features;
         features.add ("loop");
         features.add ("session");
+        // The session verb replaces mid-play with the transport carried
+        // (chunk 3). 0.5 advertised `session` too, with a swap that
+        // stopped and rewound — so the watch path gates on this feature,
+        // not that one (Codex's finding).
+        features.add ("swap");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")

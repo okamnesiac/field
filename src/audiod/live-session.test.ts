@@ -180,6 +180,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
     try {
       expect(client.supports('session')).toBe(true);
+      expect(client.supports('swap')).toBe(true);
       const loaded = await client.session(session);
       // 72000 ticks at 120 bpm resolve through the tempo map: 75 beats
       // of half a second at 48 kHz.

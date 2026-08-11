@@ -254,6 +254,11 @@ juce::var Player::load (const juce::File& file, bool loop)
 juce::var Player::loadSession (const juce::var& session, const juce::File& projectRoot)
 {
     auto result = obj();
+    // Freed after the lock releases: a session owns preloaded files and
+    // full-length child buffers, and destroying that much under liveLock
+    // would hand the callback silent blocks for the whole teardown —
+    // pullAudio try-locks and pads on a miss (Codex's finding).
+    std::unique_ptr<field::LiveSession> retired;
     try
     {
         // Construction — parsing, preloading, pre-rendering children —
@@ -261,6 +266,29 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         // the whole compile, and the swap itself is one pointer move at
         // a block boundary (realtime.md decision 5, chunk 3).
         auto next = std::make_unique<field::LiveSession> (session, projectRoot);
+        // Pre-roll outside the lock too: a swap lands at the old
+        // session's position, and warming the replacement's chain there
+        // (LiveSession::locate) renders seconds of discarded audio —
+        // under the lock, that long a hold is a silent gap. The drift
+        // between this prediction and the transport read again below is
+        // a few blocks, which the second locate rolls forward through a
+        // chain that keeps its state.
+        {
+            juce::int64 predicted = -1;
+            {
+                const juce::ScopedLock guard (liveLock);
+                if (liveSession != nullptr)
+                    predicted = liveSession->position();
+            }
+            if (predicted >= 0)
+            {
+                if (next->looping() && next->lengthSamples() > 0)
+                    predicted %= next->lengthSamples();
+                else if (next->lengthSamples() > 0)
+                    predicted = std::min (predicted, next->lengthSamples());
+                next->locate (predicted);
+            }
+        }
         const juce::ScopedLock guard (liveLock);
         // The rate guard runs before anything is touched (cursor's
         // finding): a swap the device cannot serve leaves the old
@@ -305,6 +333,7 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         liveLength = next->lengthSamples();
         liveLoop = next->looping();
         liveSong = session.getProperty ("song", juce::var()).toString();
+        retired = std::move (liveSession);
         liveSession = std::move (next);
         if (hadSession)
         {
