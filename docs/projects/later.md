@@ -23,9 +23,6 @@ costs nothing. See [README](README.md) for how these lists work.
 - **Automation** — breakpoint lanes + control-rate generators (LFO first),
   one compile target, realtime-evaluable by design; audio-rate stays SC's
   job ([automation.md](all/automation.md) records the decided shape).
-- **AU hosting** — scanning, instantiation, parameter/state management, delay
-  compensation in the daemon; UAD-2/UADx execution modes
-  ([architecture.md](../architecture.md), [build-graph.md](../build-graph.md)).
 - **Recording widget** — the native macOS control surface, last on purpose: a
   client of an engine that must exist first.
 - **Live SuperCollider** — scsynth as a node in the real-time graph via
