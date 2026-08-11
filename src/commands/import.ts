@@ -6,7 +6,7 @@ import { PROJECT_MANIFEST, DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
-import { assetsFileOrder, assetsFileSchema, projectSchema } from '../schema/index.js';
+import { assetsFileOrder, assetsFileSchema, projectSchema, songSchema } from '../schema/index.js';
 import { takenSongNames } from '../model/namespace.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
@@ -84,10 +84,17 @@ export async function importAsset(
         parseDocument(readFileSync(join(root, PROJECT_MANIFEST), 'utf8')).toJS(),
       );
       const projectRate = manifest.success ? manifest.data.sample_rate : DEFAULT_SAMPLE_RATE;
-      if (header.sampleRate !== projectRate && options.allowMismatch !== true) {
+      // Against the song's effective rate, not the project's: this
+      // import lands in the song's ledger, and the conversions the
+      // warning exposes are paid at this song's placements.
+      const songFile = songSchema.safeParse(
+        parseDocument(readFileSync(join(songDir, 'song.yaml'), 'utf8')).toJS(),
+      );
+      const songRate = (songFile.success ? songFile.data.rate : undefined) ?? projectRate;
+      if (header.sampleRate !== songRate && options.allowMismatch !== true) {
         const message =
-          `${basename(sourcePath)} is ${header.sampleRate} Hz against the project's ` +
-          `${projectRate} — placements will pay a conversion (multi-rate.md §2.4)`;
+          `${basename(sourcePath)} is ${header.sampleRate} Hz against the song's ` +
+          `${songRate} — placements will pay a conversion (multi-rate.md §2.4)`;
         const acknowledged =
           options.confirmMismatch !== undefined && (await options.confirmMismatch(message));
         if (!acknowledged) {

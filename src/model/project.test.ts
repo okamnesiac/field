@@ -1445,10 +1445,33 @@ describe('import reads the WAV header (multi-rate.md decision 5)', () => {
     expect((await check(root)).ok).toBe(true);
   });
 
+  it('measures mismatch against the song rate, not the project rate', async () => {
+    // A 44.1 kHz song in a 48 kHz project: a 44.1 kHz import matches and
+    // sails through, a 48 kHz import is the one that pays conversions at
+    // this song's placements and asks first.
+    const songPath = join(root, 'songs/opener/song.yaml');
+    writeFileSync(
+      songPath,
+      readFileSync(songPath, 'utf8').replace('name: opener', 'name: opener\nrate: 44100'),
+    );
+    const matching = wavSource(44100);
+    await expect(importAsset(root, 'opener', matching, 'match441')).resolves.toBeDefined();
+    rmSync(matching);
+    const foreign = wavSource(48000);
+    await expect(importAsset(root, 'opener', foreign, 'off48')).rejects.toThrow(
+      "48000 Hz against the song's 44100",
+    );
+    rmSync(foreign);
+    writeFileSync(
+      songPath,
+      readFileSync(songPath, 'utf8').replace('\nrate: 44100', ''),
+    );
+  });
+
   it('refuses a rate mismatch until acknowledged, before any write', async () => {
     const src = wavSource(44100);
     await expect(importAsset(root, 'opener', src, 'offrate')).rejects.toThrow(
-      "44100 Hz against the project's 48000",
+      "44100 Hz against the song's 48000",
     );
     // Refused before the copy: no item directory, no ledger row.
     expect(existsSync(join(root, 'songs/opener/audio/offrate'))).toBe(false);
@@ -1526,7 +1549,7 @@ describe('import reads the WAV header (multi-rate.md decision 5)', () => {
     const src = orig.replace(/\.wav$/, '.wave');
     renameSync(orig, src);
     await expect(importAsset(root, 'opener', src, 'sneaky')).rejects.toThrow(
-      "44100 Hz against the project's 48000",
+      "44100 Hz against the song's 48000",
     );
     const result = await importAsset(root, 'opener', src, 'sneaky', { allowMismatch: true });
     rmSync(src);

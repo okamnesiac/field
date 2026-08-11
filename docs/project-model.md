@@ -185,7 +185,7 @@ and size, plus, for WAVs, the header's facts (`sample_rate`,
 `check` against the file it already hashes (multi-rate.md decision 5).
 
 `field import <file>` is what writes a ledger entry. Importing a rate
-the project does not run at asks first, because a mismatch is a
+the song does not run at asks first, because a mismatch is a
 conversion cost someone should pay knowingly.
 
 Entries and takes reference assets **by name**, so human-edited files

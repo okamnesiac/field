@@ -191,9 +191,10 @@ The track named `main` is the song's output. It carries the song's
 declared `length` and `loop` and renders exactly that long, with `loop:`
 folding the overhang back onto the start. A bare song reference resolves
 to it: `field play creek` plays `//songs/creek/track:main`. Because the
-output track is the song, it renders at the project rate and refuses a
-`rate:` of its own; delivery at another rate is `field export --rate`,
-not a node in the song.
+output track is the song, it renders at the song's rate — its `rate:`,
+or the project's `sample_rate` — and refuses a `rate:` of its own;
+delivery at another rate is `field export --rate`, not a node in the
+song.
 
 The song's structure *is* the output track's placements:
 `field arrangement <song>` prints them as a timeline, one line per
