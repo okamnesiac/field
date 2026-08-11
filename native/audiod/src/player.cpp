@@ -365,8 +365,18 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
     auto result = obj();
     try
     {
+        // Construction — parsing, preloading, pre-rendering children —
+        // happens before the lock: the old session keeps playing through
+        // the whole compile, and the swap itself is one pointer move at
+        // a block boundary (realtime.md decision 5, chunk 3).
         auto next = std::make_unique<field::LiveSession> (session, projectRoot);
         const juce::ScopedLock guard (liveLock);
+        // A swap mid-play carries the transport: latest compile wins and
+        // the play never stops. A fresh load (no session before) starts
+        // stopped at zero, as ever.
+        const bool hadSession = liveSession != nullptr;
+        const bool wasPlaying = livePlaying.load();
+        juce::int64 carry = hadSession ? liveSession->position() : 0;
         // The session replaces whatever file was loaded — one source of
         // audio at a time, whichever arrived last.
         transport.stop();
@@ -375,7 +385,8 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         loadedPath.clear();
         everStarted = false;
         livePlaying = false;
-        liveEverStarted = false;
+        if (! hadSession)
+            liveEverStarted = false;
         liveRate = next->sessionRate();
         liveLength = next->lengthSamples();
         liveLoop = next->looping();
@@ -384,6 +395,15 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         pendingReload.reset();
         stopTimer();
         liveSession = std::move (next);
+        if (hadSession)
+        {
+            if (liveLoop && liveLength > 0)
+                carry %= liveLength;
+            else if (liveLength > 0)
+                carry = std::min (carry, liveLength);
+            liveSession->locate (carry);
+            livePlaying = wasPlaying;
+        }
         maybeMatchDeviceRate ((double) liveRate);
 
         // The live path writes session frames one-for-one to the device —

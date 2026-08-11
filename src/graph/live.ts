@@ -247,3 +247,32 @@ export async function compileSession(root: string, songName: string): Promise<Se
     tracks: [...compiled.values()],
   };
 }
+
+
+// The edit classifier (realtime.md decision 5): two compiled sessions,
+// one verdict. Sessions identical except window gains become ramps — the
+// mixer surface, landing next block with no interruption; anything else
+// is structural and swaps the whole session, which the daemon does at a
+// block boundary while the old one keeps playing through the compile.
+export type SessionEdit =
+  | { kind: 'same' }
+  | { kind: 'ramps'; ramps: { track: string; input: number; gain_db: number }[] }
+  | { kind: 'swap' };
+
+export function diffSessions(prev: Session, next: Session): SessionEdit {
+  const shapeOf = (session: Session): string =>
+    JSON.stringify(session, (key, value: unknown) => (key === 'gain_db' ? 0 : value));
+  if (shapeOf(prev) !== shapeOf(next)) return { kind: 'swap' };
+
+  const ramps: { track: string; input: number; gain_db: number }[] = [];
+  for (let t = 0; t < next.tracks.length; t++) {
+    const before = prev.tracks[t]!;
+    const after = next.tracks[t]!;
+    for (let i = 0; i < after.inputs.length; i++) {
+      if (before.inputs[i]!.gain_db !== after.inputs[i]!.gain_db) {
+        ramps.push({ track: after.name, input: i, gain_db: after.inputs[i]!.gain_db });
+      }
+    }
+  }
+  return ramps.length > 0 ? { kind: 'ramps', ramps } : { kind: 'same' };
+}
