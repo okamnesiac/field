@@ -839,6 +839,43 @@ describe('hall properties', () => {
     expect(tailSlope(highBand, highT60) * highT60).toBeLessThan(-54);
   });
 
+  it('every admitted parameter corner decays: the loop is contractive', async () => {
+    // The finding that reshaped the absorption (Codex on #146): with
+    // opposing extreme multipliers the earlier shelf-cascade form was
+    // not contractive — decay 1, decay_low 0.1, decay_high 4,
+    // size 0.1 grew to ~2.8e6 by the declared tail instead of dying.
+    // The crossover-split form keeps the composed response between
+    // the band gains for every admitted combination (hall.h), and
+    // this pins the corners of that claim, the diverging one first.
+    await importSource('imp', impulse(1));
+    const corners = [
+      ['hcodex', 0.1, 4, 0.1],
+      ['hflip', 4, 0.1, 0.1],
+      ['hfast', 0.1, 0.1, 1],
+      ['hslow', 4, 4, 0.1],
+    ] as const;
+    for (const [name, low, high, size] of corners) {
+      writeSound(name, [
+        'type: hall',
+        'source: imp',
+        'decay: 1',
+        `decay_low: ${low}`,
+        `decay_high: ${high}`,
+        `size: ${size}`,
+        'mix: 1',
+        'modulation: 0',
+      ]);
+      const rendered = await render(name);
+      let early = 0;
+      let late = 0;
+      for (let i = 0; i < Math.floor(rendered.length / 4); i++)
+        early = Math.max(early, Math.abs(rendered[i]!));
+      for (let i = Math.floor(0.9 * rendered.length); i < rendered.length; i++)
+        late = Math.max(late, Math.abs(rendered[i]!));
+      expect(late, name).toBeLessThan(early * 0.01);
+    }
+  });
+
   it('modulation is deterministic, and zero is frozen', async () => {
     await importSource('imp', impulse(1));
     for (const name of ['hmoda', 'hmodb']) {

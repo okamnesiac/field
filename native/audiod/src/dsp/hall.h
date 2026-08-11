@@ -17,16 +17,22 @@
 // lengths); stereo is the orthogonal ± output tap pair, blended
 // mid/side by `width`.
 //
-// The per-line absorption is a cascade of two tilt stages around the
-// mid-band gain: a low shelf at lowCrossoverHz whose DC gain retargets
-// the line to the low band's T60, and a high shelf at highCrossoverHz
-// doing the same toward Nyquist — per line, from that line's actual
-// length, which is what keeps every band's `decay·multiplier`
-// measurable the way the plate's single T60 is. Each shelf blends the
-// direct path with a THIRD-order one-pole cascade: a first-order
-// blend never saturates in the 2.5 octaves between the high crossover
-// and Nyquist, and measured ~25% slow there; three poles bring the
-// measured high-band slope inside the same window the mid band holds.
+// The per-line absorption is a first-order complementary crossover
+// split: low = LP₃₀₀(v), high = v − LP₄ₖ(v), mid = the remainder, and
+// the line applies each band's own per-pass gain — derived from that
+// line's actual length, which is what keeps every band's
+// `decay·multiplier` measurable the way the plate's single T60 is.
+// The split shape is load-bearing for stability (Codex's finding on
+// #146): a one-pole section's response never leaves the right half
+// plane, so the recombined filter's magnitude stays pinned between
+// the band gains and the loop stays contractive for every admitted
+// parameter combination — where a sharper (higher-order) blend
+// rotates phase past 90°, lets the magnitude between crossovers
+// exceed the largest band gain, and measurably diverges with opposing
+// extreme multipliers. Complementarity also saturates faster than a
+// same-order shelf blend (|1 − LP| rises past the crossover much
+// faster than |LP| falls), which is what makes the per-band slopes
+// measurable at all with first-order sections.
 //
 // Modulation is deterministic by construction (reverbs.md decision 4):
 // each line's read point rides its own sinusoid — eight detuned rates
@@ -95,11 +101,11 @@ private:
         size_t at = 0;
         long length = 0; // the prime nominal delay
         double lfoRate = 1.0; // Hz
-        double midGain = 0.0; // per-pass gain for the mid T60
-        double lowGain = 0.0; // extra DC gain toward the low T60
-        double highGain = 0.0; // extra Nyquist gain toward the high T60
-        double lowStates[3] = { 0.0, 0.0, 0.0 }; // the low tilt's pole cascade
-        double highStates[3] = { 0.0, 0.0, 0.0 }; // the high tilt's pole cascade
+        double midGain = 0.0; // per-pass gain toward the mid band's T60
+        double lowGain = 0.0; // per-pass gain toward the low band's T60
+        double highGain = 0.0; // per-pass gain toward the high band's T60
+        double lowState = 0.0; // the 300 Hz splitter's one pole
+        double highState = 0.0; // the 4 kHz splitter's one pole
     };
 
     static double readAgo (const std::vector<double>& buffer, size_t at, long ago);

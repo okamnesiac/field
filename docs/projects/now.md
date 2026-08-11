@@ -23,12 +23,10 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
   recorded follow-ups (streaming rings before large sessions,
   cross-rate wiring) are where an edit would land.
 
-- [Reverbs](all/reverbs.md) — shipped whole: a Dattorro `plate` and an
-  FDN `hall` with per-band decay, both golden-clean with modulation on,
-  with the old `reverb` kept deliberately as the live A/B comparison.
-  Stays until the creek listening pass has flipped `space` between the
-  three rooms and decided what the example ships with — that edit is
-  where the line retires.
+- [Reverbs](all/reverbs.md) — shipped whole (a Dattorro `plate`, an FDN
+  `hall` with per-band decay, and the old `reverb` kept deliberately as
+  the live comparison); stays until the creek listening pass has flipped
+  `space` between the three rooms and picked the example's room.
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has

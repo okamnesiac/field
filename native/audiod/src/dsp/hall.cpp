@@ -103,14 +103,22 @@ Hall::Hall (const HallSettings& settings, size_t channels)
                              / lineReferenceRate)));
         line.buffer.assign ((size_t) (line.length + (long) excursionDepth + 2), 0.0);
         line.lfoRate = hallLfoRates[k];
-        // Per-band per-pass gains from this line's actual length: the
-        // mid gain hits the mid T60 exactly; the low and high tilts
-        // multiply it toward their bands' targets at DC and Nyquist.
+        // Per-band per-pass gains from this line's actual length. The
+        // low split needs no correction (a one-pole lowpass is exactly
+        // 1 at DC), but a digital one-pole highpass reaches only
+        // 2a/(1+a) of full deflection even at Nyquist, so the high
+        // delta is divided by that reach — which lands the composed
+        // response's real part on exactly the high target at Nyquist
+        // and keeps it between the band gains everywhere else, the
+        // contractivity the header describes.
         const auto passGain = [&] (double t60)
         { return std::pow (10.0, (-3.0 * (double) line.length) / (t60 * sampleRate)); };
         line.midGain = passGain (settings.decaySeconds);
-        line.lowGain = passGain (settings.decaySeconds * settings.decayLow) / line.midGain;
-        line.highGain = passGain (settings.decaySeconds * settings.decayHigh) / line.midGain;
+        line.lowGain = passGain (settings.decaySeconds * settings.decayLow);
+        const double highReach = 2.0 * highCoeff / (1.0 + highCoeff);
+        line.highGain = line.midGain
+                        + (passGain (settings.decaySeconds * settings.decayHigh) - line.midGain)
+                              / highReach;
     }
 }
 
@@ -167,26 +175,16 @@ void Hall::process (std::vector<std::vector<float>>& block)
             const double b = readAgo (line.buffer, line.at, whole + 1);
             double v = a + frac * (b - a);
 
-            // Absorption: the mid-band per-pass gain, then the two
-            // tilt stages pulling DC toward the low band's target and
-            // Nyquist toward the high band's, each blending through
-            // its third-order pole cascade (see the header on why one
-            // pole is not enough).
-            v *= line.midGain;
-            double stage = v;
-            for (double& state : line.lowStates)
-            {
-                state = lowCoeff * state + (1.0 - lowCoeff) * stage;
-                stage = state;
-            }
-            v += (line.lowGain - 1.0) * line.lowStates[2];
-            stage = v;
-            for (double& state : line.highStates)
-            {
-                state = highCoeff * state + (1.0 - highCoeff) * stage;
-                stage = state;
-            }
-            v = line.highGain * v + (1.0 - line.highGain) * line.highStates[2];
+            // Absorption: split into complementary bands and give
+            // each its own per-pass gain (see the header on why this
+            // shape, and only this shape, is contractive across the
+            // whole admitted range).
+            line.lowState = lowCoeff * line.lowState + (1.0 - lowCoeff) * v;
+            line.highState = highCoeff * line.highState + (1.0 - highCoeff) * v;
+            const double lowBand = line.lowState;
+            const double highBand = v - line.highState;
+            const double midBand = v - lowBand - highBand;
+            v = line.lowGain * lowBand + line.midGain * midBand + line.highGain * highBand;
 
             read[k] = v;
             sum += v;
