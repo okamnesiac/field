@@ -104,10 +104,16 @@ export const sessionInsertSchema = z.discriminatedUnion('effect', [
   z.strictObject({
     effect: z.literal('plate'),
     mix: z.number().min(0).max(1),
-    decay: z.number().positive(),
+    // The authoring floor is load-bearing here too: the tank's fixed
+    // diffusion rings ~0.9 s, so a shorter T60 would out-ring the
+    // analytic tail the compiler and engine both count on — a session
+    // carrying one would be quietly wrong, which is what this parse
+    // exists to refuse (cursor's finding on #144). Same for the
+    // diffusion cap: an allpass at 1 stops decaying.
+    decay: z.number().min(1),
     predelay_ms: z.number().min(0),
     damping: z.number().min(0).max(1),
-    diffusion: z.number().min(0).max(1),
+    diffusion: z.number().min(0).max(0.98),
     modulation: z.number().min(0).max(1),
   }),
 ]);

@@ -12,7 +12,7 @@ import { init } from '../commands/init.js';
 import { compileSession, convertedLength, diffSessions } from '../graph/live.js';
 import { watchLiveSession } from '../commands/watch-live.js';
 import { AudiodClient, daemonBinary } from './client.js';
-import type { Session } from './session.js';
+import { sessionInsertSchema, type Session } from './session.js';
 
 // Chunk 2's definition of correct (realtime.md decision 3 at graph
 // level): a non-looping session rendered by the live engine is
@@ -328,7 +328,11 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     // The golden that matters for the plate's LFO: modulation is on,
     // so the phase must be a pure function of the unwrapped clock —
     // computed offline in whole-buffer passes and live in
-    // callback-sized blocks — for the bytes to agree (decision 4).
+    // callback-sized blocks — for the bytes to agree (decision 4). A
+    // limiter sits in front deliberately: its stream lags in arrival
+    // but not in content, so the plate's counter still meets timeline
+    // sample n as sample n — the alignment cursor's review asked
+    // after, pinned here by the bytes.
     init({ dir: root, name: 'plate-golden' });
     createSong(root, 'opener');
     const tone = join(tmpdir(), `plate-tone-${process.pid}.wav`);
@@ -343,6 +347,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
       [
         'name: main',
         'inserts:',
+        '  - effect: limit',
         '  - effect: plate',
         '    decay: 1.5',
         '    mix: 0.4',
@@ -357,10 +362,18 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     );
 
     const { session } = await compileSession(root, 'opener');
-    expect(session.tracks.find((t) => t.name === 'main')!.chain[0]).toMatchObject({
+    expect(session.tracks.find((t) => t.name === 'main')!.chain[1]).toMatchObject({
       effect: 'plate',
       modulation: 0.3,
     });
+    // The session parse mirrors the authoring floor and cap that the
+    // tail arithmetic rests on (cursor's finding): a plate the
+    // authoring schema would refuse must not reach the engine.
+    expect(sessionInsertSchema.safeParse({ ...session.tracks[0]!.chain[1], decay: 0.5 }).success)
+      .toBe(false);
+    expect(
+      sessionInsertSchema.safeParse({ ...session.tracks[0]!.chain[1], diffusion: 0.99 }).success,
+    ).toBe(false);
     const sessionPath = join(root, 'session.json');
     writeFileSync(sessionPath, JSON.stringify(session));
     const livePath = join(root, 'live.wav');
