@@ -102,13 +102,21 @@ their spec):
 
 ```yaml
 # songs/creek/assets.yaml — the row finalize adds
-take-20260812-210411:
-  file: audio/lead-vocal/take-20260812-210411.wav
-  sha256: 9c1f0b537b698fcad138b45c34caf3d78af4f55ee1c808c81fe2365bc9ffdd41
-  size: 8294492
-  sample_rate: 48000
-  channels: 1
+assets:
+  - name: take-20260812-210411
+    file: audio/lead-vocal/take-20260812-210411.wav
+    sha256: 9c1f0b537b698fcad138b45c34caf3d78af4f55ee1c808c81fe2365bc9ffdd41
+    bytes: 8294444
+    sample_rate: 48000
+    bit_depth: 24
+    channels: 1
+    frames: 2764800
 ```
+
+Finalize knows all four WAV facts, so the row carries all four — which
+the schema requires anyway (they travel together or not at all,
+multi-rate.md decision 5), and committing to capture them here is the
+point of showing a row that validates.
 
 - Take files carry timestamp names, not numbers —
   [project-model.md](../../project-model.md)'s identity tiers give
