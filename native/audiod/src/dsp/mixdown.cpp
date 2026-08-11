@@ -92,44 +92,6 @@ void balanceGains (double pan, double& left, double& right)
     right = pan < 0.0 ? std::cos ((-pan * M_PI) / 2.0) : 1.0;
 }
 
-std::vector<std::vector<float>> sumStems (const std::vector<std::vector<std::vector<float>>>& stems,
-                                          const std::vector<Fader>& faders)
-{
-    size_t length = 0;
-    for (const auto& stem : stems)
-        if (! stem.empty())
-            length = std::max (length, stem[0].size());
-
-    std::vector<std::vector<float>> out (2, std::vector<float> (length, 0.0f));
-    auto& left = out[0];
-    auto& right = out[1];
-
-    for (size_t i = 0; i < stems.size(); ++i)
-    {
-        // Same rule: a stem with no channels, or missing its fader, is a
-        // malformed plan rather than a track to drop from the mix.
-        if (i >= faders.size())
-            throw std::runtime_error ("mix input " + std::to_string (i) + " has no fader");
-        if (stems[i].empty())
-            throw std::runtime_error ("mix input " + std::to_string (i) + " has no channels");
-        const auto& srcL = stems[i][0];
-        const auto& srcR = rightOf (stems[i]);
-        const double gain = std::pow (10.0, faders[i].gainDb / 20.0);
-        double balanceL = 1.0, balanceR = 1.0;
-        balanceGains (faders[i].pan, balanceL, balanceR);
-        const double gL = gain * balanceL;
-        const double gR = gain * balanceR;
-
-        for (size_t at = 0; at < srcL.size(); ++at)
-        {
-            left[at] = (float) ((double) left[at] + (double) srcL[at] * gL);
-            right[at] = (float) ((double) right[at] + (double) srcR[at] * gR);
-        }
-    }
-
-    return out;
-}
-
 void applyDeclaredLength (std::vector<std::vector<float>>& channels, long declared, bool loop)
 {
     if (declared < 0)

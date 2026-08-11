@@ -23,7 +23,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 7;
+constexpr int renderPlanVersion = 8;
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -87,20 +87,9 @@ std::vector<std::vector<std::vector<float>>> readInputs (const juce::var& plan)
 // What pins the behaviour is src/generators/effect-properties.test.ts,
 // measured from rendered output, and the byte-identity goldens in
 // src/audio/render-daemon.test.ts.
-// `required` is the schema's own optionality, per operation: an effects
-// plan always serializes `inserts`, while a stem's `inserts` and a mix's
-// `master` are omitted when they have no entries — that omission is what
-// keeps insert-less stems on their pre-inserts action keys.
-enum class ChainPresence
-{
-    required,
-    optional
-};
-
 void applyChain (const juce::var& plan,
                  const char* key,
                  const char* what,
-                 ChainPresence presence,
                  std::vector<std::vector<float>>& channels,
                  double sampleRate);
 
@@ -176,16 +165,16 @@ void applyInsert (const juce::var& insert,
 void applyChain (const juce::var& plan,
                  const char* key,
                  const char* what,
-                 ChainPresence presence,
                  std::vector<std::vector<float>>& channels,
                  double sampleRate)
 {
-    // Optional means *absent* is allowed. Present-but-not-an-array is a
-    // shape mismatch either way, and rendering the chain as though it
-    // were not there is the same fail-closed violation as dropping a
-    // clip: audio cached under a key that still describes the chain.
-    if (presence == ChainPresence::optional
-        && plan.getProperty (key, juce::var()).isVoid())
+    // Absent is allowed — a stem's `inserts` is omitted when it has no
+    // entries, which is what keeps insert-less stems on their
+    // pre-inserts action keys. Present-but-not-an-array is a shape
+    // mismatch, and rendering the chain as though it were not there is
+    // the same fail-closed violation as dropping a clip: audio cached
+    // under a key that still describes the chain.
+    if (plan.getProperty (key, juce::var()).isVoid())
         return;
 
     for (const auto& insert : requireArray (plan, key, what))
@@ -221,52 +210,10 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
     }
 
     auto channels = dsp::sumClips (sources, clips);
-    applyChain (plan, "inserts", "stem plan", ChainPresence::optional, channels, sampleRate);
+    applyChain (plan, "inserts", "stem plan", channels, sampleRate);
 
-    // After the chain, for the reason renderMix gives: a tail the chain
-    // grew still has to respect the bar line. Present only when this track
-    // is a song's output.
-    const auto declared = plan.getProperty ("length_samples", juce::var());
-    if (! declared.isVoid())
-        dsp::applyDeclaredLength (channels,
-                                  (long) (double) declared,
-                                  (bool) plan.getProperty ("loop", juce::var (false)));
-
-    dsp::writeWavFloat32 (output, sampleRate, channels);
-}
-
-// mix: stems summed through their faders, then the master gain, then the
-// master chain, then the declared length. That order is the decision in
-// effects.md §5 — gain drives *into* the limiter, and the length applies
-// after the chain so a tail the chain grew still respects the bar line.
-void renderMix (const juce::var& plan, const std::string& output, double sampleRate)
-{
-    const auto stems = readInputs (plan);
-
-    std::vector<dsp::Fader> faders;
-    {
-        for (const auto& entry : requireArray (plan, "faders", "mix plan"))
-        {
-            dsp::Fader fader;
-            fader.gainDb = requireNumber (entry, "gain_db", "fader");
-            fader.pan = requireNumber (entry, "pan", "fader");
-            faders.push_back (fader);
-        }
-    }
-    if (faders.size() != stems.size())
-        throw std::runtime_error ("mix has " + std::to_string (stems.size()) + " inputs but "
-                                  + std::to_string (faders.size()) + " faders");
-
-    auto channels = dsp::sumStems (stems, faders);
-
-    const double masterGain = std::pow (10.0, requireNumber (plan, "gain_db", "mix") / 20.0);
-    if (masterGain != 1.0)
-        for (auto& channel : channels)
-            for (auto& sample : channel)
-                sample = (float) ((double) sample * masterGain);
-
-    applyChain (plan, "master", "mix plan", ChainPresence::optional, channels, sampleRate);
-
+    // After the chain: a tail the chain grew still has to respect the
+    // bar line. Present only when this track is a song's output.
     const auto declared = plan.getProperty ("length_samples", juce::var());
     if (! declared.isVoid())
         dsp::applyDeclaredLength (channels,
@@ -305,27 +252,9 @@ std::string runRender (const std::string& planPath)
         const auto op = requireString (plan, "op", "render plan");
         const auto output = requireString (plan, "output", "render plan");
 
-        if (op == "effects")
-        {
-            // One input, its own rate: effects are rate-agnostic DSP and
-            // process at the file's rate (single-input.ts says so).
-            auto wav = dsp::readWav (requireString (plan, "input", "render plan"));
-            auto channels = std::move (wav.channels);
-            applyChain (plan,
-                        "inserts",
-                        "effects plan",
-                        ChainPresence::required,
-                        channels,
-                        wav.sampleRate);
-            dsp::writeWavFloat32 (output, wav.sampleRate, channels);
-        }
-        else if (op == "stem")
+        if (op == "stem")
         {
             renderStem (plan, output, requireNumber (plan, "sample_rate", "render plan"));
-        }
-        else if (op == "mix")
-        {
-            renderMix (plan, output, requireNumber (plan, "sample_rate", "render plan"));
         }
         else if (op == "normalize")
         {

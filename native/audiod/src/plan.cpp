@@ -160,9 +160,7 @@ void validateBand (const juce::var& band, const std::string& path)
 
 // Cross-field: looping folds the overhang back onto the declared length,
 // so without one there is nothing to fold onto and the flag would be
-// silently ignored. Shared because `stem` and `mix` both declare a length
-// now — a second copy is how the two ops would drift into disagreeing
-// about what a loop without a length means.
+// silently ignored.
 void validateDeclaredLength (const juce::var& plan, const std::string& path)
 {
     auto* object = plan.getDynamicObject();
@@ -282,18 +280,7 @@ void validatePlan (const juce::var& plan)
         fail (path, "expected an object");
     const auto op = plan.getProperty ("op", juce::var()).toString();
 
-    if (op == "effects")
-    {
-        checkObject (plan,
-                     path,
-                     { { "version", Kind::integer, true },
-                       { "op", Kind::string, true },
-                       { "input", Kind::string, true },
-                       { "output", Kind::string, true },
-                       { "inserts", Kind::array, true } });
-        validateChain (plan, "inserts", path, true);
-    }
-    else if (op == "stem")
+    if (op == "stem")
     {
         checkObject (plan,
                      path,
@@ -307,8 +294,7 @@ void validatePlan (const juce::var& plan)
                        { "clips", Kind::array, true },
                        { "inserts", Kind::array, false },
                        // A track can be a song's output, so it carries the
-                       // song's declared extent — same two fields, same
-                       // meaning, same rule as the mix's.
+                       // song's declared extent.
                        { "length_samples", Kind::integer, false, 0.0 },
                        { "loop", Kind::boolean, false } });
         validateSampleRate (plan, path);
@@ -359,40 +345,6 @@ void validatePlan (const juce::var& plan)
                                     + std::to_string ((long) duration));
         }
         validateChain (plan, "inserts", path, false);
-    }
-    else if (op == "mix")
-    {
-        checkObject (plan,
-                     path,
-                     { { "version", Kind::integer, true },
-                       { "op", Kind::string, true },
-                       { "output", Kind::string, true },
-                       { "sample_rate", Kind::integer, true, 1.0 },
-                       { "inputs", Kind::array, true },
-                       { "faders", Kind::array, true },
-                       { "gain_db", Kind::number, true },
-                       { "master", Kind::array, false },
-                       // Zero is a legitimate declared length: it means
-                       // an empty bounce, which is what the reference
-                       // produced and what this renders. Only *looping*
-                       // needs it positive — see the cross-field rule
-                       // below, where the stride would otherwise be zero.
-                       { "length_samples", Kind::integer, false, 0.0 },
-                       { "loop", Kind::boolean, false } });
-        validateSampleRate (plan, path);
-        validateInputs (plan, path);
-        const auto& faders = arrayAt (plan, "faders");
-        for (int i = 0; i < faders.size(); ++i)
-            checkObject (faders[i],
-                         path + ".faders[" + std::to_string (i) + "]",
-                         { { "gain_db", Kind::number, true },
-                           { "pan", Kind::number, true, -1.0, 1.0 } });
-        if ((int) faders.size() != arrayAt (plan, "inputs").size())
-            fail (path + ".faders",
-                  "has " + std::to_string (faders.size()) + " entries for "
-                      + std::to_string (arrayAt (plan, "inputs").size()) + " inputs");
-        validateDeclaredLength (plan, path);
-        validateChain (plan, "master", path, false);
     }
     else if (op == "normalize")
     {
