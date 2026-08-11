@@ -39,7 +39,7 @@
 
 import { join, relative } from 'node:path';
 import { wavFrameCount } from '../audio/wav.js';
-import { SESSION_VERSION, type Session, type SessionInsert, type SessionTrack } from '../audiod/session.js';
+import { SESSION_VERSION, insertGrowth, insertLatency, type Session, type SessionInsert, type SessionTrack } from '../audiod/session.js';
 import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
 import { loadProject } from '../model/project.js';
@@ -78,16 +78,11 @@ function liveInsert(insert: Insert): SessionInsert {
   return insert as SessionInsert;
 }
 
-// One attack ramp of pending window: the live horizon's latency.
+// The chain's totals, summed from each insert's own declared
+// arithmetic (session.ts insertLatency/insertGrowth — the per-effect
+// formulas live beside the wire schema, not here).
 function chainLatency(chain: SessionInsert[], rate: number): number {
-  let latency = 0;
-  for (const insert of chain) {
-    if (insert.effect === 'limit') {
-      const window = Math.max(1, Math.round((insert.lookahead_ms / 1000) * rate));
-      latency += Math.ceil((insert.horizon_db / 60) * window);
-    }
-  }
-  return latency;
+  return chain.reduce((sum, insert) => sum + insertLatency(insert, rate), 0);
 }
 
 // The wrapper's output-length rule (resample.cpp's flush), mirrored the
@@ -105,17 +100,8 @@ export function convertedLength(frames: number, from: number, to: number): numbe
   return Math.max(1, Math.floor((frames * phases + Math.floor(stride / 2)) / stride));
 }
 
-// How much a chain grows its input: each reverb appends predelay + T60
-// (the plate's tail is the same arithmetic — reverbs.md decision 5).
 function chainGrowth(chain: SessionInsert[], rate: number): number {
-  let growth = 0;
-  for (const insert of chain) {
-    if (insert.effect === 'reverb' || insert.effect === 'plate') {
-      growth +=
-        Math.round((insert.predelay_ms / 1000) * rate) + Math.round(insert.decay * rate);
-    }
-  }
-  return growth;
+  return chain.reduce((sum, insert) => sum + insertGrowth(insert, rate), 0);
 }
 
 export interface CompiledSession {

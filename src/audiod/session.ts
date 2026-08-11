@@ -116,7 +116,51 @@ export const sessionInsertSchema = z.discriminatedUnion('effect', [
     diffusion: z.number().min(0).max(0.93),
     modulation: z.number().min(0).max(1),
   }),
+  z.strictObject({
+    effect: z.literal('hall'),
+    mix: z.number().min(0).max(1),
+    // The same load-bearing mirrors as the plate arm: the decay floor
+    // and diffusion cap are what the tail arithmetic rests on, and
+    // the band multipliers are bounded because the longest band *is*
+    // the tail (decision 5).
+    decay: z.number().min(1),
+    decay_low: z.number().min(0.1).max(4),
+    decay_high: z.number().min(0.1).max(4),
+    size: z.number().min(0.1).max(1),
+    predelay_ms: z.number().min(0),
+    diffusion: z.number().min(0).max(0.93),
+    modulation: z.number().min(0).max(1),
+    width: z.number().min(0).max(1),
+  }),
 ]);
+
+// Each insert's analytic contract, beside the schema that declares it
+// rather than unrolled in the compiler's walk: how much a pass grows
+// the stream (the C++ tailSamples() twin — reverbs.md decision 5's
+// pair that must always agree, held by the goldens) and how much
+// latency it adds (the limiter's live horizon; everything else is
+// zero). The compiler only sums these.
+export function insertGrowth(insert: SessionInsert, rate: number): number {
+  switch (insert.effect) {
+    case 'reverb':
+    case 'plate':
+      return Math.round((insert.predelay_ms / 1000) * rate) + Math.round(insert.decay * rate);
+    case 'hall':
+      // The longest band governs, whichever it is (decision 5).
+      return (
+        Math.round((insert.predelay_ms / 1000) * rate) +
+        Math.round(insert.decay * Math.max(1, insert.decay_low, insert.decay_high) * rate)
+      );
+    default:
+      return 0;
+  }
+}
+
+export function insertLatency(insert: SessionInsert, rate: number): number {
+  if (insert.effect !== 'limit') return 0;
+  const window = Math.max(1, Math.round((insert.lookahead_ms / 1000) * rate));
+  return Math.ceil((insert.horizon_db / 60) * window);
+}
 
 export const sessionTrackSchema = z.strictObject({
   name: z.string().min(1),

@@ -30,6 +30,7 @@ target_sources(field-audiod PRIVATE
   src/live.cpp
   src/dsp/biquad.cpp
   src/dsp/limiter.cpp
+  src/dsp/hall.cpp
   src/dsp/mixdown.cpp
   src/dsp/plate.cpp
   src/dsp/resample.cpp
@@ -69,6 +70,7 @@ target_link_libraries(field-audiod PRIVATE
 add_executable(field-dsp-check
   src/dsp-check.cpp
   src/dsp/biquad.cpp
+  src/dsp/hall.cpp
   src/dsp/limiter.cpp
   src/dsp/plate.cpp
   src/dsp/resample.cpp

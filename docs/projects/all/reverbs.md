@@ -1,5 +1,5 @@
 ---
-status: Active
+status: Shipped
 ---
 
 # Plan: Two reverbs that beat Freeverb

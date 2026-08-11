@@ -1,6 +1,7 @@
 #include "render.h"
 
 #include "dsp/biquad.h"
+#include "dsp/hall.h"
 #include "dsp/limiter.h"
 #include "dsp/mixdown.h"
 #include "dsp/plate.h"
@@ -24,7 +25,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 9; // 9: the plate insert (reverbs.md chunk 1)
+constexpr int renderPlanVersion = 10; // 10: the hall insert (reverbs.md chunk 2)
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -152,6 +153,21 @@ void applyInsert (const juce::var& insert,
         settings.modulation = requireNumber (insert, "modulation", "plate insert");
         settings.sampleRate = sampleRate;
         channels = dsp::plate (channels, settings);
+    }
+    else if (effect == "hall")
+    {
+        dsp::HallSettings settings;
+        settings.mix = requireNumber (insert, "mix", "hall insert");
+        settings.decaySeconds = requireNumber (insert, "decay", "hall insert");
+        settings.decayLow = requireNumber (insert, "decay_low", "hall insert");
+        settings.decayHigh = requireNumber (insert, "decay_high", "hall insert");
+        settings.size = requireNumber (insert, "size", "hall insert");
+        settings.predelayMs = requireNumber (insert, "predelay_ms", "hall insert");
+        settings.diffusion = requireNumber (insert, "diffusion", "hall insert");
+        settings.modulation = requireNumber (insert, "modulation", "hall insert");
+        settings.width = requireNumber (insert, "width", "hall insert");
+        settings.sampleRate = sampleRate;
+        channels = dsp::hall (channels, settings);
     }
     else
     {

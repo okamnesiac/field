@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "dsp/biquad.h"
+#include "dsp/hall.h"
 #include "dsp/limiter.h"
 #include "dsp/plate.h"
 #include "dsp/resample.h"
@@ -74,19 +75,21 @@ private:
         std::unique_ptr<dsp::Limiter> limiter;
         std::unique_ptr<dsp::Reverb> reverb;
         std::unique_ptr<dsp::Plate> plate;
+        std::unique_ptr<dsp::Hall> hall;
     };
     // Everything needed to rebuild a stage: locate discards chain state
     // (a seek does not inherit the previous position's tails) and
     // reconstructs from these.
     struct ChainSpec
     {
-        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate
+        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate, 4 hall
         std::vector<dsp::Band> bands;
         bool normalize = false;
         dsp::LimiterSettings limiter;
         double horizonDb = 0.0;
         dsp::ReverbSettings reverb;
         dsp::PlateSettings plate;
+        dsp::HallSettings hall;
     };
 
     struct Window

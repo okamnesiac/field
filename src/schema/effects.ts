@@ -60,6 +60,27 @@ export const plateParams = {
   modulation: z.number().min(0).max(1).default(0.3), // tail motion; 0 = frozen
 };
 
+// hall: a Jot FDN with per-band decay (reverbs.md decision 3); decay
+// is the mid-band T60 and the low/high bands are multipliers on it —
+// rooms keep their lows and lose their highs, said directly. The
+// output grows by the longest band's tail.
+export const hallParams = {
+  mix: z.number().min(0).max(1).default(0.3),
+  // Floored at 1 like the plate's, and for the same reason: the input
+  // diffusers' own ring must stay inside the declared tail.
+  decay: z.number().min(1).max(30).default(2), // mid-band T60, seconds
+  decay_low: z.number().min(0.1).max(4).default(1), // × decay below ~300 Hz
+  decay_high: z.number().min(0.1).max(4).default(0.5), // × decay above ~4 kHz
+  size: z.number().min(0.1).max(1).default(1), // delay-line scale: small room → hall
+  predelay_ms: z.number().min(0).max(500).default(0),
+  // Same mapping and cap as the plate's diffusion, and the hall's
+  // diffuser lines are chosen short enough (≤ 401 at 48 kHz) that the
+  // same corner arithmetic holds.
+  diffusion: z.number().min(0).max(0.93).default(0.8),
+  modulation: z.number().min(0).max(1).default(0.3), // line motion; 0 = frozen
+  width: z.number().min(0).max(1).default(1), // stereo taps blended mid/side
+};
+
 // Insert entries — discriminated on `effect:` so the AU-hosting era can
 // add an `au:` variant additively instead of reshaping track files (the
 // obligation recorded in effects.md §1).
@@ -68,6 +89,7 @@ export const insertSchema = z.discriminatedUnion('effect', [
   z.strictObject({ effect: z.literal('limit'), ...limitParams }),
   z.strictObject({ effect: z.literal('reverb'), ...reverbParams }),
   z.strictObject({ effect: z.literal('plate'), ...plateParams }),
+  z.strictObject({ effect: z.literal('hall'), ...hallParams }),
 ]);
 export type Insert = z.infer<typeof insertSchema>;
 
@@ -81,10 +103,14 @@ export const insertOrder: KeyOrder = {
     'release_ms',
     'mix',
     'decay',
+    'decay_low',
+    'decay_high',
+    'size',
     'predelay_ms',
     'damping',
     'diffusion',
     'modulation',
+    'width',
   ],
   children: { bands: { items: { keys: ['type', 'frequency', 'gain_db', 'bandwidth'] } } },
 };

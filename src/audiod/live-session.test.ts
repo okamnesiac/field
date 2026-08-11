@@ -384,6 +384,60 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     expect(wavData(livePath).equals(wavData(artifact))).toBe(true);
   });
 
+  it('a hall insert renders byte-identically offline and live (reverbs.md chunk 2)', async () => {
+    // The hall's version of the plate's golden: eight modulated lines
+    // on their own detuned LFOs, all phase-locked to the unwrapped
+    // clock, so blocked and whole-buffer renders agree byte for byte.
+    init({ dir: root, name: 'hall-golden' });
+    createSong(root, 'opener');
+    const tone = join(tmpdir(), `hall-tone-${process.pid}.wav`);
+    const frames = 24000;
+    const mono = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) mono[i] = 0.4 * Math.sin((2 * Math.PI * 261 * i) / 48000);
+    writeWavFloat32(tone, 48000, [mono, mono]);
+    await importAsset(root, 'opener', tone, 'tone');
+    rmSync(tone);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      [
+        'name: main',
+        'inserts:',
+        '  - effect: hall',
+        '    decay: 1.5',
+        '    decay_low: 1.3',
+        '    decay_high: 0.4',
+        '    size: 0.8',
+        '    mix: 0.4',
+        '    predelay_ms: 12',
+        '    modulation: 0.3',
+        'inputs:',
+        '  - audio: tone',
+        '    anchor: absolute',
+        '    at: 0',
+        '',
+      ].join('\n'),
+    );
+
+    const { session } = await compileSession(root, 'opener');
+    const chain = session.tracks.find((t) => t.name === 'main')!.chain;
+    expect(chain[0]).toMatchObject({ effect: 'hall', modulation: 0.3 });
+    // The longest band governs the extent (decision 5): decay_low 1.3
+    // rings 1.95 s, so the natural length is content + predelay +
+    // 1.3·decay·rate — the compiler's insertGrowth and the engine's
+    // tailSamples agreeing is what the byte comparison below proves.
+    expect(session.length_samples).toBe(
+      frames + Math.round(0.012 * 48000) + Math.round(1.5 * 1.3 * 48000),
+    );
+    const sessionPath = join(root, 'session.json');
+    writeFileSync(sessionPath, JSON.stringify(session));
+    const livePath = join(root, 'live.wav');
+    await execFileAsync(binary!, ['--render-live', sessionPath, livePath], { cwd: root });
+
+    const offline = await buildLabels(root, ['//songs/opener/track:main']);
+    const artifact = offline.find((o) => o.label.endsWith('track:main'))!.outputPath!;
+    expect(wavData(livePath).equals(wavData(artifact))).toBe(true);
+  });
+
   it('a cross-rate child runs live and renders byte-identically (cross-rate-live.md)', async () => {
     init({ dir: root, name: 'xrate' });
     createSong(root, 'opener');
