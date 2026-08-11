@@ -12,6 +12,7 @@
 
 #include "dsp/biquad.h"
 #include "dsp/limiter.h"
+#include "dsp/plate.h"
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
 
@@ -178,6 +179,47 @@ bool checkReverb (const Buffer& signal)
     });
 }
 
+// Both modulation cases, deliberately (reverbs.md decision 4):
+// modulation 0 is the bit-frozen fixture default, and a non-zero depth
+// proves the LFO phase is a pure function of the sample counter rather
+// than of the block boundaries it happens to be computed inside.
+bool checkPlate (const Buffer& signal, double modulation)
+{
+    field::dsp::PlateSettings settings;
+    settings.mix = 0.4;
+    settings.decaySeconds = 1.2;
+    settings.predelayMs = 10.0;
+    settings.damping = 0.5;
+    settings.diffusion = 0.75;
+    settings.modulation = modulation;
+    settings.sampleRate = 48000.0;
+
+    Buffer extended = signal;
+    {
+        field::dsp::Plate probe (settings, signal.size());
+        for (auto& channel : extended)
+            channel.resize (channel.size() + (size_t) probe.tailSamples(), 0.0f);
+    }
+
+    Buffer whole = extended;
+    field::dsp::Plate (settings, whole.size()).process (whole);
+
+    const std::string what = "plate mod=" + std::to_string (modulation);
+    return check (what.c_str(), whole, [&] (long blockSize) {
+        Buffer out (extended.size());
+        field::dsp::Plate processor (settings, extended.size());
+        for (size_t at = 0; at < extended[0].size(); at += (size_t) blockSize)
+        {
+            const size_t count = std::min ((size_t) blockSize, extended[0].size() - at);
+            Buffer block = slice (extended, at, count);
+            processor.process (block);
+            for (size_t c = 0; c < out.size(); ++c)
+                out[c].insert (out[c].end(), block[c].begin(), block[c].end());
+        }
+        return out;
+    });
+}
+
 bool checkLimiter (const Buffer& input)
 {
     field::dsp::LimiterSettings settings;
@@ -236,6 +278,8 @@ int main()
 
     bool ok = checkEq (signal);
     ok = ok && checkReverb (signal);
+    ok = ok && checkPlate (signal, 0.0);
+    ok = ok && checkPlate (signal, 0.3);
     ok = ok && checkLimiter (signal);
     ok = ok && checkResampler (signal, 44100.0, 48000.0);
     ok = ok && checkResampler (signal, 48000.0, 44100.0);

@@ -9,6 +9,7 @@
 
 #include "dsp/biquad.h"
 #include "dsp/limiter.h"
+#include "dsp/plate.h"
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
 
@@ -72,18 +73,20 @@ private:
         std::unique_ptr<dsp::Eq> eq;
         std::unique_ptr<dsp::Limiter> limiter;
         std::unique_ptr<dsp::Reverb> reverb;
+        std::unique_ptr<dsp::Plate> plate;
     };
     // Everything needed to rebuild a stage: locate discards chain state
     // (a seek does not inherit the previous position's tails) and
     // reconstructs from these.
     struct ChainSpec
     {
-        int kind = 0; // 0 eq, 1 limit, 2 reverb
+        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate
         std::vector<dsp::Band> bands;
         bool normalize = false;
         dsp::LimiterSettings limiter;
         double horizonDb = 0.0;
         dsp::ReverbSettings reverb;
+        dsp::PlateSettings plate;
     };
 
     struct Window
@@ -139,7 +142,11 @@ private:
     // load's pre-render recursion or the constructor's eager pass — so
     // the callback only ever finds the map populated.
     void ensureConverted (int trackIndex, int targetRate, bool pre);
-    void buildChain (Track& track) const;
+    // startClock is where the rebuilt chain starts rendering on the
+    // unwrapped timeline: zero at load, the warmup start at a locate —
+    // the plate's LFO phase is a pure function of it (reverbs.md
+    // decision 4).
+    void buildChain (Track& track, juce::int64 startClock = 0) const;
     // The history the output chain must hear for its state at a
     // position to be right within the design's audibility threshold —
     // what locate renders and discards after a rebuild.

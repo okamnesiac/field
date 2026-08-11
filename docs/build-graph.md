@@ -238,13 +238,16 @@ iteration. Full contract:
 [projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
 predates the §4 rename).
 
-### `eq` / `limit` / `reverb` — the offline effects
+### `eq` / `limit` / `reverb` / `plate` — the offline effects
 
 From [projects/all/effects.md](projects/all/effects.md): Fyra's
 auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
 compensation on by default — tone changes, level doesn't), an offline
 lookahead limiter with a hard ceiling guarantee, and a deterministic
-Freeverb whose output grows by its tail.
+Freeverb whose output grows by its tail. `plate` joined from
+[projects/all/reverbs.md](projects/all/reverbs.md): Dattorro's figure-8
+tank, deterministic including its modulated tail, growing by its tail
+the same way.
 
 They run as `inserts:` — baked into the stem, with the master chain on
 the song's output track — and chains are wrapper tracks placing wrapper

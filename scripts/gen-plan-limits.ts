@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { eqBandSchema, eqParams, limitParams, reverbParams } from '../src/schema/effects.js';
+import { eqBandSchema, eqParams, limitParams, plateParams, reverbParams } from '../src/schema/effects.js';
 import { bitDepth, sampleRate } from '../src/schema/common.js';
 
 // Emits native/audiod/src/plan-limits.h from the zod schemas.
@@ -60,6 +60,12 @@ pair('reverbMix', objectBounds(reverbParams, 'mix'));
 pair('reverbDecay', objectBounds(reverbParams, 'decay'));
 pair('reverbPredelayMs', objectBounds(reverbParams, 'predelay_ms'));
 pair('reverbDamping', objectBounds(reverbParams, 'damping'));
+pair('plateMix', objectBounds(plateParams, 'mix'));
+pair('plateDecay', objectBounds(plateParams, 'decay'));
+pair('platePredelayMs', objectBounds(plateParams, 'predelay_ms'));
+pair('plateDamping', objectBounds(plateParams, 'damping'));
+pair('plateDiffusion', objectBounds(plateParams, 'diffusion'));
+pair('plateModulation', objectBounds(plateParams, 'modulation'));
 
 // Cardinality of the band array, read the same way.
 const bandsJson = z.toJSONSchema(z.object({ bands: eqParams.bands })) as {

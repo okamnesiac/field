@@ -215,6 +215,18 @@ void validateInsert (const juce::var& insert, const std::string& path)
                        { "predelay_ms", Kind::number, true, limits::reverbPredelayMsMin, limits::reverbPredelayMsMax },
                        { "damping", Kind::number, true, limits::reverbDampingMin, limits::reverbDampingMax } });
     }
+    else if (effect == "plate")
+    {
+        checkObject (insert,
+                     path,
+                     { { "effect", Kind::string, true },
+                       { "mix", Kind::number, true, limits::plateMixMin, limits::plateMixMax },
+                       { "decay", Kind::number, true, limits::plateDecayMin, limits::plateDecayMax },
+                       { "predelay_ms", Kind::number, true, limits::platePredelayMsMin, limits::platePredelayMsMax },
+                       { "damping", Kind::number, true, limits::plateDampingMin, limits::plateDampingMax },
+                       { "diffusion", Kind::number, true, limits::plateDiffusionMin, limits::plateDiffusionMax },
+                       { "modulation", Kind::number, true, limits::plateModulationMin, limits::plateModulationMax } });
+    }
     else
     {
         fail (path + ".effect", "unknown insert effect \"" + effect.toStdString() + "\"");

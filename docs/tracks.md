@@ -143,7 +143,9 @@ placements above it.
 ## Inserts are content
 
 `inserts:` is the other half of the split: an insert chain (EQ, limiter,
-reverb — discriminated on `effect:` so hosted plugins can join later) is
+and the reverbs — `reverb`, the Freeverb classic, and `plate`, the
+Dattorro tank with a modulated tail; discriminated on `effect:` so
+hosted plugins can join later) is
 *content*, baked into the stem. Editing an insert re-renders the stem;
 moving a fader never does. Chains compose by nesting — a track wrapped
 in an effect is a different track, cached per link.

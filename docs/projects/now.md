@@ -25,7 +25,9 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 
 - [Reverbs](all/reverbs.md) — two new inserts that beat Freeverb: a
   Dattorro `plate` and an FDN `hall` with per-band decay, with the
-  old `reverb` kept deliberately as the live A/B comparison.
+  old `reverb` kept deliberately as the live A/B comparison. `plate`
+  is in (chunk 1); `hall` is next, and the creek listening pass
+  decides what the example ships with.
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has

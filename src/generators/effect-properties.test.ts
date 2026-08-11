@@ -611,6 +611,140 @@ describe('reverb properties', () => {
   });
 });
 
+describe('plate properties', () => {
+  const impulse = (seconds: number) => {
+    const samples = new Float32Array(seconds * RATE);
+    samples[0] = 1;
+    return samples;
+  };
+
+  it('the tail decays 60 dB per decay-second', async () => {
+    // `decay` is T60 and means it, the Freeverb port's contract: the
+    // per-circulation feedback derives from the scaled loop with the
+    // measured diffuser weight (plate.cpp), which is what makes the
+    // knob measurable. Damping and modulation are off because each is
+    // a second, deliberate loss or motion on top of T60.
+    const decay = 2;
+    await importSource('imp', impulse(1));
+    writeSound('ptail', [
+      'type: plate',
+      'source: imp',
+      `decay: ${decay}`,
+      'mix: 1',
+      'damping: 0',
+      'modulation: 0',
+    ]);
+    const rendered = await render('ptail');
+
+    const window = Math.round(0.05 * RATE);
+    const points: { t: number; db: number }[] = [];
+    for (let t = Math.round(0.1 * decay * RATE); t < 0.9 * decay * RATE; t += window) {
+      const level = rms(rendered, t, t + window);
+      if (level > 0) points.push({ t: t / RATE, db: 20 * Math.log10(level) });
+    }
+    const meanT = points.reduce((s, p) => s + p.t, 0) / points.length;
+    const meanDb = points.reduce((s, p) => s + p.db, 0) / points.length;
+    const slope =
+      points.reduce((s, p) => s + (p.t - meanT) * (p.db - meanDb), 0) /
+      points.reduce((s, p) => s + (p.t - meanT) ** 2, 0);
+    expect(slope * decay).toBeGreaterThan(-63);
+    expect(slope * decay).toBeLessThan(-57);
+  });
+
+  it('the tail holds T60 at the worst corner: minimum decay, maximum diffusion', async () => {
+    // The input diffusers ring on their own — an allpass at gain g
+    // holds energy for L·ln(10⁻³)/ln(g) samples — and that ring feeds
+    // the tank, so high diffusion stretches the composite tail. The
+    // schema cap (0.93) is chosen so this corner still measures inside
+    // the T60 window; at the 0.98 the cap replaced, this test reads
+    // ≈ −56 and the declared tail truncates audible ring (Codex's
+    // finding on #144).
+    const decay = 1;
+    await importSource('imp', impulse(1));
+    writeSound('pcorner', [
+      'type: plate',
+      'source: imp',
+      `decay: ${decay}`,
+      'mix: 1',
+      'damping: 0',
+      'diffusion: 0.93',
+      'modulation: 0',
+    ]);
+    const rendered = await render('pcorner');
+
+    const window = Math.round(0.05 * RATE);
+    const points: { t: number; db: number }[] = [];
+    for (let t = Math.round(0.1 * decay * RATE); t < 0.9 * decay * RATE; t += window) {
+      const level = rms(rendered, t, t + window);
+      if (level > 0) points.push({ t: t / RATE, db: 20 * Math.log10(level) });
+    }
+    const meanT = points.reduce((s, p) => s + p.t, 0) / points.length;
+    const meanDb = points.reduce((s, p) => s + p.db, 0) / points.length;
+    const slope =
+      points.reduce((s, p) => s + (p.t - meanT) * (p.db - meanDb), 0) /
+      points.reduce((s, p) => s + (p.t - meanT) ** 2, 0);
+    expect(slope * decay).toBeGreaterThan(-63);
+    expect(slope * decay).toBeLessThan(-57);
+  });
+
+  it('the first left tap lands at scaled(266), after the predelay', async () => {
+    // The tap table is the stereo: an impulse crosses the input
+    // diffusers and the tank's first allpass by their instant
+    // feedthrough paths, so the earliest output is the shortest
+    // published tap of the opposite branch's first delay — 266 on the
+    // left, 353 on the right, scaled by rounding like every length.
+    // Asserting the exact sample holds the read alignment in place:
+    // taps read "entered the line k samples ago", and an
+    // off-by-one here would shift all fourteen (plate.cpp).
+    await importSource('imp', impulse(1));
+    writeSound('ponset', [
+      'type: plate',
+      'source: imp',
+      'decay: 1',
+      'mix: 1',
+      'predelay_ms: 100',
+      'modulation: 0',
+    ]);
+    const [left, right] = await renderChannels('ponset');
+    expect(left!.findIndex((v) => v !== 0)).toBe(0.1 * RATE + Math.round((266 * RATE) / 29761));
+    expect(right!.findIndex((v) => v !== 0)).toBe(0.1 * RATE + Math.round((353 * RATE) / 29761));
+  });
+
+  it('modulation is deterministic, and zero is frozen', async () => {
+    // The LFO phase is a pure function of the unwrapped clock
+    // (reverbs.md decision 4): two identical builds are byte-equal
+    // with modulation on, and modulation 0 reads the integer delay
+    // exactly — the frozen case the dsp-check fixture defaults to.
+    await importSource('imp', impulse(1));
+    for (const name of ['pmoda', 'pmodb']) {
+      writeSound(name, ['type: plate', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0.4']);
+    }
+    writeSound('pfroz', ['type: plate', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0']);
+    const [a, b, frozen] = [await render('pmoda'), await render('pmodb'), await render('pfroz')];
+    expect(Buffer.from(a.buffer, a.byteOffset, a.byteLength).equals(
+      Buffer.from(b.buffer, b.byteOffset, b.byteLength),
+    )).toBe(true);
+    const from = Math.round(0.4 * RATE);
+    let moved = 0;
+    for (let i = from; i < from + 2400; i++) if (a[i] !== frozen[i]) moved++;
+    expect(moved).toBeGreaterThan(2000);
+  });
+
+  it('mono-sums into the tank, and the taps make it wide', async () => {
+    // A plate is one sheet of metal: identical channels in, and the
+    // wet field is still fully decorrelated because left and right are
+    // different tap sets — the opposite of Freeverb's offset-spread
+    // twin networks.
+    await importSource('imp', impulse(1), impulse(1));
+    writeSound('pwide', ['type: plate', 'source: imp', 'decay: 1', 'mix: 1', 'modulation: 0']);
+    const [left, right] = await renderChannels('pwide');
+    let same = 0;
+    const from = Math.round(0.4 * RATE);
+    for (let i = from; i < from + 2400; i++) if (left![i] === right![i]) same++;
+    expect(same).toBe(0);
+  });
+});
+
 describe('limit properties', () => {
   // One float32 ulp, relative. The gain curve pins every peak to the
   // ceiling exactly in double precision; storing the result as float32
