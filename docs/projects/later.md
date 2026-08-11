@@ -11,6 +11,15 @@ costs nothing. See [README](README.md) for how these lists work.
   the [realtime](all/realtime.md) engine it waited behind shipped
   2026-08-11, so capture is now an input node away from a graph that
   already runs live.
+- **Convolution reverb** — impulse responses as committed assets (a
+  real place in the repo, hash-pinned and action-keyed like any
+  asset) through partitioned zero-latency convolution; waits on a
+  cross-platform-deterministic FFT story before it can join the
+  golden ([reverbs.md](all/reverbs.md) §1 records the ranking).
+- **Exotic reverb architectures** — velvet-noise reverbs, scattering
+  delay networks: interesting papers, no track record worth a mix;
+  revisit once plate and hall have soaked
+  ([reverbs.md](all/reverbs.md) §1).
 - **Automation** — breakpoint lanes + control-rate generators (LFO first),
   one compile target, realtime-evaluable by design; audio-rate stays SC's
   job ([automation.md](all/automation.md) records the decided shape).
