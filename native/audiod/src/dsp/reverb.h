@@ -35,6 +35,50 @@ struct ReverbSettings
     double sampleRate = 48000.0;
 };
 
+// The reverb as a streaming processor: comb, allpass, and predelay state
+// carried across blocks, so any block partitioning emits the same bits.
+// process() is in place and same-length — the wet path is the predelayed
+// input, the dry path is not delayed, exactly as the whole-buffer form
+// has always mixed them. The tail is emitted by processing silence:
+// feed tailSamples() of zeros after the input ends. Zero latency — the
+// predelay is the effect, not the pipeline.
+class Reverb
+{
+public:
+    Reverb (const ReverbSettings& settings, size_t numChannels);
+    void process (std::vector<std::vector<float>>& block);
+    // Predelay plus the T60 tail: how much silence to feed (and keep)
+    // after the last input sample to hear the effect out.
+    long tailSamples() const { return (long) (predelaySamples + tailLength); }
+    long latencySamples() const { return 0; }
+
+private:
+    struct Comb
+    {
+        std::vector<double> buffer;
+        size_t at = 0;
+        double feedback = 0.0;
+        double filtered = 0.0; // one-pole damping state inside the loop
+    };
+    struct Allpass
+    {
+        std::vector<double> buffer;
+        size_t at = 0;
+    };
+    struct Channel
+    {
+        std::vector<Comb> combs;
+        std::vector<Allpass> allpasses;
+        std::vector<double> predelayLine; // ring of predelaySamples zeros
+        size_t predelayAt = 0;
+    };
+    std::vector<Channel> channels;
+    double mix = 0.3;
+    double damping = 0.5;
+    size_t predelaySamples = 0;
+    size_t tailLength = 0;
+};
+
 // Output is input length + predelay + tail (to −60 dB, i.e. the T60), so
 // this returns new buffers rather than working in place.
 std::vector<std::vector<float>> reverb (const std::vector<std::vector<float>>& channels,

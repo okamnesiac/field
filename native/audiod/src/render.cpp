@@ -116,23 +116,10 @@ void applyInsert (const juce::var& insert,
             bands.push_back (band);
         }
 
-        for (const auto& band : bands)
-        {
-            const auto biquad = dsp::design (band, sampleRate);
-            for (auto& channel : channels)
-                dsp::processBiquad (channel.data(), (int) channel.size(), biquad);
-        }
-
         const auto normalize = insert.getProperty ("normalize", juce::var());
         if (normalize.isVoid())
             throw std::runtime_error ("eq insert is missing \"normalize\"");
-        if ((bool) normalize)
-        {
-            const double gain = std::pow (10.0, dsp::autoGainDb (bands, sampleRate) / 20.0);
-            for (auto& channel : channels)
-                for (auto& sample : channel)
-                    sample = (float) ((double) sample * gain);
-        }
+        dsp::eq (channels, bands, (bool) normalize, sampleRate);
     }
     else if (effect == "limit")
     {
@@ -226,6 +213,11 @@ void renderStem (const juce::var& plan, const std::string& output, double sample
 
 std::string runRender (const std::string& planPath)
 {
+    // Default floating-point environment, deliberately: no flush-to-zero
+    // here, and none in the live callback either (realtime.md decision 6,
+    // resolved 2026-08-10 — flushing zeroes subnormal float32 input
+    // samples and moves decaying filter tails, and the double state makes
+    // denormal stalls unreachable).
     try
     {
         const juce::File planFile { juce::String (planPath) };

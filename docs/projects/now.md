@@ -6,6 +6,10 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [Realtime](all/realtime.md) — the graph runs live: edit YAML while the
+  song plays and hear it next block. Chunk 1 (the streaming DSP library)
+  shipped; the live graph (chunk 2) is next.
+
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has
   shipped, sends last (§19): cables validate and render offline, and

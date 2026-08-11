@@ -116,69 +116,111 @@ Ratio ratioFor (double inRate, double outRate)
     return { out / divisor, in / divisor };
 }
 
-std::vector<std::vector<float>> resample (const std::vector<std::vector<float>>& channels,
-                                          double inRate,
-                                          double outRate)
+Resampler::Resampler (double inRate, double outRate, size_t channels) : numChannels (channels)
 {
     const Ratio ratio = ratioFor (inRate, outRate);
-    const long phases = ratio.phases;
-    const long stride = ratio.stride;
-
-    // A 1:1 ratio is not a conversion. Returning the input verbatim keeps
-    // a bit-depth-only normalize from running a filter over material that
-    // did not ask for one — and asking the reduced ratio, rather than
-    // comparing the rates as doubles, is both exact and the same question.
-    if (phases == 1 && stride == 1)
-        return channels;
-
-    const long taps = (long) tapsPerPhase;
-    const std::vector<double> rows = designPrototype (phases, inRate, outRate);
-
+    phases = ratio.phases;
+    stride = ratio.stride;
+    if (passthrough())
+        return;
+    taps = (long) tapsPerPhase;
+    rows = designPrototype (phases, inRate, outRate);
     // The prototype's group delay is (N−1)/2 at the interpolated rate,
     // which is T/2 input samples less 1/(2L) of one. Shifting the read by
     // the integer part leaves a sub-sample offset far below the
     // resampler's own passband ripple, and taking it out exactly would
     // need an asymmetric — so non-linear-phase — prototype.
-    const long delay = taps / 2;
+    delay = taps / 2;
+    history.assign (channels, std::vector<float> ((size_t) taps, 0.0f));
+}
 
-    std::vector<std::vector<float>> out;
-    out.reserve (channels.size());
+long Resampler::latencySamples() const
+{
+    return passthrough() ? 0 : delay;
+}
 
-    for (const auto& channel : channels)
+void Resampler::emitReady (std::vector<std::vector<float>>& out, long inputLimit)
+{
+    const long k = emitted * stride;
+    const long base = k / phases;
+    const long phase = k % phases;
+    const double* row = &rows[(size_t) (phase * taps)];
+
+    for (size_t c = 0; c < numChannels; ++c)
     {
-        const long inN = (long) channel.size();
-        // Round rather than floor, and never round a non-empty source
-        // away. Flooring turned a two-frame 96 kHz file into zero frames
-        // at 44.1 kHz — a short one-shot vanishing entirely under an
-        // action key that said otherwise, where afconvert produced one
-        // frame (#57 review). Integer arithmetic so the rule is exact
-        // rather than dependent on rounding mode; whole-second lengths
-        // are unaffected, which is precisely why the fixtures missed it.
-        const long scaled = (inN * phases + stride / 2) / stride;
-        const long outN = inN > 0 ? std::max (1L, scaled) : 0L;
-        std::vector<float> resampled ((size_t) std::max (0L, outN), 0.0f);
-
-        for (long n = 0; n < outN; ++n)
+        double acc = 0.0;
+        for (long i = 0; i < taps; ++i)
         {
-            const long k = n * stride;
-            const long base = k / phases;
-            const long phase = k % phases;
-            const double* row = &rows[(size_t) (phase * taps)];
-
-            double acc = 0.0;
-            for (long i = 0; i < taps; ++i)
-            {
-                const long at = base - i + delay;
-                // Outside the source is silence, as everywhere else in
-                // this directory.
-                if (at >= 0 && at < inN)
-                    acc += row[i] * (double) channel[(size_t) at];
-            }
-            resampled[(size_t) n] = (float) acc;
+            const long at = base - i + delay;
+            // Outside the source is silence, as everywhere else in
+            // this directory.
+            if (at >= 0 && at < inputLimit)
+                acc += row[i] * (double) history[c][(size_t) (at % taps)];
         }
-        out.push_back (std::move (resampled));
+        out[c].push_back ((float) acc);
     }
+    ++emitted;
+}
 
+void Resampler::process (const std::vector<std::vector<float>>& block,
+                         std::vector<std::vector<float>>& out)
+{
+    if (block.empty() || numChannels == 0)
+        return;
+    if (passthrough())
+    {
+        for (size_t c = 0; c < numChannels; ++c)
+            out[c].insert (out[c].end(), block[c].begin(), block[c].end());
+        return;
+    }
+    const long frames = (long) block[0].size();
+    for (long i = 0; i < frames; ++i)
+    {
+        for (size_t c = 0; c < numChannels; ++c)
+            history[c][(size_t) (consumed % taps)] = block[c][(size_t) i];
+        ++consumed;
+        // Emit every output whose full window has arrived. The window
+        // spans [base − taps + 1 + delay, base + delay], exactly the
+        // ring's span when the newest needed sample has just landed.
+        while ((emitted * stride) / phases + delay <= consumed - 1)
+            emitReady (out, consumed);
+    }
+}
+
+void Resampler::flush (std::vector<std::vector<float>>& out)
+{
+    if (passthrough())
+        return;
+    const long inN = consumed;
+    // Round rather than floor, and never round a non-empty source
+    // away. Flooring turned a two-frame 96 kHz file into zero frames
+    // at 44.1 kHz — a short one-shot vanishing entirely under an
+    // action key that said otherwise, where afconvert produced one
+    // frame (#57 review). Integer arithmetic so the rule is exact
+    // rather than dependent on rounding mode; whole-second lengths
+    // are unaffected, which is precisely why the fixtures missed it.
+    const long scaled = (inN * phases + stride / 2) / stride;
+    const long outN = inN > 0 ? std::max (1L, scaled) : 0L;
+    while (emitted < outN)
+        emitReady (out, inN);
+}
+
+std::vector<std::vector<float>> resample (const std::vector<std::vector<float>>& channels,
+                                          double inRate,
+                                          double outRate)
+{
+    Resampler resampler (inRate, outRate, channels.size());
+
+    // A 1:1 ratio is not a conversion. Returning the input verbatim keeps
+    // a bit-depth-only normalize from running a filter over material that
+    // did not ask for one — and asking the reduced ratio, rather than
+    // comparing the rates as doubles, is both exact and the same question.
+    if (resampler.passthrough())
+        return channels;
+
+    std::vector<std::vector<float>> out (channels.size());
+    resampler.process (channels, out);
+    resampler.flush (out);
     return out;
 }
 

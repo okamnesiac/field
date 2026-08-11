@@ -21,41 +21,21 @@ int scaled (int tuning, double sampleRate, int spread)
 {
     return std::max (1, (int) std::lround (((tuning + spread) * sampleRate) / referenceRate));
 }
-
-struct Comb
-{
-    std::vector<double> buffer;
-    size_t at = 0;
-    double feedback = 0.0;
-    double filtered = 0.0; // one-pole damping state inside the loop
-};
-
-struct Allpass
-{
-    std::vector<double> buffer;
-    size_t at = 0;
-};
 } // namespace
 
-std::vector<std::vector<float>> reverb (const std::vector<std::vector<float>>& channels,
-                                        const ReverbSettings& settings)
+Reverb::Reverb (const ReverbSettings& settings, size_t numChannels)
+    : mix (settings.mix), damping (settings.damping)
 {
-    const size_t frames = channels.empty() ? 0 : channels[0].size();
-    const size_t predelay
+    predelaySamples
         = (size_t) std::max (0L, std::lround ((settings.predelayMs / 1000.0) * settings.sampleRate));
-    const size_t tail
-        = (size_t) std::max (0L, std::lround (settings.decaySeconds * settings.sampleRate));
-    const size_t total = frames + predelay + tail;
+    tailLength = (size_t) std::max (0L, std::lround (settings.decaySeconds * settings.sampleRate));
 
-    std::vector<std::vector<float>> result;
-    result.reserve (channels.size());
-
-    for (size_t channelIndex = 0; channelIndex < channels.size(); ++channelIndex)
+    channels.resize (numChannels);
+    for (size_t channelIndex = 0; channelIndex < numChannels; ++channelIndex)
     {
-        const auto& dry = channels[channelIndex];
         const int spread = channelIndex == 0 ? 0 : stereoSpread;
+        Channel& state = channels[channelIndex];
 
-        std::vector<Comb> combs;
         for (const int tuning : combTunings)
         {
             const int length = scaled (tuning, settings.sampleRate, spread);
@@ -64,29 +44,48 @@ std::vector<std::vector<float>> reverb (const std::vector<std::vector<float>>& c
             // T60: feedback^(T60·rate/length) = 10^(−3) → per-pass feedback.
             comb.feedback
                 = std::pow (10.0, (-3.0 * length) / (settings.decaySeconds * settings.sampleRate));
-            combs.push_back (std::move (comb));
+            state.combs.push_back (std::move (comb));
         }
 
-        std::vector<Allpass> allpasses;
         for (const int tuning : allpassTunings)
         {
             Allpass allpass;
             allpass.buffer.assign ((size_t) scaled (tuning, settings.sampleRate, spread), 0.0);
-            allpasses.push_back (std::move (allpass));
+            state.allpasses.push_back (std::move (allpass));
         }
 
-        std::vector<float> out (total, 0.0f);
-        for (size_t i = 0; i < total; ++i)
+        state.predelayLine.assign (predelaySamples, 0.0);
+    }
+}
+
+void Reverb::process (std::vector<std::vector<float>>& block)
+{
+    for (size_t channelIndex = 0; channelIndex < block.size() && channelIndex < channels.size();
+         ++channelIndex)
+    {
+        Channel& state = channels[channelIndex];
+        for (auto& sample : block[channelIndex])
         {
-            const double input
-                = (i >= predelay && i - predelay < frames) ? (double) dry[i - predelay] : 0.0;
+            const double dry = (double) sample;
+
+            // The wet path hears the input predelaySamples late; the ring
+            // starts as zeros, which is the whole-buffer form's
+            // before-the-predelay silence.
+            double input = dry;
+            if (predelaySamples > 0)
+            {
+                input = state.predelayLine[state.predelayAt];
+                state.predelayLine[state.predelayAt] = dry;
+                if (++state.predelayAt >= predelaySamples)
+                    state.predelayAt = 0;
+            }
 
             double wet = 0.0;
-            for (auto& comb : combs)
+            for (auto& comb : state.combs)
             {
                 const double read = comb.buffer[comb.at];
                 wet += read;
-                comb.filtered = read * (1.0 - settings.damping) + comb.filtered * settings.damping;
+                comb.filtered = read * (1.0 - damping) + comb.filtered * damping;
                 comb.buffer[comb.at] = input + comb.filtered * comb.feedback;
                 // The port note in render-pipeline.md §5: compare-and-reset
                 // where the reference takes a modulo, twelve times per
@@ -94,9 +93,9 @@ std::vector<std::vector<float>> reverb (const std::vector<std::vector<float>>& c
                 if (++comb.at >= comb.buffer.size())
                     comb.at = 0;
             }
-            wet /= (double) combs.size();
+            wet /= (double) state.combs.size();
 
-            for (auto& allpass : allpasses)
+            for (auto& allpass : state.allpasses)
             {
                 const double read = allpass.buffer[allpass.at];
                 const double fed = wet + read * 0.5;
@@ -106,13 +105,30 @@ std::vector<std::vector<float>> reverb (const std::vector<std::vector<float>>& c
                     allpass.at = 0;
             }
 
-            const double dryHere = i < frames ? (double) dry[i] : 0.0;
-            out[i] = (float) (dryHere * (1.0 - settings.mix) + wet * settings.mix);
+            sample = (float) (dry * (1.0 - mix) + wet * mix);
         }
-        result.push_back (std::move (out));
     }
+}
 
-    return result;
+std::vector<std::vector<float>> reverb (const std::vector<std::vector<float>>& channels,
+                                        const ReverbSettings& settings)
+{
+    const size_t frames = channels.empty() ? 0 : channels[0].size();
+    Reverb processor (settings, channels.size());
+    const size_t total = frames + (size_t) processor.tailSamples();
+
+    // The input padded with predelay + tail of silence, processed as one
+    // block: sample for sample the loop the whole-buffer form always ran.
+    std::vector<std::vector<float>> extended;
+    extended.reserve (channels.size());
+    for (const auto& dry : channels)
+    {
+        std::vector<float> padded (total, 0.0f);
+        std::copy (dry.begin(), dry.end(), padded.begin());
+        extended.push_back (std::move (padded));
+    }
+    processor.process (extended);
+    return extended;
 }
 
 } // namespace field::dsp

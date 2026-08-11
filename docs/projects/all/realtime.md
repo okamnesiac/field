@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Active
 ---
 
 # Plan: Realtime
@@ -99,6 +99,18 @@ library, and the build cache doubling as automatic track freezing.
    evidence forces one; it is not adopted in advance. Rejected: a
    blanket epsilon (custom comparison machinery, admits drift, and
    surrenders the hash-equality property for free).
+
+   *Resolved 2026-08-10 (chunk 1): neither path flushes.* Review
+   showed flush-to-zero is not output-invariant after all — DAZ
+   zeroes subnormal float32 *input* samples, which are representable
+   data, and FZ moves decaying filter tails around 1e−38 (a cold A/B
+   on creek showed three stems differing, ~760 dB down) — and keeping
+   it would have forked the cache, since no action key moves when the
+   arithmetic environment does. The double filter state makes
+   denormal stalls unreachable (every feedback path decays and
+   truncates near −60 dB), so both paths simply run the default
+   floating-point environment, and the callback inherits this as a
+   requirement, not a choice.
 7. **The resampler is the fourth repackaging — there is never a
    second SRC.** The offline converter is a fixed-ratio polyphase
    windowed sinc whose inner loop is already per-output-sample
