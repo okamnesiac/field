@@ -426,4 +426,45 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb, 
     window.rampLength = (juce::int64) std::llround ((rampMs / 1000.0) * (double) rate);
 }
 
+std::string runRenderLive (const std::string& sessionPath,
+                           const std::string& outputPath,
+                           const std::string& rootPath)
+{
+    try
+    {
+        const juce::File sessionFile { juce::String (sessionPath) };
+        if (! sessionFile.existsAsFile())
+            return sessionPath + ": no such session";
+        const auto session = juce::JSON::parse (sessionFile.loadFileAsString());
+        if (! session.isObject())
+            return sessionPath + ": session is not a JSON object";
+
+        LiveSession live (session, juce::File (juce::String (rootPath)));
+        // One pass of the declared length. Looping playback is a
+        // transport behaviour; the golden compares one pass, and a
+        // session without an extent has no "one pass" to compare.
+        const juce::int64 total = live.lengthSamples();
+        if (total <= 0)
+            return sessionPath + ": session declares no length_samples — the golden needs one pass";
+
+        std::vector<std::vector<float>> out (2);
+        constexpr int blockSize = 4096;
+        std::vector<float> left (blockSize), right (blockSize);
+        float* channels[2] = { left.data(), right.data() };
+        for (juce::int64 at = 0; at < total; at += blockSize)
+        {
+            const int n = (int) std::min<juce::int64> (blockSize, total - at);
+            live.renderBlock (channels, 2, n);
+            out[0].insert (out[0].end(), left.begin(), left.begin() + n);
+            out[1].insert (out[1].end(), right.begin(), right.begin() + n);
+        }
+        dsp::writeWavFloat32 (outputPath, (double) live.sessionRate(), out);
+        return {};
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+}
+
 } // namespace field

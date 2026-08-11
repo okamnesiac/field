@@ -131,4 +131,13 @@ private:
     std::map<std::string, int> trackIndex;
 };
 
+// --render-live: run a session offline, faster than realtime, into a
+// float32 WAV — the graph-level golden instrument realtime.md decision 3
+// requires. Not a render strategy (decision 1 keeps the build on stems);
+// it exists so a live evaluation can be byte-compared against the
+// offline artifact for the same graph. Empty string on success.
+std::string runRenderLive (const std::string& sessionPath,
+                           const std::string& outputPath,
+                           const std::string& rootPath);
+
 } // namespace field
