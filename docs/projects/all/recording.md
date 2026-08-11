@@ -225,7 +225,15 @@ for a swap to drop.
 
 V1 monitoring is Apollo-direct, configured manually in Console, and
 capture is dry — both already decided in audio-engine.md. This plan
-builds no monitor path. What it does commit is the context a take was
+builds no monitor path. That choice also disposes of the
+engine-latency-while-tracking problem class (settled 2026-08-10,
+realtime discussion): the performer's cue is Console's near-zero DSP
+path, which is where a pro studio runs tracking effects anyway, so
+Field's own chains — including the realtime limiter's buffered
+lookahead ([realtime.md](realtime.md) chunk 1) — run only at
+playback, where delay compensation absorbs them. audio-engine.md's
+bypass-and-report latency policy becomes relevant only if host
+monitoring arrives. What it does commit is the context a take was
 monitored under: each take row records `monitoring:` and
 `console_preset:` (§3), the expected-preset contract audio-engine.md
 already states, so a clone can tell how a dry take was heard. The

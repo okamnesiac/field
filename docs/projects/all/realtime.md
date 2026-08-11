@@ -181,14 +181,6 @@ stands as drafted; its list line waits in later.md.
   admits float summation-order differences? Bit-identity is the
   stronger claim and worth attempting first; the reverb's feedback
   state is where it will be hardest.
-- Whether tracking mode bypasses the limiter or substitutes a
-  zero-lookahead one while recording: its buffered window is
-  milliseconds — nothing during playback, where PDC absorbs it, but
-  monitoring while singing cannot wait even that plus the buffer.
-  audio-engine.md's latency policy already reserves bypass-and-report
-  for exactly this; deciding its default is recording.md's problem,
-  noted here because the limiter's latency is where it will first
-  bite.
 - Live rate conversion: a dirty track at its own rate
   (multi-rate.md decision 3) needs sample-rate conversion in the
   callback that the offline resample op does with a windowed-sinc
