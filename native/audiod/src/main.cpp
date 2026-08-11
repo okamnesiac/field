@@ -100,11 +100,6 @@ public:
                                          { o.setProperty ("sample", sample); }));
         }
 
-        // A queued reload took over at the wrap: say so on the socket, so
-        // a watching client can print the swap when it actually sounds.
-        if (auto reloaded = player.takeReloadedPath(); reloaded.isNotEmpty())
-            server.broadcast (jsonEvent ("reloaded", [&] (juce::DynamicObject& o)
-                                         { o.setProperty ("path", reloaded); }));
 
         auto idle = server.connectionCount() == 0 && state != "playing"
                     && juce::Time::currentTimeMillis() - server.lastActivityMs() > idleMs;

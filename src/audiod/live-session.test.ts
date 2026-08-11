@@ -9,7 +9,7 @@ import { buildLabels } from '../commands/build.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import { compileSession } from '../graph/live.js';
+import { compileSession, diffSessions } from '../graph/live.js';
 import { AudiodClient, daemonBinary } from './client.js';
 
 // Chunk 2's definition of correct (realtime.md decision 3 at graph
@@ -199,6 +199,55 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
       const stopped = await client.status();
       expect(stopped.state).toBe('stopped');
       expect(stopped.sample).toBe(0);
+    } finally {
+      try {
+        await client.quit();
+      } catch {
+        // already gone
+      }
+      client.close();
+    }
+  });
+
+  it('classifies edits: gain moves ramp, structure swaps', async () => {
+    await scaffold(root);
+    const before = await compileSession(root, 'opener');
+
+    const mainPath = join(root, 'songs/opener/tracks/main.yaml');
+    const mainYaml = readFileSync(mainPath, 'utf8');
+    writeFileSync(mainPath, mainYaml.replace('gain_db: -6', 'gain_db: -12'));
+    const gained = await compileSession(root, 'opener');
+    const rampEdit = diffSessions(before, gained);
+    expect(rampEdit).toEqual({
+      kind: 'ramps',
+      ramps: [{ track: 'main', input: 2, gain_db: -12 }],
+    });
+
+    writeFileSync(mainPath, mainYaml.replace('at: 30000', 'at: 36000'));
+    const moved = await compileSession(root, 'opener');
+    expect(diffSessions(before, moved)).toEqual({ kind: 'swap' });
+    expect(diffSessions(before, before)).toEqual({ kind: 'same' });
+  });
+
+  it('a session swap carries the transport (realtime.md chunk 3)', async () => {
+    await scaffold(root);
+    const session = await compileSession(root, 'opener');
+    const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    try {
+      await client.session(session);
+      await client.play();
+      await new Promise((r) => setTimeout(r, 300));
+      const before = await client.status();
+      expect(before.state).toBe('playing');
+
+      // A structural edit recompiles and swaps; the play never stops and
+      // the position carries — the loop-wrap wait this chunk retires.
+      const swapped = { ...session, tracks: session.tracks };
+      await client.session(swapped);
+      const after = await client.status();
+      expect(after.state).toBe('playing');
+      expect(after.sample).toBeGreaterThanOrEqual(before.sample);
+      await client.stop();
     } finally {
       try {
         await client.quit();

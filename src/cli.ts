@@ -441,8 +441,8 @@ program
         // The session already carries the song's own loop; the file-era
         // flags shape a queue of artifacts, which this is not.
         if (patterns.length !== 1) throw new Error('--live plays one song: field play <song> --live');
-        if (opts.from !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
-          throw new Error('--live does not compose with --from/--loop/--click/--watch yet');
+        if (opts.from !== undefined || opts.loop === true || opts.click === true) {
+          throw new Error('--live does not compose with --from/--loop/--click yet');
         }
         const { playLiveSession } = await import('./commands/play.js');
         const project = loadProject(root);
@@ -451,17 +451,27 @@ program
           interrupted = true;
         });
         let onLine = false;
+        const liveAbort = new AbortController();
+        process.once('SIGINT', () => liveAbort.abort());
         await playLiveSession(
           root,
           project,
           patterns[0]!,
-          { ...(opts.device !== undefined ? { device: opts.device } : {}) },
+          {
+            ...(opts.device !== undefined ? { device: opts.device } : {}),
+            ...(opts.watch === true ? { watch: true, signal: liveAbort.signal } : {}),
+          },
           {
             onItem: (label, note) =>
               process.stdout.write(`live    ${label}${note ? `  (${note})` : ''}\n`),
             onPosition: (line) => {
               process.stdout.write(`\r${line}   `);
               onLine = true;
+            },
+            onReloaded: (note) => {
+              if (onLine) process.stdout.write('\n');
+              onLine = false;
+              process.stdout.write(`edit    ${note}\n`);
             },
             interrupted: () => interrupted,
           },
@@ -479,17 +489,10 @@ program
         await playWithAfplay(items);
         return;
       }
-      if (opts.watch === true && (opts.loop !== true || items.length !== 1)) {
-        // A multi-item --loop queue is requeue-path playback with no wrap
-        // to swap at (watch.md §1.4); build --watch is the multi-label form.
-        throw new Error(
-          `--watch needs --loop and exactly one label (got ${items.length}) — watch.md §1.4`,
-        );
-      }
-      if (opts.watch === true && opts.click === true) {
-        // The click bakes into a CLI-side temp file, which a swap would
-        // silently drop — refuse rather than un-click the loop mid-listen.
-        throw new Error('--watch does not compose with --click yet');
+      if (opts.watch === true) {
+        // The loop-wrap takeover retired with the live engine
+        // (realtime.md chunk 3): edits land mid-play there, no wrap wait.
+        throw new Error('play --watch rides the live engine: field play <song> --live --watch');
       }
 
       const watchAbort = new AbortController();
@@ -517,161 +520,31 @@ program
       }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;
-      // On a tty, a watch session renders the live two-line block (header
-      // + position, loop-ui.ts) with the queued takeover on the position
-      // line; everywhere else — non-tty, or plain play — plain lines.
-      const loopUi = tty && opts.watch === true ? await import('./commands/loop-ui.js') : undefined;
-      const display = loopUi
-        ? new loopUi.LoopDisplay((chunk) => process.stdout.write(chunk), {
-            // --from takes the requeue path: passes come from onItem,
-            // not from position regression.
-            requeue: opts.from !== undefined,
-            columns: () => process.stdout.columns ?? 120,
-          })
-        : undefined;
       const say = (line: string): void => {
-        if (display) {
-          display.say(line);
-          return;
-        }
         if (onPositionLine) process.stdout.write('\n');
         onPositionLine = false;
         process.stdout.write(`${line}\n`);
       };
 
-      // --watch (watch.md §1.4): watch-build the same pattern alongside
-      // the blocking play; when the played label's output hash moves, the
-      // native loop queues a daemon reload (takeover at the wrap), and a
-      // --from region loop just repoints what the next pass loads.
-      let watchDone = Promise.resolve();
-      let fresh: string | undefined;
-      let started = false; // first onItem opens the display block; later ones are passes
-      // A takeover reported before that first load, held until there is
-      // something to take over from.
-      let heldForStart: BuildOutcome | undefined;
-      let takeover: (moved: BuildOutcome) => void = () => {};
-      if (opts.watch === true) {
-        const item = items[0]!;
-        const native = opts.from === undefined;
-        const reloadClient = native ? await AudiodClient.connect(root) : undefined;
-        if (reloadClient) {
-          const [major = 0, minor = 0] = reloadClient.daemonVersion.split('.').map(Number);
-          if (major === 0 && minor < 4) {
-            reloadClient.close();
-            throw new Error(
-              `field-audiod ${reloadClient.daemonVersion} predates --watch — ` +
-                'field transport quit, then play again (it respawns on the new build)',
-            );
-          }
-        }
-        // A rebuilt artifact takes over: the native loop asks the daemon to
-        // swap at the wrap, a --from region loop repoints what the next
-        // pass loads.
-        takeover = (moved: BuildOutcome): void => {
-          const path = moved.outputPath!;
-          if (reloadClient) {
-            void reloadClient.reload(path).then(
-              () =>
-                display
-                  ? display.queue(moved.sha256, path)
-                  : say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} at the next wrap`),
-              // A ctrl-c racing an in-flight reload closes the socket
-              // under it; that is the session ending, not a failure.
-              (err: Error) => {
-                display?.dequeue();
-                if (!watchAbort.signal.aborted) say(`reload failed: ${err.message}`);
-              },
-            );
-          } else {
-            fresh = path;
-            if (display) display.queue(moved.sha256, path);
-            else say(`↻ ${moved.label} ${moved.sha256.slice(0, 12)} next pass`);
-          }
-        };
-        const { watchBuild } = await import('./commands/watch.js');
-        watchDone = watchBuild(
-          root,
-          patterns,
-          // The baseline is what the daemon starts looping: an edit that
-          // lands between the play's own build and the watcher's first
-          // pass is reported and swapped, not silently absorbed.
-          { signal: watchAbort.signal, baseline: new Map([[item.label, item.sha256]]) },
-          {
-            onDiagnostics: (lines) => {
-              for (const line of lines) say(`check: ${line}`);
-            },
-            onError: (err, phase) => say(`${phase} failed: ${err.message}`),
-            onOutcomes: (_outcomes, changed) => {
-              const moved = changed.find((o) => o.label === item.label);
-              if (!moved?.outputPath) return;
-              // The seeded baseline can report drift before the play's own
-              // load has happened — a reload then has nothing to take over
-              // from and errors. Hold it for the first load, which the
-              // block opens on; the wrap's `reloaded` corrects the header
-              // if those bytes were already the new ones (#35 review).
-              if (!started) {
-                heldForStart = moved;
-                return;
-              }
-              takeover(moved);
-            },
-          },
-        ).finally(() => reloadClient?.close());
-      }
 
-      try {
-        await playThroughDaemon(
-          root,
-          project,
-          items,
-          { ...opts, currentPath: opts.watch === true ? () => fresh : undefined },
-          {
-            onItem: (label, note, path) => {
-              const first = !started;
-              started = true;
-              // The first pass opens the block; later ones (the requeue
-              // path reloads every pass) are pass boundaries — the pass
-              // that loads what the watch queued opens the successor's
-              // block, with the hash correlated by path, never the
-              // snapshot from before the session (#37 review P2).
-              if (!display) say(`playing ${label}${note}`);
-              else if (first) {
-                // What opened may already be the held rebuild's bytes —
-                // correlated by path, never assumed from the snapshot.
-                display.start(
-                  label,
-                  loopUi!.openingHash(path, items[0]!.sha256, heldForStart),
-                  note,
-                );
-              } else display.pass(path);
-              // Now there is something to take over from: release the
-              // rebuild that beat the first load, if one did.
-              if (first && heldForStart !== undefined) {
-                const held = heldForStart;
-                heldForStart = undefined;
-                takeover(held);
-              }
-            },
-            onPosition: (line, at) => {
-              if (display) {
-                display.position(line, at);
-              } else if (tty) {
-                process.stdout.write(`\r  ${line}   `);
-                onPositionLine = true;
-              }
-            },
-            onDevice: (name) =>
-              display ? display.deviceMoved(name) : say(`→ output moved to ${name}`),
-            onReloaded: (path) =>
-              display ? display.swapped(path) : say('↻ swapped at the wrap'),
-            interrupted: () => interrupted,
+
+      await playThroughDaemon(
+        root,
+        project,
+        items,
+        opts,
+        {
+          onItem: (label, note) => say(`playing ${label}${note}`),
+          onPosition: (line) => {
+            if (tty) {
+              process.stdout.write(`\r  ${line}   `);
+              onPositionLine = true;
+            }
           },
-        );
-      } finally {
-        watchAbort.abort();
-        await watchDone;
-      }
-      display?.end();
+          onDevice: (name) => say(`→ output moved to ${name}`),
+          interrupted: () => interrupted,
+        },
+      );
       if (onPositionLine) process.stdout.write('\n');
     } catch (err) {
       fail(err);

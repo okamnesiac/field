@@ -23,8 +23,7 @@ class LiveSession;
 // adds no locking of its own beyond the transport's internal locks. The
 // audio callback and the null clock only touch the transport, which is
 // safe by JUCE's design.
-class Player : private juce::AudioIODeviceCallback,
-               private juce::Timer
+class Player : private juce::AudioIODeviceCallback
 {
 public:
     explicit Player (bool useNullOutput);
@@ -63,21 +62,6 @@ public:
     // the blocking-play contract `field play --loop` wants.
     juce::var load (const juce::File& file, bool loop);
 
-    // Queues a takeover of the looping stream (watch.md §1.1): the new
-    // file is opened and prepared now; the swap lands at the next wrap,
-    // detected by a fine poll of the transport position, so it sits
-    // within one poll tick of the wrap — a seam-sized blink at the loop
-    // point. (watch.md §1.1's recorded successor, a sample-exact
-    // double-buffered bar-synced swap, replaces this poll when wrap
-    // latency chafes.) Returns {error} or the new file's {samples,
-    // sample_rate, channels}. Requires a loaded looping stream. A
-    // stopped transport swaps immediately without starting; a paused one
-    // keeps its position and the takeover lands at the wrap after resume.
-    juce::var reload (const juce::File& file);
-
-    // The path applied by the last completed reload takeover, cleared on
-    // read; the heartbeat turns it into a broadcast "reloaded" event.
-    juce::String takeReloadedPath();
 
     // Live session (realtime.md chunk 2): replaces the loaded file as the
     // audio source; the transport verbs drive the session clock instead.
@@ -122,11 +106,6 @@ private:
     // glitch), the file transport otherwise.
     void pullAudio (float* const* out, int numChannels, int n);
 
-    // The reload poll (message thread, running only while a reload is
-    // pending): a position moving backwards is the reader wrapping.
-    void timerCallback() override;
-    void applyReload();
-
     void registerHardwareListeners();
     void removeHardwareListeners();
 
@@ -149,20 +128,6 @@ private:
     bool everStarted = false; // distinguishes "stopped at 0" from "never played"
     bool looping = false;
 
-    // A queued takeover: the reader is opened at reload() time so the
-    // wrap-side work is just a source swap. All touched on the message
-    // thread only.
-    struct PendingReload
-    {
-        std::unique_ptr<juce::AudioFormatReaderSource> source;
-        juce::String path;
-        double sampleRate = 0.0;
-        juce::int64 length = 0;
-        int channels = 0;
-    };
-    std::unique_ptr<PendingReload> pendingReload;
-    juce::int64 reloadPollPosition = 0;
-    juce::String reloadedPath;
 
     // The live session and its transport-facing facts. livePlaying is
     // read in the audio callback; the lock covers session access.

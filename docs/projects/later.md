@@ -6,11 +6,6 @@ Wanted, nobody has committed to it. One line each, linking a plan in
 line that never graduates can just be deleted; it cost nothing and losing it
 costs nothing. See [README](README.md) for how these lists work.
 
-- **Audible loop takeover** — every `--loop --watch` reload hiccups at
-  the seam, from poll lag and transport teardown together; deferred
-  because the real-time engine deletes the mechanism
-  ([watch.md](all/watch.md) §6 has the diagnosis;
-  [realtime.md](all/realtime.md) §4 is the deletion).
 - [Recording](all/recording.md) — capture into a track as takes: the
   generative pattern with a human where the model was. Plan drafted;
   waits behind [realtime](all/realtime.md), which makes capture an

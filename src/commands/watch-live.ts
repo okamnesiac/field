@@ -1,6 +1,7 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs';
 import { sep } from 'node:path';
-import { compileSession, diffSessions, type Session, type SessionEdit } from '../graph/live.js';
+import type { Session } from '../audiod/session.js';
+import { compileSession, diffSessions, type SessionEdit } from '../graph/live.js';
 
 // The live half of watching (realtime.md chunk 3): recompile the song's
 // session on every project change and classify the edit — the successor

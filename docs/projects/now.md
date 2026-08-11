@@ -7,10 +7,12 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
 - [Realtime](all/realtime.md) — the graph runs live: edit YAML while the
-  song plays and hear it next block. Chunks 1–2 shipped: the streaming
-  DSP library, and the live graph behind `field play <song> --live` —
-  byte-identical to the offline render, proven per session. Edits
-  landing mid-play (chunk 3) is next.
+  song plays and hear it next block. Chunks 1–3 shipped: the streaming
+  DSP library, the live graph behind `field play <song> --live`
+  (byte-identical to the offline render, proven per session), and edits
+  landing mid-play — gain moves ramp, structure swaps with the
+  transport carried, and the loop-wrap takeover machinery is gone. The
+  freeze (chunk 4) is next.
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has
