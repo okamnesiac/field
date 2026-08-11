@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { daemonBinary } from '../audiod/client.js';
-import type { Insert } from '../schema/index.js';
+import type { PluginWireInsert } from './plugins.js';
+import type { EffectInsert } from '../schema/index.js';
 import type { RenderedClip } from '../generators/stem.js';
 
 const execFileAsync = promisify(execFile);
@@ -34,7 +35,7 @@ const execFileAsync = promisify(execFile);
 // action key claiming to be the declared chain. Separate from the
 // socket's PROTOCOL_VERSION: different conversations, independent
 // lifetimes.
-export const RENDER_PLAN_VERSION = 10; // 10: the hall insert (reverbs.md chunk 2)
+export const RENDER_PLAN_VERSION = 11; // 11: hosted plugin inserts (plugin-hosting.md chunk 1)
 
 export class RenderUnavailableError extends Error {}
 
@@ -56,7 +57,9 @@ export interface StemPlan {
   sample_rate: number;
   inputs: readonly string[];
   clips: readonly RenderedClip[];
-  inserts?: readonly Insert[];
+  // Built-in arms verbatim; hosted arms in the wire spelling — the keyed
+  // spec plus its machine-local half (plugin-hosting.md chunk 1).
+  inserts?: readonly (EffectInsert | PluginWireInsert)[];
   length_samples?: number;
   loop?: boolean;
 }

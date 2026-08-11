@@ -242,6 +242,46 @@ void validateInsert (const juce::var& insert, const std::string& path)
                        { "modulation", Kind::number, true, limits::hallModulationMin, limits::hallModulationMax },
                        { "width", Kind::number, true, limits::hallWidthMin, limits::hallWidthMax } });
     }
+    else if (effect == "plugin")
+    {
+        // Hosted plugin (plugin-hosting.md chunk 1). Ranges are the
+        // plugin's own business; what the plan owes is shape — and the
+        // split between repository facts (identifier, version, hashes)
+        // and machine-local facts (paths), which arrive as separate
+        // keys precisely so the action key upstream never saw the
+        // latter.
+        checkObject (insert,
+                     path,
+                     { { "effect", Kind::string, true },
+                       { "format", Kind::string, true },
+                       { "identifier", Kind::string, true },
+                       { "name", Kind::string, true },
+                       { "version", Kind::string, true },
+                       { "latency", Kind::number, true },
+                       { "tail", Kind::number, false },
+                       { "state_sha256", Kind::string, false },
+                       { "state_path", Kind::string, false },
+                       { "path", Kind::string, false },
+                       { "params", Kind::array, true },
+                       { "transport", Kind::object, true } });
+        const auto formatName = insert.getProperty ("format", juce::var()).toString();
+        if (formatName != "au" && formatName != "vst3")
+            fail (path + ".format", "must be \"au\" or \"vst3\"");
+        const auto& params = arrayAt (insert, "params");
+        for (int i = 0; i < params.size(); ++i)
+        {
+            const auto paramPath = path + ".params[" + std::to_string (i) + "]";
+            checkObject (params[i],
+                         paramPath,
+                         { { "name", Kind::string, true },
+                           { "value", Kind::number, true } });
+        }
+        const auto segments =
+            insert.getProperty ("transport", juce::var()).getProperty ("segments", juce::var());
+        if (segments.getArray() == nullptr || segments.getArray()->isEmpty())
+            fail (path + ".transport.segments",
+                  "must hold at least one tempo segment (plugin-hosting.md decision 13)");
+    }
     else
     {
         fail (path + ".effect", "unknown insert effect \"" + effect.toStdString() + "\"");

@@ -28,6 +28,7 @@ target_sources(field-audiod PRIVATE
   src/render.cpp
   src/plan.cpp
   src/live.cpp
+  src/hosting.cpp
   src/dsp/biquad.cpp
   src/dsp/limiter.cpp
   src/dsp/hall.cpp
@@ -54,9 +55,20 @@ target_compile_definitions(field-audiod PRIVATE
   # The daemon's main loop is runDispatchLoopUntil (no NSApplication in a
   # console process), which JUCE gates behind this flag.
   JUCE_MODAL_LOOPS_PERMITTED=1
+  # Hosting (plugin-hosting.md chunk 1). VST3 everywhere; AU exists only
+  # on Apple platforms, and defining its host flag elsewhere is an error.
+  JUCE_PLUGINHOST_VST3=1
+  $<$<PLATFORM_ID:Darwin>:JUCE_PLUGINHOST_AU=1>
 )
 
+# AU hosting references AUGenericView (CoreAudioKit), which JUCE's module
+# metadata does not link for a console target.
+if(APPLE)
+  target_link_libraries(field-audiod PRIVATE "-framework CoreAudioKit")
+endif()
+
 target_link_libraries(field-audiod PRIVATE
+  juce::juce_audio_processors
   juce::juce_audio_devices
   juce::juce_audio_formats
   juce::juce_recommended_config_flags
@@ -78,4 +90,42 @@ add_executable(field-dsp-check
 )
 target_compile_options(field-dsp-check PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-ffp-contract=off>
+)
+
+# The fixture plugin (plugin-hosting.md decision 12): the plugin the CI
+# suite owns, so hosting is testable without a commercial plugin
+# installed. It lives in this CMake project because JUCE is already
+# fetched here and the daemon is the only thing that hosts it; the
+# source says what it fixes. AU builds only on Apple.
+if(APPLE)
+  set(FIELD_FIXTURE_FORMATS AU VST3)
+else()
+  set(FIELD_FIXTURE_FORMATS VST3)
+endif()
+juce_add_plugin(field-fixture
+  VERSION 1.0.0
+  PRODUCT_NAME "Field Fixture"
+  COMPANY_NAME "Field"
+  BUNDLE_ID io.amnesiac.field-fixture
+  PLUGIN_MANUFACTURER_CODE Fldf
+  PLUGIN_CODE Ffx1
+  FORMATS ${FIELD_FIXTURE_FORMATS}
+  AU_MAIN_TYPE kAudioUnitType_Effect
+  IS_SYNTH FALSE
+  NEEDS_MIDI_INPUT FALSE
+  NEEDS_MIDI_OUTPUT FALSE
+  COPY_PLUGIN_AFTER_BUILD FALSE
+)
+target_sources(field-fixture PRIVATE src/fixture/fixture.cpp)
+target_compile_definitions(field-fixture PUBLIC
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+  JUCE_VST3_CAN_REPLACE_VST2=0
+)
+target_compile_options(field-fixture PRIVATE
+  $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-ffp-contract=off>
+)
+target_link_libraries(field-fixture
+  PRIVATE juce::juce_audio_utils
+  PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags
 )

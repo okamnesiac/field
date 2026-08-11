@@ -44,6 +44,7 @@ import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
 import { loadProject } from '../model/project.js';
 import type { Insert } from '../schema/index.js';
+import { isHostedInsert } from '../schema/index.js';
 import { explain, type Explanation } from './build.js';
 import { buildGraph, type Graph, type GraphNode } from './graph.js';
 
@@ -74,6 +75,19 @@ interface StemLike {
 }
 
 function liveInsert(insert: Insert): SessionInsert {
+  // A hosted plugin has no live arm yet (plugin-hosting.md chunk 2), and
+  // the union cast below would smuggle one past the compiler as a
+  // wrong-by-zero chain — so the refusal is here, exhaustive, before any
+  // arithmetic runs. A *clean* plugin track never reaches this: it plays
+  // as its frozen stem. Only a dirty one needs a live chain it cannot
+  // have yet.
+  if (isHostedInsert(insert)) {
+    throw new Error(
+      `"${insert.plugin}" is a hosted plugin, and plugins do not run live yet ` +
+        `(plugin-hosting.md chunk 2) — field build renders the chain offline, and a ` +
+        `clean track plays as its frozen stem`,
+    );
+  }
   if (insert.effect === 'limit') return { ...insert, horizon_db: 60 };
   return insert as SessionInsert;
 }

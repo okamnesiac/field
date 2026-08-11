@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Active
 ---
 
 # Plan: hosted plugins — AU and VST3 as inserts
@@ -258,11 +258,14 @@ Decided elsewhere, restated here as constraints:
     effects we author; hosted plugins get the measured version.
 12. **CI tests hosting against an in-repo fixture plugin.** A tiny
     JUCE plugin built in this repo — deterministic gain, delay,
-    latency reporting, and a state chunk — built as both AU and VST3
-    in CI, so scanning, instantiation, params, state round-trip,
-    write-back and byte-determinism are all testable without a
-    commercial plugin installed. Third-party plugins are exercised
-    by hand on real sessions; the fixture is what the suite owns.
+    latency reporting, and a state chunk — so scanning,
+    instantiation, params, state round-trip, write-back and
+    byte-determinism are all testable without a commercial plugin
+    installed. CI owns the VST3 on Linux; AU builds and is proven by
+    the local gate, the same split the workflow header already
+    records for everything CoreAudio (the macOS runner was retired
+    2026-08-08 for cost). Third-party plugins are exercised by hand
+    on real sessions; the fixture is what the suite owns.
 13. **The host supplies transport context, identically on both
     paths.** Tempo-synced plugins read the playhead — position,
     tempo, meter — and a host that supplies it only live, or only a
@@ -353,22 +356,27 @@ these; the two discriminants coexist in one chain.
 
 ## 6 Open questions
 
-- **Recapture triggers, exactly.** Which non-param signals are
-  reliable across real plugins (program-change, restartComponent,
-  property listeners), and whether the session-close chunk-hash
-  backstop suffices where they are absent.
-- **Freeze-swap policy for tier-3 plugins.** The inaudible-swap
-  guarantee rests on byte-identity, which truly free-running plugins
-  cannot give even within the warmup bound. Prompt before swapping?
-  Keep the chain live and never freeze? Leaning: flag in `explain`,
-  swap under the bound for tiers 1–2, keep tier-3 live until chosen.
-- **Editor windows vs daemon-lite.** The daemon exits when idle; an
-  open editor is a reason not to be idle, and window ownership on
-  macOS may want the daemon to run an app lifecycle while one is up.
-- **Dynamic parameter lists.** Plugins whose param *set* changes
-  with state (a Pro-Q growing bands) blur the params/state line;
-  probably "params that exist at validation time are validatable,
-  the rest ride the blob," but real plugins should decide.
+Each names the chunk that owes its answer; none blocks a chunk that
+does not.
+
+- **Recapture triggers, exactly** (chunk 3's to answer). Which
+  non-param signals are reliable across real plugins (program-change,
+  restartComponent, property listeners), and whether the
+  session-close chunk-hash backstop suffices where they are absent.
+- **Freeze-swap policy for tier-3 plugins** (chunk 2's to answer).
+  The inaudible-swap guarantee rests on byte-identity, which truly
+  free-running plugins cannot give even within the warmup bound.
+  Prompt before swapping? Keep the chain live and never freeze?
+  Leaning: flag in `explain`, swap under the bound for tiers 1–2,
+  keep tier-3 live until chosen.
+- **Editor windows vs daemon-lite** (chunk 3's to answer). The daemon
+  exits when idle; an open editor is a reason not to be idle, and
+  window ownership on macOS may want the daemon to run an app
+  lifecycle while one is up.
+- **Dynamic parameter lists** (chunk 3 revisits against real
+  plugins). Chunk 1's behavior: params the scan saw are validatable,
+  the rest ride the blob, and an unknown name is an error only where
+  a scan exists to judge it.
 - **Linux/Windows timing.** VST3 hosting is the portable half; when
   the platforms graduate from at-least-works is not this plan's call.
 
@@ -382,5 +390,5 @@ plugin captures a blob a fresh clone resolves by hash, and the
 rendering machine with that plugin removed still builds the song as
 pure cache hits — the cross-machine version of that story waits on
 the remote asset store (later.md); the fixture-plugin suite is green
-in CI on both formats; and every existing project rebuilds as pure
-cache hits.
+in CI (VST3 on Linux; AU on the local gate, per decision 12); and
+every existing project rebuilds as pure cache hits.

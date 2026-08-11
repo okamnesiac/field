@@ -1,3 +1,5 @@
+import type { HostedTrackContext, PluginInsertSpec } from '../audio/plugins.js';
+import { toPluginSpec, toPluginWire } from '../audio/plugins.js';
 import { renderInsertChain } from '../audio/render-daemon.js';
 import { readWavHeader } from '../audio/wav.js';
 // trackRef spells a placed track in `sources` (labels.ts). Nothing about
@@ -6,7 +8,8 @@ import { readWavHeader } from '../audio/wav.js';
 // the buildable sort below is spelling-blind: order is the one channel
 // a spelling change could reach the key through.
 import { convertRefName, genRef, genRefName, tapRefName, trackRef, trackRefName } from '../labels.js';
-import type { InputEntry, Insert, Track } from '../schema/index.js';
+import type { EffectInsert, InputEntry, Track } from '../schema/index.js';
+import { isHostedInsert } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
 import type { Generator } from './types.js';
 
@@ -24,6 +27,8 @@ import type { Generator } from './types.js';
 // the owning track's name, or <track>-<id> when the entry carries an id
 // — which is why a track holding two generator entries needs ids on
 // them, and check demands exactly that.
+export type SpecInsert = EffectInsert | PluginInsertSpec;
+
 export function generatorName(entry: InputEntry, owner: string): string {
   return entry.id !== undefined ? `${owner}-${entry.id}` : owner;
 }
@@ -137,8 +142,11 @@ export interface StemSpec {
   clips: PlacedClip[];
   // Inserts bake into the stem (effects.md §5): parameters here mean an
   // insert edit re-renders it. Omitted entirely when the track has none,
-  // so insert-less stems keep their pre-inserts action keys.
-  inserts?: Insert[];
+  // so insert-less stems keep their pre-inserts action keys. Built-in
+  // arms are the authored YAML verbatim; hosted arms are the keyed
+  // spelling (plugin-hosting.md decision 8) — identity not display
+  // name, full state hash not short ref, resolved transport included.
+  inserts?: SpecInsert[];
   // The song's declared extent, present only on the track that is the
   // song's output (labels.ts SONG_OUTPUT_NAME). The mix carried these
   // until a track could be a song's output; the fields, the meaning and
@@ -279,6 +287,10 @@ export function planTrack(
   // the graph mints the same edge conversion for a sender at another
   // rate that it mints for any source.
   cables: CableIn[] = [],
+  // Present exactly when the chain holds a hosted insert — computed per
+  // track by the graph, so built-in-only chains' specs (and therefore
+  // their action keys) never learn plugins exist.
+  hosted?: HostedTrackContext,
 ): StemSpec {
   const refFor = (e: InputEntry): string => {
     const raw = entryRef(e, track.name);
@@ -384,12 +396,22 @@ export function planTrack(
       a.fade_in - b.fade_in ||
       a.fade_out - b.fade_out,
   );
+  const specInserts: SpecInsert[] = track.inserts.map((insert) => {
+    if (!isHostedInsert(insert)) return insert;
+    if (hosted === undefined) {
+      throw new Error(
+        `track "${track.name}" holds a hosted insert but the graph supplied no ` +
+          `transport context — a caller skipped the hosted path`,
+      );
+    }
+    return toPluginSpec(insert, track.name, hosted);
+  });
   return {
     name: track.name,
     type: 'stem',
     sources,
     clips: placed,
-    ...(track.inserts.length > 0 ? { inserts: track.inserts } : {}),
+    ...(specInserts.length > 0 ? { inserts: specInserts } : {}),
     ...(extent.lengthSamples !== undefined ? { length_samples: extent.lengthSamples } : {}),
     // `loop` only travels with a length to fold onto — the daemon refuses
     // the pair otherwise, and planMix has always paired them this way.
@@ -447,6 +469,13 @@ export const stemGenerator: Generator<StemSpec> = {
       duration: clip.duration ?? Math.max(0, frames[clip.input]! - clip.read_offset),
     }));
 
+    // Hosted arms gain their machine-local half here — display name and
+    // path hint from the inventory, the blob's absolute path from the
+    // pool — after the action key was computed from the spec alone.
+    const wireInserts = spec.inserts?.map((insert) =>
+      insert.effect === 'plugin' ? toPluginWire(insert, ctx.root) : insert,
+    );
+
     await renderInsertChain(
       {
         op: 'stem',
@@ -454,7 +483,7 @@ export const stemGenerator: Generator<StemSpec> = {
         sample_rate: ctx.sampleRate,
         inputs: inputPaths,
         clips,
-        ...(spec.inserts !== undefined ? { inserts: spec.inserts } : {}),
+        ...(wireInserts !== undefined ? { inserts: wireInserts } : {}),
         ...(spec.length_samples !== undefined ? { length_samples: spec.length_samples } : {}),
         ...(spec.loop !== undefined ? { loop: spec.loop } : {}),
       },

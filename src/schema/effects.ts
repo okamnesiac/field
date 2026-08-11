@@ -81,21 +81,71 @@ export const hallParams = {
   width: z.number().min(0).max(1).default(1), // stereo taps blended mid/side
 };
 
-// Insert entries — discriminated on `effect:` so the AU-hosting era can
-// add an `au:` variant additively instead of reshaping track files (the
-// obligation recorded in effects.md §1).
-export const insertSchema = z.discriminatedUnion('effect', [
+// Built-in insert entries — discriminated on `effect:`, the obligation
+// recorded in effects.md §1.
+export const effectInsertSchema = z.discriminatedUnion('effect', [
   z.strictObject({ effect: z.literal('eq'), ...eqParams }),
   z.strictObject({ effect: z.literal('limit'), ...limitParams }),
   z.strictObject({ effect: z.literal('reverb'), ...reverbParams }),
   z.strictObject({ effect: z.literal('plate'), ...plateParams }),
   z.strictObject({ effect: z.literal('hall'), ...hallParams }),
 ]);
+export type EffectInsert = z.infer<typeof effectInsertSchema>;
+
+// A hosted plugin insert (plugin-hosting.md §3) — discriminated by
+// `plugin:` the way input entries are discriminated by field name. The
+// display name is cosmetic and never keyed; the exact identity lives in
+// a field named by its format, written back by the tool (`field check`
+// pins an unpinned entry when a scan knows the plugin), alongside
+// `version:` and a nonzero `latency:`. `state:` is a short content hash
+// resolving into shared/plugins/ by filename; `params:` is the plugin's
+// own parameter names in its own natural units, spelled `Name#<id>`
+// only where a plugin exposes duplicate display names.
+export const pluginInsertSchema = z
+  .strictObject({
+    plugin: z.string().min(1),
+    id: z.string().min(1).optional(), // required by check when one chain repeats a plugin
+    au: z
+      .string()
+      .regex(/^.{4}\/.{4}\/.{4}$/, 'an AU identity is type/subtype/manufacturer, three 4CCs')
+      .optional(),
+    vst3: z
+      .string()
+      .regex(/^[0-9a-f]{1,16}$/, 'a VST3 identity is the plugin unique id in lowercase hex')
+      .optional(),
+    version: z.string().min(1).optional(),
+    latency: z.number().int().min(0).optional(), // samples; tool-written, omitted when zero
+    tail: z.number().positive().max(120).optional(), // seconds; declared override, else ring-out
+    state: z
+      .string()
+      .regex(/^[0-9a-f]{8,64}$/, 'a state ref is 8–64 lowercase hex chars of the blob hash')
+      .optional(),
+    params: z.record(z.string(), z.number()).optional(),
+  })
+  .refine((entry) => entry.au === undefined || entry.vst3 === undefined, {
+    message: 'a plugin is pinned as `au:` or `vst3:`, never both',
+  });
+export type PluginInsert = z.infer<typeof pluginInsertSchema>;
+
+export const insertSchema = z.union([effectInsertSchema, pluginInsertSchema]);
 export type Insert = z.infer<typeof insertSchema>;
+
+export function isHostedInsert(insert: Insert): insert is PluginInsert {
+  return 'plugin' in insert;
+}
 
 export const insertOrder: KeyOrder = {
   keys: [
     'effect',
+    'plugin',
+    'id',
+    'au',
+    'vst3',
+    'version',
+    'latency',
+    'tail',
+    'state',
+    'params',
     'bands',
     'normalize',
     'ceiling_db',

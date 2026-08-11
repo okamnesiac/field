@@ -255,6 +255,24 @@ the song's output track — and chains are wrapper tracks placing wrapper
 tracks, cached per link: a track wrapped in an effect is a different
 track. `field check` names containment cycles.
 
+**Hosted plugins** join the same chains as `plugin:` entries
+([projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)).
+The action key hashes the keyed spelling, computable from the
+repository alone: exact identity and pinned version (never the display
+name), the authored params canonicalized by name, the *full* state-blob
+hash, the declared `tail:` and `latency:`, and the track's resolved
+transport — tempo-synced plugins read a playhead both render paths
+supply identically, so a tempo edit re-renders a tempo-synced chain.
+Machine-local facts (install paths, blob file paths) join the plan only
+at execute time. The daemon instantiates in the `--render` subprocess,
+restores the blob then overlays params, processes at a fixed 512-sample
+block (third-party code owes no block-size invariance; determinism
+comes from never varying the recipe), trims declared latency, and rings
+an undeclared tail out to −60 dBFS under a hard cap. A machine without
+the plugin serves cached stems — the version gate sits at
+instantiation, never at cache lookup — and a rebuild fails at the node
+naming the plugin, format, identity and version.
+
 ## Determinism policy
 
 **The contract is recipe-reproducibility, not bit-reproducibility.**

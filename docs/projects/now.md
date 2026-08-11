@@ -6,6 +6,12 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [Plugin hosting](all/plugin-hosting.md) — chunk 1 shipped: AU and
+  VST3 render offline as inserts (`field check` pins a bare
+  `plugin:` name to its exact identity, state blobs resolve by hash,
+  the fixture plugin owns the CI suite), with the live chain, editor
+  write-back and realtime-bounce chunks still to come.
+
 - [Cross-rate live wiring](all/cross-rate-live.md) — shipped whole: a
   foreign-rate dirty track evaluates live with the edge converting
   (byte-identical to the offline render, proven), a device that
