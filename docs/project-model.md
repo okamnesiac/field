@@ -32,24 +32,20 @@ project/
 │   └── <song>/
 │       ├── song.yaml
 │       ├── tempo.yaml
-│       ├── markers.yaml
 │       ├── tracks/       # one file per track: inserts and its inputs
-│       ├── takes/        # take manifests (see below)
-│       ├── comps/
-│       ├── midi/
 │       ├── audio/        # ALL committed song sound (LFS): recorded,
 │       │                 # imported, generated — a directory per item
-│       │                 # (audio/<name>/, project-layout.md §4.11)
-│       ├── automation/
-│       ├── assets.yaml   # the song's ledger
-│       └── monitoring/
-├── plugins/
-│   ├── manifests/        # scanned plugin inventory
-│   └── states/           # serialized AU state blobs
-├── hardware/
-│   └── apollo.yaml
+│       │                 # (audio/<name>/), takes and their pins
+│       │                 # beside the bytes (project-layout.md §4.11)
+│       └── assets.yaml   # the song's ledger
 └── .field/               # unversioned: cache, recording transactions, sockets
 ```
+
+Designed but not yet built, arriving with the features that write them:
+`field.lock` (the locked plugin and model environment), `markers.yaml`,
+`automation/`, `monitoring/`, the scanned plugin inventory and AU state
+blobs, and `hardware/apollo.yaml`. Recorded takes are deliberately not
+on that list — they add no directory (see "Takes" below).
 
 Exact schemas are designed in
 [projects/all/project-core.md](projects/all/project-core.md); the layout
@@ -139,10 +135,12 @@ tiers, by how a thing gets it:
   repo-wide, tool-assisted refactor, exactly as renaming a function is
   in code.
 - **Content is the identity → SHA-256.** Assets and cached outputs.
-- **Machines mint it → timestamp or slug-plus-short-random.** Takes are
-  timestamped (`take-20260804-202355`, sortable, merge-safe); input
-  entries — which automation references stably — get a readable random
-  suffix (`chorus-vox-x7f3q`).
+- **Machines mint it → a number, timestamp, or slug-plus-short-random.**
+  Generated takes are numbered within their request
+  (`audio/<name>/2.wav`); recorded takes get timestamps
+  (`take-20260804-202355`, sortable, merge-safe); input entries — which
+  automation references stably — get a readable random suffix
+  (`chorus-vox-x7f3q`).
 
 The industry-standard alternative (opaque ID + display name, as in
 DAWproject and every DAW format) was deliberately rejected: it makes
@@ -156,16 +154,27 @@ it before reopening this.
 
 ## Takes
 
-A take is one performance of something, stored as a manifest referencing
-an immutable asset, with timeline placement, device/latency metadata,
-and session context. Takes are numbered, auditionable, never destroyed;
-each track has one active take (or a comp built from several).
+A take is one performance of something. Takes are numbered,
+auditionable, never destroyed; each thing that has takes plays exactly
+one — the active take — and switching is a one-line edit to its record.
 
 Takes cover more than recording: **a render of a nondeterministic node
 is a take.** A hardware-synth bounce, a free-running-LFO chorus render —
 multiple valid performances of the same recipe. They reuse the same
 machinery: list, audition, select active, pin. See
 [build-graph.md](build-graph.md) for the determinism policy.
+
+The takes that exist today are generated ones: numbered WAVs with their
+record beside them under `audio/<name>/` (see "Deliberate generation").
+Recording follows the same shape when it arrives (decided 2026-08-10): a
+recorded take's record — placement, device, latency, session context —
+lives beside its bytes under `audio/`, because the decision to commit
+the audio must be the decision to commit its record
+([projects/all/bloom-in-tree.md](projects/all/bloom-in-tree.md) §7). A
+separate manifest directory whose gitignore rule could quietly disagree
+with the audio's — the earlier `takes/<track>/` design — is exactly what
+that fold retired for variants. Comping (one active take assembled from
+several) is part of the recording work.
 
 ## Assets
 
