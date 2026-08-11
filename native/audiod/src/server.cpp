@@ -206,7 +206,13 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "field-audiod");
-        ok->setProperty ("version", "0.4.0"); // 0.4: reload (takeover at the loop wrap)
+        ok->setProperty ("version", "0.5.0"); // 0.5: live sessions
+        // Capability names (realtime.md §3): clients gate on these, not
+        // on parsing the version string.
+        juce::Array<juce::var> features;
+        features.add ("reload");
+        features.add ("session");
+        ok->setProperty ("features", features);
     }
     else if (op == "devices")
     {
@@ -241,6 +247,28 @@ juce::String Server::dispatch (const juce::var& request)
         if (auto* o = info.getDynamicObject())
             for (auto& prop : o->getProperties())
                 ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "session")
+    {
+        // The compiled live session (session.ts): rendered by the
+        // engine from this moment; paths resolve against the daemon's
+        // working directory, which is the project root.
+        auto info = player.loadSession (request.getProperty ("session", juce::var()),
+                                        juce::File::getCurrentWorkingDirectory());
+        if (info.getProperty ("error", juce::var()).isString())
+            return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
+        if (auto* o = info.getDynamicObject())
+            for (auto& prop : o->getProperties())
+                ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "ramp")
+    {
+        auto error = player.liveRamp (request.getProperty ("track", juce::var()).toString(),
+                                      (int) request.getProperty ("input", juce::var (0)),
+                                      (double) request.getProperty ("gain_db", juce::var (0.0)),
+                                      (double) request.getProperty ("ramp_ms", juce::var (15.0)));
+        if (error.isNotEmpty())
+            return jsonLine (errorResponse (id, error));
     }
     else if (op == "play")
     {
