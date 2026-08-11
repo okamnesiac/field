@@ -47,8 +47,10 @@ The seams this phase opens, verified against main (01d4fe6):
   tolerable; recording adds several more, so §6 replaces the pattern
   before it spreads.
 - No identifier or schema field carries the word "latency" — it left
-  with the retired take schema (#132), surviving only in two test
-  comments about reverb tails (effect-properties.test.ts).
+  with the retired take schema (#132), surviving only in prose: two
+  test comments about reverb tails (effect-properties.test.ts) and the
+  reload doc comment on wrap latency (player.h:67), in the same header
+  chunk 1 opens for the duplex device.
   [audio-engine.md](../../audio-engine.md) defines the vocabulary; this
   phase is where it becomes observable numbers instead of prose.
 - `field click` is CLI-side TypeScript DSP (click.ts, 90 lines) and the
@@ -94,7 +96,7 @@ takes:
   not in this plan.
 - Bytes stay pure: the file is what the converter produced, at the
   device's rate. If the track renders at another rate, the edge
-  converts ([multi-rate.md](multi-rate.md) decision 3) exactly as for
+  converts ([multi-rate.md](multi-rate.md) decision 4) exactly as for
   any other source — no resample at finalize, ever.
 - `chosen` means what it means for variants, and `field choose` moves
   it the same way.
