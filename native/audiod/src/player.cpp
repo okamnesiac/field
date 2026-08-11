@@ -1,5 +1,7 @@
 #include "player.h"
 
+#include "live.h"
+
 #if JUCE_MAC
 #include <CoreAudio/CoreAudio.h>
 #endif
@@ -132,8 +134,7 @@ juce::String Player::initialise()
             juce::AudioBuffer<float> scratch (2, nullBlockSize);
             while (nullClockRunning)
             {
-                juce::AudioSourceChannelInfo info (&scratch, 0, nullBlockSize);
-                transport.getNextAudioBlock (info);
+                pullAudio (scratch.getArrayOfWritePointers(), 2, nullBlockSize);
                 // Real-time pace, so position and end-of-stream behave as
                 // they would against a device.
                 std::this_thread::sleep_for (std::chrono::microseconds (
@@ -214,6 +215,15 @@ juce::var Player::load (const juce::File& file, bool loop)
     {
         result->setProperty ("error", "cannot read audio file: " + file.getFullPathName());
         return juce::var (result.get());
+    }
+    // One source of audio at a time: a *valid* file load drops any live
+    // session — an unreadable path must not leave the player empty
+    // (Codex's finding on this PR).
+    {
+        const juce::ScopedLock guard (liveLock);
+        livePlaying = false;
+        liveEverStarted = false;
+        liveSession.reset();
     }
 
     transport.stop();
@@ -350,8 +360,89 @@ juce::String Player::takeReloadedPath()
     return std::exchange (reloadedPath, {});
 }
 
+juce::var Player::loadSession (const juce::var& session, const juce::File& projectRoot)
+{
+    auto result = obj();
+    try
+    {
+        auto next = std::make_unique<field::LiveSession> (session, projectRoot);
+        const juce::ScopedLock guard (liveLock);
+        // The session replaces whatever file was loaded — one source of
+        // audio at a time, whichever arrived last.
+        transport.stop();
+        transport.setSource (nullptr);
+        readerSource.reset();
+        loadedPath.clear();
+        everStarted = false;
+        livePlaying = false;
+        liveEverStarted = false;
+        liveRate = next->sessionRate();
+        liveLength = next->lengthSamples();
+        liveLoop = next->looping();
+        liveSong = session.getProperty ("song", juce::var()).toString();
+        // A queued file takeover must not land on top of a session.
+        pendingReload.reset();
+        stopTimer();
+        liveSession = std::move (next);
+        maybeMatchDeviceRate ((double) liveRate);
+
+        // The live path writes session frames one-for-one to the device —
+        // there is no AudioTransportSource resampling it. Refusing beats
+        // playing fast and sharp (Codex's finding); live resampling lands
+        // with the cross-rate wiring.
+        const double deviceRate = nullMode
+                                      ? nullSampleRate
+                                      : (deviceManager.getCurrentAudioDevice() != nullptr
+                                             ? deviceManager.getCurrentAudioDevice()
+                                                   ->getCurrentSampleRate()
+                                             : 0.0);
+        if (deviceRate > 0.0 && ! juce::exactlyEqual (deviceRate, (double) liveRate))
+        {
+            liveSession.reset();
+            auto err = obj();
+            err->setProperty ("error",
+                              "the device runs at " + juce::String (deviceRate)
+                                  + " Hz and cannot switch to the session's "
+                                  + juce::String (liveRate)
+                                  + " — live resampling lands with the cross-rate wiring");
+            return juce::var (err.get());
+        }
+    }
+    catch (const std::exception& e)
+    {
+        result->setProperty ("error", juce::String (e.what()));
+        return juce::var (result.get());
+    }
+    result->setProperty ("samples", liveLength);
+    result->setProperty ("sample_rate", liveRate);
+    result->setProperty ("channels", 2);
+    return juce::var (result.get());
+}
+
+juce::String Player::liveRamp (const juce::String& track, int input, double gainDb, double rampMs)
+{
+    if (liveSession == nullptr)
+        return "no live session";
+    const juce::ScopedLock guard (liveLock);
+    try
+    {
+        liveSession->ramp (track.toStdString(), input, gainDb, rampMs);
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+    return {};
+}
+
 juce::String Player::play()
 {
+    if (liveSession != nullptr)
+    {
+        liveEverStarted = true;
+        livePlaying = true;
+        return {};
+    }
     if (readerSource == nullptr)
         return "nothing loaded";
     if (streamFinished())
@@ -363,11 +454,24 @@ juce::String Player::play()
 
 void Player::pause()
 {
+    if (liveSession != nullptr)
+    {
+        livePlaying = false;
+        return;
+    }
     transport.stop();
 }
 
 void Player::stop()
 {
+    if (liveSession != nullptr)
+    {
+        livePlaying = false;
+        liveEverStarted = false;
+        const juce::ScopedLock guard (liveLock);
+        liveSession->locate (0);
+        return;
+    }
     transport.stop();
     transport.setPosition (0.0);
     everStarted = false;
@@ -375,6 +479,14 @@ void Player::stop()
 
 juce::String Player::locate (juce::int64 sample)
 {
+    if (liveSession != nullptr)
+    {
+        if (sample < 0 || (! liveLoop && liveLength > 0 && sample > liveLength))
+            return "locate out of range";
+        const juce::ScopedLock guard (liveLock);
+        liveSession->locate (sample);
+        return {};
+    }
     if (readerSource == nullptr)
         return "nothing loaded";
     if (sample < 0 || sample > fileLengthSamples)
@@ -392,12 +504,23 @@ juce::int64 Player::positionSamples() const
 
 bool Player::streamFinished() const
 {
+    if (liveSession != nullptr)
+        return liveEverStarted && ! liveLoop && liveLength > 0
+               && liveSession->position() >= liveLength;
     // A looping stream never finishes; stop is the only way out.
     return readerSource != nullptr && everStarted && ! looping && transport.hasStreamFinished();
 }
 
 juce::String Player::transportState()
 {
+    if (liveSession != nullptr)
+    {
+        if (livePlaying.load() && ! streamFinished())
+            return "playing";
+        if (liveEverStarted && liveSession->position() > 0 && ! streamFinished())
+            return "paused";
+        return "stopped";
+    }
     if (transport.isPlaying())
         return "playing";
     if (readerSource != nullptr && everStarted && positionSamples() > 0 && ! streamFinished())
@@ -409,10 +532,25 @@ juce::var Player::status()
 {
     auto result = obj();
     result->setProperty ("state", transportState());
-    result->setProperty ("sample", positionSamples());
-    result->setProperty ("samples", fileLengthSamples);
-    result->setProperty ("looping", looping);
-    result->setProperty ("path", loadedPath.isEmpty() ? juce::var() : juce::var (loadedPath));
+    if (liveSession != nullptr)
+    {
+        const juce::int64 raw = liveSession->position();
+        result->setProperty ("sample", liveLoop && liveLength > 0 ? raw % liveLength : raw);
+        result->setProperty ("samples", liveLength);
+        result->setProperty ("looping", liveLoop);
+        result->setProperty ("path", juce::var());
+        result->setProperty ("live", true);
+        if (liveSong.isNotEmpty())
+            result->setProperty ("song", liveSong);
+        result->setProperty ("sample_rate", liveRate);
+    }
+    else
+    {
+        result->setProperty ("sample", positionSamples());
+        result->setProperty ("samples", fileLengthSamples);
+        result->setProperty ("looping", looping);
+        result->setProperty ("path", loadedPath.isEmpty() ? juce::var() : juce::var (loadedPath));
+    }
     result->setProperty ("null_output", nullMode);
 
     double deviceRate = nullMode ? nullSampleRate : 0.0;
@@ -425,10 +563,41 @@ juce::var Player::status()
             d->setProperty ("sample_rate", deviceRate);
             result->setProperty ("device", juce::var (d.get()));
         }
+    const double sourceRate = liveSession != nullptr ? (double) liveRate : fileSampleRate;
     result->setProperty ("resampling",
-                         readerSource != nullptr && deviceRate > 0.0
-                             && ! juce::exactlyEqual (deviceRate, fileSampleRate));
+                         (liveSession != nullptr || readerSource != nullptr) && deviceRate > 0.0
+                             && ! juce::exactlyEqual (deviceRate, sourceRate));
     return juce::var (result.get());
+}
+
+void Player::pullAudio (float* const* out, int numChannels, int n)
+{
+    {
+        // The pointer is only readable under the lock (cursor's finding:
+        // checking it first races a message-thread load). A missed lock
+        // is one silent block during a rare edit, not a glitch.
+        const juce::ScopedTryLock guard (liveLock);
+        if (! guard.isLocked())
+        {
+            for (int c = 0; c < numChannels; ++c)
+                std::fill (out[c], out[c] + n, 0.0f);
+            return;
+        }
+        if (liveSession != nullptr)
+        {
+            if (livePlaying.load())
+            {
+                liveSession->renderBlock (out, numChannels, n);
+                return;
+            }
+            for (int c = 0; c < numChannels; ++c)
+                std::fill (out[c], out[c] + n, 0.0f);
+            return;
+        }
+    }
+    juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
+    juce::AudioSourceChannelInfo info (&buffer, 0, n);
+    transport.getNextAudioBlock (info);
 }
 
 void Player::audioDeviceIOCallbackWithContext (const float* const*, int,
@@ -437,9 +606,7 @@ void Player::audioDeviceIOCallbackWithContext (const float* const*, int,
                                                int numSamples,
                                                const juce::AudioIODeviceCallbackContext&)
 {
-    juce::AudioBuffer<float> buffer (outputChannelData, numOutputChannels, numSamples);
-    juce::AudioSourceChannelInfo info (&buffer, 0, numSamples);
-    transport.getNextAudioBlock (info);
+    pullAudio (outputChannelData, numOutputChannels, numSamples);
 }
 
 void Player::audioDeviceAboutToStart (juce::AudioIODevice* device)

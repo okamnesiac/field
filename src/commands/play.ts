@@ -8,6 +8,7 @@ import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
 import { beatTicks } from '../time/tempo.js';
 import {
+  formatPosition,
   musicalContext,
   parseMusicalPosition,
   songDirOfPkg,
@@ -143,14 +144,11 @@ export async function playThroughDaemon(
     // requeue path, where --from re-applies each pass (#23 review).
     const nativeLoop =
       options.loop === true && items.length === 1 && options.from === undefined;
-    if (nativeLoop) {
-      const [major = 0, minor = 0] = client.daemonVersion.split('.').map(Number);
-      if (major === 0 && minor < 3) {
-        throw new Error(
-          `field-audiod ${client.daemonVersion} predates --loop — ` +
-            'field transport quit, then play again (it respawns on the new build)',
-        );
-      }
+    if (nativeLoop && !client.supports('loop')) {
+      throw new Error(
+        `field-audiod ${client.daemonVersion} predates --loop — ` +
+          'field transport quit, then play again (it respawns on the new build)',
+      );
     }
     do {
       for (const item of items) {
@@ -379,4 +377,44 @@ function waitForStop(
       );
     }, 500);
   });
+}
+
+// Live evaluation (realtime.md decision 8): compile the song's graph into
+// a session, load it into the engine, and block. Explicitly experimental
+// while chunks 2-3 land; the artifact path stays the default until the
+// freeze chunk makes live evaluation always-cheap, and then this is what
+// playing a song means.
+export async function playLiveSession(
+  root: string,
+  project: LoadedProject,
+  song: string,
+  options: { device?: string } = {},
+  hooks: PlayHooks = {},
+): Promise<void> {
+  const { compileSession } = await import('../graph/live.js');
+  const session = await compileSession(root, song);
+  const client = await AudiodClient.connect(root);
+  try {
+    if (!client.supports('session')) {
+      throw new Error(
+        `field-audiod ${client.daemonVersion} predates live sessions — ` +
+          'field transport quit, then play again (it respawns on the new build)',
+      );
+    }
+    if (options.device !== undefined) await client.selectDevice(options.device);
+    const loaded = await client.session(session);
+    const ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
+    await client.play();
+    hooks.onItem?.(`${song} (live)`, session.loop === true ? 'looping' : '', '');
+    for (;;) {
+      if (hooks.interrupted?.() === true) break;
+      const status = await client.status();
+      if (status.state !== 'playing') break;
+      hooks.onPosition?.(formatPosition(status.sample, loaded.sample_rate, ctx), status.sample);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await client.stop().catch(() => {});
+  } finally {
+    client.close();
+  }
 }

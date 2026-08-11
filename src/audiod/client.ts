@@ -83,6 +83,9 @@ export class AudiodClient extends EventEmitter {
   >();
   private buffer = '';
 
+  // What the daemon's hello declared; connect() fills both.
+  readonly features: string[] = [];
+
   private constructor(
     private readonly socket: Socket,
     readonly daemonVersion: string,
@@ -147,6 +150,7 @@ export class AudiodClient extends EventEmitter {
       );
     }
     (client as { daemonVersion: string }).daemonVersion = hello.version;
+    (client as { features: string[] }).features = hello.features;
     return client;
   }
 
@@ -201,6 +205,23 @@ export class AudiodClient extends EventEmitter {
   }
   selectDevice(name: string) {
     return this.request('device.select', { name }, okResponseSchema);
+  }
+  // Capability check (realtime.md §3): the hello's features array, so
+  // callers stop parsing daemonVersion.
+  supports(feature: string): boolean {
+    return this.features.includes(feature);
+  }
+  // The compiled live session (session.ts). Requires supports('session').
+  session(session: unknown) {
+    return this.request('session', { session }, loadResponseSchema);
+  }
+  // A window gain glide on the live session (session.ts rampRequestSchema).
+  ramp(track: string, input: number, gainDb: number, rampMs = 15) {
+    return this.request(
+      'ramp',
+      { track, input, gain_db: gainDb, ramp_ms: rampMs },
+      okResponseSchema,
+    );
   }
   load(path: string, loop = false) {
     // The flag is only sent when set: an older daemon would silently

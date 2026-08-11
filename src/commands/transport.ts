@@ -102,7 +102,15 @@ export async function transportStatusLines(
   try {
     const status = await client.status();
     const lines: string[] = [];
-    if (status.path === null) {
+    if (status.live === true) {
+      // A live session has no artifact path; its identity is the song
+      // the compiler stamped into it.
+      const rate = status.sample_rate ?? DEFAULT_SAMPLE_RATE;
+      const ctx = status.song ? musicalContext(project, `songs/${status.song}`, rate) : undefined;
+      const looping = status.looping === true ? '  (looping)' : '';
+      lines.push(`${status.state}  ${formatPosition(status.sample, rate, ctx)}${looping}`);
+      lines.push(`live session: ${status.song ?? '(unknown song)'}`);
+    } else if (status.path === null) {
       lines.push(`stopped (nothing loaded)`);
     } else {
       const rate = playedRate(project, status.path);
@@ -131,9 +139,16 @@ export async function transportLocate(
   const client = await connectTransport(root);
   try {
     const status = await client.status();
-    if (status.path === null) throw new Error('nothing loaded (field play something first)');
-    const rate = playedRate(project, status.path);
-    const ctx = musicalContext(project, songDirOfPath(root, status.path), rate);
+    if (status.live !== true && status.path === null)
+      throw new Error('nothing loaded (field play something first)');
+    const rate =
+      status.live === true ? (status.sample_rate ?? DEFAULT_SAMPLE_RATE) : playedRate(project, status.path!);
+    const ctx =
+      status.live === true
+        ? status.song
+          ? musicalContext(project, `songs/${status.song}`, rate)
+          : undefined
+        : musicalContext(project, songDirOfPath(root, status.path!), rate);
     if (!ctx) {
       throw new Error(`cannot derive a tempo map for ${status.path}; locate needs a song artifact`);
     }

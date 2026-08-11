@@ -7,7 +7,8 @@
 namespace field::dsp
 {
 
-Limiter::Limiter (const LimiterSettings& settings, size_t channels) : numChannels (channels)
+Limiter::Limiter (const LimiterSettings& settings, size_t channels, double horizonDb)
+    : numChannels (channels)
 {
     ceiling = std::pow (10.0, settings.ceilingDb / 20.0);
 
@@ -19,12 +20,15 @@ Limiter::Limiter (const LimiterSettings& settings, size_t channels) : numChannel
     attackSlope = 60.0 / window;
     releaseSlope = 60.0 / std::max (1.0, (settings.releaseMs / 1000.0) * settings.sampleRate);
 
-    // The pending window out-reaches the deepest ramp any float input
-    // can demand: FLT_MAX over the ceiling (about 771 dB − ceilingDb) at
-    // attackSlope dB per sample — so the incremental propagation sees
-    // everything the whole-buffer sweep saw, for every finite input.
+    // The pending window out-reaches the deepest ramp the construction
+    // admits: by default FLT_MAX over the ceiling (about 771 dB −
+    // ceilingDb) at attackSlope dB per sample — everything the
+    // whole-buffer sweep saw, for every finite input — or the caller's
+    // shallower horizon (see the header).
     const double deepest
-        = 20.0 * std::log10 ((double) std::numeric_limits<float>::max()) - settings.ceilingDb;
+        = horizonDb > 0.0
+              ? horizonDb
+              : 20.0 * std::log10 ((double) std::numeric_limits<float>::max()) - settings.ceilingDb;
     capacity = (size_t) std::ceil (deepest / attackSlope) + 1;
     pending.assign (channels, std::vector<float> (capacity, 0.0f));
     gainDb.assign (capacity, 0.0);

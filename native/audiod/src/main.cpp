@@ -1,4 +1,5 @@
 #include "player.h"
+#include "live.h"
 #include "render.h"
 #include "server.h"
 
@@ -125,6 +126,8 @@ int main (int argc, char* argv[])
 {
     juce::String socketPath = ".field/audiod.sock";
     juce::String renderPlan;
+    juce::String renderLiveSession;
+    juce::String renderLiveOut;
     bool nullOutput = false;
     int idleSeconds = 300;
 
@@ -135,6 +138,11 @@ int main (int argc, char* argv[])
             socketPath = argv[++i];
         else if (arg == "--render" && i + 1 < argc)
             renderPlan = argv[++i];
+        else if (arg == "--render-live" && i + 2 < argc)
+        {
+            renderLiveSession = argv[++i];
+            renderLiveOut = argv[++i];
+        }
         else if (arg == "--null-output")
             nullOutput = true;
         else if (arg == "--idle" && i + 1 < argc)
@@ -144,7 +152,8 @@ int main (int argc, char* argv[])
             std::fprintf (stderr,
                           "usage: field-audiod [--socket <path>] [--null-output] "
                           "[--idle <seconds>]\n"
-                          "       field-audiod --render <plan.json>\n");
+                          "       field-audiod --render <plan.json>\n"
+                          "       field-audiod --render-live <session.json> <out.wav>\n");
             return 2;
         }
     }
@@ -159,6 +168,24 @@ int main (int argc, char* argv[])
         if (auto error = field::runRender (renderPlan.toStdString()); ! error.empty())
         {
             std::fprintf (stderr, "field-audiod: render failed: %s\n", error.c_str());
+            return 1;
+        }
+        return 0;
+    }
+
+    // The golden instrument (live.h): a session evaluated offline, for
+    // byte-comparison against the stems the same graph renders. A
+    // subprocess for the same reasons --render is.
+    if (renderLiveSession.isNotEmpty())
+    {
+        if (auto error = field::runRenderLive (renderLiveSession.toStdString(),
+                                               renderLiveOut.toStdString(),
+                                               juce::File::getCurrentWorkingDirectory()
+                                                   .getFullPathName()
+                                                   .toStdString());
+            ! error.empty())
+        {
+            std::fprintf (stderr, "field-audiod: render-live failed: %s\n", error.c_str());
             return 1;
         }
         return 0;

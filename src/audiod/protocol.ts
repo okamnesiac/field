@@ -21,6 +21,10 @@ export const helloResponseSchema = z.object({
   protocol: z.number().int(),
   daemon: z.string(),
   version: z.string(),
+  // Capability names (realtime.md §3): clients gate on these rather
+  // than parsing `version`. Absent from daemons that predate the field;
+  // the default keeps them meaning "none of the newer verbs".
+  features: z.array(z.string()).default([]),
 });
 
 export const deviceSchema = z.object({
@@ -53,6 +57,9 @@ export const statusResponseSchema = z.object({
   device: z.object({ name: z.string(), sample_rate: z.number() }).optional(),
   resampling: z.boolean(),
   looping: z.boolean().optional(), // daemon >= 0.3
+  live: z.boolean().optional(), // a live session is loaded (daemon feature "session")
+  song: z.string().optional(), // the live session's song (live only)
+  sample_rate: z.number().optional(), // the live session's rate (live only)
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });

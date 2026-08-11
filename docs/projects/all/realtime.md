@@ -227,6 +227,24 @@ stands as drafted; its list line waits in later.md.
    compensation, nested summing, level/pan/send ramps over the
    socket; `features` gating in hello; all behind `field play
    <song> --live` (decision 8).
+
+   *Amended 2026-08-10 (review of the first implementation):* the
+   engine materialises rather than streams — sources preload whole
+   at session load and every non-output track renders into a
+   full-length buffer, so memory scales with session length times
+   track count (creek: ~143 MB resident; a five-minute thirty-track
+   session extrapolates to ~3.5 GB). Correctness first, deliberately
+   — the buffers are what made the golden equivalence provable — and
+   note the freeze (decision 4) does not bound this, because a frozen
+   track becomes a file window and file windows preload whole too.
+   Streaming rings and buffered readers are follow-up work owed
+   before large sessions, not an optimisation to forget. Two more
+   bounds the same review round pinned: the bit-identity claim holds
+   within the live limiter's 60 dB horizon — beyond it the ramp
+   starts late by design, ceiling still held, offline still exact —
+   and cross-rate sessions are refused at compile time until the
+   resampler wiring lands, with the artifact path as the interim
+   answer.
 3. **Edits land mid-play** — the CLI compiles and diffs on file
    change, ramps vs. subgraph swaps, watch integration; the loop-wrap
    takeover machinery retires.

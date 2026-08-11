@@ -8,6 +8,11 @@
 #include <memory>
 #include <thread>
 
+namespace field
+{
+class LiveSession;
+}
+
 // Owns the output device (or the null-output clock used in CI), the loaded
 // file, and the sample-accurate transport. Artifacts-only by design
 // (playback.md §1): the player knows file paths and samples — never clips,
@@ -74,6 +79,14 @@ public:
     // read; the heartbeat turns it into a broadcast "reloaded" event.
     juce::String takeReloadedPath();
 
+    // Live session (realtime.md chunk 2): replaces the loaded file as the
+    // audio source; the transport verbs drive the session clock instead.
+    // Returns {error} or {samples, sample_rate, channels}. Loading a file
+    // afterwards drops the session, and vice versa.
+    juce::var loadSession (const juce::var& session, const juce::File& projectRoot);
+    juce::String liveRamp (const juce::String& track, int input, double gainDb, double rampMs);
+    bool liveMode() const { return liveSession != nullptr; }
+
     juce::String play();
     void pause();
     void stop(); // pause + rewind to 0
@@ -102,6 +115,12 @@ private:
 
     juce::int64 positionSamples() const;
     void maybeMatchDeviceRate (double fileRate);
+
+    // The one audio pull both the device callback and the null clock go
+    // through: the live session when one is loaded (behind a try-lock —
+    // a missed block during a message-thread edit is silence, not a
+    // glitch), the file transport otherwise.
+    void pullAudio (float* const* out, int numChannels, int n);
 
     // The reload poll (message thread, running only while a reload is
     // pending): a position moving backwards is the reader wrapping.
@@ -144,6 +163,17 @@ private:
     std::unique_ptr<PendingReload> pendingReload;
     juce::int64 reloadPollPosition = 0;
     juce::String reloadedPath;
+
+    // The live session and its transport-facing facts. livePlaying is
+    // read in the audio callback; the lock covers session access.
+    std::unique_ptr<field::LiveSession> liveSession;
+    juce::CriticalSection liveLock;
+    std::atomic<bool> livePlaying { false };
+    juce::int64 liveLength = 0;
+    juce::String liveSong;
+    bool liveLoop = false;
+    int liveRate = 0;
+    bool liveEverStarted = false;
 
     // Null-output mode: a thread pulls the transport at real-time pace so
     // transport, position, and end-of-stream all behave exactly as with a
