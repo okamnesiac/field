@@ -11,7 +11,7 @@
 # room for bed would be its own return.
 name: space
 inserts:
-  - effect: reverb
+  - effect: plate
     mix: 1.0
     decay: 2.5
     predelay_ms: 20
