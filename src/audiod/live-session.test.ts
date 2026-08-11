@@ -65,6 +65,12 @@ async function scaffold(root: string): Promise<void> {
       '        frequency: 900',
       '        gain_db: 3',
       '        bandwidth: 1.5',
+      // A limiter on a child: its stream lag must not shift the summed
+      // timeline (the comp_delay double-compensation Codex caught).
+      '  - effect: limit',
+      '    ceiling_db: -2',
+      '    lookahead_ms: 3',
+      '    release_ms: 60',
       'inputs:',
       '  - audio: tone',
       '    anchor: absolute',
