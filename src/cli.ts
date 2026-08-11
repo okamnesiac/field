@@ -433,9 +433,42 @@ program
   .option('--loop', 'replay the queue until ctrl-c')
   .option('--click', 'overlay a metronome (rendered CLI-side; loops with the file)')
   .option('--watch', 'rebuild on project changes, swap the loop at the wrap (needs --loop, one label)')
-  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean }) => {
+  .option('--live', 'evaluate the song graph live in the engine (realtime.md decision 8; experimental)')
+  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean; live?: boolean }) => {
     try {
       const root = requireRoot();
+      if (opts.live === true) {
+        // The session already carries the song's own loop; the file-era
+        // flags shape a queue of artifacts, which this is not.
+        if (patterns.length !== 1) throw new Error('--live plays one song: field play <song> --live');
+        if (opts.from !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
+          throw new Error('--live does not compose with --from/--loop/--click/--watch yet');
+        }
+        const { playLiveSession } = await import('./commands/play.js');
+        const project = loadProject(root);
+        let interrupted = false;
+        process.once('SIGINT', () => {
+          interrupted = true;
+        });
+        let onLine = false;
+        await playLiveSession(
+          root,
+          project,
+          patterns[0]!,
+          { ...(opts.device !== undefined ? { device: opts.device } : {}) },
+          {
+            onItem: (label, note) =>
+              process.stdout.write(`live    ${label}${note ? `  (${note})` : ''}\n`),
+            onPosition: (line) => {
+              process.stdout.write(`\r${line}   `);
+              onLine = true;
+            },
+            interrupted: () => interrupted,
+          },
+        );
+        if (onLine) process.stdout.write('\n');
+        return;
+      }
       let items = await resolvePlayables(root, patterns);
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {

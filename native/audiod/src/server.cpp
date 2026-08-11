@@ -210,6 +210,7 @@ juce::String Server::dispatch (const juce::var& request)
         // Capability names (realtime.md §3): clients gate on these, not
         // on parsing the version string.
         juce::Array<juce::var> features;
+        features.add ("loop");
         features.add ("reload");
         features.add ("session");
         ok->setProperty ("features", features);

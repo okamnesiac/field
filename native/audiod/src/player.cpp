@@ -504,23 +504,23 @@ juce::String Player::transportState()
 juce::var Player::status()
 {
     auto result = obj();
+    result->setProperty ("state", transportState());
     if (liveSession != nullptr)
     {
         const juce::int64 raw = liveSession->position();
-        result->setProperty ("state", transportState());
         result->setProperty ("sample", liveLoop && liveLength > 0 ? raw % liveLength : raw);
         result->setProperty ("samples", liveLength);
         result->setProperty ("looping", liveLoop);
         result->setProperty ("path", juce::var());
         result->setProperty ("live", true);
-        result->setProperty ("null_output", nullMode);
-        return juce::var (result.get());
     }
-    result->setProperty ("state", transportState());
-    result->setProperty ("sample", positionSamples());
-    result->setProperty ("samples", fileLengthSamples);
-    result->setProperty ("looping", looping);
-    result->setProperty ("path", loadedPath.isEmpty() ? juce::var() : juce::var (loadedPath));
+    else
+    {
+        result->setProperty ("sample", positionSamples());
+        result->setProperty ("samples", fileLengthSamples);
+        result->setProperty ("looping", looping);
+        result->setProperty ("path", loadedPath.isEmpty() ? juce::var() : juce::var (loadedPath));
+    }
     result->setProperty ("null_output", nullMode);
 
     double deviceRate = nullMode ? nullSampleRate : 0.0;
@@ -533,9 +533,10 @@ juce::var Player::status()
             d->setProperty ("sample_rate", deviceRate);
             result->setProperty ("device", juce::var (d.get()));
         }
+    const double sourceRate = liveSession != nullptr ? (double) liveRate : fileSampleRate;
     result->setProperty ("resampling",
-                         readerSource != nullptr && deviceRate > 0.0
-                             && ! juce::exactlyEqual (deviceRate, fileSampleRate));
+                         (liveSession != nullptr || readerSource != nullptr) && deviceRate > 0.0
+                             && ! juce::exactlyEqual (deviceRate, sourceRate));
     return juce::var (result.get());
 }
 
