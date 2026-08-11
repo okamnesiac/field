@@ -9,8 +9,7 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
 - [Cross-rate live wiring](all/cross-rate-live.md) — realtime
   decision 7's owed piece: a foreign-rate dirty track evaluates live
   with the edge converting, and a device that cannot switch to the
-  session's rate gets converted delivery instead of a refusal. Plan
-  drafted; implementation is one PR behind it.
+  session's rate gets converted delivery instead of a refusal.
 
 - [Realtime](all/realtime.md) — the graph runs live, and all four
   chunks shipped: the streaming DSP library, the live graph
