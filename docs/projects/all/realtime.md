@@ -53,9 +53,16 @@ library, and the build cache doubling as automatic track freezing.
 3. **Processors are causal, deterministic, and block-size-invariant.**
    Nothing that cannot run in the callback may be in the shared
    library, and a stem op processing offline-sized chunks must emit
-   the same samples as a callback processing 128 frames. The
-   non-causal implementations — the limiter's backward pass, the
-   reverb's folded tail — retire when their causal successors land.
+   the same samples as a callback processing 128 frames. One processor
+   is genuinely non-causal and retires: the limiter's backward pass
+   (limiter.h:10 states the construction in as many words). The eq
+   (RBJ biquads) and reverb (Freeverb combs and allpasses) are causal
+   structures already — what is offline-shaped about them is the
+   interface, whole buffers in and a computed output length out
+   (reverb.h:38), and what they need is a streaming form that carries
+   state across blocks. The loop *fold* is a different mechanism
+   entirely — mixdown's `applyDeclaredLength`, part of the offline
+   mix path decision 1 keeps — and is not touched here.
    The property is enforced, not hoped for: a golden equivalence test
    renders the same subgraph offline and through the engine at
    several block sizes and diffs the output (§8 decides the
@@ -121,9 +128,10 @@ for every clean subgraph.
 - `--watch`'s re-render-and-reload cycle becomes compile-diff-send;
   the build still runs (it feeds the cache and the freeze), but
   playback no longer waits on it.
-- The offline effect implementations, once the golden test says their
-  causal successors match offline-to-live — the implementations
-  retire, not the offline render path (decision 1 keeps that).
+- The limiter's backward-pass implementation, once the golden test
+  says its causal successor holds the same ceiling — the
+  implementation retires, not the offline render path (decision 1
+  keeps that, loop fold and all).
 
 ## 5 Definition of done
 
@@ -144,13 +152,15 @@ stands as drafted; its list line waits in later.md.
 
 ## 7 Chunks
 
-1. **The causal DSP library** — causal successors for `eq`, `limit`,
-   `reverb` in `native/audiod/src/dsp/`, wired into the stem op in
-   place of the non-causal implementations; latency reporting per
-   processor (the PDC groundwork); the golden equivalence harness at
-   multiple block sizes. Ships alone: `field build` output changes
-   audibly here (the backward-pass limiter is gone), so this chunk is
-   where that is heard and judged.
+1. **The causal DSP library** — streaming interfaces for `eq` and
+   `reverb` (state across blocks; same algorithms), a causal successor
+   for `limit` (a new algorithm), wired into the stem op; latency
+   reporting per processor (the PDC groundwork); the golden
+   equivalence harness at multiple block sizes — checking a
+   repackaging for two of the three and a replacement for the third.
+   Ships alone: `field build` output changes audibly here (the
+   backward-pass limiter is gone), so this chunk is where that is
+   heard and judged.
 2. **The live graph** — the session message set and schema, clip
    streaming with loops and fades, per-track chains, sends with
    delay compensation, nested summing, level/pan/send ramps over the
