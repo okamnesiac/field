@@ -4,10 +4,6 @@ status: Draft
 
 # Plan: Realtime
 
-**Status:** Written 2026-08-10, the day its decisions were settled in
-discussion. §8's open questions are open on purpose; the PR that flips
-this Active answers them.
-
 **Goal:** the graph runs live — edit YAML while the song plays and hear
 it next block — while `field build` stays exactly what it is: stems,
 caching, and the generation pipeline. Two render paths, one DSP

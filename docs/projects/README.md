@@ -70,8 +70,7 @@ entry point is `overview.md`.
 
 ## What goes in a document
 
-One line of YAML frontmatter, then a `# Title`, then a `**Status:**` line,
-then a `**Goal:**` line:
+One line of YAML frontmatter, then a `# Title`, then a `**Goal:**` line:
 
 ```markdown
 ---
@@ -79,8 +78,6 @@ status: Active
 ---
 
 # Offline effects
-
-**Status:** In progress (started 2026-08-05). Follows playback.md; ...
 
 **Goal:** three offline effects — `eq`, `limit`, `reverb` — as build rules ...
 ```
@@ -93,12 +90,16 @@ historical), `Superseded` (replaced by a newer document or approach),
 `Abandoned` (decided against; kept for the record), `Reference` (a standing
 document with no build lifecycle).
 
-The keyword and the prose split the job the status line used to do alone. The
-frontmatter carries the claim — machine-checkable, and what review tooling
-reads — while the `**Status:**` line keeps the part prose is for: which PRs
-carried the work and what is left. Both get updated when that changes, and
-the keyword is the state of record when they disagree — a disagreement being
-a bug to fix, not a nuance to preserve.
+The keyword is the only thing called status (decided 2026-08-10 — an
+earlier version of this file also required a prose `**Status:**` line,
+and two things claiming one name meant a paragraph here explaining which
+was real, with the second mostly restating the first). The story the old
+line carried — which PRs did the work, what is left, what a plan waits
+on — is still worth writing, as ordinary prose wherever the document
+wants it, dated where that helps. Existing `**Status:**` lines in past
+plans keep their stories; relabeling them is churn, not progress. Where
+prose and keyword disagree, the keyword is the state of record — a
+disagreement being a bug to fix, not a nuance to preserve.
 
 `Draft` is load-bearing: it declares the plan is not yet claiming to be
 executable, so open questions in a Draft plan do not block its pull requests

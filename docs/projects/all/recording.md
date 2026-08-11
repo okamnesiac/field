@@ -4,11 +4,8 @@ status: Draft
 
 # Plan: Recording
 
-**Status:** Written 2026-08-10, reshaped by review the same day; waits
-behind [realtime.md](realtime.md), whose live graph makes capture an
-input node rather than a second transport (realtime.md §6). §11's open
-questions are open on purpose; the PR that flips this Active answers
-them.
+Waits behind [realtime.md](realtime.md), whose live graph makes capture
+an input node rather than a second transport (realtime.md §6).
 
 **Goal:** `field record` — capture a live performance into a track as
 takes, through the same daemon that plays: armed, crash-safe,
