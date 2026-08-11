@@ -12,18 +12,26 @@ namespace
 constexpr double referenceRate = 29761.0;
 constexpr double pi = 3.14159265358979323846;
 constexpr int inputDiffuserTunings[] = { 142, 107, 379, 277 };
-constexpr int tankApf1Tunings[] = { 672, 908 }; // modulated, gain −0.70
+constexpr int tankApf1Tunings[] = { 672, 908 }; // modulated, gain +0.70
 constexpr int tankDelay1Tunings[] = { 4453, 4217 };
 constexpr int tankApf2Tunings[] = { 1800, 2656 };
 constexpr int tankDelay2Tunings[] = { 3720, 3163 };
-constexpr double tankApf1Gain = -0.70; // decay diffusion 1, sign per the figure
+constexpr double tankApf1Gain = 0.70; // decay diffusion 1, the sign-noted pair
 constexpr double inputBandwidth = 0.9995; // the paper's input one-pole
 constexpr double excursionTuning = 16.0; // max LFO sweep, samples at reference
 constexpr double tapScale = 0.6; // the paper's output-tap coefficient
 
 // The published output tap table: {branch, line, offset} where line is
-// 0 = delay1, 1 = apf2's internal buffer, 2 = delay2. Left output taps
-// the right branch positively and the left negatively; right mirrors.
+// 0 = delay1, 1 = apf2's internal buffer, 2 = delay2. Table 2 verbatim
+// (checked against the paper after review caught a transposed row):
+//   yL = 0.6·n48_54[266] + 0.6·n48_54[2974] − 0.6·n55_59[1913]
+//      + 0.6·n59_63[1996] − 0.6·n24_30[1990] − 0.6·n31_33[187]
+//      − 0.6·n33_39[1066]
+//   yR = 0.6·n24_30[353] + 0.6·n24_30[3627] − 0.6·n31_33[1228]
+//      + 0.6·n33_39[2673] − 0.6·n48_54[2111] − 0.6·n55_59[335]
+//      − 0.6·n59_63[121]
+// where 24_30/31_33/33_39 are the left branch's delay1/apf2/delay2
+// and 48_54/55_59/59_63 the right's.
 struct Tap
 {
     int branch;
@@ -32,8 +40,8 @@ struct Tap
     double sign;
 };
 constexpr Tap leftTaps[] = {
-    { 1, 0, 266, 1.0 },  { 1, 0, 2974, 1.0 }, { 1, 1, 1913, -1.0 }, { 1, 2, 145, 1.0 },
-    { 0, 0, 1996, -1.0 }, { 0, 1, 187, -1.0 }, { 0, 2, 1066, -1.0 },
+    { 1, 0, 266, 1.0 },  { 1, 0, 2974, 1.0 }, { 1, 1, 1913, -1.0 }, { 1, 2, 1996, 1.0 },
+    { 0, 0, 1990, -1.0 }, { 0, 1, 187, -1.0 }, { 0, 2, 1066, -1.0 },
 };
 constexpr Tap rightTaps[] = {
     { 0, 0, 353, 1.0 },  { 0, 0, 3627, 1.0 }, { 0, 1, 1228, -1.0 }, { 0, 2, 2673, 1.0 },
@@ -77,12 +85,13 @@ Plate::Plate (const PlateSettings& settings, size_t channels)
 
     // diffusion is input diffusion 1 directly; #2 rides at the
     // published 5/6 ratio (0.750 → 0.625), so the default lands on the
-    // paper's pair exactly.
+    // paper's pair exactly. Negative, as figure 1 draws these — the
+    // "note sign" pair below is the one lattice whose sign flips.
     for (size_t k = 0; k < 4; ++k)
     {
         Allpass apf;
         apf.buffer.assign ((size_t) scaled (inputDiffuserTunings[k], sampleRate), 0.0);
-        apf.gain = k < 2 ? settings.diffusion : settings.diffusion * (5.0 / 6.0);
+        apf.gain = -(k < 2 ? settings.diffusion : settings.diffusion * (5.0 / 6.0));
         inputDiffusers.push_back (std::move (apf));
     }
 
@@ -110,7 +119,9 @@ Plate::Plate (const PlateSettings& settings, size_t channels)
                       * (double) (scaled (tankApf1Tunings[b], sampleRate)
                                   + scaled (tankApf2Tunings[b], sampleRate));
     decayGain = std::pow (10.0, (-3.0 * loop) / (4.0 * settings.decaySeconds * sampleRate));
-    const double apf2Gain = std::clamp (decayGain + 0.15, 0.25, 0.50); // the paper's suggestion
+    // The paper's own rule for decay diffusion 2, drawn negative like
+    // the input diffusers.
+    const double apf2Gain = -std::clamp (decayGain + 0.15, 0.25, 0.50);
 
     for (int b = 0; b < 2; ++b)
     {

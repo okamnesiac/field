@@ -15,11 +15,14 @@
 // the allpasses are the canonical Schroeder form, scaled lengths and
 // taps ROUND rather than truncate, and `decay` means seconds-to-−60 dB
 // — the per-circulation feedback derives from the actual scaled loop
-// so the knob is measurable. The paper draws the tank's first diffuser
-// sign-inverted and calls the choice one of decorrelation; this port
-// keeps that sign (gain −0.70) and the fixed decay-diffusion pair
-// (0.70, and clamp(decay gain + 0.15, 0.25, 0.50), the paper's own
-// suggestion).
+// so the knob is measurable. Lattice signs are figure 1's exactly:
+// input diffusers and decay diffusion 2 negative, and decay
+// diffusion 1 — the pair the figure marks "note sign" — positive, the
+// one lattice whose polarity flips; both branches carry the same
+// coefficients (the figure draws them identically, and the paper's
+// footnote 8 requires a lattice's two coefficients to match). The
+// decay-diffusion magnitudes are the paper's: 0.70, and
+// clamp(decay gain + 0.15, 0.25, 0.50).
 //
 // Modulation is deterministic by construction (reverbs.md decision 4):
 // each branch's allpass read point rides a sinusoid whose phase is a

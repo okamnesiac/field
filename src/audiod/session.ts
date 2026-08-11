@@ -113,7 +113,7 @@ export const sessionInsertSchema = z.discriminatedUnion('effect', [
     decay: z.number().min(1),
     predelay_ms: z.number().min(0),
     damping: z.number().min(0).max(1),
-    diffusion: z.number().min(0).max(0.98),
+    diffusion: z.number().min(0).max(0.93),
     modulation: z.number().min(0).max(1),
   }),
 ]);

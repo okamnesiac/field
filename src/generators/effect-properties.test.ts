@@ -651,6 +651,42 @@ describe('plate properties', () => {
     expect(slope * decay).toBeLessThan(-57);
   });
 
+  it('the tail holds T60 at the worst corner: minimum decay, maximum diffusion', async () => {
+    // The input diffusers ring on their own — an allpass at gain g
+    // holds energy for L·ln(10⁻³)/ln(g) samples — and that ring feeds
+    // the tank, so high diffusion stretches the composite tail. The
+    // schema cap (0.93) is chosen so this corner still measures inside
+    // the T60 window; at the 0.98 the cap replaced, this test reads
+    // ≈ −56 and the declared tail truncates audible ring (Codex's
+    // finding on #144).
+    const decay = 1;
+    await importSource('imp', impulse(1));
+    writeSound('pcorner', [
+      'type: plate',
+      'source: imp',
+      `decay: ${decay}`,
+      'mix: 1',
+      'damping: 0',
+      'diffusion: 0.93',
+      'modulation: 0',
+    ]);
+    const rendered = await render('pcorner');
+
+    const window = Math.round(0.05 * RATE);
+    const points: { t: number; db: number }[] = [];
+    for (let t = Math.round(0.1 * decay * RATE); t < 0.9 * decay * RATE; t += window) {
+      const level = rms(rendered, t, t + window);
+      if (level > 0) points.push({ t: t / RATE, db: 20 * Math.log10(level) });
+    }
+    const meanT = points.reduce((s, p) => s + p.t, 0) / points.length;
+    const meanDb = points.reduce((s, p) => s + p.db, 0) / points.length;
+    const slope =
+      points.reduce((s, p) => s + (p.t - meanT) * (p.db - meanDb), 0) /
+      points.reduce((s, p) => s + (p.t - meanT) ** 2, 0);
+    expect(slope * decay).toBeGreaterThan(-63);
+    expect(slope * decay).toBeLessThan(-57);
+  });
+
   it('the first left tap lands at scaled(266), after the predelay', async () => {
     // The tap table is the stereo: an impulse crosses the input
     // diffusers and the tank's first allpass by their instant
