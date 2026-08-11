@@ -239,6 +239,14 @@ case.
 `take-YYYYMMDD-HHMMSS` files with device and latency metadata — so the
 word is spoken for and `variants` is what the field was already called.
 
+*Amended 2026-08-10:* the premise above flipped — recorded takes will
+follow this fold's own precedent and live beside their audio under
+`audio/`, so `takes/` is no longer spoken for
+([project-model.md](../../project-model.md) "Takes"). The gitignore
+argument that decided this section applies to a recorded take's record
+exactly as it does to a variant's pins. The name decided here stands on
+its other leg: `variants` is what the field was already called.
+
 *Rejected: `.field/generated/`.* Always local, no gitignore rule needed
 at all. But it separates the record from the bytes permanently, so a
 project that does commit its audio has nowhere to put the provenance that

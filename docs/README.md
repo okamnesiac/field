@@ -44,8 +44,12 @@ the same files.
 - **Asset** — an immutable audio or MIDI file, referenced by content
   hash. Field never edits audio in place; all placement and editing is
   metadata.
-- **Node** — a producer or processor in the dependency graph: a track's
-  stem, a SuperCollider render, a generative take, a rate conversion.
+- **Node** — what the build runs: a track's stem, plus the nodes the
+  graph mints that no file declares — a `gen:` per inline render, a
+  `convert:` per source-and-rate pair, a `tap:` per pre-tapped sender,
+  each shared by every placement or cable that needs it. You author
+  tracks; the engine derives nodes, so the graph is bigger than the
+  file tree.
 - **Label** — the address of something buildable: a track's stem, a gen
   node, the song's output track. For example,
   `field build //songs/opener/track:main`. See
@@ -99,3 +103,12 @@ with zero real-time code. The playback daemon arrived only after real
 use had battle-tested the project model, and the rest of the real-time
 engine (recording, monitoring, plugin hosting) follows the same rule.
 The current build order lives in [projects/](projects/README.md).
+
+## Documentation
+
+- [Architecture](architecture.md) — layers, processes, and language decisions
+- [Tracks](tracks.md) — the structural primitive: the track file, nesting, and cables
+- [Project model](project-model.md) — the canonical on-disk representation
+- [Build graph](build-graph.md) — targets, caching, freezing, determinism
+- [Audio engine](audio-engine.md) — the real-time daemon (future work)
+- [Projects](projects/README.md) — work in progress, next, and later
