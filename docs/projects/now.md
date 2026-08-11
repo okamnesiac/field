@@ -6,13 +6,15 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
-- [Realtime](all/realtime.md) — the graph runs live: edit YAML while the
-  song plays and hear it next block. Chunks 1–3 shipped: the streaming
-  DSP library, the live graph behind `field play <song> --live`
-  (byte-identical to the offline render, proven per session), and edits
-  landing mid-play — gain moves ramp, structure swaps with the
-  transport carried, and the loop-wrap takeover machinery is gone. The
-  freeze (chunk 4) is next.
+- [Realtime](all/realtime.md) — the graph runs live, and all four
+  chunks shipped: the streaming DSP library, the live graph
+  (byte-identical to the offline render, proven per session), edits
+  landing mid-play, and the freeze — `field play <song>` *is* live
+  evaluation now, clean subgraphs arrive as cached stems, dirty ones
+  rebuild behind the play under watch, and the `--live` flag is gone.
+  Stays until live-default playback has soaked on real sessions; the
+  recorded follow-ups (streaming rings before large sessions,
+  cross-rate wiring) are where an edit would land.
 
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has

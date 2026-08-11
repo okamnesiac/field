@@ -25,6 +25,16 @@
 // song's output. A window whose start − read_offset is negative would
 // need future child samples; live taps only ever delay, so that is a
 // compile error.
+//
+// The cache is the freeze (realtime.md decision 4, chunk 4): before
+// compiling, every non-output, non-pre-tapped track asks the build
+// cache — explain(), which executes nothing — whether its stem action
+// is cached. A cached track compiles to one file window over its stem;
+// the rest evaluate live and are reported as `dirty`, so the watch loop
+// can rebuild their stems behind the play and freeze them on the next
+// compile — a swap that is inaudible because live and offline are
+// bit-identical (decision 3). CPU scales with what is being edited,
+// not with the session.
 
 import { join, relative } from 'node:path';
 import { wavFrameCount } from '../audio/wav.js';
@@ -33,7 +43,8 @@ import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
 import { loadProject } from '../model/project.js';
 import type { Insert } from '../schema/index.js';
-import { buildGraph, type Graph } from './graph.js';
+import { explain, type Explanation } from './build.js';
+import { buildGraph, type Graph, type GraphNode } from './graph.js';
 
 const RESAMPLER_TAPS = 128; // dsp/resample.cpp's design point
 
@@ -92,7 +103,24 @@ function chainGrowth(chain: SessionInsert[], rate: number): number {
   return growth;
 }
 
-export async function compileSession(root: string, songName: string): Promise<Session> {
+export interface CompiledSession {
+  session: Session;
+  // Freeze candidates that missed the cache this compile — reachable
+  // tracks evaluating live that one stem build away from being served
+  // as cached files. Never the output track (always live: its windows
+  // are the ramp surface, and a looping wrap is a performance where the
+  // artifact is a fold) and never a pre-tap sender (a stem is
+  // post-chain; the cable needs the pre ring), so a watch loop that
+  // rebuilds exactly this list converges instead of chasing tracks
+  // that can never freeze.
+  dirty: string[];
+}
+
+export async function compileSession(
+  root: string,
+  songName: string,
+  options: { loop?: boolean } = {},
+): Promise<CompiledSession> {
   const project = loadProject(root);
   const errors = project.diagnostics.filter((d) => d.severity !== 'warning');
   if (errors.length > 0) throw new Error('project has errors (field check)');
@@ -102,10 +130,12 @@ export async function compileSession(root: string, songName: string): Promise<Se
 
   // The song's track nodes, keyed by name; their deps aligned to sources.
   const shapes = new Map<string, TrackShape>();
+  const stemNodes = new Map<string, GraphNode>();
   for (const track of song.tracks) {
     const key = `//${song.dir}/track:${track.data.name}`;
     const node = graph.nodes.get(key);
     if (node === undefined || node.kind !== 'rule') throw new Error(`no stem node for ${key}`);
+    stemNodes.set(track.data.name, node);
     shapes.set(track.data.name, {
       name: track.data.name,
       rate: node.sampleRate,
@@ -113,13 +143,68 @@ export async function compileSession(root: string, songName: string): Promise<Se
       deps: node.deps.map((d) => formatLabel(d)),
     });
   }
+  if (!shapes.has('main')) throw new Error(`song "${songName}" has no track named "main"`);
 
-  // Build every non-track dependency (sources, gen artifacts, converts) —
-  // the files the live engine streams. Track and tap refs stay unbuilt:
-  // they are what the engine evaluates.
+  // The freeze (realtime.md decision 4): a track whose stem action is
+  // already cached is served as that stem — one file window, no chain,
+  // no children — because live and offline are sample-identical, so the
+  // cached artifact is what live evaluation would have produced anyway.
+  // explain() answers "is this cached" without executing anything; a
+  // miss means the track evaluates live and lands in `dirty` for the
+  // watch loop to rebuild behind the play. Two kinds of track never
+  // freeze: the output (see CompiledSession), and any pre-tap sender —
+  // conservatively, a sender tapped anywhere in the song, even if the
+  // receiver itself froze.
+  const preTapped = new Set<string>();
+  for (const shape of shapes.values()) {
+    for (const dep of shape.deps) {
+      const tap = /\/tap:(.+)$/.exec(dep);
+      if (tap) preTapped.add(tap[1]!);
+    }
+  }
+  const memo = new Map<string, Explanation>();
+  const frozen = new Set<string>();
+  const candidates = new Set<string>();
+  for (const name of shapes.keys()) {
+    if (name === 'main' || preTapped.has(name)) continue;
+    candidates.add(name);
+    const explanation = await explain(project, graph, stemNodes.get(name)!, memo);
+    if (explanation.cached === true && explanation.outputs !== undefined) frozen.add(name);
+  }
+
+  // Reach from the output: recursion stops at a frozen track (its
+  // subtree is inside the stem), and tracks nothing reaches drop from
+  // the session entirely — the engine would otherwise pre-render audio
+  // nobody mixes. `dirty` is the reachable candidates that missed.
+  const liveReach = new Set<string>();
+  const frozenUsed = new Set<string>();
+  const visit = (name: string): void => {
+    if (frozen.has(name)) {
+      frozenUsed.add(name);
+      return;
+    }
+    if (liveReach.has(name) || !shapes.has(name)) return;
+    liveReach.add(name);
+    for (const dep of shapes.get(name)!.deps) {
+      const ref = /\/(track|tap):(.+)$/.exec(dep);
+      if (ref) visit(ref[2]!);
+    }
+  };
+  visit('main');
+  const dirty = [...liveReach]
+    .filter((n) => candidates.has(n) && !frozen.has(n))
+    .map((n) => `//${song.dir}/track:${n}`);
+
+  // Build every file the engine will read: the non-track dependencies
+  // (sources, gen artifacts, converts) of each live reachable track,
+  // plus the frozen stems themselves — those are guaranteed cache hits
+  // (explain just said so), so this only materializes.
   const isLive = (label: string) => /\/(track|tap):/.test(label);
   const toBuild = [
-    ...new Set([...shapes.values()].flatMap((s) => s.deps.filter((d) => !isLive(d)))),
+    ...new Set([
+      ...[...liveReach].flatMap((n) => shapes.get(n)!.deps.filter((d) => !isLive(d))),
+      ...[...frozenUsed].map((n) => `//${song.dir}/track:${n}`),
+    ]),
   ];
   const fileByLabel = new Map<string, { path: string; sha256: string }>();
   if (toBuild.length > 0) {
@@ -144,6 +229,38 @@ export async function compileSession(root: string, songName: string): Promise<Se
     if (stack.includes(name)) throw new Error(`placement cycle at "${name}"`); // validate's backstop
     const shape = shapes.get(name);
     if (!shape) throw new Error(`no such track "${name}"`);
+    if (frozen.has(name)) {
+      // The cached form: the whole subtree as one file window reading
+      // the stem, chain empty (the stem is post-chain), latency zero
+      // (a stem is final, timeline-aligned from sample 0). The engine
+      // needs nothing special — this is ordinary session vocabulary,
+      // which is what makes the freeze swap a plain session swap.
+      const built = fileByLabel.get(`//${song.dir}/track:${name}`);
+      if (built === undefined) throw new Error(`unbuilt frozen stem for "${name}"`);
+      const frames = wavFrameCount(join(root, built.path));
+      preLength.set(name, frames);
+      postLength.set(name, frames);
+      latency.set(name, 0);
+      compiled.set(name, {
+        name,
+        rate: shape.rate,
+        chain: [],
+        inputs: [
+          {
+            file: built.path,
+            sha256: built.sha256,
+            start: 0,
+            duration: frames,
+            read_offset: 0,
+            gain_db: 0,
+            fade_in: 0,
+            fade_out: 0,
+          },
+        ],
+        latency: 0,
+      });
+      return;
+    }
     const chain = (shape.spec.inserts ?? []).map(liveInsert);
 
     // Resolve every window; recurse into children first.
@@ -224,7 +341,7 @@ export async function compileSession(root: string, songName: string): Promise<Se
     });
   };
 
-  for (const name of shapes.keys()) compile(name, []);
+  compile('main', []);
 
   for (const shape of shapes.values()) {
     const sessionRate = shapes.get('main')?.rate;
@@ -236,19 +353,27 @@ export async function compileSession(root: string, songName: string): Promise<Se
       );
     }
   }
-  const output = shapes.get('main');
-  if (!output) throw new Error(`song "${songName}" has no track named "main"`);
-  return {
+  const output = shapes.get('main')!;
+  // The session is always bounded: the declared extent when the song
+  // has one, the output's natural length — content end plus chain
+  // growth, exactly where the artifact ends — when it does not
+  // (Codex's finding: an unbounded session played silence forever
+  // after the content ran out). The authored `loop:` never reaches
+  // the transport — it is a render-shape declaration, the fold
+  // (clip-looping.md: "one seamless pass of the infinite
+  // performance") — and player repetition is `field play --loop`,
+  // which wraps at the same extent the length picks.
+  const extent = output.spec.length_samples ?? postLength.get('main')!;
+  const session: Session = {
     version: SESSION_VERSION,
     song: songName,
     rate: output.rate,
-    ...(output.spec.length_samples !== undefined
-      ? { length_samples: output.spec.length_samples }
-      : {}),
-    ...(output.spec.loop !== undefined ? { loop: output.spec.loop } : {}),
+    ...(extent > 0 ? { length_samples: extent } : {}),
+    ...(options.loop === true ? { loop: true } : {}),
     output: 'main',
     tracks: [...compiled.values()],
   };
+  return { session, dirty };
 }
 
 

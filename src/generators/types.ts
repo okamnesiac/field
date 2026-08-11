@@ -35,6 +35,11 @@ export interface RunContext {
   // track's effective rate for stems and entry generators, the project
   // rate for declared sounds. Before rate: existed these were one number.
   sampleRate: number;
+  // Cancellation, when the caller has a reason to stop mid-build — the
+  // watch loop's background freeze on ctrl-c. Executors that spawn pass
+  // it to the child; the cache stays consistent either way, because the
+  // action entry is only written after a completed run.
+  signal?: AbortSignal;
 }
 
 // The song's visible names, pre-classified for source resolution

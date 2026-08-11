@@ -427,25 +427,34 @@ async function playWithAfplay(items: Playable[]): Promise<void> {
 
 program
   .command('play <patterns...>')
-  .description('build targets if needed, then audition them in order (ctrl-c stops)')
-  .option('--from <position>', 'start at bar[.beat[.tick]] (single target only)')
+  .description('play a song live in the engine, or audition built artifacts in order (ctrl-c stops)')
+  .option('--from <position>', 'start at bar[.beat[.tick]] (one song or one artifact)')
   .option('--device <name>', 'output device (field devices lists them)')
-  .option('--loop', 'replay the queue until ctrl-c')
-  .option('--click', 'overlay a metronome (rendered CLI-side; loops with the file)')
-  .option('--watch', 'rebuild on project changes, swap the loop at the wrap (needs --loop, one label)')
-  .option('--live', 'evaluate the song graph live in the engine (realtime.md decision 8; experimental)')
-  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean; live?: boolean }) => {
+  .option('--loop', 'loop the song at its declared extent, or replay an artifact queue')
+  .option('--click', 'overlay a metronome (artifacts only; rendered CLI-side, loops with the file)')
+  .option('--watch', "follow the project: edits land mid-play (a song's live session)")
+  .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean }) => {
     try {
       const root = requireRoot();
-      if (opts.live === true) {
-        // The session already carries the song's own loop; the file-era
-        // flags shape a queue of artifacts, which this is not.
-        if (patterns.length !== 1) throw new Error('--live plays one song: field play <song> --live');
-        if (opts.from !== undefined || opts.loop === true || opts.click === true) {
-          throw new Error('--live does not compose with --from/--loop/--click yet');
+      const project = loadProject(root);
+      // A bare song name plays live (realtime.md decision 8: since the
+      // freeze, live evaluation is what playing a song *is* — clean
+      // subgraphs arrive as cached stems, only dirt costs). An explicit
+      // label — `creek/track:main`, an asset, several patterns — stays
+      // file playback of the built artifact.
+      const liveSong =
+        patterns.length === 1 && project.songs.find((s) => s.name === patterns[0])
+          ? patterns[0]!
+          : undefined;
+      if (liveSong !== undefined) {
+        if (opts.click === true) {
+          // The click renders CLI-side over a file, which a live session
+          // is not; the artifact spelling still composes with it.
+          throw new Error(
+            `--click rides file playback: field play ${liveSong}/track:main --click`,
+          );
         }
         const { playLiveSession } = await import('./commands/play.js');
-        const project = loadProject(root);
         let interrupted = false;
         process.once('SIGINT', () => {
           interrupted = true;
@@ -456,9 +465,11 @@ program
         await playLiveSession(
           root,
           project,
-          patterns[0]!,
+          liveSong,
           {
             ...(opts.device !== undefined ? { device: opts.device } : {}),
+            ...(opts.from !== undefined ? { from: opts.from } : {}),
+            ...(opts.loop === true ? { loop: true } : {}),
             ...(opts.watch === true ? { watch: true, signal: liveAbort.signal } : {}),
           },
           {
@@ -492,7 +503,7 @@ program
       if (opts.watch === true) {
         // The loop-wrap takeover retired with the live engine
         // (realtime.md chunk 3): edits land mid-play there, no wrap wait.
-        throw new Error('play --watch rides the live engine: field play <song> --live --watch');
+        throw new Error("play --watch follows a song's live session: field play <song> --watch");
       }
 
       const watchAbort = new AbortController();
@@ -513,7 +524,6 @@ program
         })();
       });
 
-      const project = loadProject(root);
       if (opts.click === true) {
         const { applyClick } = await import('./commands/click.js');
         items = applyClick(root, project, items);

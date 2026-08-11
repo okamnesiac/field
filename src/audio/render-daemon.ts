@@ -99,13 +99,21 @@ function requireBinary(): string {
   return binary;
 }
 
-export async function renderInsertChain(plan: RenderPlan): Promise<void> {
+export async function renderInsertChain(
+  plan: RenderPlan,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
   const binary = requireBinary();
   const dir = mkdtempSync(join(tmpdir(), 'field-render-'));
   const planPath = join(dir, 'plan.json');
   try {
     writeFileSync(planPath, JSON.stringify({ version: RENDER_PLAN_VERSION, ...plan }));
-    await execFileAsync(binary, ['--render', planPath]);
+    // The signal kills the render subprocess: a background freeze must
+    // not outlive the session that asked for it (Codex's finding). A
+    // killed run writes no action entry, so the cache never sees it.
+    await execFileAsync(binary, ['--render', planPath], {
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    });
   } catch (error) {
     // The daemon writes the reason to stderr and exits non-zero; surface
     // that rather than the exec wrapper's "Command failed", which names

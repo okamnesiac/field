@@ -50,14 +50,19 @@ comment edit or `field fmt` pass is all cache hits and reports silence.
 mid-edit — the common case) keeps its last good outputs and retries on
 the next change.
 
-`field play <song> --live --watch` composes the same loop with playback,
-minus the wait: each settled change recompiles the song's live session,
-a gain move ramps in the next block, and anything structural swaps the
+`field play <song> --watch` composes the same loop with playback, minus
+the wait: each settled change recompiles the song's live session, a
+gain move ramps in the next block, and anything structural swaps the
 session at a block boundary with the transport carried — no wrap to
-wait for (realtime.md chunk 3). The compile still runs `build` for the
-session's file sources, and build never runs a generative request — but
-a `chosen:` repoint is just a YAML edit, so `field choose` against a
-running watch is live variant A/B-ing mid-play.
+wait for (realtime.md chunk 3). The compile is where the cache pays
+twice (realtime.md decision 4): a track whose stem action is cached is
+served as that stem — automatic freezing, no live chain to run — and
+under watch the dirty stems rebuild behind the play and freeze on the
+next compile, a swap with nothing to hear because live and offline are
+bit-identical. The compile still runs `build` for the session's file
+sources, and build never runs a generative request — but a `chosen:`
+repoint is just a YAML edit, so `field choose` against a running watch
+is live variant A/B-ing mid-play.
 
 ### Getting a file out
 

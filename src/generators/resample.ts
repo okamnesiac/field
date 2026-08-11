@@ -32,12 +32,15 @@ export const resampleGenerator: Generator<ResampleSpec> = {
     // speak (same reasoning as stem's no-op).
   },
 
-  async execute(spec, inputPaths, outputPath) {
-    await renderInsertChain({
-      op: 'resample',
-      input: inputPaths[0]!,
-      output: outputPath,
-      sample_rate: spec.sample_rate,
-    });
+  async execute(spec, inputPaths, outputPath, ctx) {
+    await renderInsertChain(
+      {
+        op: 'resample',
+        input: inputPaths[0]!,
+        output: outputPath,
+        sample_rate: spec.sample_rate,
+      },
+      { ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}) },
+    );
   },
 };

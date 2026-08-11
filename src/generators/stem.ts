@@ -447,15 +447,18 @@ export const stemGenerator: Generator<StemSpec> = {
       duration: clip.duration ?? Math.max(0, frames[clip.input]! - clip.read_offset),
     }));
 
-    await renderInsertChain({
-      op: 'stem',
-      output: outputPath,
-      sample_rate: ctx.sampleRate,
-      inputs: inputPaths,
-      clips,
-      ...(spec.inserts !== undefined ? { inserts: spec.inserts } : {}),
-      ...(spec.length_samples !== undefined ? { length_samples: spec.length_samples } : {}),
-      ...(spec.loop !== undefined ? { loop: spec.loop } : {}),
-    });
+    await renderInsertChain(
+      {
+        op: 'stem',
+        output: outputPath,
+        sample_rate: ctx.sampleRate,
+        inputs: inputPaths,
+        clips,
+        ...(spec.inserts !== undefined ? { inserts: spec.inserts } : {}),
+        ...(spec.length_samples !== undefined ? { length_samples: spec.length_samples } : {}),
+        ...(spec.loop !== undefined ? { loop: spec.loop } : {}),
+      },
+      { ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}) },
+    );
   }
 };

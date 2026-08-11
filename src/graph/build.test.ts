@@ -609,3 +609,33 @@ describe('query and explain', () => {
     expect(after.outputs).toHaveLength(1);
   });
 });
+
+describe('build cancellation (realtime.md chunk 4)', () => {
+  it('the signal reaches the runner, and an aborted one stops the walk', async () => {
+    const seen: (AbortSignal | undefined)[] = [];
+    const observing: GeneratorRunner = async (node, inputPaths, outputPath, ctx) => {
+      seen.push(ctx.signal);
+      if (inputPaths.length > 0) copyFileSync(inputPaths[0]!, outputPath);
+      else writeFileSync(outputPath, `out:${node.label.name}`);
+    };
+    const live = new AbortController();
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], observing, undefined, live.signal);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((s) => s === live.signal)).toBe(true);
+
+    // Aborted before the walk: nothing runs — the background freeze's
+    // ctrl-c must not keep rendering (realtime.md chunk 4). The moved
+    // frequency mints a fresh action key, so a run would execute.
+    writeTrack('pad-eq', eqTrackYaml(900));
+    const aborted = new AbortController();
+    aborted.abort();
+    let ran = 0;
+    const counting: GeneratorRunner = async () => {
+      ran++;
+    };
+    await expect(
+      buildLabels(root, ['//songs/creek/track:pad-eq'], counting, undefined, aborted.signal),
+    ).rejects.toThrow('build aborted');
+    expect(ran).toBe(0);
+  });
+});
