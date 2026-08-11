@@ -412,7 +412,23 @@ export async function playLiveSession(
       );
     }
     if (options.device !== undefined) await client.selectDevice(options.device);
-    const loaded = await client.session(session);
+    let loaded;
+    try {
+      loaded = await client.session(session);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The daemon's rate refusal carries the physics; the way out is a
+      // CLI spelling the daemon knows nothing about, so it is appended
+      // here — the only place holding both halves (minjudd's finding:
+      // this is the default path now, and the artifact resamples in
+      // the transport, so the command that fails has a working answer).
+      if (message.includes('cannot switch to the session')) {
+        throw new Error(
+          `${message} — the artifact resamples in the transport: field play ${song}/track:main`,
+        );
+      }
+      throw err;
+    }
     let ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
     if (options.from !== undefined) {
       if (ctx === undefined) {
