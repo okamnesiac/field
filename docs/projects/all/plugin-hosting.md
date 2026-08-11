@@ -397,6 +397,28 @@ does not.
   a scan exists to judge it.
 - **Linux/Windows timing.** VST3 hosting is the portable half; when
   the platforms graduate from at-least-works is not this plan's call.
+- **AU natural units, found in first field use** (chunk 3 owes the
+  decision, with chunk 1's behavior recorded honestly): Apple's
+  built-in AUs implement no text→value conversion, so JUCE's AU host
+  parses a numeric param value as *normalized 0–1* — `Dry/Wet Mix:
+  30` refuses (correctly, as unrecognized) and `0.3` is the working
+  spelling, which is not the natural-units promise. VST3 converts
+  properly through the controller, and AUs that publish value
+  strings (UAD's labels) work; the gap is AU continuous params
+  without ValueFromString. Candidate fixes: display-guided inversion
+  (search normalized space for the value whose own display matches
+  the authored number — adaptive unit displays make this non-trivial),
+  or recording the conversion gap per parameter at scan time and
+  validating the spelling accordingly.
+- **DSP-backed plugins without their hardware, found the same hour**
+  (chunk 4's to answer, and sharpened by measurement): a UAD
+  Apollo plugin with no Apollo attached instantiates, reports its
+  latency, and *passes audio through dry* — creek's drums rendered
+  byte-equivalent to their input under an action key claiming a
+  4:1+8:1 1176. Authorization and hardware presence are machine
+  state the key cannot see, so chunk 4 must turn "DSP absent" into a
+  refusal at instantiation the way version drift already is, not a
+  silent bypass the cache then serves forever.
 
 ## 7 Definition of done
 
