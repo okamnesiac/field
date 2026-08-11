@@ -226,6 +226,25 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     writeFileSync(mainPath, mainYaml.replace('at: 30000', 'at: 36000'));
     const moved = await compileSession(root, 'opener');
     expect(diffSessions(before, moved)).toEqual({ kind: 'swap' });
+    writeFileSync(mainPath, mainYaml);
+
+    // An edited chain is structural even when the edited field is
+    // spelled gain_db — an eq band's gain is not the mixer surface
+    // (minjudd's finding: a name-keyed mask classified this `same` and
+    // the edit never reached the daemon in either direction).
+    const voicePath = join(root, 'songs/opener/tracks/voice.yaml');
+    const voiceYaml = readFileSync(voicePath, 'utf8');
+    writeFileSync(voicePath, voiceYaml.replace('gain_db: 3', 'gain_db: 6'));
+    const chained = await compileSession(root, 'opener');
+    expect(diffSessions(before, chained)).toEqual({ kind: 'swap' });
+
+    // A window gain on a non-output track swaps too: children bake
+    // their gains into buffers pre-rendered at load, so a ramp there
+    // would report success and change nothing (Codex's finding).
+    writeFileSync(voicePath, voiceYaml.replace('    at: 0', '    at: 0\n    gain_db: -3'));
+    const childGained = await compileSession(root, 'opener');
+    expect(diffSessions(before, childGained)).toEqual({ kind: 'swap' });
+
     expect(diffSessions(before, before)).toEqual({ kind: 'same' });
   });
 
@@ -240,13 +259,22 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
       const before = await client.status();
       expect(before.state).toBe('playing');
 
-      // A structural edit recompiles and swaps; the play never stops and
-      // the position carries — the loop-wrap wait this chunk retires.
-      const swapped = { ...session, tracks: session.tracks };
+      // A structural edit recompiles and swaps; the play never stops
+      // and the position carries — the loop-wrap wait this chunk
+      // retires. The edit is real (a moved placement, minjudd's
+      // finding): a copy of the playing session would pass these
+      // assertions even if loadSession ignored its argument.
+      const mainPath = join(root, 'songs/opener/tracks/main.yaml');
+      writeFileSync(
+        mainPath,
+        readFileSync(mainPath, 'utf8').replace('at: 30000', 'at: 36000'),
+      );
+      const swapped = await compileSession(root, 'opener');
+      expect(diffSessions(session, swapped)).toEqual({ kind: 'swap' });
       await client.session(swapped);
       const after = await client.status();
       expect(after.state).toBe('playing');
-      expect(after.sample).toBeGreaterThanOrEqual(before.sample);
+      expect(after.sample).toBeGreaterThan(before.sample);
       await client.stop();
     } finally {
       try {

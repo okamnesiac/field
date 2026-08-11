@@ -34,6 +34,14 @@ const windowFields = {
 
 export const fileWindowSchema = z.strictObject({
   file: z.string().min(1), // project-root-relative
+  // The content behind the path (BuildOutcome.sha256). A source can
+  // change bytes under a stable path — a regenerated take, a re-edited
+  // asset — and a session that named only the path would serialize
+  // identically, so diffSessions would call the edit `same` and the
+  // daemon would keep playing what it preloaded (Codex's finding on
+  // #139). The engine never reads this field — a swap reloads every
+  // file fresh — it exists so identity comparisons see the bytes.
+  sha256: z.string().min(1),
   ...windowFields,
 });
 
