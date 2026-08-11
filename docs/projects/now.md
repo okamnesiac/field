@@ -21,6 +21,10 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
   recorded follow-ups (streaming rings before large sessions,
   cross-rate wiring) are where an edit would land.
 
+- [Reverbs](all/reverbs.md) — two new inserts that beat Freeverb: a
+  Dattorro `plate` and an FDN `hall` with per-band decay, with the
+  old `reverb` kept deliberately as the live A/B comparison.
+
 - [Nested tracks](all/nested-tracks.md) — a track can contain tracks, so
   structure, local time and the mixer are one primitive; every chunk has
   shipped, sends last (§19): cables validate and render offline, and

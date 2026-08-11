@@ -260,6 +260,18 @@ stands as drafted; its list line waits in later.md.
 3. **Edits land mid-play** — the CLI compiles and diffs on file
    change, ramps vs. subgraph swaps, watch integration; the loop-wrap
    takeover machinery retires.
+
+   *Amended 2026-08-11 (recording shipped behaviour two later plans
+   lean on):* this chunk's review round (#139) gave `locate` its
+   warm-up: a far seek rebuilds the output chain and then renders one
+   warm-up span — each reverb's tail, each limiter's window, a second
+   per eq stage — into the void before the position sounds, so the
+   state at an audible position matches a from-the-start render
+   within the design's own audibility threshold, 60 dB. That bound
+   had lived only as `chainWarmup`'s comment in live.cpp;
+   [reverbs.md](reverbs.md) and
+   [cross-rate-live.md](cross-rate-live.md) both reason from it, so
+   it is recorded here where they can cite it.
 4. **The cache is the freeze** — the compiler sends cached stems for
    clean subgraphs, the engine swaps a track between cached and live
    as dirtiness changes, and CPU stops scaling with session size.
