@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Shipped
 ---
 
 # Plan: Cross-rate live wiring

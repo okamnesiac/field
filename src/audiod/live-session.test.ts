@@ -9,7 +9,7 @@ import { buildLabels } from '../commands/build.js';
 import { createSong, createTrack } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import { compileSession, diffSessions } from '../graph/live.js';
+import { compileSession, convertedLength, diffSessions } from '../graph/live.js';
 import { watchLiveSession } from '../commands/watch-live.js';
 import { AudiodClient, daemonBinary } from './client.js';
 import type { Session } from './session.js';
@@ -322,6 +322,184 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     writeFileSync(songPath, songYaml.replace('length: 72000\n', ''));
     const natural = await compileSession(root, 'opener');
     expect(natural.session.length_samples).toBeGreaterThanOrEqual(54000);
+  });
+
+  it('a cross-rate child runs live and renders byte-identically (cross-rate-live.md)', async () => {
+    init({ dir: root, name: 'xrate' });
+    createSong(root, 'opener');
+    const tone = join(tmpdir(), `xrate-tone-${process.pid}.wav`);
+    const frames = 22050;
+    const left = new Float32Array(frames);
+    const right = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) {
+      left[i] = 0.4 * Math.sin((2 * Math.PI * 330 * i) / 44100);
+      right[i] = 0.3 * Math.sin((2 * Math.PI * 220 * i) / 44100);
+    }
+    writeWavFloat32(tone, 44100, [left, right]);
+    await importAsset(root, 'opener', tone, 'tone44', { allowMismatch: true });
+    rmSync(tone);
+    createTrack(root, 'opener', 'low');
+    writeFileSync(
+      join(root, 'songs/opener/tracks/low.yaml'),
+      ['name: low', 'rate: 44100', 'inputs:', '  - audio: tone44', '    anchor: absolute', '    at: 0', ''].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - track: low', '    anchor: absolute', '    at: 0', ''].join('\n'),
+    );
+
+    // Cold: the conversion is uncached, so the child evaluates live at
+    // its own rate — no refusal, and no synchronous stem build inside
+    // the compile (the cliff decision 7 rejected). Dirty speaks the
+    // convert label for the background freeze.
+    const cold = await compileSession(root, 'opener');
+    expect(cold.session.tracks.find((t) => t.name === 'low')!.rate).toBe(44100);
+    expect(cold.dirty).toContain('//songs/opener/convert:track-low-48000');
+    const sessionPath = join(root, 'session.json');
+    writeFileSync(sessionPath, JSON.stringify(cold.session));
+    const livePath = join(root, 'live.wav');
+    await execFileAsync(binary!, ['--render-live', sessionPath, livePath], { cwd: root });
+
+    // The decision-1 golden: the engine's materialized edge conversion
+    // is the same kernel on the same samples the offline convert node
+    // runs, so the bytes cannot differ.
+    const offline = await buildLabels(root, ['//songs/opener/track:main']);
+    const artifact = offline.find((o) => o.label.endsWith('track:main'))!.outputPath!;
+    expect(wavData(livePath).equals(wavData(artifact))).toBe(true);
+
+    // Warm: the conversion is cached now, so it freezes to a file
+    // window, the child drops from the session, and the same bytes
+    // come out — the clean case's first proof, not a re-confirmation.
+    const warm = await compileSession(root, 'opener');
+    expect(warm.dirty).toEqual([]);
+    expect(warm.session.tracks.map((t) => t.name)).toEqual(['main']);
+    expect(diffSessions(cold.session, warm.session)).toEqual({ kind: 'swap' });
+    const warmPath = join(root, 'warm-session.json');
+    writeFileSync(warmPath, JSON.stringify(warm.session));
+    const warmLive = join(root, 'warm-live.wav');
+    await execFileAsync(binary!, ['--render-live', warmPath, warmLive], { cwd: root });
+    expect(wavData(warmLive).equals(wavData(artifact))).toBe(true);
+
+    // The compiler's mirror of resample.cpp's flush rule, including
+    // the branches it was written to get right: zero in zero out, and
+    // never round a non-empty source away (the #57 two-frame case).
+    expect(convertedLength(0, 96000, 44100)).toBe(0);
+    expect(convertedLength(2, 96000, 44100)).toBe(1);
+    expect(convertedLength(22050, 44100, 48000)).toBe(24000);
+    expect(convertedLength(24000, 48000, 48000)).toBe(24000);
+  });
+
+  it('a device that cannot switch converts delivery instead of refusing', async () => {
+    init({ dir: root, name: 'fortyfour', sampleRate: 44100 });
+    createSong(root, 'opener');
+    const tone = join(tmpdir(), `ff-tone-${process.pid}.wav`);
+    const frames = 22050; // half a second: the natural end arrives fast
+    const mono = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) mono[i] = 0.4 * Math.sin((2 * Math.PI * 261 * i) / 44100);
+    writeWavFloat32(tone, 44100, [mono, mono]);
+    await importAsset(root, 'opener', tone, 'tone');
+    rmSync(tone);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
+    );
+
+    const { session } = await compileSession(root, 'opener');
+    expect(session.rate).toBe(44100);
+    const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    try {
+      // The null device runs at a fixed 48 kHz and cannot switch: this
+      // load refused before cross-rate-live.md decision 3.
+      const loaded = await client.session(session);
+      expect(loaded.sample_rate).toBe(44100);
+      await client.play();
+      await new Promise((r) => setTimeout(r, 300));
+      const playing = await client.status();
+      expect(playing.state).toBe('playing');
+      expect(playing.sample).toBeGreaterThan(0);
+      // Natural end: finished only fires once the converted FIFO
+      // drains, so the tail is heard before the transport stops.
+      const deadline = Date.now() + 10_000;
+      let state = playing.state;
+      while (state !== 'stopped' && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        state = (await client.status()).state;
+      }
+      expect(state).toBe('stopped');
+    } finally {
+      try {
+        await client.quit();
+      } catch {
+        // already gone
+      }
+      client.close();
+    }
+  });
+
+  it('a swap keeps converted delivery seamless: the queued tail survives', async () => {
+    // Swap-with-carry under conversion (cross-rate-live.md decision 3,
+    // minjudd's finding on #143): the FIFO holds already-converted
+    // audio the ear has not heard yet, and a swap that keeps the rate
+    // pair must keep it — dropping it skips 10–20 ms on every
+    // live-watch edit.
+    init({ dir: root, name: 'fortyfour', sampleRate: 44100 });
+    createSong(root, 'opener');
+    const tone = join(tmpdir(), `ff-swap-${process.pid}.wav`);
+    const frames = 88200; // two seconds: room to pause mid-stream
+    const mono = new Float32Array(frames);
+    for (let i = 0; i < frames; i++) mono[i] = 0.4 * Math.sin((2 * Math.PI * 261 * i) / 44100);
+    writeWavFloat32(tone, 44100, [mono, mono]);
+    await importAsset(root, 'opener', tone, 'tone');
+    rmSync(tone);
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
+    );
+
+    const { session } = await compileSession(root, 'opener');
+    const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    try {
+      await client.session(session);
+      await client.play();
+      // Pause mid-stream with converted audio in flight. The fill loop
+      // overshoots the device block, so the FIFO is almost always
+      // non-empty at a pause; retry the rare exact-drain landing.
+      let queued = 0;
+      let before = 0;
+      for (let attempt = 0; attempt < 10 && queued === 0; attempt++) {
+        await new Promise((r) => setTimeout(r, 150));
+        await client.pause();
+        await new Promise((r) => setTimeout(r, 50)); // let the last callback finish
+        const paused = await client.status();
+        queued = paused.conv_queued ?? 0;
+        before = paused.sample;
+        if (queued === 0) await client.play();
+      }
+      expect(queued).toBeGreaterThan(0);
+      // The swap: same song recompiled, same rate pair. The converter,
+      // its queued frames, and the carried position all survive.
+      await client.session(session);
+      const after = await client.status();
+      expect(after.conv_queued).toBe(queued);
+      expect(after.sample).toBe(before);
+      // And the stream still ends itself through the kept converter:
+      // the extent flush and the drain wait are unaffected by the swap.
+      await client.play();
+      const deadline = Date.now() + 15_000;
+      let state = 'playing';
+      while (state !== 'stopped' && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        state = (await client.status()).state;
+      }
+      expect(state).toBe('stopped');
+    } finally {
+      try {
+        await client.quit();
+      } catch {
+        // already gone
+      }
+      client.close();
+    }
   });
 
   it('the cache is the freeze (realtime.md chunk 4)', async () => {

@@ -11,7 +11,7 @@ namespace field
 {
 namespace
 {
-constexpr int liveSessionVersion = 1; // session.ts SESSION_VERSION
+constexpr int liveSessionVersion = 2; // session.ts SESSION_VERSION
 constexpr int engineBlock = 512; // internal granularity; output is block-size invariant
 
 double requireNumber (const juce::var& object, const char* key, const char* what)
@@ -57,11 +57,10 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
     {
         Track track;
         track.name = requireString (entry, "name", "track");
+        // A foreign rate is legal since session version 2: the track
+        // evaluates at its own rate and every consuming edge converts
+        // (cross-rate-live.md decision 1).
         track.rate = (int) requireNumber (entry, "rate", "track");
-        if (track.rate != rate)
-            throw std::runtime_error ("track \"" + track.name
-                                      + "\" declares a foreign rate — live cross-rate edges land "
-                                        "with the resampler wiring, later in chunk 2");
         trackIndex[track.name] = (int) tracks.size();
         tracks.push_back (std::move (track));
     }
@@ -155,7 +154,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 spec.limiter.ceilingDb = requireNumber (insert, "ceiling_db", "limit insert");
                 spec.limiter.lookaheadMs = requireNumber (insert, "lookahead_ms", "limit insert");
                 spec.limiter.releaseMs = requireNumber (insert, "release_ms", "limit insert");
-                spec.limiter.sampleRate = (double) rate;
+                spec.limiter.sampleRate = (double) track.rate;
                 spec.horizonDb = requireNumber (insert, "horizon_db", "limit insert");
             }
             else if (effect == "reverb")
@@ -165,7 +164,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 spec.reverb.decaySeconds = requireNumber (insert, "decay", "reverb insert");
                 spec.reverb.predelayMs = requireNumber (insert, "predelay_ms", "reverb insert");
                 spec.reverb.damping = requireNumber (insert, "damping", "reverb insert");
-                spec.reverb.sampleRate = (double) rate;
+                spec.reverb.sampleRate = (double) track.rate;
             }
             else
             {
@@ -207,6 +206,16 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
     for (int t = 0; t < (int) tracks.size(); ++t)
         if (t != outputTrack)
             produceUntil (t, tracks[(size_t) t].postLength);
+    // Every cross-rate edge's conversion exists before the callback
+    // runs: the pre-render recursion above built the ones children
+    // consume, and this pass covers the output track's own windows.
+    // After load, mixInputBlock's ensure is a map lookup.
+    for (const auto& track : tracks)
+        for (const auto& window : track.windows)
+            if (window.kind != Window::file
+                && tracks[(size_t) window.source].rate != track.rate)
+                ensureConverted (window.source, track.rate,
+                                 window.kind == Window::receivePre);
     scratchBlock.assign (2, std::vector<float>());
     scratchMixed.assign (2, std::vector<float>());
     for (int c = 0; c < 2; ++c)
@@ -224,8 +233,11 @@ void LiveSession::buildChain (Track& track) const
     {
         ChainStage stage;
         if (spec.kind == 0)
-            stage.eq = std::make_unique<dsp::Eq> (spec.bands, spec.normalize, (double) rate,
-                                                  (size_t) 2);
+            // The track's own rate, not the session's: a foreign-rate
+            // track's chain runs on its own clock, exactly as its
+            // offline stem does.
+            stage.eq = std::make_unique<dsp::Eq> (spec.bands, spec.normalize,
+                                                  (double) track.rate, (size_t) 2);
         else if (spec.kind == 1)
             stage.limiter = std::make_unique<dsp::Limiter> (spec.limiter, (size_t) 2,
                                                             spec.horizonDb);
@@ -251,10 +263,18 @@ void LiveSession::mixInputBlock (Track& track,
         if (overlapEnd <= overlapStart)
             continue;
 
-        // Ensure the child exists as far as this window reads it.
+        // Ensure the child exists as far as this window reads it. A
+        // cross-rate child converts wholesale instead (the window's
+        // indices are in this track's rate, the child's buffer in its
+        // own); after load the ensure is a map lookup — the constructor
+        // built every conversion off the audio thread.
+        const bool cross = window.kind != Window::file
+                           && tracks[(size_t) window.source].rate != track.rate;
         const juce::int64 maxSource
             = window.readOffset + (overlapEnd - 1 - window.start) - window.compDelay;
-        if (window.kind == Window::track)
+        if (cross)
+            ensureConverted (window.source, track.rate, window.kind == Window::receivePre);
+        else if (window.kind == Window::track)
             produceUntil (window.source,
                           std::min (maxSource + 1, tracks[(size_t) window.source].postLength));
         else if (window.kind == Window::receivePre)
@@ -271,8 +291,11 @@ void LiveSession::mixInputBlock (Track& track,
         }
         else
         {
-            const auto& child = tracks[(size_t) window.source];
-            const auto& buffers = window.kind == Window::track ? child.post : child.pre;
+            auto& child = tracks[(size_t) window.source];
+            const auto& buffers
+                = window.kind == Window::track
+                      ? (cross ? child.postConverted.at (track.rate) : child.post)
+                      : (cross ? child.preConverted.at (track.rate) : child.pre);
             srcL = &buffers[0];
             srcR = &buffers[1];
         }
@@ -319,6 +342,24 @@ void LiveSession::mixInputBlock (Track& track,
                 = (float) ((double) block[1][out] + (double) (*srcR)[(size_t) s] * g * balanceR);
         }
     }
+}
+
+void LiveSession::ensureConverted (int trackIndexArg, int targetRate, bool pre)
+{
+    Track& child = tracks[(size_t) trackIndexArg];
+    auto& slot = pre ? child.preConverted : child.postConverted;
+    if (slot.find (targetRate) != slot.end())
+        return;
+    // The whole child first (it pre-renders in full at load anyway),
+    // then one wholesale pass through the offline wrapper — the same
+    // kernel on the same samples the offline convert node runs, which
+    // is what makes the edge bit-identical to the offline render
+    // (cross-rate-live.md decision 1). Message thread only; the
+    // constructor's eager pass guarantees the callback always finds
+    // the map populated.
+    produceUntil (trackIndexArg, child.postLength);
+    slot[targetRate] = dsp::resample (pre ? child.pre : child.post,
+                                      (double) child.rate, (double) targetRate);
 }
 
 void LiveSession::produceUntil (int trackIndexArg, juce::int64 outputSamples)

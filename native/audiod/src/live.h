@@ -121,11 +121,24 @@ private:
         // fed), fed counts input samples pushed through the chain.
         std::vector<std::vector<float>> post; // [2][postLength]
         std::vector<std::vector<float>> pre; // [2][preLength], when needed
+        // Materialized edge conversions (cross-rate-live.md decision 1):
+        // this track's buffer converted wholesale to a consumer's rate
+        // through the offline wrapper — the same kernel on the same
+        // samples the offline convert node runs, so bit-identity with
+        // the offline render is by construction. Keyed by consumer
+        // rate; built off the audio thread at load.
+        std::map<int, std::vector<std::vector<float>>> postConverted;
+        std::map<int, std::vector<std::vector<float>>> preConverted;
         juce::int64 produced = 0;
         juce::int64 fed = 0;
     };
 
     void produceUntil (int trackIndex, juce::int64 outputSamples);
+    // Produce the child in full and convert its buffer to targetRate,
+    // once per (track, rate). Runs on the message thread — during the
+    // load's pre-render recursion or the constructor's eager pass — so
+    // the callback only ever finds the map populated.
+    void ensureConverted (int trackIndex, int targetRate, bool pre);
     void buildChain (Track& track) const;
     // The history the output chain must hear for its state at a
     // position to be right within the design's audibility threshold —

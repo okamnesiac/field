@@ -7,6 +7,9 @@
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <vector>
+
+#include "dsp/resample.h"
 
 namespace field
 {
@@ -139,6 +142,33 @@ private:
     bool liveLoop = false;
     int liveRate = 0;
     bool liveEverStarted = false;
+
+    // Delivery conversion (cross-rate-live.md decision 3): when the
+    // device cannot switch to the session's rate, the output stream
+    // runs through the streaming resampler instead of refusing.
+    // Rebuilt — which is also the reset the plan specifies — under
+    // liveLock at locate, stop, and device start; null when the rates
+    // agree. A session swap keeps the converter and its FIFO when the
+    // (session, device) rate pair is unchanged — the queued audio is
+    // exactly what the ear should hear next, and dropping it skipped
+    // 10–20 ms on every live-watch edit (minjudd's finding on #143) —
+    // so loadSession installs prepared state instead of calling this.
+    // convOut is the converted FIFO the callback drains; convQueued
+    // mirrors its unread frame count for status (the in-flight skew
+    // decision 3 bounds); completion is checked under liveLock in
+    // streamFinished, where the mirror would race the final callback.
+    void rebuildLiveConverter();
+    double currentDeviceRate() const;
+    std::unique_ptr<field::dsp::Resampler> liveConverter;
+    std::vector<std::vector<float>> convIn;
+    std::vector<std::vector<float>> convOut;
+    size_t convOutRead = 0;
+    bool convFlushed = false;
+    std::atomic<juce::int64> convQueued { 0 };
+    // The rate pair the conversion state was built for, so a swap can
+    // tell a same-pair edit (keep everything) from a real change.
+    double convLiveRate = 0.0;
+    double convDeviceRate = 0.0;
 
     // Null-output mode: a thread pulls the transport at real-time pace so
     // transport, position, and end-of-stream all behave exactly as with a

@@ -11,7 +11,11 @@ import { z } from 'zod';
 // evaluating a session whose meaning it misreads is a quietly wrong
 // monitor. Bumped whenever the shape's meaning changes.
 
-export const SESSION_VERSION = 1;
+// 2: track rates are load-bearing at edges — a session may carry a
+// track at a foreign rate and the engine converts where it is consumed
+// (cross-rate-live.md decision 4). An engine that would sum the raw
+// samples must refuse, which the version check is.
+export const SESSION_VERSION = 2;
 
 // One placed window, mirroring the render plan's clip exactly — same
 // fields, same units, same omit-when-centred pan rule — except that the

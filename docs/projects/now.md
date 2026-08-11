@@ -6,10 +6,12 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
-- [Cross-rate live wiring](all/cross-rate-live.md) — realtime
-  decision 7's owed piece: a foreign-rate dirty track evaluates live
-  with the edge converting, and a device that cannot switch to the
-  session's rate gets converted delivery instead of a refusal.
+- [Cross-rate live wiring](all/cross-rate-live.md) — shipped whole: a
+  foreign-rate dirty track evaluates live with the edge converting
+  (byte-identical to the offline render, proven), a device that
+  cannot switch gets converted delivery, and all three rate refusals
+  are gone; stays until a session has actually played through a live
+  cross-rate edge in anger, per multi-rate's precedent.
 
 - [Realtime](all/realtime.md) — the graph runs live, and all four
   chunks shipped: the streaming DSP library, the live graph

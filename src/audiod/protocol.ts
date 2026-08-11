@@ -60,6 +60,9 @@ export const statusResponseSchema = z.object({
   live: z.boolean().optional(), // a live session is loaded (daemon feature "session")
   song: z.string().optional(), // the live session's song (live only)
   sample_rate: z.number().optional(), // the live session's rate (live only)
+  // Converted delivery's in-flight frames (live only, daemon >= 0.7):
+  // the skew cross-rate-live.md decision 3 bounds, made visible.
+  conv_queued: z.number().int().optional(),
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });
