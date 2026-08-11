@@ -73,6 +73,18 @@ private:
         std::unique_ptr<dsp::Limiter> limiter;
         std::unique_ptr<dsp::Reverb> reverb;
     };
+    // Everything needed to rebuild a stage: locate discards chain state
+    // (a seek does not inherit the previous position's tails) and
+    // reconstructs from these.
+    struct ChainSpec
+    {
+        int kind = 0; // 0 eq, 1 limit, 2 reverb
+        std::vector<dsp::Band> bands;
+        bool normalize = false;
+        dsp::LimiterSettings limiter;
+        double horizonDb = 0.0;
+        dsp::ReverbSettings reverb;
+    };
 
     struct Window
     {
@@ -100,6 +112,7 @@ private:
         int rate = 0;
         std::vector<Window> windows;
         std::vector<ChainStage> chain;
+        std::vector<ChainSpec> chainSpecs;
         juce::int64 preLength = 0; // content end (before the chain grows it)
         juce::int64 postLength = 0;
         bool needPre = false; // some cable taps pre
@@ -113,7 +126,15 @@ private:
     };
 
     void produceUntil (int trackIndex, juce::int64 outputSamples);
-    void mixInputBlock (Track& track, juce::int64 from, int n, std::vector<std::vector<float>>& block);
+    void buildChain (Track& track) const;
+    // `absoluteFrom` is the unwrapped timeline position of `from` — the
+    // output track mixes in wrapped time but ramps glide on real time,
+    // so a fader move never reverses after a loop wrap.
+    void mixInputBlock (Track& track,
+                        juce::int64 from,
+                        int n,
+                        std::vector<std::vector<float>>& block,
+                        juce::int64 absoluteFrom);
     // Runs `working` through the chain from `fromStage`; a limiter stage
     // re-points working at what it emitted (which may be shorter while
     // its window primes).
@@ -128,6 +149,12 @@ private:
     int outputTrack = 0;
     juce::int64 clock = 0; // input timeline consumed
     juce::int64 delivered = 0; // output delivered (lags clock by chain latency)
+
+    // Callback scratch, allocated at load so the audio thread never
+    // touches the heap in steady state (children pre-render at load for
+    // the same reason).
+    std::vector<std::vector<float>> scratchBlock;
+    std::vector<std::vector<float>> scratchMixed;
 
     std::vector<std::vector<std::vector<float>>> files; // preloaded, 1–2 ch
     std::vector<Track> tracks;

@@ -134,10 +134,10 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
         for (const auto& insert : requireArray (entry, "chain", "track"))
         {
             const auto effect = requireString (insert, "effect", "insert");
-            ChainStage stage;
+            ChainSpec spec;
             if (effect == "eq")
             {
-                std::vector<dsp::Band> bands;
+                spec.kind = 0;
                 for (const auto& band : requireArray (insert, "bands", "eq insert"))
                 {
                     dsp::Band b;
@@ -145,38 +145,35 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                     b.frequency = requireNumber (band, "frequency", "eq band");
                     b.gainDb = requireNumber (band, "gain_db", "eq band");
                     b.bandwidth = requireNumber (band, "bandwidth", "eq band");
-                    bands.push_back (b);
+                    spec.bands.push_back (b);
                 }
-                stage.eq = std::make_unique<dsp::Eq> (
-                    bands, (bool) insert.getProperty ("normalize", juce::var (false)),
-                    (double) rate, (size_t) 2);
+                spec.normalize = (bool) insert.getProperty ("normalize", juce::var (false));
             }
             else if (effect == "limit")
             {
-                dsp::LimiterSettings settings;
-                settings.ceilingDb = requireNumber (insert, "ceiling_db", "limit insert");
-                settings.lookaheadMs = requireNumber (insert, "lookahead_ms", "limit insert");
-                settings.releaseMs = requireNumber (insert, "release_ms", "limit insert");
-                settings.sampleRate = (double) rate;
-                stage.limiter = std::make_unique<dsp::Limiter> (
-                    settings, (size_t) 2, requireNumber (insert, "horizon_db", "limit insert"));
+                spec.kind = 1;
+                spec.limiter.ceilingDb = requireNumber (insert, "ceiling_db", "limit insert");
+                spec.limiter.lookaheadMs = requireNumber (insert, "lookahead_ms", "limit insert");
+                spec.limiter.releaseMs = requireNumber (insert, "release_ms", "limit insert");
+                spec.limiter.sampleRate = (double) rate;
+                spec.horizonDb = requireNumber (insert, "horizon_db", "limit insert");
             }
             else if (effect == "reverb")
             {
-                dsp::ReverbSettings settings;
-                settings.mix = requireNumber (insert, "mix", "reverb insert");
-                settings.decaySeconds = requireNumber (insert, "decay", "reverb insert");
-                settings.predelayMs = requireNumber (insert, "predelay_ms", "reverb insert");
-                settings.damping = requireNumber (insert, "damping", "reverb insert");
-                settings.sampleRate = (double) rate;
-                stage.reverb = std::make_unique<dsp::Reverb> (settings, (size_t) 2);
+                spec.kind = 2;
+                spec.reverb.mix = requireNumber (insert, "mix", "reverb insert");
+                spec.reverb.decaySeconds = requireNumber (insert, "decay", "reverb insert");
+                spec.reverb.predelayMs = requireNumber (insert, "predelay_ms", "reverb insert");
+                spec.reverb.damping = requireNumber (insert, "damping", "reverb insert");
+                spec.reverb.sampleRate = (double) rate;
             }
             else
             {
                 throw std::runtime_error ("unknown insert effect \"" + effect + "\"");
             }
-            track.chain.push_back (std::move (stage));
+            track.chainSpecs.push_back (std::move (spec));
         }
+        buildChain (track);
     }
 
     // Lengths, computed here from the same facts the compiler used: the
@@ -202,12 +199,47 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 track.pre.assign (2, std::vector<float> ((size_t) track.preLength, 0.0f));
         }
     }
+
+    // Children render in full here, at load: the memory is already
+    // committed to their buffers, and it keeps the audio callback off
+    // the heap and out of recursion (Codex's finding on this PR). The
+    // scratch below is the callback's only working memory.
+    for (int t = 0; t < (int) tracks.size(); ++t)
+        if (t != outputTrack)
+            produceUntil (t, tracks[(size_t) t].postLength);
+    scratchBlock.assign (2, std::vector<float>());
+    scratchMixed.assign (2, std::vector<float>());
+    for (int c = 0; c < 2; ++c)
+    {
+        scratchBlock[(size_t) c].reserve (8192);
+        scratchMixed[(size_t) c].reserve (8192);
+    }
+}
+
+
+void LiveSession::buildChain (Track& track) const
+{
+    track.chain.clear();
+    for (const auto& spec : track.chainSpecs)
+    {
+        ChainStage stage;
+        if (spec.kind == 0)
+            stage.eq = std::make_unique<dsp::Eq> (spec.bands, spec.normalize, (double) rate,
+                                                  (size_t) 2);
+        else if (spec.kind == 1)
+            stage.limiter = std::make_unique<dsp::Limiter> (spec.limiter, (size_t) 2,
+                                                            spec.horizonDb);
+        else
+            stage.reverb = std::make_unique<dsp::Reverb> (spec.reverb, (size_t) 2);
+        track.chain.push_back (std::move (stage));
+    }
 }
 
 void LiveSession::mixInputBlock (Track& track,
                                  juce::int64 from,
                                  int n,
-                                 std::vector<std::vector<float>>& block)
+                                 std::vector<std::vector<float>>& block,
+                                 juce::int64 absoluteFrom)
 {
     for (auto& channel : block)
         std::fill (channel.begin(), channel.end(), 0.0f);
@@ -258,9 +290,11 @@ void LiveSession::mixInputBlock (Track& track,
             double g = baseGain;
             if (window.rampStart >= 0)
             {
-                // A dB-linear glide from rampFromDb to gainDb; before it
-                // starts, the old value; after, the new one.
-                const juce::int64 into = at - window.rampStart;
+                // A dB-linear glide from rampFromDb to gainDb, evaluated
+                // on the unwrapped timeline; before it starts, the old
+                // value; after, the new one — and after a wrap, still
+                // the new one.
+                const juce::int64 into = absoluteFrom + (at - from) - window.rampStart;
                 const double progress = window.rampLength <= 0
                                             ? 1.0
                                             : std::clamp ((double) into / (double) window.rampLength,
@@ -304,7 +338,7 @@ void LiveSession::produceUntil (int trackIndexArg, juce::int64 outputSamples)
             break; // everything fed; nothing further can emerge without a flush
         for (auto& channel : block)
             channel.assign ((size_t) n, 0.0f);
-        mixInputBlock (track, track.fed, n, block);
+        mixInputBlock (track, track.fed, n, block, track.fed);
 
         if (track.needPre)
             for (int c = 0; c < 2; ++c)
@@ -371,7 +405,9 @@ void LiveSession::flushChain (Track& track, std::vector<std::vector<float>>& wor
 void LiveSession::renderBlock (float* const* out, int numChannels, int n)
 {
     Track& output = tracks[(size_t) outputTrack];
-    std::vector<std::vector<float>> block (2, std::vector<float> ((size_t) n, 0.0f));
+    auto& block = scratchBlock;
+    for (auto& channel : block)
+        channel.assign ((size_t) n, 0.0f);
 
     // The output streams: wrapped-time input mixing, chains that never
     // reset — the wrap hears the previous pass's tails ring across it,
@@ -384,13 +420,24 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
             = loop && length > 0 ? length - t : std::max<juce::int64> (1, output.postLength - t);
         const int step = (int) std::min<juce::int64> (n - filled, std::max<juce::int64> (1, until));
 
-        std::vector<std::vector<float>> mixed (2, std::vector<float> ((size_t) step, 0.0f));
-        mixInputBlock (output, t, step, mixed);
+        auto& mixed = scratchMixed;
+        for (auto& channel : mixed)
+            channel.assign ((size_t) step, 0.0f);
+        mixInputBlock (output, t, step, mixed, clock);
         runChain (output, mixed, 0);
 
         for (int c = 0; c < 2; ++c)
             for (size_t i = 0; i < mixed[(size_t) c].size() && filled + (juce::int64) i < n; ++i)
-                block[(size_t) c][(size_t) (filled + (juce::int64) i)] = mixed[(size_t) c][i];
+            {
+                // A non-looping session truncates at its declared extent
+                // exactly as the offline render does — output samples at
+                // or past `length` are silence, whatever the chain still
+                // holds (Codex's finding on this PR).
+                const juce::int64 outAt = delivered + filled + (juce::int64) i;
+                const bool past = ! loop && length > 0 && outAt >= length;
+                block[(size_t) c][(size_t) (filled + (juce::int64) i)]
+                    = past ? 0.0f : mixed[(size_t) c][i];
+            }
         filled += (juce::int64) mixed[0].size();
         clock += step;
     }
@@ -411,6 +458,9 @@ void LiveSession::locate (juce::int64 sample)
 {
     clock = sample;
     delivered = sample;
+    // A seek does not inherit the previous position's tails: the output
+    // chain rebuilds from its specs, state zeroed (Codex's finding).
+    buildChain (tracks[(size_t) outputTrack]);
 }
 
 void LiveSession::ramp (const std::string& trackName, int input, double gainDb, double rampMs)
@@ -425,9 +475,10 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb, 
     Window& window = track.windows[(size_t) input];
     window.rampFromDb = window.gainDb;
     window.gainDb = gainDb;
-    // On the output's wrapped timeline, landing at the next block; a
+    // On the unwrapped timeline, landing at the next block — wrapped
+    // time would resurrect the old gain each pass (Codex's finding). A
     // pre-rendered child re-renders in chunk 3's diffing instead.
-    window.rampStart = loop && length > 0 ? clock % length : clock;
+    window.rampStart = clock;
     window.rampLength = (juce::int64) std::llround ((rampMs / 1000.0) * (double) rate);
 }
 
