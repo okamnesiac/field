@@ -56,7 +56,9 @@ public:
     void renderBlock (float* const* out, int numChannels, int n);
 
     void locate (juce::int64 sample);
-    juce::int64 position() const { return clock; }
+    // What has been delivered to the device — the honest transport
+    // position; the input clock runs ahead of it by any limiter window.
+    juce::int64 position() const { return delivered; }
 
     // A window gain glide (session.ts rampRequestSchema): dB-linear over
     // rampMs, applied to contributions produced after the call. Throws on
@@ -124,7 +126,8 @@ private:
     juce::int64 length = 0;
     bool loop = false;
     int outputTrack = 0;
-    juce::int64 clock = 0;
+    juce::int64 clock = 0; // input timeline consumed
+    juce::int64 delivered = 0; // output delivered (lags clock by chain latency)
 
     std::vector<std::vector<std::vector<float>>> files; // preloaded, 1–2 ch
     std::vector<Track> tracks;

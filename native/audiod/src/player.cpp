@@ -542,17 +542,28 @@ juce::var Player::status()
 
 void Player::pullAudio (float* const* out, int numChannels, int n)
 {
-    if (liveSession != nullptr)
     {
+        // The pointer is only readable under the lock (cursor's finding:
+        // checking it first races a message-thread load). A missed lock
+        // is one silent block during a rare edit, not a glitch.
         const juce::ScopedTryLock guard (liveLock);
-        if (guard.isLocked() && livePlaying.load())
+        if (! guard.isLocked())
         {
-            liveSession->renderBlock (out, numChannels, n);
+            for (int c = 0; c < numChannels; ++c)
+                std::fill (out[c], out[c] + n, 0.0f);
             return;
         }
-        for (int c = 0; c < numChannels; ++c)
-            std::fill (out[c], out[c] + n, 0.0f);
-        return;
+        if (liveSession != nullptr)
+        {
+            if (livePlaying.load())
+            {
+                liveSession->renderBlock (out, numChannels, n);
+                return;
+            }
+            for (int c = 0; c < numChannels; ++c)
+                std::fill (out[c], out[c] + n, 0.0f);
+            return;
+        }
     }
     juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
     juce::AudioSourceChannelInfo info (&buffer, 0, n);

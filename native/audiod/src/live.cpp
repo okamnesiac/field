@@ -394,6 +394,10 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
         filled += (juce::int64) mixed[0].size();
         clock += step;
     }
+    // Position is what has been *heard*: the output stream lags the
+    // input clock by any limiter window, and finishing early would clip
+    // the tail (cursor's finding on this PR).
+    delivered += n;
 
     for (int c = 0; c < numChannels; ++c)
     {
@@ -406,6 +410,7 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
 void LiveSession::locate (juce::int64 sample)
 {
     clock = sample;
+    delivered = sample;
 }
 
 void LiveSession::ramp (const std::string& trackName, int input, double gainDb, double rampMs)
