@@ -50,7 +50,14 @@ struct LimiterSettings
 class Limiter
 {
 public:
-    Limiter (const LimiterSettings& settings, size_t numChannels);
+    // horizonDb bounds the pending window's reduction depth. At or below
+    // zero (the default) it covers the deepest reduction any finite
+    // float can demand — the offline wrapper's exactness. A live
+    // construction passes a shallower figure (realtime.md chunk 2 sets
+    // 60 dB — one attack ramp of latency): reductions past it start
+    // their ramp late, the ceiling still holds at the peak itself, and
+    // the committed render never uses this path.
+    Limiter (const LimiterSettings& settings, size_t numChannels, double horizonDb = 0.0);
     void process (const std::vector<std::vector<float>>& block,
                   std::vector<std::vector<float>>& out);
     void flush (std::vector<std::vector<float>>& out);
