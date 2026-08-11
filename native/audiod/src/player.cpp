@@ -290,29 +290,11 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             }
         }
         const juce::ScopedLock guard (liveLock);
-        // The rate guard runs before anything is touched (cursor's
-        // finding): a swap the device cannot serve leaves the old
-        // session exactly as it was — playing.
+        // Prefer running the device at the session's rate (bit-perfect
+        // delivery); when it cannot switch, rebuildLiveConverter below
+        // sets up converted delivery instead of refusing
+        // (cross-rate-live.md decision 3).
         maybeMatchDeviceRate ((double) next->sessionRate());
-        {
-            const double deviceRate = nullMode
-                                          ? nullSampleRate
-                                          : (deviceManager.getCurrentAudioDevice() != nullptr
-                                                 ? deviceManager.getCurrentAudioDevice()
-                                                       ->getCurrentSampleRate()
-                                                 : 0.0);
-            if (deviceRate > 0.0
-                && ! juce::exactlyEqual (deviceRate, (double) next->sessionRate()))
-            {
-                auto err = obj();
-                err->setProperty ("error",
-                                  "the device runs at " + juce::String (deviceRate)
-                                      + " Hz and cannot switch to the session's "
-                                      + juce::String (next->sessionRate())
-                                      + " — live resampling lands with the cross-rate wiring");
-                return juce::var (err.get());
-            }
-        }
         // A swap mid-play carries the transport: latest compile wins and
         // the play never stops. A fresh load (no session before) starts
         // stopped at zero, as ever.
@@ -344,7 +326,7 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveSession->locate (carry);
             livePlaying = wasPlaying;
         }
-
+        rebuildLiveConverter();
     }
     catch (const std::exception& e)
     {
@@ -408,6 +390,10 @@ void Player::stop()
         liveEverStarted = false;
         const juce::ScopedLock guard (liveLock);
         liveSession->locate (0);
+        // A transport discontinuity resets delivery conversion to its
+        // primed starting state and drops queued output — pre-seek
+        // audio never leaks (cross-rate-live.md decision 3).
+        rebuildLiveConverter();
         return;
     }
     transport.stop();
@@ -423,6 +409,7 @@ juce::String Player::locate (juce::int64 sample)
             return "locate out of range";
         const juce::ScopedLock guard (liveLock);
         liveSession->locate (sample);
+        rebuildLiveConverter();
         return {};
     }
     if (readerSource == nullptr)
@@ -443,8 +430,14 @@ juce::int64 Player::positionSamples() const
 bool Player::streamFinished() const
 {
     if (liveSession != nullptr)
+        // The session position runs ahead of the ear when delivery
+        // converts (it counts what entered the converter), so finished
+        // also waits for the converted FIFO to drain — the last taps/2
+        // of tail are heard before the transport reports done
+        // (cross-rate-live.md decision 3).
         return liveEverStarted && ! liveLoop && liveLength > 0
-               && liveSession->position() >= liveLength;
+               && liveSession->position() >= liveLength
+               && convQueued.load() == 0;
     // A looping stream never finishes; stop is the only way out.
     return readerSource != nullptr && everStarted && ! looping && transport.hasStreamFinished();
 }
@@ -508,6 +501,36 @@ juce::var Player::status()
     return juce::var (result.get());
 }
 
+// Reset-and-rebuild for delivery conversion; callers hold liveLock.
+// Building fresh *is* the reset the plan specifies: the resampler's
+// primed-with-zeros starting state, an empty FIFO, nothing queued.
+void Player::rebuildLiveConverter()
+{
+    liveConverter.reset();
+    convOut.assign (2, std::vector<float>());
+    convOutRead = 0;
+    convFlushed = false;
+    convQueued.store (0);
+    if (liveSession == nullptr || liveRate <= 0)
+        return;
+    const double deviceRate = nullMode
+                                  ? nullSampleRate
+                                  : (deviceManager.getCurrentAudioDevice() != nullptr
+                                         ? deviceManager.getCurrentAudioDevice()
+                                               ->getCurrentSampleRate()
+                                         : 0.0);
+    if (deviceRate <= 0.0 || juce::exactlyEqual (deviceRate, (double) liveRate))
+        return;
+    liveConverter = std::make_unique<field::dsp::Resampler> ((double) liveRate, deviceRate, 2);
+    convIn.assign (2, std::vector<float>());
+    // Reserved so the callback's process/push_back stays off the heap
+    // in steady state; the compaction below keeps the FIFO inside this.
+    for (auto& ch : convIn)
+        ch.reserve (512);
+    for (auto& ch : convOut)
+        ch.reserve (1 << 16);
+}
+
 void Player::pullAudio (float* const* out, int numChannels, int n)
 {
     {
@@ -525,7 +548,50 @@ void Player::pullAudio (float* const* out, int numChannels, int n)
         {
             if (livePlaying.load())
             {
-                liveSession->renderBlock (out, numChannels, n);
+                if (liveConverter == nullptr)
+                {
+                    liveSession->renderBlock (out, numChannels, n);
+                    return;
+                }
+                // Converted delivery: render session-rate blocks into
+                // the resampler until n device frames wait in the FIFO.
+                // Past the session's extent the input is silence, which
+                // pushes the kernel's tail through; the final remainder
+                // arrives via one flush, after which the FIFO drains to
+                // empty and streamFinished may fire.
+                const int step = 512;
+                while ((juce::int64) (convOut[0].size() - convOutRead) < (juce::int64) n
+                       && ! convFlushed)
+                {
+                    for (auto& ch : convIn)
+                        ch.assign ((size_t) step, 0.0f);
+                    float* ins[2] = { convIn[0].data(), convIn[1].data() };
+                    liveSession->renderBlock (ins, 2, step);
+                    liveConverter->process (convIn, convOut);
+                    if (! liveLoop && liveLength > 0
+                        && liveSession->position() >= liveLength)
+                    {
+                        liveConverter->flush (convOut);
+                        convFlushed = true;
+                    }
+                }
+                const juce::int64 have = (juce::int64) (convOut[0].size() - convOutRead);
+                const int give = (int) std::min<juce::int64> (n, have);
+                for (int c = 0; c < numChannels; ++c)
+                {
+                    const auto& src = convOut[(size_t) std::min (c, 1)];
+                    for (int i = 0; i < n; ++i)
+                        out[c][i] = c < 2 && i < give ? src[convOutRead + (size_t) i] : 0.0f;
+                }
+                convOutRead += (size_t) give;
+                convQueued.store ((juce::int64) (convOut[0].size() - convOutRead));
+                if (convOutRead > (size_t) (1 << 15))
+                {
+                    // memmove, not allocation: capacity stays put.
+                    for (auto& ch : convOut)
+                        ch.erase (ch.begin(), ch.begin() + (std::ptrdiff_t) convOutRead);
+                    convOutRead = 0;
+                }
                 return;
             }
             for (int c = 0; c < numChannels; ++c)
@@ -550,6 +616,11 @@ void Player::audioDeviceIOCallbackWithContext (const float* const*, int,
 void Player::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     transport.prepareToPlay (device->getCurrentBufferSizeSamples(), device->getCurrentSampleRate());
+    // A device start is where a rate change becomes real (hot-plug,
+    // default-follow, an explicit selection): rebuild the delivery
+    // conversion against the rate the callback is about to run at.
+    const juce::ScopedLock guard (liveLock);
+    rebuildLiveConverter();
 }
 
 void Player::audioDeviceStopped()

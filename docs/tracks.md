@@ -192,11 +192,11 @@ declared `length` and `loop` and renders exactly that long, with `loop:`
 folding the overhang back onto the start. A bare song reference resolves
 to it: `field play creek` evaluates the song live in the engine rooted
 at `main` (realtime.md decision 8), and `field play creek/track:main`
-plays the built artifact of the same tree. The artifact spelling is
-also the answer when the output device cannot switch to the song's
-rate: live playback does not resample until the cross-rate wiring
-lands, so the live session refuses there, while the artifact path
-resamples in the transport and plays anywhere. Because the
+plays the built artifact of the same tree. Either spelling plays on
+any device: when the output cannot switch to the song's rate, live
+delivery converts through the project's own resampler
+(cross-rate-live.md decision 3), as the artifact path's transport
+always did. Because the
 output track is the song, it renders at the song's rate — its `rate:`,
 or the project's `sample_rate` — and refuses a `rate:` of its own;
 delivery at another rate is `field export --rate`, not a node in the

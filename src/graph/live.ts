@@ -13,8 +13,9 @@
 //
 // Latency is compiler arithmetic, never engine arithmetic (playback.md
 // §3.6's division of labour): the limiter's live horizon is one attack
-// ramp (60 dB — session.ts records the choice), eq and reverb are zero,
-// a cross-rate edge adds the streaming resampler's taps/2 group delay,
+// ramp (60 dB — session.ts records the choice), eq and reverb are
+// zero, a materialized cross-rate edge is delay-free (realtime.md
+// decision 7's amendment: the wrapper's emission is timeline-aligned),
 // and each summing input carries comp_delay = maxSibling − own so
 // unequal paths arrive aligned. The engine only applies offsets.
 //
@@ -45,8 +46,6 @@ import { loadProject } from '../model/project.js';
 import type { Insert } from '../schema/index.js';
 import { explain, type Explanation } from './build.js';
 import { buildGraph, type Graph, type GraphNode } from './graph.js';
-
-const RESAMPLER_TAPS = 128; // dsp/resample.cpp's design point
 
 interface TrackShape {
   name: string;
@@ -89,6 +88,21 @@ function chainLatency(chain: SessionInsert[], rate: number): number {
     }
   }
   return latency;
+}
+
+// The wrapper's output-length rule (resample.cpp's flush), mirrored the
+// way chainLatency and chainGrowth mirror their dsp counterparts:
+// n > 0 ? max(1, round(n·to/from)) : 0 in reduced-ratio integer
+// arithmetic — zero in, zero out, and the floor at one only for a
+// non-empty source ("never round a non-empty source away", #57).
+export function convertedLength(frames: number, from: number, to: number): number {
+  if (from === to) return Math.max(0, frames);
+  if (frames <= 0) return 0;
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const g = gcd(to, from);
+  const phases = to / g;
+  const stride = from / g;
+  return Math.max(1, Math.floor((frames * phases + Math.floor(stride / 2)) / stride));
 }
 
 // How much a chain grows its input: each reverb appends predelay + T60.
@@ -155,14 +169,48 @@ export async function compileSession(
   // freeze: the output (see CompiledSession), and any pre-tap sender —
   // conservatively, a sender tapped anywhere in the song, even if the
   // receiver itself froze.
+  const memo = new Map<string, Explanation>();
+
+  // Cross-rate edges arrive as convert: deps (multi-rate.md decision 4:
+  // a parent consumes the minted conversion, never the foreign-rate
+  // child directly). Each one classifies exactly like a track does
+  // under the freeze: cached, it is a file window over the converted
+  // artifact; uncached with a live source — this song's track: or
+  // tap: — the child evaluates live at its own rate and the engine
+  // converts at the edge (cross-rate-live.md decision 1), which is
+  // what replaces building the conversion synchronously inside this
+  // compile, the re-render-and-swap cliff decision 7 rejected.
+  // Uncached with a file source (a cross-rate asset placed directly)
+  // still builds here: converting a file is a build, dirty only when
+  // the file changed.
+  const liveConvert = new Map<string, { kind: 'track' | 'tap'; name: string }>();
+  for (const shape of shapes.values()) {
+    for (const dep of shape.deps) {
+      if (!/\/convert:/.test(dep) || liveConvert.has(dep)) continue;
+      const node = graph.nodes.get(dep);
+      if (node === undefined || node.kind !== 'rule') continue;
+      const source = (node.spec as { source?: string }).source;
+      const ref = source === undefined ? null : /^(track|tap):(.+)$/.exec(source);
+      if (!ref || !shapes.has(ref[2]!)) continue;
+      const explanation = await explain(project, graph, node, memo);
+      if (explanation.cached !== true || explanation.outputs === undefined) {
+        liveConvert.set(dep, { kind: ref[1] as 'track' | 'tap', name: ref[2]! });
+      }
+    }
+  }
+
   const preTapped = new Set<string>();
   for (const shape of shapes.values()) {
     for (const dep of shape.deps) {
       const tap = /\/tap:(.+)$/.exec(dep);
       if (tap) preTapped.add(tap[1]!);
+      // A live-evaluated tap conversion reads the sender's pre ring
+      // like a direct tap does; a cached one reads a file and forces
+      // nothing live.
+      const conv = liveConvert.get(dep);
+      if (conv?.kind === 'tap') preTapped.add(conv.name);
     }
   }
-  const memo = new Map<string, Explanation>();
   const frozen = new Set<string>();
   const candidates = new Set<string>();
   for (const name of shapes.keys()) {
@@ -188,18 +236,33 @@ export async function compileSession(
     for (const dep of shapes.get(name)!.deps) {
       const ref = /\/(track|tap):(.+)$/.exec(dep);
       if (ref) visit(ref[2]!);
+      const conv = liveConvert.get(dep);
+      if (conv) visit(conv.name);
     }
   };
   visit('main');
-  const dirty = [...liveReach]
-    .filter((n) => candidates.has(n) && !frozen.has(n))
-    .map((n) => `//${song.dir}/track:${n}`);
+  // Dirty speaks convert labels for cross-rate children (cross-rate-
+  // live.md decision 5): the background freeze builds the conversion,
+  // which builds the child's stem beneath it, and the next compile
+  // serves the file window — the same convergence one node deeper.
+  const dirty = [
+    ...[...liveReach]
+      .filter((n) => candidates.has(n) && !frozen.has(n))
+      .map((n) => `//${song.dir}/track:${n}`),
+    ...new Set(
+      [...liveReach].flatMap((n) =>
+        shapes.get(n)!.deps.filter((d) => liveConvert.has(d)),
+      ),
+    ),
+  ];
 
   // Build every file the engine will read: the non-track dependencies
-  // (sources, gen artifacts, converts) of each live reachable track,
-  // plus the frozen stems themselves — those are guaranteed cache hits
-  // (explain just said so), so this only materializes.
-  const isLive = (label: string) => /\/(track|tap):/.test(label);
+  // (sources, gen artifacts, converts) of each live reachable track —
+  // minus the conversions evaluating live, which are exactly what this
+  // compile must not wait on — plus the frozen stems themselves; those
+  // are guaranteed cache hits (explain just said so), so this only
+  // materializes.
+  const isLive = (label: string) => /\/(track|tap):/.test(label) || liveConvert.has(label);
   const toBuild = [
     ...new Set([
       ...[...liveReach].flatMap((n) => shapes.get(n)!.deps.filter((d) => !isLive(d))),
@@ -278,9 +341,24 @@ export async function compileSession(
         fade_in: clip.fade_in,
         fade_out: clip.fade_out,
       };
-      const tapMatch = /\/(track|tap):(.+)$/.exec(dep);
-      if (tapMatch) {
-        const child = tapMatch[2]!;
+      const direct = /\/(track|tap):(.+)$/.exec(dep);
+      const edge = direct
+        ? { kind: direct[1] as 'track' | 'tap', name: direct[2]! }
+        : liveConvert.get(dep);
+      if (edge) {
+        // One path for both spellings: a direct ref is always
+        // same-rate (the graph routes every cross-rate edge through a
+        // convert node), and a live-evaluated conversion is the same
+        // window with the child at its own rate — the arithmetic here
+        // runs in this track's rate against the *converted* child
+        // length, because the clip was planned against the convert
+        // node's output, and convertedLength is the identity when the
+        // rates agree. The engine sees the rates differ and converts
+        // the materialized buffer through the shared kernel
+        // (cross-rate-live.md decision 1); a materialized edge is
+        // delay-free (realtime.md decision 7's amendment), so the only
+        // latency is the child's own, scaled onto this track's clock.
+        const child = edge.name;
         compile(child, [...stack, name]);
         if (clip.start - clip.read_offset < 0) {
           throw new Error(
@@ -288,21 +366,22 @@ export async function compileSession(
               `(start ${clip.start} < read_offset ${clip.read_offset}) — live taps only delay`,
           );
         }
-        const childLength =
-          tapMatch[1] === 'tap' ? preLength.get(child)! : postLength.get(child)!;
-        const duration = clip.duration ?? Math.max(0, childLength - clip.read_offset);
         const childShape = shapes.get(child)!;
-        const edgeDelay =
-          childShape.rate === shape.rate
-            ? 0
-            : Math.round(((RESAMPLER_TAPS / 2) * shape.rate) / childShape.rate);
-        const ownLatency =
-          (tapMatch[1] === 'tap' ? 0 : latency.get(child)!) + edgeDelay;
+        const isTap = edge.kind === 'tap';
+        const childLength = convertedLength(
+          isTap ? preLength.get(child)! : postLength.get(child)!,
+          childShape.rate,
+          shape.rate,
+        );
+        const duration = clip.duration ?? Math.max(0, childLength - clip.read_offset);
+        const ownLatency = isTap
+          ? 0
+          : Math.round((latency.get(child)! * shape.rate) / childShape.rate);
         maxInputLatency = Math.max(maxInputLatency, ownLatency);
         contentEnd = Math.max(contentEnd, clip.start + duration);
         pending.push({ index: inputs.length, ownLatency });
         inputs.push(
-          tapMatch[1] === 'tap'
+          isTap
             ? { receive: child, tap: 'pre', ...base, duration, comp_delay: 0 }
             : { track: child, ...base, duration, comp_delay: 0 },
         );
@@ -343,16 +422,6 @@ export async function compileSession(
 
   compile('main', []);
 
-  for (const shape of shapes.values()) {
-    const sessionRate = shapes.get('main')?.rate;
-    if (sessionRate !== undefined && shape.rate !== sessionRate) {
-      throw new Error(
-        `track "${shape.name}" renders at ${shape.rate} Hz in a ${sessionRate} Hz session — ` +
-          'cross-rate live sessions land with the resampler wiring (realtime.md decision 7); ' +
-          'build and play the artifact meanwhile',
-      );
-    }
-  }
   const output = shapes.get('main')!;
   // The session is always bounded: the declared extent when the song
   // has one, the output's natural length — content end plus chain

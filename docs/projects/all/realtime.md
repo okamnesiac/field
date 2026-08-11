@@ -256,7 +256,9 @@ stands as drafted; its list line waits in later.md.
    starts late by design, ceiling still held, offline still exact —
    and cross-rate sessions are refused at compile time until the
    resampler wiring lands, with the artifact path as the interim
-   answer.
+   answer (since delivered —
+   [cross-rate-live.md](cross-rate-live.md): a foreign-rate track
+   evaluates live and the edge converts).
 3. **Edits land mid-play** — the CLI compiles and diffs on file
    change, ramps vs. subgraph swaps, watch integration; the loop-wrap
    takeover machinery retires.
@@ -302,7 +304,9 @@ stands as drafted; its list line waits in later.md.
    to serve the session's rate — the artifact path resampled in the
    transport, live playback does not until the cross-rate wiring
    lands, and the explicit artifact spelling remains the answer on a
-   device that cannot switch.
+   device that cannot switch (since delivered —
+   [cross-rate-live.md](cross-rate-live.md) decision 3: delivery
+   converts when the device cannot).
 
    *Amended 2026-08-11 (review of the first implementation):* the
    authored `loop:` never reaches the transport — it is the fold,

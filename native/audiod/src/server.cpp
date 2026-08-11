@@ -206,7 +206,7 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "field-audiod");
-        ok->setProperty ("version", "0.6.0"); // 0.6: edits land mid-play; the wrap takeover retires
+        ok->setProperty ("version", "0.7.0"); // 0.7: cross-rate — foreign-rate tracks run live, delivery converts
         // Capability names (realtime.md §3): clients gate on these, not
         // on parsing the version string.
         juce::Array<juce::var> features;

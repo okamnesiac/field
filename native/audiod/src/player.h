@@ -7,6 +7,9 @@
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <vector>
+
+#include "dsp/resample.h"
 
 namespace field
 {
@@ -139,6 +142,22 @@ private:
     bool liveLoop = false;
     int liveRate = 0;
     bool liveEverStarted = false;
+
+    // Delivery conversion (cross-rate-live.md decision 3): when the
+    // device cannot switch to the session's rate, the output stream
+    // runs through the streaming resampler instead of refusing.
+    // Rebuilt — which is also the reset the plan specifies — under
+    // liveLock at load, locate, stop, and device start; null when the
+    // rates agree. convOut is the converted FIFO the callback drains;
+    // convQueued mirrors its unread frame count so streamFinished (on
+    // the message thread) can wait for the drain without the lock.
+    void rebuildLiveConverter();
+    std::unique_ptr<field::dsp::Resampler> liveConverter;
+    std::vector<std::vector<float>> convIn;
+    std::vector<std::vector<float>> convOut;
+    size_t convOutRead = 0;
+    bool convFlushed = false;
+    std::atomic<juce::int64> convQueued { 0 };
 
     // Null-output mode: a thread pulls the transport at real-time pace so
     // transport, position, and end-of-stream all behave exactly as with a
