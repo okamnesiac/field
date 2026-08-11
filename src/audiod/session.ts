@@ -19,6 +19,9 @@ export const SESSION_VERSION = 1;
 // artifact; a `track` window reads another live track's output ring at
 // a delay. `duration` is always resolved here (the compiler runs after
 // the build, so every source length is known).
+// No loop here on purpose: loops expand at plan time into per-repetition
+// windows (clip-looping.md §1.6 — the renderer never knows loops exist),
+// and the session inherits the same pre-expanded clips.
 const windowFields = {
   start: z.number().int().min(0),
   duration: z.number().int().min(0),
@@ -27,9 +30,6 @@ const windowFields = {
   pan: z.number().min(-1).max(1).optional(),
   fade_in: z.number().int().min(0),
   fade_out: z.number().int().min(0),
-  loop: z
-    .object({ every: z.number().int().positive(), fade: z.number().int().min(0) })
-    .optional(),
 };
 
 export const fileWindowSchema = z.strictObject({
