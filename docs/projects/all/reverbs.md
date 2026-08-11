@@ -87,7 +87,8 @@ mix. This plan is the parametric pair.
    render's — block-invariant and golden-clean. Two bounds said
    plainly: the *state* after a far seek matches a from-the-top
    render within the warmup's −60 dB threshold, the bound every
-   chain already has at locate (realtime.md chunk 4) — exact
+   chain already has at locate (realtime.md chunk 3's amendment,
+   recorded from chainWarmup's own comment) — exact
    equality holds from the top, where the golden compares; and under
    `loop` the unwrapped clock keeps counting across the wrap, so
    pass two deliberately does not repeat pass one's phase — a tail
