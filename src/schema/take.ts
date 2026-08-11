@@ -5,6 +5,12 @@ import { samples, slug, ticks } from './common.js';
 // songs/<song>/takes/<track>/<take-id>.yaml — one performance, referencing
 // an immutable asset. Takes store both time representations but declare the
 // anchor; the derived one is verified by `field check` (project-core.md §3.1).
+//
+// This path is the retired layout (project-model.md "Takes", decided
+// 2026-08-10): a recorded take's record will live beside its bytes under
+// audio/, like variants, so committing the audio commits its record in one
+// decision. Nothing writes takes/ today; this schema and its loader stand
+// until the recording work replaces them with that shape.
 export const takeSchema = z.strictObject({
   id: z.string().regex(/^take-\d{8}-\d{6}$/, 'take ids are take-YYYYMMDD-HHMMSS'),
   track: slug,
