@@ -393,6 +393,11 @@ export async function playLiveSession(
     // everything else. The loop-wrap takeover this replaces waited for
     // the wrap; a ramp lands next block and a swap lands as soon as the
     // compile does.
+    // The watch ends when playback does, however playback ends — a
+    // signal only the caller aborts would leave the watcher (and the
+    // process) waiting forever on a natural stop (cursor's finding).
+    const watchAbort = new AbortController();
+    options.signal?.addEventListener('abort', () => watchAbort.abort(), { once: true });
     let watchDone: Promise<void> | undefined;
     if (options.watch === true) {
       const { watchLiveSession } = await import('./watch-live.js');
@@ -400,21 +405,17 @@ export async function playLiveSession(
         root,
         song,
         session,
-        { ...(options.signal !== undefined ? { signal: options.signal } : {}) },
+        { signal: watchAbort.signal },
         {
           onEdit: async (edit, fresh) => {
-            try {
-              if (edit.kind === 'ramps') {
-                for (const ramp of edit.ramps) {
-                  await client.ramp(ramp.track, ramp.input, ramp.gain_db);
-                }
-                hooks.onReloaded?.(`${edit.ramps.length} level${edit.ramps.length === 1 ? '' : 's'} ramped`);
-              } else if (edit.kind === 'swap') {
-                await client.session(fresh);
-                hooks.onReloaded?.('session swapped');
+            if (edit.kind === 'ramps') {
+              for (const ramp of edit.ramps) {
+                await client.ramp(ramp.track, ramp.input, ramp.gain_db);
               }
-            } catch (err) {
-              hooks.onPosition?.(`watch: ${(err as Error).message}`);
+              hooks.onReloaded?.(`${edit.ramps.length} level${edit.ramps.length === 1 ? '' : 's'} ramped`);
+            } else if (edit.kind === 'swap') {
+              await client.session(fresh);
+              hooks.onReloaded?.('session swapped');
             }
           },
           onError: (err) => hooks.onPosition?.(`watch: ${err.message}`),
@@ -430,6 +431,7 @@ export async function playLiveSession(
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     await client.stop().catch(() => {});
+    watchAbort.abort();
     await watchDone?.catch(() => {});
   } finally {
     client.close();

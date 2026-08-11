@@ -262,6 +262,29 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         // a block boundary (realtime.md decision 5, chunk 3).
         auto next = std::make_unique<field::LiveSession> (session, projectRoot);
         const juce::ScopedLock guard (liveLock);
+        // The rate guard runs before anything is touched (cursor's
+        // finding): a swap the device cannot serve leaves the old
+        // session exactly as it was — playing.
+        maybeMatchDeviceRate ((double) next->sessionRate());
+        {
+            const double deviceRate = nullMode
+                                          ? nullSampleRate
+                                          : (deviceManager.getCurrentAudioDevice() != nullptr
+                                                 ? deviceManager.getCurrentAudioDevice()
+                                                       ->getCurrentSampleRate()
+                                                 : 0.0);
+            if (deviceRate > 0.0
+                && ! juce::exactlyEqual (deviceRate, (double) next->sessionRate()))
+            {
+                auto err = obj();
+                err->setProperty ("error",
+                                  "the device runs at " + juce::String (deviceRate)
+                                      + " Hz and cannot switch to the session's "
+                                      + juce::String (next->sessionRate())
+                                      + " — live resampling lands with the cross-rate wiring");
+                return juce::var (err.get());
+            }
+        }
         // A swap mid-play carries the transport: latest compile wins and
         // the play never stops. A fresh load (no session before) starts
         // stopped at zero, as ever.
@@ -292,29 +315,7 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveSession->locate (carry);
             livePlaying = wasPlaying;
         }
-        maybeMatchDeviceRate ((double) liveRate);
 
-        // The live path writes session frames one-for-one to the device —
-        // there is no AudioTransportSource resampling it. Refusing beats
-        // playing fast and sharp (Codex's finding); live resampling lands
-        // with the cross-rate wiring.
-        const double deviceRate = nullMode
-                                      ? nullSampleRate
-                                      : (deviceManager.getCurrentAudioDevice() != nullptr
-                                             ? deviceManager.getCurrentAudioDevice()
-                                                   ->getCurrentSampleRate()
-                                             : 0.0);
-        if (deviceRate > 0.0 && ! juce::exactlyEqual (deviceRate, (double) liveRate))
-        {
-            liveSession.reset();
-            auto err = obj();
-            err->setProperty ("error",
-                              "the device runs at " + juce::String (deviceRate)
-                                  + " Hz and cannot switch to the session's "
-                                  + juce::String (liveRate)
-                                  + " — live resampling lands with the cross-rate wiring");
-            return juce::var (err.get());
-        }
     }
     catch (const std::exception& e)
     {

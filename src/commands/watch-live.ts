@@ -61,8 +61,16 @@ export async function watchLiveSession(
         if (options.signal?.aborted) return;
         if (stale) continue;
         const edit = diffSessions(current, session);
-        current = session;
-        await hooks.onEdit?.(edit, session);
+        try {
+          await hooks.onEdit?.(edit, session);
+          // The baseline advances only once the daemon accepted the edit
+          // (cursor's finding): a failed send keeps diffing against what
+          // is actually playing, so the next change re-sends everything
+          // outstanding — a ramp re-sent to its current value is a no-op.
+          current = session;
+        } catch (err) {
+          hooks.onError?.(err instanceof Error ? err : new Error(String(err)));
+        }
       } while (stale && !(options.signal?.aborted ?? false));
     } finally {
       compiling = false;
