@@ -99,5 +99,11 @@ export async function watchLiveSession(
   options.signal?.addEventListener('abort', close, { once: true });
 
   watcher = fsWatch(root, { recursive: true }, (_event, filename) => onChange(filename));
+  // An edit between the caller's baseline compile and this watcher
+  // opening — a window that includes daemon connection and session
+  // preloading — would otherwise wait for an unrelated later change
+  // (Codex's finding). One recompile now catches it; an unchanged tree
+  // diffs to `same` and lands nowhere.
+  onChange(null);
   await done;
 }

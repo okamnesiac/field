@@ -4,7 +4,7 @@ import { parsePattern } from '../labels.js';
 import { formatLabel } from '../labels.js';
 import { build, type GeneratorRunner } from '../graph/build.js';
 import { expandPattern } from '../graph/graph.js';
-import type { LoadedProject } from '../model/project.js';
+import { loadProject, type LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
 import { beatTicks } from '../time/tempo.js';
 import {
@@ -94,9 +94,8 @@ export interface PlayOptions {
 }
 
 export interface PlayHooks {
-  // `path` is the file this pass actually loaded — the requeue path
-  // consults currentPath at every load, so the watch display correlates
-  // a pass against what it queued, never against a stale snapshot.
+  // `path` is the file this pass loaded (empty for a live session,
+  // which has no artifact).
   onItem?: (label: string, note: string, path: string) => void;
   // `at` locates the printed position on a per-pass monotonic axis (the
   // beat's tick under a tempo map, the raw sample without one): a value
@@ -394,7 +393,7 @@ export async function playLiveSession(
     }
     if (options.device !== undefined) await client.selectDevice(options.device);
     const loaded = await client.session(session);
-    const ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
+    let ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
     await client.play();
     hooks.onItem?.(`${song} (live)`, session.loop === true ? 'looping' : '', '');
 
@@ -424,7 +423,12 @@ export async function playLiveSession(
               }
               hooks.onReloaded?.(`${edit.ramps.length} level${edit.ramps.length === 1 ? '' : 's'} ramped`);
             } else if (edit.kind === 'swap') {
-              await client.session(fresh);
+              const swapped = await client.session(fresh);
+              // The swap may have moved the tempo map; the readout must
+              // not keep spelling bars from the old one for the rest of
+              // the session (Codex's finding). The compile that produced
+              // `fresh` just proved the project loads clean.
+              ctx = musicalContext(loadProject(root), `songs/${song}`, swapped.sample_rate);
               hooks.onReloaded?.('session swapped');
             }
           },

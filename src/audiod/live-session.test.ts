@@ -275,7 +275,17 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
       await client.session(swapped);
       const after = await client.status();
       expect(after.state).toBe('playing');
-      expect(after.sample).toBeGreaterThan(before.sample);
+      expect(after.sample).toBeGreaterThanOrEqual(before.sample);
+      // Strictly-greater (a stopped transport satisfies >=, minjudd's
+      // finding) — but only once the callback lands a block after the
+      // swap, so poll briefly instead of racing its cadence.
+      let later = after;
+      for (let i = 0; i < 40 && later.sample <= before.sample; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        later = await client.status();
+      }
+      expect(later.state).toBe('playing');
+      expect(later.sample).toBeGreaterThan(before.sample);
       await client.stop();
     } finally {
       try {

@@ -40,10 +40,11 @@ everything — and writes it down.
 - **Browsing is a TUI** — search, filter, audition previews, pick. This
   is Field's first *input*-interactive surface, which is most of the real
   cost of this plan and the reason it sits in Later. It is not the first
-  live tty surface: `src/commands/loop-ui.ts` (watch.md §2) already
-  renders ANSI with a plain sequential fallback, and its discipline —
-  rendering as a pure function over an injected write — is the one to
-  inherit rather than re-decide.
+  live tty surface: `src/commands/loop-ui.ts` (watch.md §2) rendered
+  ANSI with a plain sequential fallback until realtime chunk 3 retired
+  it with the wrap takeover, and its discipline — rendering as a pure
+  function over an injected write — is the one to inherit rather than
+  re-decide (git history keeps the file).
 
 A recipe, concretely — living in the item's directory (§4.11) beside
 the bytes and the license it names, with `type:` as the discriminator

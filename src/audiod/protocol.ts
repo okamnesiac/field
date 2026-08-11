@@ -76,8 +76,5 @@ export const eventSchema = z.discriminatedUnion('event', [
   // system-default change, or the held device vanished and the daemon
   // fell back (playback.md §5).
   z.object({ event: z.literal('device'), name: z.string(), sample_rate: z.number() }),
-  // A queued reload took over at the loop wrap (daemon >= 0.4) — emitted
-  // when the swap actually sounds, not when it was requested.
-  z.object({ event: z.literal('reloaded'), path: z.string() }),
 ]);
 export type AudiodEvent = z.infer<typeof eventSchema>;
