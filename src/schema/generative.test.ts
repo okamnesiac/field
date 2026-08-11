@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generativeEntrySchema, generativeTakesSchema } from './sounds.js';
+import { generativeEntrySchema, generativeTakesSchema } from './generative.js';
 
 // The kind split inside `generative` (voice-generation.md §1.6). One
 // schema serves music and voice requests so that variants, `chosen`, the
@@ -47,15 +47,6 @@ describe('generative requests', () => {
     expect(absent.success).toBe(true);
     expect(empty.success).toBe(true);
     expect(absent.data?.variants).toEqual([]);
-  });
-
-  it('still admits the pre-fold sound: attachment, for the loader to forward', () => {
-    // `sounds/` has retired, but a takes file written before the fold
-    // says `sound:` — the schema admits it so the loader can tell it the
-    // rename instead of "unrecognized key" (model/project.ts), and the
-    // exactly-one refine still refuses a file claiming both.
-    expect(generativeTakesSchema.safeParse({ ...takes, gen: undefined, sound: 'scratch-vocal' }).success).toBe(true);
-    expect(generativeTakesSchema.safeParse({ ...takes, sound: 'scratch-vocal' }).success).toBe(false);
   });
 
   it('makes a music request say how long, since filling cannot be told later', () => {

@@ -562,55 +562,6 @@ describe('check', () => {
   });
 });
 
-describe('takes', () => {
-  const takeYaml = (positionSamples: number) =>
-    [
-      'id: take-20260804-202355',
-      'track: vox',
-      'asset: take-audio',
-      'anchor: musical',
-      'position: 960',
-      `position_samples: ${positionSamples}`,
-      'duration_samples: 48000',
-      '',
-    ].join('\n');
-
-  const setupTake = async (yaml: string, filename = 'take-20260804-202355.yaml') => {
-    createSong(root, 'opener');
-    createTrack(root, 'opener', 'vox');
-    const src = sourceFile();
-    await importAsset(root, 'opener', src, 'take-audio');
-    rmSync(src);
-    mkdirSync(join(root, 'songs/opener/takes/vox'), { recursive: true });
-    writeFileSync(join(root, 'songs/opener/takes/vox', filename), yaml);
-  };
-
-  it('accepts a take whose derived samples agree with the tempo map', async () => {
-    // default song: 120 BPM at 48 kHz → 960 ticks = 1 beat = 0.5 s = 24000 samples
-    await setupTake(takeYaml(24000));
-    expect((await check(root)).ok).toBe(true);
-  });
-
-  it('flags position_samples that disagree with the tempo map (§3.1)', async () => {
-    await setupTake(takeYaml(999999));
-    const messages = (await check(root)).diagnostics.map((d) => d.message).join();
-    expect(messages).toContain('disagrees with tempo map');
-    expect(messages).toContain('24000');
-  });
-
-  it('flags id ≠ filename and track ≠ containing directory (§6)', async () => {
-    await setupTake(takeYaml(24000), 'take-20260101-000000.yaml');
-    const messages = (await check(root)).diagnostics.map((d) => d.message).join();
-    expect(messages).toContain('must match filename');
-  });
-
-  it('flags takes referencing undeclared assets', async () => {
-    await setupTake(takeYaml(24000).replace('take-audio', 'phantom'));
-    const messages = (await check(root)).diagnostics.map((d) => d.message).join();
-    expect(messages).toContain('unknown asset');
-  });
-});
-
 describe('musical time (musical-time.md)', () => {
   // 4/4 at PPQ 960: a bar is 3840 ticks.
   const BAR = 3840;
@@ -913,11 +864,10 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
     expect(await messages()).toBe('');
   });
 
-  it('has no track-level fader to refuse: the field retired with the mix', async () => {
-    // A level lives on the placement (nested-tracks.md §1.13). `gain_db`
-    // on a track file used to be applied by the mix rule and then, for one
-    // commit, by nothing at all — accepted, silent, and unread. The schema
-    // refuses it now rather than letting it sit there meaning nothing.
+  it('has no track-level fader: a level lives on the placement', async () => {
+    // nested-tracks.md §1.13. `gain_db` on a track file is not a field —
+    // the strict schema refuses it rather than letting it sit there
+    // meaning nothing.
     writeFileSync(
       join(root, 'songs/opener/tracks/inner.yaml'),
       readFileSync(join(root, 'songs/opener/tracks/inner.yaml'), 'utf8').replace(
@@ -925,10 +875,7 @@ describe('placed tracks (nested-tracks.md §1.3)', () => {
         'name: inner\ngain_db: -3\n',
       ),
     );
-    // Not "Unrecognized key": a removal without a forwarding address is
-    // the failure this retirement fixes everywhere else — mixes/ names what
-    // to move, mix.yaml is repointed, mix: suggests track:.
-    expect(await messages()).toContain('a level lives on the placement that consumes this track');
+    expect(await messages()).toContain('Unrecognized key');
   });
 
   it('refuses musical time on an absolute placement', async () => {
@@ -1043,10 +990,6 @@ describe('input entries with ids (nested-tracks.md §18)', () => {
     writeFileSync(join(root, 'shared/instruments/pad.scd'), 'Out.ar(0, Silent.ar(2));\n');
     writeTrack('outer', ['inputs:', '  - id: k1', '    audio: pad', '    at: 0']);
     expect(await messages()).toContain('audio: names the generator "pad"');
-    // And the retired spelling forwards rather than answering grammar:
-    // sound: is a tombstone that names where its targets went.
-    writeTrack('outer', ['inputs:', '  - id: k2', '    sound: hit', '    at: 0']);
-    expect(await messages()).toContain('sound: retired with sounds/');
   });
 
   it('refuses a duplicate id, and accepts entries with no id at all', async () => {
@@ -1077,22 +1020,19 @@ describe('input entries with ids (nested-tracks.md §18)', () => {
     expect(await messages()).toContain('track containment cycle: a → b → a');
   });
 
-  it('type: is retired with a forwarding message, not an unrecognized-key shrug', async () => {
-    // `midi` was the one kind that rendered nothing; §18 retires the
-    // field and the message says where kinds went.
+  it('refuses keys the format does not have — type:, clips:', async () => {
+    // Every track is audio and every placement lives in inputs:; the
+    // strict schema refuses stray keys rather than ignoring them.
     writeFileSync(
       join(root, 'songs/opener/tracks/scratch.yaml'),
       'name: scratch\ntype: midi\ninputs: []\n',
     );
-    expect(await messages()).toContain('every track is audio — delete type:');
-  });
-
-  it('clips: is retired with a forwarding message naming the field moves', async () => {
+    expect(await messages()).toContain('Unrecognized key');
     writeFileSync(
       join(root, 'songs/opener/tracks/scratch.yaml'),
       'name: scratch\nclips:\n  - id: k1\n    source: hit\n    position: 0\n',
     );
-    expect(await messages()).toContain('clips: merged into inputs:');
+    expect(await messages()).toContain('Unrecognized key');
   });
 
   it('a loop on a track still needs every — its length is unknown before it builds', async () => {
@@ -1250,12 +1190,6 @@ describe('generative entries (nested-tracks.md §18 step 3)', () => {
     expect(await messages()).toContain(
       'has takes but no chosen variant yet — field choose opener/rain-pad first',
     );
-  });
-
-  it('a sound-keyed takes file is told the move', async () => {
-    writeLeaf();
-    writeTakes('rain-pad', ['take one'], { key: 'sound', chosen: 1 });
-    expect(await messages()).toContain('rename sound: to gen: (nested-tracks.md §18)');
   });
 
   it('takes must match their directory', async () => {
@@ -1438,24 +1372,6 @@ describe('orphaned takes directories (nested-tracks.md §18 decision 3)', () => 
     writeOrphanTakes('ghost', 'gen');
     const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
     expect(messages).toContain('no generative request claims audio/ghost/');
-  });
-
-  it('flags a sound-keyed takes file nothing defines', async () => {
-    writeOrphanTakes('ghost', 'sound');
-    const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
-    expect(messages).toContain('no generative request claims audio/ghost/');
-  });
-
-  it('a pre-fold file under a live name gets the rename diagnostic alone', async () => {
-    writeFileSync(
-      join(root, 'songs/opener/tracks/ghost.yaml'),
-      'name: ghost\ninputs:\n  - generative:\n      prompt: rain\n      bpm: 96\n      duration_seconds: 10\n',
-    );
-    writeOrphanTakes('ghost', 'sound');
-    const messages = (await check(root)).diagnostics.map((d) => d.message);
-    expect(messages.join('\n')).toContain('rename sound: to gen:');
-    expect(messages.join('\n')).not.toContain('no generative request claims');
-    expect(messages).toHaveLength(1);
   });
 
   it('says nothing about an asset item directory', async () => {

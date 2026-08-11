@@ -134,12 +134,12 @@ tiers, by how a thing gets it:
   repo-wide, tool-assisted refactor, exactly as renaming a function is
   in code.
 - **Content is the identity → SHA-256.** Assets and cached outputs.
-- **Machines mint it → a number, timestamp, or slug-plus-short-random.**
-  Generated takes are numbered within their request
-  (`audio/<name>/2.wav`); recorded takes get timestamps
-  (`take-20260804-202355`, sortable, merge-safe); input entries — which
-  automation references stably — get a readable random suffix
-  (`chorus-vox-x7f3q`).
+- **Machines mint it → a number or a timestamp.** Generated takes are
+  numbered within their request (`audio/<name>/2.wav`); recorded takes
+  get timestamps (`take-20260804-202355`, sortable, merge-safe). Entry
+  `id:`s — which automation will reference stably — are author-written
+  slugs; the slug-plus-short-random convention (`chorus-vox-x7f3q`)
+  keeps one unique without pretending to mean something.
 
 The industry-standard alternative (opaque ID + display name, as in
 DAWproject and every DAW format) was deliberately rejected: it makes

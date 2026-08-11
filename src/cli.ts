@@ -835,9 +835,7 @@ program
     process.stdout.write(`project ${name}${rate ? ` @ ${rate} Hz` : ''}\n`);
     for (const song of project.songs) {
       const inputs = song.tracks.reduce((n, t) => n + t.data.inputs.length, 0);
-      process.stdout.write(
-        `  ${song.name}: ${song.tracks.length} tracks, ${inputs} inputs, ${song.takes.length} takes\n`,
-      );
+      process.stdout.write(`  ${song.name}: ${song.tracks.length} tracks, ${inputs} inputs\n`);
     }
     const problems = diagnosticErrors(project.diagnostics).length;
     const warned = project.diagnostics.length - problems;

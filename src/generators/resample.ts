@@ -1,5 +1,4 @@
 import { renderInsertChain } from '../audio/render-daemon.js';
-import { singleInputSources } from './single-input.js';
 import type { Generator } from './types.js';
 
 // resample: the edge conversion (multi-rate.md decision 4). Synthesized
@@ -24,7 +23,7 @@ export interface ResampleSpec {
 export const resampleGenerator: Generator<ResampleSpec> = {
   version: 1,
   wiringFields: ['source'],
-  sources: singleInputSources,
+  sources: (spec) => [spec.source],
 
   validate() {
     // Synthesized specs are never declared in YAML; the entry whose

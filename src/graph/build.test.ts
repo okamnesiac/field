@@ -329,47 +329,6 @@ describe('build', () => {
     );
   });
 
-  it('points sound:, sounds: and targets: at track:, where sounds folded', async () => {
-    // `sound:` forwards to `track:` at the finale (nested-tracks.md §18
-    // decision 5): every sound is a track now, and correcting the plural
-    // to `sound:` — or `targets:` to it — would hand back a second dead
-    // end, the mistake `targets:` was already fixed for once.
-    await expect(buildLabels(root, ['//songs/creek/sound:pad-eq'])).rejects.toThrow(
-      'sounds folded into tracks: try //songs/creek/track:pad-eq',
-    );
-    await expect(buildLabels(root, ['//songs/creek/sounds:pad-eq'])).rejects.toThrow(
-      'try //songs/creek/track:pad-eq',
-    );
-    await expect(buildLabels(root, ['//songs/creek/sound/...'])).rejects.toThrow(
-      'try //songs/creek/track/...',
-    );
-    await expect(buildLabels(root, ['//songs/creek/targets:pad-eq'])).rejects.toThrow(
-      '(targets: is now track: try //songs/creek/track:pad-eq)',
-    );
-    await expect(buildLabels(root, ['//songs/creek/targets:all'])).rejects.toThrow(
-      'try //songs/creek/track:all',
-    );
-  });
-
-  it('points mix: and mixes: at track:, the package that replaced them', async () => {
-    // Both spellings, because correcting the plural to `mix:` would hand
-    // back a second dead end now that mixes/ has retired — the same
-    // mistake `targets:` was fixed for. The hint only fires when the
-    // suggestion exists, so the song needs a track node first.
-    mkdirSync(join(root, 'songs/creek/tracks'), { recursive: true });
-    writeFileSync(
-      join(root, 'songs/creek/tracks/pad-track.yaml'),
-      ['name: pad-track', 'inputs:', '  - id: c1', '    audio: pad', '    at: [1]', '    duration: [1]', ''].join('\n'),
-    );
-
-    await expect(buildLabels(root, ['//songs/creek/mixes:pad-track'])).rejects.toThrow(
-      'try //songs/creek/track:pad-track',
-    );
-    await expect(buildLabels(root, ['//songs/creek/mix:pad-track'])).rejects.toThrow(
-      'try //songs/creek/track:pad-track',
-    );
-  });
-
   it('refuses to build when input bytes disagree with the declaration', async () => {
     const { state, runner } = countingRunner();
     const assetPath = join(root, 'songs/creek/audio/pad/pad.wav');

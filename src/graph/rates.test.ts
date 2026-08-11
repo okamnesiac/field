@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -39,14 +39,6 @@ function writeTrack(name: string, body: string[]): void {
   writeFileSync(
     join(root, `songs/creek/tracks/${name}.yaml`),
     [`name: ${name}`, ...body, ''].join('\n'),
-  );
-}
-
-function writeSound(name: string, lines: string[]): void {
-  mkdirSync(join(root, 'songs/creek/sounds'), { recursive: true });
-  writeFileSync(
-    join(root, `songs/creek/sounds/${name}.yaml`),
-    [`name: ${name}`, ...lines, ''].join('\n'),
   );
 }
 
@@ -285,19 +277,3 @@ describe('conversion at the edge (decision 4)', () => {
   });
 });
 
-describe('the sounds/ tombstone', () => {
-  it('tells an old directory the move rather than reading it', () => {
-    // A normalize (or any) sound left on the shelf gets the fold
-    // instructions — one message for the directory, since the fix is
-    // the same fold for every file in it.
-    writeSound('pad-cd', [
-      'type: normalize',
-      'source: pad',
-      'sample_rate: 44100',
-      'bit_depth: 16',
-    ]);
-    expect(loadProject(root).diagnostics.map((d) => d.message).join('\n')).toContain(
-      'sounds/ has retired — every sound is a track now',
-    );
-  });
-});

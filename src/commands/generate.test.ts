@@ -705,17 +705,17 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
   });
 
   it('choose refuses a takes file that attaches elsewhere', async () => {
-    // A stale pre-fold sound:-keyed file would otherwise get `chosen`
-    // rewritten and a success report, while the loader rejects the
-    // file and the graph never sees the choice.
+    // A misattached file would otherwise get `chosen` rewritten and a
+    // success report, while the loader rejects the file and the graph
+    // never sees the choice.
     writeGenLeaf();
     await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2 });
     const takesPath = join(root, 'songs/creek/audio/rain-pad/variants.yaml');
     const raw = readFileSync(takesPath, 'utf8');
-    writeFileSync(takesPath, raw.replace('gen: rain-pad', 'sound: rain-pad'));
+    writeFileSync(takesPath, raw.replace('gen: rain-pad', 'gen: other-name'));
     await expect(
       chooseVariant(root, 'rain-pad', { song: 'creek', variant: 2 }),
-    ).rejects.toThrow('rename sound: to gen:');
+    ).rejects.toThrow('attach to gen "other-name", not "rain-pad"');
     expect(readFileSync(takesPath, 'utf8')).toContain('chosen: 1');
   });
 

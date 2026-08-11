@@ -6,7 +6,6 @@
 // `//songs/creek/track:keys` reads "the keys track" (project-layout.md
 // §4.5, amended).
 //   entity file      songs/creek/tracks/drums.yaml   → //songs/creek/track:drums
-//                    songs/creek/sounds/kit-sc.yaml  → //songs/creek/sound:kit-sc
 //   collection file  songs/creek/assets.yaml         → //songs/creek/asset:<entry>
 //                    shared/assets.yaml              → //shared/asset:<entry>
 // The directories and the ledger's `assets:` key stay plural: a folder

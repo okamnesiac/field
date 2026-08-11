@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
-import type { SupercolliderSound } from '../schema/index.js';
+import type { SupercolliderSound } from './types.js';
 import type { Generator } from './types.js';
 
 const execFileAsync = promisify(execFile);

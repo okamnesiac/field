@@ -8,7 +8,7 @@ import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
-import { checkCables, type Cable } from './cables.js';
+import { checkCables, entryName, type Cable } from './cables.js';
 import { sha256File } from '../hash.js';
 import { genRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
@@ -22,8 +22,6 @@ import {
   generativeTakesOrder,
   generativeTakesSchema,
   TAKES_FILENAME,
-  takeOrder,
-  takeSchema,
   tempoFileOrder,
   tempoFileSchema,
   trackOrder,
@@ -33,7 +31,6 @@ import {
   type GenerativeTakes,
   type Project,
   type Song,
-  type Take,
   type TempoFile,
   type Track,
 } from '../schema/index.js';
@@ -76,13 +73,11 @@ export interface LoadedSong {
   tempo?: LoadedFile<TempoFile> | undefined;
   assets?: LoadedFile<AssetsFile> | undefined;
   tracks: LoadedFile<Track>[];
-  takes: LoadedFile<Take>[];
   // Run-recorded state for `generative:` entries, keyed by gen node
   // name (nested-tracks.md §18 step 3): audio/<name>/variants.yaml,
   // merged here once so nothing downstream learns the file layout.
   // Absent from the map means nothing has been generated yet, which is
-  // legal. (`sounds:` and its takes lived beside this until `sounds/`
-  // retired — §18 decision 12, the chunk 6 finale.)
+  // legal.
   genTakes: Map<string, LoadedFile<GenerativeTakes>>;
   // The song's resolved cables (nested-tracks.md §19), derived by
   // validate: complete, acyclic, arrivals agreed. The graph consumes
@@ -190,18 +185,6 @@ function loadEntryTakes(
     order: generativeTakesOrder,
   });
   if (!loaded) return undefined;
-  if (loaded.data.sound !== undefined) {
-    // A takes file from before the fold: same bytes, new attachment.
-    // Told the move rather than "must match", the way every retirement
-    // here forwards.
-    project.diagnostics.push({
-      file: loaded.path,
-      message:
-        `these takes attach to the gen node "${genName}" now — rename ` +
-        `sound: to gen: (nested-tracks.md §18)`,
-    });
-    return undefined;
-  }
   if (loaded.data.gen !== genName) {
     project.diagnostics.push({
       file: loaded.path,
@@ -241,34 +224,9 @@ export function loadProject(root: string): LoadedProject {
       name: basename(dir),
       dir: relative(project.root, dir),
       tracks: [],
-      takes: [],
       genTakes: new Map(),
       cables: [],
     };
-
-    // The pre-2026-08-06 layout is diagnosed, not silently ignored: a
-    // leftover list-file or generation/ directory would otherwise just
-    // stop contributing targets, which reads as data loss.
-    for (const [legacy, replacement] of [
-      ['targets.yaml', 'one file per sound in sounds/ (project-layout.md §1.3, §4)'],
-      ['generation', 'deliberate sounds in sounds/, variants in audio/ (project-layout.md §1.4)'],
-      // Still diagnosed, but no longer pointed at mixes/: that shelf
-      // retired too, so the advice this used to give is now a second dead
-      // end rather than a migration.
-      ['mix.yaml', 'the song\'s output is the track named "main" (nested-tracks.md §7 chunk 2)'],
-      // Sections were a stored copy of the structure, and a stored copy
-      // drifts: creek's said `chorus` at bar 13 of a twelve-bar song.
-      // `field arrangement <song>` derives the same list from the root
-      // track's placements, where it cannot (nested-tracks.md §5, §11).
-      ['arrangement.yaml', 'the arrangement is derived — run `field arrangement <song>` (nested-tracks.md §11)'],
-    ] as const) {
-      if (existsSync(join(dir, legacy))) {
-        project.diagnostics.push({
-          file: posix.join(song.dir, legacy),
-          message: `the old layout is no longer read — ${replacement}`,
-        });
-      }
-    }
 
     // The casts on time-carrying files (song, tracks) are
     // the load boundary of musical-time.md §1.6: their schemas parse the
@@ -301,25 +259,6 @@ export function loadProject(root: string): LoadedProject {
       });
     }
 
-    // `sounds/` retired when the last sound folded into a track
-    // (nested-tracks.md §18, decision 12 — the chunk 6 finale). A
-    // directory still here is a project mid-migration, and silently not
-    // reading it would be the worst option, for mixes/'s reason: every
-    // sound it defines would simply stop existing, files still on disk
-    // saying otherwise. One message for the directory rather than one
-    // per file, because the fix is the same fold for all of them.
-    if (existsSync(join(dir, 'sounds'))) {
-      project.diagnostics.push({
-        file: posix.join(song.dir, 'sounds'),
-        message:
-          `sounds/ has retired — every sound is a track now (nested-tracks.md §18, ` +
-          `decision 12): fold an effect sound into a track with one insert, a ` +
-          `supercollider or generative sound into a leaf track carrying the entry ` +
-          `in inputs:, rename sound: to gen: in its audio/<name>/variants.yaml, ` +
-          `and delete the directory`,
-      });
-    }
-
     for (const file of yamlFiles(join(dir, 'tracks'))) {
       const track = loadFile(project, file, { schema: trackSchema, order: trackOrder }) as
         | LoadedFile<Track>
@@ -335,18 +274,6 @@ export function loadProject(root: string): LoadedProject {
         const name = generatorName(entry, track.data.name);
         const takes = loadEntryTakes(project, dir, name);
         if (takes) song.genTakes.set(name, takes);
-      }
-    }
-
-    const takesDir = join(dir, 'takes');
-    if (existsSync(takesDir)) {
-      for (const trackDir of readdirSync(takesDir).sort()) {
-        const p = join(takesDir, trackDir);
-        if (!statSync(p).isDirectory()) continue;
-        for (const file of yamlFiles(p)) {
-          const take = loadFile(project, file, { schema: takeSchema, order: takeOrder });
-          if (take) song.takes.push(take);
-        }
       }
     }
 
@@ -369,7 +296,6 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.assets,
       ...s.genTakes.values(),
       ...s.tracks,
-      ...s.takes,
     ]),
   ];
   return files.filter((f) => f !== undefined);
@@ -508,9 +434,8 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // The namespace a bare `audio:` ref resolves in (§4.3). Sounds
-    // shared it until `sounds/` retired; what remains is the ledger,
-    // plus the shared scope's for the one cross-scope spelling.
+    // The namespace a bare `audio:` ref resolves in (§4.3): the
+    // ledger, plus the shared scope's for the one cross-scope spelling.
     const names: SourceNames = {
       assets: assetNames,
       shared: sharedNames,
@@ -520,11 +445,12 @@ function validate(project: LoadedProject): void {
     // namespace (nested-tracks.md §18) — the whole visibility rule
     // (project-layout.md §1.5) is that no spelling reaches another song,
     // and the one cross-scope spelling is `audio: //shared/asset:`.
-    // Takes reference assets only: a take is a recording, and its asset
-    // is the ledger row import wrote.
     const assetFileByName = new Map(song.assets?.data.assets.map((a) => [a.name, a.file]) ?? []);
     // Where a committed source's bytes live (undefined for anything that
     // renders): the ledger file, the shared file, or a chosen take.
+    // graph.ts builds the same relation eagerly for the build pass
+    // (buildGraph's fileBySource) — the two must answer alike, since
+    // loop tiling validated here is planned there.
     const fileBySource = (ref: string): { base: string; file: string } | undefined => {
       const shared = sharedAssetName(ref);
       if (shared !== undefined) {
@@ -543,27 +469,10 @@ function validate(project: LoadedProject): void {
       }
       return undefined;
     };
-    // `mixes/` retired with the output track (nested-tracks.md §7 chunk 2).
-    // A directory still sitting there is a project mid-migration, and
-    // silently not reading it is the worst of the three options: the mix
-    // it describes would simply stop existing, with the files still on
-    // disk saying otherwise.
-    if (existsSync(join(project.root, song.dir, 'mixes'))) {
-      push(
-        join(song.dir, 'mixes'),
-        `mixes/ has retired — a song's output is the track named ` +
-          `"${SONG_OUTPUT_NAME}" (nested-tracks.md §7 chunk 2). Move each mix's ` +
-          `tracks to that track's inputs, carrying each one's gain_db and pan onto ` +
-          `its placement, put the master chain in the track's inserts, and delete ` +
-          `the directory`,
-      );
-    }
-
     // Names first, in full: a track may place a track declared in any
     // file, and a forward reference is fine.
     const trackByName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
     const trackPathByName = new Map(song.tracks.map((t) => [t.data.name, t.path]));
-    const trackNames = new Set(trackByName.keys());
     // Every generator entry's node name, up front: the audio: diagnostic
     // below asks "does this name render", and forward references across
     // files are as fine for generators as for tracks.
@@ -576,10 +485,10 @@ function validate(project: LoadedProject): void {
       }
     }
 
-    // One timeline per track file, resolved once. Both the track loop and
-    // the takes loop below read it: a take is a recording *on* a track, so
-    // its ticks are in that track's time exactly as a clip's are
-    // (nested-tracks.md §13, #95 review).
+    // One timeline per track file, resolved once (nested-tracks.md §13):
+    // everything positioned on a track — its clips today, a recorded
+    // take's record when recording arrives — resolves ticks through that
+    // track's time, not the song's (#95 review).
     const timeByTrack = new Map<
       string,
       { tempo: TempoMap | undefined; meter: MeterMap | undefined; rate: number }
@@ -649,8 +558,8 @@ function validate(project: LoadedProject): void {
 
       // One entry loop (nested-tracks.md §18): what an entry plays is
       // named by its field, so resolution is per kind and never guesses —
-      // audio: refuses a name that renders, sound: refuses committed
-      // bytes, each pointing at the field that owns the name.
+      // audio: refuses a name that renders, pointing at the field that
+      // owns the name.
       const entryIds = new Set<string>();
       track.data.inputs.forEach((entry, i) => {
         // A receive is not a placement (nested-tracks.md §19): it has no
@@ -658,13 +567,8 @@ function validate(project: LoadedProject): void {
         // the path, the arrivals — are checkCables', below.
         if (entry.receive !== undefined) return;
         // Named by id when it has one — ids are optional (§18 decision
-        // 3) — else by position and target, the way placements were.
-        const target =
-          entry.track ??
-          entry.sound ??
-          entry.audio ??
-          (entry.supercollider ? 'supercollider' : entry.generative ? 'generative' : '?');
-        const what = entry.id !== undefined ? `input "${entry.id}"` : `input ${i + 1} ("${target}")`;
+        // 3) — else by position and target (cables.ts entryName).
+        const what = entryName(entry, i);
         if (entry.id !== undefined) {
           if (entryIds.has(entry.id)) push(track.path, `duplicate input id "${entry.id}"`);
           entryIds.add(entry.id);
@@ -813,7 +717,7 @@ function validate(project: LoadedProject): void {
                   ? 'generator'
                   : entry.generative !== undefined
                     ? 'generative entry'
-                    : 'sound';
+                    : 'source';
             push(
               track.path,
               `${what} loops a ${kind} — set loop.every ` +
@@ -1047,56 +951,6 @@ function validate(project: LoadedProject): void {
       containmentState.set(name, 'done');
     };
     for (const track of song.tracks) visitTrack(track.data.name, []);
-
-    for (const take of song.takes) {
-      // Filenames are keys (project-core.md §6): takes/<track>/<take-id>.yaml.
-      const expectedId = basename(take.path, '.yaml');
-      if (take.data.id !== expectedId) {
-        push(take.path, `id "${take.data.id}" must match filename "${expectedId}"`);
-      }
-      const dirTrack = basename(dirname(take.path));
-      if (take.data.track !== dirTrack) {
-        push(take.path, `track "${take.data.track}" must match containing directory "${dirTrack}"`);
-      }
-      if (!trackNames.has(take.data.track)) {
-        push(take.path, `take references unknown track "${take.data.track}"`);
-      }
-      if (!assetNames.has(take.data.asset)) {
-        push(take.path, `take references unknown asset "${take.data.asset}"`);
-      }
-
-      // Takes store both time representations under a declared anchor; the
-      // derived one must agree with the tempo map (project-core.md §3.1) —
-      // the track's own, since that is the timeline the recording sits in.
-      // A known track whose local map failed to parse yields `undefined`
-      // and skips the check: its error is already reported, and deriving
-      // against the song's map would reject samples that are right.
-      const onTrack = timeByTrack.get(take.data.track);
-      const takeTempo = onTrack ? onTrack.tempo : tempoMap;
-      if (takeTempo) {
-        if (take.data.anchor === 'musical') {
-          const derived = takeTempo.ticksToSamples(take.data.position);
-          if (derived !== take.data.position_samples) {
-            push(
-              take.path,
-              `position_samples ${take.data.position_samples} disagrees with tempo map ` +
-                `(position ${take.data.position} ticks = ${derived} samples)`,
-            );
-          }
-        } else {
-          const derived = takeTempo.samplesToTicks(take.data.position_samples);
-          // ±1 tick tolerance: the authoritative samples value rounds to ticks.
-          if (Math.abs(derived - take.data.position) > 1) {
-            push(
-              take.path,
-              `position ${take.data.position} disagrees with tempo map ` +
-                `(position_samples ${take.data.position_samples} = ${Math.round(derived)} ticks)`,
-            );
-          }
-        }
-      }
-    }
-
   }
 }
 

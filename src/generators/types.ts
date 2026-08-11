@@ -1,22 +1,31 @@
-import type { SupercolliderSound } from '../schema/index.js';
 import type { ResampleSpec } from './resample.js';
 import type { StemSpec } from './stem.js';
 
-// A Generator is a pluggable module that generates a type of sound
-// automatically — §1.2's "one generator category, two trigger policies"
-// expressed as code. The engine (graph/build.ts) owns caching, keys,
-// and ordering; each Generator owns everything type-specific: wiring,
-// validation, inputs, execution, and post-run integrity. SuperCollider
-// is not special; it is one programmable synth behind this interface,
-// and the mixer arrives the same way. A deliberate type (`generate`)
-// has no Generator here — its generation is human-triggered
-// (field generate), which is what BuildableSound encodes. A Generator's
-// spec is synthesized from the project model — a supercollider entry's
-// render, a stem from a track file, a resample from a rate-mismatched
-// edge; declared sounds retired with `sounds/` (nested-tracks.md §18).
-// Each is typed against its own spec — Generator<SupercolliderSound>
-// and so on — so per-method "wrong type" narrowing is proven by the
-// compiler.
+// A Generator owns everything type-specific about realizing one spec
+// kind — wiring, validation, inputs, execution, post-run integrity —
+// while the engine (graph/build.ts) owns caching, keys, and ordering.
+// Every spec is synthesized from the project model, never parsed from a
+// file of its own: a supercollider entry's render, a stem from a track
+// file, a resample from a rate-mismatched edge. Each is typed against
+// its own spec — Generator<SupercolliderSound> and so on — so
+// per-method "wrong type" narrowing is proven by the compiler.
+
+// The spec behind a `supercollider:` entry's gen node, rendered offline
+// (NRT) via sclang with FIELD_OUTPUT / FIELD_SEED / FIELD_DURATION /
+// FIELD_SAMPLE_RATE / FIELD_CHANNELS in the environment; the program
+// must write FIELD_OUTPUT and exit. Determinism given the seed is the
+// program's job; the program's content hash is the cache input. The
+// graph synthesizes this from the entry — name and type join the
+// entry's own fields, so the action key sees exactly the authored
+// parameters (schema/track.ts supercolliderEntrySchema).
+export interface SupercolliderSound {
+  name: string;
+  type: 'supercollider';
+  source: string; // the program; bare names resolve in shared/instruments/
+  seed: number;
+  duration: number; // seconds
+  channels: 1 | 2;
+}
 
 export type GeneratorSpec = SupercolliderSound | StemSpec | ResampleSpec;
 
@@ -30,9 +39,8 @@ export interface RunContext {
 
 // The song's visible names, pre-classified for source resolution
 // (project-layout.md §4.3): a bare slug means exactly one thing in the
-// song's namespace, a //shared/asset: label crosses scope. Sounds lived
-// here too until `sounds/` retired (nested-tracks.md §18, decision 12);
-// what remains resolvable by bare name is committed bytes.
+// song's namespace, a //shared/asset: label crosses scope. What is
+// resolvable by bare name is committed bytes.
 export interface SourceNames {
   assets: Set<string>; // the song's ledger
   shared: Set<string>; // the shared ledger
