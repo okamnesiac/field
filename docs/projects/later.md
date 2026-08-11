@@ -16,8 +16,6 @@ costs nothing. See [README](README.md) for how these lists work.
 - **AU hosting** — scanning, instantiation, parameter/state management, delay
   compensation in the daemon; UAD-2/UADx execution modes
   ([architecture.md](../architecture.md), [build-graph.md](../build-graph.md)).
-- **Recording and takes** — crash-safe transactional capture, punch/loop/
-  count-in, monitoring paths ([audio-engine.md](../audio-engine.md)).
 - **Recording widget** — the native macOS control surface, last on purpose: a
   client of an engine that must exist first.
 - **Live SuperCollider** — scsynth as a node in the real-time graph via

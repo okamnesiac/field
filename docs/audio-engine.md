@@ -4,7 +4,8 @@
 sample-accurate transport, and audition of built labels, described in
 [architecture.md](architecture.md). The rest of the real-time engine —
 recording, monitoring, plugin hosting — is future work, deferred because
-the generation-first milestones need none of it. This document records
+the generation-first milestones need none of it; recording is planned in
+[projects/all/recording.md](projects/all/recording.md). This document records
 the decisions already settled so the phases that build it start from
 agreement, not from scratch. Language and framework decisions (C++/JUCE,
 and the alternatives rejected) also live in
