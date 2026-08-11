@@ -89,12 +89,49 @@ export function pinProject(
         let touched = false;
         const pinnedAu = item.get('au');
         const pinnedVst3 = item.get('vst3');
+        const pinnedFormat: 'au' | 'vst3' | undefined =
+          typeof pinnedAu === 'string' ? 'au' : typeof pinnedVst3 === 'string' ? 'vst3' : undefined;
 
         let installed: PluginInfo | undefined;
-        if (typeof pinnedAu === 'string') {
-          installed = findInstalled(inventory, 'au', pinnedAu);
-        } else if (typeof pinnedVst3 === 'string') {
-          installed = findInstalled(inventory, 'vst3', pinnedVst3);
+        // An explicit preference re-pins across formats: `pin --vst3` on
+        // an AU-pinned entry is the documented gesture for switching,
+        // and honoring it means replacing the identity, not ignoring the
+        // flag (Codex).
+        if (
+          options.prefer !== undefined &&
+          pinnedFormat !== undefined &&
+          pinnedFormat !== options.prefer
+        ) {
+          const named = inventory.plugins.filter(
+            (p) => p.name === name && p.format === options.prefer,
+          );
+          if (named.length === 0) {
+            problems.push({
+              file: track.path,
+              message: `"${name}" has no scanned ${options.prefer} to switch to`,
+            });
+            continue;
+          }
+          if (named.length > 1) {
+            problems.push({
+              file: track.path,
+              message:
+                `"${name}" matches ${named.length} scanned ${options.prefer} plugins — ` +
+                named.map((p) => p.identifier).join(' and '),
+            });
+            continue;
+          }
+          installed = named[0]!;
+          item.delete(pinnedFormat);
+          item.set(installed.format, installed.identifier);
+          item.set('version', installed.version);
+          if (installed.latency > 0) item.set('latency', installed.latency);
+          else item.delete('latency');
+          touched = true;
+        } else if (pinnedFormat === 'au') {
+          installed = findInstalled(inventory, 'au', pinnedAu as string);
+        } else if (pinnedFormat === 'vst3') {
+          installed = findInstalled(inventory, 'vst3', pinnedVst3 as string);
         } else {
           // Name-only: resolve, preferring AU on macOS and VST3
           // elsewhere when a product is installed as both (decision 2) —
@@ -126,6 +163,16 @@ export function pinProject(
         }
 
         if (installed === undefined) continue;
+        // A plugin that reports no version cannot be pinned — writing
+        // `version: ""` would turn a valid unpinned entry into a file
+        // the schema rejects (Codex).
+        if (installed.version === '') {
+          problems.push({
+            file: track.path,
+            message: `"${name}" reports no version; it cannot be pinned (${installed.format} ${installed.identifier})`,
+          });
+          continue;
+        }
         const pinnedVersion = item.get('version');
         if (typeof pinnedVersion !== 'string') {
           item.set('version', installed.version);
@@ -186,12 +233,15 @@ export function pinCommand(
 // before validation runs, so `field check` on a freshly authored
 // `- plugin: <name>` line writes the identity back and then judges the
 // pinned file. No inventory, no edits — validate reports the unpinned
-// insert and names the scan command.
-export function pinBeforeCheck(root: string): PinEdit[] {
+// insert and names the scan command. Problems come back too: an
+// ambiguous name is the scan's specific answer, and swallowing it here
+// would leave check saying only the generic "not pinned".
+export function pinBeforeCheck(root: string): PinOutcome {
+  const empty: PinOutcome = { edits: [], problems: [] };
   const inventoryPath = join(root, '.field', 'plugins.json');
-  if (!existsSync(inventoryPath)) return [];
+  if (!existsSync(inventoryPath)) return empty;
   const inventory = readInventory(root);
-  if (inventory === undefined) return [];
+  if (inventory === undefined) return empty;
   const project = loadProject(root);
   const unpinned = project.songs.some((song) =>
     song.tracks.some((track) =>
@@ -201,6 +251,6 @@ export function pinBeforeCheck(root: string): PinEdit[] {
       ),
     ),
   );
-  if (!unpinned) return [];
-  return pinProject(project, inventory).edits;
+  if (!unpinned) return empty;
+  return pinProject(project, inventory);
 }

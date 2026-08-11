@@ -229,6 +229,39 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
     expect(Math.abs(data[300 - 128]!)).toBeLessThan(1e-6);
   });
 
+  it('refuses a latency the plugin does not report (decision 11, Bugbot)', async () => {
+    // The Latency param makes the fixture actually exhibit 64 samples;
+    // the insert still declares 0, which is exactly the stale-pin case
+    // that used to render with PDC quietly wrong.
+    await expect(
+      render(pluginInsert({ params: [{ name: 'Latency', value: 64 }] })),
+    ).rejects.toThrow(/reports 64 samples of latency but the insert declares 0/);
+  });
+
+  it('splits blocks at tempo-segment boundaries mid-block (decision 13, Bugbot)', async () => {
+    // Segment 2 lands at sample 960 — inside the [512, 1024) block. At
+    // bpm 1 the gate never leaves its first half; at bpm 60000 a beat
+    // is 48 samples, so sample 990 sits in a gated quarter-level span.
+    // Without the split, the block would carry segment 1's playhead and
+    // render 990 at full level.
+    const loud = Float32Array.from({ length: 4800 }, () => 0.5);
+    const out = await render(
+      pluginInsert({
+        params: [{ name: 'Beat Gate', value: 1 }],
+        transport: {
+          segments: [
+            { sample: 0, ppq: 0, bpm: 1, numerator: 4, denominator: 4 },
+            { sample: 960, ppq: 1 / 3000, bpm: 60000, numerator: 4, denominator: 4 },
+          ],
+        },
+      }),
+      inputWav(loud),
+    );
+    const data = readWavData(out).channels[0]!;
+    expect(data[970]).toBeCloseTo(0.5, 4); // first half of a fast beat
+    expect(data[990]).toBeCloseTo(0.125, 4); // second half: quarter level
+  });
+
   it('renders a declared tail exactly and rings out an undeclared one (decision 11)', async () => {
     const declared = await render(pluginInsert({ tail: 0.01 }));
     expect(readWavData(declared).frames).toBe(4800 + 480);
@@ -237,6 +270,47 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
     // edge rather than padding a cap's worth of silence.
     const detected = await render(pluginInsert());
     expect(readWavData(detected).frames).toBe(4800);
+  });
+
+  it('pads the render by latency so lengths survive the trim (Codex)', async () => {
+    // Declared tail with latency: the run renders tail + latency and
+    // trims back to exactly input + tail — the pre-fix code delivered
+    // input + tail − latency.
+    const declared = await render(
+      pluginInsert({ tail: 0.01, latency: 128, params: [{ name: 'Latency', value: 128 }] }),
+    );
+    expect(readWavData(declared).frames).toBe(4800 + 480);
+
+    // A silent stem under ring-out keeps its full length too; the
+    // pre-fix code returned it short by the latency.
+    const silent = await render(
+      pluginInsert({ latency: 128, params: [{ name: 'Latency', value: 128 }] }),
+      inputWav(new Float32Array(4800)),
+    );
+    expect(readWavData(silent).frames).toBe(4800);
+  });
+
+  it('refuses a Name#<id> whose name disagrees with the id (Codex)', async () => {
+    const gainId = fixture.params.find((p) => p.name === 'Gain')!.id;
+    await expect(
+      render(pluginInsert({ params: [{ name: `Trim#${gainId}`, value: 1 }] })),
+    ).rejects.toThrow(/is named "Gain", not "Trim"/);
+  });
+
+  it('labeled params take their label; unrecognized spellings refuse (Codex)', async () => {
+    const input = inputWav();
+    const halved = await render(
+      pluginInsert({ params: [{ name: 'Ratio', value: '4:1' }] }),
+      input,
+    );
+    const flat = await render(pluginInsert(), input);
+    const a = readWavData(halved).channels[0]!;
+    const b = readWavData(flat).channels[0]!;
+    expect(a[55]! / b[55]!).toBeCloseTo(0.5, 3);
+
+    await expect(render(pluginInsert({ params: [{ name: 'Ratio', value: 3 }] }))).rejects.toThrow(
+      /spell the value as the plugin displays it/,
+    );
   });
 
   it('refuses a bare name matching two params and takes Name#<id> (decision 3)', async () => {

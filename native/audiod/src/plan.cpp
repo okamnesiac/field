@@ -271,10 +271,17 @@ void validateInsert (const juce::var& insert, const std::string& path)
         for (int i = 0; i < params.size(); ++i)
         {
             const auto paramPath = path + ".params[" + std::to_string (i) + "]";
-            checkObject (params[i],
-                         paramPath,
-                         { { "name", Kind::string, true },
-                           { "value", Kind::number, true } });
+            const auto& entry = params[i];
+            if (entry.getDynamicObject() == nullptr)
+                fail (paramPath, "expected an object");
+            if (! entry.getProperty ("name", juce::var()).isString())
+                fail (paramPath + ".name", "is required and must be a string");
+            // A value is a number in the plugin's natural units, or a
+            // string for labeled parameters ("4:1") — the plugin's own
+            // display spelling.
+            const auto value = entry.getProperty ("value", juce::var());
+            if (! (value.isDouble() || value.isInt() || value.isInt64() || value.isString()))
+                fail (paramPath + ".value", "must be a number or a string");
         }
         const auto segments =
             insert.getProperty ("transport", juce::var()).getProperty ("segments", juce::var());

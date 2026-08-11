@@ -359,10 +359,51 @@ namespace
                                           + std::to_string (matches) + " parameters named \""
                                           + wantName.toStdString()
                                           + "\" — spell it Name#<id> to say which");
+            // An id whose display name disagrees is the typo an
+            // inventory-backed check would have caught — a machine
+            // rendering without one must not quietly move a different
+            // knob (Codex).
+            if (wantId.isNotEmpty() && target->getName (512) != wantName)
+                throw std::runtime_error ("param \"" + name.toStdString() + "\": id "
+                                          + wantId.toStdString() + " is named \""
+                                          + target->getName (512).toStdString() + "\", not \""
+                                          + wantName.toStdString() + "\"");
 
             const auto text = value.isString() ? value.toString()
                                                : juce::String (double (value), 12);
-            target->setValue (target->getValueForText (text));
+            const auto normalized = target->getValueForText (text);
+            // Outside [0,1] is the plugin saying it did not recognize
+            // the spelling — refuse rather than render a default under
+            // a key claiming the authored value. The VST3 layer clamps
+            // this signal away (measured), so discrete parameters get a
+            // second guard below.
+            if (normalized < 0.0f || normalized > 1.0f)
+                throw std::runtime_error (displayName.toStdString()
+                                          + " does not recognize \"" + text.toStdString()
+                                          + "\" for parameter \"" + wantName.toStdString()
+                                          + "\" — spell the value as the plugin displays it");
+            target->setValue (normalized);
+
+            // Discrete parameters can verify by display round-trip: the
+            // landed value's own text must match what was authored, or
+            // an unrecognized spelling has silently become the default
+            // (Codex — labeled parameters take their label as a string:
+            // `Ratio: "4:1"`). Two-state parameters are exempt, since
+            // "On" legitimately spells 1, and continuous ones are not
+            // judged: their display rounds and rescales ("1.0 kHz").
+            if (target->isDiscrete() && target->getNumSteps() > 2)
+            {
+                const auto shown = target->getText (target->getValue(), 512).trim();
+                const bool displayMatches =
+                    value.isString() ? shown.equalsIgnoreCase (text.trim())
+                                     : std::abs (shown.getDoubleValue() - double (value)) <= 0.5;
+                if (! displayMatches)
+                    throw std::runtime_error (displayName.toStdString() + " reads \""
+                                              + text.toStdString() + "\" for parameter \""
+                                              + wantName.toStdString() + "\" as \""
+                                              + shown.toStdString()
+                                              + "\" — spell the value as the plugin displays it");
+            }
         }
     }
 } // namespace
@@ -452,8 +493,25 @@ void applyPluginInsert (const juce::var& insert,
     instance->setNonRealtime (true);
     instance->prepareToPlay (sampleRate, blockSize);
 
+    // Decision 11's instantiation-time verify: the declared latency is
+    // what the trim below uses and what the compiler's arithmetic saw,
+    // so a plugin reporting something else — a stale pin, or a
+    // latency-changing parameter — must refuse rather than render with
+    // PDC quietly wrong. Checked after state and params are applied and
+    // prepareToPlay has run, because that is when the report is real.
+    const auto declaredLatency = std::llround (requireInsertNumber (insert, "latency"));
+    const auto reportedLatency = instance->getLatencySamples();
+    if (reportedLatency != declaredLatency)
+        throw std::runtime_error (displayName.toStdString() + " reports "
+                                  + std::to_string (reportedLatency)
+                                  + " samples of latency but the insert declares "
+                                  + std::to_string (declaredLatency) + " — set latency: "
+                                  + std::to_string (reportedLatency)
+                                  + " on the insert (field plugins pin writes the default; a "
+                                    "parameter that changes latency changes the line too)");
+
     const size_t inputLength = channels[0].size();
-    const auto latencySamples = size_t (std::llround (requireInsertNumber (insert, "latency")));
+    const auto latencySamples = size_t (declaredLatency);
 
     // Declared tail renders exactly that long; no declaration rings out
     // to −60 dBFS with a hard cap (decision 11). Both are deterministic:
@@ -464,9 +522,16 @@ void applyPluginInsert (const juce::var& insert,
     constexpr double ringoutCapSeconds = 30.0;
     constexpr float ringoutThreshold = 1.0e-3f; // −60 dBFS
 
+    // Rendered length is measured *after* the latency trim, so the run
+    // pads by the declared latency up front: a 480-sample tail with 128
+    // samples of latency renders 480 + 128 and trims back to exactly
+    // 480 — the pre-fix code delivered 352 (Codex). The delayed input
+    // itself ends at inputLength + latency, which is where the ring-out
+    // window starts.
     const size_t tailSamples =
         declaredTail ? size_t (std::llround (double (tailVar) * sampleRate))
                      : size_t (std::llround (ringoutCapSeconds * sampleRate));
+    const size_t inputEnd = inputLength + latencySamples;
 
     std::vector<std::vector<float>> output (static_cast<size_t> (numChannels));
     for (auto& channel : output)
@@ -479,27 +544,44 @@ void applyPluginInsert (const juce::var& insert,
     size_t lastLoud = 0;
     bool sawLoud = false;
 
-    const size_t totalToRender = inputLength + tailSamples;
+    const size_t totalToRender = inputEnd + tailSamples;
     while (emitted < totalToRender)
     {
-        block.clear();
         const auto blockStart = consumed;
+
+        // Blocks split at tempo-segment boundaries, so the position info
+        // a block carries is a pure function of sample position rather
+        // than of how the run happened to be partitioned. Hosts report
+        // the playhead once per block and plugins extrapolate within it
+        // — splitting is what keeps that extrapolation from crossing a
+        // boundary, and what lets the live path (device-sized blocks,
+        // chunk 2) supply byte-identical context (decision 13).
+        int blockLen = blockSize;
+        for (const auto& segment : playHead.segments)
+        {
+            if (size_t (segment.sample) > blockStart
+                && size_t (segment.sample) < blockStart + size_t (blockLen))
+                blockLen = int (size_t (segment.sample) - blockStart);
+        }
+
+        block.clear();
         for (int channel = 0; channel < numChannels; ++channel)
         {
             auto* data = block.getWritePointer (channel);
             const auto& source = channels[size_t (channel)];
-            for (int i = 0; i < blockSize; ++i)
+            for (int i = 0; i < blockLen; ++i)
             {
                 const auto index = blockStart + size_t (i);
                 data[i] = index < inputLength ? source[index] : 0.0f;
             }
         }
-        consumed += size_t (blockSize);
+        consumed += size_t (blockLen);
 
         playHead.positionSamples = juce::int64 (blockStart);
-        instance->processBlock (block, midi);
+        juce::AudioBuffer<float> view (block.getArrayOfWritePointers(), numChannels, blockLen);
+        instance->processBlock (view, midi);
 
-        const auto take = juce::jmin (size_t (blockSize), totalToRender - emitted);
+        const auto take = juce::jmin (size_t (blockLen), totalToRender - emitted);
         for (int channel = 0; channel < numChannels; ++channel)
         {
             const auto* data = block.getReadPointer (channel);
@@ -508,10 +590,13 @@ void applyPluginInsert (const juce::var& insert,
             {
                 const auto sample = data[i];
                 sink.push_back (sample);
-                if (! declaredTail && emitted + i >= inputLength
+                if (! declaredTail && emitted + i >= inputEnd
                     && std::abs (sample) >= ringoutThreshold)
                 {
-                    lastLoud = emitted + i;
+                    // max, not assignment: channels walk sequentially,
+                    // and a quieter-later right channel must not pull
+                    // the mark back before the left one's tail (Codex).
+                    lastLoud = juce::jmax (lastLoud, emitted + i);
                     sawLoud = true;
                 }
             }
@@ -521,9 +606,9 @@ void applyPluginInsert (const juce::var& insert,
         // Ring-out ends when a whole second past the input has stayed
         // under the threshold — a plateau check rather than first-quiet,
         // so a beat-gated tail is not cut at its first trough.
-        if (! declaredTail && emitted > inputLength)
+        if (! declaredTail && emitted > inputEnd)
         {
-            const auto quietSince = sawLoud ? lastLoud : inputLength;
+            const auto quietSince = sawLoud ? lastLoud : inputEnd;
             if (emitted > quietSince + size_t (sampleRate))
                 break;
         }
@@ -536,7 +621,10 @@ void applyPluginInsert (const juce::var& insert,
     // declared latency from the front — the plugin's alignment debt.
     if (! declaredTail)
     {
-        const auto keep = sawLoud ? juce::jmax (lastLoud + 1, inputLength) : inputLength;
+        // Both bounds in pre-trim coordinates: never shorter than the
+        // delayed input (so a silent stem keeps its full length after
+        // the trim), never longer than the last loud sample.
+        const auto keep = sawLoud ? juce::jmax (lastLoud + 1, inputEnd) : inputEnd;
         for (auto& channel : output)
             if (channel.size() > keep)
                 channel.resize (keep);

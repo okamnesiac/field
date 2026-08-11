@@ -49,6 +49,12 @@ public:
                           juce::AudioParameterIntAttributes().withLabel ("samples")));
         addParameter (beatGate = new juce::AudioParameterBool (
                           juce::ParameterID { "beat", 1 }, "Beat Gate", false));
+        // A choice parameter, because natural units are sometimes labels
+        // ("4:1") rather than numbers — the render path's
+        // unrecognized-text refusal needs one to be testable against.
+        addParameter (ratio = new juce::AudioParameterChoice (
+                          juce::ParameterID { "ratio", 1 }, "Ratio",
+                          juce::StringArray { "2:1", "4:1", "8:1" }, 0));
 
         // The capture hook: state blobs are captured, never hand-written
         // (plugin-hosting.md decision 7), so the test suite needs a way
@@ -101,8 +107,12 @@ public:
     {
         const auto numChannels = juce::jmin (buffer.getNumChannels(), 2);
         const auto numSamples = buffer.getNumSamples();
+        // The ratio halves output per step: 2:1 → ×1, 4:1 → ×0.5,
+        // 8:1 → ×0.25 — a labeled parameter with a measurable effect.
+        const double ratioFactor = std::pow (0.5, double (ratio->getIndex()));
         const double gainLinear =
-            std::pow (10.0, (double (gain->get()) + double (trimA->get()) + double (trimB->get())) / 20.0);
+            ratioFactor
+            * std::pow (10.0, (double (gain->get()) + double (trimA->get()) + double (trimB->get())) / 20.0);
 
         // The beat gate is a pure function of the playhead: full level in
         // the first half of each beat, a quarter in the second. No
@@ -165,6 +175,7 @@ public:
         object->setProperty ("trimB", double (trimB->get()));
         object->setProperty ("latency", latency->get());
         object->setProperty ("beat", beatGate->get());
+        object->setProperty ("ratio", ratio->getIndex());
         object->setProperty ("offset", stateOffset);
         const auto json = juce::JSON::toString (juce::var (object), true);
         destData.replaceAll (json.toRawUTF8(), json.getNumBytesAsUTF8());
@@ -181,6 +192,7 @@ public:
         *trimB = float (double (parsed.getProperty ("trimB", 0.0)));
         *latency = int (parsed.getProperty ("latency", 0));
         *beatGate = bool (parsed.getProperty ("beat", false));
+        *ratio = int (parsed.getProperty ("ratio", 0));
         stateOffset = double (parsed.getProperty ("offset", 0.0));
     }
 
@@ -190,6 +202,7 @@ private:
     juce::AudioParameterFloat* trimB = nullptr;
     juce::AudioParameterInt* latency = nullptr;
     juce::AudioParameterBool* beatGate = nullptr;
+    juce::AudioParameterChoice* ratio = nullptr;
 
     double stateOffset = 0.0;
     int delaySamples = 0;

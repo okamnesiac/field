@@ -109,9 +109,14 @@ export const pluginInsertSchema = z
       .string()
       .regex(/^.{4}\/.{4}\/.{4}$/, 'an AU identity is type/subtype/manufacturer, three 4CCs')
       .optional(),
+    // What is pinned is JUCE's 32-bit plugin uid, not the VST3 class
+    // TUID — JUCE does not surface the TUID, and this derivation is
+    // JUCE's to change (it moved once already: `deprecatedUid`), which
+    // is decision 9's installer exposure one layer down; the plan
+    // records it beside that decision so the refusal is predictable.
     vst3: z
       .string()
-      .regex(/^[0-9a-f]{1,16}$/, 'a VST3 identity is the plugin unique id in lowercase hex')
+      .regex(/^[0-9a-f]{1,8}$/, "a VST3 identity is JUCE's 32-bit plugin uid in lowercase hex")
       .optional(),
     version: z.string().min(1).optional(),
     latency: z.number().int().min(0).optional(), // samples; tool-written, omitted when zero
@@ -120,14 +125,31 @@ export const pluginInsertSchema = z
       .string()
       .regex(/^[0-9a-f]{8,64}$/, 'a state ref is 8–64 lowercase hex chars of the blob hash')
       .optional(),
-    params: z.record(z.string(), z.number()).optional(),
+    // Numbers in the plugin's natural units; strings for labeled
+    // parameters ("4:1") — the plugin's own display spelling.
+    params: z.record(z.string(), z.union([z.number(), z.string().min(1)])).optional(),
   })
   .refine((entry) => entry.au === undefined || entry.vst3 === undefined, {
     message: 'a plugin is pinned as `au:` or `vst3:`, never both',
   });
 export type PluginInsert = z.infer<typeof pluginInsertSchema>;
 
-export const insertSchema = z.union([effectInsertSchema, pluginInsertSchema]);
+// One entry, two shapes, dispatched by the presence of `plugin:` rather
+// than parsed as a plain union — z.union reports whichever arm's error
+// it likes, which for the two commonest authoring mistakes (a misspelled
+// key, a misspelled effect) is neither; dispatching first keeps every
+// arm's own diagnostics (minjudd measured the loss on #148).
+export const insertSchema = z.unknown().transform((value, ctx): EffectInsert | PluginInsert => {
+  const isPlugin = typeof value === 'object' && value !== null && 'plugin' in value;
+  const result = isPlugin ? pluginInsertSchema.safeParse(value) : effectInsertSchema.safeParse(value);
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      ctx.addIssue(issue as Parameters<typeof ctx.addIssue>[0]);
+    }
+    return z.NEVER;
+  }
+  return result.data;
+});
 export type Insert = z.infer<typeof insertSchema>;
 
 export function isHostedInsert(insert: Insert): insert is PluginInsert {

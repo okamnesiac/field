@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import { daemonBinary } from '../audiod/client.js';
 import { PPQ } from '../constants.js';
+import { sha256FileSync } from '../hash.js';
 import type { PluginInsert } from '../schema/effects.js';
 import type { MeterEvent, TempoEvent } from '../time/tempo.js';
 import { TempoMap } from '../time/tempo.js';
@@ -167,7 +168,7 @@ export interface PluginInsertSpec {
   latency: number;
   tail?: number;
   state_sha256?: string;
-  params: { name: string; value: number }[];
+  params: { name: string; value: number | string }[];
   transport: { segments: TransportSegment[] };
 }
 
@@ -237,6 +238,16 @@ export function toPluginWire(spec: PluginInsertSpec, root: string): PluginWireIn
       );
     }
     statePath = join(root, blob.path);
+    // The drift guard runs here too, not only in check: `field build`
+    // never calls verifyAssetHashes, and a cold render must not cache
+    // drifted bytes under a key naming the filename's hash (Codex).
+    const actual = sha256FileSync(statePath);
+    if (actual !== spec.state_sha256) {
+      throw new Error(
+        `state blob ${blob.path} content does not hash to its filename (hashes to ${actual}) — ` +
+          `field check names it`,
+      );
+    }
   }
   return {
     ...spec,

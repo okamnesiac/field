@@ -103,6 +103,55 @@ describe('pinProject (decision 2)', () => {
     expect(problems[0]!.message).toContain('no scanned plugin is named "Missing Thing"');
   });
 
+  it('pin --au switches a vst3-pinned entry across formats (Codex)', () => {
+    const path = writeTrack(
+      'name: lead\ninserts:\n  - plugin: Field Fixture\n    vst3: 1beeb215\n    version: 1.0.0\ninputs: []\n',
+    );
+    const both: PluginInventory = {
+      plugins: [
+        inventory.plugins[0]!,
+        { ...inventory.plugins[0]!, format: 'au', identifier: 'aufx/Ffx1/Fldf' },
+      ],
+      failed: [],
+    };
+    const { edits, problems } = pinProject(loadProject(root), both, { prefer: 'au' });
+    expect(problems).toEqual([]);
+    expect(edits).toHaveLength(1);
+    const written = readFileSync(path, 'utf8');
+    expect(written).toContain('au: aufx/Ffx1/Fldf');
+    expect(written).not.toContain('vst3:');
+  });
+
+  it('refuses to pin a plugin that reports no version (Codex)', () => {
+    writeTrack('name: lead\ninserts:\n  - plugin: Field Fixture\ninputs: []\n');
+    const versionless: PluginInventory = {
+      plugins: [{ ...inventory.plugins[0]!, version: '' }],
+      failed: [],
+    };
+    const { edits, problems } = pinProject(loadProject(root), versionless);
+    expect(edits).toEqual([]);
+    expect(problems[0]!.message).toContain('reports no version');
+  });
+
+  it('build pins too: loadValid writes the identity before validating (Codex)', async () => {
+    const path = writeTrack('name: lead\ninserts:\n  - plugin: Field Fixture\ninputs: []\n');
+    writeInventory();
+    const { loadValid } = await import('./build.js');
+    const { warnings } = loadValid(root);
+    expect(warnings.some((w) => w.includes('pinned Field Fixture'))).toBe(true);
+    expect(readFileSync(path, 'utf8')).toContain('vst3: 1beeb215');
+  });
+
+  it('keeps the built-in arms their own diagnostics through the dispatch (minjudd)', () => {
+    writeTrack('name: lead\ninserts:\n  - effect: reverb\n    decayy: 2.0\ninputs: []\n');
+    const typo = loadProject(root).diagnostics.map((d) => d.message);
+    expect(typo.some((m) => m.includes('decayy'))).toBe(true);
+
+    writeTrack('name: lead\ninserts:\n  - effect: revrb\n    mix: 0.3\ninputs: []\n');
+    const wrongEffect = loadProject(root).diagnostics.map((d) => d.message);
+    expect(wrongEffect.some((m) => m.includes('reverb'))).toBe(true);
+  });
+
   it('updates a drifted version only under --update (decision 9)', () => {
     const path = writeTrack(
       'name: lead\ninserts:\n  - plugin: Field Fixture\n    vst3: 1beeb215\n    version: 0.9.0\ninputs: []\n',
@@ -118,9 +167,28 @@ describe('pinProject (decision 2)', () => {
 
   it('pinBeforeCheck is inert without an inventory', () => {
     writeTrack('name: lead\ninserts:\n  - plugin: Field Fixture\ninputs: []\n');
-    expect(pinBeforeCheck(root)).toEqual([]);
+    expect(pinBeforeCheck(root).edits).toEqual([]);
     writeInventory();
-    expect(pinBeforeCheck(root)).toHaveLength(1);
+    expect(pinBeforeCheck(root).edits).toHaveLength(1);
+  });
+
+  it('check surfaces pin problems, not just the generic unpinned error (Bugbot)', async () => {
+    writeTrack('name: lead\ninserts:\n  - plugin: Field Fixture\ninputs: []\n');
+    const twin: PluginInventory = {
+      plugins: [
+        inventory.plugins[0]!,
+        { ...inventory.plugins[0]!, identifier: 'deadbeef', path: '/elsewhere/Fixture.vst3' },
+      ],
+      failed: [],
+    };
+    mkdirSync(join(root, '.field'), { recursive: true });
+    writeFileSync(join(root, '.field', 'plugins.json'), JSON.stringify(twin));
+    const { check } = await import('./check.js');
+    const result = await check(root);
+    expect(result.ok).toBe(false);
+    expect(
+      result.diagnostics.some((d) => d.message.includes('matches 2 scanned plugins')),
+    ).toBe(true);
   });
 });
 

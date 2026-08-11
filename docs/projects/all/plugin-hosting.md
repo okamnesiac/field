@@ -84,7 +84,16 @@ Decided elsewhere, restated here as constraints:
    why nothing breaks).
 2. **The exact identity gets its own field whose name is the
    format**: `au: <type/subtype/manufacturer>` (the three 4CCs) or
-   `vst3: <class-uid>`. No `format:` line. **You write the name; the
+   `vst3: <uid>` — JUCE's 32-bit plugin uid in hex, named plainly
+   because it is *not* the VST3 class TUID: JUCE does not surface
+   the 128-bit TUID, and the uid derivation is JUCE's to change (it
+   moved once already, which is why `deprecatedUid` exists). That is
+   decision 9's installer exposure one layer down — a JUCE upgrade
+   that moves the derivation stops every `vst3:` pin resolving at
+   once — recorded here so the refusal is predictable when it
+   happens: nothing renders wrong, rebuilds refuse naming the pin,
+   and `field plugins pin` re-pins deliberately, exactly the
+   version-drift flow. No `format:` line. **You write the name; the
    tool writes the id**: a hand-authored `- plugin: 1176` resolves
    against installed plugins at first check or build, and field
    writes the identity and `version:` lines back into the file — the

@@ -19,9 +19,17 @@ export interface CheckResult {
 }
 
 export async function check(root: string): Promise<CheckResult> {
-  const pinned = pinBeforeCheck(root);
+  const pinOutcome = pinBeforeCheck(root);
+  const pinned = pinOutcome.edits;
   const project = loadProject(root);
-  const diagnostics = [...project.diagnostics, ...(await verifyAssetHashes(project))];
+  // Pin problems are diagnostics: "matches 2 scanned plugins" is the
+  // specific answer, reported beside validate's generic unpinned error
+  // rather than swallowed under it.
+  const diagnostics = [
+    ...pinOutcome.problems.map(({ file, message }) => ({ file, message })),
+    ...project.diagnostics,
+    ...(await verifyAssetHashes(project)),
+  ];
   const errors = diagnosticErrors(diagnostics);
   // Formatting is only judged for files that parsed and validated; schema
   // errors already make the run fail. Warnings don't: a warned file is
