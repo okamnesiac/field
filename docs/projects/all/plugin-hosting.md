@@ -371,8 +371,11 @@ these; the two discriminants coexist in one chain.
    children in full); only an output-track chain processes in the
    callback, which is ordinary hosting. Live growth is declared
    arithmetic only: an undeclared `tail:` grows nothing live, and a
-   locate reinstantiates hosted stages fresh — correct first,
-   reset-path fast later if relocation cost ever argues.
+   locate resets hosted stages in place rather than reinstantiating —
+   the rebuild runs under the engine lock, where its cost is dropped
+   audio rather than latency, so the "correct first, fast later"
+   sequencing never applied (minjudd on #150); the warmup bound
+   carries hosted state correctness exactly as before.
 3. **Editor sessions and write-back.** `field open <track>/<handle>`,
    the `param_changed` protocol message, gesture-quantum file
    writes, blob recapture on non-param signals, id re-binding, the

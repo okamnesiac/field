@@ -525,6 +525,47 @@ describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md 
     expect(dataOf(livePath).equals(dataOf(artifact))).toBe(true);
   });
 
+  it('loads and plays a hosted session over the socket (minjudd on #150)', { timeout: 30000 }, async () => {
+    // The path field play takes — and the one --render-live is
+    // structurally incapable of exercising: --render-live runs before
+    // the server loop exists, already on the message thread, so
+    // instantiation there is direct. Over the socket it must marshal,
+    // and the request handler must not be holding the
+    // MessageManagerLock while it waits — the self-deadlock that hung
+    // field play for two minutes of probing before this test existed.
+    const { AudiodClient } = await import('../audiod/client.js');
+    const { compileSession } = await import('../graph/live.js');
+    // Looping, so the ~100 ms session cannot finish under the status
+    // probes below — the test is about the request path, not timing.
+    const compiled = await compileSession(root, 'opener', { loop: true });
+    expect(JSON.stringify(compiled.session)).toContain('"effect":"plugin"');
+    const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    try {
+      const loaded = await client.session(compiled.session);
+      expect(loaded.sample_rate).toBe(48000);
+      await client.play();
+      await new Promise((r) => setTimeout(r, 300));
+      const playing = await client.status();
+      expect(playing.state).toBe('playing');
+      expect(playing.sample).toBeGreaterThan(0);
+      // A far seek mid-play takes locate's rebuild branch under the
+      // request lock — the path that must reset the hosted stage in
+      // place, because reinstantiating there marshals to a message
+      // thread this request is holding (minjudd's P2 on #150).
+      await client.locate(0);
+      const relocated = await client.status();
+      expect(relocated.state).toBe('playing');
+      await client.stop();
+    } finally {
+      try {
+        await client.quit();
+      } catch {
+        // already gone
+      }
+      client.close();
+    }
+  });
+
   it('refuses a latency the plugin does not report at live load (decision 11)', async () => {
     // Declared 0, exhibited 64: the refusal fires after prepareToPlay
     // on the load thread, which is also the constructor-throw teardown

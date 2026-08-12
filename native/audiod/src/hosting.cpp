@@ -651,47 +651,100 @@ void applyPluginInsert (const juce::var& insert,
     channels = std::move (output);
 }
 
+namespace
+{
+    // Plugin instantiation belongs to the message thread: JUCE's
+    // synchronous create *posts* there and waits when called from
+    // anywhere else, so a caller holding the MessageManagerLock waits
+    // forever on its own lock — minjudd hung `field play` with exactly
+    // that (#150). The helper marshals the whole job, and refuses the
+    // deadlock case loudly instead of reproducing it.
+    void runOnMessageThread (const std::function<void()>& job)
+    {
+        auto* messageManager = juce::MessageManager::getInstance();
+        if (messageManager->isThisTheMessageThread())
+        {
+            job();
+            return;
+        }
+        if (messageManager->currentThreadHasLockedMessageManager())
+            throw std::runtime_error (
+                "plugin instantiation needs a free message thread, but this thread holds the "
+                "MessageManagerLock — hosted session loads must run outside it");
+        juce::WaitableEvent done;
+        std::string error;
+        juce::MessageManager::callAsync (
+            [&job, &error, &done]
+            {
+                try
+                {
+                    job();
+                }
+                catch (const std::exception& e)
+                {
+                    error = e.what();
+                }
+                catch (...)
+                {
+                    error = "plugin instantiation failed";
+                }
+                done.signal();
+            });
+        done.wait();
+        if (! error.empty())
+            throw std::runtime_error (error);
+    }
+} // namespace
+
 LivePluginStage::LivePluginStage (const Spec& stageSpec, double sampleRate, int maxBlockArg)
     : spec (stageSpec), rate (sampleRate), maxBlock (maxBlockArg)
 {
     ensureJuceRuntime();
-    instance = instantiateByIdentity (juce::String (spec.format), juce::String (spec.identifier),
-                                      juce::String (spec.name), juce::String (spec.version),
-                                      juce::String (spec.pathHint), sampleRate);
+    runOnMessageThread (
+        [this, sampleRate]
+        {
+            instance = instantiateByIdentity (juce::String (spec.format),
+                                              juce::String (spec.identifier),
+                                              juce::String (spec.name),
+                                              juce::String (spec.version),
+                                              juce::String (spec.pathHint), sampleRate);
 
-    // Restore order is blob, then params (decision 5) — the offline
-    // arm's order exactly.
-    if (! spec.statePath.empty())
-    {
-        juce::MemoryBlock blob;
-        if (! juce::File (juce::String (spec.statePath)).loadFileAsData (blob))
-            throw std::runtime_error ("could not read state blob " + spec.statePath);
-        instance->setStateInformation (blob.getData(), int (blob.getSize()));
-    }
-    applyParamEntries (*instance, spec.params.getArray(), juce::String (spec.name));
+            // Restore order is blob, then params (decision 5) — the
+            // offline arm's order exactly.
+            if (! spec.statePath.empty())
+            {
+                juce::MemoryBlock blob;
+                if (! juce::File (juce::String (spec.statePath)).loadFileAsData (blob))
+                    throw std::runtime_error ("could not read state blob " + spec.statePath);
+                instance->setStateInformation (blob.getData(), int (blob.getSize()));
+            }
+            applyParamEntries (*instance, spec.params.getArray(), juce::String (spec.name));
 
-    const auto layout = juce::AudioChannelSet::stereo();
-    if (! instance->setBusesLayout (juce::AudioProcessor::BusesLayout { { layout }, { layout } }))
-        throw std::runtime_error (spec.name + " does not support stereo processing");
+            const auto layout = juce::AudioChannelSet::stereo();
+            if (! instance->setBusesLayout (
+                    juce::AudioProcessor::BusesLayout { { layout }, { layout } }))
+                throw std::runtime_error (spec.name + " does not support stereo processing");
 
-    playHead.sampleRate = sampleRate;
-    playHead.segments = spec.segments;
-    instance->setPlayHead (&playHead);
-    instance->setNonRealtime (false);
-    try
-    {
-        instance->prepareToPlay (sampleRate, maxBlock);
-        verifyDeclaredLatency (*instance, juce::String (spec.name), spec.latency);
-    }
-    catch (...)
-    {
-        // The destructor will not run for a half-constructed object, so
-        // the refusal path tears down by hand — a clean load error must
-        // stay a clean load error (#150 review).
-        instance->releaseResources();
-        instance->setPlayHead (nullptr);
-        throw;
-    }
+            playHead.sampleRate = rate;
+            playHead.segments = spec.segments;
+            instance->setPlayHead (&playHead);
+            instance->setNonRealtime (false);
+            try
+            {
+                instance->prepareToPlay (rate, maxBlock);
+                verifyDeclaredLatency (*instance, juce::String (spec.name), spec.latency);
+            }
+            catch (...)
+            {
+                // The destructor will not run for a half-constructed
+                // object, so the refusal path tears down by hand — a
+                // clean load error must stay a clean load error.
+                instance->releaseResources();
+                instance->setPlayHead (nullptr);
+                instance.reset();
+                throw;
+            }
+        });
 
     buffer.setSize (2, maxBlock);
     emitScratch.assign (2, {});
@@ -713,6 +766,19 @@ void LivePluginStage::startAt (juce::int64 clockSample)
 {
     clockPos = clockSample;
     toPrime = spec.latency;
+}
+
+void LivePluginStage::reset()
+{
+    // The processor's own state-clear (delay lines, tails, voices);
+    // configuration — blob and params — was applied at construction
+    // and playback never moves it (chunk 3's editor is a different
+    // signal). A plugin that ignores reset() still meets the far-seek
+    // contract through the warmup render: chainWarmup grants a hosted
+    // stage its tail, its latency window, and a one-second floor, so
+    // pre-seek memory decays below the −60 dB bound before anything
+    // is heard — the only claim the design makes for hosted state.
+    instance->reset();
 }
 
 void LivePluginStage::process (std::vector<std::vector<float>>& working)

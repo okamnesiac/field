@@ -183,6 +183,18 @@ void Server::handleLine (Connection& connection, const juce::String& line)
     {
         response = jsonLine (errorResponse (juce::var(), "invalid JSON"));
     }
+    else if (request.getProperty ("op", juce::var()).toString() == "session")
+    {
+        // The one op dispatched without the blanket lock: session
+        // construction instantiates plugins, and JUCE's create posts to
+        // the message thread and waits — under the lock that wait is on
+        // this thread's own lock, and the daemon hangs (minjudd's P1 on
+        // #150). loadSession builds lock-free and takes the lock itself
+        // for the install, so player state stays message-thread-owned
+        // and the heavy build no longer serializes other connections'
+        // requests.
+        response = dispatch (request);
+    }
     else
     {
         // Player state belongs to the message thread; every request takes

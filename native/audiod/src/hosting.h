@@ -39,9 +39,12 @@ public:
 };
 
 // One hosted insert as a streaming chain stage (plugin-hosting.md
-// chunk 2). Construction instantiates on the calling thread — identity,
+// chunk 2). Construction instantiates on the message thread — identity,
 // state, params, prepare, latency verify, the offline order exactly —
-// so it belongs on the load thread, never in the callback. Processing
+// marshalled there when the caller is elsewhere, so it belongs on the
+// load thread, never in the callback, and the caller must not hold the
+// MessageManagerLock (it would wait on its own lock; the constructor
+// refuses loudly instead — minjudd's P1 on #150). Processing
 // splits at tempo-segment boundaries like the offline arm, which keeps
 // the playhead a pure function of sample position; the stream lags by
 // the declared latency (the limiter's contract) and flush() releases
@@ -69,6 +72,14 @@ public:
     // Initialise the chain clock (reverbs.md decision 4's pattern):
     // zero at load, the warmup start at a locate.
     void startAt (juce::int64 clockSample);
+
+    // Zero the processing state for a chain rebuild: a far locate
+    // reuses the instance rather than reinstantiating — under liveLock
+    // a rebuild's cost is dropped audio, not latency (minjudd's P2 on
+    // #150). Identity, blob, and params are load-time facts a locate
+    // never moves, and the far-seek warmup bound carries the same
+    // state claim it always made for hosted arms.
+    void reset();
 
     // In place; may emit fewer samples than fed while the latency
     // window primes.

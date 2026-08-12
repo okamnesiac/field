@@ -93,10 +93,10 @@ private:
         dsp::PlateSettings plate;
         dsp::HallSettings hall;
         // A hosted insert (plugin-hosting.md chunk 2): everything the
-        // stage needs to instantiate fresh, because locate discards
-        // chain state and reconstructs — a hosted stage reinstantiates
-        // the plugin, which is the simple correct form until relocation
-        // cost argues for a reset path.
+        // stage needs to instantiate at load. A locate does not
+        // reinstantiate — buildChain hands the surviving instance back
+        // reset, because a rebuild under liveLock is dropped audio
+        // (minjudd's P2 on #150).
         LivePluginStage::Spec plugin;
     };
 

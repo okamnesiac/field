@@ -334,6 +334,19 @@ void LiveSession::primeOutput()
 
 void LiveSession::buildChain (Track& track, juce::int64 startClock) const
 {
+    // Hosted stages survive the rebuild: a locate runs under liveLock,
+    // where reinstantiation — binary load, state blob from disk,
+    // prepareToPlay — is measured in dropped audio, not milliseconds
+    // (minjudd's P2 on #150, the argument that already moved session
+    // construction and converter prep outside that lock). Specs never
+    // change after load, so surviving stages pair with their specs by
+    // order; reset() zeroes processing state, and the far-seek warmup
+    // carries the same −60 dB claim it always made for hosted arms.
+    std::vector<std::unique_ptr<LivePluginStage>> surviving;
+    for (auto& stage : track.chain)
+        if (stage.plugin != nullptr)
+            surviving.push_back (std::move (stage.plugin));
+    size_t reused = 0;
     track.chain.clear();
     for (const auto& spec : track.chainSpecs)
     {
@@ -361,15 +374,24 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
         }
         else
         {
-            // Load-thread instantiation (state → params → prepare →
-            // latency verify inside). Prepared at the same 512-sample
-            // recipe the scan and the offline render use — a plugin
-            // that derives its latency from the prepared maximum must
-            // see the environment its `latency:` was pinned under
-            // (#150 review) — and the stage splits any larger block
-            // down to it.
-            stage.plugin = std::make_unique<LivePluginStage> (spec.plugin, (double) track.rate,
-                                                              512);
+            if (reused < surviving.size())
+            {
+                stage.plugin = std::move (surviving[reused++]);
+                stage.plugin->reset();
+            }
+            else
+            {
+                // Load-thread instantiation (state → params → prepare →
+                // latency verify inside), once per session — only the
+                // constructor's first build reaches here. Prepared at
+                // the same 512-sample recipe the scan and the offline
+                // render use — a plugin that derives its latency from
+                // the prepared maximum must see the environment its
+                // `latency:` was pinned under (#150 review) — and the
+                // stage splits any larger block down to it.
+                stage.plugin = std::make_unique<LivePluginStage> (spec.plugin,
+                                                                  (double) track.rate, 512);
+            }
             stage.plugin->startAt (startClock);
         }
         track.chain.push_back (std::move (stage));

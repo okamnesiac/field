@@ -69,7 +69,11 @@ public:
     // Live session (realtime.md chunk 2): replaces the loaded file as the
     // audio source; the transport verbs drive the session clock instead.
     // Returns {error} or {samples, sample_rate, channels}. Loading a file
-    // afterwards drops the session, and vice versa.
+    // afterwards drops the session, and vice versa. Enter WITHOUT the
+    // MessageManagerLock: construction instantiates plugins, which
+    // marshal to the message thread — a caller holding the lock would
+    // wait on itself (minjudd's P1 on #150). The install takes the lock
+    // internally, so player state stays message-thread-owned.
     juce::var loadSession (const juce::var& session, const juce::File& projectRoot);
     juce::String liveRamp (const juce::String& track, int input, double gainDb, double rampMs);
     bool liveMode() const { return liveSession != nullptr; }
