@@ -745,7 +745,7 @@ describe('inventory cache', () => {
     expect(second?.plugins.map((p) => p.name)).toEqual(['one', 'two']);
     expect(second).not.toBe(first);
     // Same byte length, different bytes — a version bump is the real
-    // shape of this — so only mtime can catch it.
+    // shape of this — so size cannot catch it; the timestamps do.
     const sameSize = JSON.stringify({ plugins: [entry('one'), entry('TWO')], failed: [] });
     expect(sameSize.length).toBe(
       JSON.stringify({ plugins: [entry('one'), entry('two')], failed: [] }).length,
