@@ -75,12 +75,17 @@ written and verified, not copied from anywhere: the standalone
 sample-project repo's `.gitattributes` — seven LFS lines, each ending
 `-text` — protected the audio binaries and nothing else, so every text
 file in that tree stayed exposed to `core.autocrlf`, and no commit in
-its history ever carried `* text=auto eol=lf` (minjudd traced the whole
-history on #154; the precedent this section previously claimed does not
+the surviving clone's history ever carried `* text=auto eol=lf`
+(minjudd traced that clone on #154 — the deleted upstream can hide
+nothing reachable; the precedent this section previously claimed does not
 exist, and the file that does exist solves the adjacent problem). The
 shape chunk 1 writes is `* text=auto eol=lf` with per-extension binary
-overrides for `.wav/.aif/.aiff/.flac/.mp3/.m4a/.caf`, last-match-wins
-so audio is never touched — and its proof is §1.1's measurement re-run
+overrides for `.wav/.aif/.aiff/.flac/.mp3/.m4a/.caf` **and `.state`**
+— the loud consumer above falls through to the binary heuristic
+without it, and neither file type exists in the tree today (minjudd on
+#154), so the rule must be written before the first blob arrives to
+exercise it — last-match-wins so audio and captured plugin state are
+never touched — and its proof is §1.1's measurement re-run
 against a real Windows clone, not a provenance story. The engine
 repository has never had a `.gitattributes` at all, and when the sample
 project moved in-tree ([bloom-in-tree.md](bloom-in-tree.md)) not even
