@@ -270,6 +270,82 @@ track
     }
   });
 
+const insert = program.command('insert').description("manage a track's inserts");
+insert
+  .command('add <track> [plugin]')
+  .description('add an insert to a track (interactive chooser when no plugin is named)')
+  .option('--at <position>', '1-based chain position for the new insert, or "end"')
+  .option('--id <handle>', 'instance id (needed when the chain repeats a plugin)')
+  .option('--au', 'prefer the AU when a name matches both formats')
+  .option('--vst3', 'prefer the VST3 when a name matches both formats')
+  .action(async (trackRef: string, pluginName: string | undefined, opts: { at?: string; id?: string; au?: boolean; vst3?: boolean }) => {
+    try {
+      if (opts.au === true && opts.vst3 === true) throw new Error('--au and --vst3 are exclusive');
+      const { addInsert } = await import('./commands/insert.js');
+      // The interactive halves exist exactly where a TTY does; a
+      // script gets the recorded non-interactive answers instead
+      // (add-insert.md §2) — named plugin required, end position,
+      // duplicate case refused.
+      const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+      const hooks = interactive
+        ? await (async () => {
+            const { runPicker } = await import('./commands/picker.js');
+            return {
+              choosePlugin: (items: import('./commands/picker.js').PickerItem<import('./audio/plugins.js').PluginInfo>[]) =>
+                runPicker('plugin', items),
+              choosePosition: (labels: string[], defaultIndex: number) =>
+                runPicker(
+                  'position',
+                  labels.map((label, i) => ({
+                    label: i === defaultIndex ? `${label} (default)` : label,
+                    search: label.toLowerCase(),
+                    value: i,
+                  })),
+                ),
+              askId: async (prompt: string): Promise<string | undefined> => {
+                const { createInterface } = await import('node:readline/promises');
+                const rl = createInterface({ input: process.stdin, output: process.stdout });
+                try {
+                  const answer = await rl.question(`${prompt}: `);
+                  return answer.trim() === '' ? undefined : answer.trim();
+                } finally {
+                  rl.close();
+                }
+              },
+            };
+          })()
+        : undefined;
+      const outcome = await addInsert(requireRoot(), trackRef, {
+        ...(pluginName !== undefined ? { plugin: pluginName } : {}),
+        ...(opts.at !== undefined ? { at: opts.at } : {}),
+        ...(opts.id !== undefined ? { id: opts.id } : {}),
+        ...(opts.au === true ? { prefer: 'au' as const } : {}),
+        ...(opts.vst3 === true ? { prefer: 'vst3' as const } : {}),
+        ...(hooks !== undefined ? { hooks } : {}),
+      });
+      if (outcome.cancelled === true) {
+        process.stdout.write('nothing added\n');
+        return;
+      }
+      const p = outcome.plugin!;
+      process.stdout.write(
+        `added ${p.name} (${p.format} ${p.identifier} ${p.version}) → ` +
+          `${outcome.song}/${outcome.track} position ${outcome.position}/${outcome.chainLength} (${outcome.file})\n`,
+      );
+      if (outcome.backfilled!.length > 0) {
+        process.stdout.write(`ids written on existing instances: ${outcome.backfilled!.join(', ')}\n`);
+      }
+      // The handoff add-insert.md §5 records: once editor sessions
+      // land (plugin-hosting.md chunk 3) this runs field open instead
+      // of naming it.
+      process.stdout.write(
+        `field open ${outcome.track}/${outcome.handle} will open its editor once editor sessions land\n`,
+      );
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 program
   .command('import <file>')
   .description('copy an audio file into a song and record it (and its WAV facts) in assets.yaml')

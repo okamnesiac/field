@@ -6,6 +6,11 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [`field insert add`](all/add-insert.md) — writes a pinned insert
+  with an interactive chooser and order placement; stays until real
+  sessions have added inserts with it, and until chunk 3's `field
+  open` picks up the editor handoff the command currently prints.
+
 - [Plugin hosting](all/plugin-hosting.md) — chunks 1 and 2 shipped:
   AU and VST3 render offline and run live as inserts (`field check`
   pins a bare `plugin:` name, state blobs resolve by hash, dirty
