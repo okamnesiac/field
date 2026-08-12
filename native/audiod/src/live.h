@@ -13,6 +13,7 @@
 #include "dsp/plate.h"
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
+#include "hosting.h"
 
 // The live session engine (realtime.md §3, chunk 2): evaluates the
 // compiled graph the CLI sends — tracks, windows, chains — sample-exactly
@@ -76,13 +77,14 @@ private:
         std::unique_ptr<dsp::Reverb> reverb;
         std::unique_ptr<dsp::Plate> plate;
         std::unique_ptr<dsp::Hall> hall;
+        std::unique_ptr<LivePluginStage> plugin;
     };
     // Everything needed to rebuild a stage: locate discards chain state
     // (a seek does not inherit the previous position's tails) and
     // reconstructs from these.
     struct ChainSpec
     {
-        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate, 4 hall
+        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate, 4 hall, 5 plugin
         std::vector<dsp::Band> bands;
         bool normalize = false;
         dsp::LimiterSettings limiter;
@@ -90,6 +92,12 @@ private:
         dsp::ReverbSettings reverb;
         dsp::PlateSettings plate;
         dsp::HallSettings hall;
+        // A hosted insert (plugin-hosting.md chunk 2): everything the
+        // stage needs to instantiate at load. A locate does not
+        // reinstantiate — buildChain hands the surviving instance back
+        // reset, because a rebuild under liveLock is dropped audio
+        // (minjudd's P2 on #150).
+        LivePluginStage::Spec plugin;
     };
 
     struct Window
@@ -186,6 +194,16 @@ private:
     // the same reason).
     std::vector<std::vector<float>> scratchBlock;
     std::vector<std::vector<float>> scratchMixed;
+
+    // A hosted master stage's latency window is consumed at load, off
+    // the callback (primeOutput): the first `latency` input samples run
+    // through the chain there, and whatever emerged waits here for the
+    // first callback to drain — otherwise a high-latency plugin would
+    // make the first pull synchronously process its whole window
+    // (#150 review).
+    void primeOutput();
+    std::vector<std::vector<float>> outputPending;
+    size_t pendingRead = 0;
 
     std::vector<std::vector<std::vector<float>>> files; // preloaded, 1–2 ch
     std::vector<Track> tracks;

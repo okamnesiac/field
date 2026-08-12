@@ -44,6 +44,7 @@ import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
 import { formatDiagnostic, loadProject } from '../model/project.js';
 import type { SpecInsert } from '../generators/stem.js';
+import { toPluginWire } from '../audio/plugins.js';
 import { explain, type Explanation } from './build.js';
 import { buildGraph, type Graph, type GraphNode } from './graph.js';
 
@@ -73,24 +74,11 @@ interface StemLike {
   loop?: boolean;
 }
 
-function liveInsert(insert: SpecInsert): SessionInsert {
-  // A hosted plugin has no live arm yet (plugin-hosting.md chunk 2). By
-  // the time an insert reaches here it is the *spec* form — `effect:
-  // 'plugin'`, not the authored `plugin:` key, which an earlier draft of
-  // this guard tested and therefore never fired (found live: the raw
-  // spec sailed to the daemon as `unknown insert effect "plugin"`).
-  // Ordinary hosted chains never reach this either way — the compile
-  // freezes them unconditionally below — so what remains is the two
-  // tracks that cannot freeze: the output track and a pre-tapped
-  // sender.
-  if (insert.effect === 'plugin') {
-    throw new Error(
-      `a hosted plugin (${insert.format} ${insert.identifier}) cannot run live yet ` +
-        `(plugin-hosting.md chunk 2), and this chain is on a track that cannot be ` +
-        `frozen — the output track and pre-tapped senders evaluate live by design, ` +
-        `so their chains stay built-in until the live arm lands`,
-    );
-  }
+function liveInsert(insert: SpecInsert, root: string): SessionInsert {
+  // A hosted arm goes live in its wire spelling (plugin-hosting.md
+  // chunk 2): the keyed spec plus the machine-local half, the same
+  // enrichment the offline execute performs — one shape, both paths.
+  if (insert.effect === 'plugin') return toPluginWire(insert, root);
   if (insert.effect === 'limit') return { ...insert, horizon_db: 60 };
   return insert as SessionInsert;
 }
@@ -227,17 +215,12 @@ export async function compileSession(
   for (const name of shapes.keys()) {
     if (name === 'main' || preTapped.has(name)) continue;
     candidates.add(name);
-    // A hosted chain never evaluates live in chunk 1
-    // (plugin-hosting.md), so it freezes *unconditionally*: clean, the
-    // stem is the ordinary cache hit; dirty, the freeze build below
-    // renders it offline right now — hosting's one legal render path —
-    // and the compile blocks on that render instead of refusing. Under
-    // watch, a plugin-param edit therefore lands at the next wrap, the
-    // same cadence the takeover always had.
-    if ((shapes.get(name)!.spec.inserts ?? []).some((i) => i.effect === 'plugin')) {
-      frozen.add(name);
-      continue;
-    }
+    // Hosted chains freeze by the same rule as built-ins now
+    // (plugin-hosting.md chunk 2 lifted chunk 1's unconditional
+    // freeze): cached serves the stem, dirty evaluates live — the
+    // engine instantiates the plugin at load and the swap back to
+    // frozen rides the warmup bound rather than byte-identity, which
+    // is the whole difference the plan records for hosted arms.
     const explanation = await explain(project, graph, stemNodes.get(name)!, memo);
     if (explanation.cached === true && explanation.outputs !== undefined) frozen.add(name);
   }
@@ -347,7 +330,7 @@ export async function compileSession(
       });
       return;
     }
-    const chain = (shape.spec.inserts ?? []).map(liveInsert);
+    const chain = (shape.spec.inserts ?? []).map((insert) => liveInsert(insert, root));
 
     // Resolve every window; recurse into children first.
     let contentEnd = 0;

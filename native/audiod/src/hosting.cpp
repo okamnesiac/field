@@ -199,53 +199,49 @@ int runScan (const std::string& formatName, const std::string& exePath)
     return 0;
 }
 
+juce::Optional<juce::AudioPlayHead::PositionInfo> TrackPlayHead::getPosition() const
+{
+    const Segment* active = segments.empty() ? nullptr : &segments.front();
+    for (const auto& segment : segments)
+        if (segment.sample <= positionSamples)
+            active = &segment;
+        else
+            break;
+
+    PositionInfo info;
+    info.setTimeInSamples (positionSamples);
+    info.setTimeInSeconds (double (positionSamples) / sampleRate);
+    info.setIsPlaying (true);
+    if (active != nullptr)
+    {
+        info.setBpm (active->bpm);
+        info.setTimeSignature (TimeSignature { active->numerator, active->denominator });
+        info.setPpqPosition (active->ppq
+                             + double (positionSamples - active->sample) * active->bpm
+                                   / (60.0 * sampleRate));
+    }
+    return info;
+}
+
 namespace
 {
-    // The track-local playhead (plugin-hosting.md decision 13): position
-    // advances on the chain's own sample clock, tempo and meter come
-    // from the plan's transport segments, and both render paths supply
-    // exactly this. No loop or play/stop state exists — a stem renders
-    // as one linear pass.
-    class TrackPlayHead final : public juce::AudioPlayHead
+    // Decision 11's instantiation-time verify, shared by the offline arm
+    // and the live stage: checked after state and params are applied and
+    // prepareToPlay has run, because that is when the report is real.
+    void verifyDeclaredLatency (juce::AudioPluginInstance& instance,
+                                const juce::String& displayName,
+                                long long declaredLatency)
     {
-    public:
-        struct Segment
-        {
-            juce::int64 sample = 0;
-            double ppq = 0.0;
-            double bpm = 120.0;
-            int numerator = 4;
-            int denominator = 4;
-        };
-
-        std::vector<Segment> segments;
-        juce::int64 positionSamples = 0;
-        double sampleRate = 48000.0;
-
-        juce::Optional<PositionInfo> getPosition() const override
-        {
-            const Segment* active = segments.empty() ? nullptr : &segments.front();
-            for (const auto& segment : segments)
-                if (segment.sample <= positionSamples)
-                    active = &segment;
-                else
-                    break;
-
-            PositionInfo info;
-            info.setTimeInSamples (positionSamples);
-            info.setTimeInSeconds (double (positionSamples) / sampleRate);
-            info.setIsPlaying (true);
-            if (active != nullptr)
-            {
-                info.setBpm (active->bpm);
-                info.setTimeSignature (TimeSignature { active->numerator, active->denominator });
-                info.setPpqPosition (active->ppq
-                                     + double (positionSamples - active->sample) * active->bpm
-                                           / (60.0 * sampleRate));
-            }
-            return info;
-        }
-    };
+        const auto reported = (long long) instance.getLatencySamples();
+        if (reported != declaredLatency)
+            throw std::runtime_error (displayName.toStdString() + " reports "
+                                      + std::to_string (reported)
+                                      + " samples of latency but the insert declares "
+                                      + std::to_string (declaredLatency) + " — set latency: "
+                                      + std::to_string (reported)
+                                      + " on the insert (field plugins pin writes the default; a "
+                                        "parameter that changes latency changes the line too)");
+    }
 
     double requireInsertNumber (const juce::var& insert, const char* name)
     {
@@ -521,22 +517,10 @@ void applyPluginInsert (const juce::var& insert,
     instance->setNonRealtime (true);
     instance->prepareToPlay (sampleRate, blockSize);
 
-    // Decision 11's instantiation-time verify: the declared latency is
-    // what the trim below uses and what the compiler's arithmetic saw,
-    // so a plugin reporting something else — a stale pin, or a
-    // latency-changing parameter — must refuse rather than render with
-    // PDC quietly wrong. Checked after state and params are applied and
-    // prepareToPlay has run, because that is when the report is real.
+    // A stale pin or a latency-changing parameter must refuse rather
+    // than render with PDC quietly wrong (decision 11).
     const auto declaredLatency = std::llround (requireInsertNumber (insert, "latency"));
-    const auto reportedLatency = instance->getLatencySamples();
-    if (reportedLatency != declaredLatency)
-        throw std::runtime_error (displayName.toStdString() + " reports "
-                                  + std::to_string (reportedLatency)
-                                  + " samples of latency but the insert declares "
-                                  + std::to_string (declaredLatency) + " — set latency: "
-                                  + std::to_string (reportedLatency)
-                                  + " on the insert (field plugins pin writes the default; a "
-                                    "parameter that changes latency changes the line too)");
+    verifyDeclaredLatency (*instance, displayName, declaredLatency);
 
     const size_t inputLength = channels[0].size();
     const auto latencySamples = size_t (declaredLatency);
@@ -665,5 +649,209 @@ void applyPluginInsert (const juce::var& insert,
                                    juce::jmin (latencySamples, channel.size())));
 
     channels = std::move (output);
+}
+
+namespace
+{
+    // Plugin instantiation belongs to the message thread: JUCE's
+    // synchronous create *posts* there and waits when called from
+    // anywhere else, so a caller holding the MessageManagerLock waits
+    // forever on its own lock — minjudd hung `field play` with exactly
+    // that (#150). The helper marshals the whole job, and refuses the
+    // deadlock case loudly instead of reproducing it.
+    void runOnMessageThread (const std::function<void()>& job)
+    {
+        auto* messageManager = juce::MessageManager::getInstance();
+        if (messageManager->isThisTheMessageThread())
+        {
+            job();
+            return;
+        }
+        if (messageManager->currentThreadHasLockedMessageManager())
+            throw std::runtime_error (
+                "plugin instantiation needs a free message thread, but this thread holds the "
+                "MessageManagerLock — hosted session loads must run outside it");
+        juce::WaitableEvent done;
+        std::string error;
+        juce::MessageManager::callAsync (
+            [&job, &error, &done]
+            {
+                try
+                {
+                    job();
+                }
+                catch (const std::exception& e)
+                {
+                    error = e.what();
+                }
+                catch (...)
+                {
+                    error = "plugin instantiation failed";
+                }
+                done.signal();
+            });
+        done.wait();
+        if (! error.empty())
+            throw std::runtime_error (error);
+    }
+} // namespace
+
+LivePluginStage::LivePluginStage (const Spec& stageSpec, double sampleRate, int maxBlockArg)
+    : spec (stageSpec), rate (sampleRate), maxBlock (maxBlockArg)
+{
+    ensureJuceRuntime();
+    runOnMessageThread (
+        [this, sampleRate]
+        {
+            instance = instantiateByIdentity (juce::String (spec.format),
+                                              juce::String (spec.identifier),
+                                              juce::String (spec.name),
+                                              juce::String (spec.version),
+                                              juce::String (spec.pathHint), sampleRate);
+
+            // Restore order is blob, then params (decision 5) — the
+            // offline arm's order exactly.
+            if (! spec.statePath.empty())
+            {
+                juce::MemoryBlock blob;
+                if (! juce::File (juce::String (spec.statePath)).loadFileAsData (blob))
+                    throw std::runtime_error ("could not read state blob " + spec.statePath);
+                instance->setStateInformation (blob.getData(), int (blob.getSize()));
+            }
+            applyParamEntries (*instance, spec.params.getArray(), juce::String (spec.name));
+
+            const auto layout = juce::AudioChannelSet::stereo();
+            if (! instance->setBusesLayout (
+                    juce::AudioProcessor::BusesLayout { { layout }, { layout } }))
+                throw std::runtime_error (spec.name + " does not support stereo processing");
+
+            playHead.sampleRate = rate;
+            playHead.segments = spec.segments;
+            instance->setPlayHead (&playHead);
+            instance->setNonRealtime (false);
+            try
+            {
+                instance->prepareToPlay (rate, maxBlock);
+                verifyDeclaredLatency (*instance, juce::String (spec.name), spec.latency);
+            }
+            catch (...)
+            {
+                // The destructor will not run for a half-constructed
+                // object, so the refusal path tears down by hand — a
+                // clean load error must stay a clean load error.
+                instance->releaseResources();
+                instance->setPlayHead (nullptr);
+                instance.reset();
+                throw;
+            }
+        });
+
+    buffer.setSize (2, maxBlock);
+    emitScratch.assign (2, {});
+    for (auto& channel : emitScratch)
+        channel.reserve ((size_t) maxBlock + (size_t) spec.latency);
+    toPrime = spec.latency;
+}
+
+LivePluginStage::~LivePluginStage()
+{
+    if (instance != nullptr)
+    {
+        instance->releaseResources();
+        instance->setPlayHead (nullptr);
+    }
+}
+
+void LivePluginStage::startAt (juce::int64 clockSample)
+{
+    clockPos = clockSample;
+    toPrime = spec.latency;
+}
+
+void LivePluginStage::reset()
+{
+    // The processor's own state-clear (delay lines, tails, voices);
+    // configuration — blob and params — was applied at construction
+    // and playback never moves it (chunk 3's editor is a different
+    // signal). A plugin that ignores reset() still meets the far-seek
+    // contract through the warmup render: chainWarmup grants a hosted
+    // stage its tail, its latency window, and a one-second floor, so
+    // pre-seek memory decays below the −60 dB bound before anything
+    // is heard — the only claim the design makes for hosted state.
+    instance->reset();
+}
+
+void LivePluginStage::process (std::vector<std::vector<float>>& working)
+{
+    const auto n = (juce::int64) working[0].size();
+    auto& emitted = emitScratch;
+    for (auto& channel : emitted)
+        channel.clear();
+
+    juce::int64 done = 0;
+    while (done < n)
+    {
+        // Blocks split at tempo-segment boundaries, the offline arm's
+        // rule, so the playhead a block carries is a pure function of
+        // sample position however the run is partitioned (decision 13).
+        auto len = (int) std::min<juce::int64> (maxBlock, n - done);
+        for (const auto& segment : playHead.segments)
+            if (segment.sample > clockPos && segment.sample < clockPos + len)
+                len = (int) (segment.sample - clockPos);
+
+        for (int c = 0; c < 2; ++c)
+        {
+            auto* data = buffer.getWritePointer (c);
+            const auto& source = working[(size_t) c];
+            for (int i = 0; i < len; ++i)
+                data[i] = source[(size_t) (done + i)];
+        }
+        playHead.positionSamples = clockPos;
+        juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), 2, len);
+        instance->processBlock (view, midi);
+
+        // The stream lags by the declared latency: the first window of
+        // output is the plugin's alignment debt, dropped here and
+        // released by flush() — the limiter's contract.
+        const auto drop = (int) std::min<juce::int64> (toPrime, len);
+        toPrime -= drop;
+        for (int c = 0; c < 2; ++c)
+        {
+            const auto* data = buffer.getReadPointer (c);
+            emitted[(size_t) c].insert (emitted[(size_t) c].end(), data + drop, data + len);
+        }
+        clockPos += len;
+        done += len;
+    }
+    // Copy-assign rather than move: `emitted` is the reused scratch, and
+    // `working` (the engine's own scratch) keeps its capacity, so the
+    // steady state allocates nothing.
+    for (int c = 0; c < 2; ++c)
+        working[(size_t) c].assign (emitted[(size_t) c].begin(), emitted[(size_t) c].end());
+}
+
+void LivePluginStage::flush (std::vector<std::vector<float>>& tail)
+{
+    if (spec.latency <= 0)
+    {
+        for (auto& channel : tail)
+            channel.clear();
+        return;
+    }
+    std::vector<std::vector<float>> zeros (2);
+    for (auto& channel : zeros)
+        channel.assign ((size_t) spec.latency, 0.0f);
+    process (zeros);
+    tail = std::move (zeros);
+}
+
+juce::int64 LivePluginStage::tailSamples() const
+{
+    return (juce::int64) std::llround (spec.tailSeconds * rate);
+}
+
+juce::int64 LivePluginStage::latencySamples() const
+{
+    return spec.latency;
 }
 } // namespace field

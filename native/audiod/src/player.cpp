@@ -254,17 +254,19 @@ juce::var Player::load (const juce::File& file, bool loop)
 juce::var Player::loadSession (const juce::var& session, const juce::File& projectRoot)
 {
     auto result = obj();
-    // Freed after the lock releases: a session owns preloaded files and
-    // full-length child buffers, and destroying that much under liveLock
-    // would hand the callback silent blocks for the whole teardown —
-    // pullAudio try-locks and pads on a miss (Codex's finding).
-    std::unique_ptr<field::LiveSession> retired;
     try
     {
-        // Construction — parsing, preloading, pre-rendering children —
-        // happens before the lock: the old session keeps playing through
-        // the whole compile, and the swap itself is one pointer move at
-        // a block boundary (realtime.md decision 5, chunk 3).
+        // Construction — parsing, preloading, pre-rendering children,
+        // instantiating plugins — happens before any lock: the old
+        // session keeps playing through the whole compile, and the swap
+        // itself is one pointer move at a block boundary (realtime.md
+        // decision 5, chunk 3). Instantiation is why this method must
+        // be entered without the MessageManagerLock (the session op is
+        // the one request server.cpp dispatches outside its blanket
+        // lock): JUCE's create posts to the message thread and waits,
+        // so a caller holding the lock waits on itself — minjudd hung
+        // `field play` with exactly that (#150). The hosting guard
+        // turns that mistake into a load error instead of a hang.
         auto next = std::make_unique<field::LiveSession> (session, projectRoot);
         // Pre-roll outside the lock too: a swap lands at the old
         // session's position, and warming the replacement's chain there
@@ -289,6 +291,11 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
                 next->locate (predicted);
             }
         }
+        // Player state belongs to the message thread (server.cpp's
+        // blanket lock, which the session op alone forgoes): from here
+        // to the end of the install this thread holds its lock, exactly
+        // what every other request gets from handleLine.
+        const juce::MessageManagerLock mml;
         // Prefer running the device at the session's rate (bit-perfect
         // delivery); when it cannot switch, the prepared converter below
         // sets up converted delivery instead of refusing
@@ -319,66 +326,77 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             for (auto& ch : preparedOut)
                 ch.reserve (1 << 16);
         }
-        const juce::ScopedLock guard (liveLock);
-        // A swap mid-play carries the transport: latest compile wins and
-        // the play never stops. A fresh load (no session before) starts
-        // stopped at zero, as ever.
-        const bool hadSession = liveSession != nullptr;
-        const bool wasPlaying = livePlaying.load();
-        juce::int64 carry = hadSession ? liveSession->position() : 0;
-        // The session replaces whatever file was loaded — one source of
-        // audio at a time, whichever arrived last.
-        transport.stop();
-        transport.setSource (nullptr);
-        readerSource.reset();
-        loadedPath.clear();
-        everStarted = false;
-        livePlaying = false;
-        if (! hadSession)
-            liveEverStarted = false;
-        liveRate = next->sessionRate();
-        liveLength = next->lengthSamples();
-        liveLoop = next->looping();
-        liveSong = session.getProperty ("song", juce::var()).toString();
-        retired = std::move (liveSession);
-        liveSession = std::move (next);
-        if (hadSession)
+        // Freed after liveLock releases, still under the message lock:
+        // a session owns preloaded files, full-length child buffers,
+        // and hosted instances, and destroying that much under liveLock
+        // would hand the callback silent blocks for the whole teardown
+        // — pullAudio try-locks and pads on a miss (Codex's finding).
+        std::unique_ptr<field::LiveSession> retired;
         {
-            if (liveLoop && liveLength > 0)
-                carry %= liveLength;
-            else if (liveLength > 0)
-                carry = std::min (carry, liveLength);
-            liveSession->locate (carry);
-            livePlaying = wasPlaying;
+            const juce::ScopedLock guard (liveLock);
+            // A swap mid-play carries the transport: latest compile wins
+            // and the play never stops. A fresh load (no session before)
+            // starts stopped at zero, as ever.
+            const bool hadSession = liveSession != nullptr;
+            const bool wasPlaying = livePlaying.load();
+            juce::int64 carry = hadSession ? liveSession->position() : 0;
+            // The session replaces whatever file was loaded — one source
+            // of audio at a time, whichever arrived last.
+            transport.stop();
+            transport.setSource (nullptr);
+            readerSource.reset();
+            loadedPath.clear();
+            everStarted = false;
+            livePlaying = false;
+            if (! hadSession)
+                liveEverStarted = false;
+            liveRate = next->sessionRate();
+            liveLength = next->lengthSamples();
+            liveLoop = next->looping();
+            liveSong = session.getProperty ("song", juce::var()).toString();
+            retired = std::move (liveSession);
+            liveSession = std::move (next);
+            if (hadSession)
+            {
+                if (liveLoop && liveLength > 0)
+                    carry %= liveLength;
+                else if (liveLength > 0)
+                    carry = std::min (carry, liveLength);
+                liveSession->locate (carry);
+                livePlaying = wasPlaying;
+            }
+            // Install the prepared conversion only when the state cannot
+            // carry: a fresh start, a moved rate pair, or a stream
+            // already flushed (a natural end racing the swap — the old
+            // converter cannot take more input). Otherwise the converter,
+            // its FIFO, and its filter history all survive — the
+            // delivered stream really is continuous across a same-pair
+            // swap.
+            if (! hadSession || convFlushed
+                || ! juce::exactlyEqual (nextRate, convLiveRate)
+                || ! juce::exactlyEqual (devRate, convDeviceRate))
+            {
+                liveConverter = std::move (prepared);
+                convIn = std::move (preparedIn);
+                convOut = std::move (preparedOut);
+                convOutRead = 0;
+                convFlushed = false;
+                convQueued.store (0);
+                convLiveRate = nextRate;
+                convDeviceRate = devRate;
+            }
         }
-        // Install the prepared conversion only when the state cannot
-        // carry: a fresh start, a moved rate pair, or a stream already
-        // flushed (a natural end racing the swap — the old converter
-        // cannot take more input). Otherwise the converter, its FIFO,
-        // and its filter history all survive — the delivered stream
-        // really is continuous across a same-pair swap.
-        if (! hadSession || convFlushed
-            || ! juce::exactlyEqual (nextRate, convLiveRate)
-            || ! juce::exactlyEqual (devRate, convDeviceRate))
-        {
-            liveConverter = std::move (prepared);
-            convIn = std::move (preparedIn);
-            convOut = std::move (preparedOut);
-            convOutRead = 0;
-            convFlushed = false;
-            convQueued.store (0);
-            convLiveRate = nextRate;
-            convDeviceRate = devRate;
-        }
+        result->setProperty ("samples", liveLength);
+        result->setProperty ("sample_rate", liveRate);
+        result->setProperty ("channels", 2);
+        // `retired` destructs here: the callback already has its new
+        // source back, and the message lock is still held for the
+        // hosted teardown inside.
     }
     catch (const std::exception& e)
     {
         result->setProperty ("error", juce::String (e.what()));
-        return juce::var (result.get());
     }
-    result->setProperty ("samples", liveLength);
-    result->setProperty ("sample_rate", liveRate);
-    result->setProperty ("channels", 2);
     return juce::var (result.get());
 }
 
@@ -451,7 +469,16 @@ juce::String Player::locate (juce::int64 sample)
         if (sample < 0 || (! liveLoop && liveLength > 0 && sample > liveLength))
             return "locate out of range";
         const juce::ScopedLock guard (liveLock);
-        liveSession->locate (sample);
+        try
+        {
+            liveSession->locate (sample);
+        }
+        catch (const std::exception& e)
+        {
+            // An op error, not a dead reader thread — nothing above
+            // dispatch catches (liveRamp's shape).
+            return juce::String (e.what());
+        }
         rebuildLiveConverter();
         return {};
     }

@@ -357,12 +357,25 @@ these; the two discriminants coexist in one chain.
    RENDER_PLAN_VERSION bump with existing songs proven pure cache
    hits.
 2. **Live.** A hosted insert in the live chain: delay compensation
-   from reported latency, warmup at locate under the chain's
-   existing −60 dB bound — byte-identity offline-vs-live is
-   explicitly *not* claimed for hosted inserts (the golden stays a
-   built-ins contract; the freeze handoff leans on the warmup bound
-   instead), transport context supplied identically to offline
-   (decision 13), and the version-refusal flow runs live.
+   from declared latency (the stream lags and flushes, the limiter's
+   contract), warmup at locate under the chain's existing −60 dB
+   bound — byte-identity offline-vs-live is explicitly *not* claimed
+   for hosted inserts in general (the golden stays a built-ins
+   contract; the freeze handoff leans on the warmup bound instead,
+   §6's answered question), transport context supplied identically
+   to offline (decision 13 — blocks split at tempo-segment
+   boundaries on both paths, and the fixture, whose processing is a
+   pure function of the playhead, proves the plumbing by rendering
+   byte-identical anyway), and the version-refusal flow runs live.
+   Child-track chains run on the load thread (the engine pre-renders
+   children in full); only an output-track chain processes in the
+   callback, which is ordinary hosting. Live growth is declared
+   arithmetic only: an undeclared `tail:` grows nothing live, and a
+   locate resets hosted stages in place rather than reinstantiating —
+   the rebuild runs under the engine lock, where its cost is dropped
+   audio rather than latency, so the "correct first, fast later"
+   sequencing never applied (minjudd on #150); the warmup bound
+   carries hosted state correctness exactly as before.
 3. **Editor sessions and write-back.** `field open <track>/<handle>`,
    the `param_changed` protocol message, gesture-quantum file
    writes, blob recapture on non-param signals, id re-binding, the
@@ -381,12 +394,19 @@ does not.
   non-param signals are reliable across real plugins (program-change,
   restartComponent, property listeners), and whether the
   session-close chunk-hash backstop suffices where they are absent.
-- **Freeze-swap policy for tier-3 plugins** (chunk 2's to answer).
-  The inaudible-swap guarantee rests on byte-identity, which truly
-  free-running plugins cannot give even within the warmup bound.
-  Prompt before swapping? Keep the chain live and never freeze?
-  Leaning: flag in `explain`, swap under the bound for tiers 1–2,
-  keep tier-3 live until chosen.
+- **Freeze-swap policy** (ANSWERED by chunk 2, 2026-08-11): hosted
+  chains freeze by the same rule as built-ins — cached serves the
+  stem, dirty evaluates live — and the swap rides the chain's warmup
+  bound (declared tail + latency + the one-second floor an eq
+  already gets) rather than byte-identity. That is the default for
+  *every* hosted plugin, because no tier registry exists yet to say
+  otherwise: a truly free-running plugin's swap may exceed the bound
+  audibly, and the registry that flags those (build-graph.md tier 3)
+  remains future work — the recorded lean stands: when it exists,
+  tier-3 chains stay live and never freeze. Measured against the
+  fixture, live and offline are byte-identical (its processing is a
+  pure function of the playhead), which is a fixture property the
+  suite pins, not a general claim.
 - **Editor windows vs daemon-lite** (chunk 3's to answer). The daemon
   exits when idle; an open editor is a reason not to be idle, and
   window ownership on macOS may want the daemon to run an app
