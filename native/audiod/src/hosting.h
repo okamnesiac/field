@@ -81,15 +81,20 @@ public:
     juce::int64 latencySamples() const;
 
 private:
-    void run (const float* const* in, float* const* out, int n);
-
     Spec spec;
     double rate;
     int maxBlock;
-    std::unique_ptr<juce::AudioPluginInstance> instance;
+    // Declared before `instance` on purpose: members unwind in reverse,
+    // so the plugin — which may consult its playhead during teardown —
+    // is destroyed while the playhead still exists, on every path
+    // including a constructor throw (#150 review).
     TrackPlayHead playHead;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
+    // Reused across process() calls: the master chain runs in the
+    // device callback, which must not churn the heap per block.
+    std::vector<std::vector<float>> emitScratch;
+    std::unique_ptr<juce::AudioPluginInstance> instance;
     juce::int64 clockPos = 0;
     juce::int64 toPrime = 0;
 };

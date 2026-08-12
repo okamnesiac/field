@@ -290,6 +290,45 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
         scratchBlock[(size_t) c].reserve (8192);
         scratchMixed[(size_t) c].reserve (8192);
     }
+    outputPending.assign (2, std::vector<float>());
+    primeOutput();
+}
+
+void LiveSession::primeOutput()
+{
+    Track& output = tracks[(size_t) outputTrack];
+    juce::int64 prime = 0;
+    for (const auto& stage : output.chain)
+        if (stage.plugin != nullptr)
+            prime += stage.plugin->latencySamples();
+    if (prime <= 0)
+        return;
+
+    // The renderBlock inner loop, run at load for the first `prime`
+    // input samples: the hosted stages swallow their latency windows
+    // here, and the few samples that do emerge (a limiter downstream of
+    // a plugin has its own arithmetic) wait in outputPending.
+    std::vector<std::vector<float>> mixed (2);
+    juce::int64 fedPrime = 0;
+    while (fedPrime < prime)
+    {
+        const juce::int64 t = loop && length > 0 ? clock % length : clock;
+        const juce::int64 until
+            = loop && length > 0 ? length - t : std::max<juce::int64> (1, output.postLength - t);
+        const int step = (int) std::min<juce::int64> (
+            std::min<juce::int64> ((juce::int64) engineBlock, prime - fedPrime),
+            std::max<juce::int64> (1, until));
+        for (auto& channel : mixed)
+            channel.assign ((size_t) step, 0.0f);
+        mixInputBlock (output, t, step, mixed, clock);
+        runChain (output, mixed, 0);
+        for (int c = 0; c < 2; ++c)
+            outputPending[(size_t) c].insert (outputPending[(size_t) c].end(),
+                                              mixed[(size_t) c].begin(),
+                                              mixed[(size_t) c].end());
+        clock += step;
+        fedPrime += step;
+    }
 }
 
 
@@ -323,10 +362,14 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
         else
         {
             // Load-thread instantiation (state → params → prepare →
-            // latency verify inside); the max block covers the engine's
-            // pre-render blocks and any device callback.
+            // latency verify inside). Prepared at the same 512-sample
+            // recipe the scan and the offline render use — a plugin
+            // that derives its latency from the prepared maximum must
+            // see the environment its `latency:` was pinned under
+            // (#150 review) — and the stage splits any larger block
+            // down to it.
             stage.plugin = std::make_unique<LivePluginStage> (spec.plugin, (double) track.rate,
-                                                              8192);
+                                                              512);
             stage.plugin->startAt (startClock);
         }
         track.chain.push_back (std::move (stage));
@@ -545,10 +588,26 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
     for (auto& channel : block)
         channel.assign ((size_t) n, 0.0f);
 
+    // Primed output first (primeOutput's leftovers): samples the load
+    // already rendered, belonging at the very front of the stream.
+    juce::int64 filled = 0;
+    while (filled < n && pendingRead < outputPending[0].size())
+    {
+        for (int c = 0; c < 2; ++c)
+            block[(size_t) c][(size_t) filled] = outputPending[(size_t) c][pendingRead];
+        ++pendingRead;
+        ++filled;
+    }
+    if (pendingRead > 0 && pendingRead >= outputPending[0].size())
+    {
+        for (auto& channel : outputPending)
+            channel.clear();
+        pendingRead = 0;
+    }
+
     // The output streams: wrapped-time input mixing, chains that never
     // reset — the wrap hears the previous pass's tails ring across it,
     // which is the fold as a performance instead of an arithmetic step.
-    juce::int64 filled = 0;
     while (filled < n)
     {
         const juce::int64 t = loop && length > 0 ? clock % length : clock;
@@ -654,6 +713,12 @@ void LiveSession::locate (juce::int64 sample)
         buildChain (output, from);
         clock = from;
         delivered = from;
+        // Stale primed samples describe the pre-seek timeline; the
+        // warmup render below is this position's priming, and it runs
+        // on this (message) thread where the deadline does not exist.
+        for (auto& channel : outputPending)
+            channel.clear();
+        pendingRead = 0;
     }
     discardUntil (sample);
 }

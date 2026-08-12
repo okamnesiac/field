@@ -678,10 +678,25 @@ LivePluginStage::LivePluginStage (const Spec& stageSpec, double sampleRate, int 
     playHead.segments = spec.segments;
     instance->setPlayHead (&playHead);
     instance->setNonRealtime (false);
-    instance->prepareToPlay (sampleRate, maxBlock);
-    verifyDeclaredLatency (*instance, juce::String (spec.name), spec.latency);
+    try
+    {
+        instance->prepareToPlay (sampleRate, maxBlock);
+        verifyDeclaredLatency (*instance, juce::String (spec.name), spec.latency);
+    }
+    catch (...)
+    {
+        // The destructor will not run for a half-constructed object, so
+        // the refusal path tears down by hand — a clean load error must
+        // stay a clean load error (#150 review).
+        instance->releaseResources();
+        instance->setPlayHead (nullptr);
+        throw;
+    }
 
     buffer.setSize (2, maxBlock);
+    emitScratch.assign (2, {});
+    for (auto& channel : emitScratch)
+        channel.reserve ((size_t) maxBlock + (size_t) spec.latency);
     toPrime = spec.latency;
 }
 
@@ -703,9 +718,9 @@ void LivePluginStage::startAt (juce::int64 clockSample)
 void LivePluginStage::process (std::vector<std::vector<float>>& working)
 {
     const auto n = (juce::int64) working[0].size();
-    std::vector<std::vector<float>> emitted (2);
+    auto& emitted = emitScratch;
     for (auto& channel : emitted)
-        channel.reserve ((size_t) n);
+        channel.clear();
 
     juce::int64 done = 0;
     while (done < n)
@@ -742,7 +757,11 @@ void LivePluginStage::process (std::vector<std::vector<float>>& working)
         clockPos += len;
         done += len;
     }
-    working = std::move (emitted);
+    // Copy-assign rather than move: `emitted` is the reused scratch, and
+    // `working` (the engine's own scratch) keeps its capacity, so the
+    // steady state allocates nothing.
+    for (int c = 0; c < 2; ++c)
+        working[(size_t) c].assign (emitted[(size_t) c].begin(), emitted[(size_t) c].end());
 }
 
 void LivePluginStage::flush (std::vector<std::vector<float>>& tail)

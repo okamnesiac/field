@@ -477,7 +477,11 @@ describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md 
     expect(serialized).toContain('track/lead.wav');
   });
 
-  it('hosts on the output track: the master chain compiles live', async () => {
+  it('hosts on the output track with latency: primed at load, byte-identical to offline', async () => {
+    // The master chain is the one that streams in the callback, and a
+    // latency plugin there exercises primeOutput plus the pending
+    // drain: the load consumes the latency window off the callback,
+    // and the rendered bytes must still equal the offline stem.
     writeFileSync(
       join(root, 'songs/opener/tracks/main.yaml'),
       [
@@ -486,19 +490,70 @@ describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md 
         '  - plugin: Field Fixture',
         `    vst3: ${fixture.identifier}`,
         `    version: ${fixture.version}`,
+        '    latency: 96',
         '    params:',
         '      Gain: 3',
+        '      Latency: 96',
         'inputs:',
         '  - track: lead',
         '',
       ].join('\n'),
     );
     const { compileSession } = await import('../graph/live.js');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = promisify(execFile);
     const compiled = await compileSession(root, 'opener');
     const main = (compiled.session as { tracks: { name: string; chain: { effect: string }[] }[] }).tracks.find(
       (t) => t.name === 'main',
     );
     expect(main?.chain.some((c) => c.effect === 'plugin')).toBe(true);
+
+    const sessionPath = join(root, 'master.json');
+    writeFileSync(sessionPath, JSON.stringify(compiled.session));
+    const livePath = join(root, 'master-live.wav');
+    await run(binary!, ['--render-live', sessionPath, livePath], { cwd: root });
+
+    const { buildLabels } = await import('../commands/build.js');
+    const offline = await buildLabels(root, ['//songs/opener/track:main']);
+    const artifact = offline.find((o) => o.label.endsWith('track:main'))!.outputPath!;
+    const dataOf = (path: string): Buffer => {
+      const bytes = readFileSync(path);
+      const at = bytes.indexOf('data');
+      return bytes.subarray(at + 8, at + 8 + bytes.readUInt32LE(at + 4));
+    };
+    expect(dataOf(livePath).equals(dataOf(artifact))).toBe(true);
+  });
+
+  it('refuses a latency the plugin does not report at live load (decision 11)', async () => {
+    // Declared 0, exhibited 64: the refusal fires after prepareToPlay
+    // on the load thread, which is also the constructor-throw teardown
+    // path — a clean load error must stay a clean load error.
+    writeFileSync(
+      join(root, 'songs/opener/tracks/lead.yaml'),
+      [
+        'name: lead',
+        'inserts:',
+        '  - plugin: Field Fixture',
+        `    vst3: ${fixture.identifier}`,
+        `    version: ${fixture.version}`,
+        '    params:',
+        '      Latency: 64',
+        'inputs:',
+        '  - audio: tone',
+        '',
+      ].join('\n'),
+    );
+    const { compileSession } = await import('../graph/live.js');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = promisify(execFile);
+    const compiled = await compileSession(root, 'opener');
+    const sessionPath = join(root, 'drift.json');
+    writeFileSync(sessionPath, JSON.stringify(compiled.session));
+    await expect(
+      run(binary!, ['--render-live', sessionPath, join(root, 'out.wav')], { cwd: root }),
+    ).rejects.toThrow(/reports 64 samples of latency but the insert declares 0/);
   });
 
   it('refuses a version drift at live load, naming both versions (decision 9)', async () => {

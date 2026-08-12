@@ -195,6 +195,16 @@ private:
     std::vector<std::vector<float>> scratchBlock;
     std::vector<std::vector<float>> scratchMixed;
 
+    // A hosted master stage's latency window is consumed at load, off
+    // the callback (primeOutput): the first `latency` input samples run
+    // through the chain there, and whatever emerged waits here for the
+    // first callback to drain — otherwise a high-latency plugin would
+    // make the first pull synchronously process its whole window
+    // (#150 review).
+    void primeOutput();
+    std::vector<std::vector<float>> outputPending;
+    size_t pendingRead = 0;
+
     std::vector<std::vector<std::vector<float>>> files; // preloaded, 1–2 ch
     std::vector<Track> tracks;
     std::map<std::string, int> trackIndex;
