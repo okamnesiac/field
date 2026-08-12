@@ -166,14 +166,23 @@ the amended comment should say.
 
 `CMakeLists.txt` disables FMA contraction with `-ffp-contract=off`, gated
 to `AppleClang`, `Clang` and `GNU`. MSVC is not in that list and has no
-flag by that spelling; its default `/fp:precise` *permits* contraction,
-and the control is `/fp:contract-` (MSVC 19.3x and later). Left alone, a
-Windows build can differ from macOS and Linux in the last bits — which is
-the one thing [render-pipeline.md](render-pipeline.md) §4 promises it will
-not.
+flag by that spelling — but the risk is not the one that gate suggests:
+since Visual Studio 2022, the default `/fp:precise` generates **no
+contractions**, and contraction is an explicit opt-in spelled
+`/fp:contract` (no `/fp:contract-` exists; only `except` takes the
+minus). The compiler that could contract silently under `/fp:precise` is
+pre-VS 2022 MSVC, which has no contract switch at all — so the FMA guard
+on MSVC is a toolchain floor, not a flag. The live exposure on a current
+MSVC is the **unmeasured third libm**: render-pipeline.md §4 measured
+Apple libm and glibc byte-identical, the UCRT has never been in that
+comparison, and `clang-cl` does not dodge it because it links the same
+UCRT. Left unmeasured, a Windows build can differ from macOS and Linux
+in the last bits — which is the one thing
+[render-pipeline.md](render-pipeline.md) §4 promises it will not.
 
-Two routes: add the MSVC flag, or build with `clang-cl` and reuse the flag
-that already exists. This is the one finding in this document that must be
+Two routes: pin the VS 2022 floor and hold the documented default, or
+build with `clang-cl` and reuse the flag that already exists — and either
+way this is the one finding in this document that must be
 **measured rather than reasoned about**; the cross-platform byte
 comparison from [render-pipeline.md](render-pipeline.md) chunk 6 is the
 instrument, and it needs a Windows build to run against, exactly as it
@@ -276,9 +285,10 @@ Recorded so the next reader does not re-derive it.
   (`src/workers/client.ts` uses `createConnection`), so §1.2's named-pipe
   constraint applies to ACE and voice whatever CPython does, and they need
   the same transport decision, separately. Also
-  `src/workers/client.ts` probes `.venv/bin/<script>` (Windows:
-  `.venv/Scripts/<script>.exe`) and advises `brew install uv` when uv is
-  missing. Encouragingly, `python/aced/uv.lock` already carries win32
+  `src/workers/client.ts`'s installed-probe is already half-ported: it
+  picks `Scripts` over `bin` on win32 and joins `spec.script` bare, so
+  the `.exe` suffix uv's console shims carry is the one missing piece.
+  It advises `brew install uv` when uv is missing. Encouragingly, `python/aced/uv.lock` already carries win32
   CUDA wheels, `triton-windows` and a Windows `flash-attn`, so somebody
   has been here before.
 - **SuperCollider**, which is nearly free whenever it is wanted:
@@ -296,12 +306,15 @@ Recorded so the next reader does not re-derive it.
 2. **Build and paths** (§1.5, §1.3). MSVC compiles the daemon: the
    SIGPIPE guard, the `.exe` suffix, multi-config `--config Release` in
    `build:native`. Ends at a real milestone with no socket work at all —
-   `field-audiod --render` and `--render-live` are invoked by
-   `render-daemon.ts` as subprocesses, so **the whole offline render path
-   works** once the binary exists.
+   `field-audiod --render` is spawned by `render-daemon.ts`, and
+   `--render-live` directly by the tests that exercise it — both plain
+   subprocess runs of the compiled binary, no socket — so **the whole
+   offline render path works** once the binary exists.
 3. **Determinism** (§1.4). Measure a Windows render against macOS and
-   Linux; MSVC flags or `clang-cl` depending on what the measurement says.
-   Gated behind chunk 2, and it is the chunk most likely to surprise.
+   Linux; the toolchain floor or `clang-cl` depending on what the
+   measurement says, and the UCRT — the unmeasured third libm — is where
+   the surprise would come from. Gated behind chunk 2, and it is the
+   chunk most likely to surprise.
 4. **The transport** (§1.2). The seam, both ends, per §2.1. This is where
    `field play`, `field transport` and live rendering arrive, and it is
    the largest chunk by a wide margin.
