@@ -242,7 +242,16 @@ export async function addInsert(
       incumbentIds.add(item.get('id') as string);
     }
   }
-  const sameIdentity = chain.filter((item) => identityOf(item) === plugin.identifier);
+  // Both spellings of "the same plugin": the identity when the
+  // incumbent is pinned, the name when it is not — an unpinned
+  // hand-authored instance is the §1 flow this command shortcuts, and
+  // pinBeforeCheck collapses the two into one identity group before
+  // the duplicate rule runs, so missing it here writes exactly the
+  // file §2 promises not to (minjudd on #155).
+  const sameIdentity = chain.filter((item) => {
+    const identity = identityOf(item);
+    return identity === plugin.identifier || identity === `name:${plugin.name}`;
+  });
   let newId = options.id;
   const backfilled: string[] = [];
   if (sameIdentity.length > 0) {

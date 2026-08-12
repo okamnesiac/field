@@ -206,6 +206,25 @@ describe('field insert add', () => {
     expect(text).toContain('id: slap');
   });
 
+  it('treats an unpinned incumbent as the same plugin (minjudd on #155)', async () => {
+    // The group that needs handles is the one check builds *after*
+    // pinBeforeCheck pins the incumbent — matching only the identity
+    // let a hand-authored `- plugin: X` slip past, and the command
+    // wrote exactly the file §2 promises it will not.
+    writeFileSync(lead(), ['name: lead', 'inserts:', '  - plugin: Verbatron', ''].join('\n'));
+    writeInventory([entry('Verbatron', 'au', 'aufx/vrbt/test')]);
+    const answers = ['crush', 'slap'];
+    const outcome = await addInsert(root, 'lead', {
+      plugin: 'Verbatron',
+      hooks: { askId: () => Promise.resolve(answers.shift()) },
+    });
+    expect(outcome.backfilled).toEqual(['crush']);
+    expect(outcome.handle).toBe('slap');
+    const text = readFileSync(lead(), 'utf8');
+    expect(text).toContain('id: crush');
+    expect(text).toContain('id: slap');
+  });
+
   it('refuses the duplicate case without a TTY, and takes --id when incumbents are id-ed', async () => {
     writeFileSync(
       lead(),
