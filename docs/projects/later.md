@@ -50,3 +50,7 @@ costs nothing. See [README](README.md) for how these lists work.
 - **Generation progress** — real per-step progress from the workers
   (ACE step counts, Chatterbox chunking) over the existing progress
   events; today a minutes-long generate is one silent "generating".
+- [Windows portability](all/windows-portability.md) — the live engine has
+  no platform-bound code in it at all; what stands in the way is the
+  checkout's line endings and the AF_UNIX control socket (assessed
+  2026-08-12, nothing committed to).
