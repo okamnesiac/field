@@ -7,7 +7,7 @@
 // local gate, the same split the workflow header records for CoreAudio.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -354,6 +354,87 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
   it('refuses an uninstalled plugin by name, format, identity and version', async () => {
     await expect(render(pluginInsert({ identifier: 'deadbeef' }))).rejects.toThrow(
       /needs Field Fixture \(vst3 deadbeef 1\.0\.0\), which is not installed/,
+    );
+  });
+});
+
+describe.skipIf(!binary || !haveFixture)('hosted chains under live compile (chunk 1)', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'field-hosting-live-'));
+    process.env['FIELD_PLUGIN_PATH'] = fixtureDir!;
+    fixture ??= scanFixture();
+    const { init } = await import('../commands/init.js');
+    const { createSong } = await import('../commands/create.js');
+    init({ dir: root, name: 'test-album' });
+    createSong(root, 'opener');
+    const tone = Float32Array.from({ length: 4800 }, (_, i) =>
+      0.4 * Math.sin((2 * Math.PI * 220 * i) / RATE),
+    );
+    writeWavFloat32(join(root, 'tone.wav'), RATE, [tone, tone]);
+    const { importAsset } = await import('../commands/import.js');
+    await importAsset(root, 'opener', join(root, 'tone.wav'), 'tone');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    delete process.env['FIELD_PLUGIN_PATH'];
+  });
+
+  let fixture!: PluginInfo;
+
+  function hostedTrack(): string {
+    return [
+      'name: lead',
+      'inserts:',
+      '  - plugin: Field Fixture',
+      `    vst3: ${fixture.identifier}`,
+      `    version: ${fixture.version}`,
+      '    params:',
+      '      Gain: 6',
+      'inputs:',
+      '  - audio: tone',
+      '',
+    ].join('\n');
+  }
+
+  it('freezes a dirty hosted chain by rendering it, and sends no plugin arm live', async () => {
+    writeFileSync(join(root, 'songs/opener/tracks/lead.yaml'), hostedTrack());
+    // Reachability matters: an unplaced track drops from the session
+    // entirely, which would pass the no-plugin assertion vacuously.
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      'name: main\ninputs:\n  - track: lead\n',
+    );
+    const { compileSession } = await import('../graph/live.js');
+    const compiled = await compileSession(root, 'opener');
+    const serialized = JSON.stringify(compiled.session);
+    // No plugin arm reaches the daemon, the chain is not in the dirty
+    // list (the compile just rendered it), and the frozen stem arrives
+    // as a file window on its consumer.
+    expect(serialized).not.toContain('"plugin"');
+    expect(compiled.dirty).not.toContain('//songs/opener/track:lead');
+    expect(serialized).toContain('track/lead.wav');
+  });
+
+  it('refuses a hosted chain on the output track, naming chunk 2', async () => {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      [
+        'name: main',
+        'inserts:',
+        '  - plugin: Field Fixture',
+        `    vst3: ${fixture.identifier}`,
+        `    version: ${fixture.version}`,
+        'inputs:',
+        '  - audio: tone',
+        '',
+      ].join('\n'),
+    );
+    const { compileSession } = await import('../graph/live.js');
+    await expect(compileSession(root, 'opener')).rejects.toThrow(
+      /cannot run live yet \(plugin-hosting\.md chunk 2\)/,
     );
   });
 });
