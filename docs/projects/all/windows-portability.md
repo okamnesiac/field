@@ -49,7 +49,7 @@ sha256 as LF   : 49f970a7db30fc972b8ef060e55e3ae2991107137fbf9dd1a6ebb88e59dcea6
 content and so hides the difference completely. field does not: it hashes
 what is on disk.
 
-Three things break, all silently:
+Four things break — three silently, one loudly:
 
 - **`sc-render`'s action key includes the program's content hash.** Every
   SuperCollider render on Windows keys differently from the same render on
@@ -61,17 +61,30 @@ Three things break, all silently:
   CRLF working tree is not canonical.
 - **Asset pins are content hashes** of committed files
   (`assets.yaml`'s `sha256`), and the LFS OID is the same number.
+- **Plugin state blobs are hashed at render time**, and this consumer
+  refuses where the other three degrade: `toPluginWire` throws when
+  `shared/plugins/` bytes stop hashing to their filename (minjudd's
+  grep on #154). Whether CRLF can actually reach a `.state` blob
+  depends on git's binary heuristic sparing it — a NUL-byte accident
+  rather than a guarantee, which is exactly the dependence chunk 1
+  exists to end.
 
 The fix is one committed file and it must land first, because it is the
-instrument every other measurement depends on. The shape is already
-known-good: the **archived standalone sample-project repo carried exactly
-this file** — `* text=auto eol=lf` with per-extension binary overrides for
-`.wav/.aif/.aiff/.flac/.mp3/.m4a/.caf`, last-match-wins so audio is never
-touched — and its comment already states this reasoning. The engine
-repository has never had one, and when the sample project moved in-tree
-([bloom-in-tree.md](bloom-in-tree.md)) the attributes did not come with
-it. On the assessment machine that file survives, uncommitted, as the
-staged diff on the pre-reset checkout (tag `archive/sample-project`).
+instrument every other measurement depends on. It is a file to be
+written and verified, not copied from anywhere: the standalone
+sample-project repo's `.gitattributes` — seven LFS lines, each ending
+`-text` — protected the audio binaries and nothing else, so every text
+file in that tree stayed exposed to `core.autocrlf`, and no commit in
+its history ever carried `* text=auto eol=lf` (minjudd traced the whole
+history on #154; the precedent this section previously claimed does not
+exist, and the file that does exist solves the adjacent problem). The
+shape chunk 1 writes is `* text=auto eol=lf` with per-extension binary
+overrides for `.wav/.aif/.aiff/.flac/.mp3/.m4a/.caf`, last-match-wins
+so audio is never touched — and its proof is §1.1's measurement re-run
+against a real Windows clone, not a provenance story. The engine
+repository has never had a `.gitattributes` at all, and when the sample
+project moved in-tree ([bloom-in-tree.md](bloom-in-tree.md)) not even
+the LFS lines came with it.
 
 This is not only a Windows concern, which is the argument for landing it
 regardless of whether the rest of this plan is ever built: it makes the
@@ -310,6 +323,9 @@ rendering on Windows can be real long before playback is.
   through `device.select` the way they do on Core Audio is unverified,
   and the periodic rescan fallback has never been exercised against real
   Windows hot-plug.
-- **Does anything else hash on-disk bytes?** §1.1 names three consumers
-  found by reading; a systematic grep for content hashing against the
-  working tree would be cheap insurance before trusting chunk 1.
+- **Does anything else hash on-disk bytes?** §1.1 names four
+  consumers — three found by reading, the state-blob refusal by
+  minjudd's grep on #154, which also placed `commands/click.ts` and
+  `graph/build.ts`'s hashers inside the asset-pin family already
+  listed; a systematic grep is still cheap insurance before trusting
+  chunk 1, and this question stays open until someone runs it.
