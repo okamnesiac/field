@@ -120,9 +120,15 @@ discuss before anything is built.
   workspace.
 - **Fader drags: write-on-release only, or live ramps during the
   drag.** The daemon's `ramp` op could follow the pointer (throttled)
-  with the file write still landing once on release — hearing the
-  move is the point of a fader, but it puts a socket op inside the
-  gesture where chunk 3 keeps gestures file-only until release.
+  with the file write still landing once on release — and hearing the
+  move is the point of a fader, which is decision 7's own principle:
+  the live chain applies values immediately, *you hear the knob now*,
+  and only the file write waits for release. What live ramps add is a
+  socket op inside the gesture, where chunk 3 has none — its editor
+  lives in the daemon, so the knob is audible without crossing the
+  socket, and a browser fader is on the far side of one. The trade is
+  throttled socket traffic against an audible fader; decision 7's
+  file write lands once, on release, either way.
 - **The TUI — settled (DECIDED, 2026-08-12): it coexists, and it is
   wanted outright.** The full terminal face recorded with the
   disposable-picker decision (add-insert.md §3) is its own future
