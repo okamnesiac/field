@@ -342,8 +342,11 @@ insert
       // The handoff add-insert.md §5 records: once editor sessions
       // land (plugin-hosting.md chunk 3) this runs field open instead
       // of naming it.
+      // outcome.address, not outcome.track: a colliding track name
+      // needs its song qualifier here too, or the advertised command
+      // cannot identify the insert just added (Codex on #155).
       process.stdout.write(
-        `field open ${outcome.track}/${outcome.handle} will open its editor once editor sessions land\n`,
+        `field open ${outcome.address}/${outcome.handle} will open its editor once editor sessions land\n`,
       );
     } catch (err) {
       fail(err);

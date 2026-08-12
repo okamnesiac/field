@@ -52,6 +52,7 @@ describe('field insert add', () => {
     expect(outcome.position).toBe(1);
     expect(outcome.chainLength).toBe(1);
     expect(outcome.handle).toBe('Verbatron');
+    expect(outcome.address).toBe('lead'); // bare while unique (§2's grammar)
     const text = readFileSync(lead(), 'utf8');
     expect(text).toContain('# keep me');
     expect(text).toContain('# and me');
@@ -250,6 +251,9 @@ describe('field insert add', () => {
     );
     const qualified = await addInsert(root, 'closer/lead', { plugin: 'Verbatron' });
     expect(qualified.song).toBe('closer');
+    // The handoff address keeps the qualifier a colliding name needs —
+    // `field open lead/<handle>` could not say which lead (Codex on #155).
+    expect(qualified.address).toBe('closer/lead');
     await expect(addInsert(root, 'nowhere', { plugin: 'Verbatron' })).rejects.toThrow(
       /no track named "nowhere"/,
     );

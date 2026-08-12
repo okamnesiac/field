@@ -39,6 +39,11 @@ export interface AddInsertOutcome {
   file?: string; // project-relative track file the write landed in
   song?: string;
   track?: string;
+  // The track half of a `field open` address, in the decided grammar
+  // (add-insert.md §2): bare while the name is unique project-wide,
+  // `<song>/<track>` when it collides — computed here because the
+  // handoff must not advertise an ambiguous spelling (Codex on #155).
+  address?: string;
   plugin?: PluginInfo;
   position?: number; // 1-based, after the write
   chainLength?: number;
@@ -301,10 +306,13 @@ export async function addInsert(
   canonicalizeDocument(doc, trackOrder);
   writeFileSync(absolute, stringifyDocument(doc));
 
+  const collides =
+    project.songs.filter((s) => s.tracks.some((t) => t.data.name === target.trackName)).length > 1;
   return {
     file: target.path,
     song: target.song,
     track: target.trackName,
+    address: collides ? `${target.song}/${target.trackName}` : target.trackName,
     plugin,
     position: index + 1,
     chainLength: chain.length + 1,
