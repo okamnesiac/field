@@ -11,6 +11,12 @@ costs nothing. See [README](README.md) for how these lists work.
   the [realtime](all/realtime.md) engine it waited behind shipped
   2026-08-11, so capture is now an input node away from a graph that
   already runs live.
+- **Built-ins in the chooser — or as plugins** — whether `eq` and
+  friends join `field insert add`'s picker as rows that write
+  `effect:` blocks, or become actual AU/VST3 wrappers; the trade-off
+  is recorded in [add-insert.md §7](all/add-insert.md), and wrapping
+  would demote the byte-identity golden and the analytic latency
+  arithmetic built-ins uniquely carry.
 - **Convolution reverb** — impulse responses as committed assets (a
   real place in the repo, hash-pinned and action-keyed like any
   asset) through partitioned zero-latency convolution; waits on a

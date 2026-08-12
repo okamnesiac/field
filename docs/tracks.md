@@ -167,6 +167,12 @@ inserts:
 
 You write the name; `field check` writes the identity, `version:` and a
 nonzero `latency:` back from the scan inventory (`field plugins scan`).
+Or skip the hand edit: `field insert add <track> [plugin]` writes the
+entry already pinned — with an incremental-search chooser over the
+inventory when no plugin is named, an order chooser when the chain
+already has inserts (`--at <position|end>` scripts it), and id prompts
+when the chain would repeat a plugin
+([projects/all/add-insert.md](projects/all/add-insert.md)).
 State beyond the parameter list lives in a content-addressed blob under
 `shared/plugins/`, referenced as `state: <short-hash>` and resolved by
 hash — the directory is a convention, never load-bearing. One chain

@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Active
 ---
 
 # Plan: `field insert` — add an insert with a chooser
@@ -32,7 +32,11 @@ for chunk 3's editor.
 `field insert add <track> [plugin]` (DECIDED, 2026-08-12): the `add`
 subcommand keeps the family open for `remove` and `reorder` later —
 both non-goals here (§6) — instead of burning the bare verb on one
-operation. The track half of the address follows decision 6's
+operation. A bare track name resolves project-wide while it is
+unique; when songs collide on a name, the refusal lists the qualified
+`<song>/<track>` spellings, so the fix is a copy-paste (DECIDED,
+2026-08-12 — `field open` should adopt the same rule when chunk 3
+builds it). The track half of the address follows decision 6's
 `<track>/<handle>` scheme — this
 command is the `<track>` half alone, so `field open` and
 `field insert` read as one grammar. With a plugin named, resolution is
@@ -153,10 +157,9 @@ and nothing here blocks on chunk 3 except the final step.
 
 ## 7 Open questions
 
-- **Track addressing.** Whether the track address needs a song
-  qualifier when track names collide across songs — `field open`
-  will face the identical question, and the two must answer it the
-  same way.
+- **Track addressing** — answered in §2 (DECIDED, 2026-08-12): bare
+  name while unique, qualified `<song>/<track>` on collision, and the
+  refusal names the spellings.
 - **Built-ins, to discuss — two shapes, and they pull opposite
   directions.** (a) Make `eq` and friends *actual* AU/VST3 plugins:
   one chooser, one chain representation, editor windows and future
@@ -172,4 +175,8 @@ and nothing here blocks on chunk 3 except the final step.
   UX, engine and contracts untouched, at the price of two row kinds
   in one picker. The recorded contracts lean toward (b); (a) is
   really a separate "built-ins as plugins" project that this command
-  should not smuggle in. Undecided until discussed.
+  should not smuggle in. For *this* plan the answer is scoped
+  (DECIDED, 2026-08-12): the chooser lists scanned plugins only, and
+  built-ins stay hand-authored — the (a)-versus-(b) discussion stays
+  live as its own line in [later.md](../later.md), where uncommitted
+  ideas belong, and nothing in this command forecloses either shape.

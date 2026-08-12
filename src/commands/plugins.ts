@@ -60,6 +60,35 @@ export interface PinOutcome {
   problems: { file: string; message: string }[];
 }
 
+// Resolve a display name against the inventory, decision 2's rule:
+// prefer AU on macOS and VST3 elsewhere when a product installs as
+// both, and report zero or several matches with the identifiers, so
+// the caller's message is the scan's specific answer. Shared by the
+// pinner and `field insert add` — one resolver, one disclosure.
+export type PluginNameResolution = { installed: PluginInfo } | { problem: string };
+
+export function resolvePluginName(
+  inventory: PluginInventory,
+  name: string,
+  preferOption?: 'au' | 'vst3',
+): PluginNameResolution {
+  const named = inventory.plugins.filter((p) => p.name === name);
+  const prefer = preferOption ?? (process.platform === 'darwin' ? 'au' : 'vst3');
+  const preferred = named.filter((p) => p.format === prefer);
+  const pool = preferred.length > 0 ? preferred : named;
+  if (pool.length === 0) {
+    return { problem: `no scanned plugin is named "${name}" — field plugins scan after installing it` };
+  }
+  if (pool.length > 1) {
+    return {
+      problem:
+        `"${name}" matches ${pool.length} scanned plugins — ` +
+        pool.map((p) => `${p.format} ${p.identifier}`).join(' and '),
+    };
+  }
+  return { installed: pool[0]! };
+}
+
 // Fill the identity, version and latency lines of every unpinned (or
 // half-pinned) hosted insert the inventory can resolve. Idempotent: a
 // fully pinned entry is untouched unless `update` asks for the installed
@@ -136,28 +165,12 @@ export function pinProject(
           // Name-only: resolve, preferring AU on macOS and VST3
           // elsewhere when a product is installed as both (decision 2) —
           // the written pin is the disclosure of which format won.
-          const named = inventory.plugins.filter((p) => p.name === name);
-          const prefer =
-            options.prefer ?? (process.platform === 'darwin' ? 'au' : 'vst3');
-          const preferred = named.filter((p) => p.format === prefer);
-          const pool = preferred.length > 0 ? preferred : named;
-          if (pool.length === 0) {
-            problems.push({
-              file: track.path,
-              message: `no scanned plugin is named "${name}" — field plugins scan after installing it`,
-            });
+          const resolved = resolvePluginName(inventory, name, options.prefer);
+          if ('problem' in resolved) {
+            problems.push({ file: track.path, message: resolved.problem });
             continue;
           }
-          if (pool.length > 1) {
-            problems.push({
-              file: track.path,
-              message:
-                `"${name}" matches ${pool.length} scanned plugins — ` +
-                pool.map((p) => `${p.format} ${p.identifier}`).join(' and '),
-            });
-            continue;
-          }
-          installed = pool[0]!;
+          installed = resolved.installed;
           item.set(installed.format, installed.identifier);
           touched = true;
         }
