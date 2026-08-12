@@ -166,22 +166,30 @@ export async function runPicker<T>(
   let drawn = render(title, state, filterItems(items, ''), 0);
   stdin.setRawMode(true);
   stdin.resume();
-  return await new Promise<T | undefined>((resolve) => {
-    const finish = (value: T | undefined): void => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdin.removeListener('data', onData);
-      resolve(value);
-    };
-    const onData = (chunk: Buffer): void => {
-      for (const key of decodeKeys(chunk)) {
-        const result = reducePicker(state, key, items);
-        state = result.state;
-        if (result.done === 'selected') return finish(result.selected);
-        if (result.done === 'cancelled') return finish(undefined);
-      }
-      drawn = render(title, state, filterItems(items, state.query), drawn);
-    };
-    stdin.on('data', onData);
-  });
+  let onData!: (chunk: Buffer) => void;
+  try {
+    return await new Promise<T | undefined>((resolve, reject) => {
+      onData = (chunk: Buffer): void => {
+        // A throw in here (a write to a closed stdout, say) must reach
+        // the finally below rather than the event emitter — raw mode
+        // with no echo is a broken terminal (minjudd on #155).
+        try {
+          for (const key of decodeKeys(chunk)) {
+            const result = reducePicker(state, key, items);
+            state = result.state;
+            if (result.done === 'selected') return resolve(result.selected);
+            if (result.done === 'cancelled') return resolve(undefined);
+          }
+          drawn = render(title, state, filterItems(items, state.query), drawn);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      };
+      stdin.on('data', onData);
+    });
+  } finally {
+    stdin.setRawMode(false);
+    stdin.pause();
+    stdin.removeListener('data', onData);
+  }
 }
