@@ -358,7 +358,7 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
   });
 });
 
-describe.skipIf(!binary || !haveFixture)('hosted chains under live compile (chunk 1)', () => {
+describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md chunk 2)', () => {
   let root: string;
 
   beforeEach(async () => {
@@ -369,12 +369,56 @@ describe.skipIf(!binary || !haveFixture)('hosted chains under live compile (chun
     const { createSong } = await import('../commands/create.js');
     init({ dir: root, name: 'test-album' });
     createSong(root, 'opener');
+    // A tempo change mid-content, so segment boundaries land inside
+    // blocks on both render paths — the identity decision 13 is about.
+    writeFileSync(
+      join(root, 'songs/opener/song.yaml'),
+      [
+        'name: opener',
+        'time:',
+        '  tempo:',
+        '    - at: 0',
+        '      bpm: 120',
+        '    - at: 1920',
+        '      bpm: 174',
+        '  meter:',
+        '    - at: 0',
+        '      numerator: 4',
+        '      denominator: 4',
+        '',
+      ].join('\n'),
+    );
     const tone = Float32Array.from({ length: 4800 }, (_, i) =>
       0.4 * Math.sin((2 * Math.PI * 220 * i) / RATE),
     );
     writeWavFloat32(join(root, 'tone.wav'), RATE, [tone, tone]);
     const { importAsset } = await import('../commands/import.js');
     await importAsset(root, 'opener', join(root, 'tone.wav'), 'tone');
+    // The full chain surface in one insert: natural-unit gain, the
+    // playhead-reading gate, real exhibited latency, a declared tail.
+    writeFileSync(
+      join(root, 'songs/opener/tracks/lead.yaml'),
+      [
+        'name: lead',
+        'inserts:',
+        '  - plugin: Field Fixture',
+        `    vst3: ${fixture.identifier}`,
+        `    version: ${fixture.version}`,
+        '    latency: 128',
+        '    tail: 0.01',
+        '    params:',
+        '      Gain: 6',
+        '      Beat Gate: 1',
+        '      Latency: 128',
+        'inputs:',
+        '  - audio: tone',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'songs/opener/tracks/main.yaml'),
+      'name: main\ninputs:\n  - track: lead\n',
+    );
   });
 
   afterEach(() => {
@@ -384,41 +428,56 @@ describe.skipIf(!binary || !haveFixture)('hosted chains under live compile (chun
 
   let fixture!: PluginInfo;
 
-  function hostedTrack(): string {
-    return [
-      'name: lead',
-      'inserts:',
-      '  - plugin: Field Fixture',
-      `    vst3: ${fixture.identifier}`,
-      `    version: ${fixture.version}`,
-      '    params:',
-      '      Gain: 6',
-      'inputs:',
-      '  - audio: tone',
-      '',
-    ].join('\n');
-  }
-
-  it('freezes a dirty hosted chain by rendering it, and sends no plugin arm live', async () => {
-    writeFileSync(join(root, 'songs/opener/tracks/lead.yaml'), hostedTrack());
-    // Reachability matters: an unplaced track drops from the session
-    // entirely, which would pass the no-plugin assertion vacuously.
-    writeFileSync(
-      join(root, 'songs/opener/tracks/main.yaml'),
-      'name: main\ninputs:\n  - track: lead\n',
-    );
+  it('renders a live hosted chain byte-identically to the offline stem', async () => {
+    // Compile before anything builds, so the hosted chain evaluates
+    // live; the offline build afterwards renders the same chain. The
+    // fixture computes per-sample from the playhead, so with segment-
+    // split blocks on both paths the two are byte-identical — proving
+    // decision 13's plumbing exactly, as a fixture property; for
+    // arbitrary plugins the docs claim only the warmup bound.
     const { compileSession } = await import('../graph/live.js');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = promisify(execFile);
+
     const compiled = await compileSession(root, 'opener');
-    const serialized = JSON.stringify(compiled.session);
-    // No plugin arm reaches the daemon, the chain is not in the dirty
-    // list (the compile just rendered it), and the frozen stem arrives
-    // as a file window on its consumer.
-    expect(serialized).not.toContain('"plugin"');
-    expect(compiled.dirty).not.toContain('//songs/opener/track:lead');
+    expect(JSON.stringify(compiled.session)).toContain('"effect":"plugin"');
+    expect(compiled.dirty).toContain('//songs/opener/track:lead');
+
+    const sessionPath = join(root, 'session.json');
+    writeFileSync(sessionPath, JSON.stringify(compiled.session));
+    const livePath = join(root, 'live.wav');
+    await run(binary!, ['--render-live', sessionPath, livePath], { cwd: root });
+
+    const { buildLabels } = await import('../commands/build.js');
+    const offline = await buildLabels(root, ['//songs/opener/track:main']);
+    const artifact = offline.find((o) => o.label.endsWith('track:main'))!.outputPath!;
+
+    const dataOf = (path: string): Buffer => {
+      const bytes = readFileSync(path);
+      const at = bytes.indexOf('data');
+      return bytes.subarray(at + 8, at + 8 + bytes.readUInt32LE(at + 4));
+    };
+    const live = dataOf(livePath);
+    const stem = dataOf(artifact);
+    expect(live.length).toBe(stem.length);
+    expect(live.equals(stem)).toBe(true);
+  });
+
+  it('freezes behind the build: the recompile serves the stem, no plugin arm', async () => {
+    const { compileSession } = await import('../graph/live.js');
+    const { buildLabels } = await import('../commands/build.js');
+    const first = await compileSession(root, 'opener');
+    expect(first.dirty).toContain('//songs/opener/track:lead');
+    await buildLabels(root, first.dirty);
+    const second = await compileSession(root, 'opener');
+    expect(second.dirty).toEqual([]);
+    const serialized = JSON.stringify(second.session);
+    expect(serialized).not.toContain('"effect":"plugin"');
     expect(serialized).toContain('track/lead.wav');
   });
 
-  it('refuses a hosted chain on the output track, naming chunk 2', async () => {
+  it('hosts on the output track: the master chain compiles live', async () => {
     writeFileSync(
       join(root, 'songs/opener/tracks/main.yaml'),
       [
@@ -427,15 +486,37 @@ describe.skipIf(!binary || !haveFixture)('hosted chains under live compile (chun
         '  - plugin: Field Fixture',
         `    vst3: ${fixture.identifier}`,
         `    version: ${fixture.version}`,
+        '    params:',
+        '      Gain: 3',
         'inputs:',
-        '  - audio: tone',
+        '  - track: lead',
         '',
       ].join('\n'),
     );
     const { compileSession } = await import('../graph/live.js');
-    await expect(compileSession(root, 'opener')).rejects.toThrow(
-      /cannot run live yet \(plugin-hosting\.md chunk 2\)/,
+    const compiled = await compileSession(root, 'opener');
+    const main = (compiled.session as { tracks: { name: string; chain: { effect: string }[] }[] }).tracks.find(
+      (t) => t.name === 'main',
     );
+    expect(main?.chain.some((c) => c.effect === 'plugin')).toBe(true);
+  });
+
+  it('refuses a version drift at live load, naming both versions (decision 9)', async () => {
+    const { compileSession } = await import('../graph/live.js');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = promisify(execFile);
+    const compiled = await compileSession(root, 'opener');
+    const session = JSON.parse(JSON.stringify(compiled.session)) as {
+      tracks: { name: string; chain: { effect: string; version?: string }[] }[];
+    };
+    const lead = session.tracks.find((t) => t.name === 'lead')!;
+    lead.chain.find((c) => c.effect === 'plugin')!.version = '9.9.9';
+    const sessionPath = join(root, 'drifted.json');
+    writeFileSync(sessionPath, JSON.stringify(session));
+    await expect(
+      run(binary!, ['--render-live', sessionPath, join(root, 'out.wav')], { cwd: root }),
+    ).rejects.toThrow(/pinned at 9\.9\.9 but the installed version is/);
   });
 });
 

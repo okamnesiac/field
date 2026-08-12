@@ -206,7 +206,7 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "field-audiod");
-        ok->setProperty ("version", "0.10.0"); // 0.10: hosted plugins offline — scan, probe, state capture, the plugin render arm (plugin-hosting.md chunk 1)
+        ok->setProperty ("version", "0.11.0"); // 0.11: hosted plugins in the live chain (plugin-hosting.md chunk 2)
         // Capability names (realtime.md §3): clients gate on these, not
         // on parsing the version string.
         juce::Array<juce::var> features;

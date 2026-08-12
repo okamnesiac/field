@@ -11,7 +11,7 @@ namespace field
 {
 namespace
 {
-constexpr int liveSessionVersion = 2; // session.ts SESSION_VERSION
+constexpr int liveSessionVersion = 3; // session.ts SESSION_VERSION
 constexpr int engineBlock = 512; // internal granularity; output is block-size invariant
 
 double requireNumber (const juce::var& object, const char* key, const char* what)
@@ -191,6 +191,40 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 spec.hall.width = requireNumber (insert, "width", "hall insert");
                 spec.hall.sampleRate = (double) track.rate;
             }
+            else if (effect == "plugin")
+            {
+                // A hosted insert (plugin-hosting.md chunk 2), in the
+                // offline wire spelling. Instantiation happens in
+                // buildChain below — the load thread — never in the
+                // callback.
+                spec.kind = 5;
+                spec.plugin.format = requireString (insert, "format", "plugin insert");
+                spec.plugin.identifier = requireString (insert, "identifier", "plugin insert");
+                spec.plugin.name = requireString (insert, "name", "plugin insert");
+                spec.plugin.version = requireString (insert, "version", "plugin insert");
+                spec.plugin.latency
+                    = (juce::int64) requireNumber (insert, "latency", "plugin insert");
+                const auto tail = insert.getProperty ("tail", juce::var());
+                if (tail.isDouble() || tail.isInt() || tail.isInt64())
+                    spec.plugin.tailSeconds = (double) tail;
+                spec.plugin.statePath
+                    = insert.getProperty ("state_path", juce::var()).toString().toStdString();
+                spec.plugin.pathHint
+                    = insert.getProperty ("path", juce::var()).toString().toStdString();
+                spec.plugin.params = insert.getProperty ("params", juce::var());
+                for (const auto& segment :
+                     requireArray (insert.getProperty ("transport", juce::var()), "segments",
+                                   "plugin transport"))
+                {
+                    TrackPlayHead::Segment s;
+                    s.sample = (juce::int64) requireNumber (segment, "sample", "tempo segment");
+                    s.ppq = requireNumber (segment, "ppq", "tempo segment");
+                    s.bpm = requireNumber (segment, "bpm", "tempo segment");
+                    s.numerator = (int) requireNumber (segment, "numerator", "tempo segment");
+                    s.denominator = (int) requireNumber (segment, "denominator", "tempo segment");
+                    spec.plugin.segments.push_back (s);
+                }
+            }
             else
             {
                 throw std::runtime_error ("unknown insert effect \"" + effect + "\"");
@@ -220,6 +254,8 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
                 growth += stage.plate->tailSamples();
             else if (stage.hall != nullptr)
                 growth += stage.hall->tailSamples();
+            else if (stage.plugin != nullptr)
+                growth += stage.plugin->tailSamples();
         }
         track.postLength = contentEnd + growth;
         if (t != outputTrack)
@@ -279,10 +315,19 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
             stage.plate = std::make_unique<dsp::Plate> (spec.plate, (size_t) 2);
             stage.plate->startAt (startClock);
         }
-        else
+        else if (spec.kind == 4)
         {
             stage.hall = std::make_unique<dsp::Hall> (spec.hall, (size_t) 2);
             stage.hall->startAt (startClock);
+        }
+        else
+        {
+            // Load-thread instantiation (state → params → prepare →
+            // latency verify inside); the max block covers the engine's
+            // pre-render blocks and any device callback.
+            stage.plugin = std::make_unique<LivePluginStage> (spec.plugin, (double) track.rate,
+                                                              8192);
+            stage.plugin->startAt (startClock);
         }
         track.chain.push_back (std::move (stage));
     }
@@ -461,6 +506,8 @@ void LiveSession::runChain (Track& track, std::vector<std::vector<float>>& worki
             stage.plate->process (working);
         else if (stage.hall != nullptr)
             stage.hall->process (working);
+        else if (stage.plugin != nullptr)
+            stage.plugin->process (working);
         else if (stage.limiter != nullptr)
         {
             std::vector<std::vector<float>> out (2);
@@ -475,10 +522,13 @@ void LiveSession::flushChain (Track& track, std::vector<std::vector<float>>& wor
     for (size_t k = 0; k < track.chain.size(); ++k)
     {
         auto& stage = track.chain[k];
-        if (stage.limiter == nullptr)
+        if (stage.limiter == nullptr && stage.plugin == nullptr)
             continue;
         std::vector<std::vector<float>> tail (2);
-        stage.limiter->flush (tail);
+        if (stage.limiter != nullptr)
+            stage.limiter->flush (tail);
+        else
+            stage.plugin->flush (tail);
         // What the flush released passes through everything after this
         // stage, exactly as it would have inside a block.
         runChain (track, tail, k + 1);
@@ -559,6 +609,13 @@ juce::int64 LiveSession::chainWarmup (const Track& track) const
             warmup += stage.hall->tailSamples();
         else if (stage.limiter != nullptr)
             warmup += stage.limiter->latencySamples();
+        else if (stage.plugin != nullptr)
+            // Declared tail plus the latency window, plus the same
+            // one-second floor an eq gets: a hosted plugin's internal
+            // memory (an undeclared ring, a filter's decay) has no
+            // analytic form, and the warmup bound is the only claim the
+            // freeze swap makes for hosted arms.
+            warmup += stage.plugin->tailSamples() + stage.plugin->latencySamples() + rate;
         else
             warmup += rate;
     }

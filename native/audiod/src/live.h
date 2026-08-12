@@ -13,6 +13,7 @@
 #include "dsp/plate.h"
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
+#include "hosting.h"
 
 // The live session engine (realtime.md §3, chunk 2): evaluates the
 // compiled graph the CLI sends — tracks, windows, chains — sample-exactly
@@ -76,13 +77,14 @@ private:
         std::unique_ptr<dsp::Reverb> reverb;
         std::unique_ptr<dsp::Plate> plate;
         std::unique_ptr<dsp::Hall> hall;
+        std::unique_ptr<LivePluginStage> plugin;
     };
     // Everything needed to rebuild a stage: locate discards chain state
     // (a seek does not inherit the previous position's tails) and
     // reconstructs from these.
     struct ChainSpec
     {
-        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate, 4 hall
+        int kind = 0; // 0 eq, 1 limit, 2 reverb, 3 plate, 4 hall, 5 plugin
         std::vector<dsp::Band> bands;
         bool normalize = false;
         dsp::LimiterSettings limiter;
@@ -90,6 +92,12 @@ private:
         dsp::ReverbSettings reverb;
         dsp::PlateSettings plate;
         dsp::HallSettings hall;
+        // A hosted insert (plugin-hosting.md chunk 2): everything the
+        // stage needs to instantiate fresh, because locate discards
+        // chain state and reconstructs — a hosted stage reinstantiates
+        // the plugin, which is the simple correct form until relocation
+        // cost argues for a reset path.
+        LivePluginStage::Spec plugin;
     };
 
     struct Window

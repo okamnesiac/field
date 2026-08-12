@@ -171,8 +171,9 @@ State beyond the parameter list lives in a content-addressed blob under
 `shared/plugins/`, referenced as `state: <short-hash>` and resolved by
 hash — the directory is a convention, never load-bearing. One chain
 repeating a plugin needs an `id:` per instance, the gen-node rule at
-the same scope. Hosted chunks render offline today; the live chain is
-the plan's next chunk.
+the same scope. Hosted chains render offline and run live — a dirty
+plugin track evaluates in the engine, a cached one plays as its frozen
+stem, and the master chain hosts in the callback like any DAW's.
 
 ## Local time and rate
 

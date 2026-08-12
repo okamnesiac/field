@@ -340,5 +340,12 @@ int main (int argc, char* argv[])
         server.sweepClosedConnections();
     }
     server.sweepClosedConnections();
+    // A daemon that hosted a plugin (a live session's chain) has the
+    // same static-teardown hazard the render subprocess measured: a
+    // loaded plugin module's memory in the DeletedAtShutdown list. The
+    // sockets are drained and the device is about to close with the
+    // process; teardown has nothing left to contribute but the crash.
+    if (field::hostingWasUsed())
+        field::exitSubprocess (0);
     return 0;
 }

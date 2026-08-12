@@ -15,7 +15,9 @@ import { z } from 'zod';
 // track at a foreign rate and the engine converts where it is consumed
 // (cross-rate-live.md decision 4). An engine that would sum the raw
 // samples must refuse, which the version check is.
-export const SESSION_VERSION = 2;
+// 3: hosted plugin inserts join live chains (plugin-hosting.md
+// chunk 2); an older engine has no way to run one.
+export const SESSION_VERSION = 3;
 
 // One placed window, mirroring the render plan's clip exactly — same
 // fields, same units, same omit-when-centred pan rule — except that the
@@ -132,6 +134,41 @@ export const sessionInsertSchema = z.discriminatedUnion('effect', [
     modulation: z.number().min(0).max(1),
     width: z.number().min(0).max(1),
   }),
+  // A hosted plugin (plugin-hosting.md chunk 2), in exactly the offline
+  // wire spelling — the keyed spec plus the machine-local half
+  // (audio/plugins.ts PluginWireInsert) — so the compiler reuses one
+  // enrichment for both paths. The engine instantiates on the load
+  // thread, restores the blob then overlays params (decision 5), and
+  // verifies declared latency at instantiation (decision 11); the
+  // transport segments drive the chain's own playhead (decision 13).
+  z.strictObject({
+    effect: z.literal('plugin'),
+    format: z.enum(['au', 'vst3']),
+    identifier: z.string().min(1),
+    name: z.string().min(1),
+    version: z.string().min(1),
+    latency: z.number().int().min(0),
+    tail: z.number().positive().optional(),
+    state_sha256: z.string().optional(),
+    state_path: z.string().optional(),
+    path: z.string().optional(),
+    params: z.array(
+      z.strictObject({ name: z.string().min(1), value: z.union([z.number(), z.string()]) }),
+    ),
+    transport: z.strictObject({
+      segments: z
+        .array(
+          z.strictObject({
+            sample: z.number().int().min(0),
+            ppq: z.number().min(0),
+            bpm: z.number().positive(),
+            numerator: z.number().int().positive(),
+            denominator: z.number().int().positive(),
+          }),
+        )
+        .min(1),
+    }),
+  }),
 ]);
 
 // Each insert's analytic contract, beside the schema that declares it
@@ -151,12 +188,20 @@ export function insertGrowth(insert: SessionInsert, rate: number): number {
         Math.round((insert.predelay_ms / 1000) * rate) +
         Math.round(insert.decay * Math.max(1, insert.decay_low, insert.decay_high) * rate)
       );
+    case 'plugin':
+      // Live growth is *declared* arithmetic only (plugin-hosting.md
+      // decision 11): the offline render may ring an undeclared tail
+      // out by measurement, but a live length must be computable before
+      // a sample renders, so an absent `tail:` grows nothing — a
+      // hosted reverb wanting its ring heard live declares one.
+      return Math.round((insert.tail ?? 0) * rate);
     default:
       return 0;
   }
 }
 
 export function insertLatency(insert: SessionInsert, rate: number): number {
+  if (insert.effect === 'plugin') return insert.latency;
   if (insert.effect !== 'limit') return 0;
   const window = Math.max(1, Math.round((insert.lookahead_ms / 1000) * rate));
   return Math.ceil((insert.horizon_db / 60) * window);
