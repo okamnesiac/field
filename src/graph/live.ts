@@ -42,7 +42,7 @@ import { wavFrameCount } from '../audio/wav.js';
 import { SESSION_VERSION, insertGrowth, insertLatency, type Session, type SessionInsert, type SessionTrack } from '../audiod/session.js';
 import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
-import { loadProject } from '../model/project.js';
+import { formatDiagnostic, loadProject } from '../model/project.js';
 import type { SpecInsert } from '../generators/stem.js';
 import { explain, type Explanation } from './build.js';
 import { buildGraph, type Graph, type GraphNode } from './graph.js';
@@ -141,7 +141,14 @@ export async function compileSession(
 ): Promise<CompiledSession> {
   const project = loadProject(root);
   const errors = project.diagnostics.filter((d) => d.severity !== 'warning');
-  if (errors.length > 0) throw new Error('project has errors (field check)');
+  // The diagnostics ride the message, exactly as loadValid's gate spells
+  // them: `field play` is where a red project most often surfaces, and
+  // "project has errors" with the errors withheld sends a person off to
+  // run a second command for what this one already knew.
+  if (errors.length > 0) {
+    const lines = project.diagnostics.map(formatDiagnostic).join('\n');
+    throw new Error(`project has errors (field check):\n${lines}`);
+  }
   const song = project.songs.find((s) => s.name === songName);
   if (!song) throw new Error(`no such song "${songName}"`);
   const graph: Graph = buildGraph(project);
