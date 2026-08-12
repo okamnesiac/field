@@ -47,13 +47,23 @@ exemption:
 ## 3 First-version scope
 
 - **Transport**: play / pause / stop / locate, the device picker, and
-  a position readout in musical time — driven by the daemon's
-  `position`, `state`, and `device` events over the socket, the same
-  stream the CLI readout consumes.
+  a position readout in musical time — seeded by `status()` and
+  `devices()` at connection and re-queried after each transport or
+  device op, with the daemon's `position`, `state`, and `device`
+  events layered on top. The events alone are change notifications,
+  not truth (Codex on #156): `position` is broadcast only while
+  playing, so a locate while paused must re-query or go stale, and
+  `device` names only the *selected* output — the picker's list
+  re-queries `devices()` rather than waiting for an event the daemon
+  does not send.
 - **Tracks and levels**: the song's tracks as the project files spell
   them, each placement's `gain_db` (and `pan`) as a control; moving
-  one writes the file. Mute is a gain gesture until a `mute:` field
-  exists — the plan notes it because a session already wanted one.
+  one writes the file. Mute is a **non-goal until a `mute:` field
+  exists** (a session already wanted one, so the schema line is
+  probably coming): spelling it as a gain gesture would overwrite the
+  authored level, and remembering the old value anywhere but the file
+  is a second store — the exact thing §2 forbids, and two UIs holding
+  it privately would not converge (Codex on #156).
 - **Inserts, read-only**: each track's chain listed by name, with a
   "open editor" affordance that prints/launches `field open` per
   chunk 3's state, and an "add" affordance that names
@@ -71,13 +81,25 @@ exemption:
 - **The bridge is field itself.** The daemon speaks a unix socket a
   browser cannot reach, and every write path the UI needs —
   `loadProject`, the YAML writers, `AudiodClient`, the watch loop —
-  already lives in field's Node process. `field ui` starts a local
-  HTTP server in that process: static assets out, one WebSocket per
-  client carrying daemon events and file-change invalidations down
-  and edit operations up. No second daemon, no protocol fork; the
-  WebSocket vocabulary is deliberately thin (state, position, project
-  snapshot, edit ops) so the socket protocol stays the one already
-  documented.
+  already lives in field's Node process. `field ui <song>` starts a
+  local HTTP server in that process — the song argument is the same
+  grammar `field play` uses, and a multi-song project names one
+  rather than guessing (bloom carries two; Codex on #156) — static
+  assets out, one WebSocket per client carrying daemon events and
+  file-change invalidations down and edit operations up. No second
+  daemon, no protocol fork; the WebSocket vocabulary is deliberately
+  thin (state, position, project snapshot, edit ops) so the socket
+  protocol stays the one already documented. Two guards on that
+  socket, both required because it accepts writes: the server checks
+  `Origin` and a per-session token minted at launch (dev-proxy mode
+  included) — binding localhost excludes the network, not the other
+  pages a browser is running (Codex on #156) — and every edit op
+  carries the content hash of the file version it was derived from,
+  with a stale hash rejected and the view refreshed rather than
+  written through: placement ids are optional and duplicates legal,
+  so a write racing an editor cannot always be re-anchored by name,
+  and reject-and-refresh is what makes two views converge instead of
+  overwriting each other (Codex on #156).
 - **The client is a TypeScript SPA** rendering server truth. Local
   state exists only inside a gesture: the fader follows the pointer,
   and the file write lands on release — decision 7's knob-quantum
@@ -93,8 +115,9 @@ exemption:
 
 ## 5 Open questions
 
-Each is the flip-to-Active PR's to answer; the first is the one to
-discuss before anything is built.
+Two are settled inline and dated; the rest are the flip-to-Active
+PR's to answer, however many remain when it opens — counted then,
+not here, so the next settlement does not stale this line.
 
 - **React, or Next.js — settled (DECIDED, 2026-08-12): Vite + React
   SPA.** The server half of Next duplicates a server field already
@@ -128,7 +151,20 @@ discuss before anything is built.
   lives in the daemon, so the knob is audible without crossing the
   socket, and a browser fader is on the far side of one. The trade is
   throttled socket traffic against an audible fader; decision 7's
-  file write lands once, on release, either way.
+  file write lands once, on release, either way. Two facts bound the
+  option (Codex on #156). Reach: the ramp verb touches exactly the
+  output track's input gains — every other track pre-renders with
+  gains baked into its buffers, which is why `diffSessions` masks by
+  position and classifies nested-gain edits as swaps — so live drags
+  are audible for output-track placements only, and a nested fader
+  lands on release regardless; moving faders that change nothing are
+  worse than none, so the control must say which kind it is. And
+  interruption: a tab close or `pointercancel` mid-drag would leave
+  the daemon ahead of the file with no release write coming — chunk 3
+  prevents exactly this with owner acknowledgements and rollback on
+  detach, the bare ramp op has no such transaction — so taking the
+  option means specifying rollback to the file's value (or a write)
+  on every way a gesture can end, not only the happy release.
 - **The TUI — settled (DECIDED, 2026-08-12): it coexists, and it is
   wanted outright.** The full terminal face recorded with the
   disposable-picker decision (add-insert.md §3) is its own future
