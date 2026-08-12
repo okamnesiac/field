@@ -484,6 +484,11 @@ program
               onLine = false;
               process.stdout.write(`edit    ${note}\n`);
             },
+            onWatchError: (message) => {
+              if (onLine) process.stdout.write('\n');
+              onLine = false;
+              process.stderr.write(`watch   ${message}\n`);
+            },
             interrupted: () => interrupted,
           },
         );

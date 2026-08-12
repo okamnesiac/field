@@ -107,6 +107,11 @@ export interface PlayHooks {
   // A live-watch edit landed (realtime.md chunk 3): ramps sent or the
   // session swapped; `note` says which, for the display.
   onReloaded?: (note: string) => void;
+  // A watch reload failed — possibly multiline (a red project's
+  // diagnostics). Printed as completed lines, never into the \r-refreshed
+  // position slot, where the next tick would overwrite everything past
+  // the first line (#149 review).
+  onWatchError?: (message: string) => void;
   // Wired to SIGINT by the CLI: stop the daemon and end the queue.
   interrupted?: () => boolean;
 }
@@ -464,7 +469,10 @@ export async function playLiveSession(
               hooks.onReloaded?.('session swapped');
             }
           },
-          onError: (err) => hooks.onPosition?.(`watch: ${err.message}`),
+          onError: (err) =>
+            hooks.onWatchError !== undefined
+              ? hooks.onWatchError(err.message)
+              : hooks.onPosition?.(`watch: ${err.message}`),
           onFroze: (labels) =>
             hooks.onReloaded?.(`froze ${labels.length} stem${labels.length === 1 ? '' : 's'}`),
         },
