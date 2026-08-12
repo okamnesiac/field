@@ -7,7 +7,7 @@
 // local gate, the same split the workflow header records for CoreAudio.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -700,6 +700,81 @@ describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md 
     await expect(
       run(binary!, ['--render-live', sessionPath, join(root, 'out.wav')], { cwd: root }),
     ).rejects.toThrow(/pinned at 9\.9\.9 but the installed version is/);
+  });
+});
+
+describe('inventory cache', () => {
+  // A real inventory runs to tens of megabytes and one compile reads
+  // it twice, so readInventory caches the parsed object by file
+  // identity — most of a second off every live-watch swap on a
+  // 482-plugin machine. Reference equality is the observable claim:
+  // a cache hit returns the same object, never a re-parse.
+  let root: string;
+
+  const entry = (name: string) => ({
+    format: 'vst3',
+    name,
+    identifier: `id-${name}`,
+    version: '1.0.0',
+    manufacturer: 'Test',
+    path: `/plugins/${name}.vst3`,
+    latency: 0,
+    params: [],
+  });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'field-inventory-cache-'));
+    mkdirSync(join(root, '.field'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('serves an unchanged file from cache and re-reads a changed one', async () => {
+    const { readInventory } = await import('./plugins.js');
+    const path = join(root, '.field/plugins.json');
+    writeFileSync(path, JSON.stringify({ plugins: [entry('one')], failed: [] }));
+    const first = readInventory(root);
+    expect(first?.plugins.map((p) => p.name)).toEqual(['one']);
+    // Unchanged file: the very same object, not an equal re-parse.
+    expect(readInventory(root)).toBe(first);
+    // A rewrite — a fresh scan — is picked up, not served stale.
+    writeFileSync(path, JSON.stringify({ plugins: [entry('one'), entry('two')], failed: [] }));
+    const second = readInventory(root);
+    expect(second?.plugins.map((p) => p.name)).toEqual(['one', 'two']);
+    expect(second).not.toBe(first);
+    // Same byte length, different bytes — a version bump is the real
+    // shape of this — so size cannot catch it; the timestamps do.
+    const sameSize = JSON.stringify({ plugins: [entry('one'), entry('TWO')], failed: [] });
+    expect(sameSize.length).toBe(
+      JSON.stringify({ plugins: [entry('one'), entry('two')], failed: [] }).length,
+    );
+    writeFileSync(path, sameSize);
+    const third = readInventory(root);
+    expect(third).not.toBe(second);
+    expect(third?.plugins.map((p) => p.name)).toEqual(['one', 'TWO']);
+    // A missing inventory is still simply absent, cached or not.
+    expect(readInventory(join(root, 'nowhere'))).toBeUndefined();
+  });
+
+  it('re-reads a same-size replacement that preserves mtime (Codex on #152)', async () => {
+    // The case mtime + size cannot see — cp -p, a restored backup: the
+    // rewrite keeps the byte length and the timestamp. ctime is what
+    // catches it, because the filesystem stamps it on any write and
+    // userland cannot set it back.
+    const { readInventory } = await import('./plugins.js');
+    const path = join(root, '.field/plugins.json');
+    const pinned = new Date('2026-01-01T00:00:00Z');
+    writeFileSync(path, JSON.stringify({ plugins: [entry('aaa')], failed: [] }));
+    utimesSync(path, pinned, pinned);
+    const first = readInventory(root);
+    expect(first?.plugins[0]?.name).toBe('aaa');
+    // Same length, same pinned mtime — only ctime and content differ.
+    writeFileSync(path, JSON.stringify({ plugins: [entry('bbb')], failed: [] }));
+    utimesSync(path, pinned, pinned);
+    const replaced = readInventory(root);
+    expect(replaced?.plugins[0]?.name).toBe('bbb');
   });
 });
 
