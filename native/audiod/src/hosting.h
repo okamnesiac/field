@@ -67,6 +67,11 @@ public:
     };
 
     LivePluginStage (const Spec& spec, double sampleRate, int maxBlock);
+    // Destruction has construction's constraint in mirror: an AU
+    // instance's dispose posts to the message thread and waits, so a
+    // stage must never die on a thread holding the MessageManagerLock
+    // — sessions retire to the message thread (player.cpp's
+    // retireOnMessageThread) rather than dying under a request.
     ~LivePluginStage();
 
     // Initialise the chain clock (reverbs.md decision 4's pattern):

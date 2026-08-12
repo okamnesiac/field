@@ -42,6 +42,30 @@ juce::DynamicObject::Ptr obj() { return new juce::DynamicObject(); }
 
 constexpr int nullBlockSize = 512;
 constexpr double nullSampleRate = 48000.0;
+
+// Hosted teardown needs a free message thread, exactly like hosted
+// construction: ~AudioUnitPluginInstance posts its dispose to the
+// message thread and waits for it unconditionally, so a caller holding
+// the MessageManagerLock waits on a message that can never run — the
+// message thread is parked in that lock's handshake. Measured live on
+// a creek AUDelay swap (#150 follow-up): the retired session died
+// under loadSession's lock, the daemon deadlocked with the callback
+// still streaming, and every later request — stop, quit, ctrl-c's
+// stop — blocked on the blanket lock behind it. So a replaced session
+// is handed to the message thread and dies there asynchronously:
+// disposal lands on the one thread every plugin format accepts, and
+// the request that retired it never waits for teardown. The callback
+// is already off this session — the install moved liveSession under
+// liveLock before the corpse gets here.
+void retireOnMessageThread (std::unique_ptr<field::LiveSession> retired)
+{
+    if (retired == nullptr)
+        return;
+    // shared_ptr because callAsync copies its callable; the last copy
+    // destroyed on the message thread carries the actual teardown.
+    std::shared_ptr<field::LiveSession> keep (std::move (retired));
+    juce::MessageManager::callAsync ([keep]() mutable { keep.reset(); });
+}
 } // namespace
 
 Player::Player (bool useNullOutput) : nullMode (useNullOutput)
@@ -217,13 +241,18 @@ juce::var Player::load (const juce::File& file, bool loop)
     }
     // One source of audio at a time: a *valid* file load drops any live
     // session — an unreadable path must not leave the player empty
-    // (Codex's finding on this PR).
+    // (Codex's finding on this PR). Retired outside liveLock (the
+    // teardown would starve the callback) and off this thread entirely:
+    // load dispatches under the blanket MessageManagerLock, where a
+    // hosted session's AU teardown deadlocks (retireOnMessageThread).
+    std::unique_ptr<field::LiveSession> retired;
     {
         const juce::ScopedLock guard (liveLock);
         livePlaying = false;
         liveEverStarted = false;
-        liveSession.reset();
+        retired = std::move (liveSession);
     }
+    retireOnMessageThread (std::move (retired));
 
     transport.stop();
     transport.setSource (nullptr);
@@ -326,11 +355,13 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             for (auto& ch : preparedOut)
                 ch.reserve (1 << 16);
         }
-        // Freed after liveLock releases, still under the message lock:
-        // a session owns preloaded files, full-length child buffers,
-        // and hosted instances, and destroying that much under liveLock
-        // would hand the callback silent blocks for the whole teardown
-        // — pullAudio try-locks and pads on a miss (Codex's finding).
+        // Never destroyed here: a session owns preloaded files,
+        // full-length child buffers, and hosted instances. Under
+        // liveLock that teardown hands the callback silent blocks
+        // (pullAudio try-locks and pads on a miss — Codex's finding),
+        // and under the MessageManagerLock this function holds, an AU
+        // instance's dispose deadlocks the daemon (measured — see
+        // retireOnMessageThread). The corpse is handed off below.
         std::unique_ptr<field::LiveSession> retired;
         {
             const juce::ScopedLock guard (liveLock);
@@ -386,12 +417,10 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
                 convDeviceRate = devRate;
             }
         }
+        retireOnMessageThread (std::move (retired));
         result->setProperty ("samples", liveLength);
         result->setProperty ("sample_rate", liveRate);
         result->setProperty ("channels", 2);
-        // `retired` destructs here: the callback already has its new
-        // source back, and the message lock is still held for the
-        // hosted teardown inside.
     }
     catch (const std::exception& e)
     {

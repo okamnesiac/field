@@ -73,7 +73,10 @@ public:
     // MessageManagerLock: construction instantiates plugins, which
     // marshal to the message thread — a caller holding the lock would
     // wait on itself (minjudd's P1 on #150). The install takes the lock
-    // internally, so player state stays message-thread-owned.
+    // internally, so player state stays message-thread-owned; the
+    // replaced session dies on the message thread later, because AU
+    // teardown under any held lock is the same deadlock again
+    // (retireOnMessageThread in player.cpp).
     juce::var loadSession (const juce::var& session, const juce::File& projectRoot);
     juce::String liveRamp (const juce::String& track, int input, double gainDb, double rampMs);
     bool liveMode() const { return liveSession != nullptr; }

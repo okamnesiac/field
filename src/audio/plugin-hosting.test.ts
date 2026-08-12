@@ -7,8 +7,8 @@
 // local gate, the same split the workflow header records for CoreAudio.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -565,6 +565,93 @@ describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md 
       client.close();
     }
   });
+
+  // The AU arm of the socket path, local-gate only: AU resolution is
+  // registry-based, so FIELD_PLUGIN_PATH cannot make it hermetic —
+  // chunk 1's recorded split. It exists because AU teardown is the
+  // format that marshals: ~AudioUnitPluginInstance posts its dispose to
+  // the message thread and waits unconditionally, so a session retired
+  // on a thread holding the MessageManagerLock deadlocks the daemon —
+  // music keeps playing (the callback only needs liveLock), and every
+  // later request, ctrl-c's stop included, blocks on the blanket lock
+  // behind the corpse. Measured live on a creek AUDelay watch edit; the
+  // VST3 fixture destructor never marshals, which is how the rest of
+  // this file stayed green around it.
+  const fixtureComponent = join(
+    homedir(),
+    'Library/Audio/Plug-Ins/Components/Field Fixture.component',
+  );
+  it.skipIf(!existsSync(fixtureComponent))(
+    'swaps and drops a hosted AU session over the socket (teardown off the request lock)',
+    { timeout: 30000 },
+    async () => {
+      // A minimal inventory, so toPluginWire attaches the AU identity
+      // hint and the daemon resolves it directly — without one it falls
+      // back to describing every registered AU on the machine, which is
+      // this machine's whole plugin folder, not a test's business.
+      mkdirSync(join(root, '.field'), { recursive: true });
+      writeFileSync(
+        join(root, '.field/plugins.json'),
+        JSON.stringify({
+          plugins: [
+            {
+              format: 'au',
+              name: 'Field Fixture',
+              identifier: 'aufx/Ffx1/Fldf',
+              version: '1.0.0',
+              manufacturer: 'Field',
+              path: 'AudioUnit:Effects/aufx,Ffx1,Fldf',
+              latency: 0,
+              params: [],
+            },
+          ],
+          failed: [],
+        }),
+      );
+      writeFileSync(
+        join(root, 'songs/opener/tracks/lead.yaml'),
+        [
+          'name: lead',
+          'inserts:',
+          '  - plugin: Field Fixture',
+          '    au: aufx/Ffx1/Fldf',
+          '    version: 1.0.0',
+          'inputs:',
+          '  - audio: tone',
+          '',
+        ].join('\n'),
+      );
+      const { AudiodClient } = await import('../audiod/client.js');
+      const { compileSession } = await import('../graph/live.js');
+      const compiled = await compileSession(root, 'opener', { loop: true });
+      const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+      try {
+        const loaded = await client.session(compiled.session);
+        expect(loaded.sample_rate).toBe(48000);
+        await client.play();
+        // The swap: a second session op retires the first — the AU
+        // teardown that must not die under loadSession's own
+        // MessageManagerLock. The daemon swaps whatever arrives; the
+        // session needn't differ for the retire path to run.
+        const swapped = await client.session(compiled.session);
+        expect(swapped.sample_rate).toBe(48000);
+        const status = await client.status();
+        expect(status.state).toBe('playing');
+        // The other retire site: a file load drops the live session
+        // while dispatch holds the blanket lock — same teardown, same
+        // requirement that it never runs under a held lock.
+        const file = await client.load(join(root, 'tone.wav'));
+        expect(file.samples).toBeGreaterThan(0);
+      } finally {
+        try {
+          await client.quit();
+        } catch {
+          // already gone
+        }
+        client.close();
+      }
+    },
+  );
 
   it('refuses a latency the plugin does not report at live load (decision 11)', async () => {
     // Declared 0, exhibited 64: the refusal fires after prepareToPlay
