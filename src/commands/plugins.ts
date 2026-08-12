@@ -60,10 +60,6 @@ export interface PinOutcome {
   problems: { file: string; message: string }[];
 }
 
-// Fill the identity, version and latency lines of every unpinned (or
-// half-pinned) hosted insert the inventory can resolve. Idempotent: a
-// fully pinned entry is untouched unless `update` asks for the installed
-// version to replace the pinned one (decision 9's deliberate diff).
 // Resolve a display name against the inventory, decision 2's rule:
 // prefer AU on macOS and VST3 elsewhere when a product installs as
 // both, and report zero or several matches with the identifiers, so
@@ -93,6 +89,10 @@ export function resolvePluginName(
   return { installed: pool[0]! };
 }
 
+// Fill the identity, version and latency lines of every unpinned (or
+// half-pinned) hosted insert the inventory can resolve. Idempotent: a
+// fully pinned entry is untouched unless `update` asks for the installed
+// version to replace the pinned one (decision 9's deliberate diff).
 export function pinProject(
   project: LoadedProject,
   inventory: PluginInventory,
