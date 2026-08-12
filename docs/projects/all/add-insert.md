@@ -29,8 +29,11 @@ for chunk 3's editor.
 
 ## 2 The command
 
-`field insert <track> [plugin]`, spelling open (§7). The track half of
-the address follows decision 6's `<track>/<handle>` scheme — this
+`field insert add <track> [plugin]` (DECIDED, 2026-08-12): the `add`
+subcommand keeps the family open for `remove` and `reorder` later —
+both non-goals here (§6) — instead of burning the bare verb on one
+operation. The track half of the address follows decision 6's
+`<track>/<handle>` scheme — this
 command is the `<track>` half alone, so `field open` and
 `field insert` read as one grammar. With a plugin named, resolution is
 decision 2's exactly: match against the inventory, warn on a
@@ -90,6 +93,19 @@ exactly what a script should not do silently.
   is why the pinner refuses such entries — the chooser carries the
   same refusal on the row itself, before a write is attempted rather
   than after.
+- Recently used sorts first, and search matches format tokens (`au`,
+  `vst3`) as well as name and manufacturer (DECIDED, 2026-08-12).
+  Recency derives from the project's own files — plugins already
+  pinned in track YAML float to the top — which costs no new state; a
+  picked-history file is the fallback if that proves too coarse to
+  feel recent.
+- The picker itself is a hand-rolled raw-mode readline loop, kept
+  deliberately disposable (DECIDED, 2026-08-12): a full TUI is
+  eventually wanted, and that is its own stack decision to record
+  against project-core.md §5 when it arrives — adopting a prompts
+  library now would quietly pre-answer it with whatever the library
+  grew into. ~100 lines that expect to be deleted beat a dependency
+  that expects to be kept.
 - Selection is exact, so §2's pinned-at-birth write follows directly:
   the chooser emits an inventory entry, never a name to re-resolve.
 
@@ -137,22 +153,23 @@ and nothing here blocks on chunk 3 except the final step.
 
 ## 7 Open questions
 
-- **Spelling.** `field insert <track>` vs `field insert add <track>`
-  vs a subcommand family that later takes `remove`/`reorder`. Also
-  whether the track address needs a song qualifier when track names
-  collide across songs — `field open` will face the identical
-  question, and the two must answer it the same way.
-- **The chooser dependency.** The repo's only interactivity is a
-  readline y/N; an incremental-search picker is either a hand-rolled
-  raw-mode readline loop or a small prompts library, and either way
-  it is a stack decision to record against project-core.md §5, not a
-  quiet `package.json` line.
-- **Do built-ins join the chooser?** `eq` and friends are
-  schema-authored by hand today. A unified chooser (built-ins listed
-  beside hosted plugins) is more command than this plan needs, but
-  refusing `field insert lead eq` with "hand-edit the file" would be
-  a strange answer. Undecided.
-- **Chooser ergonomics.** Whether search matches format tokens
-  (`au`, `vst3`) and whether recently-used plugins sort first. Cheap
-  to decide at implementation; recorded so the first version is not
-  mistaken for a decision.
+- **Track addressing.** Whether the track address needs a song
+  qualifier when track names collide across songs — `field open`
+  will face the identical question, and the two must answer it the
+  same way.
+- **Built-ins, to discuss — two shapes, and they pull opposite
+  directions.** (a) Make `eq` and friends *actual* AU/VST3 plugins:
+  one chooser, one chain representation, editor windows and future
+  automation for free. The cost is the contracts built-ins uniquely
+  carry today: offline-vs-live byte-identity is explicitly a
+  built-ins golden (hosted arms get only the warmup bound —
+  plugin-hosting.md §5 chunk 2), and latency/tails are analytic
+  compiler arithmetic where hosted inserts get declared-and-verified
+  (decision 11). Wrapping them demotes both to the weaker hosted
+  guarantees, and adds scanning, versioning, and state-blob machinery
+  to effects that are pure schema'd params today. (b) Special-case
+  them as chooser rows that write ordinary `effect:` blocks: uniform
+  UX, engine and contracts untouched, at the price of two row kinds
+  in one picker. The recorded contracts lean toward (b); (a) is
+  really a separate "built-ins as plugins" project that this command
+  should not smuggle in. Undecided until discussed.
