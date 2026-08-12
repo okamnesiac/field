@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeKeys, filterItems, reducePicker, type PickerItem, type PickerState } from './picker.js';
+import { decodeKeys, filterItems, initialState, reducePicker, type PickerItem, type PickerState } from './picker.js';
 
 const item = (label: string, disabled?: string): PickerItem<string> => ({
   label,
@@ -47,6 +47,23 @@ describe('picker reduction', () => {
     expect(selected.done).toBe('selected');
     expect(selected.selected).toBe('aaa');
     expect(reducePicker(start, { type: 'escape' }, items).done).toBe('cancelled');
+  });
+
+  it('starts on the default row, so bare enter selects it (Bugbot on #155)', () => {
+    // The order chooser's shape: end is the labeled default. A cursor
+    // hardwired to 0 made bare Enter place before the first insert —
+    // diverging from the label and from the silent non-TTY default.
+    const positions = [item('before 1176'), item('between 1176 and Altiverb'), item('at the end')];
+    const state = initialState(positions, 2);
+    const selected = reducePicker(state, { type: 'enter' }, positions);
+    expect(selected.done).toBe('selected');
+    expect(selected.selected).toBe('at the end');
+    // A disabled default falls forward, then backward — navigation's
+    // own skip rule, and never a disabled landing.
+    expect(initialState(items, 1).cursor).toBe(2);
+    expect(initialState([item('aaa'), item('bbb', 'no version')], 1).cursor).toBe(0);
+    // Out-of-range clamps instead of vanishing off the list.
+    expect(initialState(positions, 99).cursor).toBe(2);
   });
 });
 

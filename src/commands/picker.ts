@@ -42,6 +42,19 @@ function firstSelectable<T>(filtered: PickerItem<T>[], from: number, step: 1 | -
   return -1;
 }
 
+// Where the cursor starts, in the pure layer because Enter with no
+// other key is the most common gesture and where it lands must be
+// testable: `initialCursor` when that row is selectable — the order
+// chooser starts on its default, the end (Bugbot on #155: a "(default)"
+// label over a cursor hardwired to 0 selected the first row) — else
+// forward then backward, navigation's own skip rule.
+export function initialState<T>(items: PickerItem<T>[], initialCursor = 0): PickerState {
+  const from = Math.min(Math.max(initialCursor, 0), Math.max(items.length - 1, 0));
+  const at = firstSelectable(items, from, 1);
+  const fallback = at >= 0 ? at : firstSelectable(items, items.length - 1, -1);
+  return { query: '', cursor: Math.max(0, fallback) };
+}
+
 export function reducePicker<T>(
   state: PickerState,
   key: PickerKey,
@@ -143,9 +156,13 @@ function render(
 // Runs the picker on the controlling TTY. Resolves with the selected
 // value, or undefined when cancelled. Callers gate on isTTY — this
 // function assumes it.
-export async function runPicker<T>(title: string, items: PickerItem<T>[]): Promise<T | undefined> {
+export async function runPicker<T>(
+  title: string,
+  items: PickerItem<T>[],
+  initialCursor = 0,
+): Promise<T | undefined> {
   const stdin = process.stdin;
-  let state: PickerState = { query: '', cursor: 0 };
+  let state: PickerState = initialState(items, initialCursor);
   let drawn = render(title, state, filterItems(items, ''), 0);
   stdin.setRawMode(true);
   stdin.resume();

@@ -301,6 +301,10 @@ insert
                     search: label.toLowerCase(),
                     value: i,
                   })),
+                  // The cursor starts where the label says it does —
+                  // bare Enter is the default, not the first row
+                  // (Bugbot on #155).
+                  defaultIndex,
                 ),
               askId: async (prompt: string): Promise<string | undefined> => {
                 const { createInterface } = await import('node:readline/promises');
