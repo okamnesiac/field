@@ -705,6 +705,11 @@ program
     } catch (err) {
       fail(err);
     }
+    for (const p of result.pinned) {
+      process.stdout.write(
+        `pinned ${p.plugin} → ${p.format} ${p.identifier} ${p.version} (${p.file})\n`,
+      );
+    }
     for (const d of result.diagnostics) {
       process.stdout.write(`${formatDiagnostic(d)}\n`);
     }
@@ -713,6 +718,41 @@ program
     }
     if (result.ok) process.stdout.write('ok\n');
     process.exit(result.ok ? 0 : 1);
+  });
+
+const plugins = program.command('plugins').description('hosted plugin inventory');
+plugins
+  .command('scan')
+  .description('scan installed AU/VST3 plugins into .field/plugins.json')
+  .action(async () => {
+    const { scanCommand } = await import('./commands/plugins.js');
+    try {
+      scanCommand(requireRoot());
+    } catch (err) {
+      fail(err);
+    }
+  });
+plugins
+  .command('list')
+  .description('print the scanned plugin inventory')
+  .action(async () => {
+    const { listCommand } = await import('./commands/plugins.js');
+    listCommand(requireRoot());
+  });
+plugins
+  .command('pin')
+  .description('write plugin identities, versions and latency back into track files')
+  .option('--au', 'prefer the AU when a name matches both formats')
+  .option('--vst3', 'prefer the VST3 when a name matches both formats')
+  .option('--update', 'accept installed versions over drifted pins (a deliberate re-render)')
+  .action(async (options: { au?: boolean; vst3?: boolean; update?: boolean }) => {
+    const { pinCommand } = await import('./commands/plugins.js');
+    const prefer = options.au === true ? 'au' : options.vst3 === true ? 'vst3' : undefined;
+    const ok = pinCommand(requireRoot(), {
+      ...(prefer !== undefined ? { prefer } : {}),
+      ...(options.update !== undefined ? { update: options.update } : {}),
+    });
+    if (!ok) process.exit(1);
   });
 
 program

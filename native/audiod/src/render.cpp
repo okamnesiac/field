@@ -8,6 +8,7 @@
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
 #include "dsp/wavfile.h"
+#include "hosting.h"
 #include "plan.h"
 
 #include <juce_core/juce_core.h>
@@ -25,7 +26,7 @@ namespace
 // exotic one, and this is what makes that a clear error instead of a
 // quietly wrong render. Separate from the socket's PROTOCOL_VERSION: they
 // version different conversations and can move independently.
-constexpr int renderPlanVersion = 10; // 10: the hall insert (reverbs.md chunk 2)
+constexpr int renderPlanVersion = 11; // 11: hosted plugin inserts (plugin-hosting.md chunk 1)
 
 // Required, not defaulted. The schema fills every field before it is
 // serialized (zod applies the defaults), so an absent one means the two
@@ -168,6 +169,10 @@ void applyInsert (const juce::var& insert,
         settings.width = requireNumber (insert, "width", "hall insert");
         settings.sampleRate = sampleRate;
         channels = dsp::hall (channels, settings);
+    }
+    else if (effect == "plugin")
+    {
+        applyPluginInsert (insert, channels, sampleRate);
     }
     else
     {

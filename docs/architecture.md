@@ -71,10 +71,13 @@ versioned NDJSON protocol on a Unix domain socket. It runs daemon-lite —
 `field play` spawns it on demand, a lock file guarantees one instance,
 and it exits when idle — and `field transport` and `field devices` drive
 the same protocol, which CI exercises against the real binary in
-null-output mode. The rest — recording, monitoring, AU hosting, plugin
-state, delay compensation, routing, metering, crash-safe capture — is
-future work whose settled decisions live in
-[audio-engine.md](audio-engine.md).
+null-output mode. Hosting arrived with
+[plugin-hosting.md](projects/all/plugin-hosting.md) chunk 1: `--scan`
+probes installed AU/VST3 plugins one crash-isolated subprocess each, and
+`--render` instantiates pinned plugins offline. The rest — recording,
+monitoring, the live plugin chain, editor windows, delay compensation,
+routing, metering, crash-safe capture — is future work whose settled
+decisions live in [audio-engine.md](audio-engine.md).
 
 The real-time audio callback never depends on TypeScript or Python: GC
 pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives

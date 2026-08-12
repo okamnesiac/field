@@ -8,6 +8,7 @@ import {
   type LoadedProject,
 } from '../model/project.js';
 import { build, explain, type BuildOutcome, type Explanation, type GeneratorRunner } from '../graph/build.js';
+import { pinBeforeCheck } from './plugins.js';
 import { buildGraph, deps, expandPattern, resolveLabel, type Graph } from '../graph/graph.js';
 import { formatLabel } from '../labels.js';
 
@@ -39,12 +40,26 @@ export function loadValid(root: string): {
   graph: Graph;
   warnings: string[];
 } {
+  // "The first check or build" pins (plugin-hosting.md decision 2) —
+  // build goes through here, not through check, so the pin step runs in
+  // both gates or the settled workflow is half true (Codex). Edits
+  // surface on the warnings channel; pin problems are diagnostics like
+  // any other and hold the gate below.
+  const pinOutcome = pinBeforeCheck(root);
   const project = loadProject(root);
+  for (const { file, message } of pinOutcome.problems) {
+    project.diagnostics.push({ file, message });
+  }
   if (diagnosticErrors(project.diagnostics).length > 0) {
     const lines = project.diagnostics.map(formatDiagnostic).join('\n');
     throw new Error(`project has errors (field check):\n${lines}`);
   }
-  const warnings = diagnosticWarnings(project.diagnostics).map(formatDiagnostic);
+  const warnings = [
+    ...pinOutcome.edits.map(
+      (e) => `pinned ${e.plugin} → ${e.format} ${e.identifier} ${e.version} (${e.file})`,
+    ),
+    ...diagnosticWarnings(project.diagnostics).map(formatDiagnostic),
+  ];
   return { project, graph: buildGraph(project), warnings };
 }
 

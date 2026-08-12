@@ -142,14 +142,37 @@ placements above it.
 
 ## Inserts are content
 
-`inserts:` is the other half of the split: an insert chain (EQ, limiter,
-and the reverbs — `reverb`, the Freeverb classic; `plate`, the Dattorro
-tank with a modulated tail; and `hall`, the FDN whose lows and highs
-decay on their own clocks; discriminated on `effect:` so
-hosted plugins can join later) is
+`inserts:` is the other half of the split: an insert chain is
 *content*, baked into the stem. Editing an insert re-renders the stem;
 moving a fader never does. Chains compose by nesting — a track wrapped
 in an effect is a different track, cached per link.
+
+An entry is a built-in effect, discriminated on `effect:` — EQ,
+limiter, and the reverbs (`reverb`, the Freeverb classic; `plate`, the
+Dattorro tank with a modulated tail; `hall`, the FDN whose lows and
+highs decay on their own clocks) — or a **hosted plugin**,
+discriminated on `plugin:` the way input entries are discriminated by
+field name
+([projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)):
+
+```yaml
+inserts:
+  - plugin: UADx 1176 Rev A
+    au: aufx/1176/UADx    # exact identity — written back by the tool
+    version: 11.2.0       # pinned; drift refuses at render, deliberately
+    params:               # the plugin's own names, natural units
+      Input: 4.5
+      Ratio: 4
+```
+
+You write the name; `field check` writes the identity, `version:` and a
+nonzero `latency:` back from the scan inventory (`field plugins scan`).
+State beyond the parameter list lives in a content-addressed blob under
+`shared/plugins/`, referenced as `state: <short-hash>` and resolved by
+hash — the directory is a convention, never load-bearing. One chain
+repeating a plugin needs an `id:` per instance, the gen-node rule at
+the same scope. Hosted chunks render offline today; the live chain is
+the plan's next chunk.
 
 ## Local time and rate
 

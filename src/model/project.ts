@@ -9,6 +9,15 @@ import { entryRef, expandLoop, generatorName, placedWindow } from '../generators
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { checkCables, entryName, type Cable } from './cables.js';
+import {
+  findInstalled,
+  indexStateBlobs,
+  pluginSlug,
+  readInventory,
+  resolveStateRef,
+  type PluginInventory,
+  type StateBlob,
+} from '../audio/plugins.js';
 import { sha256File } from '../hash.js';
 import { genRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
@@ -337,6 +346,12 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
 function validate(project: LoadedProject): void {
   const push = (file: string, message: string, severity?: 'warning') =>
     project.diagnostics.push({ file, message, ...(severity !== undefined ? { severity } : {}) });
+  const root = project.root;
+  // Hosted-insert lookups, made at most once per validate: the blob pool
+  // listing and the machine-local scan inventory (null = not yet read;
+  // undefined = read, no scan exists).
+  let validateStateBlobs: StateBlob[] | undefined;
+  let validateInventory: PluginInventory | undefined | null = null;
 
   // The shared ledger validates like a song's, against its own scope root
   // (project-layout.md §1.6); its names are what //shared/asset: refs
@@ -858,6 +873,142 @@ function validate(project: LoadedProject): void {
       }
     }
 
+    // Hosted plugin inserts (plugin-hosting.md §3). Repository facts —
+    // pins, ids, state refs — are judged everywhere; what only an
+    // installed plugin can validate (parameter names, version drift) is
+    // judged exactly where a scan inventory exists and deferred
+    // everywhere else (decision 3).
+    for (const trackFile of song.tracks) {
+      const hosted = trackFile.data.inserts.filter(
+        (insert): insert is Extract<(typeof trackFile.data.inserts)[number], { plugin: string }> =>
+          'plugin' in insert,
+      );
+      if (hosted.length === 0) continue;
+
+      const insertIds = new Set<string>();
+      for (const insert of hosted) {
+        if (insert.id === undefined) continue;
+        if (insertIds.has(insert.id)) {
+          push(trackFile.path, `duplicate insert id "${insert.id}"`);
+        }
+        insertIds.add(insert.id);
+      }
+      const byIdentity = new Map<string, typeof hosted>();
+      for (const insert of hosted) {
+        const identity = insert.au ?? insert.vst3 ?? `name:${insert.plugin}`;
+        byIdentity.set(identity, [...(byIdentity.get(identity) ?? []), insert]);
+      }
+      for (const group of byIdentity.values()) {
+        if (group.length > 1 && group.some((insert) => insert.id === undefined)) {
+          push(
+            trackFile.path,
+            `"${group[0]!.plugin}" appears ${group.length} times in one chain — give ` +
+              `each an id so a knob lands on the right one (plugin-hosting.md decision 6)`,
+          );
+        }
+      }
+
+      for (const insert of hosted) {
+        const format =
+          insert.au !== undefined ? ('au' as const) : insert.vst3 !== undefined ? ('vst3' as const) : undefined;
+        if (format === undefined) {
+          push(
+            trackFile.path,
+            `"${insert.plugin}" is not pinned — field plugins scan, then check writes ` +
+              `the identity back (plugin-hosting.md decision 2)`,
+          );
+        } else if (insert.version === undefined) {
+          push(
+            trackFile.path,
+            `"${insert.plugin}" has an identity but no version: — field plugins pin completes it`,
+          );
+        }
+
+        if (insert.state !== undefined) {
+          validateStateBlobs ??= indexStateBlobs(root);
+          const { blob, problem } = resolveStateRef(insert.state, validateStateBlobs);
+          if (problem !== undefined) {
+            push(trackFile.path, problem);
+          } else {
+            const expected = `shared/plugins/${pluginSlug(insert.plugin)}/${blob!.sha256}.state`;
+            if (blob!.path !== expected) {
+              push(
+                trackFile.path,
+                `state blob for "${insert.plugin}" lives at ${blob!.path}; the ` +
+                  `write-time convention is ${expected} — git mv tidies it (reads ` +
+                  `resolve by hash either way)`,
+                'warning',
+              );
+            }
+          }
+        }
+
+        if (validateInventory === null) validateInventory = readInventory(root);
+        const installed =
+          format !== undefined && validateInventory !== undefined
+            ? findInstalled(validateInventory, format, (insert.au ?? insert.vst3)!)
+            : undefined;
+        if (installed === undefined) continue;
+        if (insert.version !== undefined && installed.version !== insert.version) {
+          push(
+            trackFile.path,
+            `"${insert.plugin}" is pinned at ${insert.version}; installed is ` +
+              `${installed.version} — a rebuild will refuse until field plugins pin ` +
+              `--update accepts the change (plugin-hosting.md decision 9)`,
+            'warning',
+          );
+        }
+        for (const key of Object.keys(insert.params ?? {})) {
+          const hash = key.lastIndexOf('#');
+          const name = hash >= 0 ? key.slice(0, hash) : key;
+          const paramId = hash >= 0 ? key.slice(hash + 1) : undefined;
+          const matches = installed.params.filter((p) =>
+            paramId !== undefined ? p.id === paramId : p.name === name,
+          );
+          if (matches.length === 0) {
+            push(trackFile.path, `"${insert.plugin}" has no parameter "${key}"`);
+          } else if (matches.length > 1) {
+            push(
+              trackFile.path,
+              `"${insert.plugin}" has ${matches.length} parameters named "${name}" — ` +
+                `spell it ${matches.map((m) => `${name}#${m.id}`).join(' or ')} ` +
+                `(plugin-hosting.md decision 3)`,
+            );
+          } else if (paramId !== undefined && matches[0]!.name !== name) {
+            push(
+              trackFile.path,
+              `param "${key}": id ${paramId} is named "${matches[0]!.name}", not "${name}"`,
+            );
+          }
+          // Decision 3's split, enforced where the scan can judge it: a
+          // string is legal only on a labeled (discrete) parameter, and
+          // only as a label the plugin offers. An inventory scanned
+          // before discreteness was recorded defers, like no scan.
+          const value = insert.params?.[key];
+          const info = matches.length === 1 ? matches[0]! : undefined;
+          if (typeof value === 'string' && info !== undefined) {
+            if (info.discrete === false) {
+              push(
+                trackFile.path,
+                `param "${key}" takes a number — string spellings are for labeled ` +
+                  `parameters (plugin-hosting.md decision 3)`,
+              );
+            } else if (
+              info.discrete === true &&
+              info.labels !== undefined &&
+              info.labels.length > 0 &&
+              !info.labels.includes(value)
+            ) {
+              push(
+                trackFile.path,
+                `param "${key}": "${value}" is not one of ${info.labels.join(', ')}`,
+              );
+            }
+          }
+        }
+      }
+    }
+
     // A generative entry's takes get the checks a generative sound's do
     // (the deliberate-sounds block above): committed, content-addressed,
     // contained in audio/<name>/, `chosen` naming a take that exists.
@@ -1164,6 +1315,19 @@ export async function verifyAssetHashes(project: LoadedProject): Promise<Diagnos
           });
         }
       }
+    }
+  }
+  // The state-blob pool's drift guard (plugin-hosting.md decision 4):
+  // a blob's filename *is* its declared hash, so verification is content
+  // hashing to its own name — the same guard a ledger pin gives an
+  // asset, intrinsic instead of recorded.
+  for (const blob of indexStateBlobs(project.root)) {
+    const actual = await sha256File(join(project.root, blob.path));
+    if (actual !== blob.sha256) {
+      diagnostics.push({
+        file: blob.path,
+        message: `state blob content does not hash to its filename (hashes to ${actual})`,
+      });
     }
   }
   return diagnostics;

@@ -65,7 +65,14 @@ property of how it is invoked, not of the definition — the same `.scd`
 legitimately does both — so there is no shelf split along that line,
 exactly as there is no loops shelf (looping is a clip property).
 `shared/assets.yaml` is the shared scope's ledger: one pin per committed
-file under `shared/`, labeled `//shared/asset:<name>`.
+file under `shared/`, labeled `//shared/asset:<name>` — with one
+deliberate exception: plugin state blobs under `shared/plugins/`
+(`<slug>/<sha256>.state`,
+[projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)
+decision 4) carry no ledger row, because a blob's filename *is* its
+content hash — the drift guard a pin exists to add is intrinsic there,
+and reads resolve by hash so the directory is a convention rather than
+an address.
 
 ### Song directories
 

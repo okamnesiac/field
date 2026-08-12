@@ -1,4 +1,5 @@
 #include "player.h"
+#include "hosting.h"
 #include "live.h"
 #include "render.h"
 #include "server.h"
@@ -123,6 +124,14 @@ int main (int argc, char* argv[])
     juce::String renderPlan;
     juce::String renderLiveSession;
     juce::String renderLiveOut;
+    juce::String scanFormat;
+    juce::String probeFormat;
+    juce::String probeCandidate;
+    juce::String probeOut;
+    juce::String captureFormat;
+    juce::String captureIdentifier;
+    juce::String captureParams;
+    juce::String captureOut;
     bool nullOutput = false;
     int idleSeconds = 300;
 
@@ -138,6 +147,21 @@ int main (int argc, char* argv[])
             renderLiveSession = argv[++i];
             renderLiveOut = argv[++i];
         }
+        else if (arg == "--scan" && i + 1 < argc)
+            scanFormat = argv[++i];
+        else if (arg == "--scan-probe" && i + 3 < argc)
+        {
+            probeFormat = argv[++i];
+            probeCandidate = argv[++i];
+            probeOut = argv[++i];
+        }
+        else if (arg == "--state-capture" && i + 4 < argc)
+        {
+            captureFormat = argv[++i];
+            captureIdentifier = argv[++i];
+            captureParams = argv[++i];
+            captureOut = argv[++i];
+        }
         else if (arg == "--null-output")
             nullOutput = true;
         else if (arg == "--idle" && i + 1 < argc)
@@ -148,8 +172,67 @@ int main (int argc, char* argv[])
                           "usage: field-audiod [--socket <path>] [--null-output] "
                           "[--idle <seconds>]\n"
                           "       field-audiod --render <plan.json>\n"
-                          "       field-audiod --render-live <session.json> <out.wav>\n");
+                          "       field-audiod --render-live <session.json> <out.wav>\n"
+                          "       field-audiod --scan <au|vst3>\n"
+                          "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
+                          "       field-audiod --state-capture <au|vst3> <identifier> "
+                          "<paramsJson> <out>\n");
             return 2;
+        }
+    }
+
+    // Scanning is a subprocess tree for the same isolation reasons as
+    // --render: the parent iterates candidates and spawns itself with
+    // --scan-probe per candidate, so a plugin that crashes while being
+    // described is a recorded skip, never a dead scan
+    // (plugin-hosting.md chunk 1).
+    // Hosting subprocesses leave via _Exit (hosting.h exitSubprocess):
+    // their work is already flushed, and static teardown after a plugin
+    // module has loaded frees memory that is not the process's to free.
+    if (probeFormat.isNotEmpty())
+    {
+        try
+        {
+            field::exitSubprocess (field::runScanProbe (probeFormat.toStdString(),
+                                                        probeCandidate.toStdString(),
+                                                        probeOut.toStdString()));
+        }
+        catch (const std::exception& e)
+        {
+            std::fprintf (stderr, "field-audiod: probe failed: %s\n", e.what());
+            field::exitSubprocess (1);
+        }
+    }
+    if (captureFormat.isNotEmpty())
+    {
+        try
+        {
+            field::exitSubprocess (field::runStateCapture (captureFormat.toStdString(),
+                                                           captureIdentifier.toStdString(),
+                                                           captureParams.toStdString(),
+                                                           captureOut.toStdString()));
+        }
+        catch (const std::exception& e)
+        {
+            std::fprintf (stderr, "field-audiod: state capture failed: %s\n", e.what());
+            field::exitSubprocess (1);
+        }
+    }
+    if (scanFormat.isNotEmpty())
+    {
+        try
+        {
+            field::exitSubprocess (
+                field::runScan (scanFormat.toStdString(),
+                                juce::File::getSpecialLocation (
+                                    juce::File::currentExecutableFile)
+                                    .getFullPathName()
+                                    .toStdString()));
+        }
+        catch (const std::exception& e)
+        {
+            std::fprintf (stderr, "field-audiod: scan failed: %s\n", e.what());
+            field::exitSubprocess (1);
         }
     }
 
@@ -163,8 +246,15 @@ int main (int argc, char* argv[])
         if (auto error = field::runRender (renderPlan.toStdString()); ! error.empty())
         {
             std::fprintf (stderr, "field-audiod: render failed: %s\n", error.c_str());
+            if (field::hostingWasUsed())
+                field::exitSubprocess (1);
             return 1;
         }
+        // A render that hosted a plugin skips static teardown (see the
+        // subprocess comment below); one that did not keeps the ordinary
+        // exit it has always had.
+        if (field::hostingWasUsed())
+            field::exitSubprocess (0);
         return 0;
     }
 

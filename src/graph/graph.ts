@@ -22,8 +22,15 @@ import type { Cable } from '../model/cables.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import type { ResampleSpec } from '../generators/resample.js';
 import { entryRef, generatorName, planTrack } from '../generators/stem.js';
+import {
+  indexStateBlobs,
+  transportSegments,
+  type HostedTrackContext,
+  type StateBlob,
+} from '../audio/plugins.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset, Track } from '../schema/index.js';
+import { isHostedInsert } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention
@@ -122,6 +129,9 @@ function fillInstructions(pending: UngeneratedSound[]): string {
 // accepted (unique names, known references, valid tempo maps).
 export function buildGraph(project: LoadedProject): Graph {
   const projectRate = project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  // The blob pool listing, made at most once per build and only when a
+  // chain actually holds a hosted insert.
+  let stateBlobCache: StateBlob[] | undefined;
   const nodes = new Map<string, GraphNode>();
   const ungenerated = new Map<string, UngeneratedSound>();
   const addRule = (
@@ -314,6 +324,7 @@ export function buildGraph(project: LoadedProject): Graph {
     if (song.time) {
       // Captured once: the narrowing does not survive into planFor.
       const songTempoEvents = song.time.tempo;
+      const songMeterEvents = song.time.meter;
       const tempoMap = new TempoMap(songTempoEvents, songRate);
       // Loops without `every` tile at the source's length, so the plan
       // needs frame counts — but only for the sources such loops touch.
@@ -430,6 +441,21 @@ export function buildGraph(project: LoadedProject): Graph {
           : rate === songRate
             ? tempoMap
             : new TempoMap(songTempoEvents, rate);
+        // Hosted inserts carry the track's resolved transport into their
+        // keyed spec (plugin-hosting.md decision 13) and resolve state
+        // refs against the blob pool. Computed only when a chain
+        // actually holds one, so no existing spec gains a field.
+        const hosted: HostedTrackContext | undefined =
+          withInserts && track.inserts.some(isHostedInsert)
+            ? {
+                transport: transportSegments(
+                  track.time?.tempo ?? songTempoEvents,
+                  track.time?.meter ?? songMeterEvents,
+                  local,
+                ),
+                stateBlobs: (stateBlobCache ??= indexStateBlobs(project.root)),
+              }
+            : undefined;
         return planTrack(
           withInserts ? track : { ...track, inserts: [] },
           local,
@@ -438,6 +464,7 @@ export function buildGraph(project: LoadedProject): Graph {
           extent,
           convertBySource,
           cableIns,
+          hosted,
         );
       };
       for (const track of renderable) {

@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Active
 ---
 
 # Plan: hosted plugins — AU and VST3 as inserts
@@ -84,7 +84,16 @@ Decided elsewhere, restated here as constraints:
    why nothing breaks).
 2. **The exact identity gets its own field whose name is the
    format**: `au: <type/subtype/manufacturer>` (the three 4CCs) or
-   `vst3: <class-uid>`. No `format:` line. **You write the name; the
+   `vst3: <uid>` — JUCE's 32-bit plugin uid in hex, named plainly
+   because it is *not* the VST3 class TUID: JUCE does not surface
+   the 128-bit TUID, and the uid derivation is JUCE's to change (it
+   moved once already, which is why `deprecatedUid` exists). That is
+   decision 9's installer exposure one layer down — a JUCE upgrade
+   that moves the derivation stops every `vst3:` pin resolving at
+   once — recorded here so the refusal is predictable when it
+   happens: nothing renders wrong, rebuilds refuse naming the pin,
+   and `field plugins pin` re-pins deliberately, exactly the
+   version-drift flow. No `format:` line. **You write the name; the
    tool writes the id**: a hand-authored `- plugin: 1176` resolves
    against installed plugins at first check or build, and field
    writes the identity and `version:` lines back into the file — the
@@ -122,7 +131,16 @@ Decided elsewhere, restated here as constraints:
    (set, read back, compare) at write time; a plugin whose
    conversion cannot round-trip gets that one param stored in
    normalized form, a `check`-visible fallback rather than a silent
-   drift. Display names are not guaranteed unique, so the stable
+   drift. Labeled parameters are the deliberate exception to
+   never-display-strings: a discrete parameter whose natural spelling
+   *is* a label (`Ratio: "4:1"`, a mode named `Vintage`) takes
+   exactly the label the plugin offers, as a string — the scan
+   records discreteness and the label set, check enforces both where
+   a scan exists, and the render verifies by display round-trip —
+   while a continuous parameter never takes a string, which keeps
+   the no-laundering rule above true as written (minjudd caught the
+   widened schema accepting both without a distinction). Display
+   names are not guaranteed unique, so the stable
    parameter ID is load-bearing underneath: the YAML key is the
    display name while unique, and a plugin exposing duplicates gets
    tool-written `Name#<id>` keys — the same you-write-the-name,
@@ -258,11 +276,14 @@ Decided elsewhere, restated here as constraints:
     effects we author; hosted plugins get the measured version.
 12. **CI tests hosting against an in-repo fixture plugin.** A tiny
     JUCE plugin built in this repo — deterministic gain, delay,
-    latency reporting, and a state chunk — built as both AU and VST3
-    in CI, so scanning, instantiation, params, state round-trip,
-    write-back and byte-determinism are all testable without a
-    commercial plugin installed. Third-party plugins are exercised
-    by hand on real sessions; the fixture is what the suite owns.
+    latency reporting, and a state chunk — so scanning,
+    instantiation, params, state round-trip, write-back and
+    byte-determinism are all testable without a commercial plugin
+    installed. CI owns the VST3 on Linux; AU builds and is proven by
+    the local gate, the same split the workflow header already
+    records for everything CoreAudio (the macOS runner was retired
+    2026-08-08 for cost). Third-party plugins are exercised by hand
+    on real sessions; the fixture is what the suite owns.
 13. **The host supplies transport context, identically on both
     paths.** Tempo-synced plugins read the playhead — position,
     tempo, meter — and a host that supplies it only live, or only a
@@ -353,24 +374,51 @@ these; the two discriminants coexist in one chain.
 
 ## 6 Open questions
 
-- **Recapture triggers, exactly.** Which non-param signals are
-  reliable across real plugins (program-change, restartComponent,
-  property listeners), and whether the session-close chunk-hash
-  backstop suffices where they are absent.
-- **Freeze-swap policy for tier-3 plugins.** The inaudible-swap
-  guarantee rests on byte-identity, which truly free-running plugins
-  cannot give even within the warmup bound. Prompt before swapping?
-  Keep the chain live and never freeze? Leaning: flag in `explain`,
-  swap under the bound for tiers 1–2, keep tier-3 live until chosen.
-- **Editor windows vs daemon-lite.** The daemon exits when idle; an
-  open editor is a reason not to be idle, and window ownership on
-  macOS may want the daemon to run an app lifecycle while one is up.
-- **Dynamic parameter lists.** Plugins whose param *set* changes
-  with state (a Pro-Q growing bands) blur the params/state line;
-  probably "params that exist at validation time are validatable,
-  the rest ride the blob," but real plugins should decide.
+Each names the chunk that owes its answer; none blocks a chunk that
+does not.
+
+- **Recapture triggers, exactly** (chunk 3's to answer). Which
+  non-param signals are reliable across real plugins (program-change,
+  restartComponent, property listeners), and whether the
+  session-close chunk-hash backstop suffices where they are absent.
+- **Freeze-swap policy for tier-3 plugins** (chunk 2's to answer).
+  The inaudible-swap guarantee rests on byte-identity, which truly
+  free-running plugins cannot give even within the warmup bound.
+  Prompt before swapping? Keep the chain live and never freeze?
+  Leaning: flag in `explain`, swap under the bound for tiers 1–2,
+  keep tier-3 live until chosen.
+- **Editor windows vs daemon-lite** (chunk 3's to answer). The daemon
+  exits when idle; an open editor is a reason not to be idle, and
+  window ownership on macOS may want the daemon to run an app
+  lifecycle while one is up.
+- **Dynamic parameter lists** (chunk 3 revisits against real
+  plugins). Chunk 1's behavior: params the scan saw are validatable,
+  the rest ride the blob, and an unknown name is an error only where
+  a scan exists to judge it.
 - **Linux/Windows timing.** VST3 hosting is the portable half; when
   the platforms graduate from at-least-works is not this plan's call.
+- **AU natural units, found in first field use** (chunk 3 owes the
+  decision, with chunk 1's behavior recorded honestly): Apple's
+  built-in AUs implement no text→value conversion, so JUCE's AU host
+  parses a numeric param value as *normalized 0–1* — `Dry/Wet Mix:
+  30` refuses (correctly, as unrecognized) and `0.3` is the working
+  spelling, which is not the natural-units promise. VST3 converts
+  properly through the controller, and AUs that publish value
+  strings (UAD's labels) work; the gap is AU continuous params
+  without ValueFromString. Candidate fixes: display-guided inversion
+  (search normalized space for the value whose own display matches
+  the authored number — adaptive unit displays make this non-trivial),
+  or recording the conversion gap per parameter at scan time and
+  validating the spelling accordingly.
+- **DSP-backed plugins without their hardware, found the same hour**
+  (chunk 4's to answer, and sharpened by measurement): a UAD
+  Apollo plugin with no Apollo attached instantiates, reports its
+  latency, and *passes audio through dry* — creek's drums rendered
+  byte-equivalent to their input under an action key claiming a
+  4:1+8:1 1176. Authorization and hardware presence are machine
+  state the key cannot see, so chunk 4 must turn "DSP absent" into a
+  refusal at instantiation the way version drift already is, not a
+  silent bypass the cache then serves forever.
 
 ## 7 Definition of done
 
@@ -382,5 +430,5 @@ plugin captures a blob a fresh clone resolves by hash, and the
 rendering machine with that plugin removed still builds the song as
 pure cache hits — the cross-machine version of that story waits on
 the remote asset store (later.md); the fixture-plugin suite is green
-in CI on both formats; and every existing project rebuilds as pure
-cache hits.
+in CI (VST3 on Linux; AU on the local gate, per decision 12); and
+every existing project rebuilds as pure cache hits.
