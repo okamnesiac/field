@@ -62,10 +62,15 @@ const INVENTORY_RELATIVE = join('.field', 'plugins.json');
 // into a stat per read. Keyed by path, invalidated on mtime or size —
 // a fresh scan lands the moment plugins.json changes — and sharing
 // the parsed object is safe because every caller treats the
-// inventory as read-only (writers go through the file).
+// inventory as read-only (writers go through the file). ctime and
+// inode ride along because mtime and size alone miss a same-length
+// replacement that preserves timestamps (cp -p, a restored backup):
+// ctime is stamped by the filesystem on any write and cannot be set
+// from userland, and the inode changes on a rename-replace (Codex on
+// this PR).
 const inventoryCache = new Map<
   string,
-  { mtimeNs: bigint; size: bigint; inventory: PluginInventory }
+  { mtimeNs: bigint; ctimeNs: bigint; ino: bigint; size: bigint; inventory: PluginInventory }
 >();
 
 export function readInventory(root: string): PluginInventory | undefined {
@@ -73,14 +78,26 @@ export function readInventory(root: string): PluginInventory | undefined {
   if (!existsSync(path)) return undefined;
   const stat = statSync(path, { bigint: true });
   const cached = inventoryCache.get(path);
-  if (cached !== undefined && cached.mtimeNs === stat.mtimeNs && cached.size === stat.size) {
+  if (
+    cached !== undefined &&
+    cached.mtimeNs === stat.mtimeNs &&
+    cached.ctimeNs === stat.ctimeNs &&
+    cached.ino === stat.ino &&
+    cached.size === stat.size
+  ) {
     return cached.inventory;
   }
   const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
   const inventory = z
     .object({ plugins: z.array(pluginInfoSchema), failed: z.array(z.string()) })
     .parse(parsed);
-  inventoryCache.set(path, { mtimeNs: stat.mtimeNs, size: stat.size, inventory });
+  inventoryCache.set(path, {
+    mtimeNs: stat.mtimeNs,
+    ctimeNs: stat.ctimeNs,
+    ino: stat.ino,
+    size: stat.size,
+    inventory,
+  });
   return inventory;
 }
 

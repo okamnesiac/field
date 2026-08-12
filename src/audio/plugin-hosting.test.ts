@@ -7,7 +7,7 @@
 // local gate, the same split the workflow header records for CoreAudio.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -746,6 +746,25 @@ describe('inventory cache', () => {
     expect(second).not.toBe(first);
     // A missing inventory is still simply absent, cached or not.
     expect(readInventory(join(root, 'nowhere'))).toBeUndefined();
+  });
+
+  it('re-reads a same-size replacement that preserves mtime (Codex on #152)', async () => {
+    // The case mtime + size cannot see — cp -p, a restored backup: the
+    // rewrite keeps the byte length and the timestamp. ctime is what
+    // catches it, because the filesystem stamps it on any write and
+    // userland cannot set it back.
+    const { readInventory } = await import('./plugins.js');
+    const path = join(root, '.field/plugins.json');
+    const pinned = new Date('2026-01-01T00:00:00Z');
+    writeFileSync(path, JSON.stringify({ plugins: [entry('aaa')], failed: [] }));
+    utimesSync(path, pinned, pinned);
+    const first = readInventory(root);
+    expect(first?.plugins[0]?.name).toBe('aaa');
+    // Same length, same pinned mtime — only ctime and content differ.
+    writeFileSync(path, JSON.stringify({ plugins: [entry('bbb')], failed: [] }));
+    utimesSync(path, pinned, pinned);
+    const replaced = readInventory(root);
+    expect(replaced?.plugins[0]?.name).toBe('bbb');
   });
 });
 
