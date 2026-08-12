@@ -744,6 +744,16 @@ describe('inventory cache', () => {
     const second = readInventory(root);
     expect(second?.plugins.map((p) => p.name)).toEqual(['one', 'two']);
     expect(second).not.toBe(first);
+    // Same byte length, different bytes — a version bump is the real
+    // shape of this — so only mtime can catch it.
+    const sameSize = JSON.stringify({ plugins: [entry('one'), entry('TWO')], failed: [] });
+    expect(sameSize.length).toBe(
+      JSON.stringify({ plugins: [entry('one'), entry('two')], failed: [] }).length,
+    );
+    writeFileSync(path, sameSize);
+    const third = readInventory(root);
+    expect(third).not.toBe(second);
+    expect(third?.plugins.map((p) => p.name)).toEqual(['one', 'TWO']);
     // A missing inventory is still simply absent, cached or not.
     expect(readInventory(join(root, 'nowhere'))).toBeUndefined();
   });
