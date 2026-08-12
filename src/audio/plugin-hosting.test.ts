@@ -703,6 +703,52 @@ describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md 
   });
 });
 
+describe('inventory cache', () => {
+  // A real inventory runs to tens of megabytes and one compile reads
+  // it twice, so readInventory caches the parsed object by file
+  // identity — most of a second off every live-watch swap on a
+  // 482-plugin machine. Reference equality is the observable claim:
+  // a cache hit returns the same object, never a re-parse.
+  let root: string;
+
+  const entry = (name: string) => ({
+    format: 'vst3',
+    name,
+    identifier: `id-${name}`,
+    version: '1.0.0',
+    manufacturer: 'Test',
+    path: `/plugins/${name}.vst3`,
+    latency: 0,
+    params: [],
+  });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'field-inventory-cache-'));
+    mkdirSync(join(root, '.field'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('serves an unchanged file from cache and re-reads a changed one', async () => {
+    const { readInventory } = await import('./plugins.js');
+    const path = join(root, '.field/plugins.json');
+    writeFileSync(path, JSON.stringify({ plugins: [entry('one')], failed: [] }));
+    const first = readInventory(root);
+    expect(first?.plugins.map((p) => p.name)).toEqual(['one']);
+    // Unchanged file: the very same object, not an equal re-parse.
+    expect(readInventory(root)).toBe(first);
+    // A rewrite — a fresh scan — is picked up, not served stale.
+    writeFileSync(path, JSON.stringify({ plugins: [entry('one'), entry('two')], failed: [] }));
+    const second = readInventory(root);
+    expect(second?.plugins.map((p) => p.name)).toEqual(['one', 'two']);
+    expect(second).not.toBe(first);
+    // A missing inventory is still simply absent, cached or not.
+    expect(readInventory(join(root, 'nowhere'))).toBeUndefined();
+  });
+});
+
 describe.skipIf(!binary || !haveFixture)('scan output shape', () => {
   it('emits parseable NDJSON the inventory schema accepts', () => {
     const out = execFileSync(binary!, ['--scan', 'vst3'], {
