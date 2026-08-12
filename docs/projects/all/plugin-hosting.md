@@ -369,7 +369,16 @@ these; the two discriminants coexist in one chain.
    byte-identical anyway), and the version-refusal flow runs live.
    Child-track chains run on the load thread (the engine pre-renders
    children in full); only an output-track chain processes in the
-   callback, which is ordinary hosting. Live growth is declared
+   callback, which is ordinary hosting. Hosted lifecycle is
+   message-thread work at both ends (#150, #151): instantiation
+   posts to the message thread and waits, so a session load must
+   not hold the MessageManagerLock — the daemon dispatches the
+   session op outside its blanket request lock and takes the lock
+   only for the install — and a replaced session is retired *to*
+   the message thread asynchronously rather than destroyed by the
+   request that replaced it, because an AU instance's dispose posts
+   there and waits unconditionally, making teardown under any held
+   lock the same deadlock from the other side. Live growth is declared
    arithmetic only: an undeclared `tail:` grows nothing live, and a
    locate resets hosted stages in place rather than reinstantiating —
    the rebuild runs under the engine lock, where its cost is dropped
