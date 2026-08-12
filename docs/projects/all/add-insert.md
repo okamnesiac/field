@@ -38,7 +38,11 @@ name/id disagreement, prefer AU on macOS when a product installs as
 both. With no plugin named and a TTY, the chooser opens (§3). With no
 plugin named and no TTY, refuse and print the exact command line to
 run instead — the `--allow-mismatch` precedent, where the interactive
-half has a scriptable spelling and never a hang.
+half has a scriptable spelling and never a hang. Placement gets the
+same two spellings (§4): `--at <position|end>` places without asking,
+and a non-TTY run with the plugin named and no flag appends at the
+end — the order chooser's own default, taken silently — so a
+populated chain never hangs a script either.
 
 The write goes through the same comment-preserving `yaml` Document
 machinery the pinner and `field choose` already use (`yaml/emit.ts`),
@@ -49,21 +53,43 @@ written — `plugin:`, the `au:`/`vst3:` identity, `version:`, and
 `latency:` when nonzero (tool-written, like version — §4 of
 plugin-hosting.md) — so there is no unpinned moment and nothing for
 the next `check` to fix up. When the chain would hold the same plugin
-twice, decision 6 requires an `id:`; the command prompts for one at
-add time instead of leaving `check` to complain about a file it just
-wrote.
+twice, decision 6 requires an `id:` on *every* instance — the
+duplicate check quantifies over the whole identity group
+(`src/model/project.ts`), so prompting only the new arrival would
+leave the incumbent invalid and `check` complaining about the file
+this command just wrote. The command prompts for both handles at add
+time: the new insert's, and the incumbent's where it lacks one. That
+second write edits a line the user did not ask this command to touch,
+so it is disclosed as part of the confirmation rather than slipped
+into the diff — the price of decision 6's promise that a knob lands
+on the right instance. Without a TTY the duplicate case refuses and
+names the interactive command: backfilling a handle nobody chose is
+exactly what a script should not do silently.
 
 ## 3 The plugin chooser
 
 - The data source is the scanned inventory, read through
-  `readInventory` — cached by file identity as of #152, so opening
-  the chooser costs a stat, not a 75 MB parse. No inventory: refuse
-  naming `field plugins scan`, the same answer the pinner gives.
+  `readInventory`. #152 — in review as this is written, a named
+  dependency of this plan's ergonomics rather than its correctness —
+  caches that read by file identity: with it the chooser opens on a
+  stat, without it on the same 75 MB parse a 482-plugin machine
+  already pays everywhere else today. No inventory: refuse naming
+  `field plugins scan`, the same answer the pinner gives.
 - Incremental search over name and manufacturer. Each row shows
   format and version, because one product often installs as both AU
   and VST3 — decision 2 resolves that deterministically for the
   non-interactive path, and the chooser *is* the deliberate override:
-  picking the VST3 row is `--vst3` without the flag.
+  picking the VST3 row is `--vst3` without the flag. Where rows still
+  collide — same name, format, and version, which the scan permits —
+  the identifier joins the row: selection writes a load-bearing
+  identity, two indistinguishable rows would make that write a coin
+  flip, and the pinner already reports exactly these identifiers when
+  a name is ambiguous.
+- An entry that reports no version cannot be selected: writing
+  `version: ""` turns a valid file into one the schema rejects, which
+  is why the pinner refuses such entries — the chooser carries the
+  same refusal on the row itself, before a write is attempted rather
+  than after.
 - Selection is exact, so §2's pinned-at-birth write follows directly:
   the chooser emits an inventory entry, never a name to re-resolve.
 
@@ -72,7 +98,10 @@ wrote.
 Only when the track already has inserts — a first insert has exactly
 one place to go and asks nothing. Offer each position in the existing
 chain by name (before `1176`, between `1176` and `Altiverb 8`, at the
-end), default the end, since serial chains most often append. Built-in
+end), default the end, since serial chains most often append. `--at
+<position|end>` is the same choice as a flag — §2's scriptable
+spelling, and what a non-TTY run falls back to (the default, the end,
+taken silently). Built-in
 inserts (`effect: eq` and friends) appear as positions too: the two
 discriminants coexist in one chain (§4 of plugin-hosting.md), and
 placing a hosted insert relative to an eq is precisely the choice
