@@ -11,6 +11,11 @@ costs nothing. See [README](README.md) for how these lists work.
   the [realtime](all/realtime.md) engine it waited behind shipped
   2026-08-11, so capture is now an input node away from a graph that
   already runs live.
+- **The TUI** — a full-screen terminal face for a playing project,
+  wanted outright (2026-08-12) and deliberately after the first
+  [UI](all/ui.md); the disposable pickers (add-insert.md §3) are the
+  placeholder it replaces, and its stack is a fresh decision against
+  project-core.md §5 when it starts.
 - **Built-ins in the chooser — or as plugins** — whether `eq` and
   friends join `field insert add`'s picker as rows that write
   `effect:` blocks, or become actual AU/VST3 wrappers; the trade-off

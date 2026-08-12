@@ -7,8 +7,8 @@ status: Draft
 **Goal:** a graphical face for a playing project — transport and
 position, the song's tracks with their levels, edits landing as YAML
 diffs through the same write-back machinery every tool already uses —
-served locally by a `field ui` command, written in TypeScript, on the
-framework §5 settles.
+served locally by a `field ui` command, written in TypeScript on
+Vite + React (§5).
 
 ## 1 What the first version is
 
@@ -96,18 +96,17 @@ exemption:
 Each is the flip-to-Active PR's to answer; the first is the one to
 discuss before anything is built.
 
-- **React, or Next.js.** Obviously TypeScript; the question is the
-  framework. The case for plain React (bundled by Vite, served by
-  `field ui`): the server half of Next duplicates a server field
-  already is — routing, SSR, server components, and API routes solve
+- **React, or Next.js — settled (DECIDED, 2026-08-12): Vite + React
+  SPA.** The server half of Next duplicates a server field already
+  is — routing, SSR, server components, and API routes solve
   web-product problems (SEO, first-paint over a network, per-route
   data) that a localhost tool with a resident stateful process does
   not have, and a second server runtime is a real cost in a repo
-  whose stack is deliberately short. The case for Next.js: it is the
-  fuller batteries-included path — file routing, fast-refresh
-  ergonomics, a future remote story if the UI ever serves a machine
-  the project is not on. Leaning: Vite + React SPA, revisited only if
-  the remote story becomes real. To discuss.
+  whose stack is deliberately short. The remote story exists but
+  points the same way: this UI is local first, and the elements that
+  eventually serve audiofield.io get *pulled out* into that product
+  later — components built clean enough to extract, not a framework
+  carried now for a site that does not exist yet.
 - **Browser tab, or a desktop shell.** `field ui` opening a
   localhost tab costs nothing and window-manages itself; Electron or
   Tauri buy native menus, a dock icon, and window adjacency with
@@ -124,11 +123,12 @@ discuss before anything is built.
   with the file write still landing once on release — hearing the
   move is the point of a fader, but it puts a socket op inside the
   gesture where chunk 3 keeps gestures file-only until release.
-- **Does this retire the "full TUI eventually" want** recorded with
-  the disposable-picker decision (add-insert.md §3), or coexist with
-  it — terminal sessions keep the pickers either way; the question is
-  whether anyone still wants a full-screen terminal face once a
-  browser face exists.
+- **The TUI — settled (DECIDED, 2026-08-12): it coexists, and it is
+  wanted outright.** The full terminal face recorded with the
+  disposable-picker decision (add-insert.md §3) is its own future
+  project, now carried as its own line on [later.md](../later.md) —
+  this UI neither replaces nor waits for it, and the disposable
+  pickers stay disposable in the meantime.
 - **Styling**: hand-rolled CSS to start, or a component system. The
   first version's surface is small enough that this can stay
   hand-rolled and be revisited with evidence; recorded so the first
