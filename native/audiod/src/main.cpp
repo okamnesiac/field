@@ -277,9 +277,12 @@ int main (int argc, char* argv[])
     }
 
     // A write to a dying client must be an error return, never a
-    // process-killing signal. This is the whole mechanism, on every
-    // platform: with SIGPIPE ignored, write() to a closed peer returns
-    // EPIPE and Server::send stops.
+    // process-killing signal. On POSIX this line is the whole mechanism:
+    // with SIGPIPE ignored, write() to a closed peer returns EPIPE and
+    // Server::send stops. Windows has no SIGPIPE at all — a send to a
+    // closed peer is an error return by definition — so the guarantee
+    // holds there with no line to write, and the guard below is absence
+    // of the symbol, not absence of the guarantee.
     //
     // There used to be a per-socket SO_NOSIGPIPE alongside it, described
     // as belt and braces. It was redundant, and the redundancy was
@@ -303,7 +306,9 @@ int main (int argc, char* argv[])
     // SIGPIPE back at SIG_DFL, so it asserted nothing. Provoking the
     // window from outside means winning a race the daemon is built to
     // lose, and a test that hits it only sometimes is worse than none.
+#if ! defined(_WIN32)
     std::signal (SIGPIPE, SIG_IGN);
+#endif
 
     juce::ScopedJuceInitialiser_GUI juceInit;
 

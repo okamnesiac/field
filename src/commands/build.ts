@@ -27,7 +27,10 @@ export function projectRelative(root: string, path: string): string {
   // outputs, whose path parts are slugs by grammar, but the line should
   // mean what it looks like it means.
   const outside = rel === '..' || rel.startsWith(`..${sep}`);
-  return rel === '' || outside ? path : rel;
+  // Project-relative means slash-separated, matching how every other
+  // project-relative path is spelled (model/project.ts projectPath); the
+  // absolute fallback stays native, since being absolute is its point.
+  return rel === '' || outside ? path : rel.split(sep).join('/');
 }
 
 // Building trusts only a valid project: schema or reference errors fail

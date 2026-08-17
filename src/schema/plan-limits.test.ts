@@ -23,7 +23,13 @@ const header = join(root, 'native/audiod/src/plan-limits.h');
 describe('generated plan limits', () => {
   it('is in step with the zod schemas', () => {
     const committed = readFileSync(header, 'utf8');
-    execFileSync('pnpm', ['gen:limits'], { cwd: root, stdio: 'pipe' });
+    // shell on Windows only: pnpm is a .cmd shim there, which execFile
+    // cannot spawn directly (and Node refuses .cmd without a shell).
+    execFileSync('pnpm', ['gen:limits'], {
+      cwd: root,
+      stdio: 'pipe',
+      shell: process.platform === 'win32',
+    });
     const regenerated = readFileSync(header, 'utf8');
     expect(regenerated, 'run `pnpm gen:limits` and commit the result').toBe(committed);
   });

@@ -40,9 +40,12 @@ export function daemonBinary(): string | undefined {
     return absolute;
   }
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  // Same artefact directory on every platform — MSVC is a multi-config
+  // generator, but build:native pins --config Release, so the layout
+  // matches the single-config one. Only the suffix differs.
   const built = join(
     packageRoot,
-    'native/audiod/build/field-audiod_artefacts/Release/field-audiod',
+    `native/audiod/build/field-audiod_artefacts/Release/field-audiod${process.platform === 'win32' ? '.exe' : ''}`,
   );
   return existsSync(built) ? built : undefined;
 }

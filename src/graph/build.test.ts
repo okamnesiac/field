@@ -463,7 +463,12 @@ describe('runScProgram edges (no sclang needed)', () => {
     });
   });
 
-  it('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
+  // The next two fake sclang with #!/bin/sh scripts. The code path they
+  // exercise (execFile, the timeout, stdout capture) is platform-
+  // independent; the *stub* is not — Windows has no shebang — so they
+  // skip there rather than growing a second stub dialect. A real
+  // sclang.exe goes through the same spawn untouched.
+  it.skipIf(process.platform === 'win32')('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
     const hang = join(root, 'hang.sh');
     writeFileSync(hang, '#!/bin/sh\nsleep 5\n');
     chmodSync(hang, 0o755);
@@ -474,7 +479,7 @@ describe('runScProgram edges (no sclang needed)', () => {
     });
   });
 
-  it('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
+  it.skipIf(process.platform === 'win32')('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
     const fail = join(root, 'fail.sh');
     writeFileSync(fail, '#!/bin/sh\necho "ERROR: Class not defined: Blah"\necho "boring stderr" >&2\nexit 1\n');
     chmodSync(fail, 0o755);

@@ -46,6 +46,13 @@ const stubWorker = join(
 
 let root: string;
 
+// The tests below that actually generate spawn the stub worker, which
+// serves on an AF_UNIX socket path — Node on Windows can neither exec it
+// bare (no shebang) nor listen there (the local domain is named pipes).
+// The workers keep their POSIX transport until their own chunk
+// (windows-portability.md §4); validation-only tests run everywhere.
+const itSpawnsAWorker = it.skipIf(process.platform === 'win32');
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-generate-'));
   init({ dir: root, name: 'test-album' });
@@ -152,7 +159,7 @@ describe('field generate: which generator, decided before anything spawns', () =
     ).rejects.toThrow('--conviction is a voice option');
   });
 
-  it('still asks music for exactly one length, and asks voice for none', async () => {
+  itSpawnsAWorker('still asks music for exactly one length, and asks voice for none', async () => {
     const { bars: _bars, ...noLength } = music;
     await expect(generateVariants(root, 'pad', noLength)).rejects.toThrow(
       'exactly one of --bars or --duration',
@@ -265,7 +272,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     ).rejects.toThrow('does not match its recorded sha256');
   });
 
-  it('generates from the bytes it pins, even if the recording changes mid-run', async () => {
+  itSpawnsAWorker('generates from the bytes it pins, even if the recording changes mid-run', async () => {
     // The window is real: the CLI resolves the reference, then the worker
     // reads it minutes later, after daemon start and a weights download.
     // Edit the recording inside that window and put it back afterwards
@@ -312,7 +319,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     }
   });
 
-  it('leaves no snapshot behind', async () => {
+  itSpawnsAWorker('leaves no snapshot behind', async () => {
     await importReference();
     const before = readdirSync(tmpdir()).filter((e) => e.startsWith('field-voice-ref-'));
     await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
@@ -320,7 +327,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     expect(after).toEqual(before);
   });
 
-  it('pins the reference by name and hash, and hands the worker a path', async () => {
+  itSpawnsAWorker('pins the reference by name and hash, and hands the worker a path', async () => {
     const path = await importReference();
     const result = await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
 
@@ -350,7 +357,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     expect((await check(root)).unformatted).toEqual([]);
   });
 
-  it('resolves a shared reference by its full label', async () => {
+  itSpawnsAWorker('resolves a shared reference by its full label', async () => {
     mkdirSync(join(root, 'shared/audio'), { recursive: true });
     writeFileSync(join(root, 'shared/audio/justin.wav'), REF_BYTES);
     writeFileSync(
@@ -372,7 +379,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it("omits voice_ref entirely for the model's own voice", async () => {
+  itSpawnsAWorker("omits voice_ref entirely for the model's own voice", async () => {
     // "" and absent are different requests (#60), and the entry has the
     // same distinction: no key at all, not an empty one. This is the
     // configuration bloom generates with today (§6).
@@ -392,7 +399,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
 describe('field generate: what lands on disk', () => {
   const voice = { song: 'creek', text: 'the water knows the way', seed: 7, variants: 2 };
 
-  it('lands variants in seed order, hashed as written, and check-green', async () => {
+  itSpawnsAWorker('lands variants in seed order, hashed as written, and check-green', async () => {
     const result = await generateVariants(root, 'line', voice);
     expect(result.files).toEqual([
       join('songs', 'creek', 'audio', 'line', '1.wav'),
@@ -424,7 +431,7 @@ describe('field generate: what lands on disk', () => {
     expect(checked.unformatted).toEqual([]);
   });
 
-  it('scaffolds a leaf track for a brand-new request', async () => {
+  itSpawnsAWorker('scaffolds a leaf track for a brand-new request', async () => {
     // The create path's file is a track like any other — the shape every
     // request lives in (nested-tracks.md §18, decision 12) — and it must
     // be exactly the file a person would write: no defaulted placement
@@ -439,7 +446,7 @@ describe('field generate: what lands on disk', () => {
     expect((await check(root)).unformatted).toEqual([]);
   });
 
-  it('routes music to field-aced and voice to field-voiced', async () => {
+  itSpawnsAWorker('routes music to field-aced and voice to field-voiced', async () => {
     // Same verb, different socket — which is the whole of the routing
     // decision (project-layout.md §1.7). The stub answers with the name
     // it was invoked as, and the client refuses a mismatch (#60), so a
@@ -460,7 +467,7 @@ describe('field generate: what lands on disk', () => {
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it('sends the delivery knobs and records them, translating only at the worker', async () => {
+  itSpawnsAWorker('sends the delivery knobs and records them, translating only at the worker', async () => {
     // `conviction` is our name end to end — schema, protocol and wire —
     // and becomes `cfg_weight` inside the adapter, which is the boundary
     // where Chatterbox's vocabulary starts (voice-generation.md §8).
@@ -477,7 +484,7 @@ describe('field generate: what lands on disk', () => {
     expect((await check(root)).unformatted).toEqual([]);
   });
 
-  it('omits them entirely when unset, rather than pinning a default', async () => {
+  itSpawnsAWorker('omits them entirely when unset, rather than pinning a default', async () => {
     // Absent means "whatever the model does", which is not the same as
     // the number the model happens to default to today. Writing 0.5 down
     // would silently pin it if Chatterbox ever moved.
@@ -490,7 +497,7 @@ describe('field generate: what lands on disk', () => {
     expect(raw).not.toContain('conviction');
   });
 
-  it('reports progress from the worker, and says who is starting first', async () => {
+  itSpawnsAWorker('reports progress from the worker, and says who is starting first', async () => {
     const stages: string[] = [];
     await generateVariants(root, 'line', { ...voice, onProgress: (s) => stages.push(s) });
     // The first line arrives before the worker exists: daemon boot,
@@ -515,7 +522,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
     writeFileSync(join(root, 'songs/creek/tracks/topline.yaml'), yaml);
   }
 
-  it('takes the request from the entry and fills it in place, comments intact', async () => {
+  itSpawnsAWorker('takes the request from the entry and fills it in place, comments intact', async () => {
     writeLeaf(`# generate your own — nobody's creek is anybody else's\n${TAKELESS}`);
     const result = await generateVariants(root, 'topline', run);
     expect(result.files).toHaveLength(2);
@@ -532,7 +539,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it('refuses a flag that would be a second answer to what the entry says', async () => {
+  itSpawnsAWorker('refuses a flag that would be a second answer to what the entry says', async () => {
     writeLeaf(TAKELESS);
     await expect(
       generateVariants(root, 'topline', { ...run, text: 'a different line' }),
@@ -544,7 +551,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
     expect(takesOf('topline').variants).toHaveLength(2);
   });
 
-  it('fills a music entry that carries both lengths', async () => {
+  itSpawnsAWorker('fills a music entry that carries both lengths', async () => {
     // What `field generate` itself writes: the seconds it ran at, and the
     // bars it was asked for. The flag rule is exactly one, so passing both
     // through would make an ordinary request unfillable — with advice
@@ -569,7 +576,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
     expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
   });
 
-  it('leaves the leaf byte-identical, writing the takes beside the audio', async () => {
+  itSpawnsAWorker('leaves the leaf byte-identical, writing the takes beside the audio', async () => {
     // The reason for the split (bloom-in-tree.md §7): a shipped request is
     // committed, and generating into it made using the tool as documented
     // produce a diff. Bytes, not just content — a re-emit that happened to
@@ -593,7 +600,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it('refuses to run over takes that already exist', async () => {
+  itSpawnsAWorker('refuses to run over takes that already exist', async () => {
     writeLeaf(TAKELESS);
     await generateVariants(root, 'topline', run);
     // The trigger policy (project-layout.md §1.2): re-running would
@@ -619,7 +626,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
     );
   }
 
-  it('fills by gen node name and leaves the track file untouched', async () => {
+  itSpawnsAWorker('fills by gen node name and leaves the track file untouched', async () => {
     writeGenLeaf();
     const trackPath = join(root, 'songs/creek/tracks/rain-pad.yaml');
     const before = readFileSync(trackPath, 'utf8');
@@ -649,7 +656,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
     ).rejects.toThrow('the entry already says what to generate');
   });
 
-  it('refuses to refill an entry that has takes', async () => {
+  itSpawnsAWorker('refuses to refill an entry that has takes', async () => {
     writeGenLeaf();
     await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 1 });
     await expect(
@@ -690,7 +697,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
     ).rejects.toThrow('built by a rule, not generated');
   });
 
-  it('choosing repoints the gen-keyed takes and nothing else', async () => {
+  itSpawnsAWorker('choosing repoints the gen-keyed takes and nothing else', async () => {
     writeGenLeaf();
     await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2 });
     const result = await chooseVariant(root, 'rain-pad', { song: 'creek', variant: 2 });
@@ -704,7 +711,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
     expect((await check(root)).diagnostics).toEqual([]);
   });
 
-  it('choose refuses a takes file that attaches elsewhere', async () => {
+  itSpawnsAWorker('choose refuses a takes file that attaches elsewhere', async () => {
     // A misattached file would otherwise get `chosen` rewritten and a
     // success report, while the loader rejects the file and the graph
     // never sees the choice.

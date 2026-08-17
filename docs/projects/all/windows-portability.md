@@ -330,6 +330,33 @@ Recorded so the next reader does not re-derive it.
    `--render-live` directly by the tests that exercise it — both plain
    subprocess runs of the compiled binary, no socket — so **the whole
    offline render path works** once the binary exists.
+
+   **Amended on implementation (2026-08-17).** The first red run found
+   the largest Windows defect in a place this plan never looked, because
+   the assessment grepped for includes and APIs rather than for
+   separator leaks: label pkgs derive from `song.dir`, which was raw
+   `relative()` output — `songs\creek` on Windows — so **no typed label
+   or pattern could ever match** and ~70 tests failed with "no such
+   label". The fix states an invariant the model half-enforced already
+   (its schemas reject `\` in YAML paths): project-relative paths are
+   slash-separated wherever they are *data* — `song.dir`, diagnostics,
+   the session JSON handed to the daemon, `projectRelative`'s output —
+   and native only where they are genuinely local (absolute paths,
+   `BuildOutcome.outputPath`). Also discovered, all small: `pnpm` is a
+   `.cmd` shim `execFile` cannot spawn (the one test that shells it gets
+   `shell` on win32); the stub worker is a shebang script Windows cannot
+   exec, so a `.js`/`.mjs` interpreter override now runs through
+   `process.execPath` (more hermetic everywhere); a test helper built
+   `.venv/bin` where the probe reads `.venv/Scripts`; and two suffix
+   assertions compared native paths against `/`-joined strings. The
+   `server.cpp` chunk-4 stub earns its place here rather than there:
+   without it the binary does not link, and chunk 2's milestone is the
+   binary. Transport-bound tests (fake daemons on `.sock` paths, the
+   stub worker's AF_UNIX serve, two `#!/bin/sh` sclang fakes) are
+   guarded per test with the reason beside them, decision-4-of-
+   linux-portability style — 9 in `version.test.ts`, 21 in
+   `generate.test.ts`, three describes in `aced`/`voiced`, 2 in
+   `build.test.ts` — and every guard names the chunk that removes it.
 3. **Determinism** (§1.4). Measure a Windows render against macOS and
    Linux; the toolchain floor or `clang-cl` depending on what the
    measurement says, and the UCRT — the unmeasured third libm — is where

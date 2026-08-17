@@ -39,7 +39,10 @@ function findInterpreter(): string | undefined {
 
 const interpreter = findInterpreter();
 
-describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
+// win32: the worker serves on an AF_UNIX socket CPython does not bind on
+// Windows; the workers keep their POSIX transport until their own chunk
+// (windows-portability.md §4).
+describe.skipIf(!interpreter || process.platform === 'win32')('field-voiced protocol (live daemon)', () => {
   let root: string;
   let client: VoicedClient;
   let savedPythonPath: string | undefined;
@@ -249,7 +252,8 @@ function findBareInterpreter(): string | undefined {
 
 const bare = findBareInterpreter();
 
-describe.skipIf(!bare)('a backend failure reaches the log', () => {
+// win32: same AF_UNIX guard as above.
+describe.skipIf(!bare || process.platform === 'win32')('a backend failure reaches the log', () => {
   let root: string;
   let client: VoicedClient;
   let savedPythonPath: string | undefined;
