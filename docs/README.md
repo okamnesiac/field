@@ -69,10 +69,17 @@ where practical), Apollo interfaces as reference hardware, UAD-2 DSP and
 UADx native plugins, SuperCollider, and ACE-Step generative audio.
 
 Explicitly out of scope for V1: Logic (integration, import/export,
-plugins), Windows, Linux, VST/CLAP/AAX, other DAW integrations, a full
+plugins), VST/CLAP/AAX, other DAW integrations, a full
 graphical DAW interface, cloud collaboration, remote rendering, notation,
 video scoring, surround/Atmos, and Apollo Console automation (no
 supported API exists — see [audio-engine.md](audio-engine.md)).
+
+Windows and Linux are build-and-test targets, not product platforms. CI
+builds the daemon and runs the whole suite on Linux
+([linux-portability](projects/all/linux-portability.md) decision 5), and
+Windows is being brought up to build, test, and play
+([windows-portability](projects/all/windows-portability.md)). The
+product ships on macOS.
 
 ## Two workflows
 

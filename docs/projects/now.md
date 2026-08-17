@@ -11,6 +11,12 @@ lives in [next](next.md); uncommitted ideas in [later](later.md). See
   sessions have added inserts with it, and until chunk 3's `field
   open` picks up the editor handoff the command currently prints.
 
+- [Windows portability](all/windows-portability.md) — chunk 1 landed:
+  the checkout is byte-defined (`* text=auto eol=lf`) so content hashes
+  stop depending on git config; next the MSVC build of the daemon, which
+  brings the whole offline render path, then the named-pipe transport
+  that brings `field play`.
+
 - [Plugin hosting](all/plugin-hosting.md) — chunks 1 and 2 shipped:
   AU and VST3 render offline and run live as inserts (`field check`
   pins a bare `plugin:` name, state blobs resolve by hash, dirty

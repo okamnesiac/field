@@ -1,5 +1,5 @@
 ---
-status: Draft
+status: Active
 ---
 
 # Plan: Windows portability — the checkout, the socket, and the last bits
@@ -7,8 +7,9 @@ status: Draft
 **Goal:** field builds, checks, plays and **live-renders** on Windows, so
 that the realtime engine — which has no platform-bound code in it at all —
 stops being unreachable from the platform it happens not to be developed
-on. Assessment written 2026-08-12 by reading `main` at `766e532`; no code
-has been changed and nothing here is committed to.
+on. Assessment written 2026-08-12 by reading `main` at `766e532`; work
+began 2026-08-16 with chunk 1, and the flip to `Active` rode that diff,
+answering §2's decisions as it went.
 
 This is scoped to the **core**: the CLI, the build graph, and the daemon
 including live evaluation. The generative Python workers and SuperCollider
@@ -222,33 +223,42 @@ installed. CMake 3.25.2 satisfies the `cmake_minimum_required(3.24)`, and
 Visual Studio Community 2022 is present. `uv` and `sclang` are absent,
 which only matters for §4.
 
-## 2 Decisions to make
+## 2 Decisions (DECIDED, 2026-08-16)
 
-Recorded as open because this plan is `Draft`; the change that flips it to
-`Active` is the one that answers them.
+Written as open questions while the plan was `Draft`; the chunk 1 diff
+flipped it to `Active` and answered them, per the convention that the
+change making the readiness claim answers for what is still open.
 
-1. **Named pipes or loopback TCP** for the control socket (§1.2). The
-   recommendation is **named pipes**: the single-owner guarantee and the
-   permission model both come free, and a per-project daemon that lives
-   for hours is the wrong place to open a standing local port. Loopback
-   TCP is the cheap path if the goal is working-this-week, and the seam is
-   the same either way, so this is reversible at the cost of one file.
-2. **Whether `field play` keeps a non-daemon fallback on Windows** (§1.6).
-   Recommendation: no fallback.
-3. **Whether `socketPathFor` grows a platform branch.** `src/socketPath.ts`
-   exists to keep the bound path inside `sun_path`'s 104 bytes by
-   returning a cwd-relative path, and its comment records that it is one
-   function because it was nearly three. Named pipes have no such limit
-   and are not filesystem paths at all, so on Windows it would return a
-   pipe name derived from the project root instead — the same function,
-   answering a different question per platform.
-4. **When [docs/README.md](../../README.md) "V1 platform scope" changes.**
-   It currently lists Windows as explicitly out of scope alongside Linux,
-   which Linux then shipped as a build-and-test target without becoming a
-   supported product ([linux-portability.md](linux-portability.md)
-   decision 5). The same framing is available here and is probably right:
-   Windows as a build-and-test-and-play target, not a second product
-   platform. Until that line moves, this plan stays `Draft`.
+1. **Named pipes** for the control socket (§1.2), not loopback TCP. The
+   single-owner guarantee that `flock` provides today comes free from
+   `FILE_FLAG_FIRST_PIPE_INSTANCE`, pipes take ACLs so the permission
+   model matches the 0600 Unix socket, and a per-project daemon that
+   lives for hours is the wrong place to open a standing local port any
+   process can connect to. Rejected: **loopback TCP with a port file** —
+   far less code, since JUCE's `StreamingSocket` is already in the
+   dependency set, but the port-file staleness story reopens exactly the
+   race #12 review closed by choosing `flock` over a connect probe. The
+   seam is the same either way, so this is reversible at the cost of one
+   file if the pipe accept loop turns out worse than expected.
+2. **`field play` gets no non-daemon fallback on Windows** (§1.6). Since
+   [realtime.md](realtime.md) shipped, `field play` *is* live evaluation
+   in the daemon; a `SoundPlayer`-shaped fallback with no transport and
+   no `--from` would be a second, worse playback path kept alive on the
+   platform with the least coverage. Without the daemon built, `field
+   play` fails with "build the daemon", which is the honest answer.
+3. **`socketPathFor` grows a platform branch, in the same function.**
+   `src/socketPath.ts` exists to keep the bound path inside `sun_path`'s
+   104 bytes by returning a cwd-relative path; named pipes have no such
+   limit and are not filesystem paths at all, so on Windows the function
+   returns a pipe name derived from the project root instead — one
+   function answering a different question per platform, which its
+   comment must then say.
+4. **The [docs/README.md](../../README.md) "V1 platform scope" amendment
+   rode the chunk 1 diff** — this plan's own rule was "until that line
+   moves, this plan stays `Draft`", so the flip and the line move are one
+   change by construction. The framing reuses
+   [linux-portability.md](linux-portability.md) decision 5: Windows as a
+   build-and-test-and-play target, not a second product platform.
 
 ## 3 Definition of done
 
@@ -318,8 +328,10 @@ Recorded so the next reader does not re-derive it.
 4. **The transport** (§1.2). The seam, both ends, per §2.1. This is where
    `field play`, `field transport` and live rendering arrive, and it is
    the largest chunk by a wide margin.
-5. **Fallback, CI, docs** (§1.6, §2.4). The `afplay` decision, a
-   `windows-latest` job, and the "V1 platform scope" amendment.
+5. **Fallback and CI** (§1.6). The `afplay` path's Windows behaviour per
+   §2.2, and a `windows-latest` job. The "V1 platform scope" amendment
+   this chunk originally carried rode chunk 1 instead, because §2.4 tied
+   the plan's `Active` flip to it.
 
 Chunks 2 and 4 are independent of each other given chunk 1, so offline
 rendering on Windows can be real long before playback is.
