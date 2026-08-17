@@ -386,3 +386,99 @@ rendering on Windows can be real long before playback is.
   raw `readFileSync` (`model/project.ts:1190`), so a CRLF tree fails it
   by string comparison rather than by digest — §1.1's second consumer,
   named here so nobody re-derives it.
+
+## 7 Master inventory — everything else that has to port
+
+Swept 2026-08-17 on `main` at `4f90a87` plus chunk 2's working branch:
+every spawn site, path literal, and platform tool in `src/`, the daemon,
+the Python workers, and the test surface — the discoveries of chunks 1–2
+folded in beside what only reading found. Each item names where it
+lands. The chunk numbers are §5's; "workers" is the future chunk §4
+defers to; **standalone** marks work small and independent enough to
+land as its own diff whenever.
+
+### 7.1 In the committed chunks already
+
+- **The transport, both ends** (§1.2, §2.1 — chunk 4): the named-pipe
+  `Server` (accept loop over HANDLEs, drain via `CancelIoEx` replacing
+  `shutdown(SHUT_RD)`, single-owner via `FILE_FLAG_FIRST_PIPE_INSTANCE`
+  replacing `flock`), `socketPathFor`'s pipe-name branch (§2.3), and
+  `audiod/client.ts` connecting to `\.\pipe\…`. Removes the chunk-2
+  serve-mode stub in `server.cpp` and the per-test guards chunk 2
+  planted: 9 in `version.test.ts`, 21 in `generate.test.ts`, 2 sclang
+  stubs in `build.test.ts` — each names chunk 4 in its comment.
+- **Detached spawn + WASAPI verification** (§6 → chunk 4's definition of
+  done): idle-exit and ctrl-c through Windows process groups; device
+  names round-tripping `device.select`; one real unplug against the
+  heartbeat rescan.
+- **Float determinism** (§1.4 — chunk 3): `/fp:contract-` or `clang-cl`,
+  measured by the cross-platform byte comparison, with the UCRT libm the
+  likeliest surprise.
+- **`afplay`** (§1.6, §2.2 — chunk 5): dies on Windows by decision; the
+  code change is making the refusal say "build the daemon".
+- **CI** (chunk 5): a `windows-latest` job — pnpm via corepack, the VS
+  generator, the JUCE FetchContent cache keyed per-OS, and the same
+  suite the Linux job runs.
+
+### 7.2 Found by the sweep, not yet in any chunk
+
+- **`field init` plants chunk 1's defect in every new project**
+  (`commands/init.ts:60`): the `.gitattributes` it writes carries only
+  the seven LFS filter lines — no `* text=auto eol=lf`, no `*.state`
+  override — so a project created on (or cloned to) Windows has the
+  §1.1 checkout corruption against its *own* committed `.scd` programs
+  and asset pins, engine fix notwithstanding. The engine's file (chunk
+  1) is the template; `init` should write both halves. **Standalone**,
+  and the sharpest item on this list: it is chunk 1's twin for user
+  projects, and cheap.
+- **The picker runs raw-mode VT decoding** (`commands/picker.ts:93`,
+  `field insert add`'s chooser, #155): arrows are parsed as CSI
+  sequences from a `setRawMode(true)` stdin. Windows Terminal and
+  ConPTY deliver VT input on modern Windows, but nobody has run this
+  picker there — arrows, escape, ctrl-c mid-raw-mode, and the terminal
+  restoring on exit all need one manual pass. **Standalone** (verify,
+  then fix only what fails).
+- **`homeRelative` never fires on Windows** (`commands/export.ts:69`):
+  `startsWith(`${home}/`)` hardcodes the separator, so no exported path
+  ever prints with a tilde — cosmetic, wrong quietly. Its sibling
+  `defaultExportDir()` is `join(homedir(), 'Desktop')`, which on a
+  OneDrive-redirected profile is not the Desktop the user sees (the
+  real one lives under `OneDrive\Desktop`); the export still lands and
+  prints its path, so this is a wart rather than a break. **Standalone.**
+- **`sclang`'s app fallback is an .app path**
+  (`generators/supercollider.ts:21`): PATH and `FIELD_SCLANG` both work
+  on Windows already; the only gap is the convenience fallback probing
+  `/Applications/…` — its Windows spelling is
+  `C:\Program Files\SuperCollider-<v>\sclang.exe`. **Standalone**, and
+  §4 already scopes SuperCollider itself to "whenever it is wanted".
+- **`git lfs install --local` failure advice** (`commands/init.ts:71`):
+  the catch prints a warning and moves on, which is right; unverified
+  whether the probe succeeds under a Windows CI shell where `git`
+  resolves but the LFS subcommand may not. One CI run answers it, with
+  the `windows-latest` job (chunk 5).
+
+### 7.3 The workers chunk, when it opens (§4 stands)
+
+- `python/worker/server.py:129` binds `socket.AF_UNIX`; CPython has no
+  named-pipe socket family, so the Python end is a **transport decision
+  of its own** — loopback TCP is the likely answer where the daemon
+  chose pipes, and it is not this plan's §2.1 verbatim.
+- `workers/client.ts:132,315` advises `brew install uv` — needs the
+  winget/scoop spelling behind a platform switch.
+- `workerScriptInstalled` probes `Scripts/` but joins `spec.script`
+  bare; uv's Windows console shims carry `.exe` (§4 note, unverified).
+- The model environments themselves: `uv.lock` already resolves win32
+  CUDA wheels, `triton-windows`, and a Windows `flash-attn`, so the
+  heavy half has been priced by someone already.
+
+### 7.4 Consumers this unblocks, not port work itself
+
+- **The UI plan (#156)** speaks transport and levels over the files —
+  its Windows story is chunk 4's transport plus the paths above, and it
+  inherits both by construction if it lands after them.
+- **`field open`** (add-insert chunk 3, unlanded) will need `start`
+  where macOS says `open` the day it exists — noted so its review asks.
+- **Display-only `relative()` calls** (`transport.ts:58,120`,
+  `version.ts:286`) print native separators by design and port as-is;
+  named here so nobody "fixes" them into the §1.5 invariant, which is
+  about paths that are *data*.
