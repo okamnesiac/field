@@ -13,9 +13,11 @@ answering §2's decisions as it went.
 
 This is scoped to the **core**: the CLI, the build graph, and the daemon
 including live evaluation. The generative Python workers and SuperCollider
-are deliberately out (§4), and Windows is currently written down as an
-explicit V1 non-goal in [docs/README.md](../../README.md) "V1 platform
-scope" — §3 says what that means for this plan.
+are deliberately out (§4). Windows was written down as an explicit V1
+non-goal in [docs/README.md](../../README.md) "V1 platform scope" until
+chunk 1: per §2.4 that diff moved it, with Linux, into the
+build-and-test-targets paragraph there — §3 says what the claim is and
+is not.
 
 The headline, because it is not what you would guess: **live rendering is
 not the hard part.** `live.cpp`, `render.cpp`, `plan.cpp` and every file
@@ -33,10 +35,11 @@ any of the others.
 
 ### 1.1 The checkout corrupts content hashes before any code runs
 
-There is **no `.gitattributes` in this repository**. Git for Windows
-defaults to `core.autocrlf=true` (it is set on the assessment machine),
-so a fresh Windows clone rewrites every text file to CRLF on the way to
-disk.
+As assessed (2026-08-12), this repository had **no `.gitattributes` at
+all** — chunk 1 is the file that ended this finding, and the measurements
+below are from before it. Git for Windows defaults to
+`core.autocrlf=true` (it is set on the assessment machine), so a fresh
+Windows clone rewrote every text file to CRLF on the way to disk.
 
 Measured, not assumed, on `examples/bloom/shared/instruments/creek-kit.scd`:
 
@@ -70,8 +73,8 @@ Four things break — three silently, one loudly:
   rather than a guarantee, which is exactly the dependence chunk 1
   exists to end.
 
-The fix is one committed file and it must land first, because it is the
-instrument every other measurement depends on. It is a file to be
+The fix was one committed file, landed first because it is the
+instrument every other measurement depends on. It was a file to be
 written and verified, not copied from anywhere: the standalone
 sample-project repo's `.gitattributes` — seven LFS lines, each ending
 `-text` — protected the audio binaries and nothing else, so every text
@@ -80,17 +83,21 @@ the surviving clone's history ever carried `* text=auto eol=lf`
 (minjudd traced that clone on #154 — the deleted upstream can hide
 nothing reachable; the precedent this section previously claimed does not
 exist, and the file that does exist solves the adjacent problem). The
-shape chunk 1 writes is `* text=auto eol=lf` with per-extension binary
+shape chunk 1 wrote is `* text=auto eol=lf` with per-extension binary
 overrides for `.wav/.aif/.aiff/.flac/.mp3/.m4a/.caf` **and `.state`**
 — the loud consumer above falls through to the binary heuristic
-without it, and neither file type exists in the tree today (minjudd on
-#154), so the rule must be written before the first blob arrives to
+without it, and neither file type existed in the tree (minjudd on
+#154), so the rule is written before the first blob arrives to
 exercise it — last-match-wins so audio and captured plugin state are
-never touched — and its proof is §1.1's measurement re-run
-against a real Windows clone, not a provenance story. The engine
-repository has never had a `.gitattributes` at all, and when the sample
-project moved in-tree ([bloom-in-tree.md](bloom-in-tree.md)) not even
-the LFS lines came with it.
+never touched. Its proof is §1.1's measurement re-run against a real
+Windows clone, not a provenance story: the chunk 1 pull request carries
+that transcript — 0 CR bytes across the clone, `creek-kit.scd` back at
+its committed hash — and #157's review reproduced it independently,
+including the `.state` override holding against a CRLF blob with no NUL
+bytes. Until chunk 1, the engine repository had never had a
+`.gitattributes` at all: when the sample project moved in-tree
+([bloom-in-tree.md](bloom-in-tree.md)) not even the LFS lines came with
+it.
 
 This is not only a Windows concern, which is the argument for landing it
 regardless of whether the rest of this plan is ever built: it makes the
@@ -313,6 +320,9 @@ Recorded so the next reader does not re-derive it.
 1. **`.gitattributes`** (§1.1). One committed file. Lands first because
    every later measurement depends on the checkout being byte-defined,
    and it is worth landing even if nothing else here is built.
+   **Landed** (2026-08-16, the diff that carries this line): proof per
+   §1.1 — a fresh clone on a Windows machine with `core.autocrlf=true`
+   checks out 0 CR bytes and `creek-kit.scd` at its committed hash.
 2. **Build and paths** (§1.5, §1.3). MSVC compiles the daemon: the
    SIGPIPE guard, the `.exe` suffix, multi-config `--config Release` in
    `build:native`. Ends at a real milestone with no socket work at all —
@@ -342,7 +352,11 @@ rendering on Windows can be real long before playback is.
   the daemon with `detached: true` and `stdio: ['ignore','ignore', log]`,
   then `unref()`s it. Windows has different semantics for detachment and
   process groups, and the daemon's idle-exit and ctrl-c handling both ride
-  on it. Unverified.
+  on it. **Deferred to chunk 4, and resolved by building it**: the spawn
+  path first runs on Windows when the transport exists to connect to, and
+  the daemon protocol tests plus a real `field play` session are exactly
+  the verification — a separate investigation would only rehearse what
+  the chunk proves.
 - **Is the 104-byte reasoning simply gone, or replaced?** See §2.3. If
   named pipes win, `socketPathFor`'s entire premise is macOS/Linux-only,
   and the comment that explains it needs to say so.
@@ -352,10 +366,23 @@ rendering on Windows can be real long before playback is.
   with a non-redistributable SDK. Whether device *names* round-trip
   through `device.select` the way they do on Core Audio is unverified,
   and the periodic rescan fallback has never been exercised against real
-  Windows hot-plug.
+  Windows hot-plug. **Deferred to chunk 4**: both are observable only
+  against a live daemon, which does not exist before the transport does —
+  `field devices` against WASAPI and one unplug during playback are the
+  test, and chunk 4's definition of done should name them.
 - **Does anything else hash on-disk bytes?** §1.1 names four
   consumers — three found by reading, the state-blob refusal by
   minjudd's grep on #154, which also placed `commands/click.ts` and
   `graph/build.ts`'s hashers inside the asset-pin family already
-  listed; a systematic grep is still cheap insurance before trusting
-  chunk 1, and this question stays open until someone runs it.
+  listed. **Answered (2026-08-17**, the systematic grep, run in #157's
+  review): every non-test hasher in `src/` reaches file bytes through
+  `src/hash.ts`, and every caller maps onto a family §1.1 already names —
+  the `sc-render` action key, the asset-pin family (`click`, `export`,
+  `generate`, `import`, `graph/build`, `model/project`), the state-blob
+  refusal, with `graph/build.ts:145`'s `actionKey` fed by those input
+  hashes. The one byte-consumer that is **not** a hash and that a grep
+  for `createHash` would miss: `field check`'s canonical-formatting gate
+  compares `canonicalText(file.raw, file.order) !== file.raw` against a
+  raw `readFileSync` (`model/project.ts:1190`), so a CRLF tree fails it
+  by string comparison rather than by digest — §1.1's second consumer,
+  named here so nobody re-derives it.
