@@ -403,17 +403,25 @@ land as its own diff whenever.
   `Server` (accept loop over HANDLEs, drain via `CancelIoEx` replacing
   `shutdown(SHUT_RD)`, single-owner via `FILE_FLAG_FIRST_PIPE_INSTANCE`
   replacing `flock`), `socketPathFor`'s pipe-name branch (§2.3), and
-  `audiod/client.ts` connecting to `\.\pipe\…`. Removes the chunk-2
-  serve-mode stub in `server.cpp` and the per-test guards chunk 2
-  planted: 9 in `version.test.ts`, 21 in `generate.test.ts`, 2 sclang
-  stubs in `build.test.ts` — each names chunk 4 in its comment.
+  `audiod/client.ts` connecting to `\\.\pipe\…`. Removes the chunk-2
+  serve-mode stub in `server.cpp` and the 9 guards in
+  `version.test.ts` — the ones whose comment names chunk 4. The other
+  guards chunk 2 planted are not chunk 4's to remove: the 21 in
+  `generate.test.ts` and 3 describes in `aced`/`voiced` are the workers
+  chunk's (§7.3 carries them), and `build.test.ts`'s 2 sclang stubs are
+  nobody's — only a second stub dialect would unskip those (#158
+  review). A caveat on all these counts: chunk 2 is swept here from the
+  local `windows/build`, unlanded as of this section, so the numbers
+  can move until it lands.
 - **Detached spawn + WASAPI verification** (§6 → chunk 4's definition of
   done): idle-exit and ctrl-c through Windows process groups; device
   names round-tripping `device.select`; one real unplug against the
   heartbeat rescan.
-- **Float determinism** (§1.4 — chunk 3): `/fp:contract-` or `clang-cl`,
-  measured by the cross-platform byte comparison, with the UCRT libm the
-  likeliest surprise.
+- **Float determinism** (§1.4 — chunk 3): the VS 2022 toolchain floor
+  (whose default `/fp:precise` generates no contractions — the floor is
+  the guard, not any flag) or `clang-cl`, measured by the
+  cross-platform byte comparison, with the UCRT libm the likeliest
+  surprise.
 - **`afplay`** (§1.6, §2.2 — chunk 5): dies on Windows by decision; the
   code change is making the refusal say "build the daemon".
 - **CI** (chunk 5): a `windows-latest` job — pnpm via corepack, the VS
@@ -459,12 +467,18 @@ land as its own diff whenever.
 
 ### 7.3 The workers chunk, when it opens (§4 stands)
 
-- `python/worker/server.py:129` binds `socket.AF_UNIX`; CPython has no
-  named-pipe socket family, so the Python end is a **transport decision
-  of its own** — loopback TCP is the likely answer where the daemon
-  chose pipes, and it is not this plan's §2.1 verbatim.
-- `workers/client.ts:132,315` advises `brew install uv` — needs the
+- `python/worker/src/field_worker/server.py:129` binds
+  `socket.AF_UNIX`; CPython has no named-pipe socket family, so the
+  Python end is a **transport decision of its own** — loopback TCP is
+  the likely answer where the daemon chose pipes, and it is not this
+  plan's §2.1 verbatim. (Citations here are against `main` at
+  `4f90a87`; chunk 2's branch shifts `client.ts` by ten lines.)
+- `workers/client.ts:122,305` advises `brew install uv` — needs the
   winget/scoop spelling behind a platform switch.
+- The chunk-2 test guards that wait here, not on chunk 4: the 21
+  stub-spawning tests in `generate.test.ts` and the three `describe`s
+  in `aced/client.test.ts` and `voiced/client.test.ts`, all guarded on
+  the workers' POSIX transport with §4 named in the comment.
 - `workerScriptInstalled` probes `Scripts/` but joins `spec.script`
   bare; uv's Windows console shims carry `.exe` (§4 note, unverified).
 - The model environments themselves: `uv.lock` already resolves win32
