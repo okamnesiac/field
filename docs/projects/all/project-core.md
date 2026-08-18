@@ -202,6 +202,19 @@ needed. Bun was
 considered and rejected: boring wins for a decade-scale tool. Work lands as
 squash-merged PRs (the ruleset requires it), roughly one per coherent chunk.
 
+**Amended 2026-08-18** ([ui.md](ui.md) §6, the flip that implemented
+it): "single package at repo root" gains one pnpm workspace member,
+`ui/` — the browser client's home, because a DOM/bundler toolchain (its
+own tsconfig `lib`, JSX, Vite) does not belong in the CLI's strict
+Node-only config, and ui.md §5 already argued the workspace over a
+`src/ui/` sub-tsconfig before §6 settled it. The parenthetical's
+`packages/` restructure stays unclaimed: this is one member beside the
+root package, not the split. Three additions ride it: `ws` (the
+`field ui` WebSocket server — the daemon socket is unreachable from a
+browser, and hand-rolling the upgrade protocol is the kind of code this
+stack exists not to own), and react + vite inside the workspace member
+only, where the root package never sees them.
+
 ## 6 Decision record: names are identity — no UUIDs
 
 Settled 2026-08-04, recorded in full so it is never re-litigated. The

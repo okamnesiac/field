@@ -221,9 +221,11 @@ where this section says otherwise, and the mute non-goal fell the way
   in a `ui/` workspace package; browser tab, no shell; fader drags
   write on release with no live ramps inside the gesture (the bounded
   option §5 recorded stays open for later, with its rollback
-  obligations noted); hand-rolled CSS. Stack additions recorded against
-  project-core.md §5: `ws` on the server, react + vite in the
-  workspace.
+  obligations noted); hand-rolled CSS. The stack record itself is
+  amended in [project-core.md](project-core.md) §5 (2026-08-18): the
+  `ui/` workspace member against §5's single-package sentence, `ws` on
+  the server, react + vite inside the member only — with the reasons
+  and what each amends, where `AGENTS.md` says decided records change.
 - **Verified on a live session**: play through a real device with
   position streaming, a mute landing in YAML and riding the watch back
   into the running audio, solo/un-solo swapping mid-play with the
