@@ -1,0 +1,122 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+body {
+  margin: 0;
+  background: #14161a;
+  color: #d7dae0;
+}
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+.empty {
+  opacity: 0.6;
+  padding: 3rem;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #2a2e36;
+}
+.song {
+  font-weight: 600;
+}
+header button {
+  background: #22262e;
+  color: inherit;
+  border: 1px solid #343945;
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.state.playing {
+  color: #6fd08c;
+}
+.position {
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+header select {
+  background: #22262e;
+  color: inherit;
+  border: 1px solid #343945;
+  border-radius: 4px;
+  padding: 0.2rem;
+  max-width: 16rem;
+}
+.error {
+  background: #3a2226;
+  border: 1px solid #6b3038;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.75rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 0.75rem;
+}
+.lane {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #1b1e24;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+.lane.muted .name,
+.lane.dimmed {
+  opacity: 0.45;
+}
+.lane .name {
+  width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane button {
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 4px;
+  border: 1px solid #343945;
+  background: #22262e;
+  color: inherit;
+  cursor: pointer;
+}
+.lane button.mute.on {
+  background: #7a4048;
+  border-color: #a05560;
+}
+.lane button.solo.on {
+  background: #6f6430;
+  border-color: #998a45;
+}
+.gain {
+  flex: 1;
+}
+.db {
+  width: 4.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pan {
+  width: 6rem;
+}
+.inserts {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+footer {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  opacity: 0.5;
+}

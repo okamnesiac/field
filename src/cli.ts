@@ -710,6 +710,21 @@ for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
 }
 
 program
+  .command('ui <song>')
+  .description('open the web face on a song: transport, lanes, levels, mute and solo (ctrl-c stops)')
+  .option('--port <port>', 'bind this port instead of a random one', (v) => parseInt(v, 10))
+  .option('--no-open', 'print the URL without opening a browser')
+  .action(async (song: string, opts: { port?: number; open?: boolean }) => {
+    try {
+      const root = requireRoot();
+      const { runUi } = await import('./commands/ui.js');
+      await runUi(root, song, { ...(opts.port !== undefined ? { port: opts.port } : {}), open: opts.open !== false });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('devices')
   .description('list output devices via field-audiod (spawns it if needed)')
   .action(async () => {
