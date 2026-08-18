@@ -1,6 +1,6 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
@@ -142,7 +142,11 @@ describe('build', () => {
     const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);
     // Every outcome names a playable path — watch hands any label's fresh
     // artifact to the daemon, including committed content.
-    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad/pad.wav')).toBe(true);
+    // outputPath is a native absolute path; the suffix compares in the
+    // platform separator.
+    expect(
+      outcomes[0]!.outputPath!.endsWith(['songs', 'creek', 'audio', 'pad', 'pad.wav'].join(sep)),
+    ).toBe(true);
     // ...and says the path is a source it never produced, which `cached`
     // alone cannot distinguish from a cache hit.
     expect(outcomes[0]!.committed).toBe(true);
@@ -153,7 +157,7 @@ describe('build', () => {
     const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     const rule = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(rule.committed).toBeUndefined();
-    expect(rule.outputPath!).toContain('.field/out'); // materialized, not committed
+    expect(rule.outputPath!).toContain(join('.field', 'out')); // materialized, not committed
   });
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
