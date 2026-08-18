@@ -491,8 +491,17 @@ program
   });
 
 // The retiring fallback for machines without the built daemon: playback
-// through afplay, no transport, no --from.
+// through afplay, no transport, no --from. macOS only, and deliberately
+// not replaced elsewhere: since realtime.md, `field play` IS live
+// evaluation in the daemon, and a second, worse playback path on the
+// platform with the least coverage would be a liability, not a feature
+// (windows-portability.md §2.2). Windows fails with the build hint.
 async function playWithAfplay(items: Playable[]): Promise<void> {
+  if (process.platform === 'win32') {
+    throw new Error(
+      'field-audiod is not built, and there is no fallback player on Windows — run `pnpm build:native`',
+    );
+  }
   for (const item of items) {
     process.stdout.write(`playing ${item.label}\n`);
     const interrupted = await new Promise<boolean>((done, reject) => {

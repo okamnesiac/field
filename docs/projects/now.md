@@ -6,6 +6,14 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [Windows portability](all/windows-portability.md) — every chunk has
+  now been implemented: the checkout is byte-defined, MSVC builds the
+  daemon and renders byte-identically to the macOS goldens, and the
+  named-pipe transport plays sessions live through WASAPI, steerable
+  from a second terminal. Stays until the Windows CI job has actually
+  run (Actions billing) and a real session has played in anger; the
+  workers' own transport (§4) is the follow-on.
+
 - [`field insert add`](all/add-insert.md) — writes a pinned insert
   with an interactive chooser and order placement; stays until real
   sessions have added inserts with it, and until chunk 3's `field

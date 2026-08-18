@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeWavFloat32 } from '../audio/wav.js';
 import { AudiodClient, daemonBinary } from '../audiod/client.js';
@@ -10,6 +10,7 @@ import { importAsset } from './import.js';
 import { init } from './init.js';
 import { playThroughDaemon, resolvePlayables } from './play.js';
 import { transportCommand, transportLocate, transportStatusLines } from './transport.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // End-to-end daemon playback in null-output mode: real project, real
 // builds where needed, real daemon pulling the transport at real-time
@@ -22,9 +23,7 @@ const binary = (() => {
   }
 })();
 
-// win32: serve mode refuses until the named-pipe transport
-// (windows-portability.md chunk 4).
-describe.skipIf(!binary || process.platform === 'win32')('field play through the daemon', () => {
+describe.skipIf(!binary)('field play through the daemon', () => {
   let root: string;
   let project: LoadedProject;
 
@@ -53,7 +52,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field play through the
     } catch {
       // no daemon left behind
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempProject(root);
   });
 
   it('plays a queue in order, streaming positions', async () => {
@@ -284,7 +283,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field play through the
 
     const lines = await transportStatusLines(root, project);
     expect(lines[0]).toMatch(/^playing {2}\d+\.\d+\.\d+ \(/);
-    expect(lines[1]).toContain('songs/creek/audio/long/long.wav');
+    expect(lines[1]).toContain(['songs', 'creek', 'audio', 'long', 'long.wav'].join(sep));
 
     // Bar 3 at 120 bpm = 8 beats = 192000 samples.
     expect(await transportLocate(root, project, '3.1.1')).toBe('3.1.1 (0:04.0)');

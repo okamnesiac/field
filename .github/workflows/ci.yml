@@ -100,3 +100,31 @@ jobs:
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
 
+
+  # Windows is a build-and-test-and-play target (windows-portability.md),
+  # and this job is what keeps the port from rotting: the same typecheck,
+  # build, example check, native build and suite as Linux. The Python
+  # pyright gates stay Linux-only — the workers keep their POSIX
+  # transport until their own chunk (§4), so gating them here would test
+  # a combination nothing supports. The JUCE FetchContent build is the
+  # expensive step; the cache key matches the Linux job's shape and adds
+  # the OS, since MSVC objects and ELF objects share nothing.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: cd examples/bloom && node ../../dist/cli.js check
+      - uses: actions/cache@v4
+        with:
+          path: native/audiod/build
+          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      - run: pnpm build:native
+      - run: pnpm test

@@ -16,6 +16,7 @@ import { daemonBinary } from '../audiod/client.js';
 import { pluginInfoSchema, type PluginInfo } from './plugins.js';
 import { renderInsertChain } from './render-daemon.js';
 import { writeWavFloat32 } from './wav.js';
+import { removeTempProject } from '../testing/temp.js';
 
 const binary = (() => {
   try {
@@ -358,10 +359,7 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
   });
 });
 
-// win32: the live path runs over the control socket, which waits on the
-// named-pipe transport (windows-portability.md chunk 4); the offline
-// describe above renders through --render subprocesses and runs.
-describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted chains live (plugin-hosting.md chunk 2)', () => {
+describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md chunk 2)', () => {
   let root: string;
 
   beforeEach(async () => {
@@ -424,8 +422,8 @@ describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted
     );
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await removeTempProject(root);
     delete process.env['FIELD_PLUGIN_PATH'];
   });
 
@@ -730,8 +728,8 @@ describe('inventory cache', () => {
     mkdirSync(join(root, '.field'));
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await removeTempProject(root);
   });
 
   it('serves an unchanged file from cache and re-reads a changed one', async () => {

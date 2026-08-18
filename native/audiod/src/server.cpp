@@ -1,41 +1,28 @@
 #include "server.h"
 #include "player.h"
 
+
 #if defined(_WIN32)
+// The named-pipe transport (windows-portability.md §2.1): the CLI
+// computes the \\.\pipe\ name (socketPathFor's win32 branch) and
+// hands it whole via --socket. FILE_FLAG_FIRST_PIPE_INSTANCE is the
+// flock — a second daemon on the same name fails at creation, before
+// anything is disturbed — and CancelIoEx is the SHUT_RD, aborting a
+// reader's wait while the write side finishes in-flight responses.
+// Request handling below the I/O layer is shared with the POSIX arm.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 
-// The control socket does not exist on Windows yet: this transport is
-// AF_UNIX by hand (see the header), and windows-portability.md chunk 4
-// replaces it with a named pipe behind the same interface. Until then
-// the daemon still earns its keep as a subprocess — --render,
-// --render-live and --scan never construct a Server — and serve mode
-// refuses at start() with a pointer, instead of the file failing to
-// compile. The private loop methods stay declared and undefined; nothing
-// on this path can reach them.
-
-Server::Server (Player& p, juce::String relativeSocketPath)
-    : player (p), socketPath (std::move (relativeSocketPath))
-{
-}
-
-Server::~Server() = default;
-
-juce::String Server::start()
-{
-    return "the control socket is not implemented on Windows yet (windows-portability.md chunk 4)";
-}
-
-void Server::beginShutdown() {}
-void Server::broadcast (const juce::String&) {}
-void Server::sweepClosedConnections() {}
-int Server::connectionCount() { return 0; }
-
+#include <algorithm>
+#include <cstring>
 #else
-
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#endif
 
 namespace
 {
@@ -62,146 +49,6 @@ juce::var errorResponse (const juce::var& id, const juce::String& message)
 Server::Server (Player& p, juce::String relativeSocketPath)
     : player (p), socketPath (std::move (relativeSocketPath))
 {
-}
-
-Server::~Server()
-{
-    running = false;
-    if (listenFd >= 0)
-    {
-        ::shutdown (listenFd, SHUT_RDWR);
-        ::close (listenFd);
-        ::unlink (socketPath.toRawUTF8());
-    }
-    if (lockFd >= 0)
-        ::close (lockFd); // releases the flock; the lock file itself stays
-    if (acceptThread.joinable())
-        acceptThread.join();
-
-    std::vector<std::shared_ptr<Connection>> toClose;
-    {
-        const std::lock_guard<std::mutex> lock (connectionsMutex);
-        toClose = connections;
-        connections.clear();
-    }
-    for (auto& c : toClose)
-    {
-        c->open = false;
-        ::shutdown (c->fd, SHUT_RDWR);
-        ::close (c->fd);
-        if (c->reader.joinable())
-            c->reader.join();
-    }
-}
-
-juce::String Server::start()
-{
-    if (socketPath.length() >= (int) sizeof (sockaddr_un::sun_path))
-        return "socket path too long: " + socketPath;
-
-    sockaddr_un addr {};
-    addr.sun_family = AF_UNIX;
-    std::snprintf (addr.sun_path, sizeof (addr.sun_path), "%s", socketPath.toRawUTF8());
-
-    // Exactly one daemon per socket, decided by flock rather than a
-    // connect probe: two daemons spawned in the same instant could each
-    // fail the probe and unlink the other's freshly bound socket (#12
-    // review). The lock is held for the daemon's whole life and the OS
-    // releases it on any death, so it cannot go stale; with the lock won,
-    // any existing socket file is by definition a dead daemon's leftover.
-    // The lock file itself is never unlinked — removing it would reopen
-    // the race for the next pair of spawns.
-    lockFd = ::open ((socketPath + ".lock").toRawUTF8(), O_CREAT | O_RDWR, 0600);
-    if (lockFd < 0)
-        return "cannot open lock file: " + juce::String (strerror (errno));
-    if (::flock (lockFd, LOCK_EX | LOCK_NB) != 0)
-        return "another field-audiod already owns " + socketPath;
-    ::unlink (socketPath.toRawUTF8());
-
-    listenFd = ::socket (AF_UNIX, SOCK_STREAM, 0);
-    if (listenFd < 0)
-        return "socket() failed: " + juce::String (strerror (errno));
-    if (::bind (listenFd, (sockaddr*) &addr, sizeof (addr)) != 0)
-        return "bind() failed for " + socketPath + ": " + juce::String (strerror (errno));
-    if (::listen (listenFd, 8) != 0)
-        return "listen() failed: " + juce::String (strerror (errno));
-
-    lastActivity = juce::Time::currentTimeMillis();
-    running = true;
-    acceptThread = std::thread ([this] { acceptLoop(); });
-    return {};
-}
-
-void Server::acceptLoop()
-{
-    while (running)
-    {
-        int fd = ::accept (listenFd, nullptr, nullptr);
-        if (fd < 0)
-        {
-            if (running)
-                continue;
-            break;
-        }
-        auto connection = std::make_shared<Connection>();
-        connection->fd = fd;
-        {
-            const std::lock_guard<std::mutex> lock (connectionsMutex);
-            connections.push_back (connection);
-        }
-        lastActivity = juce::Time::currentTimeMillis();
-        connection->reader = std::thread ([this, connection] { readLoop (connection); });
-        // A connection accepted in the same instant as beginShutdown would
-        // miss its half-close and stall the drain loop; catch it here.
-        if (! running)
-            ::shutdown (fd, SHUT_RD);
-    }
-}
-
-void Server::readLoop (std::shared_ptr<Connection> connection)
-{
-    std::string buffer;
-    char chunk[4096];
-    while (connection->open)
-    {
-        auto n = ::read (connection->fd, chunk, sizeof (chunk));
-        if (n <= 0)
-            break;
-        buffer.append (chunk, (size_t) n);
-        size_t newline;
-        while ((newline = buffer.find ('\n')) != std::string::npos)
-        {
-            auto line = buffer.substr (0, newline);
-            buffer.erase (0, newline + 1);
-            if (! line.empty())
-                handleLine (*connection, juce::String::fromUTF8 (line.c_str(), (int) line.size()));
-        }
-    }
-    lastActivity = juce::Time::currentTimeMillis();
-    // Last: the sweep only joins threads whose connection is closed, and
-    // everything above must be finished by then. The fd is closed by the
-    // sweep too — exactly one closer, so a reused descriptor can never be
-    // closed out from under a newer connection.
-    connection->open = false;
-}
-
-void Server::sweepClosedConnections()
-{
-    const std::lock_guard<std::mutex> lock (connectionsMutex);
-    for (auto it = connections.begin(); it != connections.end();)
-    {
-        if (! (*it)->open)
-        {
-            if ((*it)->reader.joinable())
-                (*it)->reader.join();
-            ::close ((*it)->fd);
-            it = connections.erase (it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
 }
 
 void Server::handleLine (Connection& connection, const juce::String& line)
@@ -348,35 +195,6 @@ juce::String Server::dispatch (const juce::var& request)
     return jsonLine (juce::var (ok.get()));
 }
 
-void Server::send (Connection& connection, const juce::String& line)
-{
-    const std::lock_guard<std::mutex> lock (connection.writeMutex);
-    auto utf8 = line.toRawUTF8();
-    auto remaining = strlen (utf8);
-    while (remaining > 0 && connection.open)
-    {
-        // A client may vanish between our poll and this write (ctrl-c mid
-        // position stream). SIGPIPE is ignored process-wide (main.cpp), so
-        // that write returns EPIPE and the loop below stops. There is
-        // deliberately no second mechanism — see the note there.
-        auto n = ::write (connection.fd, utf8, remaining);
-        if (n <= 0)
-            break;
-        utf8 += n;
-        remaining -= (size_t) n;
-    }
-}
-
-void Server::beginShutdown()
-{
-    running = false;
-    if (listenFd >= 0)
-        ::shutdown (listenFd, SHUT_RDWR);
-    const std::lock_guard<std::mutex> lock (connectionsMutex);
-    for (auto& connection : connections)
-        if (connection->open)
-            ::shutdown (connection->fd, SHUT_RD); // write side stays up for in-flight responses
-}
 
 void Server::broadcast (const juce::String& line)
 {
@@ -400,4 +218,441 @@ int Server::connectionCount()
     return open;
 }
 
-#endif // !defined(_WIN32)
+
+#if defined(_WIN32)
+
+// Connection::pipe and the two Server members are void* in the header to
+// keep <windows.h> out of it; this file casts at the boundary.
+static HANDLE asHandle (void* p) { return static_cast<HANDLE> (p); }
+
+Server::~Server()
+{
+    running = false;
+    if (acceptEvent != nullptr)
+        SetEvent (asHandle (acceptEvent));
+    if (acceptThread.joinable())
+        acceptThread.join();
+    if (pendingPipe != nullptr)
+        CloseHandle (asHandle (pendingPipe));
+    if (acceptEvent != nullptr)
+        CloseHandle (asHandle (acceptEvent));
+
+    std::vector<std::shared_ptr<Connection>> toClose;
+    {
+        const std::lock_guard<std::mutex> lock (connectionsMutex);
+        toClose = connections;
+        connections.clear();
+    }
+    for (auto& c : toClose)
+    {
+        c->open = false;
+        CancelIoEx (asHandle (c->pipe), nullptr);
+        if (c->reader.joinable())
+            c->reader.join();
+        CloseHandle (asHandle (c->pipe));
+    }
+}
+
+juce::String Server::start()
+{
+    if (! socketPath.startsWith ("\\\\.\\pipe\\"))
+        return "on Windows --socket must be a \\\\.\\pipe\\ name, got: " + socketPath
+               + " (an older field CLI passes the POSIX path - rebuild it)";
+
+    // First instance, and the single-owner guarantee with it: two daemons
+    // racing one name cannot both hold FILE_FLAG_FIRST_PIPE_INSTANCE, and
+    // the loser fails here with ERROR_ACCESS_DENIED - the same shape as
+    // the #12-review flock, with no lock file and no stale socket to
+    // unlink.
+    auto* first = CreateNamedPipeA (socketPath.toRawUTF8(),
+                                    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                    PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, nullptr);
+    if (first == INVALID_HANDLE_VALUE)
+        return GetLastError() == ERROR_ACCESS_DENIED
+                   ? "another field-audiod already owns " + socketPath
+                   : "CreateNamedPipe failed for " + socketPath + ": " + juce::String ((int) GetLastError());
+    pendingPipe = first;
+
+    acceptEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr); // manual-reset
+    if (acceptEvent == nullptr)
+    {
+        CloseHandle (first);
+        pendingPipe = nullptr;
+        return "CreateEvent failed: " + juce::String ((int) GetLastError());
+    }
+
+    lastActivity = juce::Time::currentTimeMillis();
+    running = true;
+    acceptThread = std::thread ([this] { acceptLoop(); });
+    return {};
+}
+
+void Server::acceptLoop()
+{
+    while (running)
+    {
+        HANDLE pipe = asHandle (pendingPipe);
+        OVERLAPPED ov {};
+        ov.hEvent = asHandle (acceptEvent);
+        ResetEvent (ov.hEvent);
+        bool connected = ConnectNamedPipe (pipe, &ov) != 0;
+        if (! connected)
+        {
+            auto err = GetLastError();
+            if (err == ERROR_PIPE_CONNECTED)
+                connected = true;
+            else if (err == ERROR_IO_PENDING)
+            {
+                // A bounded poll rather than an INFINITE wait: SetEvent
+                // from beginShutdown can race the ResetEvent above and be
+                // swallowed, and a missed wake here deadlocks the drain
+                // loop. 200 ms of shutdown latency beats a wake protocol
+                // that has to be right - the same trade the heartbeat
+                // rescan made for hot-plug.
+                while (WaitForSingleObject (ov.hEvent, 200) == WAIT_TIMEOUT && running) {}
+                DWORD ignored = 0;
+                connected = running && GetOverlappedResult (pipe, &ov, &ignored, FALSE) != 0;
+            }
+        }
+        if (! running)
+            break; // the destructor closes the parked instance
+        if (! connected)
+            continue; // a client gave up mid-connect; the instance is reusable
+
+        // Park the next instance before serving this one, so a client
+        // connecting immediately after has somewhere to land. No
+        // FIRST_PIPE_INSTANCE - the name is already ours.
+        auto* next = CreateNamedPipeA (socketPath.toRawUTF8(),
+                                       PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                       PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, nullptr);
+        pendingPipe = next != INVALID_HANDLE_VALUE ? next : nullptr;
+
+        auto connection = std::make_shared<Connection>();
+        connection->pipe = pipe;
+        {
+            const std::lock_guard<std::mutex> lock (connectionsMutex);
+            connections.push_back (connection);
+        }
+        lastActivity = juce::Time::currentTimeMillis();
+        connection->reader = std::thread ([this, connection] { readLoop (connection); });
+        // A connection accepted in the same instant as beginShutdown would
+        // miss its cancel and stall the drain loop; catch it here.
+        if (! running)
+            CancelIoEx (pipe, nullptr);
+
+        if (pendingPipe == nullptr)
+            break; // no instance to accept on; stop rather than spin
+    }
+}
+
+void Server::readLoop (std::shared_ptr<Connection> connection)
+{
+    std::string buffer;
+    char chunk[4096];
+    auto processLines = [&]
+    {
+        size_t newline;
+        while ((newline = buffer.find ('\n')) != std::string::npos)
+        {
+            auto line = buffer.substr (0, newline);
+            buffer.erase (0, newline + 1);
+            if (! line.empty())
+                handleLine (*connection, juce::String::fromUTF8 (line.c_str(), (int) line.size()));
+        }
+    };
+
+    // `running` in the loop condition is the SHUT_RD this platform does
+    // not have: CancelIoEx only aborts a read that is pending at that
+    // instant, and a reader that was inside dispatch at shutdown would
+    // otherwise issue a fresh ReadFile and keep serving a chatty client
+    // forever — the daemon then never exits. The state check closes
+    // that; at most one request slips through the gap.
+    bool clientGone = false;
+    while (connection->open && running)
+    {
+        // The handle is overlapped, so each read carries its own event;
+        // CancelIoEx from beginShutdown aborts the wait.
+        DWORD n = 0;
+        OVERLAPPED ov {};
+        ov.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
+        bool ok = ReadFile (asHandle (connection->pipe), chunk, sizeof (chunk), nullptr, &ov) != 0
+                      || GetLastError() == ERROR_IO_PENDING;
+        if (ok)
+            ok = GetOverlappedResult (asHandle (connection->pipe), &ov, &n, TRUE) != 0;
+        const bool aborted = ! ok && GetLastError() == ERROR_OPERATION_ABORTED;
+        CloseHandle (ov.hEvent);
+        if (! ok || n == 0)
+        {
+            clientGone = ! aborted; // an abort is shutdown, not the client leaving
+            break;
+        }
+        buffer.append (chunk, (size_t) n);
+        processLines();
+    }
+
+    if (connection->open && ! running && ! clientGone)
+    {
+        // Shutdown drain, one peek deep: SHUT_RD on the POSIX arm still
+        // delivers what the client had already written before the
+        // half-close, so in-flight requests get their responses. One
+        // peek, then exactly that many bytes - re-peeking would chase a
+        // client that keeps writing, which is the loop this replaces.
+        DWORD available = 0;
+        PeekNamedPipe (asHandle (connection->pipe), nullptr, 0, nullptr, &available, nullptr);
+        while (available > 0)
+        {
+            DWORD got = 0;
+            OVERLAPPED drainOv {};
+            drainOv.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
+            bool drained = ReadFile (asHandle (connection->pipe), chunk,
+                                     (DWORD) std::min ((size_t) available, sizeof (chunk)), nullptr, &drainOv) != 0
+                               || GetLastError() == ERROR_IO_PENDING;
+            if (drained)
+                drained = GetOverlappedResult (asHandle (connection->pipe), &drainOv, &got, TRUE) != 0;
+            CloseHandle (drainOv.hEvent);
+            if (! drained || got == 0)
+                break;
+            available -= got;
+            buffer.append (chunk, (size_t) got);
+            processLines();
+        }
+    }
+
+    lastActivity = juce::Time::currentTimeMillis();
+    // Last, for the POSIX arm's reason: the sweep is the one closer, so a
+    // reused handle can never be closed out from under a newer connection.
+    connection->open = false;
+}
+void Server::send (Connection& connection, const juce::String& line)
+{
+    const std::lock_guard<std::mutex> lock (connection.writeMutex);
+    auto utf8 = line.toRawUTF8();
+    auto remaining = strlen (utf8);
+    while (remaining > 0 && connection.open)
+    {
+        // A vanished client is an error return here by construction -
+        // there is no SIGPIPE to ignore on this platform (main.cpp).
+        DWORD written = 0;
+        OVERLAPPED ov {};
+        ov.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
+        bool ok = WriteFile (asHandle (connection.pipe), utf8, (DWORD) remaining, nullptr, &ov) != 0
+                      || GetLastError() == ERROR_IO_PENDING;
+        if (ok)
+            ok = GetOverlappedResult (asHandle (connection.pipe), &ov, &written, TRUE) != 0;
+        CloseHandle (ov.hEvent);
+        if (! ok || written == 0)
+            break;
+        utf8 += written;
+        remaining -= (size_t) written;
+    }
+}
+
+void Server::beginShutdown()
+{
+    running = false;
+    if (acceptEvent != nullptr)
+        SetEvent (asHandle (acceptEvent)); // best effort; the accept wait also polls running
+    const std::lock_guard<std::mutex> lock (connectionsMutex);
+    for (auto& connection : connections)
+        if (connection->open)
+            CancelIoEx (asHandle (connection->pipe), nullptr); // aborts the read; in-flight writes finish
+}
+
+void Server::sweepClosedConnections()
+{
+    const std::lock_guard<std::mutex> lock (connectionsMutex);
+    for (auto it = connections.begin(); it != connections.end();)
+    {
+        if (! (*it)->open)
+        {
+            if ((*it)->reader.joinable())
+                (*it)->reader.join();
+            DisconnectNamedPipe (asHandle ((*it)->pipe));
+            CloseHandle (asHandle ((*it)->pipe));
+            it = connections.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+#else
+
+Server::~Server()
+{
+    running = false;
+    if (listenFd >= 0)
+    {
+        ::shutdown (listenFd, SHUT_RDWR);
+        ::close (listenFd);
+        ::unlink (socketPath.toRawUTF8());
+    }
+    if (lockFd >= 0)
+        ::close (lockFd); // releases the flock; the lock file itself stays
+    if (acceptThread.joinable())
+        acceptThread.join();
+
+    std::vector<std::shared_ptr<Connection>> toClose;
+    {
+        const std::lock_guard<std::mutex> lock (connectionsMutex);
+        toClose = connections;
+        connections.clear();
+    }
+    for (auto& c : toClose)
+    {
+        c->open = false;
+        ::shutdown (c->fd, SHUT_RDWR);
+        ::close (c->fd);
+        if (c->reader.joinable())
+            c->reader.join();
+    }
+}
+
+juce::String Server::start()
+{
+    if (socketPath.length() >= (int) sizeof (sockaddr_un::sun_path))
+        return "socket path too long: " + socketPath;
+
+    sockaddr_un addr {};
+    addr.sun_family = AF_UNIX;
+    std::snprintf (addr.sun_path, sizeof (addr.sun_path), "%s", socketPath.toRawUTF8());
+
+    // Exactly one daemon per socket, decided by flock rather than a
+    // connect probe: two daemons spawned in the same instant could each
+    // fail the probe and unlink the other's freshly bound socket (#12
+    // review). The lock is held for the daemon's whole life and the OS
+    // releases it on any death, so it cannot go stale; with the lock won,
+    // any existing socket file is by definition a dead daemon's leftover.
+    // The lock file itself is never unlinked — removing it would reopen
+    // the race for the next pair of spawns.
+    lockFd = ::open ((socketPath + ".lock").toRawUTF8(), O_CREAT | O_RDWR, 0600);
+    if (lockFd < 0)
+        return "cannot open lock file: " + juce::String (strerror (errno));
+    if (::flock (lockFd, LOCK_EX | LOCK_NB) != 0)
+        return "another field-audiod already owns " + socketPath;
+    ::unlink (socketPath.toRawUTF8());
+
+    listenFd = ::socket (AF_UNIX, SOCK_STREAM, 0);
+    if (listenFd < 0)
+        return "socket() failed: " + juce::String (strerror (errno));
+    if (::bind (listenFd, (sockaddr*) &addr, sizeof (addr)) != 0)
+        return "bind() failed for " + socketPath + ": " + juce::String (strerror (errno));
+    if (::listen (listenFd, 8) != 0)
+        return "listen() failed: " + juce::String (strerror (errno));
+
+    lastActivity = juce::Time::currentTimeMillis();
+    running = true;
+    acceptThread = std::thread ([this] { acceptLoop(); });
+    return {};
+}
+
+void Server::acceptLoop()
+{
+    while (running)
+    {
+        int fd = ::accept (listenFd, nullptr, nullptr);
+        if (fd < 0)
+        {
+            if (running)
+                continue;
+            break;
+        }
+        auto connection = std::make_shared<Connection>();
+        connection->fd = fd;
+        {
+            const std::lock_guard<std::mutex> lock (connectionsMutex);
+            connections.push_back (connection);
+        }
+        lastActivity = juce::Time::currentTimeMillis();
+        connection->reader = std::thread ([this, connection] { readLoop (connection); });
+        // A connection accepted in the same instant as beginShutdown would
+        // miss its half-close and stall the drain loop; catch it here.
+        if (! running)
+            ::shutdown (fd, SHUT_RD);
+    }
+}
+
+void Server::readLoop (std::shared_ptr<Connection> connection)
+{
+    std::string buffer;
+    char chunk[4096];
+    while (connection->open)
+    {
+        auto n = ::read (connection->fd, chunk, sizeof (chunk));
+        if (n <= 0)
+            break;
+        buffer.append (chunk, (size_t) n);
+        size_t newline;
+        while ((newline = buffer.find ('\n')) != std::string::npos)
+        {
+            auto line = buffer.substr (0, newline);
+            buffer.erase (0, newline + 1);
+            if (! line.empty())
+                handleLine (*connection, juce::String::fromUTF8 (line.c_str(), (int) line.size()));
+        }
+    }
+    lastActivity = juce::Time::currentTimeMillis();
+    // Last: the sweep only joins threads whose connection is closed, and
+    // everything above must be finished by then. The fd is closed by the
+    // sweep too — exactly one closer, so a reused descriptor can never be
+    // closed out from under a newer connection.
+    connection->open = false;
+}
+
+void Server::sweepClosedConnections()
+{
+    const std::lock_guard<std::mutex> lock (connectionsMutex);
+    for (auto it = connections.begin(); it != connections.end();)
+    {
+        if (! (*it)->open)
+        {
+            if ((*it)->reader.joinable())
+                (*it)->reader.join();
+            ::close ((*it)->fd);
+            it = connections.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+
+void Server::send (Connection& connection, const juce::String& line)
+{
+    const std::lock_guard<std::mutex> lock (connection.writeMutex);
+    auto utf8 = line.toRawUTF8();
+    auto remaining = strlen (utf8);
+    while (remaining > 0 && connection.open)
+    {
+        // A client may vanish between our poll and this write (ctrl-c mid
+        // position stream). SIGPIPE is ignored process-wide (main.cpp), so
+        // that write returns EPIPE and the loop below stops. There is
+        // deliberately no second mechanism — see the note there.
+        auto n = ::write (connection.fd, utf8, remaining);
+        if (n <= 0)
+            break;
+        utf8 += n;
+        remaining -= (size_t) n;
+    }
+}
+
+
+void Server::beginShutdown()
+{
+    running = false;
+    if (listenFd >= 0)
+        ::shutdown (listenFd, SHUT_RDWR);
+    const std::lock_guard<std::mutex> lock (connectionsMutex);
+    for (auto& connection : connections)
+        if (connection->open)
+            ::shutdown (connection->fd, SHUT_RD); // write side stays up for in-flight responses
+}
+
+
+#endif // platform transport

@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeWavFloat32 } from '../audio/wav.js';
 import { AudiodClient, daemonBinary } from './client.js';
 import type { AudiodEvent } from './protocol.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // Protocol tests against the real daemon in null-output mode: the null
 // clock pulls the transport at real-time pace, so spawn, handshake, load,
@@ -27,10 +28,7 @@ describe('event schema', () => {
   });
 });
 
-// win32: the binary exists but serve mode refuses until the named-pipe
-// transport (windows-portability.md chunk 4); every test here dials the
-// socket.
-describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol', () => {
+describe.skipIf(!binary)('field-audiod protocol', () => {
   let root: string;
   let client: AudiodClient;
 
@@ -50,7 +48,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol'
       }
       client.close();
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempProject(root);
   });
 
   it('handshakes, lists devices in null mode, and reports empty status', async () => {
@@ -180,7 +178,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol'
       await clients[0]!.quit();
       for (const c of clients) c.close();
     } finally {
-      rmSync(fresh, { recursive: true, force: true });
+      await removeTempProject(fresh);
     }
   });
 
