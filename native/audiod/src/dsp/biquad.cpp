@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 
 namespace field::dsp
@@ -12,7 +13,7 @@ Biquad design (const Band& band, double sampleRate)
     // Clamped to 45% of Nyquist: a bell parked at the very top of the
     // range would otherwise produce coefficients that blow up.
     const double frequency = std::min (band.frequency, sampleRate * 0.45);
-    const double w = (2.0 * M_PI * frequency) / sampleRate;
+    const double w = (2.0 * std::numbers::pi * frequency) / sampleRate;
     const double sn = std::sin (w);
     const double cs = std::cos (w);
     const double A = std::pow (10.0, band.gainDb / 40.0);
@@ -87,7 +88,7 @@ Biquad design (const Band& band, double sampleRate)
 
 double magnitudeDb (const Biquad& biquad, double frequency, double sampleRate)
 {
-    const double w = (2.0 * M_PI * std::min (frequency, sampleRate * 0.45)) / sampleRate;
+    const double w = (2.0 * std::numbers::pi * std::min (frequency, sampleRate * 0.45)) / sampleRate;
     const double cw = std::cos (w);
     const double sw = std::sin (w);
     const double c2w = std::cos (2.0 * w);

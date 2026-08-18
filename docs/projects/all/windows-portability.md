@@ -354,9 +354,34 @@ Recorded so the next reader does not re-derive it.
    binary. Transport-bound tests (fake daemons on `.sock` paths, the
    stub worker's AF_UNIX serve, two `#!/bin/sh` sclang fakes) are
    guarded per test with the reason beside them, decision-4-of-
-   linux-portability style — 9 in `version.test.ts`, 21 in
-   `generate.test.ts`, three describes in `aced`/`voiced`, 2 in
-   `build.test.ts` — and every guard names the chunk that removes it.
+   linux-portability style — 9 in `version.test.ts` naming chunk 4; 21
+   in `generate.test.ts` plus three describes in `aced`/`voiced` naming
+   the workers' §4, which is not chunk 4; 2 in `build.test.ts` naming
+   nothing, since only a second stub dialect removes them (#158 review
+   corrected an earlier version of this sentence).
+
+   **Amended again when the compiler arrived (2026-08-18).** MSVC found
+   two defects in the daemon that no amount of reading had: `M_PI` is
+   not standard C++ (glibc and Apple's libc++ hand it out, MSVC does
+   not), used six times across `biquad.cpp`, `mixdown.cpp` and
+   `resample.cpp` — now `std::numbers::pi`, the same double bit for
+   bit; and `LiveSession::Track`'s *implicit* copy constructor, which
+   clang never instantiates because nothing uses it, but MSVC's STL
+   compiles eagerly and rejects over the chain's `unique_ptr`s — Track
+   is now explicitly move-only, which is what it always was. One more
+   guard family joined at verification: the serve-mode describes
+   (`audiod/client`, `play-daemon`, plugin-hosting's live chains, and
+   four socket tests in `live-session`) run now that the binary exists
+   and refuse at the chunk-2 stub, so they skip on win32 naming chunk 4
+   — while `--render`, `--render-live` and `--scan` subprocess tests
+   run and pass. Verified in batches on the Windows machine: every
+   test file passes; `field-dsp-check` reports all block partitions
+   bit-identical, resampler included, which is chunk 3's first good
+   omen. The one caveat worth keeping: under full parallel load this
+   particular machine (OneDrive checkout, Defender re-scanning the
+   fresh exe per spawn) drops an occasional spawn — every such failure
+   re-ran green in isolation, and a CI runner shares none of those
+   conditions.
 3. **Determinism** (§1.4). Measure a Windows render against macOS and
    Linux; the toolchain floor or `clang-cl` depending on what the
    measurement says, and the UCRT — the unmeasured third libm — is where

@@ -148,6 +148,11 @@ function wavData(path: string): Buffer {
   return bytes.subarray(at + 8, at + 8 + size);
 }
 
+// The four tests below dial the socket; they wait on the named-pipe
+// transport (windows-portability.md chunk 4). The --render-live tests
+// around them run the binary as a subprocess and run everywhere.
+const itOverSocket = it.skipIf(process.platform === 'win32');
+
 describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
   let root: string;
 
@@ -175,7 +180,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     expect(live.equals(stem)).toBe(true);
   });
 
-  it('loads, plays, ramps, and locates a session over the socket', async () => {
+  itOverSocket('loads, plays, ramps, and locates a session over the socket', async () => {
     await scaffold(root);
     const { session } = await compileSession(root, 'opener');
 
@@ -251,7 +256,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     expect(diffSessions(before, before)).toEqual({ kind: 'same' });
   });
 
-  it('a session swap carries the transport (realtime.md chunk 3)', async () => {
+  itOverSocket('a session swap carries the transport (realtime.md chunk 3)', async () => {
     await scaffold(root);
     const { session } = await compileSession(root, 'opener');
     const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
@@ -503,7 +508,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     expect(convertedLength(24000, 48000, 48000)).toBe(24000);
   });
 
-  it('a device that cannot switch converts delivery instead of refusing', async () => {
+  itOverSocket('a device that cannot switch converts delivery instead of refusing', async () => {
     init({ dir: root, name: 'fortyfour', sampleRate: 44100 });
     createSong(root, 'opener');
     const tone = join(tmpdir(), `ff-tone-${process.pid}.wav`);
@@ -550,7 +555,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
     }
   });
 
-  it('a swap keeps converted delivery seamless: the queued tail survives', async () => {
+  itOverSocket('a swap keeps converted delivery seamless: the queued tail survives', async () => {
     // Swap-with-carry under conversion (cross-rate-live.md decision 3,
     // minjudd's finding on #143): the FIFO holds already-converted
     // audio the ear has not heard yet, and a swap that keeps the rate

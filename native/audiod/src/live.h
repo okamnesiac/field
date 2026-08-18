@@ -122,6 +122,17 @@ private:
 
     struct Track
     {
+        // Move-only, and said so: the chain holds unique_ptrs, nothing
+        // ever copies a Track, and MSVC eagerly compiles the vector
+        // copy path an implicit copy constructor would reference —
+        // clang and gcc never instantiate it, which is why this only
+        // surfaced on Windows.
+        Track() = default;
+        Track (const Track&) = delete;
+        Track& operator= (const Track&) = delete;
+        Track (Track&&) = default;
+        Track& operator= (Track&&) = default;
+
         std::string name;
         int rate = 0;
         std::vector<Window> windows;
