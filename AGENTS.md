@@ -9,7 +9,7 @@ is unfinished. The work itself lives in
 conventions: the three lists, plans cited by section so renumbering breaks
 references silently, and why a stale status line is worse than none.
 
-The docs are [overview](docs/README.md),
+The docs are [overview](docs/README.md), [CLI](docs/cli.md),
 [architecture](docs/architecture.md), [tracks](docs/tracks.md),
 [project model](docs/project-model.md), [build graph](docs/build-graph.md),
 [audio engine](docs/audio-engine.md).
