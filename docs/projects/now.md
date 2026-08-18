@@ -6,6 +6,12 @@ Delete the line when the work is genuinely over. Committed but not started
 lives in [next](next.md); uncommitted ideas in [later](later.md). See
 [README](README.md) for how these lists work.
 
+- [The UI, first version](all/ui.md) — implemented with mute and solo:
+  `field ui <song>` serves transport and flat lanes over the files,
+  mute is a placement field the engine excludes from the plan, solo is
+  a session-only alternate feed. Stays until real sessions have mixed
+  through it; ninjudd's #156 is the plan it implements.
+
 - [Windows portability](all/windows-portability.md) — every chunk has
   now been implemented: the checkout is byte-defined, MSVC builds the
   daemon and renders byte-identically to the macOS goldens, and the
