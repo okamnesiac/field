@@ -253,6 +253,18 @@ change making the readiness claim answers for what is still open.
    no `--from` would be a second, worse playback path kept alive on the
    platform with the least coverage. Without the daemon built, `field
    play` fails with "build the daemon", which is the honest answer.
+
+   **Amended 2026-08-18: the refusal covers every non-macOS platform,
+   not Windows alone.** #162's review found the CLI manual describing a
+   deliberate macOS-only fallback while the guard was win32-only —
+   Linux without a built daemon still spawned `afplay` and died with
+   ENOENT naming a macOS binary. The reasoning here was never about
+   Windows: `field play` is live evaluation since realtime.md, `afplay`
+   is dead code off macOS by definition, and the guard is the
+   difference between the build hint and a confusing error. Linux had
+   no plan recording the call ([linux-portability.md](linux-portability.md)
+   predates the fallback question), so this amendment is where it
+   lives.
 3. **`socketPathFor` grows a platform branch, in the same function.**
    `src/socketPath.ts` exists to keep the bound path inside `sun_path`'s
    104 bytes by returning a cwd-relative path; named pipes have no such

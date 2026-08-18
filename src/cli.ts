@@ -492,10 +492,14 @@ program
 
 // The retiring fallback for machines without the built daemon: playback
 // through afplay, no transport, no --from. macOS only, and deliberately
-// not replaced elsewhere: since realtime.md, `field play` IS live
-// evaluation in the daemon, and a second, worse playback path on the
-// platform with the least coverage would be a liability, not a feature
-// (windows-portability.md §2.2). Windows fails with the build hint.
+// not replaced anywhere else: since realtime.md, `field play` IS live
+// evaluation in the daemon, and a second, worse playback path would be
+// a liability, not a feature. Decided for Windows in
+// windows-portability.md §2.2 and widened to every non-macOS platform
+// with §2.2's own reasoning (recorded there as an amendment): afplay is
+// dead code off macOS by definition, so the guard is the difference
+// between the build hint and an ENOENT naming a tool the machine never
+// had (#162 review caught the docs describing the wide guard first).
 async function playWithAfplay(items: Playable[]): Promise<void> {
   if (process.platform !== 'darwin') {
     // afplay is a macOS binary: anywhere else the spawn below could only
