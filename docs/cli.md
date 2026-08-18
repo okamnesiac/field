@@ -412,11 +412,15 @@ unaffected.
 
 `field play` needs `field-audiod`. On macOS, a machine without the built
 daemon falls back to `afplay` for plain artifact playback, with no
-transport and no options; that fallback is deliberately macOS-only, so
-elsewhere an unbuilt daemon is an error telling you to run `pnpm
-build:native`. Porting the rest is tracked in
-[linux-portability.md](projects/all/linux-portability.md) and
-[windows-portability.md](projects/all/windows-portability.md).
+transport and no options. The fallback is attempted everywhere and only
+exists on macOS: today, off macOS, an unbuilt daemon fails with
+`afplay failed: spawn afplay ENOENT` after a stderr line pointing at
+`pnpm build:native`. The Windows port (#161, in review) replaces that
+with a plain refusal naming the build command on every non-macOS
+platform — the decision is recorded in
+[windows-portability.md](projects/all/windows-portability.md) §2.2 as
+amended. Porting the rest is tracked there and in
+[linux-portability.md](projects/all/linux-portability.md).
 
 ## Command reference
 
