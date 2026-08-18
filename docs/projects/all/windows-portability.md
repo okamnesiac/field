@@ -492,7 +492,17 @@ land as its own diff whenever.
   inherits both by construction if it lands after them.
 - **`field open`** (add-insert chunk 3, unlanded) will need `start`
   where macOS says `open` the day it exists — noted so its review asks.
-- **Display-only `relative()` calls** (`transport.ts:58,120`,
+- **Display-only `relative()` calls** (`transport.ts:120`,
   `version.ts:286`) print native separators by design and port as-is;
   named here so nobody "fixes" them into the §1.5 invariant, which is
   about paths that are *data*.
+- **`transport.ts:58` is data, not display — the invariant's other
+  half, already on the right side of it** (#158 review, correcting this
+  section's first pass, which filed it under display). `songDirOfPath`
+  splits its `relative()` result on the native `sep` and returns
+  `songs/<name>` slash-joined, and `transport.ts:44` compares that
+  against `song.dir` — the very field chunk 2 normalizes. Before that
+  fix the two disagreed on Windows and `field transport` could not
+  resolve a song from a path at all. It ports as-is *because* the
+  split below it is native; converting the `relative()` result to
+  forward slashes would break it.
