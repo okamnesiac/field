@@ -497,9 +497,12 @@ program
 // platform with the least coverage would be a liability, not a feature
 // (windows-portability.md §2.2). Windows fails with the build hint.
 async function playWithAfplay(items: Playable[]): Promise<void> {
-  if (process.platform === 'win32') {
+  if (process.platform !== 'darwin') {
+    // afplay is a macOS binary: anywhere else the spawn below could only
+    // die with ENOENT naming a tool this machine never had (#162 review
+    // caught the docs describing this guard before it was this wide).
     throw new Error(
-      'field-audiod is not built, and there is no fallback player on Windows — run `pnpm build:native`',
+      'field-audiod is not built, and the afplay fallback is macOS-only — run `pnpm build:native`',
     );
   }
   for (const item of items) {
