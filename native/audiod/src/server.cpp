@@ -297,6 +297,7 @@ void Server::acceptLoop()
         ov.hEvent = asHandle (acceptEvent);
         ResetEvent (ov.hEvent);
         bool connected = ConnectNamedPipe (pipe, &ov) != 0;
+        bool pending = false;
         if (! connected)
         {
             auto err = GetLastError();
@@ -304,6 +305,7 @@ void Server::acceptLoop()
                 connected = true;
             else if (err == ERROR_IO_PENDING)
             {
+                pending = true;
                 // A bounded poll rather than an INFINITE wait: SetEvent
                 // from beginShutdown can race the ResetEvent above and be
                 // swallowed, and a missed wake here deadlocks the drain
@@ -312,9 +314,33 @@ void Server::acceptLoop()
                 // rescan made for hot-plug.
                 while (WaitForSingleObject (ov.hEvent, 200) == WAIT_TIMEOUT && running) {}
                 DWORD ignored = 0;
-                connected = running && GetOverlappedResult (pipe, &ov, &ignored, FALSE) != 0;
+                if (running && GetOverlappedResult (pipe, &ov, &ignored, FALSE) != 0)
+                {
+                    connected = true;
+                    pending = false; // reaped: the kernel is done with ov
+                }
             }
         }
+
+        // `ov` is this thread's stack and the kernel owns it until the
+        // operation completes, so no exit from this iteration may leave a
+        // connect outstanding: the destructor joins this thread (freeing
+        // the frame) and only then closes the handle, which is when the
+        // kernel writes the completion status — into memory that is gone.
+        // Probed rather than argued on #161: the status lands *after*
+        // CloseHandle. readLoop never had this bug because every
+        // GetOverlappedResult there waits (TRUE) before its scope ends.
+        if (pending)
+        {
+            CancelIoEx (pipe, &ov);
+            DWORD ignored = 0;
+            // A connect that completed between the poll and the cancel is
+            // a real client: take it rather than dropping a connection
+            // the kernel already accepted.
+            if (GetOverlappedResult (pipe, &ov, &ignored, TRUE) != 0 && running)
+                connected = true;
+        }
+
         if (! running)
             break; // the destructor closes the parked instance
         if (! connected)
