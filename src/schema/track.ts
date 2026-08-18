@@ -97,6 +97,14 @@ const inputEntryFields = z
     // Balance, -1 left … 1 right, applied by this track while summing
     // (nested-tracks.md §1.13); a hard pan silences one channel.
     pan: z.number().min(-1).max(1).default(0),
+    // Silence this placement without deleting it or touching its level —
+    // the loop entry's `enabled:` shape applied to a whole placement.
+    // A field rather than a gain gesture because a gesture would
+    // overwrite the authored `gain_db`, and remembering the old value
+    // anywhere but the file is a second store (ui.md §3). On the
+    // placement, not the track, for the same reason levels are: a track
+    // placed twice can be muted in one home and audible in the other.
+    mute: z.boolean().default(false),
     fade_in: samples.default(0),
     fade_out: samples.default(0),
   })
@@ -140,6 +148,7 @@ export const inputEntryOrder: KeyOrder = {
     'slip',
     'gain_db',
     'pan',
+    'mute',
     'fade_in',
     'fade_out',
   ],

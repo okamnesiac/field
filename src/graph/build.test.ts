@@ -137,6 +137,42 @@ describe('build', () => {
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
+  it('a muted placement leaves the plan, and the toggle re-keys the stem', async () => {
+    // Mute is spec-borne (ui.md §3 via planFor): the placement is absent
+    // from the plan, so the action key moves on every toggle — and
+    // re-muting is a cache HIT on the first muted key, which is what
+    // proves the exclusion is deterministic rather than a gain hack.
+    const { state, runner } = countingRunner();
+    const twoPads = (muted: boolean) =>
+      [
+        'name: two-pads',
+        'inputs:',
+        '  - audio: pad',
+        '  - audio: pad',
+        '    anchor: absolute',
+        '    at: 96000',
+        ...(muted ? ['    mute: true'] : []),
+        '',
+      ].join('\n');
+    writeTrack('two-pads', twoPads(true));
+    await buildLabels(root, ['//songs/creek/track:two-pads'], runner);
+    expect(state.runs).toBe(1);
+
+    writeTrack('two-pads', twoPads(false));
+    await buildLabels(root, ['//songs/creek/track:two-pads'], runner);
+    expect(state.runs).toBe(2); // the placement returned to the plan
+
+    writeTrack('two-pads', twoPads(true));
+    await buildLabels(root, ['//songs/creek/track:two-pads'], runner);
+    expect(state.runs).toBe(2); // back to the first muted key: a hit
+  });
+
+  it('a source consumed only by muted placements drops out of the deps', async () => {
+    writeTrack('solo-mute', ['name: solo-mute', 'inputs:', '  - audio: pad', '    mute: true', ''].join('\n'));
+    const deps = queryDeps(root, 'deps(//songs/creek/track:solo-mute)');
+    expect(deps.some((d) => d.endsWith('asset:pad'))).toBe(false);
+  });
+
   it('committed outcomes name their file path (#35 review)', async () => {
     const { runner } = countingRunner();
     const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);

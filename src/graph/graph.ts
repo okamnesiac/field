@@ -378,6 +378,13 @@ export function buildGraph(project: LoadedProject): Graph {
         withInserts: boolean,
         extent: { lengthSamples?: number | undefined; loop?: boolean | undefined },
       ) => {
+        // Muted placements leave the plan here, before anything walks
+        // inputs — so the stem spec, its action key, the dep edges, and
+        // the live session (which reads these same specs) all agree the
+        // placement is absent, and a mute toggle re-keys the stem the
+        // way any spec edit does. One cut because planFor is where every
+        // consumer's view of the track is minted.
+        track = { ...track, inputs: track.inputs.filter((e) => !e.mute) };
         const rate = trackRate(track);
         // Rates convert at the placement (multi-rate.md decision 4): a
         // source arriving at another rate gets a resample node between it

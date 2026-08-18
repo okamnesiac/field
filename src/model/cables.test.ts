@@ -58,6 +58,7 @@ const entry = (fields: Partial<InputEntry>): InputEntry => ({
   slip: 0,
   gain_db: 0,
   pan: 0,
+  mute: false,
   fade_in: 0,
   fade_out: 0,
   ...fields,

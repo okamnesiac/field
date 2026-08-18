@@ -43,6 +43,7 @@ import { SESSION_VERSION, insertGrowth, insertLatency, type Session, type Sessio
 import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
 import { formatDiagnostic, loadProject } from '../model/project.js';
+import { applySolo } from '../model/solo.js';
 import type { SpecInsert } from '../generators/stem.js';
 import { toPluginWire } from '../audio/plugins.js';
 import { explain, type Explanation } from './build.js';
@@ -125,7 +126,7 @@ export interface CompiledSession {
 export async function compileSession(
   root: string,
   songName: string,
-  options: { loop?: boolean } = {},
+  options: { loop?: boolean; solo?: string } = {},
 ): Promise<CompiledSession> {
   const project = loadProject(root);
   const errors = project.diagnostics.filter((d) => d.severity !== 'warning');
@@ -139,6 +140,12 @@ export async function compileSession(
   }
   const song = project.songs.find((s) => s.name === songName);
   if (!song) throw new Error(`no such song "${songName}"`);
+  // Solo is session-only (model/solo.ts): the loaded copy is filtered
+  // before the graph is built, the files never change, and the un-soloed
+  // session comes back by compiling without the option. Validation ran
+  // above on the real project, so a red project refuses identically
+  // soloed or not.
+  if (options.solo !== undefined) applySolo(song, options.solo);
   const graph: Graph = buildGraph(project);
 
   // The song's track nodes, keyed by name; their deps aligned to sources.
