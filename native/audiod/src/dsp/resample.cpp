@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <cstdint>
+#include <numbers>
 #include <numeric>
 #include <stdexcept>
 #include <string>
