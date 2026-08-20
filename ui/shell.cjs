@@ -17,7 +17,10 @@ const { tmpdir } = require('node:os');
 // writable instead of failing noisily against a default path this
 // process may not own — the "Unable to move the cache" spew is the
 // symptom, and it drowns the page console this shell exists to surface.
-app.setPath('userData', join(tmpdir(), 'field-ui-profile'));
+// Per-user, because tmpdir() is shared on Linux: a fixed name there
+// belongs to whoever launches first, and the second user's failure
+// arrives as exactly the cache noise this line exists to remove.
+app.setPath('userData', join(tmpdir(), `field-ui-profile-${process.getuid?.() ?? 'win'}`));
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 const url = process.argv[2];

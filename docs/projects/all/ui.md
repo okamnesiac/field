@@ -135,7 +135,10 @@ not here, so the next settlement does not stale this line.
   Tauri buy native menus, a dock icon, and window adjacency with
   chunk 3's plugin editors, at the price of a shell runtime and its
   updates. Leaning: browser first, shell when editor adjacency
-  actually hurts.
+  actually hurts. **Settled 2026-08-20: the shell, and the lean was
+  wrong about which cost bites first** — see §6. Adjacency never came
+  up; being unable to see a blank window's console did, on the first
+  day the thing was opened.
 - **Where the client lives.** A pnpm workspace package (`ui/`), or
   `src/ui/` with its own tsconfig for DOM types. The repo is a single
   package today; the workspace split is cleaner for a DOM/bundler
@@ -218,10 +221,28 @@ where this section says otherwise, and the mute non-goal fell the way
   what changed is only which client of the daemon renders bars, and
   reusing the CLI's own projection beat porting it to a second runtime.
 - **§5's remaining questions, answered by the flip**: the client lives
-  in a `ui/` workspace package; browser tab, no shell; fader drags
-  write on release with no live ramps inside the gesture (the bounded
-  option §5 recorded stays open for later, with its rollback
-  obligations noted); hand-rolled CSS. The stack record itself is
+  in a `ui/` workspace package; fader drags write on release with no
+  live ramps inside the gesture (the bounded option §5 recorded stays
+  open for later, with its rollback obligations noted); hand-rolled
+  CSS.
+- **A desktop shell, not a browser tab — and not for §5's reason**
+  (amended 2026-08-20; this bullet said "browser tab, no shell" when
+  first written, and shipped the opposite two days later). §5 conditioned
+  the shell on window adjacency with chunk 3's plugin editors, and that
+  trigger has not fired — those editors do not exist yet. Two other
+  reasons did fire, on the first session that opened the thing:
+  a browser tab is the wrong answer to "open my project" when the tab
+  belongs to whatever browser happens to be default and the window
+  cannot own its own lifetime; and **a blank tab cannot be diagnosed
+  remotely**. The first render crashed on a React error nobody could
+  see, and the fix that found it was the shell mirroring the renderer's
+  console to the terminal `field ui` was launched from. A tool whose
+  failures are invisible to the person who can fix them is the more
+  expensive kind of cheap. Electron, because the client is already a web
+  app and Tauri would add a Rust toolchain the stack does not have;
+  `--browser` keeps the tab as an opt-out, and a missing Electron falls
+  back to it rather than failing. Its weight is real and recorded with
+  the rest in [project-core.md](project-core.md) §5. The stack record itself is
   amended in [project-core.md](project-core.md) §5 (2026-08-18): the
   `ui/` workspace member against §5's single-package sentence, `ws` on
   the server, react + vite inside the member only — with the reasons

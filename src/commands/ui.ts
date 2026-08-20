@@ -311,10 +311,14 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   const port = typeof address === 'object' && address !== null ? address.port : 0;
   const url = `http://127.0.0.1:${port}/?t=${token}`;
   process.stdout.write(`field ui: ${url}\n`);
-  // The shell is the front door (ui.md §5 as amended): a window of its
-  // own rather than a tab in whatever browser happens to be default.
-  // --browser opts back out, and a missing Electron falls back rather
-  // than failing — the printed URL always works.
+  // The shell is the front door (ui.md §6, settling §5's open question):
+  // a window of its own rather than a tab in whatever browser happens to
+  // be default — it owns its lifetime, and it can mirror the page's
+  // console to this terminal, which is the only reason the first blank
+  // window was diagnosable at all. --browser opts back out, and a
+  // missing Electron falls back rather than failing; the printed URL
+  // always works. The dependency's weight is recorded in
+  // project-core.md §5.
   const { spawn } = await import('node:child_process');
   let shell: ReturnType<typeof spawn> | undefined;
   const openInBrowser = () => {
