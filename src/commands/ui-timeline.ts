@@ -8,9 +8,9 @@ import { sha256Text } from '../hash.js';
 import type { InputEntry, TrackTime } from '../schema/index.js';
 import type { UiMark, UiTimeline, UiTimelineLane } from './ui-protocol.js';
 
-// The song seen in time: a pure projection from the
-// loaded project to lanes with absolute sample windows, plus the bar
-// marks the ruler draws.
+// The song seen in time: a pure projection from the loaded project to
+// lanes with absolute sample windows, plus the bar marks the ruler
+// draws.
 //
 // From the files, not the compiled session, for the plan's reason: the
 // session is a build artifact whose shape depends on cache state, so a
@@ -25,9 +25,9 @@ import type { UiMark, UiTimeline, UiTimelineLane } from './ui-protocol.js';
 // one bug this view cannot afford, because the picture is the evidence.
 
 // Bars are not linear in samples: a tempo event may ramp, so a client
-// interpolating between two marks draws the grid wrong exactly where the
-// music is doing something interesting. Every bar
-// gets its own mark, projected through the real map.
+// interpolating between two marks draws the grid wrong exactly where
+// the music is doing something interesting. Every bar gets its own
+// mark, projected through the real map.
 function barMarks(tempo: TempoMap, meter: MeterMap, lengthSamples: number): UiMark[] {
   const marks: UiMark[] = [];
   let bar = 1;

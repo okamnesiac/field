@@ -87,10 +87,10 @@ export interface UiEvent {
 // Server → client.
 export type UiDown = UiSnapshot | UiError | UiEvent;
 
-// The song in time (ui-timeline.md). Absolute sample windows, projected
-// server-side through the planner's own arithmetic, plus one mark per
-// bar — bars are not linear in samples across a tempo ramp, so the ruler
-// ships marks rather than asking the view to interpolate (§4).
+// The song in time. Absolute sample windows, projected server-side
+// through the planner's own arithmetic, plus one mark per bar — bars are
+// not linear in samples across a tempo ramp, so the ruler ships marks
+// rather than asking the view to interpolate.
 export interface UiMark {
   sample: number;
   bar: number;
