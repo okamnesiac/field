@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWav } from '../audio/wav.js';
 import { placedWindow } from '../generators/stem.js';
@@ -125,6 +125,12 @@ export function projectTimeline(
   // `seen` is a backstop so a project that somehow reached here with a
   // cycle produces a truncated picture rather than a hung server.
   const laneFor = (
+    // The LoadedFile itself: its `raw` is the exact text `data` was
+    // parsed from, which is what makes the hash below describe the
+    // document the lane was actually built out of. Re-reading the file
+    // here would let the lane's content come from one read and its
+    // stale guard from another, and an edit validated against the
+    // second would land on a document the view never rendered.
     owner: { data: { name: string; inputs: InputEntry[]; time?: TrackTime | undefined }; path: string; raw: string },
     entry: InputEntry,
     index: number,
@@ -163,7 +169,7 @@ export function projectTimeline(
             .filter((c) => c.receive === undefined)
             .map((child, i) =>
               laneFor(
-                { data: placed!.data, path: placed!.path, raw: readFileSync(join(root, placed!.path), 'utf8') },
+                placed!,
                 child,
                 i,
                 startSample,
@@ -180,19 +186,9 @@ export function projectTimeline(
     };
   };
 
-  const mainRaw = main ? readFileSync(join(root, main.path), 'utf8') : '';
   const lanes = (main?.data.inputs ?? [])
     .filter((e) => e.receive === undefined)
-    .map((entry, i) =>
-      laneFor(
-        { data: main!.data, path: main!.path, raw: mainRaw },
-        entry,
-        i,
-        0,
-        0,
-        new Set(['main']),
-      ),
-    );
+    .map((entry, i) => laneFor(main!, entry, i, 0, 0, new Set(['main'])));
 
   return {
     rate: sessionRate,
