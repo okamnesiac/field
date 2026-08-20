@@ -356,7 +356,24 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       sockets.add(ws);
       ws.on('message', (data) => void handle(ws, String(data)));
       ws.on('close', () => sockets.delete(ws));
-      void snapshot().then((s) => ws.send(JSON.stringify(s)));
+      // Through the same chain the broadcasts use, or a window can open
+      // on a stale value: this read starts before an edit, an edit's
+      // broadcast reaches the freshly added socket first, and then this
+      // one resolves and overwrites it with the older state — the same
+      // frame-of-wrong-state the chain exists to prevent, arriving
+      // through the door instead of mid-session. Sent directly rather
+      // than via pushSnapshot because a new socket must be told the
+      // current state even when it matches what everyone else was last
+      // told, which is exactly what the dedupe suppresses. lastSent is
+      // deliberately not touched here: this send informs one socket, and
+      // claiming it for all of them would suppress the next broadcast
+      // the others still need.
+      pending = (pending ?? Promise.resolve()).then(
+        async () => {
+          ws.send(JSON.stringify(await snapshot()));
+        },
+        () => {},
+      );
     });
   });
 

@@ -31,6 +31,12 @@ concurrency:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    # The ui/ workspace member pulls electron, whose postinstall fetches
+    # a ~100 MB Chromium nobody runs here: CI typechecks and builds the
+    # client, it never opens the shell. Skipping the download keeps the
+    # workspace install the cost it was before ui/ existed.
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -41,6 +47,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      # ui/ is its own workspace member with its own tsconfig, so neither
+      # the root typecheck nor the root build touches it — this is the
+      # only thing standing between the client and silent rot. `build`
+      # there is `tsc --noEmit && vite build`, so it is the typecheck
+      # too. Linux only: it is seconds of platform-neutral bundling, and
+      # duplicating it on the 10x runner buys nothing.
+      - run: pnpm --dir ui build
       # The example project, checked by the CLI that was just built. This
       # is the reason bloom moved into the tree (bloom-in-tree.md §1): the
       # format's only real consumer used to live in another repository,
@@ -111,6 +124,8 @@ jobs:
   # the OS, since MSVC objects and ELF objects share nothing.
   windows:
     runs-on: windows-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
