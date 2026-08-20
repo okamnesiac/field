@@ -133,39 +133,39 @@ export function App() {
       <div className={`lane ${lane.mute ? 'muted' : ''} ${dimmed ? 'dimmed' : ''}`}>
         <span className="name" title={lane.file}>{lane.name}</span>
         <div className="lane-ctl">
-        <button
-          className={`mute ${lane.mute ? 'on' : ''}`}
-          title="mute (writes mute: on this placement)"
-          onClick={() => edit(lane, { mute: !lane.mute })}
-        >
-          M
-        </button>
-        {lane.canSolo && (
           <button
-            className={`solo ${soloedHere ? 'on' : ''}`}
-            title="solo (session-only: an alternate feed, nothing written)"
-            onClick={() => send({ type: 'solo', track: soloedHere ? null : lane.name })}
+            className={`mute ${lane.mute ? 'on' : ''}`}
+            title="mute (writes mute: on this placement)"
+            onClick={() => edit(lane, { mute: !lane.mute })}
           >
-            S
+            M
           </button>
-        )}
-        <input
-          className="gain"
-          type="range"
-          min={-60}
-          max={12}
-          step={0.5}
-          value={gain}
-          onChange={(e) => setDrag({ ...drag, [lane.entry]: Number(e.target.value) })}
-          onPointerUp={() => {
-            if (drag[lane.entry] !== undefined) {
-              edit(lane, { gain_db: drag[lane.entry] });
-              setDrag(({ [lane.entry]: _done, ...rest }) => rest);
-            }
-          }}
-        />
-        <span className="db">{gain > 0 ? `+${gain}` : gain}</span>
-        </div>
+          {lane.canSolo && (
+            <button
+              className={`solo ${soloedHere ? 'on' : ''}`}
+              title="solo (session-only: an alternate feed, nothing written)"
+              onClick={() => send({ type: 'solo', track: soloedHere ? null : lane.name })}
+            >
+              S
+            </button>
+          )}
+          <input
+            className="gain"
+            type="range"
+            min={-60}
+            max={12}
+            step={0.5}
+            value={gain}
+            onChange={(e) => setDrag({ ...drag, [lane.entry]: Number(e.target.value) })}
+            onPointerUp={() => {
+              if (drag[lane.entry] !== undefined) {
+                edit(lane, { gain_db: drag[lane.entry] });
+                setDrag(({ [lane.entry]: _done, ...rest }) => rest);
+              }
+            }}
+          />
+          <span className="db">{gain > 0 ? `+${gain}` : gain}</span>
+          </div>
       </div>
     );
   };
