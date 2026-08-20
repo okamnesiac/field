@@ -158,15 +158,14 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       clock: song.time
         ? { sampleRate: loaded.sample_rate, tempo: song.time.tempo, meter: song.time.meter }
         : undefined,
-      // The song in time. Keyed on the file's own hash so a rebuilt stem
-      // redraws its envelope and an unchanged one costs nothing.
+      // The song in time. Envelopes are memoised inside the projection,
+      // keyed on each artifact's own size and mtime.
       timeline: projectTimeline(
         root,
         song,
         loaded.sample_rate,
         status.samples > 0 ? status.samples : loaded.samples,
         WAVE_BUCKETS,
-        (track) => `${track}:${status.samples}`,
       ),
     };
   };
@@ -319,7 +318,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         // comparison would suppress the one update that matters and the
         // playhead would sit still until the next event — and while
         // paused the daemon broadcasts no position events at all
-        // (ui-timeline.md §8's "snapshot-after-locate fix"). Clearing
+        // Clearing
         // the last-sent key forces this one through.
         lastSent = undefined;
         await pushSnapshot();

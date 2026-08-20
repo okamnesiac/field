@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWav } from '../audio/wav.js';
 import { placedWindow } from '../generators/stem.js';
@@ -6,7 +6,7 @@ import type { LoadedSong } from '../model/project.js';
 import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
 import type { UiClip, UiMark, UiTimeline } from './ui-protocol.js';
 
-// The song seen in time (ui-timeline.md §3): a pure projection from the
+// The song seen in time: a pure projection from the
 // loaded project to lanes with absolute sample windows, plus the bar
 // marks the ruler draws.
 //
@@ -24,7 +24,7 @@ import type { UiClip, UiMark, UiTimeline } from './ui-protocol.js';
 
 // Bars are not linear in samples: a tempo event may ramp, so a client
 // interpolating between two marks draws the grid wrong exactly where the
-// music is doing something interesting (ui-timeline.md §4). Every bar
+// music is doing something interesting. Every bar
 // gets its own mark, projected through the real map.
 function barMarks(tempo: TempoMap, meter: MeterMap, lengthSamples: number): UiMark[] {
   const marks: UiMark[] = [];
@@ -51,16 +51,25 @@ function barMarks(tempo: TempoMap, meter: MeterMap, lengthSamples: number): UiMa
 
 // Peak envelope for a lane, in buckets across the whole song.
 //
-// ui-timeline.md §9 makes waveforms a non-goal, on the grounds that
-// doing them properly needs a peaks artifact with a build rule, a cache
-// and an invalidation story. That argument is about the artifact, and it
-// still stands for large material. This computes the envelope on demand
-// from the stem the build already materialized, keyed on that file's
-// content, which is enough for a song of this size and buys the picture
-// its content — deliberately the cheap half, recorded as such.
+// Deliberately the cheap half of waveforms. Doing them properly means a
+// peaks artifact with a build rule, a cache and an invalidation story —
+// a project of its own, and still the right answer for long material.
+// This computes the envelope on demand from the stem the build already
+// materialized and memoises it by that file's identity, which is enough
+// for songs of a few minutes and buys the picture its content now.
 const peakCache = new Map<string, number[]>();
-export function peaksFor(path: string, buckets: number, key: string): number[] | undefined {
+export function peaksFor(path: string, buckets: number): number[] | undefined {
   if (!existsSync(path)) return undefined;
+  // Keyed on the artifact's own identity — size and modification time —
+  // rather than on anything about the song. An earlier version keyed on
+  // the session's total length, which does not move when a stem's
+  // contents change, so every same-length edit (a fader, a mute, an
+  // insert: nearly all of them) redrew the previous audio. The build
+  // materializes by rename and skips entirely when the bytes already
+  // match, so mtime moves exactly when the content does and not
+  // otherwise.
+  const stat = statSync(path);
+  const key = `${path}:${stat.size}:${stat.mtimeMs}`;
   const cached = peakCache.get(key);
   if (cached) return cached;
   let wav;
@@ -99,9 +108,6 @@ export function projectTimeline(
   sessionRate: number,
   lengthSamples: number,
   peakBuckets: number,
-  // Content hash per track, so a rebuilt stem redraws and an unchanged
-  // one is free.
-  stemKey: (track: string) => string,
 ): UiTimeline {
   const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
   const main = byName.get('main');
@@ -146,11 +152,7 @@ export function projectTimeline(
       peaks:
         placedName === undefined
           ? undefined
-          : peaksFor(
-              join(root, '.field', 'out', song.dir, 'track', `${placedName}.wav`),
-              peakBuckets,
-              `${placedName}:${stemKey(placedName)}`,
-            ),
+          : peaksFor(join(root, '.field', 'out', song.dir, 'track', `${placedName}.wav`), peakBuckets),
     };
   });
 

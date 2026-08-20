@@ -147,7 +147,7 @@ footer {
   padding: 0 0.3rem;
 }
 
-/* --- timeline (ui-timeline.md §2) ------------------------------------
+/* --- timeline ------------------------------------
    One scroller, two sticky axes: the header column sticks left, the
    ruler row sticks top, so vertical scroll moves both halves and no
    sync handler can drift. */

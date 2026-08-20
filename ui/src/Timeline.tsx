@@ -1,17 +1,17 @@
 import type { UiSnapshot } from '../../src/commands/ui-protocol.js';
 
-// The song seen in time (ui-timeline.md §2): headers on the left,
+// The song seen in time: headers on the left,
 // lanes on one shared axis to the right, under a bar ruler, with a
 // playhead.
 //
-// One scroll container and two sticky axes, per the plan: the header
+// One scroll container and two sticky axes: the header
 // column sticks left, the ruler row sticks top, and vertical scrolling
 // therefore moves both halves by construction. No scroll-sync handler
 // exists to drift out of step.
 //
 // Geometry is read, never dragged. The only gesture is clicking the
 // axis to locate — dragging clips is a different class of interaction
-// and an explicit non-goal (§9).
+// deliberately out of scope here.
 
 interface Props {
   snap: UiSnapshot;
@@ -25,7 +25,7 @@ const LANE_H = 56;
 export function Timeline({ snap, playSample, onLocate, children }: Props) {
   const tl = snap.timeline;
   if (!tl || tl.length <= 0) return null;
-  const pxPerSample = 900 / tl.length; // fit the song; wheel zoom is §8's
+  const pxPerSample = 900 / tl.length; // fit the song; wheel zoom is a follow-on
   const x = (sample: number) => sample * pxPerSample;
   const width = Math.max(320, x(tl.length));
 
