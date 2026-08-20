@@ -70,6 +70,7 @@ export interface UiSnapshot {
   devices: { devices: UiDevice[]; null_output: boolean };
   status: UiStatus;
   clock?: UiClock | undefined; // absent when the song has no tempo map
+  timeline?: UiTimeline | undefined;
 }
 
 export interface UiError {
@@ -85,3 +86,38 @@ export interface UiEvent {
 
 // Server → client.
 export type UiDown = UiSnapshot | UiError | UiEvent;
+
+// The song in time (ui-timeline.md). Absolute sample windows, projected
+// server-side through the planner's own arithmetic, plus one mark per
+// bar — bars are not linear in samples across a tempo ramp, so the ruler
+// ships marks rather than asking the view to interpolate (§4).
+export interface UiMark {
+  sample: number;
+  bar: number;
+}
+
+export interface UiClip {
+  start: number;
+  duration: number;
+  // False when the placement declined to declare a length: the source's
+  // extent is not knowable while planning, and the block says so rather
+  // than drawing a guess as measurement.
+  exact: boolean;
+  name: string;
+}
+
+export interface UiTimelineLane {
+  entry: number; // ties the lane to its header row, and to the edit locator
+  start: number;
+  duration: number;
+  clips: UiClip[];
+  // Peak envelope across the song, when the stem has been materialized.
+  peaks?: number[] | undefined;
+}
+
+export interface UiTimeline {
+  rate: number;
+  length: number;
+  marks: UiMark[];
+  lanes: UiTimelineLane[];
+}

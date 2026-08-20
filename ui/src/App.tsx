@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 // pure functions over the event arrays the snapshot carries, so the
 // view's bars and the CLI's cannot disagree.
 import { MeterMap, TempoMap } from '../../src/time/tempo.js';
+import { Timeline } from './Timeline.js';
 
 // The first face (ui.md): transport and flat lanes over the files. The
 // view renders server truth; local state exists only inside a gesture —
@@ -24,6 +25,7 @@ export function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [state, setState] = useState('stopped');
   const [position, setPosition] = useState('');
+  const [playSample, setPlaySample] = useState(0);
   // The playhead the view runs itself: the last sample the daemon
   // reported and when it arrived. Between reports the position is that
   // sample plus however long ago it landed — which is what makes the
@@ -89,6 +91,7 @@ export function App() {
         const mins = Math.floor(seconds / 60);
         const secs = (seconds - mins * 60).toFixed(1).padStart(4, '0');
         setPosition(`${meter.format(Math.round(tempo.samplesToTicks(sample)))} (${mins}:${secs})`);
+        setPlaySample(sample);
       }
       frame = requestAnimationFrame(tick);
     };
@@ -111,6 +114,70 @@ export function App() {
       </main>
     );
   }
+
+
+  // One lane's controls. Extracted so the timeline can place them in its
+  // header column without the handlers changing at all.
+  const laneControls = (lane: Snapshot['lanes'][number]) => {
+     const gain = drag[lane.entry] ?? lane.gain_db;
+    const soloedHere = snap.soloed === lane.name;
+    const dimmed = snap.soloed !== null && !soloedHere;
+    return (
+      <div key={lane.entry} className={`lane ${lane.mute ? 'muted' : ''} ${dimmed ? 'dimmed' : ''}`}>
+        <span className="name" title={lane.kind}>
+          {lane.name}
+        </span>
+        {lane.empty && (
+          <span className="empty-tag" title="this track has no inputs — it renders silence">
+            empty
+          </span>
+        )}
+        <button
+          className={`mute ${lane.mute ? 'on' : ''}`}
+          title="mute (writes mute: to the placement)"
+          onClick={() => edit(lane.entry, { mute: !lane.mute })}
+        >
+          M
+        </button>
+        {lane.canSolo && (
+          <button
+            className={`solo ${soloedHere ? 'on' : ''}`}
+            title="solo (session-only: an alternate feed, nothing written)"
+            onClick={() => send({ type: 'solo', track: soloedHere ? null : lane.name })}
+          >
+            S
+          </button>
+        )}
+        <input
+          className="gain"
+          type="range"
+          min={-60}
+          max={12}
+          step={0.5}
+          value={gain}
+          onChange={(e) => setDrag({ ...drag, [lane.entry]: Number(e.target.value) })}
+          onPointerUp={() => {
+            if (drag[lane.entry] !== undefined) {
+              edit(lane.entry, { gain_db: drag[lane.entry] });
+              setDrag(({ [lane.entry]: _done, ...rest }) => rest);
+            }
+          }}
+        />
+        <span className="db">{gain > 0 ? `+${gain}` : gain} dB</span>
+        <input
+          className="pan"
+          type="range"
+          min={-1}
+          max={1}
+          step={0.05}
+          value={lane.pan}
+          onChange={(e) => edit(lane.entry, { pan: Number(e.target.value) })}
+          title="pan"
+        />
+        {lane.inserts.length > 0 && <span className="inserts">{lane.inserts.join(' → ')}</span>}
+      </div>
+    );
+  };
 
   return (
     <main>
@@ -146,68 +213,25 @@ export function App() {
           </button>
         </div>
       )}
-      <section className="lanes">
-        {snap.lanes.map((lane) => {
-          const gain = drag[lane.entry] ?? lane.gain_db;
-          const soloedHere = snap.soloed === lane.name;
-          const dimmed = snap.soloed !== null && !soloedHere;
-          return (
-            <div key={lane.entry} className={`lane ${lane.mute ? 'muted' : ''} ${dimmed ? 'dimmed' : ''}`}>
-              <span className="name" title={lane.kind}>
-                {lane.name}
-              </span>
-              {lane.empty && (
-                <span className="empty-tag" title="this track has no inputs — it renders silence">
-                  empty
-                </span>
-              )}
-              <button
-                className={`mute ${lane.mute ? 'on' : ''}`}
-                title="mute (writes mute: to the placement)"
-                onClick={() => edit(lane.entry, { mute: !lane.mute })}
-              >
-                M
-              </button>
-              {lane.canSolo && (
-                <button
-                  className={`solo ${soloedHere ? 'on' : ''}`}
-                  title="solo (session-only: an alternate feed, nothing written)"
-                  onClick={() => send({ type: 'solo', track: soloedHere ? null : lane.name })}
-                >
-                  S
-                </button>
-              )}
-              <input
-                className="gain"
-                type="range"
-                min={-60}
-                max={12}
-                step={0.5}
-                value={gain}
-                onChange={(e) => setDrag({ ...drag, [lane.entry]: Number(e.target.value) })}
-                onPointerUp={() => {
-                  if (drag[lane.entry] !== undefined) {
-                    edit(lane.entry, { gain_db: drag[lane.entry] });
-                    setDrag(({ [lane.entry]: _done, ...rest }) => rest);
-                  }
-                }}
-              />
-              <span className="db">{gain > 0 ? `+${gain}` : gain} dB</span>
-              <input
-                className="pan"
-                type="range"
-                min={-1}
-                max={1}
-                step={0.05}
-                value={lane.pan}
-                onChange={(e) => edit(lane.entry, { pan: Number(e.target.value) })}
-                title="pan"
-              />
-              {lane.inserts.length > 0 && <span className="inserts">{lane.inserts.join(' → ')}</span>}
-            </div>
-          );
-        })}
-      </section>
+      {/* The controls are unchanged; the timeline lays them out as its
+          header column so a lane's fader sits on the lane's own row. */}
+      <Timeline
+        snap={snap}
+        playSample={playSample}
+        onLocate={(sample) => {
+          // Optimistic: the click already says where, so the playhead
+          // moves now and the daemon's next report corrects it. Waiting
+          // for the round trip is what makes a transport feel dead.
+          setPlaySample(sample);
+          anchor.current = { sample, at: performance.now() };
+          send({ type: 'locate', sample });
+        }}
+        children={(entry) => {
+          const lane = snap.lanes.find((l) => l.entry === entry);
+          if (!lane) return null;
+          return laneControls(lane);
+        }}
+      />
       <footer>
         {snap.file.path} — files are the source of truth; edits land as YAML diffs
       </footer>

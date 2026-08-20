@@ -14,6 +14,7 @@ import { loadProject } from '../model/project.js';
 import { trackOrder } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 import type { UiLane, UiSnapshot } from './ui-protocol.js';
+import { projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
 import { watchLiveSession } from './watch-live.js';
 
@@ -63,6 +64,11 @@ const upSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('solo'), track: z.string().nullable() }),
   editSchema,
 ]);
+
+// Envelope resolution: one peak per bucket across the whole song. 1200
+// is finer than any lane is wide on a normal screen, so zooming in
+// stays smooth without shipping a second resolution.
+const WAVE_BUCKETS = 1200;
 
 export interface UiOptions {
   port?: number;
@@ -152,6 +158,16 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       clock: song.time
         ? { sampleRate: loaded.sample_rate, tempo: song.time.tempo, meter: song.time.meter }
         : undefined,
+      // The song in time. Keyed on the file's own hash so a rebuilt stem
+      // redraws its envelope and an unchanged one costs nothing.
+      timeline: projectTimeline(
+        root,
+        song,
+        loaded.sample_rate,
+        status.samples > 0 ? status.samples : loaded.samples,
+        WAVE_BUCKETS,
+        (track) => `${track}:${status.samples}`,
+      ),
     };
   };
 
@@ -297,7 +313,17 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       if (msg.type === 'play') await client.play();
       else if (msg.type === 'pause') await client.pause();
       else if (msg.type === 'stop') await client.stop();
-      else if (msg.type === 'locate') await client.locate(msg.sample);
+      else if (msg.type === 'locate') {
+        await client.locate(msg.sample);
+        // Locate moves exactly the field the dedupe ignores, so the
+        // comparison would suppress the one update that matters and the
+        // playhead would sit still until the next event — and while
+        // paused the daemon broadcasts no position events at all
+        // (ui-timeline.md §8's "snapshot-after-locate fix"). Clearing
+        // the last-sent key forces this one through.
+        lastSent = undefined;
+        await pushSnapshot();
+      }
       else if (msg.type === 'device') {
         await client.selectDevice(msg.name);
         await pushSnapshot();
