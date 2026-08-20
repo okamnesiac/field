@@ -246,3 +246,45 @@ footer {
   pointer-events: none;
   z-index: 4;
 }
+
+.twirl {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  width: 1.1rem;
+  padding: 0;
+  opacity: 0.75;
+  font-size: 0.8rem;
+}
+.twirl-spacer {
+  display: inline-block;
+  width: 1.1rem;
+}
+.tl-header .lane {
+  background: none;
+  border: none;
+  padding: 0.25rem 0.4rem;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+.tl-header .lane .name {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.tl-header .lane .gain {
+  flex: 0 0 54px;
+}
+.tl-header .lane .db {
+  width: 2.6rem;
+  font-size: 0.75rem;
+}
+.tl-block.muted {
+  opacity: 0.3;
+}
+.tl-block.d1 { background: #24313d; }
+.tl-block.d2 { background: #26303a; }
+.tl-block.d3 { background: #272f36; }

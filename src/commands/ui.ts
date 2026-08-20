@@ -44,6 +44,9 @@ import { watchLiveSession } from './watch-live.js';
 
 const editSchema = z.object({
   type: z.literal('edit'),
+  // Which file the placement lives in. Absent means main.yaml, which is
+  // what every top-level lane edits and what the first version sent.
+  file: z.string().optional(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   entry: z.number().int().min(0),
   set: z
@@ -263,8 +266,19 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   );
 
   const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
-    const { main } = mainFile();
-    const absolute = join(root, main.path);
+    const { song, main } = mainFile();
+    // Resolved against the song's own track paths, never joined: a
+    // client-supplied path reaching join(root, …) is a traversal, and
+    // this socket accepts writes.
+    const target =
+      msg.file === undefined
+        ? main.path
+        : song.tracks.find((t) => t.path === msg.file)?.path;
+    if (target === undefined) {
+      socket.send(JSON.stringify({ type: 'error', message: `no such track file: ${msg.file}` }));
+      return;
+    }
+    const absolute = join(root, target);
     const raw = readFileSync(absolute, 'utf8');
     if (sha256Text(raw) !== msg.sha256) {
       // Stale base: the file moved underneath this view. Refresh rather
@@ -315,11 +329,10 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       else if (msg.type === 'locate') {
         await client.locate(msg.sample);
         // Locate moves exactly the field the dedupe ignores, so the
-        // comparison would suppress the one update that matters and the
-        // playhead would sit still until the next event — and while
-        // paused the daemon broadcasts no position events at all
-        // Clearing
-        // the last-sent key forces this one through.
+        // comparison would suppress the one update that matters — and
+        // while paused the daemon broadcasts no position events at all,
+        // so nothing else would move the playhead. Clearing the
+        // last-sent key forces this one through.
         lastSent = undefined;
         await pushSnapshot();
       }

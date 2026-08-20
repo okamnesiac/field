@@ -107,11 +107,25 @@ export interface UiClip {
 }
 
 export interface UiTimelineLane {
-  entry: number; // ties the lane to its header row, and to the edit locator
+  entry: number; // index within `file` below — the edit locator
+  // Which file this lane's placement lives in. A top-level lane is a
+  // placement in main.yaml; a child lane is a placement in the placing
+  // track's own file, so an edit has to say which. The server validates
+  // this against the song's known track paths and never joins it.
+  file: string;
+  sha256: string; // per-file stale guard, since a lane may edit any of them
+  name: string;
   start: number;
   duration: number;
+  depth: number;
+  gain_db: number;
+  pan: number;
+  mute: boolean;
+  canSolo: boolean;
+  // Null when this lane places audio rather than a track: there is
+  // nothing underneath, so no twirl is offered.
+  children: UiTimelineLane[] | null;
   clips: UiClip[];
-  // Peak envelope across the song, when the stem has been materialized.
   peaks?: number[] | undefined;
 }
 

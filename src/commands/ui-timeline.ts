@@ -1,10 +1,12 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWav } from '../audio/wav.js';
 import { placedWindow } from '../generators/stem.js';
 import type { LoadedSong } from '../model/project.js';
 import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
-import type { UiClip, UiMark, UiTimeline } from './ui-protocol.js';
+import { sha256Text } from '../hash.js';
+import type { InputEntry, TrackTime } from '../schema/index.js';
+import type { UiMark, UiTimeline, UiTimelineLane } from './ui-protocol.js';
 
 // The song seen in time: a pure projection from the
 // loaded project to lanes with absolute sample windows, plus the bar
@@ -68,12 +70,16 @@ export function peaksFor(path: string, buckets: number): number[] | undefined {
   // materializes by rename and skips entirely when the bytes already
   // match, so mtime moves exactly when the content does and not
   // otherwise.
-  const stat = statSync(path);
-  const key = `${path}:${stat.size}:${stat.mtimeMs}`;
-  const cached = peakCache.get(key);
-  if (cached) return cached;
+  let key: string;
   let wav;
   try {
+    // Both reads race the same thing and need the same guard: the build
+    // replaces this artifact by rename while the view is asking about
+    // it, so it can vanish between the existsSync above and either call.
+    const stat = statSync(path);
+    key = `${path}:${stat.size}:${stat.mtimeMs}`;
+    const cached = peakCache.get(key);
+    if (cached) return cached;
     wav = readWav(path);
   } catch {
     return undefined; // an unreadable artifact is a lane without a picture
@@ -109,52 +115,84 @@ export function projectTimeline(
   lengthSamples: number,
   peakBuckets: number,
 ): UiTimeline {
-  const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
+  const byName = new Map(song.tracks.map((t) => [t.data.name, t]));
   const main = byName.get('main');
   const songTempo = new TempoMap(song.time?.tempo ?? [{ at: 0, bpm: 120 }], sessionRate);
   const songMeter = new MeterMap(song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }]);
 
-  const lanes = (main?.inputs ?? []).map((entry) => {
+  // One lane per placement, recursing into placed tracks. Depth is
+  // bounded by the track graph, which validation already proves acyclic;
+  // `seen` is a backstop so a project that somehow reached here with a
+  // cycle produces a truncated picture rather than a hung server.
+  const laneFor = (
+    owner: { data: { name: string; inputs: InputEntry[]; time?: TrackTime | undefined }; path: string; raw: string },
+    entry: InputEntry,
+    index: number,
+    originSample: number,
+    depth: number,
+    seen: ReadonlySet<string>,
+  ): UiTimelineLane => {
+    // Everything in a track file is in that track's own time
+    // (nested-tracks.md §13), falling back to the song's.
+    const localTempo = owner.data.time?.tempo
+      ? new TempoMap(owner.data.time.tempo, sessionRate)
+      : songTempo;
+    const w = placedWindow(entry, localTempo);
+    const startSample = originSample + w.start;
+    const duration = w.duration ?? Math.max(0, lengthSamples - startSample);
+
     const placedName = entry.track;
     const placed = placedName !== undefined ? byName.get(placedName) : undefined;
-    // A placed track's contents are in that track's own time
-    // (nested-tracks.md §13), so its clips project through its map —
-    // falling back to the song's, independently for tempo and meter.
-    const localTempo = placed?.time?.tempo
-      ? new TempoMap(placed.time.tempo, sessionRate)
-      : songTempo;
-
-    // The lane's own window in main's time: where this placement sits.
-    const own = placedWindow(entry, songTempo);
-
-    // One block per placement inside the placed track, in absolute
-    // samples — the lane's own start plus the child's offset.
-    const clips: UiClip[] = (placed?.inputs ?? [])
-      .filter((child) => child.receive === undefined && !child.mute)
-      .map((child) => {
-        const w = placedWindow(child, localTempo);
-        return {
-          start: own.start + w.start,
-          duration: w.duration ?? own.duration ?? Math.max(0, lengthSamples - own.start - w.start),
-          // An omitted duration is a real state, not a zero: the source's
-          // length is not knowable while planning, and the view says so
-          // rather than drawing a guess as though it were measured.
-          exact: w.duration !== undefined,
-          name: child.track ?? child.audio ?? (child.supercollider ? 'supercollider' : child.generative ? 'generative' : 'input'),
-        };
-      });
+    const recurse = placed !== undefined && !seen.has(placedName!) && depth < 6;
 
     return {
-      entry: (main?.inputs ?? []).indexOf(entry),
-      start: own.start,
-      duration: own.duration ?? Math.max(0, lengthSamples - own.start),
-      clips,
+      entry: index,
+      file: owner.path,
+      sha256: sha256Text(owner.raw),
+      name: placedName ?? entry.audio ?? entry.receive ??
+        (entry.supercollider ? 'supercollider' : entry.generative ? 'generative' : `input ${index + 1}`),
+      start: startSample,
+      duration,
+      depth,
+      gain_db: entry.gain_db,
+      pan: entry.pan,
+      mute: entry.mute,
+      canSolo: placedName !== undefined,
+      children: recurse
+        ? placed!.data.inputs
+            .filter((c) => c.receive === undefined)
+            .map((child, i) =>
+              laneFor(
+                { data: placed!.data, path: placed!.path, raw: readFileSync(join(root, placed!.path), 'utf8') },
+                child,
+                i,
+                startSample,
+                depth + 1,
+                new Set([...seen, placedName!]),
+              ),
+            )
+        : null,
+      clips: [{ start: startSample, duration, exact: w.duration !== undefined, name: placedName ?? entry.audio ?? 'input' }],
       peaks:
         placedName === undefined
           ? undefined
           : peaksFor(join(root, '.field', 'out', song.dir, 'track', `${placedName}.wav`), peakBuckets),
     };
-  });
+  };
+
+  const mainRaw = main ? readFileSync(join(root, main.path), 'utf8') : '';
+  const lanes = (main?.data.inputs ?? [])
+    .filter((e) => e.receive === undefined)
+    .map((entry, i) =>
+      laneFor(
+        { data: main!.data, path: main!.path, raw: mainRaw },
+        entry,
+        i,
+        0,
+        0,
+        new Set(['main']),
+      ),
+    );
 
   return {
     rate: sessionRate,

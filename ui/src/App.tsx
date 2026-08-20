@@ -100,8 +100,10 @@ export function App() {
   }, [clock, state]);
 
   const send = (msg: unknown) => ws.current?.send(JSON.stringify(msg));
-  const edit = (entry: number, set: Record<string, unknown>) =>
-    snap && send({ type: 'edit', sha256: snap.file.sha256, entry, set });
+  // An edit addresses the file its placement lives in: main.yaml for a
+  // top-level lane, the placing track's own file for a child row.
+  const edit = (lane: { file: string; sha256: string; entry: number }, set: Record<string, unknown>) =>
+    send({ type: 'edit', file: lane.file, sha256: lane.sha256, entry: lane.entry, set });
 
   // Never a bare blank: before the first snapshot the page says what it
   // is waiting for, and any connection failure replaces that with the
@@ -118,24 +120,19 @@ export function App() {
 
   // One lane's controls. Extracted so the timeline can place them in its
   // header column without the handlers changing at all.
-  const laneControls = (lane: Snapshot['lanes'][number]) => {
-     const gain = drag[lane.entry] ?? lane.gain_db;
+  // One lane's controls, for either a top-level lane or a child row —
+  // the timeline places them in its header column.
+  const laneControls = (lane: import('../../src/commands/ui-protocol.js').UiTimelineLane) => {
+    const gain = drag[lane.entry] ?? lane.gain_db;
     const soloedHere = snap.soloed === lane.name;
     const dimmed = snap.soloed !== null && !soloedHere;
     return (
-      <div key={lane.entry} className={`lane ${lane.mute ? 'muted' : ''} ${dimmed ? 'dimmed' : ''}`}>
-        <span className="name" title={lane.kind}>
-          {lane.name}
-        </span>
-        {lane.empty && (
-          <span className="empty-tag" title="this track has no inputs — it renders silence">
-            empty
-          </span>
-        )}
+      <div className={`lane ${lane.mute ? 'muted' : ''} ${dimmed ? 'dimmed' : ''}`}>
+        <span className="name" title={lane.file}>{lane.name}</span>
         <button
           className={`mute ${lane.mute ? 'on' : ''}`}
-          title="mute (writes mute: to the placement)"
-          onClick={() => edit(lane.entry, { mute: !lane.mute })}
+          title="mute (writes mute: on this placement)"
+          onClick={() => edit(lane, { mute: !lane.mute })}
         >
           M
         </button>
@@ -158,23 +155,12 @@ export function App() {
           onChange={(e) => setDrag({ ...drag, [lane.entry]: Number(e.target.value) })}
           onPointerUp={() => {
             if (drag[lane.entry] !== undefined) {
-              edit(lane.entry, { gain_db: drag[lane.entry] });
+              edit(lane, { gain_db: drag[lane.entry] });
               setDrag(({ [lane.entry]: _done, ...rest }) => rest);
             }
           }}
         />
-        <span className="db">{gain > 0 ? `+${gain}` : gain} dB</span>
-        <input
-          className="pan"
-          type="range"
-          min={-1}
-          max={1}
-          step={0.05}
-          value={lane.pan}
-          onChange={(e) => edit(lane.entry, { pan: Number(e.target.value) })}
-          title="pan"
-        />
-        {lane.inserts.length > 0 && <span className="inserts">{lane.inserts.join(' → ')}</span>}
+        <span className="db">{gain > 0 ? `+${gain}` : gain}</span>
       </div>
     );
   };
@@ -226,11 +212,7 @@ export function App() {
           anchor.current = { sample, at: performance.now() };
           send({ type: 'locate', sample });
         }}
-        children={(entry) => {
-          const lane = snap.lanes.find((l) => l.entry === entry);
-          if (!lane) return null;
-          return laneControls(lane);
-        }}
+        controls={laneControls}
       />
       <footer>
         {snap.file.path} — files are the source of truth; edits land as YAML diffs
