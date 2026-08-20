@@ -242,6 +242,15 @@ footer {
   border: 1px solid #2f4258;
   border-radius: 3px;
   overflow: hidden;
+  cursor: grab;
+}
+.tl-block.selected {
+  border-color: #e8c35a;
+  box-shadow: 0 0 0 1px rgba(232, 195, 90, 0.45);
+}
+.tl-block.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
 }
 .tl-wave {
   width: 100%;

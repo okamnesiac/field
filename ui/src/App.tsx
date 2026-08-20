@@ -100,6 +100,22 @@ export function App() {
   }, [clock, state]);
 
   const send = (msg: unknown) => ws.current?.send(JSON.stringify(msg));
+
+  // Space is the transport, as in every DAW — unless the key is headed
+  // somewhere that uses it: a focused button would fire twice, and a
+  // fader or the device picker owns its own keys.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat) return;
+      const t = e.target instanceof HTMLElement ? e.target.tagName : '';
+      if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || t === 'BUTTON') return;
+      e.preventDefault(); // space scrolls the page otherwise
+      send({ type: state === 'playing' ? 'pause' : 'play' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [state]);
+
   // An edit addresses the file its placement lives in: main.yaml for a
   // top-level lane, the placing track's own file for a child row.
   const edit = (lane: { file: string; sha256: string; entry: number }, set: Record<string, unknown>) =>
@@ -217,6 +233,9 @@ export function App() {
           anchor.current = { sample, at: performance.now() };
           send({ type: 'locate', sample });
         }}
+        onMove={(lane, delta) =>
+          send({ type: 'move', file: lane.file, sha256: lane.sha256, entry: lane.entry, delta })
+        }
         controls={laneControls}
       />
       <footer>

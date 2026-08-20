@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { AudiodClient } from '../audiod/client.js';
 import type { CompiledSession } from '../graph/live.js';
 import { compileSession } from '../graph/live.js';
+import { placedWindow } from '../generators/stem.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
 import { trackOrder } from '../schema/index.js';
@@ -16,6 +17,7 @@ import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 import type { UiLane, UiSnapshot } from './ui-protocol.js';
 import { projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
+import { TempoMap } from '../time/tempo.js';
 import { watchLiveSession } from './watch-live.js';
 
 // `field ui <song>` (ui.md): a local web face over what already exists —
@@ -58,6 +60,20 @@ const editSchema = z.object({
     .strict(),
 });
 
+// Moving a clip is a delta in session samples, not a new position. The
+// delta is what the drag measured, and it is anchor-agnostic: a sample
+// is a sample whichever way `at` is spelled, and the entry's own origin
+// cancels out — which is also what keeps a track placed in two homes
+// unambiguous, since the entry moves by the same amount however many
+// windows render it.
+const moveSchema = z.object({
+  type: z.literal('move'),
+  file: z.string().optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  entry: z.number().int().min(0),
+  delta: z.number().int(),
+});
+
 const upSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('play') }),
   z.object({ type: z.literal('pause') }),
@@ -66,6 +82,7 @@ const upSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('device'), name: z.string() }),
   z.object({ type: z.literal('solo'), track: z.string().nullable() }),
   editSchema,
+  moveSchema,
 ]);
 
 // Envelope resolution: one peak per bucket across the whole song. 1200
@@ -265,20 +282,24 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     },
   );
 
-  const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
+  // Shared by edit and move: the placement a message names, resolved to
+  // its owner file and parsed document with the stale guard enforced. A
+  // null return means the socket was already answered.
+  const resolvePlacement = async (
+    socket: WebSocket,
+    msg: { file?: string | undefined; sha256: string; entry: number },
+  ) => {
     const { song, main } = mainFile();
     // Resolved against the song's own track paths, never joined: a
     // client-supplied path reaching join(root, …) is a traversal, and
     // this socket accepts writes.
-    const target =
-      msg.file === undefined
-        ? main.path
-        : song.tracks.find((t) => t.path === msg.file)?.path;
-    if (target === undefined) {
+    const owner =
+      msg.file === undefined ? main : song.tracks.find((t) => t.path === msg.file);
+    if (owner === undefined) {
       socket.send(JSON.stringify({ type: 'error', message: `no such track file: ${msg.file}` }));
-      return;
+      return null;
     }
-    const absolute = join(root, target);
+    const absolute = join(root, owner.path);
     const raw = readFileSync(absolute, 'utf8');
     if (sha256Text(raw) !== msg.sha256) {
       // Stale base: the file moved underneath this view. Refresh rather
@@ -286,15 +307,21 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       // legal, so re-anchoring by name is not always possible (ui.md §4).
       socket.send(JSON.stringify({ type: 'error', message: 'file changed underneath — refreshed' }));
       await pushSnapshot();
-      return;
+      return null;
     }
     const doc = parseDocument(raw);
-    const entryNode = doc.getIn(['inputs', msg.entry], true);
-    if (entryNode === undefined) {
+    if (doc.getIn(['inputs', msg.entry], true) === undefined) {
       socket.send(JSON.stringify({ type: 'error', message: `no input ${msg.entry} — refreshed` }));
       await pushSnapshot();
-      return;
+      return null;
     }
+    return { song, owner, absolute, doc };
+  };
+
+  const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
+    const resolved = await resolvePlacement(socket, msg);
+    if (resolved === null) return;
+    const { absolute, doc } = resolved;
     for (const [key, value] of Object.entries(msg.set)) {
       // Defaults stay implicit: writing `mute: false` or `pan: 0` onto
       // an entry that never spelled them would churn the file.
@@ -312,6 +339,40 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     // makes a click feel like it landed — waiting for the watch put a
     // debounce and a recompile between pressing M and seeing it, and let
     // an in-flight recompile answer first with the old value.
+    await pushSnapshot();
+  };
+
+  const handleMove = async (socket: WebSocket, msg: z.infer<typeof moveSchema>) => {
+    const resolved = await resolvePlacement(socket, msg);
+    if (resolved === null) return;
+    const { song, owner, absolute, doc } = resolved;
+    // The parsed entry, not the YAML node: the model rewrote musical
+    // arrays to tick scalars at load, which is the shape placedWindow
+    // takes — and the sha guard just proved the parse describes these
+    // exact bytes.
+    const entry = owner.data.inputs[msg.entry];
+    if (entry === undefined) {
+      socket.send(JSON.stringify({ type: 'error', message: `no input ${msg.entry} — refreshed` }));
+      await pushSnapshot();
+      return;
+    }
+    // The owner's own time, falling back to the song's — the same rule
+    // the timeline renders by (nested-tracks.md §13), so a clip lands
+    // exactly where the drag showed it.
+    const tempo = new TempoMap(
+      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
+      loaded.sample_rate,
+    );
+    const w = placedWindow(entry, tempo);
+    const local = Math.max(0, w.start + msg.delta);
+    const at = entry.anchor === 'absolute' ? Math.round(local) : Math.round(tempo.samplesToTicks(local));
+    // Defaults stay implicit, as in edit: a clip dragged back to zero
+    // loses its `at:` rather than gaining `at: 0`. A musical array
+    // spelling is rewritten as the tick scalar it already meant.
+    if (at === 0) doc.deleteIn(['inputs', msg.entry, 'at']);
+    else doc.setIn(['inputs', msg.entry, 'at'], at);
+    canonicalizeDocument(doc, trackOrder);
+    writeFileSync(absolute, stringifyDocument(doc));
     await pushSnapshot();
   };
 
@@ -345,6 +406,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         await pushSnapshot();
       } else if (msg.type === 'edit') {
         await handleEdit(socket, msg);
+      } else if (msg.type === 'move') {
+        await handleMove(socket, msg);
       }
     } catch (err) {
       socket.send(

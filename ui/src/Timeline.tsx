@@ -1,4 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+// Real imports, not type-only: the grid the drag snaps to is the song's
+// own tempo arithmetic, the same functions the server projects bars
+// through — a client-side copy would drift from the ruler it snaps to.
+import { barTicks, MeterMap, TempoMap } from '../../src/time/tempo.js';
 import type { UiSnapshot, UiTimelineLane } from '../../src/commands/ui-protocol.js';
 
 // The song seen in time: headers on the left, lanes on one shared axis
@@ -16,8 +20,13 @@ import type { UiSnapshot, UiTimelineLane } from '../../src/commands/ui-protocol.
 // the one file underneath, which is the same convergence argument that
 // put `mute:` on the placement.
 //
-// Geometry is read, never dragged. The only gesture is clicking the
-// axis to locate; dragging clips is deliberately out of scope.
+// The gestures, and which one owns the playhead: clicking a clip
+// selects it, dragging a clip moves it in time (snapped to the beat
+// grid, committed as a `move` on release), and the playhead moves only
+// from the ruler or a double-click on a clip. A single click on a lane
+// deliberately does nothing to the transport — locating on every stray
+// click made selecting a clip impossible without also moving the play
+// position, which is how the first version worked and why it stopped.
 //
 // The view follows the playhead while it moves: once the head crosses
 // the middle of the viewport the scroll position tracks it, which is
@@ -37,13 +46,23 @@ interface Props {
   snap: UiSnapshot;
   playSample: number;
   onLocate: (sample: number) => void;
+  onMove: (lane: UiTimelineLane, deltaSamples: number) => void;
   controls: (lane: UiTimelineLane) => React.ReactNode;
 }
 
-export function Timeline({ snap, playSample, onLocate, controls }: Props) {
+export function Timeline({ snap, playSample, onLocate, onMove, controls }: Props) {
   // Keyed by path through the tree, so the same track opens separately
   // in each home it is placed in.
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Selection is view state like expansion: one clip, by tree path,
+  // cleared by Escape or a click on empty lane ground.
+  const [selected, setSelected] = useState<string | null>(null);
+  // While a drag is live, the dragged clip renders at start+delta; the
+  // write happens once, on release.
+  const [drag, setDrag] = useState<{ path: string; delta: number } | null>(null);
+  const grab = useRef<{ x: number; path: string; lane: UiTimelineLane; active: boolean } | null>(
+    null,
+  );
   const scroller = useRef<HTMLDivElement | null>(null);
   // A manual scroll holds off the auto-follow until this timestamp, so
   // the conveyor never yanks the view back mid-gesture.
@@ -60,6 +79,36 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelected(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // The snap grid: the song's beat positions, through the real maps.
+  // Beats rather than bars — bars are the ruler's resolution, and a
+  // clip that can only land on a barline cannot make a pickup.
+  const clock = snap.clock;
+  const grid = useMemo(
+    () =>
+      clock
+        ? { tempo: new TempoMap(clock.tempo, clock.sampleRate), meter: new MeterMap(clock.meter) }
+        : null,
+    [clock],
+  );
+  const snapSample = (sample: number): number => {
+    if (!grid) return Math.max(0, Math.round(sample));
+    const ticks = grid.tempo.samplesToTicks(Math.max(0, sample));
+    let seg = 0;
+    while (seg + 1 < grid.meter.events.length && grid.meter.events[seg + 1]!.at <= ticks) seg++;
+    const ev = grid.meter.events[seg]!;
+    const beat = barTicks(ev) / ev.numerator;
+    const snapped = Math.max(0, ev.at + Math.round((ticks - ev.at) / beat) * beat);
+    return Math.max(0, Math.round(grid.tempo.ticksToSamples(snapped)));
+  };
 
   const tl = snap.timeline;
   const length = tl?.length ?? 0;
@@ -89,10 +138,42 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
 
   if (!tl || length <= 0) return null;
 
-  const locateFromEvent = (e: React.MouseEvent<HTMLDivElement>) => {
-    const box = e.currentTarget.getBoundingClientRect();
-    const sample = Math.max(0, Math.round((e.clientX - box.left) / pxPerSample));
-    onLocate(Math.min(sample, tl.length));
+  // Locate from a horizontal position inside any lane-width element:
+  // the ruler on a single click, a clip on a double.
+  const locateAt = (clientX: number, laneEl: HTMLElement) => {
+    const box = laneEl.getBoundingClientRect();
+    const sample = Math.max(0, Math.round((clientX - box.left) / pxPerSample));
+    onLocate(Math.min(sample, length));
+  };
+
+  const onGrab = (e: React.PointerEvent<HTMLDivElement>, lane: UiTimelineLane, path: string) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    setSelected(path);
+    grab.current = { x: e.clientX, path, lane, active: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = grab.current;
+    if (!g) return;
+    const dx = e.clientX - g.x;
+    // A click is not yet a drag: a few pixels of hand tremor must not
+    // become a file write.
+    if (!g.active && Math.abs(dx) < 4) return;
+    g.active = true;
+    holdUntil.current = performance.now() + 1500; // the conveyor yields to the hand
+    const target = snapSample(g.lane.start + dx / pxPerSample);
+    setDrag({ path: g.path, delta: target - g.lane.start });
+  };
+  const onDrop = () => {
+    const g = grab.current;
+    grab.current = null;
+    if (g?.active && drag !== null && drag.delta !== 0) onMove(g.lane, drag.delta);
+    setDrag(null);
+  };
+  const onDragCancel = () => {
+    grab.current = null;
+    setDrag(null);
   };
 
   // Flatten the visible tree: a child only appears when every ancestor
@@ -120,7 +201,11 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
           <div className="tl-corner" />
           {/* One tick per bar, drawn where the server says the bar falls:
               bars are not linear in samples across a tempo ramp. */}
-          <div className="tl-ruler" style={{ width }} onClick={locateFromEvent}>
+          <div
+            className="tl-ruler"
+            style={{ width }}
+            onClick={(e) => locateAt(e.clientX, e.currentTarget)}
+          >
             {tl.marks.map((m) => (
               <div key={m.bar} className="tl-mark" style={{ left: x(m.sample) }}>
                 <span>{m.bar}</span>
@@ -138,7 +223,14 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
               width={width}
               x={x}
               playSample={playSample}
-              onLocate={locateFromEvent}
+              selected={selected === path}
+              dragOffset={drag?.path === path ? drag.delta : 0}
+              onGrab={(e) => onGrab(e, lane, path)}
+              onDragMove={onDragMove}
+              onDrop={onDrop}
+              onDragCancel={onDragCancel}
+              onDeselect={() => setSelected(null)}
+              locateAt={locateAt}
               controls={controls}
             />
           ))}
@@ -149,7 +241,8 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
 }
 
 function Row({
-  lane, open, onToggle, width, x, playSample, onLocate, controls,
+  lane, open, onToggle, width, x, playSample, selected, dragOffset,
+  onGrab, onDragMove, onDrop, onDragCancel, onDeselect, locateAt, controls,
 }: {
   lane: UiTimelineLane;
   open: boolean;
@@ -157,10 +250,18 @@ function Row({
   width: number;
   x: (s: number) => number;
   playSample: number;
-  onLocate: (e: React.MouseEvent<HTMLDivElement>) => void;
+  selected: boolean;
+  dragOffset: number;
+  onGrab: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onDragMove: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onDrop: () => void;
+  onDragCancel: () => void;
+  onDeselect: () => void;
+  locateAt: (clientX: number, laneEl: HTMLElement) => void;
   controls: (lane: UiTimelineLane) => React.ReactNode;
 }) {
   const peaks = lane.peaks;
+  const dragging = dragOffset !== 0;
   return (
     <>
       <div className="tl-header" style={{ paddingLeft: 6 + lane.depth * 14 }}>
@@ -173,10 +274,27 @@ function Row({
         )}
         {controls(lane)}
       </div>
-      <div className="tl-lane" style={{ width }} onClick={onLocate}>
+      {/* A click on empty lane ground only clears the selection — the
+          playhead belongs to the ruler and to double-clicks. */}
+      <div className="tl-lane" style={{ width }} onClick={onDeselect}>
         <div
-          className={`tl-block ${lane.mute ? 'muted' : ''} d${Math.min(lane.depth, 3)}`}
-          style={{ left: x(lane.start), width: Math.max(2, x(lane.duration)) }}
+          className={[
+            'tl-block',
+            lane.mute ? 'muted' : '',
+            selected ? 'selected' : '',
+            dragging ? 'dragging' : '',
+            `d${Math.min(lane.depth, 3)}`,
+          ].join(' ')}
+          style={{ left: x(lane.start + dragOffset), width: Math.max(2, x(lane.duration)) }}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={onGrab}
+          onPointerMove={onDragMove}
+          onPointerUp={onDrop}
+          onPointerCancel={onDragCancel}
+          onDoubleClick={(e) => {
+            const laneEl = e.currentTarget.closest('.tl-lane');
+            if (laneEl instanceof HTMLElement) locateAt(e.clientX, laneEl);
+          }}
         >
           {peaks && (
             <svg className="tl-wave" viewBox={`0 0 ${peaks.length} 100`} preserveAspectRatio="none">
