@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+// The engine's own tempo arithmetic, imported rather than reimplemented:
+// pure functions over the event arrays the snapshot carries, so the
+// view's bars and the CLI's cannot disagree.
+import { MeterMap, TempoMap } from '../../src/time/tempo.js';
 
 // The first face (ui.md): transport and flat lanes over the files. The
 // view renders server truth; local state exists only inside a gesture —
@@ -20,6 +24,11 @@ export function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [state, setState] = useState('stopped');
   const [position, setPosition] = useState('');
+  // The playhead the view runs itself: the last sample the daemon
+  // reported and when it arrived. Between reports the position is that
+  // sample plus however long ago it landed — which is what makes the
+  // readout move at frame rate instead of four times a second.
+  const anchor = useRef<{ sample: number; at: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   // The gesture's own state: entry index -> value while dragging.
@@ -42,11 +51,16 @@ export function App() {
       if (msg.type === 'snapshot') {
         setSnap(msg);
         setState(msg.status.state);
+        anchor.current = { sample: msg.status.sample, at: performance.now() };
         setPosition(msg.status.musical);
         setError(null);
       } else if (msg.type === 'event') {
         if (msg.event.event === 'state' && msg.event.state) setState(msg.event.state);
-        if (msg.event.event === 'position' && msg.musical) setPosition(msg.musical);
+        // Resync the anchor rather than printing the string: the
+        // daemon's sample is truth, and the frame loop below spells it.
+        if (msg.event.event === 'position' && typeof msg.event.sample === 'number') {
+          anchor.current = { sample: msg.event.sample, at: performance.now() };
+        }
       } else if (msg.type === 'error') {
         setError(msg.message);
       }
@@ -54,6 +68,33 @@ export function App() {
     socket.onclose = () => setError('server closed — restart field ui and reload');
     return () => socket.close();
   }, []);
+
+
+  // Runs the readout at the display's rate off the anchor, and stops
+  // entirely when nothing is playing — a paused transport has a fixed
+  // position, and a rAF loop spinning behind a still clock is the kind
+  // of idle cost a machine with a hundred things open should not pay.
+  const clock = snap?.clock;
+  useEffect(() => {
+    if (!clock) return; // no tempo map: the server's sample readout stands
+    const tempo = new TempoMap(clock.tempo, clock.sampleRate);
+    const meter = new MeterMap(clock.meter);
+    let frame = 0;
+    const tick = () => {
+      const a = anchor.current;
+      if (a) {
+        const elapsed = state === 'playing' ? (performance.now() - a.at) / 1000 : 0;
+        const sample = a.sample + elapsed * clock.sampleRate;
+        const seconds = sample / clock.sampleRate;
+        const mins = Math.floor(seconds / 60);
+        const secs = (seconds - mins * 60).toFixed(1).padStart(4, '0');
+        setPosition(`${meter.format(Math.round(tempo.samplesToTicks(sample)))} (${mins}:${secs})`);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [clock, state]);
 
   const send = (msg: unknown) => ws.current?.send(JSON.stringify(msg));
   const edit = (entry: number, set: Record<string, unknown>) =>
@@ -115,6 +156,11 @@ export function App() {
               <span className="name" title={lane.kind}>
                 {lane.name}
               </span>
+              {lane.empty && (
+                <span className="empty-tag" title="this track has no inputs — it renders silence">
+                  empty
+                </span>
+              )}
               <button
                 className={`mute ${lane.mute ? 'on' : ''}`}
                 title="mute (writes mute: to the placement)"

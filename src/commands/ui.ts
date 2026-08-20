@@ -13,7 +13,7 @@ import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
 import { trackOrder } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
-import type { UiLane, UiSnapshot } from './ui-protocol.js';
+import type { UiClock, UiLane, UiSnapshot } from './ui-protocol.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
 import { watchLiveSession } from './watch-live.js';
 
@@ -109,6 +109,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     return { project, song, main };
   };
 
+  // The song's own maps, when it has them: a song without a tempo map
+  // has no bars to spell, and the readout falls back to samples.
+  const songTime = (song: { time?: { tempo: unknown[]; meter: unknown[] } | undefined }) =>
+    song.time as { tempo: UiClock['tempo']; meter: UiClock['meter'] } | undefined;
+
   const snapshot = async (): Promise<UiSnapshot> => {
     const { song, main } = mainFile();
     const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
@@ -123,6 +128,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         pan: entry.pan,
         mute: entry.mute,
         canSolo: kind === 'track',
+        empty: placed !== undefined && placed.inputs.length === 0,
         inserts: placed?.inserts.map((ins) => ('effect' in ins ? String(ins.effect) : 'plugin')) ?? [],
       };
     });
@@ -139,6 +145,16 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         ...status,
         musical: formatPosition(status.sample, loaded.sample_rate, ctx),
       },
+      // The view runs the playhead between the daemon's 250 ms events;
+      // these are the same arrays this process builds its own TempoMap
+      // from, so the two projections cannot drift apart.
+      clock: songTime(song)
+        ? {
+            sampleRate: loaded.sample_rate,
+            tempo: songTime(song)!.tempo,
+            meter: songTime(song)!.meter,
+          }
+        : undefined,
     };
   };
 

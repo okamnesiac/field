@@ -28,6 +28,10 @@ export interface UiLane {
   mute: boolean;
   canSolo: boolean;
   inserts: string[];
+  // A placed track that contains nothing. tall-grass ships two of
+  // them, and a silent lane that looks identical to a loud one reads
+  // as the UI being broken rather than the track being empty.
+  empty: boolean;
 }
 
 export interface UiStatus {
@@ -38,6 +42,25 @@ export interface UiStatus {
   device?: { name: string; sample_rate: number } | undefined;
 }
 
+// What the view needs to run its own clock. The daemon emits position
+// events on a 250 ms heartbeat, so a readout that only moves when one
+// arrives ticks four times a second and reads as broken — no amount of
+// machine speed fixes that, because the rate is the daemon's and the
+// samples in between simply are not sent. The view therefore projects
+// the playhead itself between events and resynchronises on each one.
+//
+// The maps travel as the plain event arrays the project already stores,
+// and the client builds the same `TempoMap`/`MeterMap` this process
+// uses — the class is pure arithmetic over these arrays, so both ends
+// run one implementation rather than two that can disagree. The daemon
+// still hears only samples (playback.md §3.6); what moved is which
+// client of the daemon spells bars, which ui.md §6 records.
+export interface UiClock {
+  sampleRate: number;
+  tempo: { at: number; bpm: number; ramp?: 'linear' | undefined }[];
+  meter: { at: number; numerator: number; denominator: number }[];
+}
+
 export interface UiSnapshot {
   type: 'snapshot';
   song: string;
@@ -46,6 +69,7 @@ export interface UiSnapshot {
   soloed: string | null;
   devices: { devices: UiDevice[]; null_output: boolean };
   status: UiStatus;
+  clock?: UiClock | undefined; // absent when the song has no tempo map
 }
 
 export interface UiError {

@@ -282,8 +282,19 @@ async function buildNode(
     // in-place copy truncates under its reader. A fresh inode leaves the
     // playing pass untouched until the swap (watch.md §1.6).
     const tmp = `${out}.tmp-${process.pid}-${nextTmp++}`;
-    copyFileSync(casPath(project, sha256), tmp);
-    renameOverwrite(tmp, out);
+    try {
+      copyFileSync(casPath(project, sha256), tmp);
+      renameOverwrite(tmp, out);
+    } catch (err) {
+      // Never leave the copy behind. Before the rename learned to clean
+      // up after itself, a contended destination leaked one artifact-sized
+      // file per attempt, and the watch loop retries — one project had
+      // accumulated 2,990 of them totalling 3.7 GB, which a synced folder
+      // then dutifully uploaded. The copy is worthless the moment it does
+      // not land.
+      rmSync(tmp, { force: true });
+      throw err;
+    }
     return out;
   };
 

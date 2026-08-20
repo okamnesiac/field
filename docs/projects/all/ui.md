@@ -213,13 +213,29 @@ where this section says otherwise, and the mute non-goal fell the way
   the nesting stays an engine concern. Lane-per-placement rather than
   lane-per-track is what makes mute-on-the-placement the button's exact
   meaning.
-- **Musical time is projected in the server, not the browser.** §2 said
-  client-side; the implementation kept the projection in field's own
-  process, where `formatPosition` and the tempo map already live, and
-  ships rendered strings. The load-bearing rule — samples cross the
-  daemon socket, music does not (playback.md §3.6) — holds unchanged;
-  what changed is only which client of the daemon renders bars, and
-  reusing the CLI's own projection beat porting it to a second runtime.
+- **Musical time is projected in the browser after all** (amended
+  2026-08-20; this bullet said the opposite for two days, and §2 said
+  client-side before that). The first implementation kept the projection
+  in field's own process and shipped rendered strings, which is cheaper
+  and was wrong for one reason nobody had measured: **the daemon emits
+  position on a 250 ms heartbeat** (`main.cpp`'s `Heartbeat`), so a
+  readout that only moves when an event arrives moves four times a
+  second. That reads as broken — reported as "the time thing is really
+  jumpy… it needs to flow" — and no amount of machine speed fixes it,
+  because the samples in between are never sent. A view that runs its
+  own playhead between events and resynchronises on each one is the only
+  shape that flows, and that view needs the tempo map.
+
+  What kept the earlier decision honest still holds, and is why this is
+  cheap rather than a second implementation: the snapshot carries the
+  song's own tempo and meter **event arrays**, and the client builds the
+  same `TempoMap`/`MeterMap` from `src/time/tempo.ts` that the CLI uses
+  — pure arithmetic with no Node dependency, imported rather than
+  ported, so the two projections cannot drift. `ramp` travels with the
+  tempo events, or a ramped song would disagree. The load-bearing rule
+  is untouched: the daemon still hears only samples (playback.md §3.6).
+  The server keeps formatting the snapshot's `musical` string as the
+  value a song with no tempo map falls back to.
 - **§5's remaining questions, answered by the flip**: the client lives
   in a `ui/` workspace package; fader drags write on release with no
   live ramps inside the gesture (the bounded option §5 recorded stays
