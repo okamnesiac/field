@@ -140,7 +140,11 @@ export class MeterMap {
     return i;
   }
 
-  format(ticks: number): string {
+  // The ordinal position of a tick — [bar, beat, tick], 1-indexed — as
+  // numbers, for a writer that needs the array spelling rather than the
+  // display string. positionTicks's inverse: for any non-negative
+  // integer T, positionTicks(...position(T)) === T.
+  position(ticks: number): [number, number, number] {
     if (ticks < 0 || !Number.isInteger(ticks)) throw new Error(`invalid tick ${ticks}`);
     const i = this.segmentFor(ticks);
     const meter = this.events[i]!;
@@ -149,6 +153,11 @@ export class MeterMap {
     const inBar = rel % barTicks(meter);
     const beat = Math.floor(inBar / beatTicks(meter.denominator)) + 1;
     const tick = (inBar % beatTicks(meter.denominator)) + 1;
+    return [bar, beat, tick];
+  }
+
+  format(ticks: number): string {
+    const [bar, beat, tick] = this.position(ticks);
     return `${bar}.${beat}.${tick}`;
   }
 

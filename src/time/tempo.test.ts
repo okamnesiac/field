@@ -146,4 +146,19 @@ describe('MeterMap', () => {
     // Beats after the change are eighth-note beats.
     expect(map.spanTicks(PPQ * 8, [0, 2])).toBe(480 * 2);
   });
+
+  it('position() inverts positionTicks, through meter changes', () => {
+    const map = new MeterMap([
+      { at: 0, numerator: 4, denominator: 4 },
+      { at: PPQ * 8, numerator: 7, denominator: 8 }, // bar 3 becomes 7/8
+    ]);
+    expect(map.position(0)).toEqual([1, 1, 1]);
+    expect(map.position(PPQ * 5)).toEqual([2, 2, 1]);
+    expect(map.position(PPQ * 8 + 480 * 3 + 7)).toEqual([3, 4, 8]); // eighth-note beats
+    // The inverse property a writer of `at:` arrays leans on: every
+    // non-negative tick round-trips exactly.
+    for (const t of [0, 1, PPQ - 1, PPQ * 4, PPQ * 8, PPQ * 8 + 479, PPQ * 11 + 3]) {
+      expect(map.positionTicks(...map.position(t))).toBe(t);
+    }
+  });
 });

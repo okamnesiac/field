@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseDocument } from 'yaml';
+import { isNode, isSeq, parseDocument } from 'yaml';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
 import { AudiodClient } from '../audiod/client.js';
@@ -17,7 +17,7 @@ import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 import type { UiLane, UiSnapshot } from './ui-protocol.js';
 import { projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
-import { TempoMap } from '../time/tempo.js';
+import { MeterMap, TempoMap } from '../time/tempo.js';
 import { watchLiveSession } from './watch-live.js';
 
 // `field ui <song>` (ui.md): a local web face over what already exists —
@@ -366,11 +366,39 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     const w = placedWindow(entry, tempo);
     const local = Math.max(0, w.start + msg.delta);
     const at = entry.anchor === 'absolute' ? Math.round(local) : Math.round(tempo.samplesToTicks(local));
-    // Defaults stay implicit, as in edit: a clip dragged back to zero
-    // loses its `at:` rather than gaining `at: 0`. A musical array
-    // spelling is rewritten as the tick scalar it already meant.
-    if (at === 0) doc.deleteIn(['inputs', msg.entry, 'at']);
-    else doc.setIn(['inputs', msg.entry, 'at'], at);
+    // What the author wrote stays theirs across the move. An `at:`
+    // spelled as a musical array is written back as one — through the
+    // owner's meter map, positionTicks's own inverse — because a drag
+    // that flattens `at: [5]` to `at: 7680` is the one edit in this
+    // view that does not read like something a person typed. And the
+    // line's comment is carried across the node swap by hand: replacing
+    // a sequence with a fresh node discards the comment attached to the
+    // old one, where scalar-over-scalar keeps it, which is why edit
+    // never had this problem (#163 review).
+    const oldNode = doc.getIn(['inputs', msg.entry, 'at'], true);
+    const comment = isNode(oldNode) ? oldNode.comment : undefined;
+    if (isSeq(oldNode) && entry.anchor !== 'absolute') {
+      const meter = new MeterMap(
+        owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
+      );
+      const [bar, beat, tick] = meter.position(at);
+      // The shortest array that means it, as a person would write it —
+      // through createNode, because setIn stores a raw JS array as-is:
+      // unwrapped, it dodges the canonicalizer's flow flag (isSeq is
+      // false on an Array) and stringifies block-style.
+      const spelled = tick > 1 ? [bar, beat, tick] : beat > 1 ? [bar, beat] : [bar];
+      doc.setIn(['inputs', msg.entry, 'at'], doc.createNode(spelled));
+    } else if (at === 0) {
+      // Defaults stay implicit, as in edit: a clip dragged back to zero
+      // loses its `at:` rather than gaining `at: 0`.
+      doc.deleteIn(['inputs', msg.entry, 'at']);
+    } else {
+      doc.setIn(['inputs', msg.entry, 'at'], at);
+    }
+    if (comment != null) {
+      const fresh = doc.getIn(['inputs', msg.entry, 'at'], true);
+      if (isNode(fresh)) fresh.comment = comment;
+    }
     canonicalizeDocument(doc, trackOrder);
     writeFileSync(absolute, stringifyDocument(doc));
     await pushSnapshot();
