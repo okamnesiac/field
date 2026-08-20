@@ -5,40 +5,16 @@ import { useEffect, useRef, useState } from 'react';
 // a fader follows the pointer and the file write lands on release, after
 // which the snapshot the server pushes is what the control believes.
 
-interface Lane {
-  entry: number;
-  kind: 'track' | 'audio' | 'other';
-  name: string;
-  gain_db: number;
-  pan: number;
-  mute: boolean;
-  canSolo: boolean;
-  inserts: string[];
-}
+// The wire shapes come from the server rather than being restated
+// here. This file's own copy said `devices: string[]` where the daemon
+// sends `{name, default}` objects, and rendering an object as a child
+// blanked the whole window — a mistake no compiler could see, because
+// two independent declarations cannot disagree with each other. Type-only,
+// so none of the server's code is bundled: the import erases at build.
+import type { UiSnapshot, UiDown } from '../../src/commands/ui-protocol.js';
 
-interface Snapshot {
-  type: 'snapshot';
-  song: string;
-  lanes: Lane[];
-  file: { path: string; sha256: string };
-  soloed: string | null;
-  // Mirrors devicesResponseSchema: a device is {name, default}, not a
-  // bare string. Getting this wrong rendered an object as a React child
-  // and blanked the whole window.
-  devices: { devices: { name: string; default: boolean }[]; null_output: boolean };
-  status: {
-    state: string;
-    sample: number;
-    samples: number;
-    musical: string;
-    device?: { name: string; sample_rate: number };
-  };
-}
-
-type Down =
-  | Snapshot
-  | { type: 'event'; event: { event: string; state?: string; sample?: number; name?: string }; musical?: string }
-  | { type: 'error'; message: string };
+type Snapshot = UiSnapshot;
+type Down = UiDown;
 
 export function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);

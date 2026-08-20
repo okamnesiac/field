@@ -13,6 +13,7 @@ import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
 import { trackOrder } from '../schema/index.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
+import type { UiLane, UiSnapshot } from './ui-protocol.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
 import { watchLiveSession } from './watch-live.js';
 
@@ -63,17 +64,6 @@ const upSchema = z.discriminatedUnion('type', [
   editSchema,
 ]);
 
-interface Lane {
-  entry: number; // index into main's inputs — the edit locator
-  kind: 'track' | 'audio' | 'other';
-  name: string;
-  gain_db: number;
-  pan: number;
-  mute: boolean;
-  canSolo: boolean; // track lanes only: solo is a graph walk from a track
-  inserts: string[]; // the placed track's chain, read-only (ui.md §3)
-}
-
 export interface UiOptions {
   port?: number;
   open?: boolean;
@@ -119,10 +109,10 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     return { project, song, main };
   };
 
-  const snapshot = async () => {
+  const snapshot = async (): Promise<UiSnapshot> => {
     const { song, main } = mainFile();
     const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
-    const lanes: Lane[] = main.data.inputs.map((entry, i) => {
+    const lanes: UiLane[] = main.data.inputs.map((entry, i) => {
       const kind = entry.track !== undefined ? 'track' : entry.audio !== undefined ? 'audio' : 'other';
       const placed = entry.track !== undefined ? byName.get(entry.track) : undefined;
       return {
@@ -370,7 +360,22 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       // the others still need.
       pending = (pending ?? Promise.resolve()).then(
         async () => {
-          ws.send(JSON.stringify(await snapshot()));
+          try {
+            ws.send(JSON.stringify(await snapshot()));
+          } catch (err) {
+            // Same discipline as pushSnapshot's run: a rejection escaping
+            // here would poison `pending` itself, and with nothing else
+            // chaining onto it Node's default takes an unhandled
+            // rejection as fatal — ending the session, and the window
+            // with it, over one failed read. Telling the window instead
+            // costs nothing and says what happened.
+            try {
+              const message = err instanceof Error ? err.message : String(err);
+              ws.send(JSON.stringify({ type: 'error', message }));
+            } catch {
+              // The socket is gone; there is nobody left to tell.
+            }
+          }
         },
         () => {},
       );
