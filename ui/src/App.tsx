@@ -22,8 +22,17 @@ interface Snapshot {
   lanes: Lane[];
   file: { path: string; sha256: string };
   soloed: string | null;
-  devices: { devices: string[]; default?: string; null_output: boolean };
-  status: { state: string; sample: number; samples: number; musical: string };
+  // Mirrors devicesResponseSchema: a device is {name, default}, not a
+  // bare string. Getting this wrong rendered an object as a React child
+  // and blanked the whole window.
+  devices: { devices: { name: string; default: boolean }[]; null_output: boolean };
+  status: {
+    state: string;
+    sample: number;
+    samples: number;
+    musical: string;
+    device?: { name: string; sample_rate: number };
+  };
 }
 
 type Down =
@@ -41,9 +50,17 @@ export function App() {
   const [drag, setDrag] = useState<Record<number, number>>({});
 
   useEffect(() => {
+    // The shell passes the token on the URL exactly as the printed link
+    // does, so both entry points authenticate the same way.
     const token = new URLSearchParams(location.search).get('t') ?? '';
+    if (!token) {
+      setError('no session token in the URL — open the link field ui printed, or relaunch it');
+      return;
+    }
     const socket = new WebSocket(`ws://${location.host}/ws?t=${token}`);
     ws.current = socket;
+    socket.onerror = () =>
+      setError(`could not reach the field ui server at ${location.host} — is it still running?`);
     socket.onmessage = (m) => {
       const msg = JSON.parse(String(m.data)) as Down;
       if (msg.type === 'snapshot') {
@@ -66,7 +83,17 @@ export function App() {
   const edit = (entry: number, set: Record<string, unknown>) =>
     snap && send({ type: 'edit', sha256: snap.file.sha256, entry, set });
 
-  if (!snap) return <main className="empty">connecting…</main>;
+  // Never a bare blank: before the first snapshot the page says what it
+  // is waiting for, and any connection failure replaces that with the
+  // reason rather than leaving the wait looking like a hung window.
+  if (!snap) {
+    return (
+      <main className="empty">
+        <h1>field</h1>
+        {error ? <div className="error">{error}</div> : <p>connecting to the session…</p>}
+      </main>
+    );
+  }
 
   return (
     <main>
@@ -79,12 +106,14 @@ export function App() {
         <span className={`state ${state}`}>{state}</span>
         <span className="position">{position}</span>
         <select
-          value={snap.devices.default ?? ''}
+          value={snap.status.device?.name ?? snap.devices.devices.find((d) => d.default)?.name ?? ''}
           onChange={(e) => send({ type: 'device', name: e.target.value })}
+          title={snap.devices.null_output ? 'null output: no device is being driven' : 'output device'}
         >
           {snap.devices.devices.map((d) => (
-            <option key={d} value={d}>
-              {d}
+            <option key={d.name} value={d.name}>
+              {d.name}
+              {d.default ? ' (default)' : ''}
             </option>
           ))}
         </select>

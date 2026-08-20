@@ -196,9 +196,16 @@ describe('build', () => {
     expect(rule.outputPath!).toContain(join('.field', 'out')); // materialized, not committed
   });
 
-  it('materializes by rename, never in place (watch.md §1.6)', async () => {
-    const { runner } = countingRunner();
-    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+  it('materializes changed bytes by rename, never in place (watch.md §1.6)', async () => {
+    // A runner whose output tracks the spec, so a parameter change moves
+    // the bytes: the previous shape of this test used countingRunner,
+    // which copies its input and therefore produced identical bytes on
+    // both passes — it asserted the rename against a rebuild that had
+    // nothing new to write.
+    const varying: GeneratorRunner = async (node, _inputs, outputPath) => {
+      writeFileSync(outputPath, JSON.stringify(node.spec));
+    };
+    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], varying);
     const out = first.find((o) => o.label.endsWith(':pad-eq'))!.outputPath!;
     const before = statSync(out).ino;
 
@@ -206,8 +213,30 @@ describe('build', () => {
     // path; a rebuild must land on a fresh inode so an open reader keeps
     // its bytes — an in-place copy would truncate under it.
     writeTrack('pad-eq', eqTrackYaml(400));
-    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], varying);
     expect(statSync(out).ino).not.toBe(before);
+  });
+
+  it('leaves an already-correct artifact untouched, rather than replacing it', async () => {
+    // The other half of §1.6's guarantee, and the half Windows enforces:
+    // re-materializing bytes that are already there must not disturb the
+    // path at all. POSIX tolerates renaming over a file a daemon holds
+    // open (the reader keeps its inode); Windows refuses with EPERM, so
+    // a re-materialize that "moved" an identical artifact broke every
+    // rebuild-behind-the-play there. Nothing to write is nothing to do.
+    const { runner } = countingRunner();
+    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    const out = first.find((o) => o.label.endsWith(':pad-eq'))!.outputPath!;
+    const before = statSync(out);
+
+    // A re-key with an identical result: the rule re-runs (countingRunner
+    // copies its input), and the bytes it produces are the ones already
+    // materialized.
+    writeTrack('pad-eq', eqTrackYaml(400));
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    const after = statSync(out);
+    expect(after.ino).toBe(before.ino);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
   it('expands wildcards, including the everything pattern', async () => {

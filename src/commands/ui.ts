@@ -77,6 +77,7 @@ interface Lane {
 export interface UiOptions {
   port?: number;
   open?: boolean;
+  browser?: boolean; // open a tab instead of the app window
 }
 
 export async function runUi(root: string, songName: string, options: UiOptions = {}): Promise<void> {
@@ -310,8 +311,13 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   const port = typeof address === 'object' && address !== null ? address.port : 0;
   const url = `http://127.0.0.1:${port}/?t=${token}`;
   process.stdout.write(`field ui: ${url}\n`);
-  if (options.open !== false) {
-    const { spawn } = await import('node:child_process');
+  // The shell is the front door (ui.md §5 as amended): a window of its
+  // own rather than a tab in whatever browser happens to be default.
+  // --browser opts back out, and a missing Electron falls back rather
+  // than failing — the printed URL always works.
+  const { spawn } = await import('node:child_process');
+  let shell: ReturnType<typeof spawn> | undefined;
+  const openInBrowser = () => {
     const opener =
       process.platform === 'darwin'
         ? { cmd: 'open', args: [url] }
@@ -319,16 +325,45 @@ export async function runUi(root: string, songName: string, options: UiOptions =
           ? { cmd: 'cmd', args: ['/c', 'start', '', url] }
           : { cmd: 'xdg-open', args: [url] };
     const child = spawn(opener.cmd, opener.args, { stdio: 'ignore', detached: true });
-    child.on('error', () => {}); // the printed URL is the fallback
+    child.on('error', () => {});
     child.unref();
+  };
+  if (options.open !== false) {
+    if (options.browser === true) {
+      openInBrowser();
+    } else {
+      const electron = join(packageRoot, 'ui', 'node_modules', 'electron', 'cli.js');
+      const shellEntry = join(packageRoot, 'ui', 'shell.cjs');
+      if (existsSync(electron) && existsSync(shellEntry)) {
+        // stderr inherited on purpose: the shell mirrors the page's
+        // console here, which is the only place a blank window can
+        // explain itself.
+        shell = spawn(process.execPath, [electron, shellEntry, url], {
+          stdio: ['ignore', 'ignore', 'inherit'],
+        });
+        shell.on('error', () => {
+          process.stderr.write('field ui: could not start the app shell; opening a browser\n');
+          openInBrowser();
+        });
+      } else {
+        process.stderr.write(
+          'field ui: the app shell is not installed (pnpm --dir ui install); opening a browser\n',
+        );
+        openInBrowser();
+      }
+    }
   }
 
-  // The server lives until ctrl-c; the watch and the daemon connection
-  // come down with it.
+  // The session ends on ctrl-c, or when the window closes — the shell
+  // window IS the app, so outliving it would leave a server nobody can
+  // reach. A browser tab has no such signal and keeps the ctrl-c
+  // contract the printed URL implies.
   await new Promise<void>((resolve) => {
     process.once('SIGINT', () => resolve());
     process.once('SIGTERM', () => resolve());
+    shell?.once('exit', () => resolve());
   });
+  if (shell !== undefined && shell.exitCode === null) shell.kill();
   watchAbort.abort();
   http.close();
   client.close();

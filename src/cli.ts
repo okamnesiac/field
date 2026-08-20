@@ -713,12 +713,13 @@ program
   .command('ui <song>')
   .description('open the web face on a song: transport, lanes, levels, mute and solo (ctrl-c stops)')
   .option('--port <port>', 'bind this port instead of a random one', (v) => parseInt(v, 10))
-  .option('--no-open', 'print the URL without opening a browser')
-  .action(async (song: string, opts: { port?: number; open?: boolean }) => {
+  .option('--no-open', 'print the URL without opening anything')
+  .option('--browser', 'open a browser tab instead of the app window')
+  .action(async (song: string, opts: { port?: number; open?: boolean; browser?: boolean }) => {
     try {
       const root = requireRoot();
       const { runUi } = await import('./commands/ui.js');
-      await runUi(root, song, { ...(opts.port !== undefined ? { port: opts.port } : {}), open: opts.open !== false });
+      await runUi(root, song, { ...(opts.port !== undefined ? { port: opts.port } : {}), open: opts.open !== false, browser: opts.browser === true });
     } catch (err) {
       fail(err);
     }
