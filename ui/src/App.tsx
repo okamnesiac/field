@@ -118,7 +118,17 @@ export function App() {
           ))}
         </select>
       </header>
-      {error && <div className="error">{error}</div>}
+      {error && (
+        // Dismissible, and never in the way: an error here is a report
+        // about one failed operation, not a state the whole window has
+        // to sit in — the controls behind it still work.
+        <div className="error">
+          <span>{error}</span>
+          <button className="dismiss" onClick={() => setError(null)} title="dismiss">
+            ×
+          </button>
+        </div>
+      )}
       <section className="lanes">
         {snap.lanes.map((lane) => {
           const gain = drag[lane.entry] ?? lane.gain_db;

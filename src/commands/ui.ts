@@ -85,9 +85,23 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   let soloed: string | null = null;
   let ctx: MusicalContext | undefined;
 
-  // The session first: a project that cannot compile should fail here,
-  // in the terminal, before a browser opens on it.
-  let compiled: CompiledSession = await compileSession(root, songName);
+  // The session first. A song that cannot compile fails here rather than
+  // half-opening — but the message has to survive the trip: whoever
+  // launched a window may never look at the terminal it came from, and
+  // "nothing happened" is the worst possible rendering of "creek's takes
+  // have not been generated yet". So the reason is restated as the
+  // window's own failure, pointing at the command that fixes it.
+  let compiled: CompiledSession;
+  try {
+    compiled = await compileSession(root, songName);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `field ui cannot open "${songName}" — the song does not compile yet:\n\n${detail}\n\n` +
+        `Fix that, then run field ui ${songName} again. ` +
+        `(field play ${songName} fails the same way, for the same reason.)`,
+    );
+  }
   const client = await AudiodClient.connect(root);
   if (!client.supports('session') || !client.supports('swap')) {
     throw new Error(
@@ -143,12 +157,45 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     const line = JSON.stringify(message);
     for (const socket of sockets) socket.send(line);
   };
-  const pushSnapshot = async () => {
-    try {
-      broadcast(await snapshot());
-    } catch (err) {
-      broadcast({ type: 'error', message: err instanceof Error ? err.message : String(err) });
-    }
+
+  // The view re-renders on every snapshot, so a snapshot that says
+  // nothing new is a visible flicker for no information. The watch loop
+  // legitimately recompiles several times per edit — the freeze pass
+  // alone recompiles after building dirty stems — and on a synced folder
+  // the filesystem produces events nobody asked for. One click was
+  // landing as up to eight identical renders, with the stale ones
+  // flipping the button back before correcting. Only differences ship.
+  //
+  // Serialized rather than field-compared because the snapshot IS the
+  // wire format: if two of them serialize identically the view cannot
+  // tell them apart, which is exactly the test worth applying.
+  let lastSent: string | undefined;
+  let pending: Promise<void> | undefined;
+  const pushSnapshot = async (): Promise<void> => {
+    // One at a time: two overlapping snapshots can read the file in one
+    // order and arrive in the other, which is how a just-cleared mute
+    // came back for a frame.
+    const run = async () => {
+      try {
+        const snap = await snapshot();
+        // Compare everything except the playhead. Position and its
+        // musical spelling advance on their own the whole time a song is
+        // playing, so including them means no two snapshots ever match
+        // and the dedupe never fires precisely when the flicker is worst.
+        // The view gets position from `position` events regardless —
+        // that is the channel built for a value that changes constantly.
+        const { sample: _s, musical: _m, ...stable } = snap.status;
+        const key = JSON.stringify({ ...snap, status: stable });
+        if (key === lastSent) return;
+        lastSent = key;
+        const line = JSON.stringify(snap);
+        for (const socket of sockets) socket.send(line);
+      } catch (err) {
+        broadcast({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      }
+    };
+    pending = (pending ?? Promise.resolve()).then(run, run);
+    return pending;
   };
 
   client.on('event', (event: { event: string; sample?: number }) => {
@@ -227,6 +274,13 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     writeFileSync(absolute, stringifyDocument(doc));
     // No daemon push here: the watch loop owns carrying file edits into
     // the session, for the UI exactly as for a hand edit in an editor.
+    //
+    // The *view* does not wait for it, though. The file is written, so a
+    // snapshot taken now is authoritative, and taking it here is what
+    // makes a click feel like it landed — waiting for the watch put a
+    // debounce and a recompile between pressing M and seeing it, and let
+    // an in-flight recompile answer first with the old value.
+    await pushSnapshot();
   };
 
   const handle = async (socket: WebSocket, raw: string) => {
