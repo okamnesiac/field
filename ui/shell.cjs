@@ -44,6 +44,10 @@ function create() {
     autoHideMenuBar: true,
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
+  // The timeline is the app's body and wants the whole screen; anyone
+  // who prefers a smaller window un-maximizes once and Windows
+  // remembers nothing, which is fine — full is the right default.
+  win.maximize();
 
   // Electron moved this event from positional arguments to a details
   // object; accept both so the mirror survives an Electron bump, which

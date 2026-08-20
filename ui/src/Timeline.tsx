@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { UiSnapshot, UiTimelineLane } from '../../src/commands/ui-protocol.js';
 
 // The song seen in time: headers on the left, lanes on one shared axis
@@ -18,6 +18,20 @@ import type { UiSnapshot, UiTimelineLane } from '../../src/commands/ui-protocol.
 //
 // Geometry is read, never dragged. The only gesture is clicking the
 // axis to locate; dragging clips is deliberately out of scope.
+//
+// The view follows the playhead while it moves: once the head crosses
+// the middle of the viewport the scroll position tracks it, which is
+// the conveyor a DAW runs during playback. A manual scroll wins for a
+// moment — the hold below — so looking at another part of the song is
+// never a fight with the transport.
+
+// The header column's width, shared by the CSS grid template and every
+// piece of arithmetic that has to know where lane content begins.
+const HEADER_PX = 200;
+
+// Zoom, fixed for now: enough that a song longer than the window keeps
+// scrolling as it plays, while a short one stretches to fill (below).
+const PX_PER_SECOND = 100;
 
 interface Props {
   snap: UiSnapshot;
@@ -30,12 +44,50 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
   // Keyed by path through the tree, so the same track opens separately
   // in each home it is placed in.
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const tl = snap.timeline;
-  if (!tl || tl.length <= 0) return null;
+  const scroller = useRef<HTMLDivElement | null>(null);
+  // A manual scroll holds off the auto-follow until this timestamp, so
+  // the conveyor never yanks the view back mid-gesture.
+  const holdUntil = useRef(0);
+  // Measured, not assumed: the lane area is whatever the window gives
+  // it, and a short song stretches to exactly that.
+  const [viewWidth, setViewWidth] = useState(1200);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const measure = () => setViewWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  const pxPerSample = 900 / tl.length; // fit the song; wheel zoom is a follow-on
+  const tl = snap.timeline;
+  const length = tl?.length ?? 0;
+  // A song shorter than the window fills it; a longer one gets the
+  // fixed zoom and scrolls. Declared before the effect below so hook
+  // order never depends on the snapshot's contents.
+  const pxPerSample = tl
+    ? Math.max((viewWidth - HEADER_PX) / length, PX_PER_SECOND / tl.rate)
+    : 0;
   const x = (sample: number) => sample * pxPerSample;
-  const width = Math.max(320, x(tl.length));
+  const width = x(length);
+
+  // Follow the playhead. playSample only moves while playing or on a
+  // locate, so this is idle exactly when the transport is.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || performance.now() < holdUntil.current) return;
+    const view = el.clientWidth - HEADER_PX;
+    const head = x(playSample);
+    if (head - el.scrollLeft > view * 0.5) {
+      el.scrollLeft = head - view * 0.5; // the conveyor: head pinned mid-view
+    } else if (head < el.scrollLeft) {
+      el.scrollLeft = Math.max(0, head - view * 0.15); // jumped back: catch up
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playSample]);
+
+  if (!tl || length <= 0) return null;
 
   const locateFromEvent = (e: React.MouseEvent<HTMLDivElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -57,8 +109,14 @@ export function Timeline({ snap, playSample, onLocate, controls }: Props) {
 
   return (
     <div className="tl">
-      <div className="tl-scroll">
-        <div className="tl-grid" style={{ width: 180 + width }}>
+      <div
+        className="tl-scroll"
+        ref={scroller}
+        onWheel={() => {
+          holdUntil.current = performance.now() + 1500;
+        }}
+      >
+        <div className="tl-grid" style={{ width: HEADER_PX + width }}>
           <div className="tl-corner" />
           {/* One tick per bar, drawn where the server says the bar falls:
               bars are not linear in samples across a tempo ramp. */}

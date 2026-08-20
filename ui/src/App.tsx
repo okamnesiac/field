@@ -126,9 +126,13 @@ export function App() {
     const gain = drag[lane.entry] ?? lane.gain_db;
     const soloedHere = snap.soloed === lane.name;
     const dimmed = snap.soloed !== null && !soloedHere;
+    // Two rows, not one: the name above, the controls below. One row
+    // was wider than the header column, and the fader spilled over the
+    // waveform beside it.
     return (
       <div className={`lane ${lane.mute ? 'muted' : ''} ${dimmed ? 'dimmed' : ''}`}>
         <span className="name" title={lane.file}>{lane.name}</span>
+        <div className="lane-ctl">
         <button
           className={`mute ${lane.mute ? 'on' : ''}`}
           title="mute (writes mute: on this placement)"
@@ -161,6 +165,7 @@ export function App() {
           }}
         />
         <span className="db">{gain > 0 ? `+${gain}` : gain}</span>
+        </div>
       </div>
     );
   };
