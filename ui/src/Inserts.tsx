@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { UiInsert, UiTimelineLane } from '../../src/commands/ui-protocol.js';
-import { autoGainDb, responseDb, type EqBandLike } from './eq-math.js';
+import { autoGainDb, responseDb, type EqBandLike } from '../../src/audio/eq-response.js';
 
 // The plugins panel: the selected lane's insert chain, at the bottom of
 // the window. Selection already exists for moving clips; this gives it
@@ -13,8 +13,9 @@ import { autoGainDb, responseDb, type EqBandLike } from './eq-math.js';
 // the track file under its own hash (lane.trackFile / trackSha256).
 //
 // The EQ editor draws its curve and its compensation readout from
-// eq-math.ts, the engine's own arithmetic ported line-for-line — the
-// picture is the render's numbers, not a lookalike. Handles drag in
+// src/audio/eq-response.ts, the engine's own arithmetic ported
+// line-for-line and held equal to the C++ by its tests — the picture
+// is the render's numbers, not a lookalike. Handles drag in
 // gain and frequency; bandwidth and type sit in the band strip below,
 // because two axes is what a drag has.
 

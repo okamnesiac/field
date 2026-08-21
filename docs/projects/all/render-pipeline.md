@@ -637,6 +637,22 @@ most memory-bound of the three effects.
    much as stop the file from claiming coverage it had lost two chunks
    earlier — which is the failure mode worth naming, because nothing goes
    red when it happens.
+
+   **Amended 2026-08-20 — a bounded reversal.** The UI's EQ editor
+   (ui.md) draws its response curve and compensation readout under a
+   pointer drag at frame rate, and a socket round trip per pointer move
+   is the latency mistake the transport clock already made once
+   (ui.md §6). So response *arithmetic* — never sample processing —
+   exists in TypeScript again: `src/audio/eq-response.ts` transliterates
+   `design`, `magnitudeDb` and `autoGainDb` from `dsp/biquad.cpp`, and
+   the UI bundles it the way it bundles the tempo maps. The price this
+   decision set for exactly that file is paid in `eq-response.test.ts`:
+   the three properties above asserted against the port, each confirmed
+   by the same three mutations, plus parity with the C++ itself through
+   `field-dsp-check eq-response` (64 response points and the auto-gain,
+   |Δ| < 1e-6, native-gated like `dsp-check.test.ts`). The executor
+   remains the daemon alone; what returned is the picture's arithmetic,
+   held equal to the render's by a test rather than by intent.
 5. **Sample-rate conversion in the built-in tier**, replacing
    `afconvert` in `normalize` — the work
    [linux-portability.md](linux-portability.md) §4.2–4.3 described,

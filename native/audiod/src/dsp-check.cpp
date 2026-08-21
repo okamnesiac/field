@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -312,8 +313,55 @@ bool checkResampler (const Buffer& signal, double inRate, double outRate)
 }
 } // namespace
 
-int main()
+// eq-response mode: print the composite response and auto-gain for
+// bands given on the command line, so the TypeScript port that draws
+// the UI's curve (src/audio/eq-response.ts) can be held equal to this
+// binary by a test. Band spec: type:frequency:gain_db:bandwidth.
+static int eqResponseMode (int argc, char** argv)
 {
+    const double rate = std::atof (argv[2]);
+    std::vector<field::dsp::Band> bands;
+    for (int i = 3; i < argc; ++i)
+    {
+        std::string spec (argv[i]);
+        field::dsp::Band band;
+        size_t a = spec.find (':');
+        size_t b = spec.find (':', a + 1);
+        size_t c = spec.find (':', b + 1);
+        if (a == std::string::npos || b == std::string::npos || c == std::string::npos)
+        {
+            std::fprintf (stderr, "bad band spec: %s\n", spec.c_str());
+            return 1;
+        }
+        band.type = spec.substr (0, a);
+        band.frequency = std::atof (spec.substr (a + 1, b - a - 1).c_str());
+        band.gainDb = std::atof (spec.substr (b + 1, c - b - 1).c_str());
+        band.bandwidth = std::atof (spec.substr (c + 1).c_str());
+        bands.push_back (band);
+    }
+
+    std::vector<field::dsp::Biquad> biquads;
+    for (const auto& band : bands)
+        biquads.push_back (field::dsp::design (band, rate));
+
+    constexpr int points = 64;
+    for (int i = 0; i < points; ++i)
+    {
+        const double frequency = 20.0 * std::pow (20000.0 / 20.0, (double) i / (points - 1));
+        double db = 0.0;
+        for (const auto& biquad : biquads)
+            db += field::dsp::magnitudeDb (biquad, frequency, rate);
+        std::printf ("point %.9f %.9f\n", frequency, db);
+    }
+    std::printf ("autogain %.9f\n", field::dsp::autoGainDb (bands, rate));
+    return 0;
+}
+
+int main (int argc, char** argv)
+{
+    if (argc >= 3 && std::string (argv[1]) == "eq-response")
+        return eqResponseMode (argc, argv);
+
     // Default floating-point environment, matching both render paths
     // (realtime.md decision 6, resolved: no flush-to-zero anywhere).
     const Buffer signal = testSignal (48000);

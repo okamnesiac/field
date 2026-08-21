@@ -1,9 +1,19 @@
 // The engine's EQ arithmetic, ported line-for-line from
-// native/audiod/src/dsp/biquad.cpp so the curve the editor draws and
-// the compensation it reports are the render's own numbers. If the two
-// implementations ever disagree, the picture lies — so this file
+// native/audiod/src/dsp/biquad.cpp so the curve the UI's editor draws
+// and the compensation it reports are the render's own numbers. If the
+// two implementations ever disagree, the picture lies — so this file
 // mirrors design(), magnitudeDb() and autoGainDb() exactly, including
 // the 45%-of-Nyquist clamp and the w/sin(w) bandwidth correction.
+//
+// This is a recorded partial reversal of render-pipeline.md decision 4,
+// which deleted the TypeScript DSP: response arithmetic (never sample
+// processing) re-exists here because the editor redraws its curve under
+// a pointer drag at frame rate, and a socket round trip per pointer
+// move is the same latency mistake the clock already made once
+// (ui.md §6). The price decision 4 sets for a TS autoGainDb is paid in
+// eq-response.test.ts: its three properties — make-up for cuts, the
+// ±12 dB clamp, narrow-vs-wide proportionality — plus parity against
+// the C++ itself through field-dsp-check's eq-response mode.
 
 export interface EqBandLike {
   type: string;
