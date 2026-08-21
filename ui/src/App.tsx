@@ -106,6 +106,29 @@ export function App() {
 
   const send = (msg: unknown) => ws.current?.send(JSON.stringify(msg));
 
+  // The selected lane, resolved fresh from the snapshot; and whether
+  // the playhead is strictly inside its window, which is what a split
+  // needs — a cut at either edge would leave a zero-length half.
+  const selLane = selected && snap?.timeline ? laneAt(snap.timeline.lanes, selected) : null;
+  const canSplit =
+    selLane !== null &&
+    playSample > selLane.start &&
+    playSample < selLane.start + selLane.duration;
+  const split = () => {
+    if (!canSplit || selLane === null) return;
+    send({
+      type: 'split',
+      file: selLane.file,
+      sha256: selLane.sha256,
+      entry: selLane.entry,
+      offset: Math.round(playSample - selLane.start),
+    });
+  };
+  // The keyboard reaches split through a ref so the keydown listener —
+  // bound once per transport state — always sees the current playhead.
+  const splitRef = useRef(split);
+  splitRef.current = split;
+
   // Space is the transport, as in every DAW — unless the key is headed
   // somewhere that uses it: a focused button would fire twice, and a
   // fader or the device picker owns its own keys.
@@ -113,6 +136,11 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelected(null);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        splitRef.current();
         return;
       }
       if (e.code !== 'Space' || e.repeat) return;
@@ -203,6 +231,13 @@ export function App() {
           {state === 'playing' ? '⏸' : '▶'}
         </button>
         <button onClick={() => send({ type: 'stop' })}>⏹</button>
+        <button
+          onClick={split}
+          disabled={!canSplit}
+          title="split the selected clip at the playhead (Ctrl+E)"
+        >
+          ✂
+        </button>
         <span className={`state ${state}`}>{state}</span>
         <span className="position">{position}</span>
         <select
@@ -249,16 +284,13 @@ export function App() {
         }
         controls={laneControls}
       />
-      {(() => {
-        const lane = selected && snap.timeline ? laneAt(snap.timeline.lanes, selected) : null;
-        return lane && lane.trackFile !== null ? (
-          <Inserts
-            lane={lane}
-            sampleRate={snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
-            send={send}
-          />
-        ) : null;
-      })()}
+      {selLane && selLane.trackFile !== null ? (
+        <Inserts
+          lane={selLane}
+          sampleRate={snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
+          send={send}
+        />
+      ) : null}
       <footer>
         {snap.file.path} — files are the source of truth; edits land as YAML diffs
       </footer>

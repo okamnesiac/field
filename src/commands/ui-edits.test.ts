@@ -7,6 +7,7 @@ import {
   applyInsertEdit,
   applyInsertRemove,
   applyMove,
+  applySplit,
 } from './ui-edits.js';
 
 // The socket's writes land in files the author also edits by hand, so
@@ -70,6 +71,101 @@ describe('placement moves', () => {
     const moved = applyMove(raw, 0, abs, 12345, tempo, meter);
     if (!moved.ok) throw new Error(moved.message);
     expect(moved.text).toContain('at: 12345');
+  });
+});
+
+describe('placement splits', () => {
+  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
+  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
+  const barTicks = 3840;
+  const full = (over: Record<string, unknown>) =>
+    ({
+      at: 0, anchor: 'musical', source_offset: 0, slip: 0,
+      gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
+      ...over,
+    }) as unknown as InputEntry;
+
+  it('cuts a windowed musical clip into two that add back up', () => {
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
+    const parsed = full({ audio: 'riff', duration: barTicks * 2 });
+    const result = applySplit(raw, 0, parsed, barSamples, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(
+      track([
+        'name: main',
+        'inputs:',
+        '  - audio: riff',
+        `    duration: ${barTicks}`,
+        '  - audio: riff',
+        `    at: ${barTicks}`,
+        `    duration: ${barTicks}`,
+        `    source_offset: ${barSamples}`,
+      ]),
+    );
+  });
+
+  it('keeps the at spelling and comments, and leaves an open window open', () => {
+    const raw = track([
+      'name: main',
+      'inputs:',
+      '  - audio: riff',
+      '    at: [2] # the pickup',
+      '    gain_db: -3 # trimmed',
+    ]);
+    const parsed = full({ audio: 'riff', at: barTicks, gain_db: -3 });
+    const result = applySplit(raw, 0, parsed, barSamples / 2, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    // Second half: bar 2 beat 3, spelled musically, comment carried;
+    // the clone keeps the gain comment on both halves. The first half
+    // gains the cut as its duration; the second stays an open window —
+    // it plays to the source's end from its advanced offset.
+    expect(result.text).toContain('at: [2] # the pickup');
+    expect(result.text).toContain('at: [2, 3] # the pickup');
+    expect(result.text.match(/gain_db: -3 # trimmed/g)).toHaveLength(2);
+    expect(result.text).toContain(`source_offset: ${barSamples / 2}`);
+    expect(result.text.match(/duration:/g)).toHaveLength(1); // the first half's cut
+  });
+
+  it('splits an absolute clip in samples, and hands the fades to their halves', () => {
+    const raw = track([
+      'name: main', 'inputs:', '  - audio: hit', '    anchor: absolute', '    at: 1000',
+      '    duration: 5000', '    fade_in: 10', '    fade_out: 20', '    id: whack',
+    ]);
+    const parsed = full({
+      audio: 'hit', anchor: 'absolute', at: 1000, duration: 5000,
+      fade_in: 10, fade_out: 20, id: 'whack',
+    });
+    const result = applySplit(raw, 0, parsed, 2000, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    // The whole file, canonical order: the id stays with the first
+    // half, the fades go to their halves, the source picks up where
+    // the cut left off.
+    expect(result.text).toBe(
+      track([
+        'name: main',
+        'inputs:',
+        '  - id: whack',
+        '    audio: hit',
+        '    anchor: absolute',
+        '    at: 1000',
+        '    duration: 2000',
+        '    fade_in: 10',
+        '  - audio: hit',
+        '    anchor: absolute',
+        '    at: 3000',
+        '    duration: 3000',
+        '    source_offset: 2000',
+        '    fade_out: 20',
+      ]),
+    );
+  });
+
+  it('refuses a cut past the clip end', () => {
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks}`]);
+    const parsed = full({ audio: 'riff', duration: barTicks });
+    const result = applySplit(raw, 0, parsed, barSamples * 2, tempo, meter);
+    expect(result.ok).toBe(false);
   });
 });
 

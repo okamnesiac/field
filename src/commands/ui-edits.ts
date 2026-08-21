@@ -93,6 +93,94 @@ export function applyMove(
   return { ok: true, text: stringifyDocument(doc) };
 }
 
+// Split one placement into two at an offset within its window, given
+// in session samples — origin-free the same way move's delta is. The
+// first half keeps the front (and its fade_in); the second starts at
+// the cut with `source_offset` advanced by the same distance, so the
+// source keeps reading where the first half stopped, and it keeps the
+// fade_out. Everything else — gain, pan, mute, slip, per-field comments
+// and spellings — is carried by cloning the entry node itself, which
+// is what makes the result read as two entries a person wrote rather
+// than one entry and a robot's paraphrase.
+//
+// The caller enforces what needs the model or the ledger: a positive
+// offset inside the window, no `loop:` (a loop tiles its window — the
+// two halves of a tiling are not two tilings), and a same-rate source,
+// because `source_offset` addresses the source's samples and a
+// cross-rate advance computed in session samples would land the second
+// half in the wrong place quietly.
+export function applySplit(
+  raw: string,
+  entry: number,
+  parsed: InputEntry,
+  offset: number,
+  tempo: TempoMap,
+  meter: MeterMap,
+): EditOutcome {
+  const doc = parseDocument(raw);
+  const node = doc.getIn(['inputs', entry], true);
+  if (!isNode(node) || !('clone' in node)) {
+    return { ok: false, message: `no input ${entry} — refreshed`, refresh: true };
+  }
+  const w = placedWindow(parsed, tempo);
+
+  // The cut in the entry's own unit: span ticks for a musical anchor,
+  // samples for an absolute one.
+  const musical = parsed.anchor !== 'absolute';
+  const cut = musical
+    ? Math.round(tempo.samplesToTicks(w.start + offset)) - parsed.at
+    : Math.round(offset);
+  if (cut <= 0) return { ok: false, message: 'the cut lands before the clip starts' };
+  if (parsed.duration !== undefined && cut >= parsed.duration) {
+    return { ok: false, message: 'the cut lands past the clip ends' };
+  }
+
+  // Two entries from one node: the clone carries every field, comment
+  // and spelling the original had, and each half then edits only what
+  // the cut changes.
+  const second = (node as { clone(): typeof node }).clone();
+  const inputs = doc.getIn(['inputs']) as { items: unknown[] };
+  inputs.items.splice(entry + 1, 0, second);
+
+  // First half: duration becomes the cut, the fade_out belongs to the
+  // second half now, and an id stays with the first — ids are unique.
+  doc.setIn(['inputs', entry, 'duration'], cut);
+  doc.deleteIn(['inputs', entry, 'fade_out']);
+
+  // Second half: starts at the cut, spelled the way the author spelled
+  // `at` (the same rule as move, comment carried the same way), reads
+  // the source from where the first half stopped, keeps what remains
+  // of the duration, and drops what the first half kept.
+  const atValue = parsed.at + cut;
+  const oldAt = doc.getIn(['inputs', entry + 1, 'at'], true);
+  const atComment = isNode(oldAt) ? oldAt.comment : undefined;
+  if (isSeq(oldAt) && musical) {
+    const [bar, beat, tick] = meter.position(atValue);
+    const spelled = tick > 1 ? [bar, beat, tick] : beat > 1 ? [bar, beat] : [bar];
+    doc.setIn(['inputs', entry + 1, 'at'], doc.createNode(spelled));
+    if (atComment != null) {
+      const fresh = doc.getIn(['inputs', entry + 1, 'at'], true);
+      if (isNode(fresh)) fresh.comment = atComment;
+    }
+  } else {
+    doc.setIn(['inputs', entry + 1, 'at'], atValue);
+  }
+  doc.setIn(['inputs', entry + 1, 'source_offset'], parsed.source_offset + Math.round(offset));
+  if (parsed.duration === undefined) {
+    // An open window stays open: the second half plays to the source's
+    // end, which is still "the whole of what remains" after the
+    // source_offset advance.
+    doc.deleteIn(['inputs', entry + 1, 'duration']);
+  } else {
+    doc.setIn(['inputs', entry + 1, 'duration'], parsed.duration - cut);
+  }
+  doc.deleteIn(['inputs', entry + 1, 'fade_in']);
+  doc.deleteIn(['inputs', entry + 1, 'id']);
+
+  canonicalizeDocument(doc, trackOrder);
+  return { ok: true, text: stringifyDocument(doc) };
+}
+
 // Insert parameter validation: the same zod objects the track schema is
 // built from, partial per effect, so this module can never produce a
 // value the engine would refuse.

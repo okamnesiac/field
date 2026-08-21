@@ -17,6 +17,7 @@ import {
   applyInsertEdit,
   applyInsertRemove,
   applyMove,
+  applySplit,
 } from './ui-edits.js';
 import type { UiLane, UiSnapshot } from './ui-protocol.js';
 import { projectTimeline } from './ui-timeline.js';
@@ -98,6 +99,17 @@ const insertRemoveSchema = z.object({
   entry: z.number().int().min(0),
 });
 
+// Split carries the cut as an offset from the clip's own window start,
+// in session samples — origin-free the way move's delta is, and what
+// the client knows directly: playhead minus lane start.
+const splitSchema = z.object({
+  type: z.literal('split'),
+  file: z.string().optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  entry: z.number().int().min(0),
+  offset: z.number().int().min(1),
+});
+
 const upSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('play') }),
   z.object({ type: z.literal('pause') }),
@@ -107,6 +119,7 @@ const upSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('solo'), track: z.string().nullable() }),
   editSchema,
   moveSchema,
+  splitSchema,
   insertAddSchema,
   insertEditSchema,
   insertRemoveSchema,
@@ -316,7 +329,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     socket: WebSocket,
     msg: { file?: string | undefined; sha256: string; entry: number },
   ) => {
-    const { song, main } = mainFile();
+    const { project, song, main } = mainFile();
     // Resolved against the song's own track paths, never joined: a
     // client-supplied path reaching join(root, …) is a traversal, and
     // this socket accepts writes.
@@ -342,7 +355,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       await pushSnapshot();
       return null;
     }
-    return { song, owner, absolute, raw };
+    return { project, song, owner, absolute, raw };
   };
 
   const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
@@ -393,6 +406,60 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     const result = applyMove(raw, msg.entry, entry, msg.delta, tempo, meter);
     if (!result.ok) {
       socket.send(JSON.stringify({ type: 'error', message: result.message }));
+      return;
+    }
+    writeFileSync(absolute, result.text);
+    await pushSnapshot();
+  };
+
+  const handleSplit = async (socket: WebSocket, msg: z.infer<typeof splitSchema>) => {
+    const resolved = await resolvePlacement(socket, msg);
+    if (resolved === null) return;
+    const { song, owner, absolute, raw } = resolved;
+    const entry = owner.data.inputs[msg.entry];
+    if (entry === undefined) {
+      socket.send(JSON.stringify({ type: 'error', message: `no input ${msg.entry} — refreshed` }));
+      await pushSnapshot();
+      return;
+    }
+    // A loop tiles its window; the two halves of a tiling are not two
+    // tilings, so a looped clip does not split.
+    if (entry.loop !== undefined) {
+      socket.send(JSON.stringify({ type: 'error', message: 'a looped clip cannot be split — remove the loop first' }));
+      return;
+    }
+    // source_offset addresses the source's samples. The split advances
+    // it by the cut measured in session samples, which is only the same
+    // number when the source runs at the session rate — so a cross-rate
+    // placement is refused rather than cut in quietly the wrong place.
+    const placedTrack = entry.track !== undefined
+      ? song.tracks.find((t) => t.data.name === entry.track)
+      : undefined;
+    if (placedTrack?.data.rate !== undefined && placedTrack.data.rate !== loaded.sample_rate) {
+      socket.send(JSON.stringify({ type: 'error', message: 'a cross-rate track cannot be split yet' }));
+      return;
+    }
+    if (entry.audio !== undefined) {
+      const shared = /^\/\/shared\/asset:(.+)$/.exec(entry.audio);
+      const ledger = shared
+        ? resolved.project?.shared?.data.assets.find((a) => a.name === shared[1])
+        : song.assets?.data.assets.find((a) => a.name === entry.audio);
+      if (ledger?.sample_rate !== undefined && ledger.sample_rate !== loaded.sample_rate) {
+        socket.send(JSON.stringify({ type: 'error', message: 'a cross-rate clip cannot be split yet' }));
+        return;
+      }
+    }
+    const tempo = new TempoMap(
+      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
+      loaded.sample_rate,
+    );
+    const meter = new MeterMap(
+      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
+    );
+    const result = applySplit(raw, msg.entry, entry, msg.offset, tempo, meter);
+    if (!result.ok) {
+      socket.send(JSON.stringify({ type: 'error', message: result.message }));
+      if (result.refresh) await pushSnapshot();
       return;
     }
     writeFileSync(absolute, result.text);
@@ -489,6 +556,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         await handleEdit(socket, msg);
       } else if (msg.type === 'move') {
         await handleMove(socket, msg);
+      } else if (msg.type === 'split') {
+        await handleSplit(socket, msg);
       } else if (msg.type === 'insert-add') {
         await handleInsertAdd(socket, msg);
       } else if (msg.type === 'insert-edit') {
