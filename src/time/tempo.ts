@@ -183,6 +183,36 @@ export class MeterMap {
     );
   }
 
+  // Tick count → cardinal span from an anchor — spanTicks's inverse,
+  // and anchored for the same reason spanTicks is: a meter change
+  // inside the span changes what a bar is worth, so the same tick
+  // count spells differently from different starting points. Greedy —
+  // whole bars, then whole beats, then ticks — which walks exactly the
+  // steps spanTicks adds back: spanTicks(from, ...span(from, T)) === T
+  // for every non-negative integer T.
+  span(from: number, ticks: number): [number, number, number] {
+    if (ticks < 0 || !Number.isInteger(ticks)) throw new Error(`invalid span ${ticks}`);
+    let at = from;
+    let remaining = ticks;
+    let bars = 0;
+    let beats = 0;
+    for (;;) {
+      const bar = barTicks(this.events[this.segmentFor(at)]!);
+      if (remaining < bar) break;
+      remaining -= bar;
+      at += bar;
+      bars++;
+    }
+    for (;;) {
+      const beat = beatTicks(this.events[this.segmentFor(at)]!.denominator);
+      if (remaining < beat) break;
+      remaining -= beat;
+      at += beat;
+      beats++;
+    }
+    return [bars, beats, remaining];
+  }
+
   // Cardinal span → tick count from an anchor: [bars, beats?, ticks?],
   // zero-legal ([0, 2] is two beats). Bars and beats step at the meter in
   // force at the moving position, so a span crossing a meter change means

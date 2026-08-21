@@ -161,6 +161,33 @@ describe('placement splits', () => {
     );
   });
 
+  it('keeps a span spelling for duration, and its comment, on both halves', () => {
+    // bloom's lead-vocal authors exactly this: a beats span with a
+    // sentence explaining why. A split must not cost the sentence.
+    const raw = track([
+      'name: main',
+      'inputs:',
+      '  - audio: take',
+      '    duration: [0, 8] # eight beats — room for any take, not just this one',
+    ]);
+    const parsed = full({ audio: 'take', duration: 8 * 960 });
+    // Three beats in: 2880 ticks, 72000 samples at 120 BPM / 48 kHz.
+    const result = applySplit(raw, 0, parsed, 72000, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(
+      track([
+        'name: main',
+        'inputs:',
+        '  - audio: take',
+        '    duration: [0, 3] # eight beats — room for any take, not just this one',
+        '  - audio: take',
+        '    at: 2880',
+        '    duration: [1, 1] # eight beats — room for any take, not just this one',
+        '    source_offset: 72000',
+      ]),
+    );
+  });
+
   it('refuses a cut past the clip end', () => {
     const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks}`]);
     const parsed = full({ audio: 'riff', duration: barTicks });

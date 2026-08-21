@@ -142,9 +142,32 @@ export function applySplit(
   const inputs = doc.getIn(['inputs']) as { items: unknown[] };
   inputs.items.splice(entry + 1, 0, second);
 
+  // Durations keep the author's spelling and comment, the same rule as
+  // `at` below — with one wrinkle worth naming: `at` is an ordinal
+  // position while duration is a cardinal span, and a span's musical
+  // spelling depends on where it starts, since a meter change inside
+  // it changes what a bar is worth. So each half re-spells through
+  // span() from its own anchor.
+  const oldDur = doc.getIn(['inputs', entry, 'duration'], true);
+  const durComment = isNode(oldDur) ? oldDur.comment : undefined;
+  const durWasSeq = isSeq(oldDur) && musical;
+  const setDuration = (index: number, from: number, ticks: number) => {
+    if (durWasSeq) {
+      const [bars, beats, rest] = meter.span(from, ticks);
+      const spelled = rest > 0 ? [bars, beats, rest] : beats > 0 ? [bars, beats] : [bars];
+      doc.setIn(['inputs', index, 'duration'], doc.createNode(spelled));
+    } else {
+      doc.setIn(['inputs', index, 'duration'], ticks);
+    }
+    if (durComment != null) {
+      const fresh = doc.getIn(['inputs', index, 'duration'], true);
+      if (isNode(fresh)) fresh.comment = durComment;
+    }
+  };
+
   // First half: duration becomes the cut, the fade_out belongs to the
   // second half now, and an id stays with the first — ids are unique.
-  doc.setIn(['inputs', entry, 'duration'], cut);
+  setDuration(entry, parsed.at, cut);
   doc.deleteIn(['inputs', entry, 'fade_out']);
 
   // Second half: starts at the cut, spelled the way the author spelled
@@ -172,7 +195,7 @@ export function applySplit(
     // source_offset advance.
     doc.deleteIn(['inputs', entry + 1, 'duration']);
   } else {
-    doc.setIn(['inputs', entry + 1, 'duration'], parsed.duration - cut);
+    setDuration(entry + 1, parsed.at + cut, parsed.duration - cut);
   }
   doc.deleteIn(['inputs', entry + 1, 'fade_in']);
   doc.deleteIn(['inputs', entry + 1, 'id']);
