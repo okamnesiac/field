@@ -56,3 +56,6 @@ costs nothing. See [README](README.md) for how these lists work.
 - **Generation progress** — real per-step progress from the workers
   (ACE step counts, Chatterbox chunking) over the existing progress
   events; today a minutes-long generate is one silent "generating".
+- **Features other DAWs are loved for** — a standing list of what REAPER,
+  Logic, Ableton, Pro Tools and the AI-native tools get praised for, and
+  what each would cost here ([daw-features.md](all/daw-features.md)).
