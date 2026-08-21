@@ -6,7 +6,7 @@ import type { LoadedSong } from '../model/project.js';
 import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
 import { sha256Text } from '../hash.js';
 import type { InputEntry, TrackTime } from '../schema/index.js';
-import type { UiMark, UiTimeline, UiTimelineLane } from './ui-protocol.js';
+import type { UiInsert, UiMark, UiTimeline, UiTimelineLane } from './ui-protocol.js';
 
 // The song seen in time: a pure projection from the loaded project to
 // lanes with absolute sample windows, plus the bar marks the ruler
@@ -164,6 +164,19 @@ export function projectTimeline(
       pan: entry.pan,
       mute: entry.mute,
       canSolo: placedName !== undefined,
+      trackFile: placed?.path ?? null,
+      trackSha256: placed ? sha256Text(placed.raw) : null,
+      inserts: placed
+        ? placed.data.inserts.map(
+            (ins, i): UiInsert => ({
+              entry: i,
+              effect: 'effect' in ins ? String(ins.effect) : 'plugin',
+              // The whole parsed insert, defaults applied — the knobs
+              // render from real values, not from re-derived ones.
+              params: { ...ins },
+            }),
+          )
+        : null,
       children: recurse
         ? placed!.data.inputs
             .filter((c) => c.receive === undefined)

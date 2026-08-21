@@ -87,6 +87,17 @@ export interface UiEvent {
 // Server → client.
 export type UiDown = UiSnapshot | UiError | UiEvent;
 
+// One insert in a track's chain, parsed with defaults applied — the
+// client renders knobs from these values and sends whole-param edits
+// back against the track file's own hash. `effect` is the discriminant
+// for built-ins; a hosted plugin arrives as 'plugin' and is read-only
+// here (its knobs belong to its own editor window).
+export interface UiInsert {
+  entry: number;
+  effect: string;
+  params: Record<string, unknown>;
+}
+
 // The song in time. Absolute sample windows, projected server-side
 // through the planner's own arithmetic, plus one mark per bar — bars are
 // not linear in samples across a tempo ramp, so the ruler ships marks
@@ -122,6 +133,13 @@ export interface UiTimelineLane {
   pan: number;
   mute: boolean;
   canSolo: boolean;
+  // The placed track's own file — where its inserts live — with its
+  // hash as the stale guard for insert ops. Null when the placement is
+  // not a track (raw audio, a generator), which is also the panel's
+  // signal that there is no chain to show.
+  trackFile: string | null;
+  trackSha256: string | null;
+  inserts: UiInsert[] | null;
   // Null when this lane places audio rather than a track: there is
   // nothing underneath, so no twirl is offered.
   children: UiTimelineLane[] | null;
