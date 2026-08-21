@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 // pure functions over the event arrays the snapshot carries, so the
 // view's bars and the CLI's cannot disagree.
 import { MeterMap, TempoMap } from '../../src/time/tempo.js';
-import { Timeline } from './Timeline.js';
+import { laneAt, Timeline } from './Timeline.js';
+import { Inserts } from './Inserts.js';
 
 // The first face (ui.md): transport and flat lanes over the files. The
 // view renders server truth; local state exists only inside a gesture —
@@ -35,6 +36,10 @@ export function App() {
   const ws = useRef<WebSocket | null>(null);
   // The gesture's own state: entry index -> value while dragging.
   const [drag, setDrag] = useState<Record<number, number>>({});
+  // The selected clip, by tree path. The timeline writes it; the
+  // inserts panel reads the lane it names. A path rather than a lane
+  // object, so every snapshot re-resolves to current values.
+  const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
     // The shell passes the token on the URL exactly as the printed link
@@ -106,6 +111,10 @@ export function App() {
   // fader or the device picker owns its own keys.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelected(null);
+        return;
+      }
       if (e.code !== 'Space' || e.repeat) return;
       const t = e.target instanceof HTMLElement ? e.target.tagName : '';
       if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || t === 'BUTTON') return;
@@ -225,6 +234,8 @@ export function App() {
       <Timeline
         snap={snap}
         playSample={playSample}
+        selected={selected}
+        onSelect={setSelected}
         onLocate={(sample) => {
           // Optimistic: the click already says where, so the playhead
           // moves now and the daemon's next report corrects it. Waiting
@@ -238,6 +249,16 @@ export function App() {
         }
         controls={laneControls}
       />
+      {(() => {
+        const lane = selected && snap.timeline ? laneAt(snap.timeline.lanes, selected) : null;
+        return lane && lane.trackFile !== null ? (
+          <Inserts
+            lane={lane}
+            sampleRate={snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
+            send={send}
+          />
+        ) : null;
+      })()}
       <footer>
         {snap.file.path} — files are the source of truth; edits land as YAML diffs
       </footer>

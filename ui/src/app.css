@@ -342,3 +342,153 @@ footer {
 .tl-block.d1 { background: #24313d; }
 .tl-block.d2 { background: #26303a; }
 .tl-block.d3 { background: #272f36; }
+
+/* --- inserts panel -------------------------------
+   The selected track's chain, at the bottom. Appears with selection,
+   leaves with Escape; the timeline above keeps the rest of the window. */
+.ins {
+  flex: none;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  background: #171a1f;
+  padding: 0.5rem 0.75rem;
+  scrollbar-width: none;
+}
+.ins::-webkit-scrollbar {
+  display: none;
+}
+.ins-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.ins-track {
+  font-weight: 600;
+}
+.ins-path {
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+.ins-add {
+  margin-left: auto;
+  display: flex;
+  gap: 0.3rem;
+}
+.ins-add button,
+.eq-strip button,
+.eq-strip select {
+  background: #22262e;
+  color: inherit;
+  border: 1px solid #343945;
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.ins-none {
+  opacity: 0.5;
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}
+.ins-row {
+  border-top: 1px solid #23272f;
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+}
+.ins-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ins-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ins-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 0.2rem;
+}
+.ins-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  padding: 0.3rem 0;
+}
+.knob {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+.knob input[type='range'] {
+  width: 110px;
+}
+.knob-name {
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.knob-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.6rem;
+}
+
+/* --- the EQ editor -------------------------------- */
+.eq-view {
+  width: 100%;
+  max-width: 720px;
+  height: 150px;
+  display: block;
+  background: #14161a;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  touch-action: none;
+}
+.eq-grid {
+  stroke: #23272f;
+  stroke-width: 1;
+}
+.eq-zero {
+  stroke: #343945;
+  stroke-width: 1;
+}
+.eq-curve {
+  fill: none;
+  stroke: #5b8fc7;
+  stroke-width: 2;
+}
+.eq-handle {
+  fill: #22262e;
+  stroke: #6d86a8;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.eq-handle.picked {
+  fill: #e8c35a;
+  stroke: #e8c35a;
+}
+.eq-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.35rem 0;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+.eq-norm {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  opacity: 0.85;
+}
+.eq-comp {
+  font-variant-numeric: tabular-nums;
+  color: #e8c35a;
+}

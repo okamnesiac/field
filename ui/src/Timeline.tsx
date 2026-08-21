@@ -42,21 +42,37 @@ const HEADER_PX = 200;
 // scrolling as it plays, while a short one stretches to fill (below).
 const PX_PER_SECOND = 100;
 
+// Find a lane again by its tree path — the shape the walk below
+// builds. The panel holds a path rather than a lane object, so each
+// snapshot re-resolves it and edits always read current values.
+export function laneAt(lanes: UiTimelineLane[], path: string, prefix = ''): UiTimelineLane | null {
+  for (const lane of lanes) {
+    const p = `${prefix}/${lane.entry}:${lane.name}`;
+    if (p === path) return lane;
+    if (lane.children && path.startsWith(p + '/')) {
+      const hit = laneAt(lane.children, path, p);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 interface Props {
   snap: UiSnapshot;
   playSample: number;
+  // Selection lives in App — the inserts panel reads it too — and the
+  // timeline is one of its writers.
+  selected: string | null;
+  onSelect: (path: string | null) => void;
   onLocate: (sample: number) => void;
   onMove: (lane: UiTimelineLane, deltaSamples: number) => void;
   controls: (lane: UiTimelineLane) => React.ReactNode;
 }
 
-export function Timeline({ snap, playSample, onLocate, onMove, controls }: Props) {
+export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMove, controls }: Props) {
   // Keyed by path through the tree, so the same track opens separately
   // in each home it is placed in.
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  // Selection is view state like expansion: one clip, by tree path,
-  // cleared by Escape or a click on empty lane ground.
-  const [selected, setSelected] = useState<string | null>(null);
   // While a drag is live, the dragged clip renders at start+delta; the
   // write happens once, on release.
   const [drag, setDrag] = useState<{ path: string; delta: number } | null>(null);
@@ -78,14 +94,6 @@ export function Timeline({ snap, playSample, onLocate, onMove, controls }: Props
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelected(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // The snap grid: the song's beat positions, through the real maps.
@@ -149,7 +157,7 @@ export function Timeline({ snap, playSample, onLocate, onMove, controls }: Props
   const onGrab = (e: React.PointerEvent<HTMLDivElement>, lane: UiTimelineLane, path: string) => {
     if (e.button !== 0) return;
     e.stopPropagation();
-    setSelected(path);
+    onSelect(path);
     grab.current = { x: e.clientX, path, lane, active: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -229,7 +237,7 @@ export function Timeline({ snap, playSample, onLocate, onMove, controls }: Props
               onDragMove={onDragMove}
               onDrop={onDrop}
               onDragCancel={onDragCancel}
-              onDeselect={() => setSelected(null)}
+              onDeselect={() => onSelect(null)}
               locateAt={locateAt}
               controls={controls}
             />
