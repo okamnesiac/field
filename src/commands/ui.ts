@@ -3,24 +3,21 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isNode, isSeq, parseDocument } from 'yaml';
+import { parseDocument } from 'yaml';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
 import { AudiodClient } from '../audiod/client.js';
 import type { CompiledSession } from '../graph/live.js';
 import { compileSession } from '../graph/live.js';
-import { placedWindow } from '../generators/stem.js';
 import { sha256Text } from '../hash.js';
 import { loadProject } from '../model/project.js';
 import {
-  eqParams,
-  hallParams,
-  limitParams,
-  plateParams,
-  reverbParams,
-  trackOrder,
-} from '../schema/index.js';
-import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
+  applyEdit,
+  applyInsertAdd,
+  applyInsertEdit,
+  applyInsertRemove,
+  applyMove,
+} from './ui-edits.js';
 import type { UiLane, UiSnapshot } from './ui-protocol.js';
 import { projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
@@ -80,29 +77,6 @@ const moveSchema = z.object({
   entry: z.number().int().min(0),
   delta: z.number().int(),
 });
-
-// Insert ops speak to the placed track's own file — where `inserts:`
-// lives — under that file's hash, which the lane carries as
-// trackSha256. Edits send whole parameter values; the per-effect
-// schemas below are the same objects the track schema is built from,
-// so the socket can never write a parameter the engine would refuse.
-const effectParamSchemas = {
-  eq: z.strictObject(eqParams).partial(),
-  limit: z.strictObject(limitParams).partial(),
-  reverb: z.strictObject(reverbParams).partial(),
-  plate: z.strictObject(plateParams).partial(),
-  hall: z.strictObject(hallParams).partial(),
-};
-// Defaults per effect, resolved once through the same schemas: a value
-// set back to its default is deleted rather than written, the rule
-// every other edit here follows.
-const effectDefaults: Record<string, Record<string, unknown>> = {
-  eq: z.strictObject(eqParams).omit({ bands: true }).parse({}),
-  limit: z.strictObject(limitParams).parse({}),
-  reverb: z.strictObject(reverbParams).parse({}),
-  plate: z.strictObject(plateParams).parse({}),
-  hall: z.strictObject(hallParams).parse({}),
-};
 
 const insertAddSchema = z.object({
   type: z.literal('insert-add'),
@@ -368,22 +342,19 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       await pushSnapshot();
       return null;
     }
-    return { song, owner, absolute, doc };
+    return { song, owner, absolute, raw };
   };
 
   const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
     const resolved = await resolvePlacement(socket, msg);
     if (resolved === null) return;
-    const { absolute, doc } = resolved;
-    for (const [key, value] of Object.entries(msg.set)) {
-      // Defaults stay implicit: writing `mute: false` or `pan: 0` onto
-      // an entry that never spelled them would churn the file.
-      const isDefault = (key === 'mute' && value === false) || (key !== 'mute' && value === 0);
-      if (isDefault) doc.deleteIn(['inputs', msg.entry, key]);
-      else doc.setIn(['inputs', msg.entry, key], value);
+    const { absolute, raw } = resolved;
+    const result = applyEdit(raw, msg.entry, msg.set);
+    if (!result.ok) {
+      socket.send(JSON.stringify({ type: 'error', message: result.message }));
+      return;
     }
-    canonicalizeDocument(doc, trackOrder);
-    writeFileSync(absolute, stringifyDocument(doc));
+    writeFileSync(absolute, result.text);
     // No daemon push here: the watch loop owns carrying file edits into
     // the session, for the UI exactly as for a hand edit in an editor.
     //
@@ -398,11 +369,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   const handleMove = async (socket: WebSocket, msg: z.infer<typeof moveSchema>) => {
     const resolved = await resolvePlacement(socket, msg);
     if (resolved === null) return;
-    const { song, owner, absolute, doc } = resolved;
+    const { song, owner, absolute, raw } = resolved;
     // The parsed entry, not the YAML node: the model rewrote musical
-    // arrays to tick scalars at load, which is the shape placedWindow
-    // takes — and the sha guard just proved the parse describes these
-    // exact bytes.
+    // arrays to tick scalars at load, which is the shape applyMove's
+    // window arithmetic takes — and the sha guard just proved the
+    // parse describes these exact bytes.
     const entry = owner.data.inputs[msg.entry];
     if (entry === undefined) {
       socket.send(JSON.stringify({ type: 'error', message: `no input ${msg.entry} — refreshed` }));
@@ -416,44 +387,15 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
       loaded.sample_rate,
     );
-    const w = placedWindow(entry, tempo);
-    const local = Math.max(0, w.start + msg.delta);
-    const at = entry.anchor === 'absolute' ? Math.round(local) : Math.round(tempo.samplesToTicks(local));
-    // What the author wrote stays theirs across the move. An `at:`
-    // spelled as a musical array is written back as one — through the
-    // owner's meter map, positionTicks's own inverse — because a drag
-    // that flattens `at: [5]` to `at: 7680` is the one edit in this
-    // view that does not read like something a person typed. And the
-    // line's comment is carried across the node swap by hand: replacing
-    // a sequence with a fresh node discards the comment attached to the
-    // old one, where scalar-over-scalar keeps it, which is why edit
-    // never had this problem (#163 review).
-    const oldNode = doc.getIn(['inputs', msg.entry, 'at'], true);
-    const comment = isNode(oldNode) ? oldNode.comment : undefined;
-    if (isSeq(oldNode) && entry.anchor !== 'absolute') {
-      const meter = new MeterMap(
-        owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
-      );
-      const [bar, beat, tick] = meter.position(at);
-      // The shortest array that means it, as a person would write it —
-      // through createNode, because setIn stores a raw JS array as-is:
-      // unwrapped, it dodges the canonicalizer's flow flag (isSeq is
-      // false on an Array) and stringifies block-style.
-      const spelled = tick > 1 ? [bar, beat, tick] : beat > 1 ? [bar, beat] : [bar];
-      doc.setIn(['inputs', msg.entry, 'at'], doc.createNode(spelled));
-    } else if (at === 0) {
-      // Defaults stay implicit, as in edit: a clip dragged back to zero
-      // loses its `at:` rather than gaining `at: 0`.
-      doc.deleteIn(['inputs', msg.entry, 'at']);
-    } else {
-      doc.setIn(['inputs', msg.entry, 'at'], at);
+    const meter = new MeterMap(
+      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
+    );
+    const result = applyMove(raw, msg.entry, entry, msg.delta, tempo, meter);
+    if (!result.ok) {
+      socket.send(JSON.stringify({ type: 'error', message: result.message }));
+      return;
     }
-    if (comment != null) {
-      const fresh = doc.getIn(['inputs', msg.entry, 'at'], true);
-      if (isNode(fresh)) fresh.comment = comment;
-    }
-    canonicalizeDocument(doc, trackOrder);
-    writeFileSync(absolute, stringifyDocument(doc));
+    writeFileSync(absolute, result.text);
     await pushSnapshot();
   };
 
@@ -478,103 +420,41 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       await pushSnapshot();
       return null;
     }
-    return { song, owner, absolute, doc: parseDocument(raw) };
+    return { song, owner, absolute, raw };
   };
 
-  const writeTrack = async (absolute: string, doc: ReturnType<typeof parseDocument>) => {
-    canonicalizeDocument(doc, trackOrder);
-    writeFileSync(absolute, stringifyDocument(doc));
+  // The shared tail of every insert op: run the pure edit against the
+  // resolved file, report failure, or write and push.
+  const runInsertOp = async (
+    socket: WebSocket,
+    absolute: string,
+    result: ReturnType<typeof applyInsertRemove>,
+  ) => {
+    if (!result.ok) {
+      socket.send(JSON.stringify({ type: 'error', message: result.message }));
+      if (result.refresh) await pushSnapshot();
+      return;
+    }
+    writeFileSync(absolute, result.text);
     await pushSnapshot();
   };
 
   const handleInsertAdd = async (socket: WebSocket, msg: z.infer<typeof insertAddSchema>) => {
     const resolved = await resolveTrackFile(socket, msg);
     if (resolved === null) return;
-    const { absolute, doc } = resolved;
-    // Minimal spelling: parameters stay implicit at their defaults, as
-    // a person would write it. The eq arrives as the Fyra channel
-    // layout — the fixed homes a hand reaches for — flat, so adding it
-    // changes nothing until a band moves.
-    const fresh =
-      msg.effect === 'eq'
-        ? {
-            effect: 'eq',
-            bands: [
-              { type: 'lowshelf', frequency: 90 },
-              { type: 'bell', frequency: 220 },
-              { type: 'bell', frequency: 500 },
-              { type: 'bell', frequency: 1200 },
-              { type: 'bell', frequency: 3200 },
-              { type: 'highshelf', frequency: 8000 },
-            ],
-          }
-        : { effect: msg.effect };
-    const chain = doc.getIn(['inserts']);
-    if (chain === undefined) doc.setIn(['inserts'], doc.createNode([fresh]));
-    else doc.addIn(['inserts'], doc.createNode(fresh));
-    await writeTrack(absolute, doc);
+    await runInsertOp(socket, resolved.absolute, applyInsertAdd(resolved.raw, msg.effect));
   };
 
   const handleInsertEdit = async (socket: WebSocket, msg: z.infer<typeof insertEditSchema>) => {
     const resolved = await resolveTrackFile(socket, msg);
     if (resolved === null) return;
-    const { owner, absolute, doc } = resolved;
-    const insert = owner.data.inserts[msg.entry];
-    if (insert === undefined) {
-      socket.send(JSON.stringify({ type: 'error', message: `no insert ${msg.entry} — refreshed` }));
-      await pushSnapshot();
-      return;
-    }
-    if (!('effect' in insert)) {
-      // A hosted plugin's parameters belong to its own editor window
-      // (plugin-hosting.md §5 chunk 3), not to this socket.
-      socket.send(JSON.stringify({ type: 'error', message: 'plugin inserts are read-only here' }));
-      return;
-    }
-    const effect = String(insert.effect) as keyof typeof effectParamSchemas;
-    const parsed = effectParamSchemas[effect]?.safeParse(msg.set);
-    if (parsed === undefined || !parsed.success) {
-      socket.send(JSON.stringify({ type: 'error', message: `bad ${effect} parameters` }));
-      return;
-    }
-    const defaults = effectDefaults[effect]!;
-    for (const [key, value] of Object.entries(parsed.data)) {
-      if (key === 'bands' && Array.isArray(value)) {
-        // Bands re-spelled minimally: per-band defaults stay implicit,
-        // so an untouched band keeps the two fields its author wrote.
-        const minimal = value.map((b) => {
-          const band: Record<string, unknown> = { type: b.type, frequency: b.frequency };
-          if (b.gain_db !== undefined && b.gain_db !== 0) band['gain_db'] = b.gain_db;
-          if (b.bandwidth !== undefined && b.bandwidth !== 2) band['bandwidth'] = b.bandwidth;
-          return band;
-        });
-        doc.setIn(['inserts', msg.entry, 'bands'], doc.createNode(minimal));
-      } else if (JSON.stringify(value) === JSON.stringify(defaults[key])) {
-        doc.deleteIn(['inserts', msg.entry, key]);
-      } else {
-        doc.setIn(['inserts', msg.entry, key], value);
-      }
-    }
-    await writeTrack(absolute, doc);
+    await runInsertOp(socket, resolved.absolute, applyInsertEdit(resolved.raw, msg.entry, msg.set));
   };
 
   const handleInsertRemove = async (socket: WebSocket, msg: z.infer<typeof insertRemoveSchema>) => {
     const resolved = await resolveTrackFile(socket, msg);
     if (resolved === null) return;
-    const { owner, absolute, doc } = resolved;
-    if (owner.data.inserts[msg.entry] === undefined) {
-      socket.send(JSON.stringify({ type: 'error', message: `no insert ${msg.entry} — refreshed` }));
-      await pushSnapshot();
-      return;
-    }
-    doc.deleteIn(['inserts', msg.entry]);
-    // An emptied chain loses its key: `inserts: []` is not something a
-    // person leaves behind.
-    const chain = doc.getIn(['inserts']);
-    if (chain !== undefined && typeof chain === 'object' && (chain as { items?: unknown[] }).items?.length === 0) {
-      doc.deleteIn(['inserts']);
-    }
-    await writeTrack(absolute, doc);
+    await runInsertOp(socket, resolved.absolute, applyInsertRemove(resolved.raw, msg.entry));
   };
 
   const handle = async (socket: WebSocket, raw: string) => {
