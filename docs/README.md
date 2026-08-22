@@ -7,7 +7,7 @@ schema-validated, diffable files. Every meaningful action is a CLI
 command, and audio outputs are produced by an explicit dependency graph
 with content-addressed caching. Human users and coding agents work on
 the same underlying representation; an MCP surface exposing the CLI's
-verbs as tools is planned ([projects/later.md](projects/later.md)).
+verbs as tools is planned ([projects/later.md](projects/README.md)).
 
 For a concrete project you can read and build, see
 [`examples/bloom`](../examples/bloom/README.md) — two songs exercising

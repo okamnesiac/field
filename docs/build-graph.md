@@ -42,7 +42,7 @@ pointer.
 ### Watch mode
 
 The cache is what makes watching cheap
-([watch.md](projects/all/watch.md)). `field build --watch <label>`
+([watch.md](projects/watch/readme.md)). `field build --watch <label>`
 rebuilds on every settled change and answers "did anything audible
 change" as an output-hash question: a fader move re-runs one sum, and a
 comment edit or `field fmt` pass is all cache hits and reports silence.
@@ -176,7 +176,7 @@ entry kinds, placement, nesting, levels, local time and rate, sends — is
 The stem places its entries through the tempo map (`at`, source offset,
 slip, entry gain and pan, linear fades) and sums them into a pre-fader
 Float32 stereo stem in the render daemon
-([projects/all/mix-assembly.md](projects/all/mix-assembly.md) §1). A
+([projects/mix-assembly/readme.md](projects/mix-assembly/readme.md) §1). A
 placed track is one more source in the same list, so a track→track edge
 is an ordinary graph edge, and a track placed three times is one render
 placed three times. The song's output track additionally renders the
@@ -202,7 +202,7 @@ gain, tap and arrivals, and on nothing else: a send-level tweak
 re-renders the receiver and whatever consumes it, never the sender.
 
 An entry's `loop:` map tiles its source to fill the window
-([projects/all/clip-looping.md](projects/all/clip-looping.md)):
+([projects/clip-looping/readme.md](projects/clip-looping/readme.md)):
 repetitions expand into ordinary placement-plan entries — grid-locked
 via `loop.every`, cut or rung-out per `loop.mode`, seams click-guarded
 by `loop.fade` — so the renderer and action-key format don't know loops
@@ -235,17 +235,17 @@ in the environment; it writes `FIELD_OUTPUT` and exits. The program's
 its own renders; with a fixed seed, renders are reproducible
 bit-for-bit. `field sc render` runs a program directly (uncached) for
 iteration. Full contract:
-[projects/all/sc-render.md](projects/all/sc-render.md) §2 (the plan
+[projects/sc-render/readme.md](projects/sc-render/readme.md) §2 (the plan
 predates the §4 rename).
 
 ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
 
-From [projects/all/effects.md](projects/all/effects.md): Fyra's
+From [projects/effects/readme.md](projects/effects/readme.md): Fyra's
 auto-normalizing EQ (RBJ biquads, bandwidth in octaves, response-based
 compensation on by default — tone changes, level doesn't), an offline
 lookahead limiter with a hard ceiling guarantee, and a deterministic
 Freeverb whose output grows by its tail. The reverbs pair joined from
-[projects/all/reverbs.md](projects/all/reverbs.md): `plate`, Dattorro's
+[projects/reverbs/readme.md](projects/reverbs/readme.md): `plate`, Dattorro's
 figure-8 tank, and `hall`, a Jot FDN with per-band decay — both
 deterministic including their modulated tails, growing by their tails
 the same way (the hall by its longest band's).
@@ -256,7 +256,7 @@ tracks, cached per link: a track wrapped in an effect is a different
 track. `field check` names containment cycles.
 
 **Hosted plugins** join the same chains as `plugin:` entries
-([projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)).
+([projects/plugin-hosting/readme.md](projects/plugin-hosting/readme.md)).
 The action key hashes the keyed spelling, computable from the
 repository alone: exact identity and pinned version (never the display
 name), the authored params canonicalized by name, the *full* state-blob

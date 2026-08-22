@@ -7,9 +7,9 @@ recording, monitoring, plugin hosting — is future work, deferred because
 the generation-first milestones need none of it. The live engine —
 the graph evaluated in the callback, with the build cache as automatic
 track freezing — is planned in
-[projects/all/realtime.md](projects/all/realtime.md); recording waits
+[projects/realtime/readme.md](projects/realtime/readme.md); recording waits
 behind it in
-[projects/all/recording.md](projects/all/recording.md). This document records
+[projects/recording/readme.md](projects/recording/readme.md). This document records
 the decisions already settled so the phases that build it start from
 agreement, not from scratch. Language and framework decisions (C++/JUCE,
 and the alternatives rejected) also live in
@@ -26,7 +26,7 @@ routing/buses/sends, real-time automation, offline rendering where
 supported, safe file writing, crash recovery, and peak generation.
 
 Sends did not wait for this engine:
-[projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19
+[projects/nested-tracks/readme.md](projects/nested-tracks/readme.md) §19
 renders them offline, and that shipped first. A label links exactly one
 send to one receive, the edge carries a level and a tap point and never
 an offset, and a receive may sit only where its path to the cable's

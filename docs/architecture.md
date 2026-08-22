@@ -72,7 +72,7 @@ versioned NDJSON protocol on a Unix domain socket. It runs daemon-lite —
 and it exits when idle — and `field transport` and `field devices` drive
 the same protocol, which CI exercises against the real binary in
 null-output mode. Hosting arrived with
-[plugin-hosting.md](projects/all/plugin-hosting.md) chunks 1 and 2:
+[plugin-hosting.md](projects/plugin-hosting/readme.md) chunks 1 and 2:
 `--scan` probes installed AU/VST3 plugins one crash-isolated subprocess
 each, `--render` instantiates pinned plugins offline, and live sessions
 host them in their chains — child chains on the load thread, the master
