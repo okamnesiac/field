@@ -256,6 +256,29 @@ footer {
   cursor: grabbing;
   opacity: 0.85;
 }
+.tl-block.stretching {
+  cursor: ew-resize;
+}
+/* The window's own edges, grabbable: drag one and the clip trims short
+   or plays longer, snapped to the grid a move lands on. Visible on
+   hover rather than always, so a lane of clips reads as clips. */
+.tl-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 1;
+  cursor: ew-resize;
+}
+.tl-grip.start {
+  left: 0;
+}
+.tl-grip.end {
+  right: 0;
+}
+.tl-grip:hover {
+  background: rgba(232, 195, 90, 0.4);
+}
 .tl-wave {
   width: 100%;
   height: 100%;

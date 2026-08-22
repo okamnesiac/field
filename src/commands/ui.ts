@@ -18,6 +18,7 @@ import {
   applyInsertRemove,
   applyMove,
   applySplit,
+  applyStretch,
 } from './ui-edits.js';
 import type { UiLane, UiSnapshot } from './ui-protocol.js';
 import { projectTimeline } from './ui-timeline.js';
@@ -110,6 +111,20 @@ const splitSchema = z.object({
   offset: z.number().int().min(1),
 });
 
+// Stretch carries which edge was dragged and where it landed, in
+// session samples from the clip's own window start — one measurement
+// covering both edges (ui-edits.ts). The start edge's number is how far
+// that edge travelled and may be negative; the end edge's is the
+// window's new length, so it is at least one sample.
+const stretchSchema = z.object({
+  type: z.literal('stretch'),
+  file: z.string().optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  entry: z.number().int().min(0),
+  edge: z.enum(['start', 'end']),
+  offset: z.number().int(),
+});
+
 const upSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('play') }),
   z.object({ type: z.literal('pause') }),
@@ -120,6 +135,7 @@ const upSchema = z.discriminatedUnion('type', [
   editSchema,
   moveSchema,
   splitSchema,
+  stretchSchema,
   insertAddSchema,
   insertEditSchema,
   insertRemoveSchema,
@@ -358,6 +374,52 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     return { project, song, owner, absolute, raw };
   };
 
+  // A placement resolved far enough to edit: what resolvePlacement
+  // hands back, named so the helpers below can take it whole.
+  type Resolved = NonNullable<Awaited<ReturnType<typeof resolvePlacement>>>;
+
+  // The owner's own time, falling back to the song's — the same rule the
+  // timeline renders by (nested-tracks.md §13), so a clip lands exactly
+  // where the drag showed it.
+  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) => ({
+    tempo: new TempoMap(
+      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
+      loaded.sample_rate,
+    ),
+    meter: new MeterMap(
+      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
+    ),
+  });
+
+  // `source_offset` addresses the source's own samples, and both the
+  // split and the front-trim advance it by a distance measured in
+  // session samples — the same number only when the source runs at the
+  // session rate. So a cross-rate placement is refused rather than
+  // edited quietly into the wrong place, which is the one thing this
+  // surface must never write. Returns the refusal's wording, naming the
+  // gesture, or null when there is nothing to refuse.
+  const crossRateRefusal = (
+    { song, project }: Pick<Resolved, 'song' | 'project'>,
+    entry: { track?: string | undefined; audio?: string | undefined },
+    verb: string,
+  ): string | null => {
+    const placedTrack =
+      entry.track !== undefined ? song.tracks.find((t) => t.data.name === entry.track) : undefined;
+    if (placedTrack?.data.rate !== undefined && placedTrack.data.rate !== loaded.sample_rate) {
+      return `a cross-rate track cannot be ${verb} yet`;
+    }
+    if (entry.audio !== undefined) {
+      const shared = /^\/\/shared\/asset:(.+)$/.exec(entry.audio);
+      const ledger = shared
+        ? project?.shared?.data.assets.find((a) => a.name === shared[1])
+        : song.assets?.data.assets.find((a) => a.name === entry.audio);
+      if (ledger?.sample_rate !== undefined && ledger.sample_rate !== loaded.sample_rate) {
+        return `a cross-rate clip cannot be ${verb} yet`;
+      }
+    }
+    return null;
+  };
+
   const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
     const resolved = await resolvePlacement(socket, msg);
     if (resolved === null) return;
@@ -382,7 +444,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   const handleMove = async (socket: WebSocket, msg: z.infer<typeof moveSchema>) => {
     const resolved = await resolvePlacement(socket, msg);
     if (resolved === null) return;
-    const { song, owner, absolute, raw } = resolved;
+    const { owner, absolute, raw } = resolved;
     // The parsed entry, not the YAML node: the model rewrote musical
     // arrays to tick scalars at load, which is the shape applyMove's
     // window arithmetic takes — and the sha guard just proved the
@@ -393,16 +455,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       await pushSnapshot();
       return;
     }
-    // The owner's own time, falling back to the song's — the same rule
-    // the timeline renders by (nested-tracks.md §13), so a clip lands
-    // exactly where the drag showed it.
-    const tempo = new TempoMap(
-      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
-      loaded.sample_rate,
-    );
-    const meter = new MeterMap(
-      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
-    );
+    const { tempo, meter } = localMaps(resolved);
     const result = applyMove(raw, msg.entry, entry, msg.delta, tempo, meter);
     if (!result.ok) {
       socket.send(JSON.stringify({ type: 'error', message: result.message }));
@@ -415,7 +468,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   const handleSplit = async (socket: WebSocket, msg: z.infer<typeof splitSchema>) => {
     const resolved = await resolvePlacement(socket, msg);
     if (resolved === null) return;
-    const { song, owner, absolute, raw } = resolved;
+    const { owner, absolute, raw } = resolved;
     const entry = owner.data.inputs[msg.entry];
     if (entry === undefined) {
       socket.send(JSON.stringify({ type: 'error', message: `no input ${msg.entry} — refreshed` }));
@@ -428,35 +481,55 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       socket.send(JSON.stringify({ type: 'error', message: 'a looped clip cannot be split — remove the loop first' }));
       return;
     }
-    // source_offset addresses the source's samples. The split advances
-    // it by the cut measured in session samples, which is only the same
-    // number when the source runs at the session rate — so a cross-rate
-    // placement is refused rather than cut in quietly the wrong place.
-    const placedTrack = entry.track !== undefined
-      ? song.tracks.find((t) => t.data.name === entry.track)
-      : undefined;
-    if (placedTrack?.data.rate !== undefined && placedTrack.data.rate !== loaded.sample_rate) {
-      socket.send(JSON.stringify({ type: 'error', message: 'a cross-rate track cannot be split yet' }));
+    const refusal = crossRateRefusal(resolved, entry, 'split');
+    if (refusal !== null) {
+      socket.send(JSON.stringify({ type: 'error', message: refusal }));
       return;
     }
-    if (entry.audio !== undefined) {
-      const shared = /^\/\/shared\/asset:(.+)$/.exec(entry.audio);
-      const ledger = shared
-        ? resolved.project?.shared?.data.assets.find((a) => a.name === shared[1])
-        : song.assets?.data.assets.find((a) => a.name === entry.audio);
-      if (ledger?.sample_rate !== undefined && ledger.sample_rate !== loaded.sample_rate) {
-        socket.send(JSON.stringify({ type: 'error', message: 'a cross-rate clip cannot be split yet' }));
+    const { tempo, meter } = localMaps(resolved);
+    const result = applySplit(raw, msg.entry, entry, msg.offset, tempo, meter);
+    if (!result.ok) {
+      socket.send(JSON.stringify({ type: 'error', message: result.message }));
+      if (result.refresh) await pushSnapshot();
+      return;
+    }
+    writeFileSync(absolute, result.text);
+    await pushSnapshot();
+  };
+
+  const handleStretch = async (socket: WebSocket, msg: z.infer<typeof stretchSchema>) => {
+    const resolved = await resolvePlacement(socket, msg);
+    if (resolved === null) return;
+    const { owner, absolute, raw } = resolved;
+    const entry = owner.data.inputs[msg.entry];
+    if (entry === undefined) {
+      socket.send(JSON.stringify({ type: 'error', message: `no input ${msg.entry} — refreshed` }));
+      await pushSnapshot();
+      return;
+    }
+    // Only the front edge touches the source, so only it inherits
+    // split's two refusals. The end edge is window arithmetic and
+    // nothing else, which is why it is offered on every clip: dragging
+    // the end of a looped placement is how its window grows another
+    // repetition — the gesture, not a hazard.
+    if (msg.edge === 'start') {
+      if (entry.loop !== undefined) {
+        socket.send(
+          JSON.stringify({
+            type: 'error',
+            message: 'a looped clip cannot be trimmed at the front — remove the loop first',
+          }),
+        );
+        return;
+      }
+      const refusal = crossRateRefusal(resolved, entry, 'trimmed');
+      if (refusal !== null) {
+        socket.send(JSON.stringify({ type: 'error', message: refusal }));
         return;
       }
     }
-    const tempo = new TempoMap(
-      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
-      loaded.sample_rate,
-    );
-    const meter = new MeterMap(
-      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
-    );
-    const result = applySplit(raw, msg.entry, entry, msg.offset, tempo, meter);
+    const { tempo, meter } = localMaps(resolved);
+    const result = applyStretch(raw, msg.entry, entry, msg.edge, msg.offset, tempo, meter);
     if (!result.ok) {
       socket.send(JSON.stringify({ type: 'error', message: result.message }));
       if (result.refresh) await pushSnapshot();
@@ -558,6 +631,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         await handleMove(socket, msg);
       } else if (msg.type === 'split') {
         await handleSplit(socket, msg);
+      } else if (msg.type === 'stretch') {
+        await handleStretch(socket, msg);
       } else if (msg.type === 'insert-add') {
         await handleInsertAdd(socket, msg);
       } else if (msg.type === 'insert-edit') {

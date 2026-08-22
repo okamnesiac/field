@@ -8,6 +8,7 @@ import {
   applyInsertRemove,
   applyMove,
   applySplit,
+  applyStretch,
 } from './ui-edits.js';
 
 // The socket's writes land in files the author also edits by hand, so
@@ -193,6 +194,116 @@ describe('placement splits', () => {
     const parsed = full({ audio: 'riff', duration: barTicks });
     const result = applySplit(raw, 0, parsed, barSamples * 2, tempo, meter);
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('placement stretches', () => {
+  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
+  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
+  const barTicks = 3840;
+  const full = (over: Record<string, unknown>) =>
+    ({
+      at: 0, anchor: 'musical', source_offset: 0, slip: 0,
+      gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
+      ...over,
+    }) as unknown as InputEntry;
+
+  it('trims the end to the length the drag drew, and touches nothing else', () => {
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
+    const parsed = full({ audio: 'riff', duration: barTicks * 2 });
+    const result = applyStretch(raw, 0, parsed, 'end', barSamples, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(
+      track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks}`]),
+    );
+    // And back out again: the end edge is one key, so the round trip is
+    // the author's bytes.
+    const back = applyStretch(result.text, 0, full({ audio: 'riff', duration: barTicks }), 'end', barSamples * 2, tempo, meter);
+    if (!back.ok) throw new Error(back.message);
+    expect(back.text).toBe(raw);
+  });
+
+  it('gives an open window the length the drag drew', () => {
+    const raw = track(['name: main', 'inputs:', '  - audio: riff']);
+    const result = applyStretch(raw, 0, full({ audio: 'riff' }), 'end', barSamples * 2, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(
+      track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]),
+    );
+  });
+
+  it('trims the front through at, duration and source_offset together', () => {
+    const raw = track([
+      'name: main',
+      'inputs:',
+      '  - audio: riff',
+      '    at: [2] # the pickup',
+      `    duration: ${barTicks * 2}`,
+    ]);
+    const parsed = full({ audio: 'riff', at: barTicks, duration: barTicks * 2 });
+    const result = applyStretch(raw, 0, parsed, 'start', barSamples, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    // The window starts a bar later and is a bar shorter, and the read
+    // advanced by the same bar — so what sounds under the surviving half
+    // of the window is exactly what sounded there before.
+    expect(result.text).toBe(
+      track([
+        'name: main',
+        'inputs:',
+        '  - audio: riff',
+        '    at: [3] # the pickup',
+        `    duration: ${barTicks}`,
+        `    source_offset: ${barSamples}`,
+      ]),
+    );
+    const trimmed = full({
+      audio: 'riff', at: barTicks * 2, duration: barTicks, source_offset: barSamples,
+    });
+    const back = applyStretch(result.text, 0, trimmed, 'start', -barSamples, tempo, meter);
+    if (!back.ok) throw new Error(back.message);
+    expect(back.text).toBe(raw); // source_offset back to zero loses its key
+  });
+
+  it('leaves an open window open when the front is trimmed', () => {
+    const raw = track(['name: main', 'inputs:', '  - audio: riff']);
+    const result = applyStretch(raw, 0, full({ audio: 'riff' }), 'start', barSamples, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(
+      track([
+        'name: main',
+        'inputs:',
+        '  - audio: riff',
+        `    at: ${barTicks}`,
+        `    source_offset: ${barSamples}`,
+      ]),
+    );
+  });
+
+  it('stretches an absolute clip in samples', () => {
+    const raw = track([
+      'name: main', 'inputs:', '  - audio: hit', '    anchor: absolute', '    duration: 48000',
+    ]);
+    const parsed = full({ audio: 'hit', anchor: 'absolute', duration: 48000 });
+    const result = applyStretch(raw, 0, parsed, 'end', 24000, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toContain('duration: 24000');
+  });
+
+  it('refuses a window with nothing left of it', () => {
+    const parsed = full({ audio: 'riff', duration: barTicks });
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks}`]);
+    const flat = applyStretch(raw, 0, parsed, 'end', 0, tempo, meter);
+    expect(flat).toEqual({ ok: false, message: 'a clip cannot end where it starts' });
+    const eaten = applyStretch(raw, 0, parsed, 'start', barSamples, tempo, meter);
+    expect(eaten).toEqual({ ok: false, message: 'the clip would have no length left' });
+  });
+
+  it('refuses a front trim that reaches before the source begins', () => {
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', '    at: [2]']);
+    const parsed = full({ audio: 'riff', at: barTicks });
+    const result = applyStretch(raw, 0, parsed, 'start', -barSamples, tempo, meter);
+    expect(result).toEqual({ ok: false, message: 'the source has nothing before its first sample' });
   });
 });
 

@@ -21,10 +21,16 @@ import type { UiSnapshot, UiTimelineLane } from '../../src/commands/ui-protocol.
 // put `mute:` on the placement.
 //
 // The gestures, and which one owns the playhead: clicking a clip
-// selects it, dragging a clip moves it in time (snapped to the beat
-// grid, committed as a `move` on release), and the playhead moves only
-// from the ruler or a double-click on a clip. A single click on a lane
-// deliberately does nothing to the transport — locating on every stray
+// selects it, dragging a clip moves it in time, dragging either edge of
+// a clip trims it short or lets it play longer (all three snapped to the
+// beat grid and committed on release, as a `move` or a `stretch`), and
+// the playhead moves only from the ruler or a double-click on a clip.
+// The edges are grips rather than a hit test on the block, so the cursor
+// says which gesture the hand is about to start — and they appear only
+// on a block wide enough to hold them and still be draggable, since a
+// clip narrower than two grips could otherwise never be moved.
+//
+// A single click on a lane deliberately does nothing to the transport — locating on every stray
 // click made selecting a clip impossible without also moving the play
 // position, which is how the first version worked and why it stopped.
 //
@@ -37,6 +43,14 @@ import type { UiSnapshot, UiTimelineLane } from '../../src/commands/ui-protocol.
 // The header column's width, shared by the CSS grid template and every
 // piece of arithmetic that has to know where lane content begins.
 const HEADER_PX = 200;
+
+// Which edge a drag is holding. A move holds the start and carries the
+// whole window; the other two change the window's length.
+type Edge = 'move' | 'start' | 'end';
+
+// The grip's width, and the unit the "is this block wide enough" test is
+// written in — one number so the two cannot disagree.
+const GRIP_PX = 7;
 
 // Zoom, fixed for now: enough that a song longer than the window keeps
 // scrolling as it plays, while a short one stretches to fill (below).
@@ -66,19 +80,24 @@ interface Props {
   onSelect: (path: string | null) => void;
   onLocate: (sample: number) => void;
   onMove: (lane: UiTimelineLane, deltaSamples: number) => void;
+  // The end edge commits the window's new length, the start edge how far
+  // it travelled — one measurement from the clip's own window start,
+  // which is what the server's op takes (ui-edits.ts).
+  onStretch: (lane: UiTimelineLane, edge: 'start' | 'end', offset: number) => void;
   controls: (lane: UiTimelineLane) => React.ReactNode;
 }
 
-export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMove, controls }: Props) {
+export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMove, onStretch, controls }: Props) {
   // Keyed by path through the tree, so the same track opens separately
   // in each home it is placed in.
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  // While a drag is live, the dragged clip renders at start+delta; the
+  // While a drag is live, the dragged clip renders with its edge moved
+  // by delta — the whole block for a move, one side for a stretch. The
   // write happens once, on release.
-  const [drag, setDrag] = useState<{ path: string; delta: number } | null>(null);
-  const grab = useRef<{ x: number; path: string; lane: UiTimelineLane; active: boolean } | null>(
-    null,
-  );
+  const [drag, setDrag] = useState<{ path: string; edge: Edge; delta: number } | null>(null);
+  const grab = useRef<
+    { x: number; path: string; lane: UiTimelineLane; edge: Edge; active: boolean } | null
+  >(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   // A manual scroll holds off the auto-follow until this timestamp, so
   // the conveyor never yanks the view back mid-gesture.
@@ -154,11 +173,16 @@ export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMov
     onLocate(Math.min(sample, length));
   };
 
-  const onGrab = (e: React.PointerEvent<HTMLDivElement>, lane: UiTimelineLane, path: string) => {
+  const onGrab = (
+    e: React.PointerEvent<HTMLDivElement>,
+    lane: UiTimelineLane,
+    path: string,
+    edge: Edge,
+  ) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     onSelect(path);
-    grab.current = { x: e.clientX, path, lane, active: false };
+    grab.current = { x: e.clientX, path, lane, edge, active: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -170,13 +194,26 @@ export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMov
     if (!g.active && Math.abs(dx) < 4) return;
     g.active = true;
     holdUntil.current = performance.now() + 1500; // the conveyor yields to the hand
-    const target = snapSample(g.lane.start + dx / pxPerSample);
-    setDrag({ path: g.path, delta: target - g.lane.start });
+    // Whichever edge the hand is holding, snapped to the grid and read
+    // back as a delta from where that edge started — a move holds the
+    // start and carries the whole window with it.
+    const held = g.edge === 'end' ? g.lane.start + g.lane.duration : g.lane.start;
+    const delta = snapSample(held + dx / pxPerSample) - held;
+    // A window never closes to nothing under the hand. The drag simply
+    // stops following at the last grid step that leaves a window, rather
+    // than clamping to a position no snap would have produced.
+    if (g.edge === 'start' && delta >= g.lane.duration) return;
+    if (g.edge === 'end' && delta <= -g.lane.duration) return;
+    setDrag({ path: g.path, edge: g.edge, delta });
   };
   const onDrop = () => {
     const g = grab.current;
     grab.current = null;
-    if (g?.active && drag !== null && drag.delta !== 0) onMove(g.lane, drag.delta);
+    if (g?.active && drag !== null && drag.delta !== 0) {
+      if (g.edge === 'move') onMove(g.lane, drag.delta);
+      else if (g.edge === 'end') onStretch(g.lane, 'end', g.lane.duration + drag.delta);
+      else onStretch(g.lane, 'start', drag.delta);
+    }
     setDrag(null);
   };
   const onDragCancel = () => {
@@ -232,8 +269,8 @@ export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMov
               x={x}
               playSample={playSample}
               selected={selected === path}
-              dragOffset={drag?.path === path ? drag.delta : 0}
-              onGrab={(e) => onGrab(e, lane, path)}
+              drag={drag?.path === path ? drag : null}
+              onGrab={(e, edge) => onGrab(e, lane, path, edge)}
               onDragMove={onDragMove}
               onDrop={onDrop}
               onDragCancel={onDragCancel}
@@ -249,7 +286,7 @@ export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMov
 }
 
 function Row({
-  lane, open, onToggle, width, x, playSample, selected, dragOffset,
+  lane, open, onToggle, width, x, playSample, selected, drag,
   onGrab, onDragMove, onDrop, onDragCancel, onDeselect, locateAt, controls,
 }: {
   lane: UiTimelineLane;
@@ -259,8 +296,8 @@ function Row({
   x: (s: number) => number;
   playSample: number;
   selected: boolean;
-  dragOffset: number;
-  onGrab: (e: React.PointerEvent<HTMLDivElement>) => void;
+  drag: { edge: Edge; delta: number } | null;
+  onGrab: (e: React.PointerEvent<HTMLDivElement>, edge: Edge) => void;
   onDragMove: (e: React.PointerEvent<HTMLDivElement>) => void;
   onDrop: () => void;
   onDragCancel: () => void;
@@ -269,7 +306,21 @@ function Row({
   controls: (lane: UiTimelineLane) => React.ReactNode;
 }) {
   const peaks = lane.peaks;
-  const dragging = dragOffset !== 0;
+  // One delta, read three ways: a move carries both edges, a start drag
+  // moves the left edge and eats into the window, an end drag leaves the
+  // left edge where it is and changes the length.
+  const delta = drag?.delta ?? 0;
+  const start = drag?.edge === 'end' ? lane.start : lane.start + delta;
+  const duration =
+    drag === null || drag.edge === 'move'
+      ? lane.duration
+      : drag.edge === 'end'
+        ? lane.duration + delta
+        : lane.duration - delta;
+  const stretching = drag !== null && drag.edge !== 'move';
+  // Two grips and room to grab the block between them: below that the
+  // clip is all handle and nothing to drag, so the edges step aside.
+  const grips = x(duration) >= 3 * GRIP_PX;
   return (
     <>
       <div className="tl-header" style={{ paddingLeft: 6 + lane.depth * 14 }}>
@@ -290,12 +341,13 @@ function Row({
             'tl-block',
             lane.mute ? 'muted' : '',
             selected ? 'selected' : '',
-            dragging ? 'dragging' : '',
+            drag !== null ? 'dragging' : '',
+            stretching ? 'stretching' : '',
             `d${Math.min(lane.depth, 3)}`,
           ].join(' ')}
-          style={{ left: x(lane.start + dragOffset), width: Math.max(2, x(lane.duration)) }}
+          style={{ left: x(start), width: Math.max(2, x(duration)) }}
           onClick={(e) => e.stopPropagation()}
-          onPointerDown={onGrab}
+          onPointerDown={(e) => onGrab(e, 'move')}
           onPointerMove={onDragMove}
           onPointerUp={onDrop}
           onPointerCancel={onDragCancel}
@@ -304,6 +356,18 @@ function Row({
             if (laneEl instanceof HTMLElement) locateAt(e.clientX, laneEl);
           }}
         >
+          {grips &&
+            (['start', 'end'] as const).map((edge) => (
+              <div
+                key={edge}
+                className={`tl-grip ${edge}`}
+                title={edge === 'start' ? 'trim the front (moves what it reads)' : 'trim the end'}
+                onPointerDown={(e) => onGrab(e, edge)}
+                onPointerMove={onDragMove}
+                onPointerUp={onDrop}
+                onPointerCancel={onDragCancel}
+              />
+            ))}
           {peaks && (
             <svg className="tl-wave" viewBox={`0 0 ${peaks.length} 100`} preserveAspectRatio="none">
               {/* Mirrored envelope: the shape of the render, not a claim

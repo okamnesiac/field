@@ -1,4 +1,4 @@
-import { isNode, isSeq, parseDocument } from 'yaml';
+import { type Document, isNode, isSeq, parseDocument } from 'yaml';
 import { z } from 'zod';
 import { placedWindow } from '../generators/stem.js';
 import {
@@ -27,6 +27,63 @@ import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 export type EditOutcome =
   | { ok: true; text: string }
   | { ok: false; message: string; refresh?: boolean };
+
+// `at`, written the way the author spelled it. A musical array stays an
+// array — re-spelled through the owner's meter map, positionTicks's own
+// inverse — because an edit that flattens `at: [5]` to `at: 7680` is the
+// one write in this surface that does not read like something a person
+// typed. A scalar stays ticks, zero deletes the key (defaults stay
+// implicit, as in edit), and the line's comment is carried across the
+// node swap by hand: replacing a sequence with a fresh node discards the
+// comment attached to the old one, where scalar-over-scalar keeps it,
+// which is why edit never had this problem (#163 review).
+function setAt(doc: Document, meter: MeterMap, index: number, at: number, musical: boolean): void {
+  const oldNode = doc.getIn(['inputs', index, 'at'], true);
+  const comment = isNode(oldNode) ? oldNode.comment : undefined;
+  if (isSeq(oldNode) && musical) {
+    const [bar, beat, tick] = meter.position(at);
+    // The shortest array that means it, as a person would write it —
+    // through createNode, because setIn stores a raw JS array as-is:
+    // unwrapped, it dodges the canonicalizer's flow flag (isSeq is
+    // false on an Array) and stringifies block-style.
+    const spelled = tick > 1 ? [bar, beat, tick] : beat > 1 ? [bar, beat] : [bar];
+    doc.setIn(['inputs', index, 'at'], doc.createNode(spelled));
+  } else if (at === 0) {
+    doc.deleteIn(['inputs', index, 'at']);
+  } else {
+    doc.setIn(['inputs', index, 'at'], at);
+  }
+  if (comment != null) {
+    const fresh = doc.getIn(['inputs', index, 'at'], true);
+    if (isNode(fresh)) fresh.comment = comment;
+  }
+}
+
+// A duration keeps its spelling and its comment the same way, with one
+// wrinkle worth naming: `at` is an ordinal position while duration is a
+// cardinal span, and a span's musical spelling depends on where it
+// starts, since a meter change inside it changes what a bar is worth. So
+// a span is re-spelled through span() from its own anchor. The spelling
+// is read once and handed back as a writer, because a split writes both
+// halves out of the original entry's node.
+function durationSpeller(doc: Document, meter: MeterMap, source: number, musical: boolean) {
+  const oldDur = doc.getIn(['inputs', source, 'duration'], true);
+  const comment = isNode(oldDur) ? oldDur.comment : undefined;
+  const wasSeq = isSeq(oldDur) && musical;
+  return (index: number, from: number, span: number): void => {
+    if (wasSeq) {
+      const [bars, beats, rest] = meter.span(from, span);
+      const spelled = rest > 0 ? [bars, beats, rest] : beats > 0 ? [bars, beats] : [bars];
+      doc.setIn(['inputs', index, 'duration'], doc.createNode(spelled));
+    } else {
+      doc.setIn(['inputs', index, 'duration'], span);
+    }
+    if (comment != null) {
+      const fresh = doc.getIn(['inputs', index, 'duration'], true);
+      if (isNode(fresh)) fresh.comment = comment;
+    }
+  };
+}
 
 // One placement edit: set or clear gain_db / pan / mute on an input
 // entry. Defaults stay implicit: writing `mute: false` or `pan: 0` onto
@@ -59,36 +116,10 @@ export function applyMove(
   const w = placedWindow(parsed, tempo);
   const local = Math.max(0, w.start + delta);
   const at = parsed.anchor === 'absolute' ? Math.round(local) : Math.round(tempo.samplesToTicks(local));
-  // What the author wrote stays theirs across the move. An `at:`
-  // spelled as a musical array is written back as one — through the
-  // owner's meter map, positionTicks's own inverse — because a drag
-  // that flattens `at: [5]` to `at: 7680` is the one edit in this
-  // view that does not read like something a person typed. And the
-  // line's comment is carried across the node swap by hand: replacing
-  // a sequence with a fresh node discards the comment attached to the
-  // old one, where scalar-over-scalar keeps it, which is why edit
-  // never had this problem (#163 review).
-  const oldNode = doc.getIn(['inputs', entry, 'at'], true);
-  const comment = isNode(oldNode) ? oldNode.comment : undefined;
-  if (isSeq(oldNode) && parsed.anchor !== 'absolute') {
-    const [bar, beat, tick] = meter.position(at);
-    // The shortest array that means it, as a person would write it —
-    // through createNode, because setIn stores a raw JS array as-is:
-    // unwrapped, it dodges the canonicalizer's flow flag (isSeq is
-    // false on an Array) and stringifies block-style.
-    const spelled = tick > 1 ? [bar, beat, tick] : beat > 1 ? [bar, beat] : [bar];
-    doc.setIn(['inputs', entry, 'at'], doc.createNode(spelled));
-  } else if (at === 0) {
-    // Defaults stay implicit, as in edit: a clip dragged back to zero
-    // loses its `at:` rather than gaining `at: 0`.
-    doc.deleteIn(['inputs', entry, 'at']);
-  } else {
-    doc.setIn(['inputs', entry, 'at'], at);
-  }
-  if (comment != null) {
-    const fresh = doc.getIn(['inputs', entry, 'at'], true);
-    if (isNode(fresh)) fresh.comment = comment;
-  }
+  // What the author wrote stays theirs across the move: setAt spells
+  // the line the way the line was already spelled, and a clip dragged
+  // back to zero loses its `at:` rather than gaining `at: 0`.
+  setAt(doc, meter, entry, at, parsed.anchor !== 'absolute');
   canonicalizeDocument(doc, trackOrder);
   return { ok: true, text: stringifyDocument(doc) };
 }
@@ -142,28 +173,9 @@ export function applySplit(
   const inputs = doc.getIn(['inputs']) as { items: unknown[] };
   inputs.items.splice(entry + 1, 0, second);
 
-  // Durations keep the author's spelling and comment, the same rule as
-  // `at` below — with one wrinkle worth naming: `at` is an ordinal
-  // position while duration is a cardinal span, and a span's musical
-  // spelling depends on where it starts, since a meter change inside
-  // it changes what a bar is worth. So each half re-spells through
-  // span() from its own anchor.
-  const oldDur = doc.getIn(['inputs', entry, 'duration'], true);
-  const durComment = isNode(oldDur) ? oldDur.comment : undefined;
-  const durWasSeq = isSeq(oldDur) && musical;
-  const setDuration = (index: number, from: number, ticks: number) => {
-    if (durWasSeq) {
-      const [bars, beats, rest] = meter.span(from, ticks);
-      const spelled = rest > 0 ? [bars, beats, rest] : beats > 0 ? [bars, beats] : [bars];
-      doc.setIn(['inputs', index, 'duration'], doc.createNode(spelled));
-    } else {
-      doc.setIn(['inputs', index, 'duration'], ticks);
-    }
-    if (durComment != null) {
-      const fresh = doc.getIn(['inputs', index, 'duration'], true);
-      if (isNode(fresh)) fresh.comment = durComment;
-    }
-  };
+  // Both halves keep the spelling and comment of the duration they were
+  // cut from, each re-spelled from its own anchor.
+  const setDuration = durationSpeller(doc, meter, entry, musical);
 
   // First half: duration becomes the cut, the fade_out belongs to the
   // second half now, and an id stays with the first — ids are unique.
@@ -174,20 +186,7 @@ export function applySplit(
   // `at` (the same rule as move, comment carried the same way), reads
   // the source from where the first half stopped, keeps what remains
   // of the duration, and drops what the first half kept.
-  const atValue = parsed.at + cut;
-  const oldAt = doc.getIn(['inputs', entry + 1, 'at'], true);
-  const atComment = isNode(oldAt) ? oldAt.comment : undefined;
-  if (isSeq(oldAt) && musical) {
-    const [bar, beat, tick] = meter.position(atValue);
-    const spelled = tick > 1 ? [bar, beat, tick] : beat > 1 ? [bar, beat] : [bar];
-    doc.setIn(['inputs', entry + 1, 'at'], doc.createNode(spelled));
-    if (atComment != null) {
-      const fresh = doc.getIn(['inputs', entry + 1, 'at'], true);
-      if (isNode(fresh)) fresh.comment = atComment;
-    }
-  } else {
-    doc.setIn(['inputs', entry + 1, 'at'], atValue);
-  }
+  setAt(doc, meter, entry + 1, parsed.at + cut, musical);
   doc.setIn(['inputs', entry + 1, 'source_offset'], parsed.source_offset + Math.round(offset));
   if (parsed.duration === undefined) {
     // An open window stays open: the second half plays to the source's
@@ -200,6 +199,89 @@ export function applySplit(
   doc.deleteIn(['inputs', entry + 1, 'fade_in']);
   doc.deleteIn(['inputs', entry + 1, 'id']);
 
+  canonicalizeDocument(doc, trackOrder);
+  return { ok: true, text: stringifyDocument(doc) };
+}
+
+// Stretch one edge of a placement's window: the drag that trims a clip
+// short or lets it play longer. `offset` is where the dragged edge
+// landed, in session samples measured from the clip's own window start —
+// origin-free the way move's delta and split's cut are, and one
+// definition that covers both edges. The start edge's number is how far
+// that edge travelled (negative reaches earlier); the end edge's is the
+// window's new length, which is the same measurement from the same
+// place.
+//
+// The end edge is a window edit and nothing else. `duration` moves, what
+// the source plays from does not, and a placement that never declared a
+// length gains the one the drag drew — trimming an open window is how a
+// person says "this much of it", and the alternative was refusing the
+// gesture on exactly the clips whose length nobody has pinned yet.
+//
+// The start edge moves the window and the read together: `at` later by
+// the drag, `duration` shorter by it, `source_offset` advanced by it, so
+// the content under the surviving part of the window does not slide.
+// That is split's second-half arithmetic, and it inherits split's
+// constraints — the caller refuses a cross-rate source, because
+// `source_offset` addresses the source's own samples, and a looped clip,
+// because a loop tiles from its window start and every repetition would
+// be re-cut. Neither constraint touches the end edge, which is why the
+// caller applies them per edge rather than to the op.
+export function applyStretch(
+  raw: string,
+  entry: number,
+  parsed: InputEntry,
+  edge: 'start' | 'end',
+  offset: number,
+  tempo: TempoMap,
+  meter: MeterMap,
+): EditOutcome {
+  const doc = parseDocument(raw);
+  if (doc.getIn(['inputs', entry], true) === undefined) {
+    return { ok: false, message: `no input ${entry} — refreshed`, refresh: true };
+  }
+  const musical = parsed.anchor !== 'absolute';
+  const w = placedWindow(parsed, tempo);
+  // The landing place in the entry's own unit: span ticks for a musical
+  // anchor, samples for an absolute one. Both edges convert the same
+  // way, since both are measured from the same window start.
+  const units = musical
+    ? Math.round(tempo.samplesToTicks(w.start + offset)) - parsed.at
+    : Math.round(offset);
+  const setDuration = durationSpeller(doc, meter, entry, musical);
+
+  if (edge === 'end') {
+    if (units < 1) return { ok: false, message: 'a clip cannot end where it starts' };
+    setDuration(entry, parsed.at, units);
+    canonicalizeDocument(doc, trackOrder);
+    return { ok: true, text: stringifyDocument(doc) };
+  }
+
+  // A start edge that lands back where it began writes nothing: the
+  // author's bytes are already what the drag asked for.
+  if (units === 0) return { ok: true, text: raw };
+  const at = parsed.at + units;
+  if (at < 0) return { ok: false, message: 'a clip cannot start before the track does' };
+  // The read advances by the drag measured in session samples, which is
+  // the source's own distance only because the caller proved the rates
+  // agree. Backwards past the source's first sample has nothing to
+  // reveal, so it is refused rather than clamped — a clamp would leave
+  // the window and the content disagreeing about where the edge went.
+  const sourceOffset = parsed.source_offset + Math.round(offset);
+  if (sourceOffset < 0) {
+    return { ok: false, message: 'the source has nothing before its first sample' };
+  }
+  if (parsed.duration !== undefined) {
+    const remaining = parsed.duration - units;
+    if (remaining < 1) return { ok: false, message: 'the clip would have no length left' };
+    setDuration(entry, at, remaining);
+  }
+  // An open window stays open, exactly as it does across a split: the
+  // clip still plays what remains of the source from the advanced
+  // offset, which is what "the whole source" now means.
+  setAt(doc, meter, entry, at, musical);
+  if (sourceOffset === 0) doc.deleteIn(['inputs', entry, 'source_offset']);
+  else doc.setIn(['inputs', entry, 'source_offset'], sourceOffset);
   canonicalizeDocument(doc, trackOrder);
   return { ok: true, text: stringifyDocument(doc) };
 }

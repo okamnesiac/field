@@ -282,6 +282,16 @@ export function App() {
         onMove={(lane, delta) =>
           send({ type: 'move', file: lane.file, sha256: lane.sha256, entry: lane.entry, delta })
         }
+        onStretch={(lane, edge, offset) =>
+          send({
+            type: 'stretch',
+            file: lane.file,
+            sha256: lane.sha256,
+            entry: lane.entry,
+            edge,
+            offset,
+          })
+        }
         controls={laneControls}
       />
       {selLane && selLane.trackFile !== null ? (
