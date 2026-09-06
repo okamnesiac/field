@@ -1,8 +1,13 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped whole: a foreign-rate dirty track evaluates live
+with the edge converting (byte-identical to the offline render, proven),
+a device that cannot switch gets converted delivery, and all three rate
+refusals are gone. Stays open until a session has actually played
+through a live cross-rate edge in anger, per multi- rate's precedent.
 
 # Plan: Cross-rate live wiring
 
@@ -117,8 +122,8 @@ kernel, per decision 7 there is never a second.
 One chunk: a single implementation PR carrying the compiler, the
 engine, the device fallback, and the docs sweep, because none of the
 halves is testable without the others. It follows this plan and flips
-the status to Active when it opens — Shipped when it lands, since the
-chunk is the plan.
+the status to `in-progress` when it opens — `completed` when it lands,
+since the chunk is the plan.
 
 ## 4 Definition of done
 

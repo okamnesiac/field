@@ -1,8 +1,10 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped: all three chunks (#4–#6). Stays open until real
+use (bloom, new phases) stops surfacing surprises.
 
 # Plan: Project core — format, CLI, build graph skeleton
 

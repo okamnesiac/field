@@ -505,7 +505,7 @@ export async function generateVariants(
     // hang (found exercising the format). So who is starting is said
     // now, from this side, last before the slow work — a refusal never
     // gets a stray "starting" ahead of it (Bugbot on #120).
-    // Finer-grained in-run progress is generation-progress/readme.md's line.
+    // Finer-grained in-run progress is generation-progress.md's line.
     request.onProgress?.(`starting field-${kind === 'voice' ? 'voiced' : 'aced'}`);
     const client =
       kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);

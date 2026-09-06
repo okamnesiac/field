@@ -1,8 +1,10 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped: committed vocals from text, and creek sings. Stays
+open until more songs have used it.
 
 # Plan: Voice generation
 

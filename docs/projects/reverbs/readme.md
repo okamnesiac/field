@@ -1,8 +1,12 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped whole: a Dattorro `plate`, an FDN `hall` with
+per-band decay, and the old `reverb` kept deliberately as the live
+comparison. Stays open until the creek listening pass has flipped
+`space` between the three rooms and picked the example's room.
 
 # Plan: Two reverbs that beat Freeverb
 

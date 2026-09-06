@@ -112,13 +112,14 @@ exemption:
   with the package; `field ui` serves them and opens the browser. Dev
   mode proxies the bundler for hot reload. The stack additions this
   implies are recorded against project-core.md §5 by the PR that
-  flips this plan Active, like every stack decision.
+  flips this plan to `in-progress`, like every stack decision.
 
 ## 5 Open questions
 
-Two are settled inline and dated; the rest are the flip-to-Active
-PR's to answer, however many remain when it opens — counted then,
-not here, so the next settlement does not stale this line.
+Two are settled inline and dated; the rest are the
+flip-to-`in-progress` PR's to answer, however many remain when it
+opens — counted then, not here, so the next settlement does not
+stale this line.
 
 - **React, or Next.js — settled (DECIDED, 2026-08-12): Vite + React
   SPA.** The server half of Next duplicates a server field already

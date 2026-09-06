@@ -1,8 +1,12 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped: every chunk, sends last (§19). Stays open until
+sessions have worked the folded format and wired a cable or two in anger
+— the entry list, gen nodes, takes machinery and now sends are where
+every edit lands.
 
 # Plan: Nested tracks — one primitive for structure, time and mix
 

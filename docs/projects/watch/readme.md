@@ -1,8 +1,10 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped: both chunks (#34, #35). Stays open while §5's
+status-visibility question is open, per its neighbours' precedent.
 
 # Plan: Watch mode — the loop follows the project
 

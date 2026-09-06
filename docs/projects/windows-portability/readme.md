@@ -225,8 +225,8 @@ which only matters for §4.
 
 ## 2 Decisions to make
 
-Recorded as open because this plan is `Draft`; the change that flips it to
-`Active` is the one that answers them.
+Recorded as open because this plan is `draft`; the change that flips it to
+`in-progress` is the one that answers them.
 
 1. **Named pipes or loopback TCP** for the control socket (§1.2). The
    recommendation is **named pipes**: the single-owner guarantee and the
@@ -249,7 +249,7 @@ Recorded as open because this plan is `Draft`; the change that flips it to
    supported product ([linux-portability.md](../linux-portability/readme.md)
    decision 5). The same framing is available here and is probably right:
    Windows as a build-and-test-and-play target, not a second product
-   platform. Until that line moves, this plan stays `Draft`.
+   platform. Until that line moves, this plan stays `draft`.
 
 ## 3 Definition of done
 

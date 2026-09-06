@@ -1,8 +1,11 @@
 ---
-status: completed
+status: in-progress
+priority: now
 ---
 
-**Outcome:** Shipped.
+**Outcome:** Shipped: all three steps (#107, #108, #112). Stays open
+until a session has actually played through an edge conversion, per the
+neighbours' precedent.
 
 # Plan: Sample rate is a property of the track, converted at the edge
 
