@@ -46,9 +46,9 @@ blobs, and `hardware/apollo.yaml`. Recorded takes are deliberately not
 on that list — they add no directory (see "Takes" below).
 
 Exact schemas are designed in
-[projects/all/project-core.md](projects/all/project-core.md); the layout
+[projects/project-core/readme.md](projects/project-core/readme.md); the layout
 and its vocabulary are decided in
-[projects/all/project-layout.md](projects/all/project-layout.md).
+[projects/project-layout/readme.md](projects/project-layout/readme.md).
 
 ### The shared library
 
@@ -68,7 +68,7 @@ exactly as there is no loops shelf (looping is a clip property).
 file under `shared/`, labeled `//shared/asset:<name>` — with one
 deliberate exception: plugin state blobs under `shared/plugins/`
 (`<slug>/<sha256>.state`,
-[projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)
+[projects/plugin-hosting/readme.md](projects/plugin-hosting/readme.md)
 decision 4) carry no ledger row, because a blob's filename *is* its
 content hash — the drift guard a pin exists to add is intrinsic there,
 and reads resolve by hash so the directory is a convention rather than
@@ -107,7 +107,7 @@ position or sample position?) is a per-track, explicitly stored
 property, not an ambient behavior.
 
 Time fields in project YAML take two spellings
-([projects/all/musical-time.md](projects/all/musical-time.md)): a scalar
+([projects/musical-time/readme.md](projects/musical-time/readme.md)): a scalar
 is ticks (samples on absolute-anchored entries), and an array is
 musical, resolved through the song's meter map.
 
@@ -154,7 +154,7 @@ supposed advantages mostly don't survive scrutiny. `field check`
 validates referential integrity (in CI, and after merges — cross-branch
 dangling references merge cleanly under *any* ID scheme). The full
 argument is preserved in
-[projects/all/project-core.md](projects/all/project-core.md) §6 — read
+[projects/project-core/readme.md](projects/project-core/readme.md) §6 — read
 it before reopening this.
 
 ## Takes
@@ -175,7 +175,7 @@ Recording follows the same shape when it arrives (decided 2026-08-10): a
 recorded take's record — placement, device, latency, session context —
 lives beside its bytes under `audio/`, because the decision to commit
 the audio must be the decision to commit its record
-([projects/all/bloom-in-tree.md](projects/all/bloom-in-tree.md) §7). A
+([projects/bloom-in-tree/readme.md](projects/bloom-in-tree/readme.md) §7). A
 separate manifest directory whose gitignore rule could quietly disagree
 with the audio's — the earlier `takes/<track>/` design — is exactly what
 that fold retired for variants. Comping (one active take assembled from

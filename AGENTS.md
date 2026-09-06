@@ -5,9 +5,16 @@
 `docs/` describes how the system works today, and is kept current when
 behaviour changes — a change that moves behaviour and leaves the docs behind
 is unfinished. The work itself lives in
-[`docs/projects/`](docs/projects/README.md), whose README carries the
-conventions: the three lists, plans cited by section so renumbering breaks
-references silently, and why a stale status line is worse than none.
+[`docs/projects/`](docs/projects/README.md), whose README carries the Projector
+convention: one permanent directory and lowercase `readme.md` per project,
+`status: draft|ready|in-progress|completed` beside `priority: now|next|later`
+in frontmatter, and plans cited by section so renumbering breaks references
+silently. A project never moves when either field changes, and a stale status
+is worse than none.
+
+Use the `project` command rather than reading the tree by hand — `project
+list` groups by priority, `project show <name>` prints one plan, and
+`project check` validates every plan before you hand work over.
 
 The docs are [overview](docs/README.md),
 [architecture](docs/architecture.md), [tracks](docs/tracks.md),
@@ -21,7 +28,7 @@ obvious alternatives are already recorded there with the reason they lost.
 
 Settled decisions are recorded `(DECIDED)` with the alternatives that lost and
 why. Do not reopen one casually — the ID scheme in particular has a full
-decision record ([project-core.md §6](docs/projects/all/project-core.md))
+decision record ([project-core.md §6](docs/projects/project-core/readme.md))
 written so it never gets re-litigated. If new evidence genuinely overturns a
 decision, update the record with what changed, don't just diverge from it.
 
@@ -29,7 +36,7 @@ decision, update the record with what changed, don't just diverge from it.
 
 Stack choices (Node 24, pnpm, ESM-only, strict TypeScript, zod v4 +
 generated JSON Schema, commander, vitest, afconvert) are recorded in
-[project-core.md §5](docs/projects/all/project-core.md). Use pnpm — never npm
+[project-core.md §5](docs/projects/project-core/readme.md). Use pnpm — never npm
 or yarn, and never generate a package-lock.json.
 
 ## Pull requests
