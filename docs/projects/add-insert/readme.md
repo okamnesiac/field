@@ -1,5 +1,6 @@
 ---
-status: now
+status: in-progress
+priority: now
 ---
 
 # Plan: `field insert` — add an insert with a chooser
@@ -178,5 +179,7 @@ and nothing here blocks on chunk 3 except the final step.
   should not smuggle in. For *this* plan the answer is scoped
   (DECIDED, 2026-08-12): the chooser lists scanned plugins only, and
   built-ins stay hand-authored — the (a)-versus-(b) discussion stays
-  live as its own line in [later.md](../README.md), where uncommitted
-  ideas belong, and nothing in this command forecloses either shape.
+  live as its own project
+  ([builtins-in-chooser](../builtins-in-chooser/readme.md)), where
+  uncommitted ideas belong, and nothing in this command forecloses
+  either shape.

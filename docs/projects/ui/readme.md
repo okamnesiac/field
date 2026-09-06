@@ -1,5 +1,6 @@
 ---
-status: next
+status: draft
+priority: next
 ---
 
 # Plan: the UI, first version

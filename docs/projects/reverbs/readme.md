@@ -1,5 +1,5 @@
 ---
-status: done
+status: completed
 ---
 
 **Outcome:** Shipped.
@@ -35,7 +35,9 @@ The constraints are realtime.md's, and they prune the field:
 Convolution reverb (impulse responses as committed assets — a real
 place, hash-pinned like any asset) and the exotic architectures
 (velvet-noise, scattering delay networks) were ranked and deferred to
-later.md: the first needs a cross-platform-deterministic FFT story
+their own projects ([convolution-reverb](../convolution-reverb/readme.md),
+[exotic-reverbs](../exotic-reverbs/readme.md)): the first needs a
+cross-platform-deterministic FFT story
 before it can join the golden, the second has no track record worth a
 mix. This plan is the parametric pair.
 

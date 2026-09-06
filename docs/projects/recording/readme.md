@@ -1,5 +1,6 @@
 ---
-status: later
+status: draft
+priority: later
 ---
 
 # Plan: Recording

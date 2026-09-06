@@ -1,5 +1,5 @@
 ---
-status: done
+status: completed
 ---
 
 **Outcome:** Shipped.
@@ -21,13 +21,14 @@ library, and the build cache doubling as automatic track freezing.
   session graph over the socket — the daemon still never learns what
   a bar is (playback.md §3.6); positions arrive as samples.
 - Today the closest thing is `--loop --watch`: a whole-mix re-render
-  taking over at the loop wrap, with the audible hiccup later.md
-  tracks. That mechanism — and the wait — is what this deletes: a
+  taking over at the loop wrap, with an audible hiccup at the wrap.
+  That mechanism — and the wait — is what this deletes: a
   level change lands as a ramp next block, a structural edit as a
   subgraph swap mid-play.
 - Generation is untouched. SuperCollider, ACE and chatterbox produce
   the *sources* the engine plays; live SC as a graph node stays
-  future work (later.md). Automation lanes were already designed
+  future work ([live-supercollider](../live-supercollider/readme.md)).
+  Automation lanes were already designed
   realtime-evaluable ([automation.md](../automation/readme.md)) and will ride
   this engine when they arrive.
 
@@ -216,7 +217,7 @@ one live chain plus file streaming.
 [recording.md](../recording/readme.md) waits behind this plan and gets simpler
 because of it: capture becomes an input node in a graph that already
 runs live, and monitoring falls out of the same callback. Its plan
-stands as drafted; its list line waits in later.md.
+stands as drafted, waiting at `priority: later`.
 
 ## 7 Chunks
 

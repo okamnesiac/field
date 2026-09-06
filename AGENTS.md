@@ -7,8 +7,14 @@ behaviour changes — a change that moves behaviour and leaves the docs behind
 is unfinished. The work itself lives in
 [`docs/projects/`](docs/projects/README.md), whose README carries the Projector
 convention: one permanent directory and lowercase `readme.md` per project,
-`now|next|later|done` status frontmatter, and plans cited by section so
-renumbering breaks references silently. A stale status is worse than none.
+`status: draft|ready|in-progress|completed` beside `priority: now|next|later`
+in frontmatter, and plans cited by section so renumbering breaks references
+silently. A project never moves when either field changes, and a stale status
+is worse than none.
+
+Use the `project` command rather than reading the tree by hand — `project
+list` groups by priority, `project show <name>` prints one plan, and
+`project check` validates every plan before you hand work over.
 
 The docs are [overview](docs/README.md),
 [architecture](docs/architecture.md), [tracks](docs/tracks.md),

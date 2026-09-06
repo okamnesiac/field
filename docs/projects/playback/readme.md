@@ -1,5 +1,5 @@
 ---
-status: done
+status: completed
 ---
 
 **Outcome:** Shipped.

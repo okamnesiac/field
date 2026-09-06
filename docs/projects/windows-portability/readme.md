@@ -1,5 +1,6 @@
 ---
-status: later
+status: draft
+priority: later
 ---
 
 # Plan: Windows portability — the checkout, the socket, and the last bits

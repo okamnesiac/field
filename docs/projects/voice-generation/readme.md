@@ -1,5 +1,5 @@
 ---
-status: done
+status: completed
 ---
 
 **Outcome:** Shipped.
@@ -11,8 +11,8 @@ worker lifecycle (#59), `field-voiced` (#60) and the CLI seam (#61);
 chunk 2 put the worker against the actual model (#64) and gave the
 recipe its delivery knobs (#65). The spoken `say` line is gone:
 `lead-take` is a generative leaf placed by `lead-vocal` (#113), its
-takes riding the same variant machinery ACE established. Stays listed
-in [now.md](../README.md) until more songs have used it. Written before
+takes riding the same variant machinery ACE established. More songs
+through it is what proves it in anger. Written before
 the `sounds/` fold: where this plan says `generation/<name>.yaml`, a
 `generate` sound, or recipe fields, read a `generative:` entry on a
 leaf track ([nested-tracks.md](../nested-tracks/readme.md) §18), takes keyed by

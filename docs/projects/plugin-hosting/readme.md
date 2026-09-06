@@ -1,5 +1,6 @@
 ---
-status: now
+status: in-progress
+priority: now
 ---
 
 # Plan: hosted plugins — AU and VST3 as inserts
@@ -71,7 +72,8 @@ Decided elsewhere, restated here as constraints:
   alone, so any machine *holding the artifact* serves it without the
   plugin — today that means the machine that rendered it, because the
   cache is local and unversioned, and the remote asset store
-  (later.md) is what turns this into a cross-machine story. Freezing
+  ([remote-asset-store](../remote-asset-store/readme.md)) is what
+  turns this into a cross-machine story. Freezing
   is the collaboration story, not an optimization.
 
 ## 3 Decisions (DECIDED, 2026-08-11)
@@ -458,6 +460,8 @@ as a one-line YAML diff that re-freezes behind the play; a stateful
 plugin captures a blob a fresh clone resolves by hash, and the
 rendering machine with that plugin removed still builds the song as
 pure cache hits — the cross-machine version of that story waits on
-the remote asset store (later.md); the fixture-plugin suite is green
+the remote asset store
+([remote-asset-store](../remote-asset-store/readme.md)); the
+fixture-plugin suite is green
 in CI (VST3 on Linux; AU on the local gate, per decision 12); and
 every existing project rebuilds as pure cache hits.
