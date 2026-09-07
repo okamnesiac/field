@@ -172,3 +172,13 @@ export function formatSeeds(seeds: number[]): string {
     ? `seeds ${seeds[0]}–${seeds[seeds.length - 1]}`
     : `seeds ${seeds.join(', ')}`;
 }
+
+// `field record --input`: a channel as it is printed on the interface,
+// counting from 1. The daemon speaks the same number (recording.md §6).
+export function parseInputChannel(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new InvalidArgumentError('input must be a positive integer (channels count from 1)');
+  }
+  return n;
+}

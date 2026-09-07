@@ -76,11 +76,10 @@ supported API exists — see [audio-engine.md](audio-engine.md)).
 
 ## Two workflows
 
-**CLI-first.** You create, configure, generate, build, and play a
-project from the command line, and recording joins the same surface when
-the engine grows it. `field init` starts an empty project; on a fresh
-clone of [`examples/bloom`](../examples/bloom/README.md), this sequence
-takes creek from request to delivered file:
+**CLI-first.** You create, configure, generate, build, play, and record
+a project from the command line. `field init` starts an empty project;
+on a fresh clone of [`examples/bloom`](../examples/bloom/README.md),
+this sequence takes creek from request to delivered file:
 
 ```bash
 field generate creek/still-water-keys --seed 90210 --variants 2
@@ -100,8 +99,9 @@ project state; the widget holds no hidden state unavailable to the CLI.
 Field is built generation-first, because offline generation delivers
 unique value — prompt → recipe → committed, diffable, buildable music —
 with zero real-time code. The playback daemon arrived only after real
-use had battle-tested the project model, and the rest of the real-time
-engine (recording, monitoring, plugin hosting) follows the same rule.
+use had battle-tested the project model; the live graph, plugin hosting
+and recording's input side each followed the same rule, and monitoring
+is next in that line.
 The current build order lives in [projects/](projects/README.md).
 
 ## Documentation
