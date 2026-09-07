@@ -19,7 +19,7 @@ import {
   type StateBlob,
 } from '../audio/plugins.js';
 import { sha256File } from '../hash.js';
-import { genRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
+import { genRefName, recordRefName, sharedAssetName, SONG_OUTPUT_NAME } from '../labels.js';
 import type { SourceNames } from '../generators/types.js';
 import {
   assetsFileOrder,
@@ -31,11 +31,15 @@ import {
   generativeTakesOrder,
   generativeTakesSchema,
   TAKES_FILENAME,
+  RECORD_TAKES_FILENAME,
+  recordTakesOrder,
+  recordTakesSchema,
   trackOrder,
   trackSchema,
   type Asset,
   type AssetsFile,
   type GenerativeTakes,
+  type RecordTakes,
   type Project,
   type Song,
   type SongTime,
@@ -87,6 +91,10 @@ export interface LoadedSong {
   // Absent from the map means nothing has been generated yet, which is
   // legal.
   genTakes: Map<string, LoadedFile<GenerativeTakes>>;
+  // The same for `record:` entries (recording.md §3), keyed by record
+  // node name: audio/<name>/takes.yaml. Absent means nothing has been
+  // recorded yet, which builds as silence (§4).
+  recordTakes: Map<string, LoadedFile<RecordTakes>>;
   // The song's resolved cables (nested-tracks.md §19), derived by
   // validate: complete, acyclic, arrivals agreed. The graph consumes
   // these rather than re-walking, so check and build cannot answer
@@ -203,9 +211,41 @@ function loadEntryTakes(
   return loaded;
 }
 
+// A record entry's takes, beside the audio under its record node's name
+// (recording.md §3): audio/<name>/takes.yaml with `record: <name>`.
+// Absent is legal — a session that has not happened yet.
+export function recordTakesPath(songDir: string, name: string): string {
+  return join(songDir, 'audio', name, RECORD_TAKES_FILENAME);
+}
+
+function loadRecordTakes(
+  project: LoadedProject,
+  songDirAbs: string,
+  name: string,
+): LoadedFile<RecordTakes> | undefined {
+  const abs = recordTakesPath(songDirAbs, name);
+  if (!existsSync(abs)) return undefined;
+  const loaded = loadFile(project, abs, { schema: recordTakesSchema, order: recordTakesOrder });
+  if (!loaded) return undefined;
+  if (loaded.data.record !== name) {
+    project.diagnostics.push({
+      file: loaded.path,
+      message: `takes name "${loaded.data.record}" must match the directory audio/${name}/`,
+    });
+    return undefined;
+  }
+  return loaded;
+}
+
+// The take a record node plays: the row `chosen` names, if any.
+export function chosenTake(takes: RecordTakes | undefined) {
+  if (takes?.chosen === undefined) return undefined;
+  return takes.takes.find((t) => t.asset === takes.chosen);
+}
+
 // Where a committed source's bytes live (undefined for anything that
-// renders): the song's ledger, the shared ledger, or a generative
-// entry's chosen take. The one resolver for both passes — validate's
+// renders): the song's ledger, the shared ledger, a generative entry's
+// chosen take, or a record entry's. The one resolver for both passes — validate's
 // loop tiling and buildGraph's planning must answer alike, and two
 // constructions of one relation is how the #58 asset readings came to
 // disagree. `base` is the project-relative root the file resolves
@@ -231,6 +271,14 @@ export function committedFileResolver(
       const takes = song.genTakes.get(gen)?.data;
       const variant = takes?.chosen !== undefined ? takes.variants[takes.chosen - 1] : undefined;
       if (variant) return { base: song.dir, file: variant.file };
+    }
+    // A record entry's chosen take pins in the ledger like imported
+    // audio (project-layout.md §1.6), so its row names an asset there.
+    const rec = recordRefName(ref);
+    if (rec !== undefined) {
+      const take = chosenTake(song.recordTakes.get(rec)?.data);
+      const file = take !== undefined ? assetFileByName.get(take.asset) : undefined;
+      if (file !== undefined) return { base: song.dir, file };
     }
     return undefined;
   };
@@ -266,6 +314,7 @@ export function loadProject(root: string): LoadedProject {
       dir: relative(project.root, dir),
       tracks: [],
       genTakes: new Map(),
+      recordTakes: new Map(),
       cables: [],
     };
 
@@ -311,10 +360,15 @@ export function loadProject(root: string): LoadedProject {
     // pass; loading the same file twice here is merely idempotent.
     for (const track of song.tracks) {
       for (const entry of track.data.inputs) {
-        if (entry.generative === undefined) continue;
-        const name = generatorName(entry, track.data.name);
-        const takes = loadEntryTakes(project, dir, name);
-        if (takes) song.genTakes.set(name, takes);
+        if (entry.generative !== undefined) {
+          const name = generatorName(entry, track.data.name);
+          const takes = loadEntryTakes(project, dir, name);
+          if (takes) song.genTakes.set(name, takes);
+        } else if (entry.record !== undefined) {
+          const name = generatorName(entry, track.data.name);
+          const takes = loadRecordTakes(project, dir, name);
+          if (takes) song.recordTakes.set(name, takes);
+        }
       }
     }
 
@@ -335,6 +389,7 @@ export function allFiles(project: LoadedProject): LoadedFile<unknown>[] {
       s.song,
       s.assets,
       ...s.genTakes.values(),
+      ...s.recordTakes.values(),
       ...s.tracks,
     ]),
   ];
@@ -507,7 +562,11 @@ function validate(project: LoadedProject): void {
     const genNodeNames = new Set<string>();
     for (const trackFile of song.tracks) {
       for (const entry of trackFile.data.inputs) {
-        if (entry.supercollider !== undefined || entry.generative !== undefined) {
+        if (
+          entry.supercollider !== undefined ||
+          entry.generative !== undefined ||
+          entry.record !== undefined
+        ) {
           genNodeNames.add(generatorName(entry, trackFile.data.name));
         }
       }
@@ -677,6 +736,26 @@ function validate(project: LoadedProject): void {
               `${what} has takes but no chosen variant yet — field choose ${song.name}/${gname} first`,
             );
           }
+        } else if (entry.record !== undefined) {
+          // A record entry with no takes builds as silence (recording.md
+          // §4): the session has not happened yet, and refusing would
+          // stop the mix being placed and looped before it does. A
+          // warning, so check still says ok. Takes with nothing chosen
+          // is the hand-edit case, exactly as for a generative entry.
+          const rname = generatorName(entry, track.data.name);
+          const takes = song.recordTakes.get(rname)?.data;
+          if (takes === undefined || takes.takes.length === 0) {
+            push(
+              track.path,
+              `${what} has no takes yet — field record ${song.name}/track:${track.data.name}`,
+              'warning',
+            );
+          } else if (takes.chosen === undefined) {
+            push(
+              track.path,
+              `${what} has takes but none chosen — field choose ${song.name}/${rname} --take <name> first`,
+            );
+          }
         }
         // Musical arrays need the musical anchor: an absolute entry's
         // scalars are samples, and silently converting [9, 2] would be a
@@ -837,15 +916,22 @@ function validate(project: LoadedProject): void {
     const genNames = new Map<string, string>();
     for (const trackFile of song.tracks) {
       for (const entry of trackFile.data.inputs) {
-        if (entry.supercollider === undefined && entry.generative === undefined) continue;
+        if (
+          entry.supercollider === undefined &&
+          entry.generative === undefined &&
+          entry.record === undefined
+        )
+          continue;
         const name = generatorName(entry, trackFile.data.name);
         // A generative entry's takes claim audio/<name>/, and so does an
         // asset: imports land in audio/<name>/ too (project-layout.md
-        // §4.11) — so one name may not be both.
-        if (entry.generative !== undefined && assetNames.has(name)) {
+        // §4.11) — so one name may not be both. A record entry's takes
+        // claim the directory the same way (recording.md §3).
+        if ((entry.generative !== undefined || entry.record !== undefined) && assetNames.has(name)) {
           push(
             trackFile.path,
-            `generative entry mints the name "${name}", which the asset "${name}" also ` +
+            `${entry.record !== undefined ? 'record' : 'generative'} entry mints the name ` +
+              `"${name}", which the asset "${name}" also ` +
               `holds — both claim audio/${name}/ (rename the track, the entry id, or ` +
               `the asset)`,
           );
@@ -1050,6 +1136,35 @@ function validate(project: LoadedProject): void {
       }
     }
 
+    // A record entry's takes get their own checks (recording.md §3):
+    // `chosen` names a row, every row's asset is in the ledger with its
+    // bytes under audio/<name>/, no row twice. Pushed against the takes
+    // file, which is the file you would edit.
+    for (const [name, takesFile] of song.recordTakes) {
+      const takes = takesFile.data;
+      const seen = new Set<string>();
+      for (const take of takes.takes) {
+        if (seen.has(take.asset)) push(takesFile.path, `duplicate take "${take.asset}"`);
+        seen.add(take.asset);
+        const asset = song.assets?.data.assets.find((a) => a.name === take.asset);
+        if (asset === undefined) {
+          push(
+            takesFile.path,
+            `take "${take.asset}" is not in the ledger — recorded audio pins in ` +
+              `assets.yaml (recording.md §3)`,
+          );
+        } else if (!asset.file.startsWith(`audio/${name}/`)) {
+          push(
+            takesFile.path,
+            `take "${take.asset}" must live in audio/${name}/: the ledger has it at ${asset.file}`,
+          );
+        }
+      }
+      if (takes.chosen !== undefined && !seen.has(takes.chosen)) {
+        push(takesFile.path, `chosen take "${takes.chosen}" is not one of the takes`);
+      }
+    }
+
     // Nothing else ever opens audio/, so a renamed track or entry id
     // strands its takes — model-minutes of them — with check green and
     // the takes silently gone from the model. A directory holding a
@@ -1066,19 +1181,38 @@ function validate(project: LoadedProject): void {
         }
       }
     }
+    // The same for record entries (recording.md §3): a recorded take is
+    // a performance nobody can regenerate, so a stranded takes.yaml is
+    // the worse of the two.
+    const claimedRecordDirs = new Set<string>();
+    for (const trackFile of song.tracks) {
+      for (const entry of trackFile.data.inputs) {
+        if (entry.record !== undefined) {
+          claimedRecordDirs.add(generatorName(entry, trackFile.data.name));
+        }
+      }
+    }
     const audioDir = join(project.root, song.dir, 'audio');
     if (existsSync(audioDir)) {
       for (const item of readdirSync(audioDir).sort()) {
         const itemDir = join(audioDir, item);
         if (!statSync(itemDir).isDirectory()) continue;
-        if (claimedTakesDirs.has(item)) continue;
-        if (!existsSync(join(itemDir, TAKES_FILENAME))) continue;
-        push(
-          join(song.dir, 'audio', item, TAKES_FILENAME),
-          `no generative request claims audio/${item}/ — a renamed track or id ` +
-            `leaves its takes behind; rename the directory (and its gen: key) ` +
-            `to follow, or delete it`,
-        );
+        if (!claimedTakesDirs.has(item) && existsSync(join(itemDir, TAKES_FILENAME))) {
+          push(
+            join(song.dir, 'audio', item, TAKES_FILENAME),
+            `no generative request claims audio/${item}/ — a renamed track or id ` +
+              `leaves its takes behind; rename the directory (and its gen: key) ` +
+              `to follow, or delete it`,
+          );
+        }
+        if (!claimedRecordDirs.has(item) && existsSync(join(itemDir, RECORD_TAKES_FILENAME))) {
+          push(
+            join(song.dir, 'audio', item, RECORD_TAKES_FILENAME),
+            `no record entry claims audio/${item}/ — a renamed track or id leaves ` +
+              `its takes behind; rename the directory (and its record: key) to ` +
+              `follow, or add \`- record:\` back to the track`,
+          );
+        }
       }
     }
 

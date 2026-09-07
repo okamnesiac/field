@@ -218,22 +218,39 @@ program
   });
 program
   .command('choose <target>')
-  .description("repoint which committed variant a gen node's label resolves to (<song>/<name>)")
+  .description("repoint which take a gen node or record entry plays (<song>/<name>)")
   .option('--song <name>', 'retired — the song rides in the name (creek/still-water-keys)')
-  .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
-  .action(async (target: string, opts: { song?: string; variant: number }) => {
+  .option('--variant <n>', 'a generative variant, by number (1-based, as played/numbered)', parseVariantNumber)
+  .option('--take <name>', 'a recorded take, by name (take-YYYYMMDD-HHMMSS)')
+  .action(async (target: string, opts: { song?: string; variant?: number; take?: string }) => {
     try {
       if (opts.song !== undefined) {
         throw new Error(
           `--song has retired — the song rides in the name: ` +
-            `field choose ${opts.song}/${target} --variant ${opts.variant}`,
+            `field choose ${opts.song}/${target} --variant ${opts.variant ?? '<n>'}`,
         );
       }
       const { song, name } = parseGenTarget(target, 'choose');
+      if ((opts.variant === undefined) === (opts.take === undefined)) {
+        throw new Error('choose takes exactly one of --variant <n> (a gen node) or --take <name> (a record entry)');
+      }
+      if (opts.take !== undefined) {
+        // A record entry's take (recording.md §3): one line in
+        // audio/<node>/takes.yaml, and every placement of the track
+        // follows, exactly as a variant.
+        const { chooseTake } = await import('./commands/land.js');
+        const result = await chooseTake(requireRoot(), song, name, opts.take);
+        const moved = result.previous !== undefined && result.previous !== opts.take;
+        process.stdout.write(
+          `${moved ? 'moved' : 'chose'} ${name} → ${opts.take}\n` +
+            `the record entry in ${song}/${name} now plays it; every placement follows\n`,
+        );
+        return;
+      }
       const { chooseVariant } = await import('./commands/generate.js');
       const result = await chooseVariant(requireRoot(), name, {
         song,
-        variant: opts.variant,
+        variant: opts.variant!,
       });
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
@@ -700,30 +717,67 @@ program
   .option('--input <n>', 'input channel on the device, counting from 1 (default 1)', parseInputChannel)
   .option('--device <name>', 'input device (field devices lists them; default: the system input)')
   .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
-  .option('--list', 'list the takes under .field/recording/ instead of recording')
-  .option('--recover <id>', 'finalize a take a dead daemon left behind instead of recording')
+  .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
+  .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
+  .option('--list', 'list the transactions under .field/recording/ instead of recording')
+  .option('--recover <id>', 'finalize a take a dead daemon left behind and land it, instead of recording')
+  .option('--land <id>', 'land a finalized transaction nothing landed, instead of recording')
   .action(
     async (
       target: string | undefined,
-      opts: { input?: number; device?: string; at?: string; list?: boolean; recover?: string },
+      opts: {
+        input?: number;
+        device?: string;
+        at?: string;
+        monitoring?: string;
+        consolePreset?: string;
+        list?: boolean;
+        recover?: string;
+        land?: string;
+      },
     ) => {
       try {
         const root = requireRoot();
-        const { describeTake, listRecordings, recordTake, recoverRecording } = await import(
-          './commands/record.js'
-        );
+        const { describeTake, landRecording, listRecordings, recordTake, recoverRecording } =
+          await import('./commands/record.js');
+        const landOptions = {
+          monitoring: opts.monitoring ?? 'apollo-direct',
+          ...(opts.consolePreset !== undefined ? { consolePreset: opts.consolePreset } : {}),
+        };
+        // What landing did, in one line: the take, where it sits on the
+        // track, and where its bytes went.
+        const landedLine = (landed: import('./commands/land.js').LandedTake): string => {
+          const where =
+            landed.row.musical_position !== undefined
+              ? `bar ${landed.row.musical_position.join('.')}`
+              : `sample ${landed.placedAt}`;
+          const seconds = (landed.frames / landed.sampleRate).toFixed(1);
+          const note =
+            landed.placements > 1
+              ? `  (${landed.track} is placed ${landed.placements} times; the take counts from the first)`
+              : '';
+          return `take    ${landed.song}/${landed.node} ← ${landed.asset} at ${where}, chosen (${landed.file}, ${seconds} s)${note}`;
+        };
         if (opts.list === true) {
           const entries = await listRecordings(root);
-          if (entries.length === 0) process.stdout.write('no takes under .field/recording/\n');
+          if (entries.length === 0) process.stdout.write('no transactions under .field/recording/\n');
           for (const entry of entries) process.stdout.write(`${describeTake(entry)}\n`);
           return;
         }
         if (opts.recover !== undefined) {
-          process.stdout.write(`${describeTake(await recoverRecording(root, opts.recover))}\n`);
+          const { landed } = await recoverRecording(root, opts.recover, landOptions);
+          process.stdout.write(`${landedLine(landed)}\n`);
+          return;
+        }
+        if (opts.land !== undefined) {
+          const { landed } = await landRecording(root, opts.land, landOptions);
+          process.stdout.write(`${landedLine(landed)}\n`);
           return;
         }
         if (target === undefined) {
-          throw new Error('record needs a track to record (creek/track:lead-vocal), or --list / --recover <id>');
+          throw new Error(
+            'record needs a track to record (creek/track:lead-vocal), or --list / --recover <id> / --land <id>',
+          );
         }
         const project = loadProject(root);
         let interrupted = false;
@@ -740,7 +794,7 @@ program
           onPositionLine = false;
           process.stdout.write(`${line}\n`);
         };
-        const take = await recordTake(
+        const { take, landed } = await recordTake(
           root,
           project,
           target,
@@ -748,6 +802,7 @@ program
             ...(opts.input !== undefined ? { input: opts.input } : {}),
             ...(opts.device !== undefined ? { device: opts.device } : {}),
             ...(opts.at !== undefined ? { at: opts.at } : {}),
+            ...landOptions,
           },
           {
             onBed: say,
@@ -762,9 +817,7 @@ program
             interrupted: () => interrupted,
           },
         );
-        // Where the bytes are. Landing them in the project — audio/<name>/,
-        // the ledger row, takes.yaml — is recording.md chunk 2.
-        say(`take    ${describeTake(take)}`);
+        say(landedLine(landed));
         if (take.dropped !== undefined && take.dropped > 0) {
           say(`warning: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
         }

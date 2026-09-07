@@ -91,6 +91,20 @@ export function convertRefName(ref: string): string | undefined {
   return ref.startsWith(CONVERT_REF_PREFIX) ? ref.slice(CONVERT_REF_PREFIX.length) : undefined;
 }
 
+// A record entry's node in wiring: `record:<name>` names the record node
+// (recording.md §4) — the owning track's name, or <track>-<id> — whose
+// chosen take the entry plays. The graph expands every record entry
+// into a window over that take's ledger asset before planning (graph.ts
+// withTakes), so this spelling reaches a plan only when something
+// skipped the expansion, and then it resolves to nothing, loudly.
+const RECORD_REF_PREFIX = 'record:';
+export function recordRef(name: string): string {
+  return `${RECORD_REF_PREFIX}${name}`;
+}
+export function recordRefName(ref: string): string | undefined {
+  return ref.startsWith(RECORD_REF_PREFIX) ? ref.slice(RECORD_REF_PREFIX.length) : undefined;
+}
+
 // A pre-insert tap the graph minted for a `tap: pre` send
 // (nested-tracks.md §19 decision 6): `tap:<sender>` in wiring,
 // //songs/<song>/tap:<sender> as a label — the sender's stem before its

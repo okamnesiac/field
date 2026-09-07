@@ -163,7 +163,12 @@ that generates it mechanically, in-graph, cached. The `generative` kind
 has none: its generation is human-triggered (`field generate`), its
 variants are committed under `audio/<name>/`, named by the gen node —
 and its label resolves to the chosen variant (`field choose` repoints
-it; every placement follows).
+it; every placement follows). A `record:` entry has no node of its own
+either: before a track is planned, the graph replaces the entry with a
+window over its chosen take's ledger asset, placed where the take's
+row says it was sung, or with nothing when no take is chosen
+(`withTakes` in `src/graph/graph.ts`). Nothing after that point knows
+recording exists.
 
 ### `stem` — every track, implicitly
 

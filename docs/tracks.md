@@ -50,6 +50,11 @@ the kind lives in the field name, never in a value prefix:
   `text:` (voice) plus conditioning. Nothing in the build may run it;
   the node resolves to the chosen committed take. See
   [project-model.md](project-model.md) "Deliberate generation".
+- **`record:`** — a performance to record, with no payload: bare
+  `- record:`. `field record` fills its takes, the entry plays the
+  chosen one at the position it was sung, and an entry with no takes
+  yet plays silence. See [project-model.md](project-model.md)
+  "Recorded takes".
 - **`receive: <label>`** — the receiving end of a cable. A receive
   admits signal rather than placing it, so it carries nothing but its
   label; `check` rejects any other key on it. See

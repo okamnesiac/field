@@ -3,11 +3,13 @@ status: in-progress
 priority: now
 ---
 
-**Outcome:** Chunk 1 shipped (2026-09-06): the daemon's input side —
-arm, record, stop, the crash-safe transaction and its recovery — and a
-`field record` that ends with a take under `.field/recording/`. Chunks
-2–4 remain. Closes when a take recorded against creek on the Apollo
-plays back in place, compensated, from `field build && field play`.
+**Outcome:** Chunks 1 and 2 shipped (2026-09-06, 2026-09-07): the
+daemon's input side, and a `field record` whose take lands in the
+project — `audio/<node>/`, the ledger row, `takes.yaml`, chosen — and
+builds in place. Chunks 3–4 remain, and the latency arithmetic §12.3
+recorded is still owed its loopback measurement. Closes when a take
+recorded against creek on the Apollo plays back in place, compensated,
+from `field build && field play`.
 
 # Plan: Recording
 
@@ -275,7 +277,8 @@ compensated, so what comes back sits where it was sung.
    names) plus the ledger row plus `takes.yaml`, the `record:` entry
    and its schema with takeless-builds-as-silence, resolver arm for
    recorded takes, latency-compensated placement verified by loopback
-   on real hardware, blocking `field record`.
+   on real hardware, blocking `field record`. *Shipped 2026-09-07 (§13),
+   except the loopback measurement, which waits for the hardware.*
 3. **Count-in and click** — the click schedule over the socket, engine
    ticks, click.ts retired.
 4. **Punch and loop takes** — punch in/out against a region, loop
@@ -407,3 +410,67 @@ the decisions it made:
     Known limits: a take past 4 GB (six hours of mono float at 48 kHz)
     would need RF64; frames the FIFO refuses are counted in `dropped`
     and reported, not recovered.
+
+## 13 Chunk 2 as built (2026-09-07)
+
+What landed, and the decisions it made:
+
+1. **The take is placed on the recording track's own timeline.** The
+   daemon reports where a take started on the bed's timeline — the
+   song's session — but a track's content moves with the track, so the
+   row stores `started_at_samples` on the track's timeline at the
+   track's rate, and landing does the conversion once: it subtracts the
+   track's origin on the song — the `at`s summed down its first
+   placement path from the output track (land.ts `trackOrigin`) — and
+   scales bed samples to track samples. A track placed more than once
+   records against its earliest placement, and `field record` says so
+   on the take line. A track the song does not place keeps its own
+   timeline from zero. Track-local `time:` maps are not consulted on the
+   walk; a recording track with its own tempo map would misplace, and
+   nothing in bloom has one — a known limit, not a decision.
+   Rejected: storing the song-timeline position and resolving the
+   origin at build time, which would glue a take to the song and make
+   it slide when the track was moved — the opposite of what every other
+   entry's content does.
+2. **Latency is the device's declared round trip.** `latency` on the
+   row is `input_latency + output_latency` from the manifest, converted
+   to track samples, and placement is `started_at_samples − latency`.
+   The reasoning: a performer hearing the interface's direct path sings
+   against playback that reached their ears `output_latency` late, and
+   their sound reaches the callback `input_latency` late, so the
+   capture sits behind by both. §3's loopback measurement — does the
+   device's claim match what a cable from output to input measures? —
+   is still owed, and the row is the place a measured correction lands,
+   per take, without touching the arithmetic.
+3. **The graph expands a record entry into a window over its chosen
+   take** (graph.ts `withTakes`) before anything reads a track's inputs:
+   an absolute `audio:` placement at `entry.at + started_at − latency`,
+   reading into the take when that is negative, in the take's own
+   samples so the edge conversion scales it. Nothing downstream — the
+   planner, the render, the live compile, the freeze — learns recording
+   exists, which is what makes a landed take play live and freeze like
+   any other content. An entry with no chosen take contributes nothing.
+4. **The record node is named like a gen node** — the track, or
+   `<track>-<id>` — and claims `audio/<node>/` in the song's one
+   namespace exactly as a generative entry does. One record entry per
+   track for now; a second would need the take to say which node it
+   lands in, and nothing asks that yet.
+5. **`check` treats an entry with no takes as a warning and everything
+   else as an error**: takes with none chosen, a chosen name no row
+   carries, a row whose asset is not in the ledger or whose bytes live
+   outside `audio/<node>/`, a takes file naming another node, and a
+   `takes.yaml` no entry claims. The last is the worse of the two
+   stranded-takes cases, because a recording cannot be regenerated.
+6. **Rows carry `recorded_at`, `monitoring`, and `console_preset`.**
+   The wall-clock time is the transaction's; monitoring defaults to
+   `apollo-direct` on the CLI (the V1 decision in audio-engine.md) and
+   the preset is `--console-preset`, recorded only when given.
+7. **Landing is the last step of `field record`,** and also of
+   `--recover`; `--land <id>` covers a transaction the daemon finalized
+   but nothing landed. The CLI refuses a track without a `record:`
+   entry before arming, so the refusal comes before the performance.
+   The order inside landing is ledger row, then takes row, then the
+   transaction's removal, so a crash at any point leaves a project
+   `check` can describe rather than a row whose bytes are missing.
+8. **`field choose <song>/<node> --take <name>`** moves `chosen` the way
+   `--variant` does; the two flags are exclusive.

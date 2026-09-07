@@ -9,8 +9,10 @@ import { loadProject } from '../model/project.js';
 import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
+import { buildLabels } from './build.js';
 import { describeTake, meterLine, recordTake, resolveRecordTarget } from './record.js';
 import { transportCommand, transportStatusLines } from './transport.js';
+import { check } from './check.js';
 
 // The input side (recording.md chunk 1) against the real daemon in
 // null-output mode. The null clock presents an input while armed — a
@@ -336,14 +338,14 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     },
   );
 
-  it('field record: arms, loads the song as the bed, blocks, and stops on ctrl-c', { timeout: 20_000 }, async () => {
+  it('field record: arms, loads the song as the bed, blocks, stops on ctrl-c, and lands the take', { timeout: 30_000 }, async () => {
     await importTone('tone', NULL_RATE * 6);
     createTrack(root, 'creek', 'lead-vocal');
     writeFileSync(
       join(root, 'songs/creek/tracks/main.yaml'),
       ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
     );
-    const project = loadProject(root);
+    let project = loadProject(root);
     expect(resolveRecordTarget(root, 'creek/track:lead-vocal')).toEqual({
       label: '//songs/creek/track:lead-vocal',
       track: 'lead-vocal',
@@ -351,15 +353,29 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     });
     expect(() => resolveRecordTarget(root, 'creek/asset:tone')).toThrow('is a asset');
     expect(() => resolveRecordTarget(root, 'creek/track:all')).toThrow('one track');
+    // No `record:` entry, no take: refused before the daemon is touched.
+    await expect(recordTake(root, project, 'creek/track:lead-vocal', {}, {})).rejects.toThrow(
+      'lead-vocal has no `record:` entry',
+    );
+    writeFileSync(
+      join(root, 'songs/creek/tracks/lead-vocal.yaml'),
+      ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'),
+    );
+    project = loadProject(root);
+    // Takeless is a warning, not a gate (recording.md §4).
+    const before = await check(root);
+    expect(before.diagnostics.map((d) => `${d.severity ?? 'error'}: ${d.message}`)).toEqual([
+      'warning: input 1 ("record") has no takes yet — field record creek/track:lead-vocal',
+    ]);
 
     const lines: string[] = [];
     const positions: string[] = [];
     let interrupted = false;
-    const take = await recordTake(
+    const { take, landed } = await recordTake(
       root,
       project,
       'creek/track:lead-vocal',
-      { input: 1, at: '1.2.1' },
+      { input: 1, at: '1.2.1', monitoring: 'apollo-direct', consolePreset: 'vocal-tracking' },
       {
         onBed: (line) => lines.push(line),
         onArmed: (line) => lines.push(line),
@@ -379,8 +395,52 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     expect(take.track).toBe('//songs/creek/track:lead-vocal');
     expect(take.song).toBe('creek');
     expect(take.started_at_samples).toBeGreaterThanOrEqual(24000);
-    expect(existsSync(join(root, take.file))).toBe(true);
-    assertGapless(readWav(join(root, take.file)).channels[0]!);
+
+    // Landed (recording.md §3): the bytes under the record node's
+    // directory and in the ledger, the row beside them, the transaction
+    // gone, the take chosen. lead-vocal is not placed in main, so its
+    // timeline is the song's from zero and the row's start is the
+    // daemon's.
+    expect(landed).toMatchObject({
+      song: 'creek',
+      track: 'lead-vocal',
+      node: 'lead-vocal',
+      asset: take.id,
+      file: `audio/lead-vocal/${take.id}.wav`,
+      placements: 0,
+      placedAt: take.started_at_samples,
+    });
+    expect(landed.row).toMatchObject({
+      asset: take.id,
+      started_at_samples: take.started_at_samples,
+      musical_position: [1, 2],
+      latency: 0,
+      device: 'null',
+      input: 1,
+      monitoring: 'apollo-direct',
+      console_preset: 'vocal-tracking',
+      recorded_at: take.started_wall,
+    });
+    expect(existsSync(join(root, take.file))).toBe(false); // the transaction went
+    expect(existsSync(join(root, 'songs/creek', landed.file))).toBe(true);
+    assertGapless(readWav(join(root, 'songs/creek', landed.file)).channels[0]!);
+    const takesYaml = readFileSync(join(root, 'songs/creek/audio/lead-vocal/takes.yaml'), 'utf8');
+    expect(takesYaml).toContain(`record: lead-vocal\nchosen: ${take.id}\ntakes:\n  - asset: ${take.id}\n`);
+    expect(readFileSync(join(root, 'songs/creek/assets.yaml'), 'utf8')).toContain(
+      `  - name: ${take.id}\n    file: audio/lead-vocal/${take.id}.wav\n`,
+    );
+    const after = await check(root);
+    expect(after.diagnostics).toEqual([]);
+
+    // And it builds in place: the stem is silence up to the take's
+    // start and the take from there — the sawtooth, gapless.
+    const built = (await buildLabels(root, ['creek/track:lead-vocal'])).find(
+      (o) => o.label === '//songs/creek/track:lead-vocal',
+    )!;
+    const stem = readWav(built.outputPath!).channels[0]!;
+    expect(stem.length).toBe(take.started_at_samples! + take.frames!);
+    expect(stem.subarray(0, take.started_at_samples!).every((s) => s === 0)).toBe(true);
+    assertGapless(stem.subarray(take.started_at_samples!));
 
     // Ctrl-c stopped the transport and released the input.
     const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
@@ -394,7 +454,7 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     await importTone('tone', NULL_RATE * 20);
     writeFileSync(
       join(root, 'songs/creek/tracks/main.yaml'),
-      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - record:', ''].join('\n'),
     );
     const project = loadProject(root);
     const recording = recordTake(root, project, 'creek/track:main', {}, {});
@@ -415,8 +475,10 @@ describe.skipIf(!binary)('recording through the daemon', () => {
       /^recording: take-\S+ \(\d+ frames\) on null input 1 → \/\/songs\/creek\/track:main$/,
     );
     await transportCommand(root, 'stop');
-    const take = await recording; // the take event reached the blocking side
+    const { take, landed } = await recording; // the take event reached the blocking side
     expect(take.complete).toBe(true);
     expect(take.frames).toBeGreaterThan(0);
+    expect(landed.node).toBe('main');
+    expect(landed.placements).toBe(1); // the output track is its own one placement, at zero
   });
 });
