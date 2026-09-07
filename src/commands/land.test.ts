@@ -217,6 +217,50 @@ describe('landTake', () => {
     expect(stem[0]).toBeCloseTo(601 / 100000, 9); // the take's 601st sample is the track's first
   });
 
+  it('counts started_at_samples from the record entry\'s own at, as the graph reads it', async () => {
+    // main places vox at song zero; the entry sits at bar 3 (192000
+    // samples). A take that began at bed sample 0 sounds at bar 1 — it
+    // was sung there — so the row counts back from the window: −192000.
+    // Reading the row the graph's way puts the clip at track sample 0,
+    // which is what minjudd's finding on #167 caught the writer and the
+    // reader disagreeing about (a bare entry hid it: window start 0).
+    createTrack(root, 'creek', 'vox');
+    writeTrack('main', ['inputs:', '  - track: vox']);
+    writeTrack('vox', ['inputs:', '  - record:', '    at: [3]']);
+    const first = writeTransaction('take-20260907-120000', {
+      track: '//songs/creek/track:vox',
+      started_at_samples: 0,
+    });
+    const landedFirst = await landTake(root, first);
+    expect(landedFirst.row.started_at_samples).toBe(-192000);
+    expect(landedFirst.row.musical_position).toEqual([1]);
+    expect(landedFirst.placedAt).toBe(0);
+    let stem = readWav(
+      (await buildLabels(root, ['creek/track:vox'])).find((o) => o.label === '//songs/creek/track:vox')!
+        .outputPath!,
+    ).channels[0]!;
+    expect(stem.length).toBe(4800);
+    expect(stem[0]).toBeCloseTo(1 / 100000, 9);
+
+    // And one sung at bar 3.2 (bed sample 216000): 24000 past the
+    // entry's window, placed at 216000 on the track.
+    const second = writeTransaction('take-20260907-120100', {
+      track: '//songs/creek/track:vox',
+      started_at_samples: 216000,
+    });
+    const landedSecond = await landTake(root, second);
+    expect(landedSecond.row.started_at_samples).toBe(24000);
+    expect(landedSecond.row.musical_position).toEqual([3, 2]);
+    expect(landedSecond.placedAt).toBe(216000);
+    stem = readWav(
+      (await buildLabels(root, ['creek/track:vox'])).find((o) => o.label === '//songs/creek/track:vox')!
+        .outputPath!,
+    ).channels[0]!;
+    expect(stem.length).toBe(216000 + 4800);
+    expect(stem.subarray(0, 216000).every((s) => s === 0)).toBe(true);
+    expect(stem[216000]).toBeCloseTo(1 / 100000, 9);
+  });
+
   it('converts the daemon\'s rates into the track\'s', async () => {
     createTrack(root, 'creek', 'vox');
     writeTrack('main', ['inputs:', '  - track: vox']);

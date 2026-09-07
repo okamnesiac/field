@@ -415,14 +415,22 @@ the decisions it made:
 
 What landed, and the decisions it made:
 
-1. **The take is placed on the recording track's own timeline.** The
-   daemon reports where a take started on the bed's timeline — the
-   song's session — but a track's content moves with the track, so the
-   row stores `started_at_samples` on the track's timeline at the
-   track's rate, and landing does the conversion once: it subtracts the
-   track's origin on the song — the `at`s summed down its first
-   placement path from the output track (land.ts `trackOrigin`) — and
-   scales bed samples to track samples. A track placed more than once
+1. **The take is placed on the recording track's own timeline, counted
+   from its record entry's `at`.** The daemon reports where a take
+   started on the bed's timeline — the song's session — but a track's
+   content moves with the track, and an entry's content moves with the
+   entry, so the row stores `started_at_samples` relative to the
+   entry's window start at the track's rate, and landing does the
+   conversion once: it subtracts the track's origin on the song — the
+   `at`s summed down its first placement path from the output track
+   (land.ts `trackOrigin`) — scales bed samples to track samples, and
+   subtracts the entry's window start under the track's map. The graph
+   adds that window start back (`withTakes`), which is what makes a
+   record entry's placement fields mean what they mean on every other
+   kind; the first cut of this chunk subtracted the origin and not the
+   window, so a `record:` entry carrying its own `at` sounded somewhere
+   other than where landing said (minjudd's finding on #167). A bare
+   entry hid it. A track placed more than once
    records against its earliest placement, and `field record` says so
    on the take line. A track the song does not place keeps its own
    timeline from zero. Track-local `time:` maps are not consulted on the

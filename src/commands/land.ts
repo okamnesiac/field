@@ -4,7 +4,7 @@ import { Document, isSeq, parseDocument } from 'yaml';
 import { readWavHeader } from '../audio/wav.js';
 import { takeSchema, type Take } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
-import { generatorName } from '../generators/stem.js';
+import { generatorName, placedWindow } from '../generators/stem.js';
 import { sha256File } from '../hash.js';
 import { parseLabel, SONG_OUTPUT_NAME } from '../labels.js';
 import { takenSongNames } from '../model/namespace.js';
@@ -113,7 +113,7 @@ export interface LandedTake {
   asset: string; // the take's ledger name
   file: string; // song-relative
   row: RecordedTake;
-  placedAt: number; // track samples: started_at_samples - latency
+  placedAt: number; // track samples: the entry's window start + started_at_samples - latency
   placements: number; // how many times the song places the track
   frames: number;
   sampleRate: number;
@@ -149,7 +149,7 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   if (errors.length > 0) {
     throw new Error(`project has errors (field check) — fix them before landing ${take.id}`);
   }
-  const { song, trackName, node } = recordNodeFor(project, take.track);
+  const { song, trackName, node, entry } = recordNodeFor(project, take.track);
   const songDir = join(root, song.dir);
   const track = song.tracks.find((t) => t.data.name === trackName)!.data;
 
@@ -168,9 +168,13 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   const sha256 = await sha256File(dest);
   const bytes = statSync(dest).size;
 
-  // The record: placement on the track's timeline, at the track's rate.
-  // The daemon's start is on the bed's timeline at the bed's rate; the
-  // track's origin on that timeline comes off, then the rate changes.
+  // The record: placement counted from the record entry's own window,
+  // at the track's rate — the same reading the graph makes (graph.ts
+  // withTakes adds the window start back), so the entry's placement
+  // fields mean what they mean on every other kind and moving its `at`
+  // moves its takes. The daemon's start is on the bed's timeline at the
+  // bed's rate; the track's origin on that timeline comes off, the rate
+  // changes, then the entry's window start comes off in track samples.
   // Latency is the device's declared round trip (§12.3 — input plus
   // output, which is what a performer hearing the interface's direct
   // path actually runs behind), scaled from device samples the same way.
@@ -179,9 +183,20 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   const timelineRate = take.timeline_rate ?? take.sample_rate;
   const origin = trackOrigin(project, song, trackName);
   const startedOnBed = take.started_at_samples ?? 0;
-  const startedAt = Math.round(
+  const onTrack = Math.round(
     ((startedOnBed - Math.round(origin.seconds * timelineRate)) * trackRate) / timelineRate,
   );
+  // The entry's window under the track's own map, as the graph projects
+  // it (nested-tracks.md §13): a track's `time:` when it has one, else
+  // the song's at the track's rate.
+  const tempoEvents = track.time?.tempo ?? song.time?.tempo;
+  const windowStart =
+    tempoEvents !== undefined
+      ? placedWindow(entry, new TempoMap(tempoEvents, trackRate)).start
+      : entry.anchor === 'absolute'
+        ? entry.at
+        : 0;
+  const startedAt = onTrack - windowStart;
   const latency = Math.round(((take.input_latency + take.output_latency) * trackRate) / take.sample_rate);
   const position =
     take.song !== undefined && song.time !== undefined
@@ -235,7 +250,7 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
     asset: take.id,
     file,
     row,
-    placedAt: startedAt - latency,
+    placedAt: windowStart + startedAt - latency,
     placements: origin.placements,
     frames: header.frames,
     sampleRate: header.sampleRate,

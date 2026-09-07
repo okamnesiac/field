@@ -28,14 +28,15 @@ export const takeName = z
 // does), so this row carries the record and never a hash.
 //
 // `started_at_samples` is where the take's first sample sits on the
-// recording track's own timeline, at the track's rate, and `latency` is
-// how many of those samples the capture ran behind — the round trip the
-// device declared, input plus output, in the track's samples. Placement
-// is `started_at_samples - latency` and nothing else (§3's authority
-// rule): `musical_position` records what the song's map said at capture
-// and is never arithmetic. A take that started before the track's
-// origin has a negative `started_at_samples`; the placement reads into
-// the take by that much.
+// recording track's timeline, counted from the record entry's own `at`
+// (zero for a bare entry), at the track's rate; `latency` is how many
+// of those samples the capture ran behind — the round trip the device
+// declared, input plus output, in the track's samples. The take sounds
+// at the entry's window start plus `started_at_samples - latency` and
+// nothing else (§3's authority rule): `musical_position` records what
+// the song's map said at capture and is never arithmetic. A take that
+// started before the window has a negative `started_at_samples`; the
+// placement reads into the take by that much.
 export const recordedTakeSchema = z.strictObject({
   asset: takeName,
   started_at_samples: z.number().int(),

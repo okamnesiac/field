@@ -312,11 +312,14 @@ takes:
 ```
 
 `started_at_samples` is where the take's first sample sits on the
-recording track's own timeline, at the track's rate, and `latency` is
-how far the capture ran behind it — the device's declared round trip,
-input plus output. Placement is their difference and nothing else;
-`musical_position` records what the song's map said at capture and is
-never arithmetic. `field record` writes the row when a take lands,
+recording track's timeline, counted from the record entry's own `at`
+(zero for a bare entry) at the track's rate, and `latency` is how far
+the capture ran behind it — the device's declared round trip, input
+plus output. The take sounds at the entry's window start plus their
+difference and nothing else; `musical_position` records what the song's
+map said at capture and is never arithmetic. Moving the entry's `at`
+moves its takes with it, as every other entry's content moves. `field
+record` writes the row when a take lands,
 choosing it, and `field choose creek/lead-vocal --take <name>` moves
 `chosen` the way `--variant` moves a gen node's.
 

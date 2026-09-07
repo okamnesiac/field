@@ -142,7 +142,9 @@ into `audio/<node>/takes.yaml` placing the take on the recording
 track's timeline, the new take is chosen, and the transaction directory
 is removed. The daemon reported the start on the bed's timeline; landing
 subtracts the track's origin on that timeline — the `at`s down its first
-placement path from the output track — and the device's declared round
-trip, input plus output latency, and converts both into the track's
+placement path from the output track — and then the record entry's own
+window start, so the row counts from the entry's `at` the way the graph
+reads it back; the device's declared round trip, input plus output
+latency, is recorded beside it, and both are converted into the track's
 rate. `field record --recover <id>` lands what it recovers, and
 `field record --land <id>` lands a finalized transaction nothing landed.
