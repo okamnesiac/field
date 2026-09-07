@@ -363,7 +363,7 @@ juce::String Server::dispatch (const juce::var& request)
     }
     else if (op == "status")
     {
-        auto s = player.status();
+        auto s = player.status (true); // a client read consumes the meter
         if (auto* o = s.getDynamicObject())
             for (auto& prop : o->getProperties())
                 ok->setProperty (prop.name, prop.value);

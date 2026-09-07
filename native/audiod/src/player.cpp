@@ -659,7 +659,7 @@ juce::String Player::transportState()
     return "stopped";
 }
 
-juce::var Player::status()
+juce::var Player::status (bool consumePeak)
 {
     auto result = obj();
     result->setProperty ("state", transportState());
@@ -690,9 +690,10 @@ juce::var Player::status()
 
     // The input side (recording.md §6): what is armed, what is being
     // taken, and the one meter V1 carries — the peak since the last
-    // status read, which the reader resets. One reader is the blocking
+    // client read, which that read resets. One reader is the blocking
     // `field record`; two readers would each see half the peaks, which
-    // is the widget's problem to solve when it becomes a reader.
+    // is the widget's problem to solve when it becomes a reader. The
+    // heartbeat's own reads never consume it (player.h).
     {
         auto rec = obj();
         rec->setProperty ("state", recordState());
@@ -701,7 +702,8 @@ juce::var Player::status()
             rec->setProperty ("track", armedTrack);
             rec->setProperty ("device", armedDevice);
             rec->setProperty ("input", armedInput);
-            rec->setProperty ("input_peak", (double) inputPeak.exchange (0.0f));
+            rec->setProperty ("input_peak",
+                              (double) (consumePeak ? inputPeak.exchange (0.0f) : inputPeak.load()));
         }
         if (capture != nullptr)
         {

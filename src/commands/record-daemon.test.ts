@@ -144,7 +144,13 @@ describe.skipIf(!binary)('recording through the daemon', () => {
         const mid = await client.status();
         expect(mid.record?.state).toBe('recording');
         expect(mid.record?.frames).toBeGreaterThan(NULL_RATE);
-        expect(mid.record?.input_peak).toBeGreaterThan(0.9); // the sawtooth reaches ±1
+        // The peak since the status read above: 1.2 s of a sawtooth that
+        // spans ±1 once a second, so it reaches 1. The heartbeat also
+        // reads status, four times a second, and at first consumed the
+        // meter too — every client then saw at most a quarter-second
+        // window, which is a quarter of the ramp and read 0.48 on CI.
+        // Only a client's read may reset it (Player::status consumePeak).
+        expect(mid.record?.input_peak).toBeGreaterThan(0.9);
 
         const stopped = await client.stop();
         const take = stopped.take!;

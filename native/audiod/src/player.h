@@ -90,7 +90,13 @@ public:
     void stop(); // pause + rewind to 0
     juce::String locate (juce::int64 sample);
 
-    juce::var status();
+    // consumePeak: the status op passes true, so a client reading the
+    // meter gets the peak since the last client read and resets it. The
+    // heartbeat reads status four times a second for its own events and
+    // must not consume the meter — it did at first, and every client
+    // then saw at most a quarter-second window, which on a busy CI runner
+    // read a sawtooth that spans ±1 as 0.48.
+    juce::var status (bool consumePeak = false);
 
     // "playing" | "paused" | "stopped"; drives state-change events (main.cpp).
     juce::String transportState();
