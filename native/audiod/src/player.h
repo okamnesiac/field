@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "click.h"
 #include "dsp/resample.h"
 
 namespace field
@@ -123,7 +124,18 @@ public:
     // of that block as started_at_samples; the response waits for the
     // latch so it can report it. Returns {error} or {transaction,
     // started_at_samples}.
-    juce::var record (const juce::var& at);
+    //
+    // With `start` (recording.md §7's count-in, and the punch-in it
+    // amounts to): locate to `start` instead, play, and capture from the
+    // first sample at or after `at` — mid-block, so started_at_samples
+    // is `at` exactly — while status reports the take as pending. The
+    // response then returns at once with started_at_samples -1.
+    juce::var record (const juce::var& at, const juce::var& start);
+    // The metronome (recording.md §7): a schedule the CLI projected from
+    // the tempo map, rendered into the output by the callback (click.h).
+    // A load or a fresh session clears it — a schedule belongs to a bed.
+    juce::String setClick (const juce::var& schedule);
+    int clickTicks() const { return click.tickCount(); }
     // Finalize the take in progress: the callback stops pushing, the
     // writer drains, the header is patched, the manifest is final.
     // Returns the manifest, or void when nothing was recording. stop()
@@ -267,6 +279,10 @@ private:
     std::atomic<int> nullInputChannel { 1 };
     std::atomic<bool> captureStartRequested { false };
     std::atomic<bool> captureStarted { false };
+    // The position the requested take waits for (record's `at` when a
+    // `start` was given); -1 means the next block, whatever its position.
+    std::atomic<juce::int64> captureStartAt { -1 };
+    field::Click click;
     std::atomic<juce::uint64> callbackEpoch { 0 };
     // Largest |sample| on the armed input since status last read it; the
     // V1 meter (recording.md §11's meters question, resolved in §12).

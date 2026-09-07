@@ -182,3 +182,13 @@ export function parseInputChannel(value: string): number {
   }
   return n;
 }
+
+// `field record --count-in`: whole bars, because that is what a musician
+// counts (recording.md §7).
+export function parseCountIn(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new InvalidArgumentError('count-in must be a positive whole number of bars');
+  }
+  return n;
+}

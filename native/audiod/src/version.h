@@ -7,5 +7,7 @@ namespace field
 {
 // 0.12: the input side — arm/record/stop, transactional capture,
 // recovery (recording.md chunk 1).
-constexpr const char* daemonVersion = "0.12.0";
+// 0.13: the metronome in the engine and record's `start` — count-in
+// and a sample-exact punch-in (recording.md chunk 3).
+constexpr const char* daemonVersion = "0.13.0";
 }

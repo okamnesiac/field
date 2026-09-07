@@ -3,13 +3,14 @@ status: in-progress
 priority: now
 ---
 
-**Outcome:** Chunks 1 and 2 shipped (2026-09-06, 2026-09-07): the
-daemon's input side, and a `field record` whose take lands in the
-project — `audio/<node>/`, the ledger row, `takes.yaml`, chosen — and
-builds in place. Chunks 3–4 remain, and the latency arithmetic §12.3
-recorded is still owed its loopback measurement. Closes when a take
-recorded against creek on the Apollo plays back in place, compensated,
-from `field build && field play`.
+**Outcome:** Chunks 1–3 shipped (2026-09-06 to 2026-09-07): the
+daemon's input side; a `field record` whose take lands in the project —
+`audio/<node>/`, the ledger row, `takes.yaml`, chosen — and builds in
+place; and the metronome in the engine with a count-in that begins the
+take on the exact sample. Chunk 4 remains, and the latency arithmetic
+§12.3 recorded is still owed its loopback measurement. Closes when a
+take recorded against creek on the Apollo plays back in place,
+compensated, from `field build && field play`.
 
 # Plan: Recording
 
@@ -280,7 +281,7 @@ compensated, so what comes back sits where it was sung.
    on real hardware, blocking `field record`. *Shipped 2026-09-07 (§13),
    except the loopback measurement, which waits for the hardware.*
 3. **Count-in and click** — the click schedule over the socket, engine
-   ticks, click.ts retired.
+   ticks, click.ts retired. *Shipped 2026-09-07 (§14).*
 4. **Punch and loop takes** — punch in/out against a region, loop
    cycles landing one take each. Comping — one active take assembled
    from several — is part of the recording work
@@ -482,3 +483,55 @@ What landed, and the decisions it made:
    `check` can describe rather than a row whose bytes are missing.
 8. **`field choose <song>/<node> --take <name>`** moves `chosen` the way
    `--variant` does; the two flags are exclusive.
+
+## 14 Chunk 3 as built (2026-09-07)
+
+What landed, and the decisions it made:
+
+1. **The schedule is the wire shape §7 described**: `{rate, ticks:
+   [{sample, accent}]}`, positions on the bed's timeline at the rate the
+   daemon's positions count in — the session rate for a live song, the
+   file's rate for an artifact. The CLI projects it with the same
+   `beatGrid` the old click used; the daemon (click.cpp) sorts it and
+   looks up each block's ticks by binary search. The daemon still never
+   learns what a bar is. An empty list clears.
+2. **Ticks render in the device domain, after the pull.** The callback
+   positions each tick by the block-start position `pullAudio` returns —
+   the same one the capture latches on — scaled by device rate over
+   schedule rate, so a schedule plays through a device at another rate on
+   the same instants. Two approximations recorded: under converted
+   delivery the block-start position leads the ear by the converter's
+   FIFO (cross-rate-live.md decision 3's bound), and a loop wrap inside a
+   block places that block's post-wrap ticks a block late. Both are
+   milliseconds; neither touches the capture.
+3. **A schedule belongs to a bed.** `load` and a fresh `session` clear
+   it; a session swap keeps it, and the watch loop re-sends it after a
+   swap because the map may be what changed. The CLI clears it when its
+   play or take ends, so a later `field transport play` on the same bed
+   is not clicked by a metronome nobody asked for this time.
+4. **Count-in is a pre-roll with a sample-exact start.** `record` gained
+   `start`: the transport locates there and plays, and the callback
+   begins the take on the first sample at or after `at` — mid-block,
+   pushing from that offset — so `started_at_samples` is `at` exactly,
+   where chunk 1's latch was the block after the request. `status`
+   reports the take `pending` until then and the `record` response
+   returns at once with −1. This is also chunk 4's punch-in primitive;
+   punch-out (a stop at a position) is the symmetric half still to build.
+5. **`--count-in N` and `--click` are independent.** The count-in
+   schedules ticks only over the N bars before `--at`, so the performer
+   hears the bar before the take and nothing after it; `--click` covers
+   the whole bed; both together give the whole bed. `--count-in` needs
+   `--at`, because it counts into a position.
+6. **`click.ts` keeps `beatGrid` and lost its DSP** — the temp-file
+   copy, the re-hash, and the whole-file WAV codec's one production
+   caller are gone — so `--click` composes with `--watch` and with a live
+   song, and the two refusals §2 named are deleted rather than carved
+   around.
+7. **`--render-live` takes `--click <schedule.json>`** and runs the same
+   `Click::render` offline at the session rate, which is how the suite
+   proves the ticks land on their samples: a rendered bar has a zero at
+   each scheduled sample, a nonzero one after it, 720 frames of ring, and
+   silence between, with G6 and C6 told apart by zero crossings. Never
+   for a golden.
+8. **The daemon is 0.13.0** with features `click` and `record-start`;
+   the client gates on both names.

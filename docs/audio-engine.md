@@ -133,6 +133,37 @@ switching until the take ends, because each would restart the device
 and gap the capture. A session swap is allowed: it carries the
 transport.
 
+## The metronome
+
+`field play --click` and `field record --click` put a metronome in the
+output, and `field record --count-in <bars>` counts a performer in
+([recording.md](projects/recording/readme.md) §7). The CLI projects the
+song's tempo map into a schedule — `{rate, ticks: [{sample, accent}]}`,
+positions on the bed's timeline at the rate the daemon's positions count
+in — and sends it with the `click` op. The daemon synthesizes each tick
+in the callback against the same block-start position the capture
+latches on: 15 ms of sine, G6 on the downbeat and C6 elsewhere, decaying
+over 4 ms, added to every output channel and never to the capture or to
+anything `field build` renders. A schedule belongs to a bed: `load` and
+a fresh `session` clear it, a session swap keeps it and the watch loop
+re-sends it when the map may have moved, and the CLI clears it when its
+play or take ends. Positions scale into the device's rate when they
+differ, so a 48 kHz schedule lands on the same instants through a
+44.1 kHz device.
+
+A count-in is a pre-roll: `record` takes a `start` beside `at`, the
+transport locates to `start` and plays, and the callback begins the
+take on the first sample at or after `at` — mid-block, so
+`started_at_samples` is `at` exactly — while `status` reports the take
+as `pending`. `--count-in N` schedules ticks only over the N bars before
+`--at`; `--click` schedules the whole bed. The same `start` is the
+punch-in the plan's chunk 4 builds on.
+
+`field-audiod --render-live <session> <out> --click <schedule.json>`
+runs the same click layer offline at the session rate, which is how the
+suite proves tick positions to the sample; it is never used for a
+golden.
+
 ## Landing a take
 
 When a take finalizes, `field record` lands it

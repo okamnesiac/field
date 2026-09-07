@@ -13,6 +13,7 @@ import { recordTakesOrder, recordTakesSchema, type InputEntry, type RecordedTake
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 import { appendLedgerRow, openLedger } from './import.js';
+import { songDirOfPath } from './transport.js';
 
 // Landing a take (recording.md §3, chunk 2): the daemon finalized a
 // transaction under .field/recording/<id>/ — bytes, manifest, journal —
@@ -198,8 +199,14 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
         : 0;
   const startedAt = onTrack - windowStart;
   const latency = Math.round(((take.input_latency + take.output_latency) * trackRate) / take.sample_rate);
+  // What the song's map said at capture, when the bed was the song —
+  // its live session, or an artifact of it (a stem, a take) — and not
+  // when it was some other file.
+  const bedIsSong =
+    take.song === song.name ||
+    (take.source !== undefined && songDirOfPath(root, take.source) === song.dir);
   const position =
-    take.song !== undefined && song.time !== undefined
+    bedIsSong && song.time !== undefined
       ? musicalPosition(
           new MeterMap(song.time.meter),
           Math.round(new TempoMap(song.time.tempo, timelineRate).samplesToTicks(startedOnBed)),

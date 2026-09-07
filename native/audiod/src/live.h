@@ -215,8 +215,13 @@ private:
 // requires. Not a render strategy (decision 1 keeps the build on stems);
 // it exists so a live evaluation can be byte-compared against the
 // offline artifact for the same graph. Empty string on success.
+//
+// With a click schedule (recording.md §7), the same Click layer the
+// callback runs is added block by block at the session rate — never for
+// a golden, only so a test can prove where the ticks land.
 std::string runRenderLive (const std::string& sessionPath,
                            const std::string& outputPath,
-                           const std::string& rootPath);
+                           const std::string& rootPath,
+                           const std::string& clickPath = {});
 
 } // namespace field

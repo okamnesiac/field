@@ -91,6 +91,29 @@ export interface PlayOptions {
   from?: string | undefined; // bar[.beat[.tick]], musical time — CLI-side only
   device?: string | undefined;
   loop?: boolean | undefined; // replay the queue until interrupted
+  click?: boolean | undefined; // the metronome, scheduled from the song's map (recording.md §7)
+}
+
+// The metronome for a bed (recording.md §7): the schedule projected from
+// the song's map at the rate the daemon's positions count in, sent over
+// the socket for the callback to synthesize. Needs a tempo map, and a
+// daemon that speaks the schedule.
+async function sendClick(
+  client: AudiodClient,
+  ctx: MusicalContext | undefined,
+  frames: number,
+  sampleRate: number,
+  what: string,
+): Promise<void> {
+  if (!client.supports('click')) {
+    throw new Error(
+      `field-audiod ${client.daemonVersion} predates the engine click — ` +
+        'field transport quit, then play again (it respawns on the new build)',
+    );
+  }
+  if (!ctx) throw new Error(`--click needs a song's tempo map; ${what} has none`);
+  const { clickSchedule } = await import('./click.js');
+  await client.click(clickSchedule(ctx, frames, sampleRate));
 }
 
 export interface PlayHooks {
@@ -169,6 +192,11 @@ export async function playThroughDaemon(
         if (options.from !== undefined) {
           if (!ctx) throw new Error(`--from needs a song's tempo map; ${item.label} has none`);
           await client.locate(parseMusicalPosition(options.from, ctx));
+        }
+        // The load cleared any schedule; each item gets its own song's,
+        // over its own length, at its own rate.
+        if (options.click === true) {
+          await sendClick(client, ctx, loaded.samples, loaded.sample_rate, item.label);
         }
 
         const status = await client.status();
@@ -378,6 +406,7 @@ export async function playLiveSession(
     watch?: boolean;
     from?: string;
     loop?: boolean;
+    click?: boolean;
     signal?: AbortSignal;
   } = {},
   hooks: PlayHooks = {},
@@ -419,6 +448,11 @@ export async function playLiveSession(
     if (options.device !== undefined) await client.selectDevice(options.device);
     const loaded = await client.session(session);
     let ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
+    // The schedule rides the session's clock and rate; a swap keeps it,
+    // and the swap branch below re-sends it when the map may have moved.
+    if (options.click === true) {
+      await sendClick(client, ctx, loaded.samples, loaded.sample_rate, song);
+    }
     if (options.from !== undefined) {
       if (ctx === undefined) {
         throw new Error(`--from is musical time and "${song}" has no tempo map`);
@@ -466,6 +500,11 @@ export async function playLiveSession(
               // the session (Codex's finding). The compile that produced
               // `fresh` just proved the project loads clean.
               ctx = musicalContext(loadProject(root), `songs/${song}`, swapped.sample_rate);
+              // The map the schedule was projected from may be the
+              // thing that changed; the swap kept the old ticks.
+              if (options.click === true) {
+                await sendClick(client, ctx, swapped.samples, swapped.sample_rate, song);
+              }
               hooks.onReloaded?.('session swapped');
             }
           },

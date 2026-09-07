@@ -65,6 +65,7 @@ export const recordStatusSchema = z.object({
   transaction: z.string().optional(),
   file: z.string().optional(), // project-root-relative take.wav
   started_at_samples: z.number().int().optional(), // -1 until the callback latches
+  pending: z.boolean().optional(), // a pre-rolled take waiting for its position (daemon >= 0.13)
   frames: z.number().int().optional(), // pushed by the callback
   written: z.number().int().optional(), // reached the file
   dropped: z.number().int().optional(), // the FIFO refused (a stalled writer)
@@ -88,8 +89,22 @@ export const recordResponseSchema = z.object({
   ok: z.literal(true),
   transaction: z.string(),
   file: z.string(),
-  started_at_samples: z.number().int(),
+  started_at_samples: z.number().int(), // -1 while a pre-rolled take waits for its position
 });
+
+// The metronome schedule (recording.md §7): tick positions on the bed's
+// timeline at `rate`, with downbeat accents. The CLI projects the tempo
+// map into it; the daemon synthesizes the ticks in the callback and never
+// learns what a bar is. An empty list clears.
+export const clickTickSchema = z.strictObject({
+  sample: z.number().int().min(0),
+  accent: z.boolean(),
+});
+export const clickScheduleSchema = z.strictObject({
+  rate: z.number().positive(),
+  ticks: z.array(clickTickSchema),
+});
+export type ClickSchedule = z.infer<typeof clickScheduleSchema>;
 
 // A take's manifest (capture.cpp writeManifest): the transaction's
 // facts, plus the frame count once it is complete. `recordings` lists
@@ -176,6 +191,7 @@ export const statusResponseSchema = z.object({
   // the skew cross-rate-live.md decision 3 bounds, made visible.
   conv_queued: z.number().int().optional(),
   record: recordStatusSchema.optional(), // daemon feature "record"
+  click_ticks: z.number().int().optional(), // ticks in the loaded schedule (daemon feature "click")
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });

@@ -141,6 +141,7 @@ int main (int argc, char* argv[])
     juce::String renderPlan;
     juce::String renderLiveSession;
     juce::String renderLiveOut;
+    juce::String renderLiveClick;
     juce::String scanFormat;
     juce::String probeFormat;
     juce::String probeCandidate;
@@ -164,6 +165,8 @@ int main (int argc, char* argv[])
             renderLiveSession = argv[++i];
             renderLiveOut = argv[++i];
         }
+        else if (arg == "--click" && i + 1 < argc)
+            renderLiveClick = argv[++i]; // with --render-live: a click schedule to add
         else if (arg == "--scan" && i + 1 < argc)
             scanFormat = argv[++i];
         else if (arg == "--scan-probe" && i + 3 < argc)
@@ -189,7 +192,8 @@ int main (int argc, char* argv[])
                           "usage: field-audiod [--socket <path>] [--null-output] "
                           "[--idle <seconds>]\n"
                           "       field-audiod --render <plan.json>\n"
-                          "       field-audiod --render-live <session.json> <out.wav>\n"
+                          "       field-audiod --render-live <session.json> <out.wav> "
+                          "[--click <schedule.json>]\n"
                           "       field-audiod --scan <au|vst3>\n"
                           "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
                           "       field-audiod --state-capture <au|vst3> <identifier> "
@@ -284,7 +288,8 @@ int main (int argc, char* argv[])
                                                renderLiveOut.toStdString(),
                                                juce::File::getCurrentWorkingDirectory()
                                                    .getFullPathName()
-                                                   .toStdString());
+                                                   .toStdString(),
+                                               renderLiveClick.toStdString());
             ! error.empty())
         {
             std::fprintf (stderr, "field-audiod: render-live failed: %s\n", error.c_str());
