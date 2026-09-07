@@ -261,6 +261,28 @@ describe('landTake', () => {
     expect(stem[216000]).toBeCloseTo(1 / 100000, 9);
   });
 
+  it('reads the musical position off a song artifact bed too, but not off a foreign file', async () => {
+    createTrack(root, 'creek', 'vox');
+    writeTrack('main', ['inputs:', '  - track: vox']);
+    writeTrack('vox', ['inputs:', '  - record:']);
+    // The bed was a file under songs/creek/ — a stem or another take —
+    // so the song's map applies; a file from elsewhere says nothing.
+    const artifactBed = writeTransaction('take-20260907-130000', {
+      track: '//songs/creek/track:vox',
+      song: undefined,
+      source: join(root, 'songs/creek/audio/bed/bed.wav'),
+      started_at_samples: 120000,
+    });
+    expect((await landTake(root, artifactBed)).row.musical_position).toEqual([2, 2]);
+    const foreignBed = writeTransaction('take-20260907-130100', {
+      track: '//songs/creek/track:vox',
+      song: undefined,
+      source: '/tmp/elsewhere/loop.wav',
+      started_at_samples: 120000,
+    });
+    expect((await landTake(root, foreignBed)).row.musical_position).toBeUndefined();
+  });
+
   it('converts the daemon\'s rates into the track\'s', async () => {
     createTrack(root, 'creek', 'vox');
     writeTrack('main', ['inputs:', '  - track: vox']);

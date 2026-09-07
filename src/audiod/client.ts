@@ -22,6 +22,7 @@ import {
   statusResponseSchema,
   stopResponseSchema,
   type AudiodEvent,
+  type ClickSchedule,
 } from './protocol.js';
 
 // Client for the per-project field-audiod daemon (playback.md §3): connects
@@ -262,9 +263,22 @@ export class AudiodClient extends EventEmitter {
   }
   // Start a take: at `at` (a sample on the bed's timeline, needing a
   // loaded bed) or wherever the transport is. The response carries the
-  // transaction id and the position the callback latched.
-  record(at?: number) {
-    return this.request('record', at !== undefined ? { at } : {}, recordResponseSchema);
+  // transaction id and the position the callback latched. With `start`
+  // (recording.md §7, needs supports('record-start')) the transport
+  // pre-rolls from there and the take begins exactly at `at`; the
+  // response's position is -1 until then, and status says pending.
+  record(at?: number, start?: number) {
+    return this.request(
+      'record',
+      { ...(at !== undefined ? { at } : {}), ...(start !== undefined ? { start } : {}) },
+      recordResponseSchema,
+    );
+  }
+  // The metronome schedule (protocol.ts clickScheduleSchema). Requires
+  // supports('click'); an empty ticks list clears it, and so does loading
+  // a new bed.
+  click(schedule: ClickSchedule) {
+    return this.request('click', schedule, okResponseSchema);
   }
   // Every transaction under .field/recording/, complete or not.
   recordings() {

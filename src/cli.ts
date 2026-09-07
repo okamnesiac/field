@@ -15,6 +15,7 @@ import {
   parseExaggeration,
   parseExportBitDepth,
   parseExportRate,
+  parseCountIn,
   parseInputChannel,
   parseSeed,
   parseVariantNumber,
@@ -532,7 +533,7 @@ program
   .option('--from <position>', 'start at bar[.beat[.tick]] (one song or one artifact)')
   .option('--device <name>', 'output device (field devices lists them)')
   .option('--loop', 'loop the song at its declared extent, or replay an artifact queue')
-  .option('--click', 'overlay a metronome (artifacts only; rendered CLI-side, loops with the file)')
+  .option('--click', "overlay a metronome, synthesized in the engine against the song's tempo map")
   .option('--watch', "follow the project: edits land mid-play (a song's live session)")
   .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean }) => {
     try {
@@ -548,13 +549,6 @@ program
           ? patterns[0]!
           : undefined;
       if (liveSong !== undefined) {
-        if (opts.click === true) {
-          // The click renders CLI-side over a file, which a live session
-          // is not; the artifact spelling still composes with it.
-          throw new Error(
-            `--click rides file playback: field play ${liveSong}/track:main --click`,
-          );
-        }
         const { playLiveSession } = await import('./commands/play.js');
         let interrupted = false;
         process.once('SIGINT', () => {
@@ -571,6 +565,7 @@ program
             ...(opts.device !== undefined ? { device: opts.device } : {}),
             ...(opts.from !== undefined ? { from: opts.from } : {}),
             ...(opts.loop === true ? { loop: true } : {}),
+            ...(opts.click === true ? { click: true } : {}),
             ...(opts.watch === true ? { watch: true, signal: liveAbort.signal } : {}),
           },
           {
@@ -630,10 +625,6 @@ program
         })();
       });
 
-      if (opts.click === true) {
-        const { applyClick } = await import('./commands/click.js');
-        items = applyClick(root, project, items);
-      }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;
       const say = (line: string): void => {
@@ -717,6 +708,8 @@ program
   .option('--input <n>', 'input channel on the device, counting from 1 (default 1)', parseInputChannel)
   .option('--device <name>', 'input device (field devices lists them; default: the system input)')
   .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
+  .option('--click', 'a metronome through the take, synthesized in the engine against the song\'s map')
+  .option('--count-in <bars>', 'pre-roll this many bars before --at, clicking; the take begins exactly at --at', parseCountIn)
   .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
   .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
   .option('--list', 'list the transactions under .field/recording/ instead of recording')
@@ -729,6 +722,8 @@ program
         input?: number;
         device?: string;
         at?: string;
+        click?: boolean;
+        countIn?: number;
         monitoring?: string;
         consolePreset?: string;
         list?: boolean;
@@ -802,11 +797,14 @@ program
             ...(opts.input !== undefined ? { input: opts.input } : {}),
             ...(opts.device !== undefined ? { device: opts.device } : {}),
             ...(opts.at !== undefined ? { at: opts.at } : {}),
+            ...(opts.click === true ? { click: true } : {}),
+            ...(opts.countIn !== undefined ? { countIn: opts.countIn } : {}),
             ...landOptions,
           },
           {
             onBed: say,
             onArmed: say,
+            onCountIn: say,
             onStarted: say,
             onPosition: (line) => {
               if (tty) {

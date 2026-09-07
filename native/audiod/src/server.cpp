@@ -238,6 +238,10 @@ juce::String Server::dispatch (const juce::var& request)
         // recordings list and recover, `record` in status, the `record`
         // and `take` events, and stop finalizing a take.
         features.add ("record");
+        // The metronome schedule op and record's `start` (recording.md
+        // §7): a count-in is the schedule beginning before the take.
+        features.add ("click");
+        features.add ("record-start");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -333,12 +337,21 @@ juce::String Server::dispatch (const juce::var& request)
     }
     else if (op == "record")
     {
-        auto info = player.record (request.getProperty ("at", juce::var()));
+        auto info = player.record (request.getProperty ("at", juce::var()),
+                                   request.getProperty ("start", juce::var()));
         if (info.getProperty ("error", juce::var()).isString())
             return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
         if (auto* o = info.getDynamicObject())
             for (auto& prop : o->getProperties())
                 ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "click")
+    {
+        // The metronome schedule (recording.md §7): {rate, ticks}. An
+        // empty ticks list clears it.
+        auto error = player.setClick (request);
+        if (error.isNotEmpty())
+            return jsonLine (errorResponse (id, error));
     }
     else if (op == "recordings")
     {

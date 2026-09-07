@@ -31,6 +31,8 @@ export interface RecordOptions extends LandOptions {
   input?: number | undefined; // 1-based channel on the input device
   device?: string | undefined; // the input device; default: the system's
   at?: string | undefined; // bar[.beat[.tick]] on the loaded song
+  click?: boolean | undefined; // the metronome through the take (recording.md §7)
+  countIn?: number | undefined; // bars of pre-roll before `at`, clicking; needs `at`
 }
 
 export interface RecordHooks {
@@ -39,6 +41,8 @@ export interface RecordHooks {
   // Nothing was loaded, so the target's song was compiled and loaded as
   // the bed.
   onBed?: (line: string) => void;
+  // A count-in began: the transport is rolling toward the take.
+  onCountIn?: (line: string) => void;
   // The take began, at this position.
   onStarted?: (line: string) => void;
   // A status tick while recording: position, meter, elapsed.
@@ -157,6 +161,11 @@ async function captureTake(
           ? musicalContext(project, songDirOfPath(root, status.path), rate)
           : undefined;
 
+    // Before arming: a flag that cannot be honoured is an error to give
+    // before the input is opened, not after.
+    if (options.countIn !== undefined && (options.at === undefined || ctx === undefined)) {
+      throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
+    }
     const armed = await client.arm(resolved.label, options.input ?? 1, options.device);
     hooks.onArmed?.(
       `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +
@@ -168,6 +177,40 @@ async function captureTake(
       if (ctx === undefined) throw new Error('--at is musical time and the loaded bed has no tempo map');
       at = parseMusicalPosition(options.at, ctx);
     }
+    // The metronome and the count-in (recording.md §7): a schedule the
+    // daemon synthesizes against the clock the capture uses. --click
+    // covers the whole bed; --count-in alone clicks only the bars before
+    // the take, and pre-rolls the transport from there so the take
+    // begins exactly at --at.
+    let start: number | undefined;
+    if (options.countIn !== undefined) {
+      if (at === undefined || ctx === undefined) {
+        throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
+      }
+      if (!client.supports('record-start')) {
+        throw new Error(
+          `field-audiod ${client.daemonVersion} predates count-in — field transport quit, then record again`,
+        );
+      }
+      const { countInStart } = await import('./click.js');
+      start = ctx.tempo.ticksToSamples(countInStart(ctx, ctx.meter.parse(options.at!), options.countIn));
+    }
+    let clicking = false;
+    if (options.click === true || start !== undefined) {
+      if (ctx === undefined) throw new Error('--click needs a song with a tempo map');
+      if (!client.supports('click')) {
+        throw new Error(
+          `field-audiod ${client.daemonVersion} predates the engine click — field transport quit, then record again`,
+        );
+      }
+      const { clickSchedule, countInSchedule } = await import('./click.js');
+      await client.click(
+        options.click === true
+          ? clickSchedule(ctx, status.samples, rate)
+          : countInSchedule(ctx, start!, at!, rate),
+      );
+      clicking = true;
+    }
 
     // A take that ends from elsewhere reaches this terminal as the `take`
     // event; the stop this terminal sends gets it in the response.
@@ -178,7 +221,7 @@ async function captureTake(
     client.on('event', onEvent);
     let transaction: string | undefined;
     try {
-      const started = await client.record(at);
+      const started = await client.record(at, start);
       transaction = started.transaction;
       try {
         await followTake(started);
@@ -194,7 +237,9 @@ async function captureTake(
     } finally {
       client.removeListener('event', onEvent);
       // Release the input whatever happened; the microphone is not ours
-      // between takes.
+      // between takes — and the click, which belongs to this take, not
+      // to whatever plays the bed next.
+      if (clicking) await client.click({ rate, ticks: [] }).catch(() => {});
       await client.disarm().catch(() => {});
     }
     if (landed === undefined) {
@@ -203,9 +248,17 @@ async function captureTake(
     return landed;
 
     async function followTake(started: { transaction: string; started_at_samples: number }): Promise<void> {
-      const from =
-        started.started_at_samples >= 0 ? ` from ${formatPosition(started.started_at_samples, rate, ctx)}` : '';
-      hooks.onStarted?.(`recording ${started.transaction}${from}`);
+      // A pre-rolled take reports -1 until the callback reaches its
+      // position; the recording line waits for that, and the count-in
+      // shows as its own line meanwhile.
+      let announced = started.started_at_samples >= 0;
+      if (announced) {
+        hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(started.started_at_samples, rate, ctx)}`);
+      } else {
+        hooks.onCountIn?.(
+          `count-in ${formatPosition(start!, rate, ctx)} → ${formatPosition(at!, rate, ctx)} (${options.countIn} bar${options.countIn === 1 ? '' : 's'})`,
+        );
+      }
       for (;;) {
         if (hooks.interrupted?.() === true) {
           const stopped = await client.stop();
@@ -214,6 +267,10 @@ async function captureTake(
         }
         const s = await client.status();
         if (s.record?.state !== 'recording') break; // ended from elsewhere
+        if (!announced && s.record.pending !== true && s.record.started_at_samples !== undefined && s.record.started_at_samples >= 0) {
+          announced = true;
+          hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(s.record.started_at_samples, rate, ctx)}`);
+        }
         const elapsed = s.record.frames !== undefined ? ` ${(s.record.frames / armed.sample_rate).toFixed(1)}s` : '';
         hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${meterLine(s.record.input_peak)}${elapsed}`);
         await sleep(250);

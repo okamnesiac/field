@@ -337,6 +337,7 @@ juce::var Player::load (const juce::File& file, bool loop)
     transport.stop();
     transport.setSource (nullptr);
     readerSource.reset();
+    click.clear(); // a schedule belongs to a bed
 
     fileSampleRate = reader->sampleRate;
     fileLengthSamples = reader->lengthInSamples;
@@ -460,7 +461,10 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             everStarted = false;
             livePlaying = false;
             if (! hadSession)
+            {
                 liveEverStarted = false;
+                click.clear(); // a fresh bed; a swap keeps the schedule, the CLI re-sends on a map change
+            }
             liveRate = next->sessionRate();
             liveLength = next->lengthSamples();
             liveLoop = next->looping();
@@ -710,12 +714,15 @@ juce::var Player::status (bool consumePeak)
             rec->setProperty ("transaction", capture->id());
             rec->setProperty ("file", ".field/recording/" + capture->id() + "/take.wav");
             rec->setProperty ("started_at_samples", capture->startedAt());
+            // Counting in: the take exists and has not reached its position.
+            rec->setProperty ("pending", ! captureStarted.load());
             rec->setProperty ("frames", capture->pushed());
             rec->setProperty ("written", capture->written());
             rec->setProperty ("dropped", capture->dropped());
         }
         result->setProperty ("record", juce::var (rec.get()));
     }
+    result->setProperty ("click_ticks", click.tickCount());
 
     double deviceRate = nullMode ? nullSampleRate : 0.0;
     if (! nullMode)
@@ -874,6 +881,10 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
 {
     const juce::int64 position = pullAudio (out, numOutputs, n);
     const juce::int64 freeBefore = freeClock.fetch_add (n);
+    // The metronome rides the output after the pull, positioned by the
+    // same block-start position the capture latches on; with no bed it
+    // counts on the free clock, which is a metronome by itself.
+    click.render (position == -2 ? freeBefore : position, currentDeviceRate(), out, numOutputs, n);
     // Counted after the pull: a finalize that has seen two more epochs
     // knows the block that was in flight when it cleared activeCapture
     // has fully passed through here.
@@ -894,6 +905,7 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
     auto* target = activeCapture.load();
     if (target == nullptr)
         return;
+    int from = 0; // the first frame of this block the take includes
     if (captureStartRequested.load())
     {
         // A missed live lock made this block silence with no position to
@@ -901,16 +913,27 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
         // and the first pushed samples always describe the same instant.
         if (position == -1)
             return;
+        const juce::int64 here = position == -2 ? freeBefore : position;
+        const juce::int64 startAt = captureStartAt.load();
+        if (startAt >= 0)
+        {
+            // A pre-rolled take (count-in) waits for its position, and
+            // begins mid-block when the position falls inside this one,
+            // so started_at_samples is exactly what was asked for.
+            if (here + n <= startAt)
+                return;
+            from = (int) std::max<juce::int64> (0, startAt - here);
+        }
         captureStartRequested = false;
-        target->setStartedAt (position == -2 ? freeBefore : position);
+        target->setStartedAt (here + from);
         captureStarted = true;
     }
     if (! captureStarted.load())
         return;
     if (input != nullptr)
-        target->push (input, n);
+        target->push (input + from, n - from);
     else if ((int) silence.size() >= n)
-        target->push (silence.data(), n); // no input this block: keep the take gapless
+        target->push (silence.data(), n - from); // no input this block: keep the take gapless
 }
 
 void Player::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
@@ -1067,7 +1090,7 @@ juce::String Player::disarm()
     return {};
 }
 
-juce::var Player::record (const juce::var& at)
+juce::var Player::record (const juce::var& at, const juce::var& start)
 {
     auto result = obj();
     auto fail = [&] (const juce::String& error)
@@ -1081,13 +1104,23 @@ juce::var Player::record (const juce::var& at)
         return fail ("already recording");
 
     const bool bed = liveSession != nullptr || readerSource != nullptr;
+    const bool preRoll = ! start.isVoid();
+    if (preRoll)
+    {
+        if (at.isVoid())
+            return fail ("record with start needs at — the position the take begins");
+        if (! start.isInt() && ! start.isInt64() && ! start.isDouble())
+            return fail ("record needs a sample number for start");
+        if ((juce::int64) start > (juce::int64) at)
+            return fail ("start must not be after at");
+    }
     if (! at.isVoid())
     {
         if (! bed)
             return fail ("nothing loaded to record against; omit `at` for a free-running take");
         if (! at.isInt() && ! at.isInt64() && ! at.isDouble())
             return fail ("record needs a sample number for at");
-        if (auto error = locate ((juce::int64) at); error.isNotEmpty())
+        if (auto error = locate (preRoll ? (juce::int64) start : (juce::int64) at); error.isNotEmpty())
             return fail (error);
     }
     if (bed && transportState() != "playing")
@@ -1122,12 +1155,15 @@ juce::var Player::record (const juce::var& at)
     }
 
     captureStarted = false;
+    captureStartAt = preRoll ? (juce::int64) at : -1;
     activeCapture = capture.get();
     captureStartRequested = true;
     // Wait for the callback to latch the start — a block or two, unless
     // the device is not running, in which case the response reports -1
-    // and the manifest fills in when it does.
-    for (int i = 0; i < 300 && ! captureStarted.load(); ++i)
+    // and the manifest fills in when it does. A pre-rolled take is
+    // waiting for its position by design, so no wait: -1 now, and status
+    // says pending until the callback gets there.
+    for (int i = 0; ! preRoll && i < 300 && ! captureStarted.load(); ++i)
         std::this_thread::sleep_for (std::chrono::milliseconds (1));
 
     result->setProperty ("transaction", capture->id());
@@ -1147,6 +1183,7 @@ juce::var Player::stopRecording()
     // is not running at all, where nothing can be pushing.
     activeCapture = nullptr;
     captureStartRequested = false;
+    captureStartAt = -1;
     const auto epoch = callbackEpoch.load();
     for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 2; ++i)
         std::this_thread::sleep_for (std::chrono::milliseconds (1));
@@ -1201,4 +1238,17 @@ juce::var Player::recover (const juce::String& id) const
         result->setProperty ("error", juce::String (e.what()));
         return juce::var (result.get());
     }
+}
+
+juce::String Player::setClick (const juce::var& schedule)
+{
+    try
+    {
+        click.setSchedule (schedule);
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+    return {};
 }

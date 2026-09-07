@@ -1,5 +1,7 @@
 #include "live.h"
 
+#include "click.h"
+
 #include "dsp/mixdown.h"
 #include "dsp/wavfile.h"
 
@@ -766,7 +768,8 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb, 
 
 std::string runRenderLive (const std::string& sessionPath,
                            const std::string& outputPath,
-                           const std::string& rootPath)
+                           const std::string& rootPath,
+                           const std::string& clickPath)
 {
     try
     {
@@ -776,6 +779,14 @@ std::string runRenderLive (const std::string& sessionPath,
         const auto session = juce::JSON::parse (sessionFile.loadFileAsString());
         if (! session.isObject())
             return sessionPath + ": session is not a JSON object";
+        Click click;
+        if (! clickPath.empty())
+        {
+            const juce::File clickFile { juce::String (clickPath) };
+            if (! clickFile.existsAsFile())
+                return clickPath + ": no such click schedule";
+            click.setSchedule (juce::JSON::parse (clickFile.loadFileAsString()));
+        }
 
         LiveSession live (session, juce::File (juce::String (rootPath)));
         // One pass of the declared length. Looping playback is a
@@ -793,6 +804,7 @@ std::string runRenderLive (const std::string& sessionPath,
         {
             const int n = (int) std::min<juce::int64> (blockSize, total - at);
             live.renderBlock (channels, 2, n);
+            click.render (at, (double) live.sessionRate(), channels, 2, n);
             out[0].insert (out[0].end(), left.begin(), left.begin() + n);
             out[1].insert (out[1].end(), right.begin(), right.begin() + n);
         }
