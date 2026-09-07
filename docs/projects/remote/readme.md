@@ -83,13 +83,17 @@ Verified against main (7c84226):
   upload point on push is the `writeAction` call at the bottom of the
   same function.
 - **CAS reads are never verified.** `readAction` checks that each
-  output exists and nothing else, and `materialize()` is a bare
-  `copyFileSync`. That is fine for bytes this machine hashed on the
-  way in and wrong for bytes that arrived over a network: a fetched
-  output must be hashed before it lands at `casPath()`, or the
-  comment on the tamper guard in the same function describes exactly
-  what happens — "a tampered file gets cached under the clean file's
-  key and the poisoned entry outlives the tampering".
+  output exists and nothing else, and `materialize()` copies from the
+  CAS without hashing (copy-to-temp plus rename, never in place, so a
+  playing pass is not truncated under its reader — `watch.md §1.6`).
+  That is fine for bytes this machine hashed on the way in and wrong
+  for bytes that arrived over a network: a fetched output must be
+  hashed before it lands at `casPath()`, and the hash check belongs on
+  the fetch path, not inside `materialize`, whose swap is the
+  constraint to keep. Otherwise the comment on the tamper guard in
+  the same function describes exactly what happens — "a tampered file
+  gets cached under the clean file's key and the poisoned entry
+  outlives the tampering".
 - **`explain()` reads the cache too** (`src/graph/build.ts:347`), to
   report `cached:`. It has to consult the remote the same way, or
   `field explain` will say "not cached" for a label `field build`
