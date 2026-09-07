@@ -1,0 +1,11 @@
+#pragma once
+
+// The daemon's own version, reported in `hello` for humans (`field
+// transport status` prints it) and stamped into every take's manifest.
+// Clients gate on `features`, never on this string (realtime.md §3).
+namespace field
+{
+// 0.12: the input side — arm/record/stop, transactional capture,
+// recovery (recording.md chunk 1).
+constexpr const char* daemonVersion = "0.12.0";
+}

@@ -69,17 +69,23 @@ playback half is shipped: device I/O, a sample-accurate transport with
 musical-position readout, and playback of built labels, behind a
 versioned NDJSON protocol on a Unix domain socket. It runs daemon-lite —
 `field play` spawns it on demand, a lock file guarantees one instance,
-and it exits when idle — and `field transport` and `field devices` drive
-the same protocol, which CI exercises against the real binary in
-null-output mode. Hosting arrived with
+and it exits when idle — and `field transport`, `field devices` and
+`field record` drive the same protocol, which CI exercises against the
+real binary in null-output mode. Hosting arrived with
 [plugin-hosting.md](projects/plugin-hosting/readme.md) chunks 1 and 2:
 `--scan` probes installed AU/VST3 plugins one crash-isolated subprocess
 each, `--render` instantiates pinned plugins offline, and live sessions
 host them in their chains — child chains on the load thread, the master
-chain in the callback, delay compensation from declared latency. The
-rest — recording, monitoring, editor windows, routing, metering,
-crash-safe capture — is future work whose settled decisions live in
-[audio-engine.md](audio-engine.md).
+chain in the callback, delay compensation from declared latency.
+Recording's input side arrived with
+[recording.md](projects/recording/readme.md) chunk 1: the daemon opens
+the device duplex only when something arms, captures one input channel
+into a crash-safe transaction under `.field/recording/`, and recovers a
+transaction a dead daemon left behind
+([audio-engine.md](audio-engine.md) "Capture as built"). The rest —
+landing takes in the project, monitoring, editor windows, routing,
+metering beyond the armed input's peak — is future work whose settled
+decisions live in [audio-engine.md](audio-engine.md).
 
 The real-time audio callback never depends on TypeScript or Python: GC
 pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives

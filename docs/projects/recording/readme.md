@@ -1,12 +1,19 @@
 ---
-status: draft
-priority: later
+status: in-progress
+priority: now
 ---
+
+**Outcome:** Chunk 1 shipped (2026-09-06): the daemon's input side —
+arm, record, stop, the crash-safe transaction and its recovery — and a
+`field record` that ends with a take under `.field/recording/`. Chunks
+2–4 remain. Closes when a take recorded against creek on the Apollo
+plays back in place, compensated, from `field build && field play`.
 
 # Plan: Recording
 
-Waits behind [realtime.md](../realtime/readme.md), whose live graph makes capture
-an input node rather than a second transport (realtime.md §6).
+Waited behind [realtime.md](../realtime/readme.md), whose live graph makes
+capture an input node rather than a second transport (realtime.md §6);
+realtime shipped its four chunks (#137–#143) and this proceeded.
 
 **Goal:** `field record` — capture a live performance into a track as
 takes, through the same daemon that plays: armed, crash-safe,
@@ -50,6 +57,11 @@ The seams this phase opens, verified against main (01d4fe6):
   splits `daemonVersion`; `--watch` gates the same way). Two gates was
   tolerable; recording adds several more, so §6 replaces the pattern
   before it spreads.
+
+  *Superseded 2026-09-06:* realtime chunk 2 built `features` in `hello`
+  (#138 — the "whichever plan lands first builds it" clause of
+  realtime.md §3) and every gate moved to `client.supports()`. Chunk 1
+  adds the name `record` to the list and migrates nothing.
 - No identifier or schema field carries the word "latency" — it left
   with the retired take schema (#132), surviving only in prose: two
   test comments about reverb tails (effect-properties.test.ts) and the
@@ -277,17 +289,121 @@ compensated, so what comes back sits where it was sung.
 - The record entry's spelling: bare `- record:` (null payload) as
   above, or `- record: {}`? Both are honest about carrying nothing;
   pick the one that reads better in a real track file.
+
+  *Resolved 2026-09-06 (§12.6):* bare `- record:`, preprocessed to `{}`
+  the way a bare send label already is (`sendSchema` in
+  schema/track.ts). Chunk 2 implements it.
 - The record file: `takes.yaml` with a `takes:` list as above, or reuse
   the `variants.yaml` name and `variants:` key so both kinds of take
   share one filename? Separate names say what happened; one name says
   they are the same machinery — though less of it is shared than it
   was, now that recorded rows pin in the ledger while variant rows
   pin in-file.
+
+  *Resolved 2026-09-06 (§12.6):* `takes.yaml` with `takes:`. The two
+  files pin in different places, so one filename would claim a shared
+  shape the loader would then have to disambiguate by content.
 - Does stop auto-choose the new take, the way generation chooses its
   first variant? Tracking says yes — you want to hear what you just
   sang; a later take overwriting your chosen comp says no.
+
+  *Resolved 2026-09-06 (§12.6):* yes, the new take is chosen — the
+  generation precedent, and what tracking wants. The comp case that
+  argues otherwise arrives with comping (chunk 4), which is where to
+  revisit it with real takes on disk.
 - Are meters needed for the V1 CLI, or is the widget their first real
   consumer?
+
+  *Resolved 2026-09-06 (§12.4):* one meter, in `status`, no event
+  stream. The blocking `field record` draws it; a stream waits for a
+  consumer that polling cannot serve.
 - The committed `hardware/` file's schema — what binds a named input
   and an expected Console preset per machine class (§8) — decided
   from a real Apollo session rather than invented in this plan.
+
+  *Deferred 2026-09-06, deliberately:* nothing in chunks 1–3 reads it.
+  Device and input are `field record` flags, the record entry carries
+  no payload (§4), and the manifest records what was used (§12.2), so
+  the schema can be written from the first real Apollo session's
+  manifests rather than ahead of them.
+
+## 12 Chunk 1 as built (2026-09-06)
+
+Re-verified against main at 7185f90 before starting; §2's seams held
+except the feature-detection bullet, superseded above. What landed, and
+the decisions it made:
+
+1. **The transaction is one append-only WAV plus a journal, not chunk
+   files.** `.field/recording/<id>/take.wav` is written block by block
+   with its header sizes at zero; finalize patches them, and an
+   unpatched header is what marks a transaction incomplete on disk.
+   `journal.json` records the frames `fsync` has reached the disk with,
+   once a second. A process crash keeps everything `fwrite` handed the
+   kernel, so recovery patches from the file size and records the
+   journal's count beside it as the power-loss floor. Rejected: a file
+   per flush — it buys nothing a single file with a patched header
+   does not, and lands a reassembly step in front of every recovery.
+2. **Bytes are float32 mono at the device's rate.** The callback
+   delivers float; writing it unchanged is the same "bytes stay pure"
+   rule §3 states for rate, applied to depth — a 24-bit writer would be
+   a quantization the pipeline avoids everywhere else. §3's ledger row
+   showed `bit_depth: 24` as an illustration; the row finalize writes
+   will say 32. The manifest carries both `sample_rate` (the take's)
+   and `timeline_rate` (the bed's), because `started_at_samples` counts
+   in the bed's samples while the bytes are at the device's.
+3. **Latencies are recorded, not yet applied.** The arm response and
+   the manifest carry `input_latency` and `output_latency` as the
+   device reports them, separately. Which of them placement subtracts
+   — input alone, or the round trip a performer hearing Console's
+   direct path actually experiences — is §3's loopback measurement,
+   and it stays in chunk 2 with the hardware.
+4. **The meter is a peak in `status`.** `record.input_peak` is the
+   largest |sample| on the armed input since the last status read, and
+   the read resets it; `field record` draws it as a 60 dB bar. One
+   reader sees the whole picture, two readers each see half — the
+   widget's problem when it becomes a reader, and the point at which an
+   event stream earns its place.
+5. **Placement is latched in the callback.** `record` sets a request
+   flag; the block that honours it reads the transport position and
+   pushes that block's input, so the first captured sample and the
+   position it is placed at describe the same instant. A block whose
+   live lock was missed defers the start rather than latching a
+   position it does not have. A take with no bed is placed on a free
+   clock counted from arm; `timeline_rate` is absent to say so.
+6. **The three product questions above are settled here** because this
+   is the pull request that makes the readiness claim; chunk 2 builds
+   them as written.
+7. **`field record` lands in `.field/recording/` for now.** The command
+   arms, loads the target's song as the bed when nothing is loaded,
+   blocks with a position and meter line, and ends — on ctrl-c or on a
+   stop from elsewhere — by printing the take's path and frames.
+   `--list` shows every transaction and `--recover <id>` finalizes one
+   a dead daemon left behind. Landing into `audio/<name>/` with the
+   ledger row and `takes.yaml` is chunk 2, unchanged.
+8. **What a running take refuses:** `locate`, `load`, `device.select`,
+   a second `arm`, `disarm`. `pause` ends the take like `stop` does —
+   a capture against a still transport has no honest placement. A
+   session swap is allowed because it carries the transport.
+   Default-output following and the sample-rate switch a load prefers
+   are deferred until the take ends, because each restarts the device
+   and gaps the capture; delivery converts meanwhile
+   (cross-rate-live.md decision 3).
+9. **The null input.** Armed, the null clock presents one channel as a
+   real duplex open would: channel 1 a sawtooth over one second of the
+   input clock, channel 2 a constant. The tests read a take back and
+   prove every consecutive pair differs by exactly one step — no block
+   lost or repeated between callback and file, including across a
+   SIGKILL and recovery — and that arming channel 2 captured the
+   constant. The null clock now paces against an absolute deadline; the
+   relative sleep it had ran a tenth slow, which a frame count measures
+   where a position readout never noticed.
+10. **Not verified here, owed to the first hardware session:** the
+    macOS microphone prompt for a detached daemon (TCC attributes it to
+    the terminal that spawned `field`; a denied prompt looks like an
+    input that reads `silent` in the meter, which is why the meter
+    names silence instead of drawing an empty bar); the duplex open on
+    an Apollo whose input and output are one device, and on a pair of
+    devices JUCE combines; and the latency arithmetic of item 3.
+    Known limits: a take past 4 GB (six hours of mono float at 48 kHz)
+    would need RF64; frames the FIFO refuses are counted in `dropped`
+    and reported, not recovered.

@@ -15,6 +15,7 @@ import {
   parseExaggeration,
   parseExportBitDepth,
   parseExportRate,
+  parseInputChannel,
   parseSeed,
   parseVariantNumber,
   parseVariants,
@@ -694,8 +695,88 @@ for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
 }
 
 program
+  .command('record [target]')
+  .description('record a take on a track through field-audiod: arms an input, takes against what is playing, ctrl-c stops and finalizes')
+  .option('--input <n>', 'input channel on the device, counting from 1 (default 1)', parseInputChannel)
+  .option('--device <name>', 'input device (field devices lists them; default: the system input)')
+  .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
+  .option('--list', 'list the takes under .field/recording/ instead of recording')
+  .option('--recover <id>', 'finalize a take a dead daemon left behind instead of recording')
+  .action(
+    async (
+      target: string | undefined,
+      opts: { input?: number; device?: string; at?: string; list?: boolean; recover?: string },
+    ) => {
+      try {
+        const root = requireRoot();
+        const { describeTake, listRecordings, recordTake, recoverRecording } = await import(
+          './commands/record.js'
+        );
+        if (opts.list === true) {
+          const entries = await listRecordings(root);
+          if (entries.length === 0) process.stdout.write('no takes under .field/recording/\n');
+          for (const entry of entries) process.stdout.write(`${describeTake(entry)}\n`);
+          return;
+        }
+        if (opts.recover !== undefined) {
+          process.stdout.write(`${describeTake(await recoverRecording(root, opts.recover))}\n`);
+          return;
+        }
+        if (target === undefined) {
+          throw new Error('record needs a track to record (creek/track:lead-vocal), or --list / --recover <id>');
+        }
+        const project = loadProject(root);
+        let interrupted = false;
+        process.once('SIGINT', () => {
+          // The loop in recordTake sees this on its next tick and sends
+          // the stop itself — one connection, so the finalized take comes
+          // back in the stop's response.
+          interrupted = true;
+        });
+        const tty = process.stdout.isTTY === true;
+        let onPositionLine = false;
+        const say = (line: string): void => {
+          if (onPositionLine) process.stdout.write('\n');
+          onPositionLine = false;
+          process.stdout.write(`${line}\n`);
+        };
+        const take = await recordTake(
+          root,
+          project,
+          target,
+          {
+            ...(opts.input !== undefined ? { input: opts.input } : {}),
+            ...(opts.device !== undefined ? { device: opts.device } : {}),
+            ...(opts.at !== undefined ? { at: opts.at } : {}),
+          },
+          {
+            onBed: say,
+            onArmed: say,
+            onStarted: say,
+            onPosition: (line) => {
+              if (tty) {
+                process.stdout.write(`\r  ${line}   `);
+                onPositionLine = true;
+              }
+            },
+            interrupted: () => interrupted,
+          },
+        );
+        // Where the bytes are. Landing them in the project — audio/<name>/,
+        // the ledger row, takes.yaml — is recording.md chunk 2.
+        say(`take    ${describeTake(take)}`);
+        if (take.dropped !== undefined && take.dropped > 0) {
+          say(`warning: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
+        }
+      } catch (err) {
+        fail(err);
+      }
+    },
+  );
+
+program
   .command('devices')
-  .description('list output devices via field-audiod (spawns it if needed)')
+  .description('list output and input devices via field-audiod (spawns it if needed)')
   .action(async () => {
     try {
       const { AudiodClient } = await import('./audiod/client.js');
@@ -706,8 +787,19 @@ program
         process.stdout.write('daemon is in null-output mode (no devices)\n');
         return;
       }
+      // Two lists now that the input side exists (recording.md §6); the
+      // `*` marks the system default on each, which is what an unnamed
+      // --device (play) or --device (record) uses.
+      process.stdout.write('output:\n');
       for (const device of result.devices) {
         process.stdout.write(`${device.default ? '* ' : '  '}${device.name}\n`);
+      }
+      if (result.inputs.length > 0) {
+        process.stdout.write('input:\n');
+        for (const device of result.inputs) {
+          const channels = `${device.channels} channel${device.channels === 1 ? '' : 's'}`;
+          process.stdout.write(`${device.default ? '* ' : '  '}${device.name}  (${channels})\n`);
+        }
       }
     } catch (err) {
       fail(err);

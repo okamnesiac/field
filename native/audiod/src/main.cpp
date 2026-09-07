@@ -1,4 +1,5 @@
 #include "player.h"
+#include "capture.h"
 #include "hosting.h"
 #include "live.h"
 #include "render.h"
@@ -35,6 +36,7 @@ public:
         : player (p), server (s), idleMs ((juce::int64) idleSeconds * 1000)
     {
         lastKnownState = player.transportState();
+        lastKnownRecord = player.recordState();
         // Baseline the device too, or the first tick broadcasts the
         // spawn-time output as a phantom "moved" event (#16 review).
         lastKnownDevice = player.status()
@@ -79,6 +81,17 @@ public:
                                          { o.setProperty ("state", state); }));
         }
 
+        // The input side's state (recording.md §6): idle, armed,
+        // recording — a `field record` blocking on the take and a
+        // `field transport status` from elsewhere read the same thing.
+        auto record = player.recordState();
+        if (record != lastKnownRecord)
+        {
+            lastKnownRecord = record;
+            server.broadcast (jsonEvent ("record", [&] (juce::DynamicObject& o)
+                                         { o.setProperty ("state", record); }));
+        }
+
         // The output can move underneath a client (default-follow, device
         // vanishing): say so on the socket.
         auto device = status.getProperty ("device", juce::var());
@@ -102,7 +115,10 @@ public:
         }
 
 
+        // Armed or recording pins the daemon open (recording.md §5): an
+        // idle exit under a take would be the take dying to a timeout.
         auto idle = server.connectionCount() == 0 && state != "playing"
+                    && ! player.recordingPinned()
                     && juce::Time::currentTimeMillis() - server.lastActivityMs() > idleMs;
         if (server.quitRequested || idle)
             wantExit = true;
@@ -113,6 +129,7 @@ private:
     Server& server;
     const juce::int64 idleMs;
     juce::String lastKnownState;
+    juce::String lastKnownRecord;
     juce::String lastKnownDevice;
     int ticksSinceRescan = 0;
 };
@@ -320,6 +337,34 @@ int main (int argc, char* argv[])
         std::fprintf (stderr, "field-audiod: %s\n", error.toRawUTF8());
         return 1;
     }
+
+    // A finalized take reaches every client, however the take ended — the
+    // stop op that ended it, a remote stop, the bed running out.
+    // Nested rather than flattened: the manifest's own `id` is the
+    // transaction's, and a top-level `id` is how every client tells a
+    // response from an event.
+    player.onTake = [&server] (const juce::var& manifest)
+    {
+        server.broadcast (jsonEvent ("take", [&] (juce::DynamicObject& o)
+                                     { o.setProperty ("take", manifest); }));
+    };
+
+    // The spawn reports what a dead daemon left behind (recording.md §5):
+    // an incomplete transaction under .field/recording/ is a take whose
+    // audio is still there, waiting for `recover`. The log is the
+    // daemon's only voice at this point; the `recordings` op is how a
+    // client asks.
+    // Held in a local: getArray() points into the var, and a temporary
+    // var dies at the end of the condition that produced it.
+    const auto transactions = field::Capture::list (juce::File::getCurrentWorkingDirectory(), {});
+    if (auto* pending = transactions.getArray())
+        for (const auto& entry : *pending)
+            if (! (bool) entry.getProperty ("complete", false))
+                std::fprintf (stderr,
+                              "field-audiod: recoverable take %s (%lld frames on disk) — "
+                              "recover it with the recover op\n",
+                              entry.getProperty ("id", juce::var()).toString().toRawUTF8(),
+                              (long long) (juce::int64) entry.getProperty ("frames_on_disk", 0));
 
     Heartbeat heartbeat (player, server, idleSeconds);
     // runDispatchLoopUntil rather than runDispatchLoop: the daemon has no

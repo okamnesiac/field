@@ -1,5 +1,6 @@
 #include "server.h"
 #include "player.h"
+#include "version.h"
 
 #include <fcntl.h>
 #include <sys/file.h>
@@ -218,7 +219,11 @@ juce::String Server::dispatch (const juce::var& request)
     {
         ok->setProperty ("protocol", protocolVersion);
         ok->setProperty ("daemon", "field-audiod");
-        ok->setProperty ("version", "0.11.0"); // 0.11: hosted plugins in the live chain (plugin-hosting.md chunk 2)
+        ok->setProperty ("version", field::daemonVersion);
+        // So a client can tell a stale daemon apart from a live one by
+        // more than its answers — and so a test can kill this process
+        // mid-take to prove the transaction survives.
+        ok->setProperty ("pid", (int) ::getpid());
         // Capability names (realtime.md §3): clients gate on these, not
         // on parsing the version string.
         juce::Array<juce::var> features;
@@ -229,6 +234,10 @@ juce::String Server::dispatch (const juce::var& request)
         // stopped and rewound — so the watch path gates on this feature,
         // not that one (Codex's finding).
         features.add ("swap");
+        // The input side (recording.md §6): arm, disarm, record, the
+        // recordings list and recover, `record` in status, the `record`
+        // and `take` events, and stop finalizing a take.
+        features.add ("record");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -285,11 +294,63 @@ juce::String Server::dispatch (const juce::var& request)
     }
     else if (op == "pause")
     {
+        // Both end a take in progress (player.cpp: a capture against a
+        // still transport has no honest placement), and both hand the
+        // finalized manifest back so the caller that ended it has it
+        // without a second round-trip; the `take` event reaches everyone
+        // else.
+        auto take = player.stopRecording();
         player.pause();
+        if (take.isObject() && ! take.hasProperty ("error"))
+            ok->setProperty ("take", take);
     }
     else if (op == "stop")
     {
+        auto take = player.stopRecording();
         player.stop();
+        if (take.isObject() && ! take.hasProperty ("error"))
+            ok->setProperty ("take", take);
+    }
+    else if (op == "arm")
+    {
+        auto input = request.getProperty ("input", juce::var (1));
+        if (! input.isInt() && ! input.isInt64() && ! input.isDouble())
+            return jsonLine (errorResponse (id, "arm needs an input channel number"));
+        auto info = player.arm (request.getProperty ("track", juce::var()).toString(),
+                                request.getProperty ("device", juce::var()).toString(),
+                                (int) input);
+        if (info.getProperty ("error", juce::var()).isString())
+            return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
+        if (auto* o = info.getDynamicObject())
+            for (auto& prop : o->getProperties())
+                ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "disarm")
+    {
+        auto error = player.disarm();
+        if (error.isNotEmpty())
+            return jsonLine (errorResponse (id, error));
+    }
+    else if (op == "record")
+    {
+        auto info = player.record (request.getProperty ("at", juce::var()));
+        if (info.getProperty ("error", juce::var()).isString())
+            return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
+        if (auto* o = info.getDynamicObject())
+            for (auto& prop : o->getProperties())
+                ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "recordings")
+    {
+        ok->setProperty ("recordings", player.recordings());
+    }
+    else if (op == "recover")
+    {
+        // `transaction`, not `id`: the request's id is the request's.
+        auto info = player.recover (request.getProperty ("transaction", juce::var()).toString());
+        if (info.getProperty ("error", juce::var()).isString())
+            return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
+        ok->setProperty ("take", info);
     }
     else if (op == "locate")
     {
@@ -302,7 +363,7 @@ juce::String Server::dispatch (const juce::var& request)
     }
     else if (op == "status")
     {
-        auto s = player.status();
+        auto s = player.status (true); // a client read consumes the meter
         if (auto* o = s.getDynamicObject())
             for (auto& prop : o->getProperties())
                 ok->setProperty (prop.name, prop.value);

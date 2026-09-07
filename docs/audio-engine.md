@@ -1,18 +1,18 @@
 # Audio engine
 
-`field-audiod` exists today as the playback daemon: device I/O, a
-sample-accurate transport, and audition of built labels, described in
-[architecture.md](architecture.md). The rest of the real-time engine —
-recording, monitoring, plugin hosting — is future work, deferred because
-the generation-first milestones need none of it. The live engine —
-the graph evaluated in the callback, with the build cache as automatic
-track freezing — is planned in
-[projects/realtime/readme.md](projects/realtime/readme.md); recording waits
-behind it in
-[projects/recording/readme.md](projects/recording/readme.md). This document records
-the decisions already settled so the phases that build it start from
-agreement, not from scratch. Language and framework decisions (C++/JUCE,
-and the alternatives rejected) also live in
+`field-audiod` exists today as the daemon that plays and captures:
+device I/O, a sample-accurate transport, audition of built labels, live
+evaluation of the session graph with the build cache as automatic track
+freezing ([projects/realtime/readme.md](projects/realtime/readme.md)),
+hosted plugins, and the input side of recording — arm, record, stop, a
+crash-safe transaction and its recovery — described in
+[architecture.md](architecture.md) and under
+[Capture as built](#capture-as-built) below. Landing a take in the
+project and monitoring through the engine are what remains of
+[projects/recording/readme.md](projects/recording/readme.md). This
+document records the decisions already settled so the phases that build
+it start from agreement, not from scratch. Language and framework
+decisions (C++/JUCE, and the alternatives rejected) also live in
 [architecture.md](architecture.md).
 
 ## Responsibilities
@@ -82,3 +82,55 @@ recoverable chunks. A normal stop finalizes the asset and writes a take
 manifest (timeline placement, device, latency, monitoring context,
 session metadata); after a crash, Field recovers any valid audio from
 the transaction.
+
+## Capture as built
+
+The daemon opens its device output-only until something arms
+([recording.md](projects/recording/readme.md) §5), so a playback-only
+session never asks for the microphone. `arm` names a track, an input
+device, and a channel counted from 1; the daemon reopens the device
+with that one input channel active and reports the input and output
+latency the device declares, in samples. `record` starts a take: it
+locates the bed to `at` when you give one, starts the transport if it
+is stopped, and captures from the next callback block. The callback
+latches that block's transport position as `started_at_samples`, so the
+first captured sample and the position it is placed at describe the
+same instant. `stop` and `pause` finalize the take and return its
+manifest; a `take` event carries the same manifest to every connected
+client, which is how a `field record` blocking in one terminal learns
+that `field transport stop` in another ended its take.
+
+A transaction is one directory, `.field/recording/take-YYYYMMDD-HHMMSS/`:
+
+- `take.wav` — float32 mono at the device's rate, appended block by
+  block. The header's sizes read zero until finalize patches them,
+  which is what marks a transaction incomplete on disk.
+- `journal.json` — the frames `fsync` has reached the disk with,
+  rewritten once a second, and the frames the FIFO refused.
+- `manifest.json` — track, device, input, the take's rate and the bed's,
+  both latencies, `started_at_samples`, and `complete: true` with
+  `frames` once finalized.
+
+The audio callback copies the armed channel into a lock-free FIFO and
+does no I/O. A writer thread drains the FIFO to the file every 20 ms. If
+the writer falls more than the FIFO holds behind — about twenty seconds
+at 48 kHz — the frames that did not fit are counted in `dropped` rather
+than blocking the callback, and the manifest carries the count.
+
+To recover a take a dead daemon left behind:
+
+1. Start the daemon. Any `field record` or `field play` does; it lists
+   incomplete transactions in `.field/audiod.log`.
+2. Run `field record --list` to see every transaction with the frames
+   on disk.
+3. Run `field record --recover <id>`. The daemon patches the header from
+   the file size and marks the manifest `recovered`.
+
+An armed or recording daemon never idle-exits. While a take runs, the
+daemon refuses `locate`, `load`, `device.select`, a second `arm`, and
+`disarm`, and it defers default-output following and sample-rate
+switching until the take ends, because each would restart the device
+and gap the capture. A session swap is allowed: it carries the
+transport. Landing a finalized take in the project — `audio/<name>/`,
+the ledger row, `takes.yaml` — is recording.md chunk 2, so today a take
+ends as a path under `.field/recording/`.
