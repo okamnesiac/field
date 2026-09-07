@@ -131,6 +131,20 @@ daemon refuses `locate`, `load`, `device.select`, a second `arm`, and
 `disarm`, and it defers default-output following and sample-rate
 switching until the take ends, because each would restart the device
 and gap the capture. A session swap is allowed: it carries the
-transport. Landing a finalized take in the project — `audio/<name>/`,
-the ledger row, `takes.yaml` — is recording.md chunk 2, so today a take
-ends as a path under `.field/recording/`.
+transport.
+
+## Landing a take
+
+When a take finalizes, `field record` lands it
+([project-model.md](project-model.md) "Recorded takes"): the bytes move
+to `audio/<node>/<take>.wav` and pin in the song's ledger, a row goes
+into `audio/<node>/takes.yaml` placing the take on the recording
+track's timeline, the new take is chosen, and the transaction directory
+is removed. The daemon reported the start on the bed's timeline; landing
+subtracts the track's origin on that timeline — the `at`s down its first
+placement path from the output track — and then the record entry's own
+window start, so the row counts from the entry's `at` the way the graph
+reads it back; the device's declared round trip, input plus output
+latency, is recorded beside it, and both are converted into the track's
+rate. `field record --recover <id>` lands what it recovers, and
+`field record --land <id>` lands a finalized transaction nothing landed.

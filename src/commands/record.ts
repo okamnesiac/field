@@ -5,6 +5,7 @@ import { expandPattern } from '../graph/graph.js';
 import { formatLabel, parsePattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
+import { landTake, readTransaction, recordNodeFor, type LandedTake, type LandOptions } from './land.js';
 import {
   formatPosition,
   musicalContext,
@@ -15,19 +16,18 @@ import {
   type MusicalContext,
 } from './transport.js';
 
-// `field record` (recording.md §6, chunk 1): arm an input on the daemon
-// that plays, take against whatever it is playing, and block until
-// ctrl-c — which stops and finalizes, matching `field play`'s muscle
-// memory — or until the take ends from elsewhere (`field transport
-// stop`, the bed running out). The daemon writes the take into
-// `.field/recording/<id>/`; landing it in the project — `audio/<name>/`,
-// the ledger row, `takes.yaml` — is chunk 2, so this command ends by
-// saying where the bytes are.
+// `field record` (recording.md §6): arm an input on the daemon that
+// plays, take against whatever it is playing, and block until ctrl-c —
+// which stops and finalizes, matching `field play`'s muscle memory — or
+// until the take ends from elsewhere (`field transport stop`, the bed
+// running out). The daemon writes the take into `.field/recording/<id>/`
+// and this command lands it (land.ts): bytes into `audio/<node>/`, the
+// ledger row, the `takes.yaml` row, chosen.
 //
 // Musical time stays CLI-side (playback.md §3.6): `--at` projects
 // through the bed's tempo map here and the daemon receives a sample.
 
-export interface RecordOptions {
+export interface RecordOptions extends LandOptions {
   input?: number | undefined; // 1-based channel on the input device
   device?: string | undefined; // the input device; default: the system's
   at?: string | undefined; // bar[.beat[.tick]] on the loaded song
@@ -55,8 +55,9 @@ export interface RecordTarget {
 
 // The record target is a track, named the way every label is named.
 // Resolved through the graph so a typo is an error here rather than a
-// manifest naming a track that does not exist; chunk 2 adds the
-// requirement that the track carry a `record:` entry.
+// manifest naming a track that does not exist. Whether the track can
+// take a recording — it carries a `record:` entry — is recordNodeFor's
+// question, asked before the daemon is touched.
 export function resolveRecordTarget(root: string, target: string): RecordTarget {
   const pattern = parsePattern(target);
   if (pattern.kind !== 'label') {
@@ -100,8 +101,25 @@ export async function recordTake(
   target: string,
   options: RecordOptions = {},
   hooks: RecordHooks = {},
-): Promise<Take> {
+): Promise<{ take: Take; landed: LandedTake }> {
   const resolved = resolveRecordTarget(root, target);
+  // Before arming: a track with nowhere to attach a take is an error to
+  // give before the performance, not after it (recording.md §4).
+  recordNodeFor(project, resolved.label);
+  const take = await captureTake(root, project, resolved, options, hooks);
+  const landed = await landTake(root, take, options);
+  return { take, landed };
+}
+
+// The daemon half: arm, take, finalize. Returns the finalized
+// transaction's manifest; landing is the caller's next step.
+async function captureTake(
+  root: string,
+  project: LoadedProject,
+  resolved: RecordTarget,
+  options: RecordOptions,
+  hooks: RecordHooks,
+): Promise<Take> {
   const client = await AudiodClient.connect(root);
   try {
     if (!client.supports('record')) {
@@ -228,17 +246,36 @@ export async function listRecordings(root: string): Promise<RecordingEntry[]> {
   }
 }
 
-// `field record --recover <id>`: patch the header a crash left unpatched.
-export async function recoverRecording(root: string, id: string): Promise<Take> {
+// `field record --recover <id>`: patch the header a crash left unpatched,
+// then land the take like any other.
+export async function recoverRecording(
+  root: string,
+  id: string,
+  options: LandOptions = {},
+): Promise<{ take: Take; landed: LandedTake }> {
   const client = await AudiodClient.connect(root);
+  let take: Take;
   try {
     if (!client.supports('record')) {
       throw new Error(`field-audiod ${client.daemonVersion} predates recording — field transport quit, then try again`);
     }
-    return (await client.recover(id)).take;
+    take = (await client.recover(id)).take;
   } finally {
     client.close();
   }
+  return { take, landed: await landTake(root, take, options) };
+}
+
+// `field record --land <id>`: a transaction the daemon finalized but
+// nothing landed — the CLI died between the two, or the take was made
+// before its track carried a `record:` entry.
+export async function landRecording(
+  root: string,
+  id: string,
+  options: LandOptions = {},
+): Promise<{ take: Take; landed: LandedTake }> {
+  const take = readTransaction(root, id);
+  return { take, landed: await landTake(root, take, options) };
 }
 
 // One line per transaction for --list and for the report after a take.
