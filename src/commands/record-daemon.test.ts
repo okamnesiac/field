@@ -127,10 +127,16 @@ describe.skipIf(!binary)('recording through the daemon', () => {
 
         // Beat 2 (sample 24000): record locates there, starts the
         // transport, and latches the position of the first captured
-        // block — that block or the one after, never earlier.
+        // block. Never earlier — that is the correctness claim. The
+        // ceiling is a sanity bound, not a latency guarantee: how soon
+        // the callback runs after the request is the scheduler's, and a
+        // loaded runner has landed the latch three blocks late (minjudd's
+        // finding on #166), so eight blocks catches a daemon latching
+        // wildly late without asserting promptness this code cannot
+        // promise.
         const started = await client.record(24000);
         expect(started.started_at_samples).toBeGreaterThanOrEqual(24000);
-        expect(started.started_at_samples).toBeLessThan(24000 + 2 * 512);
+        expect(started.started_at_samples).toBeLessThan(24000 + 8 * 512);
         expect(started.transaction).toMatch(/^take-\d{8}-\d{6}(-\d+)?$/);
         expect((await client.status()).state).toBe('playing');
 
