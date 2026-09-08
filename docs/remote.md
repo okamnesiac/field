@@ -83,7 +83,13 @@ words `build` uses, rather than warmed.
 installed, because a clone without it lands pointer files where audio
 should be and the first `field check` then reports every ledger row as
 corrupt. `field init` only warns about a missing `git-lfs`, since a new
-project has no audio yet.
+project has no audio yet. The clone carries the LFS filters itself and
+runs `git lfs install --local` in the new checkout, so audio arrives as
+audio and a later push uploads it, whether or not LFS was ever installed
+globally on the machine.
+
+When the remote cannot be reached during the warm, each song reports
+`not warmed` with the reason rather than claiming nothing was cached.
 
 A full clone URL works where a short name is expected, so a project
 hosted anywhere Git reaches can still be cloned; only the expansion and
@@ -153,7 +159,8 @@ the project. No second file records the same fact.
   `origin`'s path, so a checkout cloned from a bare repository at
   `/remotes/howlo/chemicals.git` talks to the stub about
   `howlo/chemicals`.
-- `FIELD_REMOTE=off` disables reads for a shell.
+- `FIELD_REMOTE=off` disables reads for a shell, including the read
+  that expands a short name, so `field clone` under it takes a URL.
 - `--no-remote` skips the lookup for one `build` or `explain`.
 
 A project whose `origin` is not an audiofield git host, and has no

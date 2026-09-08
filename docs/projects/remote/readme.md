@@ -390,6 +390,15 @@ decision 13.
    `init` warns and continues today because a new project has no
    audio yet and may never commit any (bloom-in-tree.md §2 decision
    3), and that stays. Open in §9.5.
+   *Amended (2026-09-08, audiofield's read of #171):* the binary being
+   on the path is not the filter being installed — `git lfs version`
+   answers on a machine where `git lfs install` was never run, and the
+   checkout then lands pointer files anyway. So the clone carries the
+   four `filter.lfs.*` settings as `clone -c` config, which applies to
+   the initial checkout, and runs `git lfs install --local` in the new
+   repository afterwards for the hooks a push needs. The refusal stays
+   for the binary; the filters no longer depend on anyone's global
+   config.
 
 7. **`license` is validated for shape, not against a list.** Field
    accepts any SPDX-shaped identifier and the site decides which are
@@ -766,3 +775,13 @@ watch and misses it.
   Until the API exists, `field clone` with the full git URL clones and
   then reports that `https://audiofield.io` is not an audiofield remote
   and warms nothing, which is the protocol check doing its job.
+- 2026-09-08 — audiofield's read of #171 at 8ddd321 against the live
+  host found the git side matching and five things to fix, landed as
+  three commits by cause: the credential helper handing `FIELD_TOKEN`
+  to any `git.*` host, the helper list not reset ahead of osxkeychain,
+  and the persisted proactive auth (decision 13, amended twice); no
+  request timeout, redirects followed, and a 400's message hidden
+  (client); and the warm claiming "nothing cached" after the remote
+  failed, the LFS check testing the binary rather than the filter
+  (decision 6, amended), a short name expanded under `FIELD_REMOTE=off`,
+  and the destination check after the network call (clone).

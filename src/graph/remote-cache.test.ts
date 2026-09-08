@@ -119,7 +119,10 @@ const wipeCache = () => rmSync(join(root, '.field'), { recursive: true, force: t
 
 function reads(url: string, notices: string[], token?: string) {
   const client = new RemoteClient(url, { token });
-  return new RemoteReads(projectCache(client, { api: url, owner: 'howlo', project: 'chemicals' }), (l) => notices.push(l));
+  return new RemoteReads(projectCache(client, { api: url, owner: 'howlo', project: 'chemicals' }), {
+    notice: (l) => notices.push(l),
+    fallback: 'building locally',
+  });
 }
 
 describe('the read-through cache', () => {

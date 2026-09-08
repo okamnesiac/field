@@ -25,16 +25,36 @@ export function projectCache(client: RemoteClient, remote: ProjectRemote): Remot
 // slow network is visible without being fatal (remote.md §3.4). After
 // that line the remote is not asked again this build: every later miss
 // would print the same thing and wait for the same timeout.
+export interface RemoteReadsOptions {
+  notice?: ((line: string) => void) | undefined;
+  // What the caller does after the remote fails — "building locally" for
+  // a build. With one, a disabling failure prints once with that suffix;
+  // without one, it does not print at all and the caller reads `failure`
+  // and reports in its own words, which is what the warm does: it
+  // builds nothing, so "building locally" would have been false there
+  // and "nothing cached on the remote yet" after it falser still
+  // (audiofield on #171).
+  fallback?: string | undefined;
+}
+
 export class RemoteReads {
   private disabled = false;
   private readonly noticed = new Set<string>();
+  private readonly notice: (line: string) => void;
+  private readonly fallback: string | undefined;
   fetched = 0; // entries this session brought in, for the reports
   fetchedBytes = 0;
+  // Why the remote stopped being asked, once it has: the message of the
+  // unreachable, refused or protocol error, for a caller to report.
+  failure: string | undefined;
 
   constructor(
     private readonly cache: RemoteCache,
-    private readonly notice: (line: string) => void = (line) => process.stderr.write(`remote: ${line}\n`),
-  ) {}
+    options: RemoteReadsOptions = {},
+  ) {
+    this.notice = options.notice ?? ((line) => process.stderr.write(`remote: ${line}\n`));
+    this.fallback = options.fallback;
+  }
 
   async lookup(actionKey: string): Promise<RemoteArtifactEntry | undefined> {
     if (this.disabled) return undefined;
@@ -73,17 +93,14 @@ export class RemoteReads {
   }
 
   private fail(err: unknown): void {
-    if (err instanceof RemoteError) {
-      if (err.kind === 'unreachable' || err.kind === 'refused' || err.kind === 'protocol') {
-        this.disabled = true;
-        this.say(err.kind, `${err.message}; building locally`);
-        return;
-      }
+    if (err instanceof RemoteError && err.kind === 'http') {
       this.say(`http:${err.status ?? ''}`, err.message);
       return;
     }
+    const kind = err instanceof RemoteError ? err.kind : 'unknown';
     this.disabled = true;
-    this.say('unknown', `${(err as Error).message}; building locally`);
+    this.failure = (err as Error).message;
+    if (this.fallback !== undefined) this.say(kind, `${this.failure}; ${this.fallback}`);
   }
 
   private say(key: string, line: string): void {

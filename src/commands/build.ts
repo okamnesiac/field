@@ -38,7 +38,7 @@ export function remoteReads(root: string, options: RemoteOptions = {}): RemoteRe
   const { remote } = resolution;
   const token = resolveToken(remote.api, options.store ?? defaultCredentialStore(), env)?.token;
   const client = new RemoteClient(remote.api, { token });
-  return new RemoteReads(projectCache(client, remote), options.notice);
+  return new RemoteReads(projectCache(client, remote), { notice: options.notice, fallback: 'building locally' });
 }
 
 // Output paths print relative to the project root. Every path a build

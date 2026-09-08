@@ -70,17 +70,38 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
       token: resolveToken(api, store, env)?.token,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     });
+  const override = env['FIELD_REMOTE'];
+  const off = override === 'off';
+  const overrideApi = override !== undefined && override !== '' && !off ? override.replace(/\/+$/, '') : undefined;
+
+  // What the target is, and where the clone lands, before any request:
+  // a destination that already exists is a refusal that should not cost
+  // a round trip (audiofield on #171).
+  const short = SHORT_NAME.exec(options.target);
+  const isShort = short !== null && !options.target.includes(':');
+  const defaultName = isShort
+    ? short![2]!
+    : basename(options.target.replace(/\/+$/, '')).replace(/\.git$/, '');
+  const dirName = options.dir ?? defaultName;
+  const dir = resolve(options.cwd, dirName);
+  if (existsSync(dir)) throw new Error(`destination ${dirName} already exists`);
 
   let cloneUrl: string;
   let remote: ProjectRemote | undefined;
-  const short = SHORT_NAME.exec(options.target);
-  if (short && !options.target.includes(':')) {
+  if (isShort) {
     const [, owner, project] = short as unknown as [string, string, string];
     if (!remoteName.safeParse(owner).success || !remoteName.safeParse(project).success) {
       throw new Error(`"${options.target}" is not an <owner>/<project> name (lowercase slugs) or a clone URL`);
     }
-    const override = env['FIELD_REMOTE'];
-    const api = override !== undefined && override !== '' && override !== 'off' ? override.replace(/\/+$/, '') : DEFAULT_REMOTE;
+    // Expanding a short name is a read of the remote, and `off` means no
+    // reads — including this one, rather than one against the default
+    // site (audiofield on #171). The URL form still works.
+    if (off) {
+      throw new Error(
+        `FIELD_REMOTE=off disables the remote, so ${options.target} cannot be expanded — clone by URL instead`,
+      );
+    }
+    const api = overrideApi ?? DEFAULT_REMOTE;
     const info = await clientFor(api).resolveProject(owner, project);
     if (info === undefined) {
       // A private project the token cannot see answers the same 404 as
@@ -95,15 +116,9 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
     // short form and the warm depend on the remote's API.
     cloneUrl = options.target;
     const parsed = parseCloneUrl(cloneUrl);
-    const override = env['FIELD_REMOTE'];
-    const api =
-      override !== undefined && override !== '' && override !== 'off' ? override.replace(/\/+$/, '') : parsed.api;
+    const api = off ? undefined : (overrideApi ?? parsed.api);
     remote = api !== undefined && parsed.slug !== undefined ? { api, ...parsed.slug } : undefined;
   }
-
-  const dirName = options.dir ?? basename(cloneUrl.replace(/\/+$/, '')).replace(/\.git$/, '');
-  const dir = resolve(options.cwd, dirName);
-  if (existsSync(dir)) throw new Error(`destination ${dirName} already exists`);
 
   options.out(`cloning ${cloneUrl} into ${dirName}`);
   // `-c` sets the variable in the new repository's config before the
@@ -119,15 +134,36 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
   // anonymous clone would prompt (probed against git.audiofield.io,
   // 2026-09-08) and so would any checkout after `field logout`. The
   // verbs that hold a token, push and pull, pass it per invocation.
-  const config = remote !== undefined && /^https?:\/\//.test(cloneUrl) ? gitConfigForRemote(cloneUrl) : [];
+  // The LFS filters ride every clone as `-c` too, so the checkout
+  // smudges whether or not `git lfs install` was ever run on this
+  // machine — the binary being present is not the filter being
+  // installed, and decision 6 exists to keep pointer files out of
+  // `audio/` (audiofield on #171). `git lfs install --local` afterwards
+  // writes the same filters into the clone's config for good and adds
+  // the hooks a later push needs to upload LFS objects.
+  const config = [
+    ...LFS_FILTER_CONFIG,
+    ...(remote !== undefined && /^https?:\/\//.test(cloneUrl) ? gitConfigForRemote(cloneUrl) : []),
+  ];
   git(['clone', ...config.flatMap(([k, v]) => ['-c', `${k}=${v}`]), cloneUrl, dir], {
     cwd: options.cwd,
     interactive: options.interactive ?? true,
   });
+  git(['lfs', 'install', '--local'], { cwd: dir });
 
   const warmed = remote === undefined ? [] : await warmCache(dir, remote, clientFor(remote.api), options.out);
   return { dir, cloneUrl, remote, warmed };
 }
+
+// What `git lfs install --local` writes, as `clone -c` pairs so they
+// apply to the initial checkout, which happens before anything can be
+// run inside the new repository.
+export const LFS_FILTER_CONFIG: [string, string][] = [
+  ['filter.lfs.clean', 'git-lfs clean -- %f'],
+  ['filter.lfs.smudge', 'git-lfs smudge -- %f'],
+  ['filter.lfs.process', 'git-lfs filter-process'],
+  ['filter.lfs.required', 'true'],
+];
 
 // The config a clone from an audiofield git host carries, as pairs, so a
 // test can assert on the list without cloning over HTTP. The empty value
@@ -160,7 +196,9 @@ export async function warmCache(
     return [];
   }
   const graph = buildGraph(project);
-  const reads = new RemoteReads(projectCache(client, remote), (line) => out(`remote: ${line}`));
+  // No fallback: the warm builds nothing, so a failed remote is reported
+  // per song below in the warm's own words, never as "building locally".
+  const reads = new RemoteReads(projectCache(client, remote), { notice: (line) => out(`remote: ${line}`) });
   const reports: WarmReport[] = [];
   for (const song of project.songs) {
     const before = { fetched: reads.fetched, bytes: reads.fetchedBytes };
@@ -175,6 +213,8 @@ export async function warmCache(
       // `build` would give, said now.
       report.note = firstLine((err as Error).message);
     }
+    // A remote that stopped answering is not "nothing cached": say why.
+    if (report.note === undefined && reads.failure !== undefined) report.note = reads.failure;
     report.fetched = reads.fetched - before.fetched;
     report.bytes = reads.fetchedBytes - before.bytes;
     reports.push(report);

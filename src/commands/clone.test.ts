@@ -176,14 +176,53 @@ describe('field clone', () => {
     expect(result.warmed.find((w) => w.song === 'tall-grass')?.note).toContain('has no takes yet');
     expect(out).toContain('tall-grass: not warmed — //songs/tall-grass/gen:topline has no takes yet');
 
-    // Committed audio came through LFS, when LFS is here to bring it.
+    // Committed audio came through LFS: the clone carries the filters
+    // itself, so this holds wherever the binary exists, whether or not
+    // `git lfs install` was ever run globally (audiofield on #171), and
+    // the hooks a later push needs are in place.
+    expect(git(['config', '--get', 'filter.lfs.smudge'], { cwd: dir })).toBe('git-lfs smudge -- %f');
+    expect(git(['config', '--get', 'filter.lfs.required'], { cwd: dir })).toBe('true');
     const audio = join(dir, 'songs/creek/audio/pad/pad.wav');
-    if (gitLfsAvailable() && tryGit(['config', '--get', 'filter.lfs.smudge'], dir) !== undefined) {
+    if (gitLfsAvailable()) {
       expect(statSync(audio).size).toBe(statSync(join(source, 'songs/creek/audio/pad/pad.wav')).size);
       expect(git(['lfs', 'ls-files'], { cwd: dir })).toContain('pad.wav');
+      expect(existsSync(join(dir, '.git', 'hooks', 'pre-push'))).toBe(true);
     } else {
-      process.stderr.write('clone.test: git-lfs filters not configured here; skipping the LFS assertion\n');
+      process.stderr.write('clone.test: git-lfs is not installed here; skipping the LFS transfer assertion\n');
     }
+  });
+
+  it('says why a song was not warmed when the remote fails, never "nothing cached"', async () => {
+    // The first lookup against a site with no API disables the remote;
+    // every song then reports that reason (audiofield on #171: the old
+    // report said "building locally" — nothing is built — and then
+    // "nothing cached on the remote yet", which was false).
+    const dead = await fakeRemote({ noHello: true });
+    try {
+      const { opts, out } = options({ target: `file://${bare}`, env: { FIELD_REMOTE: dead.url } });
+      const result = await clone(opts);
+      const creek = result.warmed.find((w) => w.song === 'creek')!;
+      expect(creek.note).toContain('not an audiofield remote');
+      expect(creek.fetched).toBe(0);
+      // The recipe-only song never reached the remote; its reason is
+      // still its own.
+      expect(result.warmed.find((w) => w.song === 'tall-grass')?.note).toContain('has no takes yet');
+      expect(out.join('\n')).toContain('creek: not warmed — ');
+      expect(out.join('\n')).not.toContain('nothing cached');
+      expect(out.join('\n')).not.toContain('building locally');
+    } finally {
+      await dead.close();
+    }
+  });
+
+  it('refuses to expand a short name under FIELD_REMOTE=off, and clones a URL without a remote', async () => {
+    const { opts } = options({ env: { FIELD_REMOTE: 'off' } });
+    await expect(clone(opts)).rejects.toThrow(/FIELD_REMOTE=off.*clone by URL/);
+    expect(remote.requests).toEqual([]);
+    const byUrl = options({ target: `file://${bare}`, env: { FIELD_REMOTE: 'off' } });
+    const result = await clone(byUrl.opts);
+    expect(result.remote).toBeUndefined();
+    expect(result.warmed).toEqual([]);
   });
 
   it('names both readings of a 404: no such project, or private and not logged in', async () => {
@@ -215,10 +254,11 @@ describe('field clone', () => {
     expect(again.warmed.find((w) => w.song === 'creek')?.fetched).toBe(2);
   });
 
-  it('refuses to clone over an existing directory', async () => {
+  it('refuses to clone over an existing directory, before any request', async () => {
     mkdirSync(join(work, 'chemicals'));
     const { opts } = options();
     await expect(clone(opts)).rejects.toThrow('already exists');
+    expect(remote.requests).toEqual([]);
   });
 
   it('configures only the credential helper for an audiofield git host, ahead of a reset list', () => {
