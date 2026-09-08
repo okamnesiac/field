@@ -325,7 +325,10 @@ stands as drafted, waiting at `priority: later`.
    past its content. `--from --loop` — the region loop — is refused on
    the live path and pointed at the artifact spelling until the engine
    grows a loop-start; that wiring is owed alongside the streaming
-   rings. The background freeze rides the watch's abort signal down
+   rings (*delivered 2026-09-08 by
+   [recording.md](../recording/readme.md) §15: the session wraps
+   between arbitrary bounds, and `field play <song> --from --loop`
+   rides it*). The background freeze rides the watch's abort signal down
    into the render subprocess, so ctrl-c ends a mid-freeze build at
    once instead of when the stem finishes, and build temporary paths
    are process-unique because the freeze legitimately put two builds

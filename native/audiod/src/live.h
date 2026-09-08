@@ -51,7 +51,23 @@ public:
 
     int sessionRate() const { return rate; }
     juce::int64 lengthSamples() const { return length; } // 0 = unbounded
-    bool looping() const { return loop; }
+    bool looping() const { return loop || loopTo > loopFrom; }
+
+    // A region loop (recording.md §10.4, the loop-start realtime.md
+    // chunk 4 owed): the clock wraps from `to` back to `from` instead of
+    // from the declared length back to zero, chains ringing across the
+    // wrap exactly as they do at the extent. `to` must lie within the
+    // session's content; equal bounds clear the region. Throws on a
+    // region the session does not contain.
+    void setLoopRegion (juce::int64 from, juce::int64 to);
+    juce::int64 loopRegionFrom() const { return loopFrom; }
+    juce::int64 loopRegionTo() const { return loopTo; }
+    // Where the ear is on the timeline: the delivered position, wrapped
+    // into whichever loop is in force.
+    juce::int64 wrappedPosition() const { return wrap (delivered); }
+    // The content's extent: the declared length, else the output's
+    // natural length.
+    juce::int64 extentSamples() const;
 
     // Fill `n` frames of the output track at the session clock, advancing
     // it; wraps at the declared length when looping (the fold included).
@@ -185,6 +201,9 @@ private:
     int rate = 0;
     juce::int64 length = 0;
     bool loop = false;
+    juce::int64 loopFrom = 0; // region loop bounds; loopTo <= loopFrom means none
+    juce::int64 loopTo = 0;
+    juce::int64 wrap (juce::int64 unwrapped) const;
     int outputTrack = 0;
     juce::int64 clock = 0; // input timeline consumed
     juce::int64 delivered = 0; // output delivered (lags clock by chain latency)

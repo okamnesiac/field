@@ -3,14 +3,16 @@ status: in-progress
 priority: now
 ---
 
-**Outcome:** Chunks 1–3 shipped (2026-09-06 to 2026-09-07): the
-daemon's input side; a `field record` whose take lands in the project —
-`audio/<node>/`, the ledger row, `takes.yaml`, chosen — and builds in
-place; and the metronome in the engine with a count-in that begins the
-take on the exact sample. Chunk 4 remains, and the latency arithmetic
-§12.3 recorded is still owed its loopback measurement. Closes when a
-take recorded against creek on the Apollo plays back in place,
-compensated, from `field build && field play`.
+**Outcome:** Chunks 1–3 and the punch-and-loop half of chunk 4 shipped
+(2026-09-06 to 2026-09-08): the daemon's input side; a `field record`
+whose take lands in the project — `audio/<node>/`, the ledger row,
+`takes.yaml`, chosen — and builds in place; the metronome in the engine
+with a count-in that begins the take on the exact sample; punch-out;
+and loop takes over the live session's region loop. Comping remains,
+to be planned once real takes have accumulated, and the latency
+arithmetic §12.3 recorded is still owed its loopback measurement.
+Closes when a take recorded against creek on the Apollo plays back in
+place, compensated, from `field build && field play`.
 
 # Plan: Recording
 
@@ -286,7 +288,8 @@ compensated, so what comes back sits where it was sung.
    cycles landing one take each. Comping — one active take assembled
    from several — is part of the recording work
    (project-model.md "Takes") but big enough to plan when we reach it,
-   informed by how takes actually accumulate.
+   informed by how takes actually accumulate. *Punch and loop takes
+   shipped 2026-09-08 (§15); comping is still to plan.*
 
 ## 11 Open questions
 
@@ -535,3 +538,64 @@ What landed, and the decisions it made:
    for a golden.
 8. **The daemon is 0.13.0** with features `click` and `record-start`;
    the client gates on both names.
+
+## 15 Chunk 4, punch and loop takes, as built (2026-09-08)
+
+What landed, and the decisions it made:
+
+1. **An `at` is exact in both directions.** Chunk 3 made a pre-rolled
+   take begin on `at` to the sample; now every `at` does. The capture
+   request is armed before the transport starts, so the first rolling
+   block is the one that latches — and a bed that is not rolling
+   reports no position at all (`pullAudio` returns −1), so nothing
+   latches or ticks against a stopped transport. A take asked for on a
+   bed already rolling toward `at` waits for it: the punch-in. The
+   chunk-1 shape, "that block or the one after", survives only for a
+   take with no `at`.
+2. **Punch-out is `until` on `record`.** The callback ends the take on
+   that sample mid-block and raises `captureDone`; the heartbeat
+   finalizes on the message thread (`serviceCapture`), fires the `take`
+   event, and the transport keeps rolling. `field record --until` then
+   stops the transport itself, because ctrl-c's muscle memory says a
+   finished take stops the mix, and a `--until` is ctrl-c decided in
+   advance.
+3. **The region loop is the session's** (`LiveSession::setLoopRegion`):
+   `[from, to)` on the session timeline, the wrap mixing in wrapped time
+   with chains ringing across it exactly as the declared-extent wrap
+   does — the same code path generalized, so a region loop is also "the
+   fold as a performance". `to` must lie within the content; open-ended
+   `to` means the extent. Set with the `loop` op, cleared by an empty
+   one, a `load`, or a fresh `session`; `status` carries the bounds and
+   `looping` now means either loop. This is the loop-start realtime.md
+   chunk 4's amendment owed; `field play <song> --from --loop` rides it
+   and the artifact spelling is no longer the answer. A file bed still
+   loops only whole: the reader wraps at end-of-file and nowhere else.
+4. **A loop take is the region loop plus a standby transaction.** With
+   `loop`, `record` sets the session's region to `[at, until)` and opens
+   the next pass's transaction ahead of the wrap; at `until` the
+   callback pushes the block's remaining frames — which the wrap put at
+   `at` — into the standby and raises the done flag, so consecutive
+   takes meet on consecutive input samples (the suite proves it on the
+   sawtooth). The heartbeat finalizes the finished pass and opens the
+   next standby. A pass that begins with none ready — a region shorter
+   than a heartbeat tick, in practice — is counted in `record.missed`
+   and skipped rather than half-recorded. Stop finalizes the partial
+   pass as a take, discards the unused standby (its directory goes;
+   `recordings` never lists it), and clears the region.
+5. **`field record --loop` lands takes as they arrive**, each `take`
+   event landing in order while the next pass records, the last one
+   chosen, and the partial pass ctrl-c ends landing last. `--loop` needs
+   `--until`, `--until` needs `--at`, and loop takes need a live song as
+   the bed. The take line prints per pass; the tally prints at the end.
+6. **A file bed's position leads its output by the resampler's
+   prefetch** — `AudioTransportSource` through its `ResamplingAudioSource`
+   reads a few samples ahead on the first block, so `positionSamples()`
+   runs about three samples early thereafter, and a punch-out against a
+   file bed ends that many frames short. Recorded here as a known limit
+   of the artifact path rather than fixed: every record flow's bed is
+   the song's session, whose positions are exact, and the artifact path
+   is the audition path. The exact fix is counting frames delivered
+   since the last locate rather than asking the transport.
+7. **What remains of chunk 4 is comping**, still to be planned from real
+   takes, and the `record-until`/`loop-region` names are the features
+   the client gates on. Daemon 0.14.0.

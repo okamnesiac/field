@@ -66,6 +66,13 @@ export const recordStatusSchema = z.object({
   file: z.string().optional(), // project-root-relative take.wav
   started_at_samples: z.number().int().optional(), // -1 until the callback latches
   pending: z.boolean().optional(), // a pre-rolled take waiting for its position (daemon >= 0.13)
+  // Punch-out and loop takes (daemon >= 0.14): where the take ends,
+  // whether every pass is a take, how many have finalized, and how many
+  // passes began with no transaction ready.
+  until: z.number().int().optional(),
+  loop: z.boolean().optional(),
+  loop_takes: z.number().int().optional(),
+  missed: z.number().int().optional(),
   frames: z.number().int().optional(), // pushed by the callback
   written: z.number().int().optional(), // reached the file
   dropped: z.number().int().optional(), // the FIFO refused (a stalled writer)
@@ -192,6 +199,9 @@ export const statusResponseSchema = z.object({
   conv_queued: z.number().int().optional(),
   record: recordStatusSchema.optional(), // daemon feature "record"
   click_ticks: z.number().int().optional(), // ticks in the loaded schedule (daemon feature "click")
+  // The live session's region loop, when one is set (daemon feature "loop-region").
+  loop_from: z.number().int().optional(),
+  loop_to: z.number().int().optional(),
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });

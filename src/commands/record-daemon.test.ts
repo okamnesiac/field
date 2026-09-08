@@ -371,7 +371,7 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     const lines: string[] = [];
     const positions: string[] = [];
     let interrupted = false;
-    const { take, landed } = await recordTake(
+    const { takes } = await recordTake(
       root,
       project,
       'creek/track:lead-vocal',
@@ -391,6 +391,8 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     expect(lines[1]).toMatch(/^armed {3}null input 1 {2}\(48000 Hz, latency in 0 \/ out 0 samples\)$/);
     expect(lines[2]).toMatch(/^recording take-\S+ from 1\.2\.1 \(0:00\.5\)$/);
     expect(positions[0]).toMatch(/^\d+\.\d+\.\d+ \(\d+:\d\d\.\d\)  ▮.* dBFS \d+\.\ds$/);
+    expect(takes).toHaveLength(1);
+    const { take, landed } = takes[0]!;
     expect(take.complete).toBe(true);
     expect(take.track).toBe('//songs/creek/track:lead-vocal');
     expect(take.song).toBe('creek');
@@ -475,7 +477,8 @@ describe.skipIf(!binary)('recording through the daemon', () => {
       /^recording: take-\S+ \(\d+ frames\) on null input 1 → \/\/songs\/creek\/track:main$/,
     );
     await transportCommand(root, 'stop');
-    const { take, landed } = await recording; // the take event reached the blocking side
+    const { takes } = await recording; // the take event reached the blocking side
+    const { take, landed } = takes[0]!;
     expect(take.complete).toBe(true);
     expect(take.frames).toBeGreaterThan(0);
     expect(landed.node).toBe('main');

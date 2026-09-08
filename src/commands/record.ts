@@ -33,6 +33,8 @@ export interface RecordOptions extends LandOptions {
   at?: string | undefined; // bar[.beat[.tick]] on the loaded song
   click?: boolean | undefined; // the metronome through the take (recording.md §7)
   countIn?: number | undefined; // bars of pre-roll before `at`, clicking; needs `at`
+  until?: string | undefined; // bar[.beat[.tick]] where the take ends (§10.4); needs `at`
+  loop?: boolean | undefined; // loop [at, until), a take per pass; needs `until`
 }
 
 export interface RecordHooks {
@@ -45,6 +47,9 @@ export interface RecordHooks {
   onCountIn?: (line: string) => void;
   // The take began, at this position.
   onStarted?: (line: string) => void;
+  // A take landed — under a loop, one per pass as it finalizes; the
+  // caller says what a landed take looks like.
+  onTake?: (landed: LandedTake) => void;
   // A status tick while recording: position, meter, elapsed.
   onPosition?: (line: string) => void;
   // Wired to SIGINT by the CLI: stop the take and the transport.
@@ -99,31 +104,49 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export interface RecordedTakes {
+  takes: { take: Take; landed: LandedTake }[]; // in the order they landed
+}
+
 export async function recordTake(
   root: string,
   project: LoadedProject,
   target: string,
   options: RecordOptions = {},
   hooks: RecordHooks = {},
-): Promise<{ take: Take; landed: LandedTake }> {
+): Promise<RecordedTakes> {
   const resolved = resolveRecordTarget(root, target);
   // Before arming: a track with nowhere to attach a take is an error to
   // give before the performance, not after it (recording.md §4).
   recordNodeFor(project, resolved.label);
-  const take = await captureTake(root, project, resolved, options, hooks);
-  const landed = await landTake(root, take, options);
-  return { take, landed };
+  if (options.loop === true && options.until === undefined) {
+    throw new Error('--loop needs --until — the region is --at to --until, a take per pass');
+  }
+  if (options.until !== undefined && options.at === undefined) {
+    throw new Error('--until needs --at (where the take begins)');
+  }
+  // Each take lands as it arrives — under a loop, while the next one is
+  // already recording — so the flow is one landing per manifest.
+  const takes: RecordedTakes['takes'] = [];
+  await captureTakes(root, project, resolved, options, hooks, async (take) => {
+    const landed = await landTake(root, take, options);
+    takes.push({ take, landed });
+    hooks.onTake?.(landed);
+  });
+  if (takes.length === 0) throw new Error('no take was recorded');
+  return { takes };
 }
 
-// The daemon half: arm, take, finalize. Returns the finalized
-// transaction's manifest; landing is the caller's next step.
-async function captureTake(
+// The daemon half: arm, take, finalize. Calls `land` with each finalized
+// manifest, in order; landing is the caller's business.
+async function captureTakes(
   root: string,
   project: LoadedProject,
   resolved: RecordTarget,
   options: RecordOptions,
   hooks: RecordHooks,
-): Promise<Take> {
+  land: (take: Take) => Promise<void>,
+): Promise<void> {
   const client = await AudiodClient.connect(root);
   try {
     if (!client.supports('record')) {
@@ -177,6 +200,23 @@ async function captureTake(
       if (ctx === undefined) throw new Error('--at is musical time and the loaded bed has no tempo map');
       at = parseMusicalPosition(options.at, ctx);
     }
+    // Punch-out and loop takes (recording.md §10.4): the take ends on
+    // `until` exactly; with --loop the live session loops the region and
+    // every pass lands a take.
+    let until: number | undefined;
+    if (options.until !== undefined) {
+      if (ctx === undefined) throw new Error('--until is musical time and the loaded bed has no tempo map');
+      if (!client.supports('record-until')) {
+        throw new Error(
+          `field-audiod ${client.daemonVersion} predates punch-out — field transport quit, then record again`,
+        );
+      }
+      until = parseMusicalPosition(options.until, ctx);
+      if (at === undefined || until <= at) throw new Error('--until must be after --at');
+      if (options.loop === true && status.live !== true) {
+        throw new Error('--loop takes need a live song as the bed (field play <song>); a file bed loops only whole');
+      }
+    }
     // The metronome and the count-in (recording.md §7): a schedule the
     // daemon synthesizes against the clock the capture uses. --click
     // covers the whole bed; --count-in alone clicks only the bars before
@@ -212,16 +252,27 @@ async function captureTake(
       clicking = true;
     }
 
-    // A take that ends from elsewhere reaches this terminal as the `take`
-    // event; the stop this terminal sends gets it in the response.
-    let landed: Take | undefined;
+    // Every finalized take reaches this terminal as a `take` event — the
+    // one this terminal's stop ends comes back in the response too — and
+    // each lands as it arrives, in order, one at a time.
+    const seen = new Set<string>();
+    let queue: Promise<void> = Promise.resolve();
+    let landedAny = false;
+    const landOnce = (take: Take): void => {
+      if (seen.has(take.id)) return;
+      seen.add(take.id);
+      queue = queue.then(async () => {
+        await land(take);
+        landedAny = true;
+      });
+    };
     const onEvent = (e: AudiodEvent) => {
-      if (e.event === 'take') landed = e.take;
+      if (e.event === 'take') landOnce(e.take);
     };
     client.on('event', onEvent);
     let transaction: string | undefined;
     try {
-      const started = await client.record(at, start);
+      const started = await client.record(at, start, until, options.loop === true);
       transaction = started.transaction;
       try {
         await followTake(started);
@@ -234,6 +285,7 @@ async function captureTake(
             `the take is recoverable — field record --list, then field record --recover ${started.transaction}`,
         );
       }
+      await queue;
     } finally {
       client.removeListener('event', onEvent);
       // Release the input whatever happened; the microphone is not ours
@@ -242,10 +294,10 @@ async function captureTake(
       if (clicking) await client.click({ rate, ticks: [] }).catch(() => {});
       await client.disarm().catch(() => {});
     }
-    if (landed === undefined) {
+    if (!landedAny) {
       throw new Error(`the take ended but its manifest never arrived (${transaction ?? 'no transaction'})`);
     }
-    return landed;
+    return;
 
     async function followTake(started: { transaction: string; started_at_samples: number }): Promise<void> {
       // A pre-rolled take reports -1 until the callback reaches its
@@ -253,35 +305,49 @@ async function captureTake(
       // shows as its own line meanwhile.
       let announced = started.started_at_samples >= 0;
       if (announced) {
-        hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(started.started_at_samples, rate, ctx)}`);
-      } else {
+        const to = until !== undefined ? ` to ${formatPosition(until, rate, ctx)}` : '';
+        const looping = options.loop === true ? ', looping — a take per pass' : '';
+        hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(started.started_at_samples, rate, ctx)}${to}${looping}`);
+      } else if (start !== undefined) {
         hooks.onCountIn?.(
-          `count-in ${formatPosition(start!, rate, ctx)} → ${formatPosition(at!, rate, ctx)} (${options.countIn} bar${options.countIn === 1 ? '' : 's'})`,
+          `count-in ${formatPosition(start, rate, ctx)} → ${formatPosition(at!, rate, ctx)} (${options.countIn} bar${options.countIn === 1 ? '' : 's'})`,
         );
+      } else if (at !== undefined) {
+        // The bed is rolling toward --at from wherever it was: a punch-in.
+        hooks.onCountIn?.(`waiting for ${formatPosition(at, rate, ctx)}`);
       }
+      let endedItself = false;
       for (;;) {
         if (hooks.interrupted?.() === true) {
           const stopped = await client.stop();
-          landed = stopped.take ?? landed;
+          if (stopped.take !== undefined) landOnce(stopped.take);
           break;
         }
         const s = await client.status();
-        if (s.record?.state !== 'recording') break; // ended from elsewhere
+        if (s.record?.state !== 'recording') {
+          // Ended without this terminal: a remote stop, the bed running
+          // out, or a punch-out — the transport is still rolling after
+          // one of those, and ctrl-c's muscle memory says it stops here.
+          endedItself = true;
+          break;
+        }
         if (!announced && s.record.pending !== true && s.record.started_at_samples !== undefined && s.record.started_at_samples >= 0) {
           announced = true;
           hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(s.record.started_at_samples, rate, ctx)}`);
         }
         const elapsed = s.record.frames !== undefined ? ` ${(s.record.frames / armed.sample_rate).toFixed(1)}s` : '';
-        hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${meterLine(s.record.input_peak)}${elapsed}`);
+        const passes = s.record.loop === true ? `  take ${(s.record.loop_takes ?? 0) + 1}` : '';
+        hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${meterLine(s.record.input_peak)}${elapsed}${passes}`);
         await sleep(250);
       }
+      if (endedItself) await client.stop().catch(() => {});
       // A remote stop's `take` event can trail the status tick that
       // showed the state change; the recordings list is the fallback.
-      for (let i = 0; i < 20 && landed === undefined; i++) await sleep(50);
-      if (landed === undefined) {
+      for (let i = 0; i < 20 && seen.size === 0; i++) await sleep(50);
+      if (seen.size === 0) {
         const { recordings } = await client.recordings();
         const entry = recordings.find((r) => r.id === started.transaction && r.complete);
-        if (entry !== undefined) landed = takeSchema.parse(entry);
+        if (entry !== undefined) landOnce(takeSchema.parse(entry));
       }
     }
   } finally {

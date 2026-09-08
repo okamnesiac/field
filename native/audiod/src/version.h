@@ -9,5 +9,7 @@ namespace field
 // recovery (recording.md chunk 1).
 // 0.13: the metronome in the engine and record's `start` — count-in
 // and a sample-exact punch-in (recording.md chunk 3).
-constexpr const char* daemonVersion = "0.13.0";
+// 0.14: the region loop, punch-out, and loop takes (recording.md
+// chunk 4).
+constexpr const char* daemonVersion = "0.14.0";
 }

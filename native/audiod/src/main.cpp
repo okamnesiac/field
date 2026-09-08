@@ -70,6 +70,10 @@ public:
 
         if (player.streamFinished())
             player.stop();
+        // A take the callback ended at its until (recording.md §10.4)
+        // finalizes here, on the message thread, and a loop opens its
+        // next standby.
+        player.serviceCapture();
 
         auto status = player.status();
 
