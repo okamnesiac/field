@@ -186,5 +186,62 @@ moved second. Device authorization uses RFC 8628's field names. A
 private project answers 404 to anyone without access, the same as one
 that does not exist.
 
-`field push` and `field pull`, which carry artifacts the other way, are
+## Push a project
+
+`field push [git args]` is `git push` with everything after the verb
+handed to Git, then the artifact offer: every rule entry this machine
+holds beneath each song's `main`, sent with the commit at `HEAD` and the
+label it satisfies. The remote asks for the outputs it lacks, those are
+uploaded, and a completion call registers the entry:
+
+```console
+$ field login
+$ field push -u origin main
+creek: offered 6 entries, uploaded 4 outputs (61.2 MB)
+tall-grass: not offered — //songs/tall-grass/gen:topline has no takes yet
+```
+
+Nothing renders on push: an artifact you never built is simply not
+offered. Every entry beneath `main` is offered, not only the new ones,
+because the site plays by commit and label and an unchanged mix at a
+new commit still needs to be named at that commit; the remote asks for
+no upload when it already holds the bytes, so a second push of the same
+commit reports `already on the remote` and moves nothing.
+
+The offer describes `HEAD`, so a working tree with uncommitted changes
+pushes and offers nothing, and says so: the keys are computed from the
+files on disk, and calling them the commit's would be a lie the site's
+player would repeat. Commit, then push again.
+
+When a token is held, the push carries two things per invocation that
+let Git use it without any configuration in the checkout: the
+credential helper for the origin's host, so a project made with `field
+init` needs only `field login` before its first push, and
+`http.proactiveAuth=basic` (Git 2.46 and later), so the token goes
+without a 401 round trip. Neither is written to the checkout, because
+"a token is held" is only known to be true at that moment. Without a
+token, `git push` runs as it always did, and a private project asks Git
+the usual way.
+
+A remote that refuses the token, or stops answering part way, stops that
+song's offer and says why; what was completed is registered, and the
+rest is offered again by the next push. Plain `git push` keeps working;
+it just carries no artifacts, and the site says `no build yet` for the
+songs it cannot play.
+
+## Pull
+
+`field pull [git args]` is `git pull` with the arguments handed to Git,
+then the warm `field clone` does, for the `HEAD` the pull left behind:
+
+```console
+$ field pull
+Already up to date.
+creek: fetched 2 artifacts (2.1 MB)
+```
+
+A plain `git pull` keeps working and skips the warm; the next `field
+build` then reads through per miss instead.
+
+`field push` and `field pull` carry artifacts the other way from the cache, and are
 the next chunk of [remote.md](projects/remote/readme.md).

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { z } from 'zod';
@@ -11,10 +11,12 @@ import {
   deviceTokenResponseSchema,
   helloResponseSchema,
   missingResponseSchema,
+  offerResponseSchema,
   paths,
   projectResponseSchema,
   type DeviceCode,
   type DeviceTokenResponse,
+  type OfferRequest,
   type RemoteArtifactEntry,
   type RemoteHello,
   type RemoteProject,
@@ -182,6 +184,47 @@ export class RemoteClient {
     const res = await this.request('GET', paths.artifact(owner, project, actionKey));
     if (res.status === 404) return undefined;
     return this.parse(res, artifactEntrySchema, 'artifact');
+  }
+
+  // --- the offer (remote.md §3.3) ---
+
+  // Announce an entry and the commit and label it satisfies. The answer
+  // names the outputs the remote lacks, each with a presigned URL to PUT
+  // the bytes to; an empty list means every output is already held.
+  async offer(owner: string, project: string, entry: OfferRequest): Promise<{ sha256: string; url: string }[]> {
+    await this.hello();
+    const res = await this.request('POST', paths.offer(owner, project), entry);
+    return (await this.parse(res, offerResponseSchema, 'offer')).uploads;
+  }
+
+  // PUT one output's bytes to the URL the offer handed out. The URL is
+  // presigned, so no token rides with it; the remote hashes what lands
+  // at completion, and a mismatch there is refused, never registered.
+  async upload(url: string, fromPath: string): Promise<void> {
+    const signal = AbortSignal.timeout(this.timeouts.idle * 10);
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/octet-stream', 'user-agent': userAgent() },
+        body: readFileSync(fromPath),
+        signal,
+      });
+    } catch (err) {
+      if (signal.aborted) throw new RemoteError('unreachable', `upload to ${hostOf(url)} did not finish in time`);
+      throw new RemoteError('unreachable', `upload to ${hostOf(url)} failed: ${(err as Error).message}`);
+    }
+    if (!res.ok) throw new RemoteError('http', `upload to ${hostOf(url)} answered ${res.status}`, res.status);
+  }
+
+  // The uploads of an offer have landed: verify them and register the
+  // entry. A completion the remote refuses — bytes that hash to something
+  // else, an upload that never arrived — is an `http` error carrying the
+  // remote's own message, and the entry does not exist there.
+  async complete(owner: string, project: string, actionKey: string): Promise<void> {
+    await this.hello();
+    const res = await this.request('POST', paths.complete(owner, project, actionKey), {});
+    if (!res.ok) throw await this.httpError(res, 'completion');
   }
 
   // Streams a presigned URL to `toPath`, hashing on the way, and reports

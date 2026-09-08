@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { REMOTE_API_VERSION } from '../remote/protocol.js';
 
@@ -19,6 +20,11 @@ export interface FakeProject {
   default_branch: string;
   visibility: 'public' | 'private';
   artifacts: Map<string, FakeArtifact>; // by action key
+  // What a push registers beside the entries (audiofield-io.md §5.7): the
+  // commit and label each entry satisfies, keyed "<commit> <label>".
+  refs: Map<string, string>;
+  // Offers whose completion has not come; served by nothing until then.
+  offers: Map<string, FakeArtifact & { commit: string; label: string }>;
 }
 
 export interface FakeRequest {
@@ -51,7 +57,7 @@ export interface FakeRemote {
   revoked: string[];
   readonly token: string; // the token the device flow hands out
   readonly userCode: string;
-  addProject(name: string, project: Omit<FakeProject, 'artifacts'>): FakeProject;
+  addProject(name: string, project: Omit<FakeProject, 'artifacts' | 'refs' | 'offers'>): FakeProject;
   // Registers an entry and its bytes under a project, as the site would
   // hold them after a push.
   addArtifact(project: string, actionKey: string, entry: FakeArtifact, blobs: Buffer[]): void;
@@ -62,6 +68,7 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
   const requests: FakeRequest[] = [];
   const projects = new Map<string, FakeProject>();
   const blobs = new Map<string, Buffer>();
+  const staged = new Map<string, Buffer>(); // uploads a completion has not hashed yet
   const token = 'fake-token-' + Math.random().toString(36).slice(2);
   const tokens = new Set<string>([token]);
   const revoked: string[] = [];
@@ -151,8 +158,19 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
       if (options.stallBlobs) return void res.write(bytes.subarray(0, 1)); // one byte, then silence
       return res.end(bytes);
     }
+    // A presigned upload, as the site's bucket takes one: a PUT of the
+    // bytes, no token. Kept apart from verified blobs until a completion
+    // hashes it, the way the site stages an upload.
+    const upload = /^\/upload\/([0-9a-f]{64})$/.exec(url.pathname);
+    if (upload && method === 'PUT') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      staged.set(upload[1]!, Buffer.concat(chunks));
+      res.writeHead(200);
+      return res.end();
+    }
 
-    const m = /^\/api\/projects\/([^/]+)\/([^/]+)(?:\/artifacts(?:\/([^/]+))?)?$/.exec(url.pathname);
+    const m = /^\/api\/projects\/([^/]+)\/([^/]+)(?:\/artifacts(?:\/([^/]+)(?:\/(complete))?)?)?$/.exec(url.pathname);
     if (m) {
       const project = projects.get(`${m[1]}/${m[2]}`);
       // Private and unseen is the same 404 as absent (audiofield-io.md §9.9).
@@ -163,11 +181,57 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
         const { clone_url, default_branch, visibility } = project;
         return json(res, 200, { clone_url, default_branch, visibility });
       }
+      // The writes: an offer and its completion need a token that may push.
+      if (url.pathname.endsWith('/artifacts') && method === 'POST') {
+        if (!authorized) return json(res, 401, { error: 'unauthorized' });
+        const body = (await readBody(req)) as {
+          commit: string;
+          label: string;
+          action_key: string;
+          rule: string;
+          outputs: { sha256: string; bytes: number }[];
+        };
+        project.offers.set(`${body.action_key} ${body.commit} ${body.label}`, {
+          rule: body.rule,
+          outputs: body.outputs,
+          commit: body.commit,
+          label: body.label,
+        });
+        const uploads = body.outputs
+          .filter((o) => !blobs.has(o.sha256))
+          .map((o) => ({ sha256: o.sha256, url: `${base}/upload/${o.sha256}` }));
+        return json(res, 200, { uploads });
+      }
+      if (m[4] === 'complete' && method === 'POST') {
+        if (!authorized) return json(res, 401, { error: 'unauthorized' });
+        const key = m[3]!;
+        const pending = [...project.offers.entries()].filter(([id]) => id.startsWith(`${key} `));
+        if (pending.length === 0) return json(res, 404, { error: 'no_offer', message: 'nothing was offered under this action key' });
+        const entry = pending[pending.length - 1]![1];
+        for (const output of entry.outputs) {
+          if (blobs.has(output.sha256)) continue;
+          const bytes = staged.get(output.sha256);
+          if (bytes === undefined) return json(res, 422, { error: 'missing_upload', message: `${output.sha256} was not uploaded` });
+          const digest = createHash('sha256').update(bytes).digest('hex');
+          if (digest !== output.sha256 || bytes.length !== output.bytes) {
+            staged.delete(output.sha256);
+            return json(res, 422, { error: 'hash_mismatch', message: `the bytes uploaded for ${output.sha256} hash to ${digest}` });
+          }
+          blobs.set(output.sha256, bytes);
+          staged.delete(output.sha256);
+        }
+        project.artifacts.set(key, { rule: entry.rule, outputs: entry.outputs });
+        for (const [id, offer] of pending) {
+          project.refs.set(`${offer.commit} ${offer.label}`, key);
+          project.offers.delete(id);
+        }
+        return json(res, 200, { action_key: key, rule: entry.rule, outputs: entry.outputs });
+      }
       if (m[3] === 'missing' && method === 'POST') {
         const body = (await readBody(req)) as { action_keys: string[] };
         return json(res, 200, { missing: body.action_keys.filter((k) => !project.artifacts.has(k)) });
       }
-      if (m[3] !== undefined && method === 'GET') {
+      if (m[3] !== undefined && m[4] === undefined && method === 'GET') {
         const entry = project.artifacts.get(m[3]);
         if (entry === undefined) return json(res, 404, { error: 'no such artifact' });
         return json(res, 200, {
@@ -194,7 +258,7 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
     token,
     userCode,
     addProject(name, project) {
-      const full: FakeProject = { ...project, artifacts: new Map() };
+      const full: FakeProject = { ...project, artifacts: new Map(), refs: new Map(), offers: new Map() };
       projects.set(name, full);
       return full;
     },
