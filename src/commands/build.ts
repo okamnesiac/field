@@ -11,6 +11,35 @@ import { build, explain, type BuildOutcome, type Explanation, type GeneratorRunn
 import { pinBeforeCheck } from './plugins.js';
 import { buildGraph, deps, expandPattern, resolveLabel, type Graph } from '../graph/graph.js';
 import { formatLabel } from '../labels.js';
+import { RemoteReads, projectCache } from '../remote/cache.js';
+import { RemoteClient } from '../remote/client.js';
+import { defaultCredentialStore, resolveToken, type CredentialStore } from '../remote/credentials.js';
+import { resolveProjectRemote } from '../remote/origin.js';
+
+// The project's remote as a read-through cache, or undefined when there
+// is none (remote.md §5 decisions 3 and 4): reads are on whenever the
+// origin is an audiofield git host or `FIELD_REMOTE` names one, off for
+// `FIELD_REMOTE=off`, and off for one build with `--no-remote`. This is
+// the command layer's job, not the engine's — `build()` and `explain()`
+// take the result as a parameter so a build test never reads Git or
+// the environment to find out whether a network is in reach.
+export interface RemoteOptions {
+  noRemote?: boolean | undefined;
+  notice?: ((line: string) => void) | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  store?: CredentialStore | undefined;
+}
+
+export function remoteReads(root: string, options: RemoteOptions = {}): RemoteReads | undefined {
+  if (options.noRemote === true) return undefined;
+  const env = options.env ?? process.env;
+  const resolution = resolveProjectRemote(root, env);
+  if (resolution.kind !== 'remote') return undefined;
+  const { remote } = resolution;
+  const token = resolveToken(remote.api, options.store ?? defaultCredentialStore(), env)?.token;
+  const client = new RemoteClient(remote.api, { token });
+  return new RemoteReads(projectCache(client, remote), options.notice);
+}
 
 // Output paths print relative to the project root. Every path a build
 // reports is inside the project, so the absolute prefix is the same on
@@ -69,11 +98,12 @@ export async function buildLabels(
   runner?: GeneratorRunner,
   onWarning?: (line: string) => void,
   signal?: AbortSignal,
+  remote?: RemoteReads,
 ): Promise<BuildOutcome[]> {
   const { project, graph, warnings } = loadValid(root);
   for (const line of warnings) onWarning?.(line);
   const nodes = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
-  return build(project, graph, nodes, runner, signal);
+  return build(project, graph, nodes, runner, signal, remote);
 }
 
 export function queryDeps(root: string, query: string): string[] {
@@ -87,7 +117,11 @@ export function queryDeps(root: string, query: string): string[] {
   return expandPattern(graph, parsePattern(query.trim())).map((n) => formatLabel(n.label));
 }
 
-export async function explainLabel(root: string, label: string): Promise<Explanation> {
+export async function explainLabel(
+  root: string,
+  label: string,
+  remote?: RemoteReads,
+): Promise<Explanation> {
   const { project, graph } = loadValid(root);
-  return explain(project, graph, resolveLabel(graph, parseLabel(label)));
+  return explain(project, graph, resolveLabel(graph, parseLabel(label)), new Map(), remote);
 }

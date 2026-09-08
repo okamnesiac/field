@@ -22,7 +22,7 @@ import {
   parseVariants,
   wantsVersion,
 } from './cliParsers.js';
-import { buildLabels, explainLabel, projectRelative, queryDeps } from './commands/build.js';
+import { buildLabels, explainLabel, projectRelative, queryDeps, remoteReads } from './commands/build.js';
 import { formatReach, rootNote } from './model/levels.js';
 import { formatCable } from './model/cables.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
@@ -97,6 +97,90 @@ program
     try {
       const root = init({ dir: process.cwd(), ...opts });
       process.stdout.write(`initialized Field project at ${root}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+// The remote verbs (remote.md §3). `login` and `logout` mint and forget a
+// token; `clone` expands a short name, clones with LFS, and warms the
+// cache; `git-credential` is the helper `clone` configures so Git shares
+// the stored token. `push` and `pull` arrive with the artifact offer.
+program
+  .command('login')
+  .description('log in to an audiofield remote with a device code')
+  .option('--remote <url>', "the site to log in to (default: this project's, or audiofield.io)")
+  .action(async (opts: { remote?: string }) => {
+    try {
+      const { login, remoteForLogin } = await import('./commands/login.js');
+      const { RemoteClient } = await import('./remote/client.js');
+      const { defaultCredentialStore } = await import('./remote/credentials.js');
+      const remote = remoteForLogin(process.cwd(), process.env, opts.remote);
+      const store = defaultCredentialStore();
+      const result = await login(remote, {
+        client: new RemoteClient(remote),
+        store,
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
+      const who = result.login ? ` as ${result.login}` : '';
+      process.stdout.write(`logged in to ${remote}${who} (token in ${store.kind})\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('logout')
+  .description('forget the stored token, revoking it on the remote when reachable')
+  .option('--remote <url>', "the site to log out of (default: this project's, or audiofield.io)")
+  .action(async (opts: { remote?: string }) => {
+    try {
+      const { logout, remoteForLogin } = await import('./commands/login.js');
+      const { RemoteClient } = await import('./remote/client.js');
+      const { defaultCredentialStore } = await import('./remote/credentials.js');
+      const remote = remoteForLogin(process.cwd(), process.env, opts.remote);
+      await logout(remote, {
+        store: defaultCredentialStore(),
+        client: (token) => new RemoteClient(remote, { token }),
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('clone <target> [dir]')
+  .description('clone <owner>/<project> from the remote (or any clone URL) and warm the build cache')
+  .action(async (target: string, dir: string | undefined) => {
+    try {
+      const { clone } = await import('./commands/clone.js');
+      const result = await clone({
+        target,
+        dir,
+        cwd: process.cwd(),
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
+      process.stdout.write(`cloned into ${projectRelative(process.cwd(), result.dir)}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+// Git's credential helper, configured by `clone` as `!field
+// git-credential` for the git host. Git speaks to it on stdin/stdout;
+// nothing else calls it, hence hidden from --help.
+program
+  .command('git-credential <operation>', { hidden: true })
+  .action(async (operation: string) => {
+    try {
+      if (operation !== 'get') return; // store/erase: Field manages the token itself
+      const { gitCredentialGet } = await import('./commands/login.js');
+      const { defaultCredentialStore } = await import('./remote/credentials.js');
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      const answer = gitCredentialGet(Buffer.concat(chunks).toString('utf8'), defaultCredentialStore());
+      if (answer !== undefined) process.stdout.write(answer);
     } catch (err) {
       fail(err);
     }
@@ -420,7 +504,8 @@ program
 // claims a cache hit that never happened. Padded to a common width so the
 // labels line up down the column.
 function buildStatus(o: BuildOutcome): string {
-  const status = o.committed === true ? 'source' : o.cached ? 'cached' : 'built';
+  const status =
+    o.committed === true ? 'source' : o.fetched === true ? 'fetched' : o.cached ? 'cached' : 'built';
   return status.padEnd(6);
 }
 
@@ -428,12 +513,22 @@ program
   .command('build <patterns...>')
   .description('build labels (creek/track:drums, creek/..., or a bare song for its output track)')
   .option('--watch', 'rebuild on project changes until ctrl-c, reporting outputs that audibly moved')
-  .action(async (patterns: string[], opts: { watch?: boolean }) => {
+  .option('--no-remote', 'skip the remote cache for this build (remote.md §3.4)')
+  .action(async (patterns: string[], opts: { watch?: boolean; remote?: boolean }) => {
     try {
       const root = requireRoot();
       if (opts.watch !== true) {
-        const outcomes = await buildLabels(root, patterns, undefined, (line) =>
-          process.stdout.write(`check: ${line}\n`),
+        // A local miss asks the project's remote before rendering; a miss
+        // there, or no remote at all, renders as before. Watch mode does
+        // not read through: a rebuild loop that waits on a network every
+        // edit is a different trade, not yet made.
+        const outcomes = await buildLabels(
+          root,
+          patterns,
+          undefined,
+          (line) => process.stdout.write(`check: ${line}\n`),
+          undefined,
+          remoteReads(root, { noRemote: opts.remote === false }),
         );
         for (const o of outcomes) {
           const where = o.outputPath ? ` → ${projectRelative(root, o.outputPath)}` : '';
@@ -488,10 +583,12 @@ program
   .action(async (patterns: string[], opts: { to?: string; rate?: number; bitDepth?: 16 | 24 | 32 }) => {
     try {
       const { exportLabels, homeRelative } = await import('./commands/export.js');
-      const results = await exportLabels(requireRoot(), patterns, {
+      const root = requireRoot();
+      const results = await exportLabels(root, patterns, {
         to: opts.to,
         rate: opts.rate,
         bitDepth: opts.bitDepth,
+        remote: remoteReads(root),
       });
       for (const r of results) {
         // Three outcomes, one column: a new version, nothing to do, and
@@ -591,7 +688,7 @@ program
         if (onLine) process.stdout.write('\n');
         return;
       }
-      let items = await resolvePlayables(root, patterns);
+      let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
@@ -873,9 +970,11 @@ program
 program
   .command('explain <label>')
   .description('show a label\'s type, inputs, action key, and cache status')
-  .action(async (label: string) => {
+  .option('--no-remote', 'do not consult the remote cache')
+  .action(async (label: string, opts: { remote?: boolean }) => {
     try {
-      const e = await explainLabel(requireRoot(), label);
+      const root = requireRoot();
+      const e = await explainLabel(root, label, remoteReads(root, { noRemote: opts.remote === false }));
       process.stdout.write(`${e.label} (${e.kind})\n`);
       // The CLI speaks the format's language (project-layout.md §4):
       // type, not the engine's rule.
@@ -898,7 +997,8 @@ program
         process.stdout.write(`parameters: ${JSON.stringify(e.parameters)}\n`);
       }
       if (e.actionKey) {
-        process.stdout.write(`action: ${e.actionKey.slice(0, 12)} (${e.cached ? 'cached' : 'not cached'})\n`);
+        const state = e.fetched ? 'fetched' : e.cached ? 'cached' : 'not cached';
+        process.stdout.write(`action: ${e.actionKey.slice(0, 12)} (${state})\n`);
       }
       for (const out of e.outputs ?? []) {
         process.stdout.write(`output: ${out.sha256.slice(0, 12)} (${out.bytes} bytes)\n`);

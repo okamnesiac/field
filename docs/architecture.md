@@ -62,6 +62,17 @@ update`. Running from source (tsx, vitest) keeps the live git read,
 because there the checkout is the code; an unstamped dist falls back to
 the live read.
 
+**The remote is a second cache, reached over HTTPS with no new
+dependency.** `field login`, `field clone`, and the read-through in
+`field build` talk to an audiofield remote through Node's global
+`fetch`, with the API shapes as zod schemas in `src/remote/protocol.ts`
+and the protocol versioned the way the daemons' are. The remote client
+is injected into the build engine at the same seam as the generator
+runner, so a build test is never a network test. Git is spawned through
+one helper, `src/git.ts`. Tokens live in the macOS keychain or
+`~/.field/credentials`, Field's first per-user state. See
+[remote.md](remote.md).
+
 ## Native audio daemon (C++ / JUCE) — `field-audiod`
 
 The daemon owns all latency-sensitive and hardware-facing work. Its

@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { DEFAULT_SAMPLE_RATE, PROJECT_MANIFEST } from '../constants.js';
+import { git, tryGit } from '../git.js';
 import { isSlug } from '../ids.js';
 import { projectOrder, projectSchema } from '../schema/index.js';
 import { stringifyCanonical } from '../yaml/emit.js';
@@ -65,11 +65,11 @@ export function init(options: InitOptions): string {
   }
 
   if (!existsSync(join(root, '.git'))) {
-    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    git(['init'], { cwd: root });
   }
-  try {
-    execFileSync('git', ['lfs', 'install', '--local'], { cwd: root, stdio: 'ignore' });
-  } catch {
+  // Warn and continue (remote.md §5 decision 6): a new project has no
+  // audio yet and may never commit any. `clone` is the verb that refuses.
+  if (tryGit(['lfs', 'install', '--local'], root) === undefined) {
     process.stderr.write('warning: git-lfs not available; audio assets will not be tracked by LFS\n');
   }
 
