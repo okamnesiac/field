@@ -216,6 +216,21 @@ void Capture::drain()
         writtenFrames.fetch_add ((juce::int64) frames);
 }
 
+void Capture::discard()
+{
+    stopWriter = true;
+    wake.signal();
+    if (writer.joinable())
+        writer.join();
+    if (wav != nullptr)
+    {
+        std::fclose (wav);
+        wav = nullptr;
+    }
+    finalized = true; // nothing left to finalize
+    dir.deleteRecursively();
+}
+
 void Capture::writerLoop()
 {
     auto lastJournal = juce::Time::getMillisecondCounterHiRes();
@@ -226,9 +241,14 @@ void Capture::writerLoop()
         // The start position is latched by the callback on the first
         // block; the manifest on disk learns it from here, off the audio
         // thread, so a crash in the first second still leaves a
-        // placeable take.
+        // placeable take. A standby opened ahead of its take (a loop's
+        // next pass) started when it latched, not when it was opened, so
+        // the wall time follows the latch.
         if (! manifestHasStart && startedAtSamples.load() >= 0)
+        {
+            startedWall = juce::Time::getCurrentTime().toISO8601 (true);
             writeManifest (false, false);
+        }
         const auto now = juce::Time::getMillisecondCounterHiRes();
         if (now - lastJournal >= journalEverySeconds * 1000.0)
         {

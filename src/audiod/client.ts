@@ -267,11 +267,30 @@ export class AudiodClient extends EventEmitter {
   // (recording.md §7, needs supports('record-start')) the transport
   // pre-rolls from there and the take begins exactly at `at`; the
   // response's position is -1 until then, and status says pending.
-  record(at?: number, start?: number) {
+  // `until` (recording.md §10.4, supports('record-until')) ends the take
+  // on that exact sample and finalizes it while the transport keeps
+  // going; `loop` makes the live session loop [at, until) with every
+  // pass a take, each arriving as a `take` event.
+  record(at?: number, start?: number, until?: number, loop?: boolean) {
     return this.request(
       'record',
-      { ...(at !== undefined ? { at } : {}), ...(start !== undefined ? { start } : {}) },
+      {
+        ...(at !== undefined ? { at } : {}),
+        ...(start !== undefined ? { start } : {}),
+        ...(until !== undefined ? { until } : {}),
+        ...(loop === true ? { loop: true } : {}),
+      },
       recordResponseSchema,
+    );
+  }
+  // The live session's region loop (supports('loop-region')): the clock
+  // wraps from `to` — the content's extent when omitted — back to
+  // `from`. No arguments clears it.
+  loop(from?: number, to?: number) {
+    return this.request(
+      'loop',
+      { ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) },
+      okResponseSchema,
     );
   }
   // The metronome schedule (protocol.ts clickScheduleSchema). Requires

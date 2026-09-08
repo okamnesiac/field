@@ -411,17 +411,6 @@ export async function playLiveSession(
   } = {},
   hooks: PlayHooks = {},
 ): Promise<void> {
-  if (options.from !== undefined && options.loop === true) {
-    // A region loop: the artifact path requeues from the position each
-    // pass, but the live wrap returns to the top — the engine has no
-    // loop-start yet (realtime.md chunk 4 amendment) — so refusing is
-    // honest where silently looping the wrong region is not (Codex's
-    // finding).
-    throw new Error(
-      `--from with --loop is a region loop, which rides file playback: ` +
-        `field play ${song}/track:main --from <position> --loop`,
-    );
-  }
   const { compileSession } = await import('../graph/live.js');
   const compiled = await compileSession(root, song, {
     ...(options.loop === true ? { loop: true } : {}),
@@ -453,14 +442,30 @@ export async function playLiveSession(
     if (options.click === true) {
       await sendClick(client, ctx, loaded.samples, loaded.sample_rate, song);
     }
+    let regionLooped = false;
     if (options.from !== undefined) {
       if (ctx === undefined) {
         throw new Error(`--from is musical time and "${song}" has no tempo map`);
       }
+      const from = parseMusicalPosition(options.from, ctx);
+      // --from with --loop is a region loop (recording.md §10.4): the
+      // engine wraps from the content's extent back to the position, so
+      // the region audition that once rode file playback and a requeue
+      // plays live. Set before the locate so the seek and the wrap agree.
+      if (options.loop === true) {
+        if (!client.supports('loop-region')) {
+          throw new Error(
+            `field-audiod ${client.daemonVersion} predates region loops — ` +
+              'field transport quit, then play again (it respawns on the new build)',
+          );
+        }
+        await client.loop(from);
+        regionLooped = true;
+      }
       // Musical time never crosses the socket (playback.md §3.6): the
       // position resolves to a sample here, and locating before play
       // also pre-rolls the chain there (live.cpp's warmup).
-      await client.locate(parseMusicalPosition(options.from, ctx));
+      await client.locate(from);
     }
     await client.play();
     hooks.onItem?.(`${song} (live)`, session.loop === true ? 'looping' : '', '');
@@ -526,6 +531,8 @@ export async function playLiveSession(
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     await client.stop().catch(() => {});
+    // The region was this play's; the bed stays loaded without it.
+    if (regionLooped) await client.loop().catch(() => {});
     watchAbort.abort();
     await watchDone?.catch(() => {});
   } finally {

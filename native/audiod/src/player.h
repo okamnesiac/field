@@ -130,7 +130,21 @@ public:
     // first sample at or after `at` — mid-block, so started_at_samples
     // is `at` exactly — while status reports the take as pending. The
     // response then returns at once with started_at_samples -1.
-    juce::var record (const juce::var& at, const juce::var& start);
+    //
+    // With `until` (§10.4's punch-out): the take ends on that exact
+    // sample and finalizes from the heartbeat (serviceCapture); the
+    // transport keeps going. With `loop` too, the live session loops the
+    // region [at, until) and every pass is a take: the next transaction
+    // is opened ahead of the wrap, so the pass that ends and the pass
+    // that begins hand off inside one block with no sample lost.
+    juce::var record (const juce::var& at, const juce::var& start, const juce::var& until, bool loop);
+    // Heartbeat: finalize a take the callback ended at its `until`, hand
+    // it to onTake, and open the next standby when looping.
+    void serviceCapture();
+    // The live session's region loop (recording.md §10.4): the clock
+    // wraps from `to` back to `from`. Equal bounds clear it. Empty
+    // string on success.
+    juce::String setLoopRegion (juce::int64 from, juce::int64 to);
     // The metronome (recording.md §7): a schedule the CLI projected from
     // the tempo map, rendered into the output by the callback (click.h).
     // A load or a fresh session clears it — a schedule belongs to a bed.
@@ -282,6 +296,23 @@ private:
     // The position the requested take waits for (record's `at` when a
     // `start` was given); -1 means the next block, whatever its position.
     std::atomic<juce::int64> captureStartAt { -1 };
+    // Punch-out and loop takes (recording.md §10.4). captureUntil is
+    // where the callback ends the active take (-1: never); captureLoop
+    // says the next pass is a take too, read from standbyCapture — the
+    // transaction the message thread opened ahead of the wrap — and
+    // captureDone tells the heartbeat a take is waiting to finalize.
+    // captureMissed counts passes that began with no standby ready.
+    std::atomic<juce::int64> captureUntil { -1 };
+    std::atomic<bool> captureLoop { false };
+    std::atomic<bool> captureDone { false };
+    std::atomic<field::Capture*> standbyCapture { nullptr };
+    std::atomic<int> captureMissed { 0 };
+    std::unique_ptr<field::Capture> standby;
+    std::unique_ptr<field::Capture> finished; // ended by the callback, awaiting finalize
+    int loopTakes = 0; // takes finalized in the current loop
+    // Everything a new transaction needs, kept for the standbys a loop
+    // opens after the first.
+    std::unique_ptr<field::Capture> openCapture();
     field::Click click;
     std::atomic<juce::uint64> callbackEpoch { 0 };
     // Largest |sample| on the armed input since status last read it; the

@@ -164,6 +164,39 @@ runs the same click layer offline at the session rate, which is how the
 suite proves tick positions to the sample; it is never used for a
 golden.
 
+## Punch-out and loop takes
+
+`record` takes an `until` beside `at`
+([recording.md](projects/recording/readme.md) §10.4): the callback
+ends the take on that exact sample, mid-block, and the heartbeat
+finalizes it on the message thread while the transport keeps rolling.
+`field record creek/track:lead-vocal --at 17 --until 21` lands exactly
+bars 17 to 20 and then stops the transport, the way ctrl-c does. An
+`at` is exact in the other direction too: the request is armed before
+the transport starts, so the first rolling block latches on `at`
+itself, and a take asked for on a bed already rolling toward `at`
+waits for it as a punch-in.
+
+With `loop`, the live session loops the region `[at, until)` and every
+pass is a take. The next transaction is opened ahead of each wrap, so
+the callback hands the frames after the wrap point to it inside the
+same block: the pass that ends and the pass that begins meet on
+consecutive samples, which the suite proves on the null clock's
+sawtooth. Each take reaches every client as a `take` event as it
+finalizes, and `field record --loop` lands them as they arrive, the last
+one chosen, until ctrl-c — whose partial pass is a take too. A pass that
+begins before the previous one was serviced is counted in
+`record.missed` rather than recorded twice; regions shorter than a
+heartbeat tick are where that would happen, and `field record` says so
+on its live line and in its closing tally.
+
+The region loop is the live session's own (`loop {from, to}`, `to`
+defaulting to the content's extent): the clock wraps from `to` back to
+`from` with the chains ringing across the wrap exactly as they do at
+the declared extent, `status` reports `loop_from` and `loop_to`, and a
+load or a fresh session clears it. `field play <song> --from 5 --loop`
+rides it now instead of being refused. A file bed loops only whole.
+
 ## Landing a take
 
 When a take finalizes, `field record` lands it

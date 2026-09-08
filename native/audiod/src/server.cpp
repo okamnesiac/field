@@ -242,6 +242,10 @@ juce::String Server::dispatch (const juce::var& request)
         // §7): a count-in is the schedule beginning before the take.
         features.add ("click");
         features.add ("record-start");
+        // The region loop and record's until/loop (recording.md §10.4):
+        // punch-out, and a take per pass.
+        features.add ("loop-region");
+        features.add ("record-until");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -338,12 +342,29 @@ juce::String Server::dispatch (const juce::var& request)
     else if (op == "record")
     {
         auto info = player.record (request.getProperty ("at", juce::var()),
-                                   request.getProperty ("start", juce::var()));
+                                   request.getProperty ("start", juce::var()),
+                                   request.getProperty ("until", juce::var()),
+                                   (bool) request.getProperty ("loop", false));
         if (info.getProperty ("error", juce::var()).isString())
             return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
         if (auto* o = info.getDynamicObject())
             for (auto& prop : o->getProperties())
                 ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "loop")
+    {
+        // The live session's region loop (recording.md §10.4): {from,
+        // to} in session samples; omitting both clears it.
+        auto from = request.getProperty ("from", juce::var (0));
+        // `to` omitted beside a `from` means the content's extent (-1 to
+        // the player); both omitted clears.
+        auto to = request.getProperty ("to", request.hasProperty ("from") ? juce::var (-1) : juce::var (0));
+        if ((! from.isInt() && ! from.isInt64() && ! from.isDouble())
+            || (! to.isInt() && ! to.isInt64() && ! to.isDouble()))
+            return jsonLine (errorResponse (id, "loop needs sample numbers for from and to"));
+        auto error = player.setLoopRegion ((juce::int64) from, (juce::int64) to);
+        if (error.isNotEmpty())
+            return jsonLine (errorResponse (id, error));
     }
     else if (op == "click")
     {

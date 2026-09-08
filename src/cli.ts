@@ -710,6 +710,8 @@ program
   .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
   .option('--click', 'a metronome through the take, synthesized in the engine against the song\'s map')
   .option('--count-in <bars>', 'pre-roll this many bars before --at, clicking; the take begins exactly at --at', parseCountIn)
+  .option('--until <position>', 'punch out at bar[.beat[.tick]]: the take ends there exactly and lands while the mix plays on')
+  .option('--loop', 'loop --at to --until, landing a take every pass until ctrl-c (needs a live song as the bed)')
   .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
   .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
   .option('--list', 'list the transactions under .field/recording/ instead of recording')
@@ -724,6 +726,8 @@ program
         at?: string;
         click?: boolean;
         countIn?: number;
+        until?: string;
+        loop?: boolean;
         monitoring?: string;
         consolePreset?: string;
         list?: boolean;
@@ -789,7 +793,7 @@ program
           onPositionLine = false;
           process.stdout.write(`${line}\n`);
         };
-        const { take, landed } = await recordTake(
+        const { takes, missed } = await recordTake(
           root,
           project,
           target,
@@ -799,6 +803,8 @@ program
             ...(opts.at !== undefined ? { at: opts.at } : {}),
             ...(opts.click === true ? { click: true } : {}),
             ...(opts.countIn !== undefined ? { countIn: opts.countIn } : {}),
+            ...(opts.until !== undefined ? { until: opts.until } : {}),
+            ...(opts.loop === true ? { loop: true } : {}),
             ...landOptions,
           },
           {
@@ -806,6 +812,7 @@ program
             onArmed: say,
             onCountIn: say,
             onStarted: say,
+            onTake: (landed) => say(landedLine(landed)),
             onPosition: (line) => {
               if (tty) {
                 process.stdout.write(`\r  ${line}   `);
@@ -815,9 +822,20 @@ program
             interrupted: () => interrupted,
           },
         );
-        say(landedLine(landed));
-        if (take.dropped !== undefined && take.dropped > 0) {
-          say(`warning: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
+        // Each take printed as it landed (onTake); what is left to say is
+        // the tally under a loop — passes lost included, so the count of
+        // takes is never mistaken for the count of passes — and any gaps.
+        if (takes.length > 1 || missed > 0) {
+          const lost =
+            missed > 0
+              ? `, ${missed} pass${missed === 1 ? '' : 'es'} missed (the region is shorter than the daemon's tick)`
+              : '';
+          say(`${takes.length} take${takes.length === 1 ? '' : 's'} landed${lost}; ${takes.at(-1)!.landed.asset} is chosen`);
+        }
+        for (const { take } of takes) {
+          if (take.dropped !== undefined && take.dropped > 0) {
+            say(`warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
+          }
         }
       } catch (err) {
         fail(err);

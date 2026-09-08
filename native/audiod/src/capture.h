@@ -82,6 +82,10 @@ public:
     // final manifest (what `recordings` lists and the `take` event
     // carries). Idempotent: a second call returns the same manifest.
     juce::var finalize();
+    // Message thread: a transaction that never received a sample — a
+    // loop take's standby the loop ended before reaching — is not a
+    // take; its directory goes away. Only valid before finalize.
+    void discard();
 
     // What lives under root/.field/recording/: one entry per
     // transaction, complete or not, with the frames on disk and whether

@@ -181,7 +181,7 @@ describe.skipIf(!binary)('the engine click', () => {
     const project = loadProject(root);
     const lines: string[] = [];
     let interrupted = false;
-    const { take, landed } = await recordTake(
+    const { takes } = await recordTake(
       root,
       project,
       'creek/track:lead-vocal',
@@ -202,6 +202,8 @@ describe.skipIf(!binary)('the engine click', () => {
     expect(lines[3]).toMatch(/^recording take-\S+ from 2\.1\.1 \(0:02\.0\)$/);
     // Bar 2 exactly: the callback started the take mid-block at 96000,
     // and lead-vocal is placed at the song's zero, so the row says so too.
+    expect(takes).toHaveLength(1);
+    const { take, landed } = takes[0]!;
     expect(take.started_at_samples).toBe(96000);
     expect(landed.row.started_at_samples).toBe(96000);
     expect(landed.row.musical_position).toEqual([2]);
