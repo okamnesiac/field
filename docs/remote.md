@@ -135,6 +135,12 @@ A download whose hash disagrees with its entry is discarded, reported,
 and treated as a miss, so a wrong remote can cost a render but never
 poison the cache. Reads only: a build never uploads.
 
+A request that gets no answer within 15 seconds, or a download that
+goes idle for 30 seconds, counts as unreachable, so a black-holed remote
+holds a build for at most that long before the notice. An API that
+redirects, say to a marketing site, is reported as misconfigured rather
+than followed.
+
 ### Which remote
 
 Field reads the remote from Git. The project's `origin` names it: for

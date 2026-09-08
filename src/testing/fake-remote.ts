@@ -35,6 +35,11 @@ export interface FakeRemoteOptions {
   login?: string | undefined;
   refuseAll?: boolean | undefined; // 401 on every route but hello
   noHello?: boolean | undefined; // 404 on /api/hello: not an audiofield site
+  hang?: boolean | undefined; // never answer anything: the black-holed remote
+  stallBlobs?: boolean | undefined; // start every blob and never finish it
+  redirectTo?: string | undefined; // 307 every /api path to another origin
+  // Exact-path overrides, checked first: a 400 with a message, say.
+  answers?: Record<string, { status: number; body: unknown }> | undefined;
 }
 
 export interface FakeRemote {
@@ -89,6 +94,14 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
     const auth = bearer(req);
     const authorized = auth !== undefined && tokens.has(auth);
 
+    if (options.hang) return; // the socket stays open and silent
+    const override = options.answers?.[url.pathname];
+    if (override !== undefined) return json(res, override.status, override.body);
+    if (options.redirectTo !== undefined && url.pathname.startsWith('/api/')) {
+      res.writeHead(307, { location: `${options.redirectTo}${url.pathname}` });
+      return res.end();
+    }
+
     if (url.pathname === '/api/hello') {
       if (options.noHello) return json(res, 404, { error: 'not found' });
       return json(res, 200, {
@@ -135,6 +148,7 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
       const bytes = blobs.get(blob[1]!);
       if (bytes === undefined) return json(res, 404, { error: 'no such blob' });
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length });
+      if (options.stallBlobs) return void res.write(bytes.subarray(0, 1)); // one byte, then silence
       return res.end(bytes);
     }
 
@@ -194,7 +208,13 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
         blobs.set(sha, buffer);
       }
     },
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    // Connections a hanging or stalled route left open would keep
+    // close() from ever calling back; drop them first.
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
   };
 }
 

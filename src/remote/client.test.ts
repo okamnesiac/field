@@ -73,6 +73,54 @@ describe('RemoteClient', () => {
     expect((err as RemoteError).message).toContain('unreachable');
   });
 
+  it('gives up on a remote that never answers, within its own deadline (audiofield on #171)', async () => {
+    // undici's default is about five minutes; a black-holed remote must
+    // not hold a build that long before the once-only notice.
+    const r = await remote({ hang: true });
+    const client = new RemoteClient(r.url, { timeouts: { request: 200 } });
+    const err = await client.resolveProject('h', 'c').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RemoteError);
+    expect((err as RemoteError).kind).toBe('unreachable');
+    expect((err as RemoteError).message).toMatch(/did not answer within 0\.2s/);
+  });
+
+  it('abandons a download that goes idle, and finishes a slow one', async () => {
+    const r = await remote({ stallBlobs: true });
+    r.addProject('howlo/chemicals', { clone_url: 'x://y/z', default_branch: 'main', visibility: 'public' });
+    const bytes = Buffer.from('never all arrives');
+    r.addArtifact('howlo/chemicals', key, { rule: 'stem', outputs: [{ sha256: sha(bytes), bytes: bytes.length }] }, [bytes]);
+    const client = new RemoteClient(r.url, { timeouts: { idle: 200 } });
+    const entry = await client.fetchEntry('howlo', 'chemicals', key);
+    const dir = mkdtempSync(join(tmpdir(), 'field-client-'));
+    try {
+      const err = await client.download(entry!.outputs[0]!.url, join(dir, 'blob')).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RemoteError);
+      expect((err as RemoteError).kind).toBe('unreachable');
+      expect((err as RemoteError).message).toMatch(/went idle for 0\.2s/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats a redirected API as misconfigured rather than following it', async () => {
+    // The live apex 307s every path to a marketing site; following would
+    // talk to whatever it points at instead of saying so.
+    const r = await remote({ redirectTo: 'https://field.one' });
+    await expect(new RemoteClient(r.url).resolveProject('h', 'c')).rejects.toMatchObject({
+      kind: 'protocol',
+      message: expect.stringContaining('redirects /api/hello to https://field.one/api/hello'),
+    });
+  });
+
+  it("surfaces the server's message on a 400 instead of a shape complaint", async () => {
+    const r = await remote({ answers: { '/api/projects/h/c': { status: 400, body: { message: 'owner must be a slug' } } } });
+    await expect(new RemoteClient(r.url).resolveProject('h', 'c')).rejects.toMatchObject({
+      kind: 'http',
+      status: 400,
+      message: expect.stringContaining('owner must be a slug'),
+    });
+  });
+
   it('reports a 401 as refused, naming the fix', async () => {
     const r = await remote({ refuseAll: true });
     await expect(new RemoteClient(r.url).resolveProject('h', 'c')).rejects.toMatchObject({

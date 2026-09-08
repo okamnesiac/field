@@ -47,7 +47,19 @@ export interface RemoteClientOptions {
   token?: string | undefined;
   // Injected for tests: an in-process stub's fetch, or one that throws.
   fetch?: typeof fetch;
+  timeouts?: Partial<RemoteTimeouts> | undefined;
 }
+
+// How long a black-holed remote may hold a build before it counts as
+// unreachable and the once-only notice prints (audiofield on #171:
+// undici's own default is about five minutes). API answers are small
+// JSON, so a flat deadline; a download is bounded per chunk instead,
+// because a large artifact on a slow link is not a stall.
+export interface RemoteTimeouts {
+  request: number; // ms, whole request
+  idle: number; // ms between chunks of a download
+}
+export const DEFAULT_TIMEOUTS: RemoteTimeouts = { request: 15_000, idle: 30_000 };
 
 // Every conversation is HTTPS (remote.md §4), and this is where that is
 // enforced rather than assumed: a token crosses the network on the
@@ -84,6 +96,7 @@ export class RemoteClient {
   readonly base: string;
   private readonly token: string | undefined;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeouts: RemoteTimeouts;
   private helloPromise: Promise<RemoteHello> | undefined;
 
   constructor(base: string, options: RemoteClientOptions = {}) {
@@ -92,6 +105,7 @@ export class RemoteClient {
     if (cleartext !== undefined) throw new RemoteError('protocol', cleartext);
     this.token = options.token;
     this.fetchImpl = options.fetch ?? fetch;
+    this.timeouts = { ...DEFAULT_TIMEOUTS, ...options.timeouts };
   }
 
   // Checked once per client, before the first real call. A `protocol`
@@ -135,8 +149,7 @@ export class RemoteClient {
   // so the body is read whatever the status says; the schema decides.
   async deviceToken(deviceCode: string): Promise<DeviceTokenResponse> {
     const res = await this.request('POST', paths.deviceToken, { device_code: deviceCode }, { auth: false });
-    if (res.ok || res.status === 400) return this.parse(res, deviceTokenResponseSchema, 'token');
-    throw await this.httpError(res, 'token');
+    return this.parse(res, deviceTokenResponseSchema, 'token', { allow400: true });
   }
 
   // Forget the token on the remote too. Best effort by the caller's
@@ -176,23 +189,42 @@ export class RemoteClient {
   // check belongs on the fetch path, not inside materialize() (remote.md
   // §2) — and never lets a disagreeing file reach the CAS.
   async download(url: string, toPath: string): Promise<{ sha256: string; bytes: number }> {
-    let res: Response;
-    try {
-      res = await this.fetchImpl(url, { headers: { 'user-agent': userAgent() } });
-    } catch (err) {
-      throw new RemoteError('unreachable', `download failed: ${(err as Error).message}`);
-    }
-    if (!res.ok || res.body === null) {
-      throw new RemoteError('http', `download of ${url} answered ${res.status}`, res.status);
-    }
+    // Idle, not total: the timer re-arms on every chunk, so a slow link
+    // is fine and a stalled one is not.
+    const controller = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    const arm = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(
+        () =>
+          controller.abort(
+            new RemoteError('unreachable', `download from ${hostOf(url)} went idle for ${this.timeouts.idle / 1000}s`),
+          ),
+        this.timeouts.idle,
+      );
+    };
     const hash = createHash('sha256');
     let bytes = 0;
-    const source = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream);
-    source.on('data', (chunk: Buffer) => {
-      hash.update(chunk);
-      bytes += chunk.length;
-    });
-    await pipeline(source, createWriteStream(toPath));
+    arm();
+    try {
+      const res = await this.fetchImpl(url, { headers: { 'user-agent': userAgent() }, signal: controller.signal });
+      if (!res.ok || res.body === null) {
+        throw new RemoteError('http', `download of ${url} answered ${res.status}`, res.status);
+      }
+      const source = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream);
+      source.on('data', (chunk: Buffer) => {
+        hash.update(chunk);
+        bytes += chunk.length;
+        arm();
+      });
+      await pipeline(source, createWriteStream(toPath));
+    } catch (err) {
+      if (err instanceof RemoteError) throw err;
+      if (controller.signal.aborted) throw controller.signal.reason as RemoteError;
+      throw new RemoteError('unreachable', `download failed: ${(err as Error).message}`);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
     return { sha256: hash.digest('hex'), bytes };
   }
 
@@ -207,18 +239,39 @@ export class RemoteClient {
     const headers: Record<string, string> = { accept: 'application/json', 'user-agent': userAgent() };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (options.auth !== false && this.token !== undefined) headers['authorization'] = `Bearer ${this.token}`;
+    const signal = AbortSignal.timeout(this.timeouts.request);
     let res: Response;
     try {
       res = await this.fetchImpl(`${this.base}${path}`, {
         method,
         headers,
+        signal,
+        // Never follow: an API that redirects is misconfigured — the
+        // apex sending every path to a marketing site was the live case
+        // — and following would talk to whatever it points at instead
+        // of saying so.
+        redirect: 'manual',
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
     } catch (err) {
+      if (signal.aborted) {
+        throw new RemoteError(
+          'unreachable',
+          `${this.base} did not answer within ${this.timeouts.request / 1000}s`,
+        );
+      }
       const cause = (err as { cause?: { code?: string } }).cause?.code;
       throw new RemoteError(
         'unreachable',
         `${this.base} is unreachable${cause ? ` (${cause})` : ''}`,
+      );
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location') ?? 'elsewhere';
+      throw new RemoteError(
+        'protocol',
+        `${this.base} redirects ${path} to ${location} — the API must be served directly`,
+        res.status,
       );
     }
     if (res.status === 401 || res.status === 403) {
@@ -233,8 +286,17 @@ export class RemoteClient {
     return res;
   }
 
-  private async parse<T>(res: Response, schema: z.ZodType<T>, what: string): Promise<T> {
-    if (!res.ok && res.status !== 400) throw await this.httpError(res, what);
+  // A 400 is an error with a message worth reading, except on the token
+  // poll, where RFC 8628 puts the pending and slow-down answers behind
+  // one; parsing every 400 against the success schema hid the server's
+  // message behind "a shape this CLI does not know" (audiofield on #171).
+  private async parse<T>(
+    res: Response,
+    schema: z.ZodType<T>,
+    what: string,
+    options: { allow400?: boolean } = {},
+  ): Promise<T> {
+    if (!res.ok && !(options.allow400 === true && res.status === 400)) throw await this.httpError(res, what);
     let json: unknown;
     try {
       json = await res.json();
@@ -264,4 +326,12 @@ export class RemoteClient {
 
 function userAgent(): string {
   return `field/${packageVersion()}`;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
