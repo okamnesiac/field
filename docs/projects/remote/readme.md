@@ -1,6 +1,6 @@
 ---
-status: draft
-priority: next
+status: in-progress
+priority: now
 ---
 
 # Plan: Remote — login, clone, push, and a read-through cache
@@ -300,6 +300,29 @@ starts here. The request and response shapes are zod schemas in
 `src/remote/protocol.ts`, the way `helloResponseSchema` is, so the
 site's tests can import the same file (§7).
 
+Paths, as the CLI speaks them since chunk 2 shipped (`paths` in
+`src/remote/protocol.ts`; the site is built to these, and either side
+changing one changes both):
+
+| Conversation | Method and path |
+| --- | --- |
+| Hello | `GET /api/hello` |
+| Device code | `POST /api/device/code` |
+| Token poll | `POST /api/device/token` with `{ device_code }` |
+| Revoke | `DELETE /api/token` with the bearer token |
+| Resolve | `GET /api/projects/<owner>/<project>` |
+| Which do you lack | `POST /api/projects/<owner>/<project>/artifacts/missing` |
+| Fetch an entry | `GET /api/projects/<owner>/<project>/artifacts/<action_key>` |
+| Offer | `POST /api/projects/<owner>/<project>/artifacts` |
+| Complete | `POST /api/projects/<owner>/<project>/artifacts/<action_key>/complete` |
+
+The token poll answers the RFC's `authorization_pending`, `slow_down`,
+`access_denied` and `expired_token` behind a 400, and the token itself
+with `token_type: bearer` and an optional `login` naming the handle for
+the "logged in as" line. Git receives the same token as the HTTP basic
+password with username `field`, through the credential helper of
+decision 13.
+
 ## 5 Decisions (DECIDED, 2026-09-07)
 
 1. **A remote is a second cache, keyed by the action key that
@@ -367,6 +390,15 @@ site's tests can import the same file (§7).
    `init` warns and continues today because a new project has no
    audio yet and may never commit any (bloom-in-tree.md §2 decision
    3), and that stays. Open in §9.5.
+   *Amended (2026-09-08, audiofield's read of #171):* the binary being
+   on the path is not the filter being installed — `git lfs version`
+   answers on a machine where `git lfs install` was never run, and the
+   checkout then lands pointer files anyway. So the clone carries the
+   four `filter.lfs.*` settings as `clone -c` config, which applies to
+   the initial checkout, and runs `git lfs install --local` in the new
+   repository afterwards for the hooks a push needs. The refusal stays
+   for the binary; the filters no longer depend on anyone's global
+   config.
 
 7. **`license` is validated for shape, not against a list.** Field
    accepts any SPDX-shaped identifier and the site decides which are
@@ -406,6 +438,86 @@ site's tests can import the same file (§7).
     it counts executions. *Rejected: `fetch` inside `buildNode`.* It
     would make every build test a network test or a mock of the
     global.
+
+12. **The API host is derived from the git host, and `FIELD_REMOTE`
+    replaces only the API base** (2026-09-08, chunk 2). Git and LFS are
+    served from `git.<site>` and the API from `<site>`
+    (audiofield-io.md §10.9), so stripping the `git.` label is the whole
+    mapping, and it works unchanged for a staging host. The project is
+    the origin's last two path segments minus `.git`. `FIELD_REMOTE`
+    swaps the API base and leaves the project alone, which is what lets
+    a test clone from a bare repository at `/remotes/howlo/chemicals.git`
+    and talk to an in-process stub about `howlo/chemicals`, and lets
+    anyone point a real checkout at staging. *Rejected: `FIELD_REMOTE`
+    carrying the project too* (`http://stub/howlo/chemicals`) — a
+    second spelling of a fact origin already holds, which decision 3
+    argued against for a file and applies to a variable. *Rejected:
+    recognizing any host* — a GitHub origin would then be asked
+    `/api/hello` on every build and told "not an audiofield remote"
+    once per build, for a project that never wanted a remote.
+    *Amended (2026-09-08, minjudd on #171):* the derivation accepted
+    `http:` for any host, so an origin of `http://git.example.com/…`
+    yielded a base the client then sent a bearer to, against §4's
+    first sentence. Now `RemoteClient` refuses any base that is not
+    `https` or loopback `http` before a token or device code can cross
+    it, whichever route produced the URL; an origin on cleartext
+    yields no remote at all rather than a remote every build fails
+    against, because its scheme was inherited rather than typed, while
+    a typed `FIELD_REMOTE` or `--remote` on cleartext is refused loudly.
+    The reviewer left `FIELD_REMOTE` to judgement; holding it to the
+    same rule won because a warning still sends the token.
+
+13. **Git gets the token through `field git-credential`** (2026-09-08,
+    chunk 3). `clone` configures the helper for the git host and
+    `http.proactiveAuth=basic` (git 2.46+) in the new checkout, so Git
+    over HTTPS and the API share the one stored token and Git sends it
+    without a 401 probe. The helper answers only `get`, only for a host
+    shaped `git.<site>` whose API host holds a token, and stays silent
+    otherwise so Git falls through to its own helpers. *Rejected:
+    `http.extraHeader`* — the token rides argv and `ps`, and every push
+    would have to be spawned by Field to carry it. *Rejected: copying
+    the token into Git's own credential store* — a second copy that
+    `logout` would have to find, and that outlives it when it cannot.
+    *Amended (2026-09-08, against the live git host):* proactive auth
+    is set only when a token is held at clone time. With
+    `http.proactiveAuth=basic` and no credential, Git asks for a
+    username before its first request, so an anonymous clone of a
+    public project would have become a prompt. The helper is still
+    always configured; a `login` after an anonymous clone costs that
+    checkout one 401 probe per push until `push` sets the option
+    itself, which is the push chunk's job.
+    *Amended again (2026-09-08, audiofield's read of #171):* `clone`
+    persists no `http.proactiveAuth` at all. A clone-time snapshot of
+    "a token is held" goes stale the moment `logout` runs, and that
+    checkout then prompts for a username on every fetch; `push` and
+    `pull` pass the option per invocation when they hold a token, which
+    is the only moment the fact is known to be true. Two more from the
+    same read: the helper is registered behind an empty value that
+    resets the helper list for the host, because a global osxkeychain
+    helper ahead of it would store a copy of the token on the first
+    successful push and serve that copy first ever after — one `logout`
+    never erases; and the helper answers `FIELD_TOKEN` or the
+    `FIELD_REMOTE` token only for the remote the shell points at,
+    since any `git.*` host derives an API and `clone` registers the
+    helper for whatever it cloned, so `git fetch` from `git.sr.ht`
+    would otherwise have carried the audiofield token.
+
+14. **The engine's default is no remote; the command layer resolves
+    it** (2026-09-08, chunk 2, refining decision 11). `build()` and
+    `explain()` take a `RemoteReads` and do nothing when handed none;
+    `remoteReads()` in `src/commands/build.ts` reads origin and the
+    environment, and `build`, `explain`, `play` and `export` pass its
+    answer in. *Rejected: the engine reading origin itself as the
+    default* — every one of the 25 test files that builds a temp project
+    would spawn `git remote get-url` per build, and the engine would
+    know about environment variables for the first time.
+
+15. **Watch and live do not read through** (2026-09-08, chunk 2).
+    `field build --watch`, `field play --watch` and the live session's
+    compile build without a remote. A rebuild loop that waits on a
+    network on every edit is a different trade from a one-shot build
+    that can only get faster; open in §9.12 for when the network is
+    fast enough to make it.
 
 ## 6 Chunks
 
@@ -491,11 +603,26 @@ Chunk 1 could ride sooner as a small PR of its own if the site's
 worker needs `--json` before the rest, and `priority` can move
 without the plan moving.
 
+Settled (2026-09-08): `now`. Implementation began the night the plan
+merged, at Justin's ask, and the site's v1 renders nothing on the
+server (audiofield-io.md §9.14), so the artifacts a push offers are
+what make a hosted project play — which put chunks 2–4 ahead of chunk
+1 rather than behind it. Chunk 1 is unstarted and rides when the site
+wants `--json`.
+
 ### 9.2 Keychain, or `~/.field/credentials` everywhere
 
 Decision 5 splits by platform. The alternative is the file everywhere
 — simpler, one code path, and what most CLIs of this shape do — at
 the cost of a plaintext token on macOS.
+
+Answered by the implementation (2026-09-08): as decision 5 says. Both
+stores are `src/remote/credentials.ts` behind one interface with the
+`security` call injected, so the file-everywhere alternative is the
+deletion of one branch if the keychain turns out to prompt or fail on
+someone's machine. One cost to know: `security add-generic-password`
+takes the secret on argv, visible to `ps` for the instant of the call,
+because the tool has no stdin form.
 
 ### 9.3 `field push` as a verb, or a hook too
 
@@ -503,11 +630,22 @@ Decision 2 says verb. Whether `clone` should also install a
 post-push hook that runs the offer is a product call about how much
 a collaborator has to remember.
 
+Settled for v1 (2026-09-08): verb only, and `clone` installs no hook.
+With no server rendering in v1 a forgotten `field push` leaves the
+project page with nothing to play, which is visible enough to teach
+the verb; the hook stays available if that turns out to be wrong.
+
 ### 9.4 Reads on by default
 
 Decision 4 says yes when an origin is an audiofield host. Whether
 `FIELD_REMOTE=off` is enough of an off switch, or whether a project
 needs a way to say "never" on disk.
+
+Settled (2026-09-08): `FIELD_REMOTE=off` for a shell and `--no-remote`
+for a build, nothing on disk. Reads happen only when origin is an
+audiofield git host (decision 12), so a project that wants "never" is
+one whose origin is not, and a project that is hosted there wanting
+"never" is a contradiction the flag covers.
 
 ### 9.5 Missing `git-lfs`
 
@@ -515,11 +653,21 @@ Decision 6 refuses on `clone`. The alternative is to clone anyway and
 have `field check` explain the pointer files, which keeps `clone`
 working on a machine that only wants to read the YAML.
 
+Settled (2026-09-08): refuse, before the network is touched, naming
+the package. A machine that only wants the YAML has `git clone`.
+
 ### 9.6 Recipe-only projects on `clone`
 
 Decision 9 leaves it to `build`. Whether `clone` should print what
 the remote holds for the project — "artifacts for 2 of 3 songs" — so
 the person knows before the first build.
+
+Settled (2026-09-08): `clone` prints one line per song — how many
+entries it fetched, or that the remote held nothing yet, or that the
+song cannot be warmed and why, in the words `build` would use
+(`tall-grass: not warmed — //songs/tall-grass/gen:topline has no
+takes yet`). That is the "2 of 3 songs" answer, per song. Why a
+recipe-only song cannot be warmed at all is §9.11.
 
 ### 9.7 The name
 
@@ -528,12 +676,17 @@ the person knows before the first build.
 and `audiofield` were the alternatives; `remote` is Git's word for the
 thing and the one a `field remote` subcommand would want later.
 
+Settled (2026-09-08): `remote`, which is also the module (`src/remote/`)
+and the document ([docs/remote.md](../../remote.md)).
+
 ### 9.8 `--json` further out
 
 `explain` and `arrangement` are what the site needs. `build` outcomes,
 `status` (which needs a command module first) and `check` (which has
 `CheckResult` already) are the obvious next three; not in this plan
 unless the worker turns out to want them.
+
+Unchanged (2026-09-08): chunk 1 is unstarted and this belongs to it.
 
 ### 9.9 What `pull` does to `.field/out`
 
@@ -542,9 +695,93 @@ on the next `build`, as they do after any local change. Whether
 `pull` should materialize them itself so `field play` works with no
 build in between.
 
+Open (2026-09-08): `pull` is unbuilt. Note that `field play` builds
+before it plays and reads through, so on a warmed clone `play` already
+works with no `build` in between; the question is only what `pull`
+leaves under `.field/out`.
+
 ### 9.10 Project license against asset licenses
 
 §3.5 keeps them independent. Whether `field check` should warn when
 an asset's license is stricter than the project's — a CC-BY-SA sample
 in a CC0 project — is a question splice.md's chunk owns once both
 keys exist.
+
+Open (2026-09-08): chunk 1 is unstarted; nothing here changes it.
+
+### 9.11 A recipe-only song cannot be warmed by action key
+
+Found implementing the warm. A node's action key is computed from its
+dependencies' output hashes, and a generative request with no
+committed takes mints no node at all (`graph.ungenerated`), so nothing
+above it has a key and the remote cannot be asked for anything in that
+song: `clone` reports `has no takes yet` for it, and `build` stops at
+the request exactly as it does today. Decision 9 assumed "if the site
+holds the artifacts, `build` fetches them", and by key it cannot. The
+site indexes artifacts by commit and label as well (§4), so a by-label
+fetch of `main` is possible — but `build` still refuses a node whose
+dependency is takeless (`assertGenerated`), so "clone and it plays"
+for a recipe-only project would need `play` to accept a by-label
+artifact for `main` without a graph walk, which is a different verb
+from the one this plan builds. The honest v1 answer is the one
+bloom-in-tree.md §7 already gives — the takes are yours, run `field
+generate` — and the site labels such projects (audiofield-io.md §9.13)
+because it holds the author's render and the clone does not. For the
+sync: is by-label playback of a recipe-only clone wanted, or is the
+label enough?
+
+### 9.12 Reading through in watch and live
+
+Decision 15 keeps the rebuild loops local. When the network is fast
+enough that a fetch beats a render for a stem, `--watch` would want the
+read-through too, probably with a shorter timeout than a one-shot
+build tolerates. Not needed until someone edits a hosted project under
+watch and misses it.
+
+## 10 Progress
+
+- 2026-09-08 — Chunks 2 and 3 and the `clone` half of chunk 4 landed
+  together as one pull request (branch `remote/login-clone`): the
+  `src/remote/` module, the read-through in `build` and `explain`,
+  `login`/`logout`/`git-credential`, `clone` with the warm, `src/git.ts`
+  with `init` and `version` moved onto it, and
+  [docs/remote.md](../../remote.md). One PR rather than three because
+  the warm *is* the read-through with `git clone` in front of it, and
+  `login` is what makes a private clone possible, so none of the three
+  was verifiable without the others. Chunk 1 and the `push`/`pull`
+  half of chunk 4 remain; the push offer covers every stem beneath
+  `main`, as §3.3 says and audiofield-io.md §5.2 now says too.
+- The tests found that git-lfs 3.7 pushes to and fetches from a
+  `file://` bare repository, so the clone test commits real LFS audio
+  and asserts it arrives intact; the assertion skips with a note where
+  the LFS filters are not configured. Whether CI's runner image ships
+  them is recorded by the first CI run of that pull request.
+- 2026-09-08 — `git.audiofield.io` went live (okamnesiac/audiofield#17)
+  serving smart HTTP and LFS, before the API on `audiofield.io`. Probed
+  read-only from this side: `howlo/chemicals` answers 401 anonymously,
+  so no public project exists yet to clone; and `http.proactiveAuth=
+  basic` with no credential makes Git ask for a username before its
+  first request even against a public repository (`git/git`), which is
+  why decision 13 was amended — first to set it only when a token is
+  held, then to leave it out of `clone` altogether and have `push` and
+  `pull` pass it per invocation.
+  Facts the push chunk builds to, from the host's author: the token is
+  the basic-auth password and the username is ignored; a private
+  project is 401 anonymously and 404 to a token without access; the
+  first push to an unused name under the token's handle creates the
+  project; a default branch without `field.yaml` at the root is refused
+  as `[remote rejected] main -> main (no field.yaml)`; a racing push
+  loses as `fetch first` or `failed to update ref` depending on timing.
+  Until the API exists, `field clone` with the full git URL clones and
+  then reports that `https://audiofield.io` is not an audiofield remote
+  and warms nothing, which is the protocol check doing its job.
+- 2026-09-08 — audiofield's read of #171 at 8ddd321 against the live
+  host found the git side matching and five things to fix, landed as
+  three commits by cause: the credential helper handing `FIELD_TOKEN`
+  to any `git.*` host, the helper list not reset ahead of osxkeychain,
+  and the persisted proactive auth (decision 13, amended twice); no
+  request timeout, redirects followed, and a 400's message hidden
+  (client); and the warm claiming "nothing cached" after the remote
+  failed, the LFS check testing the binary rather than the filter
+  (decision 6, amended), a short name expanded under `FIELD_REMOTE=off`,
+  and the destination check after the network call (clone).

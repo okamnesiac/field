@@ -111,4 +111,5 @@ The current build order lives in [projects/](projects/README.md).
 - [Project model](project-model.md) — the canonical on-disk representation
 - [Build graph](build-graph.md) — targets, caching, freezing, determinism
 - [Audio engine](audio-engine.md) — the real-time daemon (future work)
+- [Remote](remote.md) — login, clone, and the read-through cache against an audiofield remote
 - [Projects](projects/README.md) — work in progress, next, and later

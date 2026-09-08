@@ -6,6 +6,7 @@ import type { LoadedProject } from '../model/project.js';
 import { reaches, type Reach } from '../model/levels.js';
 import type { Cable } from '../model/cables.js';
 import { generatorFor, type ExtraInput, type RunContext } from '../generators/index.js';
+import type { RemoteReads } from '../remote/cache.js';
 import { assertGenerated, deps, resolveLabel, type Graph, type GraphNode, type GeneratorNode } from './graph.js';
 
 // Action cache (project-core.md §3.5): outputs live in a content-addressed
@@ -34,6 +35,11 @@ export interface BuildOutcome {
   // variants report cached:true because nothing executed, which is not
   // the same claim as "this came out of the cache" (#35 review).
   committed?: boolean;
+  // The entry came from the remote cache during this build (remote.md
+  // §3.4): `cached` is true too, because nothing executed, but "a
+  // server had it" and "this machine had it" are different claims —
+  // the same honesty that separated `cached` from `committed`.
+  fetched?: boolean;
   sha256: string;
 }
 
@@ -46,6 +52,7 @@ export interface Explanation {
   parameters?: Record<string, unknown>;
   actionKey?: string;
   cached?: boolean;
+  fetched?: boolean; // this explain brought the entry in from the remote
   outputs?: { sha256: string; bytes: number }[];
   // Generation nodes only: the committed file, and — on the node the
   // request's own label resolves to — which take is chosen, of how many.
@@ -177,6 +184,61 @@ function outPath(project: LoadedProject, node: GeneratorNode): string {
 // rename are idempotent for identical content.
 let nextTmp = 0;
 
+// The read-through (remote.md §3.4): on a local miss, ask the remote for
+// the action key, and on a hit bring its outputs into the CAS and the
+// entry into the index so that everything below here — materialize,
+// the next build, `explain` — sees an ordinary local hit. Every output
+// is hashed on the way down and compared against the entry before it
+// lands at casPath(): CAS reads are never verified (readAction checks
+// existence and nothing else), which is fine for bytes this machine
+// hashed on the way in and wrong for bytes that arrived over a network.
+// A disagreeing download is discarded and the whole entry treated as a
+// miss, so a wrong remote can cost a render but never poison the cache.
+//
+// Failure policy lives in RemoteReads, not here: it answers a miss for
+// an unreachable or refused remote after saying so once, and `download`
+// answers undefined the same way, so this function only knows about
+// bytes and hashes.
+async function fetchAction(
+  project: LoadedProject,
+  key: string,
+  remote: RemoteReads,
+): Promise<ActionEntry | undefined> {
+  const entry = await remote.lookup(key);
+  if (entry === undefined) return undefined;
+  const tmpDir = join(cacheDir(project), 'tmp');
+  mkdirSync(tmpDir, { recursive: true });
+  mkdirSync(join(cacheDir(project), 'cas'), { recursive: true });
+  let downloaded = 0;
+  for (const output of entry.outputs) {
+    const target = casPath(project, output.sha256);
+    // Bytes this machine already holds under that hash were hashed on
+    // the way in (or arrived for another entry a moment ago — a stem
+    // and a mix of one silent input are the same bytes); only the
+    // entry is new.
+    if (existsSync(target)) continue;
+    const tmp = join(tmpDir, `${output.sha256}.fetch-${process.pid}-${nextTmp++}`);
+    const got = await remote.download(output.url, tmp);
+    if (got === undefined || got.sha256 !== output.sha256 || got.bytes !== output.bytes) {
+      rmSync(tmp, { force: true });
+      if (got !== undefined) remote.mismatch(key, output.sha256);
+      return undefined;
+    }
+    renameSync(tmp, target);
+    downloaded += got.bytes;
+  }
+  // One entry brought in, however many of its bytes were new.
+  remote.record(downloaded);
+  // The entry mirrors ActionEntry exactly, minus the download URLs,
+  // which are presigned and expire; the index never stores them.
+  const local: ActionEntry = {
+    rule: entry.rule,
+    outputs: entry.outputs.map(({ sha256, bytes }) => ({ sha256, bytes })),
+  };
+  writeAction(project, key, local);
+  return local;
+}
+
 async function buildNode(
   project: LoadedProject,
   graph: Graph,
@@ -184,6 +246,7 @@ async function buildNode(
   runner: GeneratorRunner,
   built: Map<string, BuildOutcome>,
   signal?: AbortSignal,
+  remote?: RemoteReads,
 ): Promise<BuildOutcome> {
   if (node.kind === 'asset') {
     // Source targets: the declared hash is the identity; check verifies
@@ -246,6 +309,21 @@ async function buildNode(
   if (cached) {
     const sha256 = cached.outputs[0]!.sha256;
     return { label: formatLabel(node.label), cached: true, outputPath: materialize(sha256), sha256 };
+  }
+  // A local miss asks the remote before running the rule (remote.md
+  // §3.4). Reads only: a build never uploads.
+  if (remote !== undefined) {
+    const fetched = await fetchAction(project, key, remote);
+    if (fetched) {
+      const sha256 = fetched.outputs[0]!.sha256;
+      return {
+        label: formatLabel(node.label),
+        cached: true,
+        fetched: true,
+        outputPath: materialize(sha256),
+        sha256,
+      };
+    }
   }
 
   // The action key uses the *declared* asset hashes, so before executing,
@@ -318,12 +396,17 @@ async function buildNode(
 }
 
 // Build nodes in dependency order (deps() returns dependencies first).
+// `remote` is injected where the runner is (remote.md §5 decision 11),
+// and defaults to none: the engine never reads Git or the environment to
+// find one, so a build test is a build test. The command layer resolves
+// the project's remote (commands/build.ts `remoteReads`) and passes it.
 export async function build(
   project: LoadedProject,
   graph: Graph,
   nodes: GraphNode[],
   runner: GeneratorRunner = defaultRunner,
   signal?: AbortSignal,
+  remote?: RemoteReads,
 ): Promise<BuildOutcome[]> {
   // Across every requested target at once, before any per-target walk:
   // a queue where each target hides its own takeless request must
@@ -336,7 +419,7 @@ export async function build(
       if (signal?.aborted) throw new Error('build aborted');
       const label = formatLabel(node.label);
       if (built.has(label)) continue;
-      const outcome = await buildNode(project, graph, node, runner, built, signal);
+      const outcome = await buildNode(project, graph, node, runner, built, signal, remote);
       built.set(label, outcome);
       outcomes.push(outcome);
     }
@@ -344,11 +427,17 @@ export async function build(
   return outcomes;
 }
 
+// With a `remote`, a local miss reads through exactly as build does
+// (remote.md §2: otherwise `field explain` says "not cached" for a label
+// `field build` would fetch) — and since the recursion asks every rule
+// node beneath the one explained, explaining a song's `main` with a
+// remote is what warms a fresh clone (commands/clone.ts).
 export async function explain(
   project: LoadedProject,
   graph: Graph,
   node: GraphNode,
   memo: Map<string, Explanation> = new Map(),
+  remote?: RemoteReads,
 ): Promise<Explanation> {
   const label = formatLabel(node.label);
   const seen = memo.get(label);
@@ -390,7 +479,7 @@ export async function explain(
   const inputs: { label: string; sha256: string }[] = [];
   let unknown = false;
   for (const depLabel of node.deps) {
-    const dep = await explain(project, graph, resolveLabel(graph, depLabel), memo);
+    const dep = await explain(project, graph, resolveLabel(graph, depLabel), memo, remote);
     const sha256 = dep.cached !== false && dep.outputs ? dep.outputs[0]!.sha256 : '';
     if (sha256 === '') unknown = true;
     inputs.push({ label: dep.label, sha256 });
@@ -399,7 +488,12 @@ export async function explain(
     inputs.push(...(await impl.extraInputs(project.root, node.spec)));
   }
   const key = unknown ? undefined : actionKey(node, inputs.map((i) => i.sha256));
-  const cached = key === undefined ? undefined : readAction(project, key);
+  let cached = key === undefined ? undefined : readAction(project, key);
+  let fetched = false;
+  if (cached === undefined && key !== undefined && remote !== undefined) {
+    cached = await fetchAction(project, key, remote);
+    fetched = cached !== undefined;
+  }
   // A stem is the one spec synthesized from a track file, so it is also
   // the one whose level question has an answer (nested-tracks.md §5).
   const song = project.songs.find((s) => s.dir === node.songDir);
@@ -427,6 +521,7 @@ export async function explain(
     parameters: ruleParameters(node),
     ...(key !== undefined ? { actionKey: key } : {}),
     cached: cached !== undefined,
+    ...(fetched ? { fetched: true } : {}),
     ...(cached ? { outputs: cached.outputs } : {}),
     ...(levels ? { levels } : {}),
   };

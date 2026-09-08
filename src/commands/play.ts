@@ -4,6 +4,7 @@ import { parsePattern } from '../labels.js';
 import { formatLabel } from '../labels.js';
 import { build, type GeneratorRunner } from '../graph/build.js';
 import { expandPattern } from '../graph/graph.js';
+import type { RemoteReads } from '../remote/cache.js';
 import { loadProject, type LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
 import { beatTicks } from '../time/tempo.js';
@@ -38,6 +39,7 @@ export async function resolvePlayables(
   root: string,
   patterns: string[],
   runner?: GeneratorRunner,
+  remote?: RemoteReads,
 ): Promise<Playable[]> {
   const { project, graph } = loadValid(root);
   const requested = patterns.flatMap((p) => expandPattern(graph, parsePattern(p)));
@@ -50,7 +52,7 @@ export async function resolvePlayables(
     return true;
   });
 
-  const outcomes = await build(project, graph, nodes, runner);
+  const outcomes = await build(project, graph, nodes, runner, undefined, remote);
   const outputs = new Map(outcomes.map((o) => [o.label, o]));
 
   return nodes.map((node) => {

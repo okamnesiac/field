@@ -39,6 +39,17 @@ Outputs are stored under their content hash, so a rebuild never
 overwrites an old render — it produces a new artifact and moves a
 pointer.
 
+### The remote as a second cache
+
+When a project has an audiofield remote, a local miss asks the remote
+for the action key before the rule runs, and a hit lands in the same
+CAS and index as a local render would, verified against the entry's
+hash on the way in. The build reports it as `fetched`. Every failure
+falls through to the render; a build never uploads. `field clone`
+warms the cache the same way for every song's `main` and the nodes
+beneath it, so the first build on a fresh clone is hits all the way
+down. See [remote.md](remote.md).
+
 ### Watch mode
 
 The cache is what makes watching cheap
