@@ -586,7 +586,11 @@ What landed, and the decisions it made:
    event landing in order while the next pass records, the last one
    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs
    `--until`, `--until` needs `--at`, and loop takes need a live song as
-   the bed. The take line prints per pass; the tally prints at the end.
+   the bed. The take line prints per pass; the tally prints at the end,
+   and both carry the daemon's count of missed passes whenever it is
+   not zero — the set of takes must never look like the set of passes
+   when it is smaller (minjudd's finding on #170; the first cut counted
+   them everywhere except where the performer would see it).
 6. **A file bed's position leads its output by the resampler's
    prefetch** — `AudioTransportSource` through its `ResamplingAudioSource`
    reads a few samples ahead on the first block, so `positionSamples()`

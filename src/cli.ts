@@ -793,7 +793,7 @@ program
           onPositionLine = false;
           process.stdout.write(`${line}\n`);
         };
-        const { takes } = await recordTake(
+        const { takes, missed } = await recordTake(
           root,
           project,
           target,
@@ -823,8 +823,15 @@ program
           },
         );
         // Each take printed as it landed (onTake); what is left to say is
-        // the tally under a loop and any gaps.
-        if (takes.length > 1) say(`${takes.length} takes landed; ${takes.at(-1)!.landed.asset} is chosen`);
+        // the tally under a loop — passes lost included, so the count of
+        // takes is never mistaken for the count of passes — and any gaps.
+        if (takes.length > 1 || missed > 0) {
+          const lost =
+            missed > 0
+              ? `, ${missed} pass${missed === 1 ? '' : 'es'} missed (the region is shorter than the daemon's tick)`
+              : '';
+          say(`${takes.length} take${takes.length === 1 ? '' : 's'} landed${lost}; ${takes.at(-1)!.landed.asset} is chosen`);
+        }
         for (const { take } of takes) {
           if (take.dropped !== undefined && take.dropped > 0) {
             say(`warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);

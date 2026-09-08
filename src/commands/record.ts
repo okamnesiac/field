@@ -106,6 +106,24 @@ function sleep(ms: number): Promise<void> {
 
 export interface RecordedTakes {
   takes: { take: Take; landed: LandedTake }[]; // in the order they landed
+  // Loop passes that began with no transaction ready and were skipped
+  // (recording.md §15.4) — the daemon counts them so the set of takes is
+  // never silently smaller than the set of passes.
+  missed: number;
+}
+
+// The loop's progress on the live line: which pass this is, and how
+// many passes were lost, whenever any were. A lost pass is the one fact
+// a performer looping a short region cannot hear, so it is never
+// folded into the count of what arrived (minjudd's finding on #170).
+export function passesNote(record: {
+  loop?: boolean | undefined;
+  loop_takes?: number | undefined;
+  missed?: number | undefined;
+}): string {
+  if (record.loop !== true) return '';
+  const missed = record.missed ?? 0;
+  return `  take ${(record.loop_takes ?? 0) + 1}${missed > 0 ? `, ${missed} pass${missed === 1 ? '' : 'es'} missed` : ''}`;
 }
 
 export async function recordTake(
@@ -128,13 +146,13 @@ export async function recordTake(
   // Each take lands as it arrives — under a loop, while the next one is
   // already recording — so the flow is one landing per manifest.
   const takes: RecordedTakes['takes'] = [];
-  await captureTakes(root, project, resolved, options, hooks, async (take) => {
+  const { missed } = await captureTakes(root, project, resolved, options, hooks, async (take) => {
     const landed = await landTake(root, take, options);
     takes.push({ take, landed });
     hooks.onTake?.(landed);
   });
   if (takes.length === 0) throw new Error('no take was recorded');
-  return { takes };
+  return { takes, missed };
 }
 
 // The daemon half: arm, take, finalize. Calls `land` with each finalized
@@ -146,7 +164,7 @@ async function captureTakes(
   options: RecordOptions,
   hooks: RecordHooks,
   land: (take: Take) => Promise<void>,
-): Promise<void> {
+): Promise<{ missed: number }> {
   const client = await AudiodClient.connect(root);
   try {
     if (!client.supports('record')) {
@@ -271,6 +289,7 @@ async function captureTakes(
     };
     client.on('event', onEvent);
     let transaction: string | undefined;
+    let missed = 0; // the daemon's count, as last seen while the loop ran
     try {
       const started = await client.record(at, start, until, options.loop === true);
       transaction = started.transaction;
@@ -297,7 +316,7 @@ async function captureTakes(
     if (!landedAny) {
       throw new Error(`the take ended but its manifest never arrived (${transaction ?? 'no transaction'})`);
     }
-    return;
+    return { missed };
 
     async function followTake(started: { transaction: string; started_at_samples: number }): Promise<void> {
       // A pre-rolled take reports -1 until the callback reaches its
@@ -336,8 +355,8 @@ async function captureTakes(
           hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(s.record.started_at_samples, rate, ctx)}`);
         }
         const elapsed = s.record.frames !== undefined ? ` ${(s.record.frames / armed.sample_rate).toFixed(1)}s` : '';
-        const passes = s.record.loop === true ? `  take ${(s.record.loop_takes ?? 0) + 1}` : '';
-        hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${meterLine(s.record.input_peak)}${elapsed}${passes}`);
+        missed = s.record.missed ?? missed;
+        hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${meterLine(s.record.input_peak)}${elapsed}${passesNote(s.record)}`);
         await sleep(250);
       }
       if (endedItself) await client.stop().catch(() => {});

@@ -11,7 +11,7 @@ import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { playLiveSession } from './play.js';
-import { recordTake } from './record.js';
+import { passesNote, recordTake } from './record.js';
 
 // Punch-out, the region loop, and loop takes (recording.md §10.4,
 // chunk 4). The null clock's sawtooth (player.cpp) is what makes the
@@ -57,6 +57,16 @@ function assertContinues(previous: Float32Array, next: Float32Array): void {
   const d = next[0]! - previous[previous.length - 1]!;
   expect(Math.abs(d - SAW_STEP) < 1e-6 || Math.abs(d - (SAW_STEP - 2)) < 1e-6).toBe(true);
 }
+
+describe('the loop line', () => {
+  it('names the pass, and says how many passes were lost whenever any were', () => {
+    expect(passesNote({})).toBe('');
+    expect(passesNote({ loop: true, loop_takes: 0, missed: 0 })).toBe('  take 1');
+    expect(passesNote({ loop: true, loop_takes: 5 })).toBe('  take 6');
+    expect(passesNote({ loop: true, loop_takes: 5, missed: 1 })).toBe('  take 6, 1 pass missed');
+    expect(passesNote({ loop: true, loop_takes: 7, missed: 2 })).toBe('  take 8, 2 passes missed');
+  });
+});
 
 describe.skipIf(!binary)('punch-out and loop takes', () => {
   let root: string;
@@ -263,6 +273,7 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
       },
     );
     expect(lines[1]).toMatch(/to 2\.3\.1 \(0:03\.0\), looping — a take per pass$/);
+    expect(looped.missed).toBe(0); // a bar-long region is well past the daemon's tick
     // Three full passes and the partial one ctrl-c ended, all landed, all
     // at the region's top, the last one chosen.
     expect(looped.takes.length).toBeGreaterThanOrEqual(4);

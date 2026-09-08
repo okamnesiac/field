@@ -187,7 +187,8 @@ finalizes, and `field record --loop` lands them as they arrive, the last
 one chosen, until ctrl-c — whose partial pass is a take too. A pass that
 begins before the previous one was serviced is counted in
 `record.missed` rather than recorded twice; regions shorter than a
-heartbeat tick are where that would happen.
+heartbeat tick are where that would happen, and `field record` says so
+on its live line and in its closing tally.
 
 The region loop is the live session's own (`loop {from, to}`, `to`
 defaulting to the content's extent): the clock wraps from `to` back to
