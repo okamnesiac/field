@@ -49,6 +49,37 @@ export interface RemoteClientOptions {
   fetch?: typeof fetch;
 }
 
+// Every conversation is HTTPS (remote.md §4), and this is where that is
+// enforced rather than assumed: a token crosses the network on the
+// first authenticated call, and the device-code exchange hands one back
+// over the same connection, so a cleartext base is refused before either
+// happens. Plain `http` is accepted only for a loopback host, which is
+// how anyone runs the CLI against a site on their own machine and how
+// the tests reach their in-process stub. Whichever route produced the
+// URL — an origin, `FIELD_REMOTE`, `--remote` — lands here (minjudd on
+// #171: the origin route accepted `http://git.example.com` and would
+// have sent the bearer in the clear).
+export function cleartextReason(base: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return `${base} is not a URL`;
+  }
+  if (url.protocol === 'https:') return undefined;
+  if (url.protocol === 'http:' && isLoopbackHost(url.hostname)) return undefined;
+  return (
+    `refusing to send a token in the clear to ${base} — a remote must be https ` +
+    `(plain http is allowed only for localhost)`
+  );
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  // URL brackets IPv6 hostnames: `http://[::1]:3000` reads back as `[::1]`.
+  const host = hostname.replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
 export class RemoteClient {
   readonly base: string;
   private readonly token: string | undefined;
@@ -57,6 +88,8 @@ export class RemoteClient {
 
   constructor(base: string, options: RemoteClientOptions = {}) {
     this.base = base.replace(/\/+$/, '');
+    const cleartext = cleartextReason(this.base);
+    if (cleartext !== undefined) throw new RemoteError('protocol', cleartext);
     this.token = options.token;
     this.fetchImpl = options.fetch ?? fetch;
   }

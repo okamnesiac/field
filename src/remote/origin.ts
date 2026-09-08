@@ -1,4 +1,5 @@
 import { tryGit } from '../git.js';
+import { cleartextReason } from './client.js';
 
 // Which remote a project talks to (remote.md §5 decision 3): the origin,
 // read from Git, with `FIELD_REMOTE` as the override. A project cloned
@@ -50,10 +51,17 @@ export function parseCloneUrl(url: string): { slug?: { owner: string; project: s
   const owner = segments.at(-2);
   const slug = owner !== undefined && project !== undefined && project !== '' ? { owner, project } : undefined;
   const host = parsed.hostname;
-  const api =
+  const candidate =
     (parsed.protocol === 'https:' || parsed.protocol === 'http:') && host.startsWith('git.') && host.length > 4
       ? `${parsed.protocol}//${host.slice(4)}${parsed.port ? `:${parsed.port}` : ''}`
       : undefined;
+  // A base the client would refuse is no base at all: an origin on plain
+  // http anywhere but loopback gives the project no remote rather than a
+  // remote every build fails against, because the scheme was inherited
+  // from `git remote get-url`, not typed (remote.md §5 decision 12 as
+  // amended). `FIELD_REMOTE` and `--remote` are typed, and the client
+  // refuses those loudly instead.
+  const api = candidate !== undefined && cleartextReason(candidate) === undefined ? candidate : undefined;
   return { ...(slug ? { slug } : {}), ...(api ? { api } : {}) };
 }
 
@@ -76,7 +84,8 @@ export function resolveProjectRemote(
   }
   const api = override !== undefined && override !== '' ? override.replace(/\/+$/, '') : parsed.api;
   if (api === undefined) {
-    return { kind: 'none', reason: `origin ${url} is not an audiofield git host (git.<site>)` };
+    const cleartext = /^http:/.test(url) ? ' over plain http, which a remote must not be' : '';
+    return { kind: 'none', reason: `origin ${url} is not an audiofield git host (git.<site>)${cleartext}` };
   }
   return { kind: 'remote', remote: { api, ...parsed.slug } };
 }

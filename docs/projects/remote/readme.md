@@ -446,6 +446,17 @@ decision 13.
     recognizing any host* — a GitHub origin would then be asked
     `/api/hello` on every build and told "not an audiofield remote"
     once per build, for a project that never wanted a remote.
+    *Amended (2026-09-08, minjudd on #171):* the derivation accepted
+    `http:` for any host, so an origin of `http://git.example.com/…`
+    yielded a base the client then sent a bearer to, against §4's
+    first sentence. Now `RemoteClient` refuses any base that is not
+    `https` or loopback `http` before a token or device code can cross
+    it, whichever route produced the URL; an origin on cleartext
+    yields no remote at all rather than a remote every build fails
+    against, because its scheme was inherited rather than typed, while
+    a typed `FIELD_REMOTE` or `--remote` on cleartext is refused loudly.
+    The reviewer left `FIELD_REMOTE` to judgement; holding it to the
+    same rule won because a warning still sends the token.
 
 13. **Git gets the token through `field git-credential`** (2026-09-08,
     chunk 3). `clone` configures the helper for the git host and

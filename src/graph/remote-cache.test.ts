@@ -287,5 +287,10 @@ describe('remoteReads', () => {
     expect(remoteReads(root, { env, store, noRemote: true })).toBeUndefined();
     expect(remoteReads(root, { env: { FIELD_REMOTE: 'off' }, store })).toBeUndefined();
     expect(remoteReads(root, { env: {}, store })).toBeUndefined(); // a bare path is not an audiofield host
+    // A typed cleartext override is refused loudly rather than ignored
+    // (minjudd on #171): the person asked for it and gets told why not.
+    expect(() => remoteReads(root, { env: { FIELD_REMOTE: 'http://staging.example' }, store })).toThrow(
+      /in the clear.*https/,
+    );
   });
 });

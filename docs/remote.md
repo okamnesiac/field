@@ -148,6 +148,13 @@ A project whose `origin` is not an audiofield git host, and has no
 `FIELD_REMOTE`, has no remote, and every command behaves as it did
 before this existed.
 
+Every conversation is HTTPS. Plain `http` is accepted only for a
+loopback host (`localhost`, `127.0.0.1`, `::1`), which is how you run
+the CLI against a site on your own machine. An `origin` on plain `http`
+anywhere else gives the project no remote, and a plain-`http`
+`FIELD_REMOTE` or `--remote` is refused with a message saying so, before
+a token or a device-code exchange can cross the network in the clear.
+
 ## The contract
 
 The remote's API is versioned the way the daemons' protocols are. The

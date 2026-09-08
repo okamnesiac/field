@@ -27,6 +27,19 @@ describe('parseCloneUrl', () => {
     });
   });
 
+  it('derives no API from plain http anywhere but loopback (minjudd on #171)', () => {
+    // Every conversation is HTTPS (remote.md §4). An origin on cleartext
+    // http would have yielded a base the client then sent a bearer to;
+    // now it yields no base, and the project simply has no remote.
+    expect(parseCloneUrl('http://git.example.com/howlo/chemicals.git')).toEqual({
+      slug: { owner: 'howlo', project: 'chemicals' },
+    });
+    expect(parseCloneUrl('http://git.127.0.0.1.nip.io/howlo/chemicals')).toEqual({
+      slug: { owner: 'howlo', project: 'chemicals' },
+    });
+    expect(parseCloneUrl('http://git.localhost/howlo/chemicals').api).toBe('http://localhost');
+  });
+
   it('gives a slug but no API for hosts Field does not recognize', () => {
     expect(parseCloneUrl('https://github.com/okamnesiac/field.git')).toEqual({
       slug: { owner: 'okamnesiac', project: 'field' },
@@ -70,6 +83,13 @@ describe('resolveProjectRemote', () => {
     expect(resolveProjectRemote(root, {})).toMatchObject({ kind: 'none' });
     git(['remote', 'add', 'origin', 'https://github.com/okamnesiac/field.git'], { cwd: root });
     expect(resolveProjectRemote(root, {})).toMatchObject({ kind: 'none', reason: expect.stringContaining('git.<site>') });
+    // A cleartext audiofield-shaped origin is the same answer, and the
+    // reason says why, so the silence can be explained.
+    git(['remote', 'set-url', 'origin', 'http://git.example.com/howlo/chemicals.git'], { cwd: root });
+    expect(resolveProjectRemote(root, {})).toMatchObject({
+      kind: 'none',
+      reason: expect.stringContaining('plain http'),
+    });
   });
 
   it('lets FIELD_REMOTE supply the API base for any origin with a slug', () => {

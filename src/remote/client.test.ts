@@ -24,6 +24,17 @@ const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 const key = 'a'.repeat(64);
 
 describe('RemoteClient', () => {
+  it('refuses a cleartext base before any token can cross it (minjudd on #171)', () => {
+    // Every conversation is HTTPS (remote.md §4); plain http only for a
+    // loopback host, which is how a site on this machine is reached.
+    expect(() => new RemoteClient('http://example.com', { token: 't' })).toThrow(/in the clear.*https/);
+    expect(() => new RemoteClient('http://git.example.com:8080')).toThrow(/in the clear/);
+    expect(() => new RemoteClient('not a url')).toThrow(/not a URL/);
+    for (const ok of ['https://audiofield.io', 'http://localhost:3000', 'http://127.0.0.1:1', 'http://[::1]:1']) {
+      expect(new RemoteClient(ok).base).toBe(ok);
+    }
+  });
+
   it('says hello once per client and gates on protocol, not version', async () => {
     const r = await remote();
     const client = new RemoteClient(r.url);
