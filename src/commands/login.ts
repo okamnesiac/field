@@ -132,17 +132,24 @@ export function gitCredentialGet(
   if (protocol === undefined || host === undefined) return undefined;
   // The git host implies the API host (origin.ts), and the token is
   // filed under the API host.
-  const api = parseCloneUrl(`${protocol}://${host}/x/y`).api;
+  const gitHost = `${protocol}://${host}`;
+  const api = parseCloneUrl(`${gitHost}/x/y`).api;
   const override = env['FIELD_REMOTE'];
-  const candidates = [
-    ...(api !== undefined ? [api] : []),
-    ...(override !== undefined && override !== '' && override !== 'off' ? [override.replace(/\/+$/, '')] : []),
-  ];
-  for (const remote of candidates) {
-    const found = resolveToken(remote, store, env);
-    if (found) return `username=${GIT_CREDENTIAL_USERNAME}\npassword=${found.token}\n`;
+  const current =
+    override !== undefined && override !== '' && override !== 'off' ? override.replace(/\/+$/, '') : DEFAULT_REMOTE;
+  // Only the remote this shell points at gets the full resolution,
+  // FIELD_TOKEN included. Any other host — `git.sr.ht` derives an API
+  // like anything else, and `clone` registers the helper for whatever
+  // it cloned — gets only a token someone logged in to it deliberately,
+  // never the environment's (audiofield on #171: FIELD_TOKEN was handed
+  // to every https git.* host the helper was ever asked about).
+  let token: string | undefined;
+  if (api === current || gitHost === current) {
+    token = resolveToken(current, store, env)?.token;
+  } else if (api !== undefined) {
+    token = store.read(api)?.token;
   }
-  return undefined;
+  return token === undefined ? undefined : `username=${GIT_CREDENTIAL_USERNAME}\npassword=${token}\n`;
 }
 
 function openBrowser(url: string): void {

@@ -175,4 +175,27 @@ describe('gitCredentialGet', () => {
       gitCredentialGet('protocol=http\nhost=127.0.0.1:9\n\n', store, { FIELD_REMOTE: 'http://127.0.0.1:9' }),
     ).toBe('username=field\npassword=stub\n');
   });
+
+  it('never hands an environment token to a host the shell is not pointed at (audiofield on #171)', () => {
+    // `git.sr.ht` derives an API like any git.* host, and `field clone`
+    // registers the helper for whatever it cloned, so after cloning
+    // from there a fetch asks this helper. FIELD_TOKEN belongs to the
+    // current remote and must not go out.
+    const store = fileStore(join(dir, 'credentials'));
+    expect(gitCredentialGet('protocol=https\nhost=git.sr.ht\n\n', store, { FIELD_TOKEN: 'ci' })).toBeUndefined();
+    // Nor does the FIELD_REMOTE token go to some other host...
+    store.write('https://staging.audiofield.io', { token: 'staging' });
+    const env = { FIELD_REMOTE: 'https://staging.audiofield.io' };
+    expect(gitCredentialGet('protocol=https\nhost=git.sr.ht\n\n', store, env)).toBeUndefined();
+    // ...only to its own git host.
+    expect(gitCredentialGet('protocol=https\nhost=git.staging.audiofield.io\n\n', store, env)).toBe(
+      'username=field\npassword=staging\n',
+    );
+    // A token someone logged in to sr.ht for on purpose is theirs to
+    // send there — and it, not FIELD_TOKEN, is what goes.
+    store.write('https://sr.ht', { token: 'sourcehut' });
+    expect(gitCredentialGet('protocol=https\nhost=git.sr.ht\n\n', store, { FIELD_TOKEN: 'ci' })).toBe(
+      'username=field\npassword=sourcehut\n',
+    );
+  });
 });

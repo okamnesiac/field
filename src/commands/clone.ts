@@ -109,17 +109,17 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
   // `-c` sets the variable in the new repository's config before the
   // fetch, so it applies to this clone and persists for every later
   // push and pull. The helper is `field git-credential`, so Git and the
-  // API share one stored token (audiofield-io.md §5.5). proactiveAuth
-  // (git 2.46+) sends the token without a 401 probe first — and only
-  // when there is a token to send: with the option set and no
-  // credential, Git asks for a username before its first request, which
-  // turns an anonymous clone of a public project into a prompt (probed
-  // against git.audiofield.io, 2026-09-08). Only for a host Field
-  // recognizes — a clone from GitHub gets Git's own defaults.
-  const config =
-    remote !== undefined && /^https?:\/\//.test(cloneUrl)
-      ? gitConfigForRemote(cloneUrl, { withToken: resolveToken(remote.api, store, env) !== undefined })
-      : [];
+  // API share one stored token (audiofield-io.md §5.5). Only for a host
+  // Field recognizes — a clone from GitHub gets Git's own defaults.
+  //
+  // No http.proactiveAuth here, deliberately (remote.md §5 decision 13
+  // as amended twice): it is a property of "a token is held now", and a
+  // setting written at clone time goes stale — with it set and no
+  // credential, Git asks for a username before its first request, so an
+  // anonymous clone would prompt (probed against git.audiofield.io,
+  // 2026-09-08) and so would any checkout after `field logout`. The
+  // verbs that hold a token, push and pull, pass it per invocation.
+  const config = remote !== undefined && /^https?:\/\//.test(cloneUrl) ? gitConfigForRemote(cloneUrl) : [];
   git(['clone', ...config.flatMap(([k, v]) => ['-c', `${k}=${v}`]), cloneUrl, dir], {
     cwd: options.cwd,
     interactive: options.interactive ?? true,
@@ -130,14 +130,18 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
 }
 
 // The config a clone from an audiofield git host carries, as pairs, so a
-// test can assert on the list without cloning over HTTP. The helper
-// always; proactive auth only when a token is held, because Git prompts
-// for one otherwise before it has even asked the server.
-export function gitConfigForRemote(cloneUrl: string, options: { withToken: boolean }): [string, string][] {
+// test can assert on the list without cloning over HTTP. The empty value
+// first: it resets the helper list for this host, so a global helper —
+// osxkeychain on every Mac that has used GitHub — never sees the token.
+// Left in the list ahead of ours, it would store a copy on the first
+// successful push and serve that copy first ever after, a copy `field
+// logout` does not know to erase (audiofield on #171).
+export function gitConfigForRemote(cloneUrl: string): [string, string][] {
   const url = new URL(cloneUrl);
+  const key = `credential.${url.protocol}//${url.host}.helper`;
   return [
-    ...(options.withToken ? [['http.proactiveAuth', 'basic'] as [string, string]] : []),
-    [`credential.${url.protocol}//${url.host}.helper`, '!field git-credential'],
+    [key, ''],
+    [key, '!field git-credential'],
   ];
 }
 

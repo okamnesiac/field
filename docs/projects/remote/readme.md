@@ -477,6 +477,21 @@ decision 13.
     always configured; a `login` after an anonymous clone costs that
     checkout one 401 probe per push until `push` sets the option
     itself, which is the push chunk's job.
+    *Amended again (2026-09-08, audiofield's read of #171):* `clone`
+    persists no `http.proactiveAuth` at all. A clone-time snapshot of
+    "a token is held" goes stale the moment `logout` runs, and that
+    checkout then prompts for a username on every fetch; `push` and
+    `pull` pass the option per invocation when they hold a token, which
+    is the only moment the fact is known to be true. Two more from the
+    same read: the helper is registered behind an empty value that
+    resets the helper list for the host, because a global osxkeychain
+    helper ahead of it would store a copy of the token on the first
+    successful push and serve that copy first ever after — one `logout`
+    never erases; and the helper answers `FIELD_TOKEN` or the
+    `FIELD_REMOTE` token only for the remote the shell points at,
+    since any `git.*` host derives an API and `clone` registers the
+    helper for whatever it cloned, so `git fetch` from `git.sr.ht`
+    would otherwise have carried the audiofield token.
 
 14. **The engine's default is no remote; the command layer resolves
     it** (2026-09-08, chunk 2, refining decision 11). `build()` and
@@ -738,7 +753,9 @@ watch and misses it.
   so no public project exists yet to clone; and `http.proactiveAuth=
   basic` with no credential makes Git ask for a username before its
   first request even against a public repository (`git/git`), which is
-  why decision 13 was amended to set it only when a token is held.
+  why decision 13 was amended — first to set it only when a token is
+  held, then to leave it out of `clone` altogether and have `push` and
+  `pull` pass it per invocation.
   Facts the push chunk builds to, from the host's author: the token is
   the basic-auth password and the username is ignored; a private
   project is 401 anonymously and 404 to a token without access; the

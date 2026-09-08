@@ -221,18 +221,32 @@ describe('field clone', () => {
     await expect(clone(opts)).rejects.toThrow('already exists');
   });
 
-  it('configures the credential helper for an audiofield git host, and proactive auth only with a token', () => {
-    // With http.proactiveAuth set and no credential, Git asks for a
-    // username before its first request — probed against
-    // git.audiofield.io — so an anonymous clone of a public project must
-    // not carry it.
-    expect(gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git', { withToken: true })).toEqual([
-      ['http.proactiveAuth', 'basic'],
+  it('configures only the credential helper for an audiofield git host, ahead of a reset list', () => {
+    // No http.proactiveAuth: with it set and no credential, Git asks for
+    // a username before its first request — probed against
+    // git.audiofield.io — so an anonymous clone, or any checkout after
+    // logout, would prompt. The reset keeps a global osxkeychain helper
+    // from caching a copy of the token that logout never erases.
+    expect(gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git')).toEqual([
+      ['credential.https://git.audiofield.io.helper', ''],
       ['credential.https://git.audiofield.io.helper', '!field git-credential'],
     ]);
-    expect(gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git', { withToken: false })).toEqual([
-      ['credential.https://git.audiofield.io.helper', '!field git-credential'],
-    ]);
+  });
+
+  it('a reset-then-set helper list is what Git reads back', () => {
+    // The pair above is only right if Git honours an empty value as a
+    // reset when it arrives through `clone -c`; a repository configured
+    // the same way shows both entries in order.
+    const repo = join(tmp, 'helper-config');
+    git(['init', '-q', repo], { cwd: tmp });
+    for (const [k, v] of gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git')) {
+      git(['config', '--add', k, v], { cwd: repo });
+    }
+    // NUL-separated, because the empty entry is the point and a trimmed
+    // line-separated read would lose it.
+    expect(git(['config', '--get-all', '-z', 'credential.https://git.audiofield.io.helper'], { cwd: repo })).toBe(
+      '\0!field git-credential\0',
+    );
   });
 
   it('describes a warm in one line each way', () => {
