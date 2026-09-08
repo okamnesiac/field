@@ -99,14 +99,35 @@ export function gitRemote(verb: 'push' | 'pull', root: string, token: string | u
 // and whether a token is held, so a test can assert on them without a
 // network. Nothing without a token: an anonymous push of a public
 // project is Git's own business.
-export function remoteGitConfig(origin: string | undefined, token: string | undefined): string[] {
+export function remoteGitConfig(
+  origin: string | undefined,
+  token: string | undefined,
+  helper: string = runningCliHelper(),
+): string[] {
   if (token === undefined) return [];
   const config: string[] = [];
   if (origin !== undefined && /^https?:\/\//.test(origin)) {
-    for (const [k, v] of gitConfigForRemote(origin)) config.push('-c', `${k}=${v}`);
+    for (const [k, v] of gitConfigForRemote(origin)) config.push('-c', `${k}=${v === '' ? '' : helper}`);
   }
   config.push('-c', 'http.proactiveAuth=basic');
   return config;
+}
+
+// The helper as a shell command naming this very CLI, not whatever
+// `field` resolves to on PATH. `clone` writes `!field git-credential`
+// into a checkout because a path would go stale with the next install,
+// but a push runs now: the first push against the live site was made
+// from a checkout's dist/ while an older `field` sat on PATH, and Git
+// was handed a helper without the subcommand. A script that is not
+// compiled JavaScript — `tsx src/cli.ts` — cannot be re-run by node, so
+// it falls back to the PATH form.
+export function runningCliHelper(execPath: string = process.execPath, script: string | undefined = process.argv[1]): string {
+  if (script !== undefined && /\.(c|m)?js$/.test(script)) return `!${shellQuote(execPath)} ${shellQuote(script)} git-credential`;
+  return '!field git-credential';
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 // The offer, song by song: `explain` on `main` with no remote walks every

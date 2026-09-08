@@ -6,7 +6,7 @@ import { buildLabels } from './build.js';
 import { createSong } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
-import { describeOffer, push, remoteGitConfig } from './push.js';
+import { describeOffer, push, remoteGitConfig, runningCliHelper } from './push.js';
 import { git } from '../git.js';
 import { fileStore } from '../remote/credentials.js';
 import { fakeRemote, type FakeRemote } from '../testing/fake-remote.js';
@@ -190,7 +190,8 @@ describe('field push', () => {
   });
 
   it('carries the credential helper and proactive auth only when a token is held', () => {
-    expect(remoteGitConfig('https://git.audiofield.io/howlo/chemicals.git', 'tok')).toEqual([
+    const helper = '!field git-credential';
+    expect(remoteGitConfig('https://git.audiofield.io/howlo/chemicals.git', 'tok', helper)).toEqual([
       '-c',
       'credential.https://git.audiofield.io.helper=',
       '-c',
@@ -199,8 +200,20 @@ describe('field push', () => {
       'http.proactiveAuth=basic',
     ]);
     // A file:// origin gets the auth flag alone; no token gets nothing.
-    expect(remoteGitConfig('file:///tmp/x.git', 'tok')).toEqual(['-c', 'http.proactiveAuth=basic']);
-    expect(remoteGitConfig('https://git.audiofield.io/howlo/chemicals.git', undefined)).toEqual([]);
+    expect(remoteGitConfig('file:///tmp/x.git', 'tok', helper)).toEqual(['-c', 'http.proactiveAuth=basic']);
+    expect(remoteGitConfig('https://git.audiofield.io/howlo/chemicals.git', undefined, helper)).toEqual([]);
+  });
+
+  it('names the running CLI in the helper, not whatever field is on PATH', () => {
+    // The first push against the live site ran from a checkout's dist/
+    // while an older `field` sat on PATH, and Git was handed a helper
+    // without the subcommand.
+    expect(runningCliHelper('/usr/local/bin/node', "/Users/x y/field's/dist/cli.js")).toBe(
+      "!'/usr/local/bin/node' '/Users/x y/field'\\''s/dist/cli.js' git-credential",
+    );
+    // A TypeScript entry point cannot be re-run by node: the PATH form.
+    expect(runningCliHelper('/usr/local/bin/node', '/checkout/src/cli.ts')).toBe('!field git-credential');
+    expect(runningCliHelper('/usr/local/bin/node', '')).toBe('!field git-credential');
   });
 
   it('describes an offer in one line each way', () => {
