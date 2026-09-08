@@ -88,10 +88,12 @@ project has no audio yet.
 A full clone URL works where a short name is expected, so a project
 hosted anywhere Git reaches can still be cloned; only the expansion and
 the warm need the remote's API. For an audiofield git host, the clone is
-configured with `http.proactiveAuth=basic` (Git 2.46 and later) so Git
-sends the token without a 401 round trip, and with `field
-git-credential` as the credential helper for that host, so Git over
-HTTPS and the API share the one stored token.
+configured with `field git-credential` as the credential helper for that
+host, so Git over HTTPS and the API share the one stored token, and,
+when you are logged in, with `http.proactiveAuth=basic` (Git 2.46 and
+later) so Git sends the token without a 401 round trip. An anonymous
+clone does not get proactive auth: with it set and no credential, Git
+asks for a username before its first request.
 
 ## The read-through cache
 

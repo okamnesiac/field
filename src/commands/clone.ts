@@ -108,11 +108,18 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
   options.out(`cloning ${cloneUrl} into ${dirName}`);
   // `-c` sets the variable in the new repository's config before the
   // fetch, so it applies to this clone and persists for every later
-  // push and pull. proactiveAuth (git 2.46+) sends the token without a
-  // 401 probe first; the helper is `field git-credential`, so Git and the
-  // API share one stored token (audiofield-io.md §5.5). Only for a host
-  // Field recognizes — a clone from GitHub gets Git's own defaults.
-  const config = remote !== undefined && /^https?:\/\//.test(cloneUrl) ? gitConfigForRemote(cloneUrl) : [];
+  // push and pull. The helper is `field git-credential`, so Git and the
+  // API share one stored token (audiofield-io.md §5.5). proactiveAuth
+  // (git 2.46+) sends the token without a 401 probe first — and only
+  // when there is a token to send: with the option set and no
+  // credential, Git asks for a username before its first request, which
+  // turns an anonymous clone of a public project into a prompt (probed
+  // against git.audiofield.io, 2026-09-08). Only for a host Field
+  // recognizes — a clone from GitHub gets Git's own defaults.
+  const config =
+    remote !== undefined && /^https?:\/\//.test(cloneUrl)
+      ? gitConfigForRemote(cloneUrl, { withToken: resolveToken(remote.api, store, env) !== undefined })
+      : [];
   git(['clone', ...config.flatMap(([k, v]) => ['-c', `${k}=${v}`]), cloneUrl, dir], {
     cwd: options.cwd,
     interactive: options.interactive ?? true,
@@ -123,11 +130,13 @@ export async function clone(options: CloneOptions): Promise<CloneResult> {
 }
 
 // The config a clone from an audiofield git host carries, as pairs, so a
-// test can assert on the list without cloning over HTTP.
-export function gitConfigForRemote(cloneUrl: string): [string, string][] {
+// test can assert on the list without cloning over HTTP. The helper
+// always; proactive auth only when a token is held, because Git prompts
+// for one otherwise before it has even asked the server.
+export function gitConfigForRemote(cloneUrl: string, options: { withToken: boolean }): [string, string][] {
   const url = new URL(cloneUrl);
   return [
-    ['http.proactiveAuth', 'basic'],
+    ...(options.withToken ? [['http.proactiveAuth', 'basic'] as [string, string]] : []),
     [`credential.${url.protocol}//${url.host}.helper`, '!field git-credential'],
   ];
 }

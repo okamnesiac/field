@@ -221,9 +221,16 @@ describe('field clone', () => {
     await expect(clone(opts)).rejects.toThrow('already exists');
   });
 
-  it('configures proactive auth and the credential helper for an audiofield git host', () => {
-    expect(gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git')).toEqual([
+  it('configures the credential helper for an audiofield git host, and proactive auth only with a token', () => {
+    // With http.proactiveAuth set and no credential, Git asks for a
+    // username before its first request — probed against
+    // git.audiofield.io — so an anonymous clone of a public project must
+    // not carry it.
+    expect(gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git', { withToken: true })).toEqual([
       ['http.proactiveAuth', 'basic'],
+      ['credential.https://git.audiofield.io.helper', '!field git-credential'],
+    ]);
+    expect(gitConfigForRemote('https://git.audiofield.io/howlo/chemicals.git', { withToken: false })).toEqual([
       ['credential.https://git.audiofield.io.helper', '!field git-credential'],
     ]);
   });

@@ -469,6 +469,14 @@ decision 13.
     would have to be spawned by Field to carry it. *Rejected: copying
     the token into Git's own credential store* — a second copy that
     `logout` would have to find, and that outlives it when it cannot.
+    *Amended (2026-09-08, against the live git host):* proactive auth
+    is set only when a token is held at clone time. With
+    `http.proactiveAuth=basic` and no credential, Git asks for a
+    username before its first request, so an anonymous clone of a
+    public project would have become a prompt. The helper is still
+    always configured; a `login` after an anonymous clone costs that
+    checkout one 401 probe per push until `push` sets the option
+    itself, which is the push chunk's job.
 
 14. **The engine's default is no remote; the command layer resolves
     it** (2026-09-08, chunk 2, refining decision 11). `build()` and
@@ -724,3 +732,20 @@ watch and misses it.
   and asserts it arrives intact; the assertion skips with a note where
   the LFS filters are not configured. Whether CI's runner image ships
   them is recorded by the first CI run of that pull request.
+- 2026-09-08 — `git.audiofield.io` went live (okamnesiac/audiofield#17)
+  serving smart HTTP and LFS, before the API on `audiofield.io`. Probed
+  read-only from this side: `howlo/chemicals` answers 401 anonymously,
+  so no public project exists yet to clone; and `http.proactiveAuth=
+  basic` with no credential makes Git ask for a username before its
+  first request even against a public repository (`git/git`), which is
+  why decision 13 was amended to set it only when a token is held.
+  Facts the push chunk builds to, from the host's author: the token is
+  the basic-auth password and the username is ignored; a private
+  project is 401 anonymously and 404 to a token without access; the
+  first push to an unused name under the token's handle creates the
+  project; a default branch without `field.yaml` at the root is refused
+  as `[remote rejected] main -> main (no field.yaml)`; a racing push
+  loses as `fetch first` or `failed to update ref` depending on timing.
+  Until the API exists, `field clone` with the full git URL clones and
+  then reports that `https://audiofield.io` is not an audiofield remote
+  and warms nothing, which is the protocol check doing its job.
