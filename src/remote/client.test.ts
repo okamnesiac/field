@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -97,6 +97,25 @@ describe('RemoteClient', () => {
       expect(err).toBeInstanceOf(RemoteError);
       expect((err as RemoteError).kind).toBe('unreachable');
       expect((err as RemoteError).message).toMatch(/went idle for 0\.2s/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('abandons an upload that goes idle, under the same timer as a download', async () => {
+    // The uplink stalls: the remote takes the connection and never reads
+    // the body. Bounded by the gaps in the transfer, not by its size
+    // (minjudd on #172), so a large render on a slow link still lands.
+    const r = await remote({ stallUploads: true });
+    const client = new RemoteClient(r.url, { timeouts: { idle: 200 } });
+    const dir = mkdtempSync(join(tmpdir(), 'field-client-'));
+    try {
+      const blob = join(dir, 'blob');
+      writeFileSync(blob, 'a render that never lands');
+      const err = await client.upload(`${r.url}/upload/${key}`, blob).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RemoteError);
+      expect((err as RemoteError).kind).toBe('unreachable');
+      expect((err as RemoteError).message).toMatch(/upload to .* went idle for 0\.2s/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -43,6 +43,7 @@ export interface FakeRemoteOptions {
   noHello?: boolean | undefined; // 404 on /api/hello: not an audiofield site
   hang?: boolean | undefined; // never answer anything: the black-holed remote
   stallBlobs?: boolean | undefined; // start every blob and never finish it
+  stallUploads?: boolean | undefined; // accept an upload's connection and never read its body
   redirectTo?: string | undefined; // 307 every /api path to another origin
   // Exact-path overrides, checked first: a 400 with a message, say.
   answers?: Record<string, { status: number; body: unknown }> | undefined;
@@ -163,6 +164,7 @@ export async function fakeRemote(options: FakeRemoteOptions = {}): Promise<FakeR
     // hashes it, the way the site stages an upload.
     const upload = /^\/upload\/([0-9a-f]{64})$/.exec(url.pathname);
     if (upload && method === 'PUT') {
+      if (options.stallUploads) return; // the body is never read: a stalled uplink
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(chunk as Buffer);
       staged.set(upload[1]!, Buffer.concat(chunks));

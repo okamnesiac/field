@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createWriteStream, readFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, statSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { z } from 'zod';
@@ -200,19 +200,32 @@ export class RemoteClient {
   // PUT one output's bytes to the URL the offer handed out. The URL is
   // presigned, so no token rides with it; the remote hashes what lands
   // at completion, and a mismatch there is refused, never registered.
+  // Streamed from disk, never buffered, under the same idle timer the
+  // download has: a render is the largest thing this CLI moves and a
+  // slow uplink is not a stall (minjudd on #172). The length goes in the
+  // header so the bucket sees one sized PUT rather than a chunked body.
   async upload(url: string, fromPath: string): Promise<void> {
-    const signal = AbortSignal.timeout(this.timeouts.idle * 10);
+    const idle = this.idleGuard(`upload to ${hostOf(url)}`);
     let res: Response;
     try {
+      const source = createReadStream(fromPath);
+      source.on('data', () => idle.arm());
       res = await this.fetchImpl(url, {
         method: 'PUT',
-        headers: { 'content-type': 'application/octet-stream', 'user-agent': userAgent() },
-        body: readFileSync(fromPath),
-        signal,
-      });
+        headers: {
+          'content-type': 'application/octet-stream',
+          'content-length': String(statSync(fromPath).size),
+          'user-agent': userAgent(),
+        },
+        body: Readable.toWeb(source) as ReadableStream,
+        duplex: 'half',
+        signal: idle.signal,
+      } as RequestInit);
     } catch (err) {
-      if (signal.aborted) throw new RemoteError('unreachable', `upload to ${hostOf(url)} did not finish in time`);
+      if (idle.signal.aborted) throw idle.signal.reason as RemoteError;
       throw new RemoteError('unreachable', `upload to ${hostOf(url)} failed: ${(err as Error).message}`);
+    } finally {
+      idle.clear();
     }
     if (!res.ok) throw new RemoteError('http', `upload to ${hostOf(url)} answered ${res.status}`, res.status);
   }
@@ -232,25 +245,11 @@ export class RemoteClient {
   // check belongs on the fetch path, not inside materialize() (remote.md
   // §2) — and never lets a disagreeing file reach the CAS.
   async download(url: string, toPath: string): Promise<{ sha256: string; bytes: number }> {
-    // Idle, not total: the timer re-arms on every chunk, so a slow link
-    // is fine and a stalled one is not.
-    const controller = new AbortController();
-    let timer: NodeJS.Timeout | undefined;
-    const arm = () => {
-      if (timer !== undefined) clearTimeout(timer);
-      timer = setTimeout(
-        () =>
-          controller.abort(
-            new RemoteError('unreachable', `download from ${hostOf(url)} went idle for ${this.timeouts.idle / 1000}s`),
-          ),
-        this.timeouts.idle,
-      );
-    };
+    const idle = this.idleGuard(`download from ${hostOf(url)}`);
     const hash = createHash('sha256');
     let bytes = 0;
-    arm();
     try {
-      const res = await this.fetchImpl(url, { headers: { 'user-agent': userAgent() }, signal: controller.signal });
+      const res = await this.fetchImpl(url, { headers: { 'user-agent': userAgent() }, signal: idle.signal });
       if (!res.ok || res.body === null) {
         throw new RemoteError('http', `download of ${url} answered ${res.status}`, res.status);
       }
@@ -258,17 +257,41 @@ export class RemoteClient {
       source.on('data', (chunk: Buffer) => {
         hash.update(chunk);
         bytes += chunk.length;
-        arm();
+        idle.arm();
       });
       await pipeline(source, createWriteStream(toPath));
     } catch (err) {
       if (err instanceof RemoteError) throw err;
-      if (controller.signal.aborted) throw controller.signal.reason as RemoteError;
+      if (idle.signal.aborted) throw idle.signal.reason as RemoteError;
       throw new RemoteError('unreachable', `download failed: ${(err as Error).message}`);
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      idle.clear();
     }
     return { sha256: hash.digest('hex'), bytes };
+  }
+
+  // Idle, not total: a timer that re-arms on every chunk, so a slow link
+  // is fine and a stalled one is not, and a large artifact is bounded by
+  // the gaps in its transfer rather than its size. Armed on creation, so
+  // a transfer that never starts is a stall too.
+  private idleGuard(what: string): { signal: AbortSignal; arm: () => void; clear: () => void } {
+    const controller = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    const arm = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(
+        () => controller.abort(new RemoteError('unreachable', `${what} went idle for ${this.timeouts.idle / 1000}s`)),
+        this.timeouts.idle,
+      );
+    };
+    arm();
+    return {
+      signal: controller.signal,
+      arm,
+      clear: () => {
+        if (timer !== undefined) clearTimeout(timer);
+      },
+    };
   }
 
   // --- plumbing ---
