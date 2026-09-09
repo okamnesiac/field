@@ -708,10 +708,16 @@ on the next `build`, as they do after any local change. Whether
 `pull` should materialize them itself so `field play` works with no
 build in between.
 
-Open (2026-09-08): `pull` is unbuilt. Note that `field play` builds
-before it plays and reads through, so on a warmed clone `play` already
-works with no `build` in between; the question is only what `pull`
-leaves under `.field/out`.
+Open (2026-09-08): note that `field play` builds before it plays and
+reads through, so on a warmed clone `play` already works with no
+`build` in between; the question is only what `pull` leaves under
+`.field/out`.
+
+*Amended (2026-09-08, as built):* `pull` is built, and it warms only —
+the CAS and the index — so `.field/out` refreshes on the next `build`,
+which is the status quo this section describes, now chosen by the
+implementation rather than by the verb not existing. Whether `pull`
+should materialize the pointers itself is still open.
 
 ### 9.10 Project license against asset licenses
 
