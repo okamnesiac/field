@@ -243,5 +243,6 @@ creek: fetched 2 artifacts (2.1 MB)
 A plain `git pull` keeps working and skips the warm; the next `field
 build` then reads through per miss instead.
 
-`field push` and `field pull` carry artifacts the other way from the cache, and are
-the next chunk of [remote.md](projects/remote/readme.md).
+With `push` and `pull` the remote's verbs are complete. What remains of
+[remote.md](projects/remote/readme.md) is its first chunk: `--json` on
+`explain` and `arrangement`, and `license` in `field.yaml`.
