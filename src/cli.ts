@@ -104,8 +104,9 @@ program
 
 // The remote verbs (remote.md §3). `login` and `logout` mint and forget a
 // token; `clone` expands a short name, clones with LFS, and warms the
-// cache; `git-credential` is the helper `clone` configures so Git shares
-// the stored token. `push` and `pull` arrive with the artifact offer.
+// cache; `push` and `pull` are Git's verbs with the artifact offer and
+// the warm behind them; `git-credential` is the helper that lets Git
+// share the stored token.
 program
   .command('login')
   .description('log in to an audiofield remote with a device code')
@@ -167,9 +168,41 @@ program
     }
   });
 
+// `push` and `pull` are `git push` and `git pull` with everything after
+// the verb handed to Git untouched, so `-u origin main` and `--force`
+// mean what they mean there; the offer and the warm follow.
+program
+  .command('push')
+  .description('git push, then offer the renders this machine holds to the remote')
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async (_opts: unknown, cmd: { args: string[] }) => {
+    try {
+      const { push } = await import('./commands/push.js');
+      await push({ cwd: process.cwd(), gitArgs: cmd.args, out: (line) => process.stdout.write(`${line}\n`) });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('pull')
+  .description('git pull, then warm the build cache for the new HEAD')
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async (_opts: unknown, cmd: { args: string[] }) => {
+    try {
+      const { pull } = await import('./commands/pull.js');
+      await pull({ cwd: process.cwd(), gitArgs: cmd.args, out: (line) => process.stdout.write(`${line}\n`) });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 // Git's credential helper, configured by `clone` as `!field
-// git-credential` for the git host. Git speaks to it on stdin/stdout;
-// nothing else calls it, hence hidden from --help.
+// git-credential` for the git host and passed per invocation by `push`
+// and `pull`. Git speaks to it on stdin/stdout; nothing else calls it,
+// hence hidden from --help.
 program
   .command('git-credential <operation>', { hidden: true })
   .action(async (operation: string) => {

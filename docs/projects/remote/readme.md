@@ -208,6 +208,19 @@ on push; an artifact the author never built is simply not offered.
 HEAD. Plain `git push` and `git pull` keep working unchanged; the
 site's worker fills what it can when no artifacts arrive.
 
+*Amended (2026-09-08, as built):* every entry beneath `main` is
+offered, not only the ones the remote lacks, because the site indexes
+its player by commit and label (audiofield-io.md §5.7) and an unchanged
+mix at a new commit needs a ref at that commit; the remote asks for no
+upload when it holds the bytes, so "upload only those" still holds for
+the bytes. The offer describes `HEAD`, so a working tree with
+uncommitted changes pushes and offers nothing, since keys computed from
+the files on disk would not be the commit's. And when a token is held,
+`push` and `pull` pass the credential helper for the origin's host per
+invocation as well as `http.proactiveAuth`, so a project made with
+`field init` needs only `field login` before its first push, which is
+what the site's own instructions say.
+
 ### 3.4 The read-through cache in `field build`
 
 When a project has a remote (§5 decision 3), a local miss in
@@ -695,10 +708,16 @@ on the next `build`, as they do after any local change. Whether
 `pull` should materialize them itself so `field play` works with no
 build in between.
 
-Open (2026-09-08): `pull` is unbuilt. Note that `field play` builds
-before it plays and reads through, so on a warmed clone `play` already
-works with no `build` in between; the question is only what `pull`
-leaves under `.field/out`.
+Open (2026-09-08): note that `field play` builds before it plays and
+reads through, so on a warmed clone `play` already works with no
+`build` in between; the question is only what `pull` leaves under
+`.field/out`.
+
+*Amended (2026-09-08, as built):* `pull` is built, and it warms only —
+the CAS and the index — so `.field/out` refreshes on the next `build`,
+which is the status quo this section describes, now chosen by the
+implementation rather than by the verb not existing. Whether `pull`
+should materialize the pointers itself is still open.
 
 ### 9.10 Project license against asset licenses
 
@@ -785,3 +804,22 @@ watch and misses it.
   failed, the LFS check testing the binary rather than the filter
   (decision 6, amended), a short name expanded under `FIELD_REMOTE=off`,
   and the destination check after the network call (clone).
+- 2026-09-08 — The `push`/`pull` half of chunk 4 (branch `remote/push`),
+  the day the site's artifact API and player landed
+  (okamnesiac/audiofield#22) and `audiofield.io` went live. `field
+  push` is `git push` plus the offer for `HEAD`, entry by entry:
+  `POST …/artifacts`, a PUT per output the remote lacks, and the
+  completion; `field pull` is `git pull` plus the clone's warm. The
+  client gains `offer`, `upload` and `complete`; the stub gains the
+  three routes with a staging area and a hash check at completion, as
+  the site does. Three things §3.3 now records as amended: every entry
+  beneath `main` is offered so the site has a ref per commit and
+  label, a dirty tree offers nothing, and the credential helper rides
+  per invocation with the proactive auth. The tests push a built
+  project to a bare repository with the stub as its API and assert the
+  bare has the commit, the stub has both entries under the commit's
+  labels with one blob between them, a second push moves nothing, a
+  dirty tree and a missing remote push without offering, and a refused
+  token is reported per song; `pull` from a plain clone warms two
+  entries and a build with a refusing runner is hits throughout.
+  Chunk 1 (`--json` and `license`) is what remains of the plan.
