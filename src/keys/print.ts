@@ -35,7 +35,7 @@ const EXTRA_POSITIONS: { position: string; label: string }[] = [
   { position: 'ArrowDown', label: '↓' },
 ];
 
-function signed(n: number): string {
+export function signed(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
 }
 

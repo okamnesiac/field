@@ -130,6 +130,32 @@ describe('controls', () => {
     expect(session.press('Space')).toEqual([[CC, 64, 0]]);
   });
 
+  it('turns a toggled controller off at quit, at panic, and on reload', () => {
+    const keymap = parseKeymap(
+      'name: t\nnotes: { KeyA: 0 }\ncontrols: { Space: { cc: 64, mode: toggle }, Backquote: panic }\n',
+      't.yaml',
+    );
+    const atQuit = new KeysSession(keymap);
+    atQuit.press('Space');
+    expect(atQuit.quit()).toEqual([
+      [CC, 64, 0],
+      [CC, 123, 0],
+    ]);
+
+    const atPanic = new KeysSession(keymap);
+    atPanic.press('Space');
+    expect(atPanic.press('Backquote')).toEqual([
+      [CC, 64, 0],
+      [CC, 123, 0],
+    ]);
+    expect(atPanic.quit()).toEqual([[CC, 123, 0]]);
+
+    const atReload = new KeysSession(keymap);
+    atReload.press('Space');
+    expect(atReload.setKeymap(keymap)).toEqual([[CC, 64, 0]]);
+    expect(atReload.press('Space')).toEqual([[CC, 64, 127]]);
+  });
+
   it('changes velocity within 1 to 127', () => {
     const session = musicalTyping();
     session.press('KeyV');

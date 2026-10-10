@@ -1,7 +1,7 @@
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
 import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
-import { printKeymap } from '../keys/print.js';
+import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
 import type { Keymap } from '../schema/keymap.js';
@@ -93,7 +93,7 @@ async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: st
             reloadError = result.error.problems[0];
           } else {
             reloadError = undefined;
-            session.setKeymap(result.keymap);
+            send(session.setKeymap(result.keymap));
             session.message ??= `reloaded ${result.keymap.name}`;
           }
           draw();
@@ -136,12 +136,11 @@ async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: st
 }
 
 function statusText(session: KeysSession, layout: KeyboardLayout | undefined, reloadError: string | undefined): string {
-  const transpose = session.transpose > 0 ? `+${session.transpose}` : `${session.transpose}`;
   const notes = session.soundingNotes();
   const parts = [
     SOURCE_NAME,
     session.keymap.name,
-    `transpose ${transpose}`,
+    `transpose ${signed(session.transpose)}`,
     `velocity ${session.velocity}`,
     notes.length > 0 ? notes.join(' ') : '–',
   ];

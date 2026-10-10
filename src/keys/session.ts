@@ -1,5 +1,5 @@
 import type { Keymap, KeymapAction } from '../schema/keymap.js';
-import { noteName } from './print.js';
+import { noteName, signed } from './print.js';
 import { MOD_ALT, MOD_CTRL, MOD_HYPER, MOD_META, MOD_SUPER, type KeyEventType } from './terminal.js';
 
 export type MidiMessage = number[];
@@ -33,10 +33,6 @@ export function bendValue(x: number): number {
   return Math.min(BEND_MAX, Math.max(0, Math.round(BEND_CENTER + x * BEND_CENTER)));
 }
 
-function signed(n: number): string {
-  return n > 0 ? `+${n}` : `${n}`;
-}
-
 // The note state behind `field keys`. Two keys can hold the same note,
 // through a shared chord note or a transpose, so the session counts the
 // keys holding each note: the first press sends the note-on and the last
@@ -51,7 +47,7 @@ export class KeysSession {
   private readonly held = new Map<string, { channel: number; notes: number[] }>();
   private readonly holders = new Map<number, number>();
   private readonly heldControls = new Map<string, { channel: number; action: KeymapAction }>();
-  private readonly toggledOn = new Set<string>();
+  private readonly toggledOn = new Map<string, { channel: number; cc: number }>();
 
   constructor(keymap: Keymap) {
     this.keymap = keymap;
@@ -117,19 +113,28 @@ export class KeysSession {
   }
 
   quit(): MidiMessage[] {
-    return [...this.releaseAll(), controlChange(this.keymap.channel, ALL_NOTES_OFF, 0)];
+    return [...this.releaseAll(), ...this.untoggleAll(), controlChange(this.keymap.channel, ALL_NOTES_OFF, 0)];
   }
 
   // A reloaded keymap applies to the next press; notes sounding finish
-  // with the notes and channel they started with.
-  setKeymap(keymap: Keymap): void {
+  // with the notes and channel they started with. Controllers toggled on
+  // go back to 0, because the keymap that could toggle them off is gone.
+  setKeymap(keymap: Keymap): MidiMessage[] {
     if (keymap.velocity !== this.keymap.velocity) this.velocity = keymap.velocity;
     this.keymap = keymap;
-    this.toggledOn.clear();
     if (!this.transposeFits(this.transpose)) {
       this.transpose = 0;
       this.message = 'transpose reset to 0 for the reloaded keymap';
     }
+    return this.untoggleAll();
+  }
+
+  // A toggled sustain left on would hold the receiver's notes after
+  // `field keys` has gone.
+  private untoggleAll(): MidiMessage[] {
+    const messages = [...this.toggledOn.values()].map(({ channel, cc }) => controlChange(channel, cc, 0));
+    this.toggledOn.clear();
+    return messages;
   }
 
   soundingNotes(): string[] {
@@ -149,7 +154,7 @@ export class KeysSession {
   private control(position: string, action: KeymapAction): MidiMessage[] {
     const channel = this.keymap.channel;
     if (action === 'panic') {
-      return [...this.releaseAll(), controlChange(channel, ALL_NOTES_OFF, 0)];
+      return [...this.releaseAll(), ...this.untoggleAll(), controlChange(channel, ALL_NOTES_OFF, 0)];
     }
     if ('transpose' in action) {
       const next = this.transpose + action.transpose;
@@ -170,10 +175,13 @@ export class KeysSession {
       return [controlChange(channel, action.cc, action.value)];
     }
     if (action.mode === 'toggle') {
-      const on = this.toggledOn.has(position);
-      if (on) this.toggledOn.delete(position);
-      else this.toggledOn.add(position);
-      return [controlChange(channel, action.cc, on ? 0 : action.value)];
+      const on = this.toggledOn.get(position);
+      if (on !== undefined) {
+        this.toggledOn.delete(position);
+        return [controlChange(on.channel, on.cc, 0)];
+      }
+      this.toggledOn.set(position, { channel, cc: action.cc });
+      return [controlChange(channel, action.cc, action.value)];
     }
     return [controlChange(channel, action.cc, action.value)];
   }
