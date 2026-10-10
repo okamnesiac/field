@@ -110,6 +110,25 @@ namespace
         object->setProperty ("params", params);
         return juce::var (object);
     }
+
+    // FIELD_PLUGIN_PATH as a search path, split the way the platform
+    // splits PATH. Windows paths carry a drive colon, so splitting on ':'
+    // there turns D:\a\VST3 into "D" and a drive-relative \a\VST3 that
+    // resolves against whichever drive the process's cwd is on: the scan
+    // found the fixture from the checkout's drive while --render-live,
+    // running in a temp project on C:, did not.
+    juce::FileSearchPath pluginPathFromEnvironment (const juce::String& extra)
+    {
+#if defined(_WIN32)
+        const char* separator = ";";
+#else
+        const char* separator = ":";
+#endif
+        juce::FileSearchPath searchPath;
+        for (const auto& piece : juce::StringArray::fromTokens (extra, separator, ""))
+            searchPath.addIfNotAlreadyThere (juce::File (piece));
+        return searchPath;
+    }
 } // namespace
 
 bool hostingWasUsed()
@@ -154,8 +173,7 @@ int runScan (const std::string& formatName, const std::string& exePath)
     juce::FileSearchPath searchPath;
     const auto extra = juce::SystemStats::getEnvironmentVariable ("FIELD_PLUGIN_PATH", "");
     if (extra.isNotEmpty())
-        for (const auto& piece : juce::StringArray::fromTokens (extra, ":", ""))
-            searchPath.addIfNotAlreadyThere (juce::File (piece));
+        searchPath = pluginPathFromEnvironment (extra);
     else
         searchPath = format->getDefaultLocationsToSearch();
 
@@ -290,8 +308,7 @@ namespace
             juce::FileSearchPath searchPath;
             const auto extra = juce::SystemStats::getEnvironmentVariable ("FIELD_PLUGIN_PATH", "");
             if (extra.isNotEmpty())
-                for (const auto& piece : juce::StringArray::fromTokens (extra, ":", ""))
-                    searchPath.addIfNotAlreadyThere (juce::File (piece));
+                searchPath = pluginPathFromEnvironment (extra);
             else
                 searchPath = format->getDefaultLocationsToSearch();
             for (const auto& candidate : format->searchPathsForPlugins (searchPath, true, true))
