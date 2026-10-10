@@ -152,9 +152,10 @@ controls:
 
 Run it with `field keys --keymap ~/keymaps/mine.yaml`. While it runs,
 saving the file reloads it: the next key press uses the new keymap, and
-notes already sounding finish as they started. If the saved file has an
-error, `field keys` keeps the keymap it has and shows the error in the
-status line. `field keys --keymap ~/keymaps/mine.yaml --print` draws it
+notes already sounding finish as they started. A controller you toggled
+on, such as this example's sustain, goes back to 0 on the reload, so the
+notes it was holding end. If the saved file has an error, `field keys`
+keeps the keymap it has and shows the error in the status line. `field keys --keymap ~/keymaps/mine.yaml --print` draws it
 without a supported terminal, which helps while you design one.
 
 ### Fields
@@ -202,7 +203,7 @@ times its row's index. In the example, `KeyZ` plays 48, `KeyA` 53,
 | `{ transpose: <n> }` | Shifts every new note by n semitones, and stays shifted. A transpose that would move any note outside 0 to 127 is refused. |
 | `{ velocity: <n> }` | Changes the velocity by n, kept between 1 and 127. |
 | `{ bend: <x> }` | Pitch bend to x, from -1 to 1, while held; back to center on release. |
-| `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0. `value` defaults to 127. |
+| `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0, and goes back to 0 when you quit, press `panic`, or reload the keymap. `value` defaults to 127. |
 | `panic` | Releases every note and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
 
 ### Rules
