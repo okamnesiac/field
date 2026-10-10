@@ -1,21 +1,19 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createSocket } from 'node:dgram';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { programPath, sclangCommand } from '../generators/supercollider.js';
+import { instrumentProgram, sclangCommand, scScript } from '../generators/supercollider.js';
 
 export function voiceHostScript(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sc', 'voice-host.scd');
+  return scScript('voice-host.scd');
 }
 
 // An instrument name resolves exactly as a supercollider: entry's source
 // does, after `.scd` is added to a name without an extension
 // (keyboard-instrument.md §2.1).
 export function instrumentPath(spec: string, root: string): string {
-  const source = extname(spec) === '' ? `${spec}.scd` : spec;
-  const relative = programPath({ source });
+  const relative = instrumentProgram(spec);
   return isAbsolute(relative) ? relative : resolve(root, relative);
 }
 

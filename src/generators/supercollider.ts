@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { accessSync, constants, existsSync } from 'node:fs';
-import { delimiter, join, posix } from 'node:path';
+import { delimiter, dirname, join, posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
 import type { SupercolliderSound } from './types.js';
@@ -52,6 +53,18 @@ export function programPath(sound: Pick<SupercolliderSound, 'source'>): string {
   return sound.source.includes('/') ? sound.source : posix.join('shared/instruments', sound.source);
 }
 
+// An instrument named by `field keys` or a record entry
+// (keyboard-instrument.md §2.1, §12.2): `.scd` is added to a name without
+// an extension, then it resolves as a supercollider: entry's source does.
+export function instrumentProgram(instrument: string): string {
+  return programPath({ source: posix.extname(instrument) === '' ? `${instrument}.scd` : instrument });
+}
+
+// Field's own SuperCollider programs, beside the package's source.
+export function scScript(name: string): string {
+  return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sc', name);
+}
+
 function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
   for (const dir of (env['PATH'] ?? '').split(delimiter)) {
     if (dir === '') continue;
@@ -94,10 +107,14 @@ export async function runScProgram(
     channels: number;
     sampleRate: number;
     timeoutMs?: number;
+    // More of the program's environment, such as a take render's
+    // FIELD_INSTRUMENT and FIELD_EVENTS (keyboard-instrument.md §12.3).
+    env?: Record<string, string>;
   },
 ): Promise<void> {
   const env = {
     ...process.env,
+    ...params.env,
     FIELD_OUTPUT: outputPath,
     FIELD_SEED: String(params.seed),
     FIELD_DURATION: String(params.duration),
