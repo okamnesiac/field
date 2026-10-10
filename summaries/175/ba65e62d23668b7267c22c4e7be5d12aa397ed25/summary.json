@@ -1,0 +1,180 @@
+{
+ "version": 1,
+ "name": "Keyboard instrument plan",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 175,
+  "title": "Plan the keyboard instrument: field keys with keymaps, a SuperCollider voice host, and recorded keys",
+  "head": "ba65e62d23668b7267c22c4e7be5d12aa397ed25",
+  "headRef": "keys/plan",
+  "base": "3d26d52705cbd9a94328e9dca4b703dd11791889",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a command-line music production tool whose songs live in Git. Today it makes sound only by rendering: a SuperCollider program under <code>shared/instruments/</code> runs offline from a seed and a duration and writes one WAV file. Nothing in Field takes notes. No code opens a MIDI input, the audio daemon <code>field-audiod</code> hands every hosted plugin an empty MIDI buffer, and no command reads the keyboard as anything but commands. So you cannot hear how an instrument responds under your fingers, which is how a player judges one.",
+   "This pull request adds one file, the plan <code>docs/projects/keyboard-instrument/readme.md</code>, and changes no code. The plan designs four chunks, each meant to be one later pull request:",
+   "<ol><li><b><code>field keys</code> as a MIDI device.</b> The command reads key presses and releases from the terminal, finds the physical key behind each one, looks it up in a keymap file, and sends the result from a virtual MIDI source named <code>Field Keys</code>, which Logic or any other application can play from.</li><li><b>The voice host.</b> <code>field keys &lt;instrument&gt;</code> also starts <code>sclang</code>, SuperCollider's language process, which boots its own <code>scsynth</code> audio server and plays the instrument's new voice mode from every MIDI source.</li><li><b>Two more built-in keymaps.</b> <code>tracker</code> and <code>fourths</code> join the default, Logic's Musical Typing.</li><li><b>Recording.</b> The daemon timestamps played notes against the song's transport, and the build renders the take offline through the same voice. Its file format and two other questions stay open until that chunk starts.</li></ol>",
+   "The plan is marked <code>status: ready</code>, which in this repository's Projector convention claims that the work can start. That claim covers chunks 1 to 3. The first review, at <code>1632605</code>, left four findings open. The author fixed all four, and the review at <code>ba65e62</code> found the head clean. Notes under the lines concerned show where each fix landed."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms this page uses",
+    "html": "<ul class=\"tight\"><li><b>Position</b>: a physical key, named by its W3C <code>KeyboardEvent.code</code> value such as <code>KeyA</code> or <code>Semicolon</code>. The name comes from the US key in that place, but it means the place, whatever the key types.</li><li><b>Keyboard layout</b>: the operating system's map from position to character, such as QWERTY, Dvorak, or AZERTY.</li><li><b>Keymap</b>: Field's YAML map from position to what the key plays: a note, a chord, or a control such as transpose or sustain.</li><li><b>Kitty keyboard protocol</b>: a terminal extension that reports key releases and repeats, which ordinary terminals do not. Ghostty and iTerm2 3.5 and later implement it. Apple's Terminal does not.</li><li><b>Base layout key</b>: an optional field of that protocol that names the US key at the pressed position. A terminal leaves it out when it equals the typed key.</li><li><b>Helper</b>: the new short-lived <code>field-audiod --keys</code> mode. It publishes the virtual MIDI source and reports the active keyboard layout on macOS.</li><li><b>Voice host</b>: an <code>sclang</code> process that boots <code>scsynth</code> on the output device and turns MIDI into voices.</li><li><b>Voice mode</b>: the second way to run an instrument program. With <code>FIELD_MODE=voice</code>, the program returns one SynthDef with <code>freq</code>, <code>amp</code>, and <code>gate</code> controls instead of rendering a file.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review status at this head",
+    "html": "<p>Projector review at <code>ba65e62</code>: <b>clean</b>. All 4 finding threads from the review at <code>1632605</code> are resolved, each fixed at this head:</p><ul class=\"tight\"><li><b>Line 29</b>: the citations now name <code>project-layout.md §4.6</code>.</li><li><b>Line 414</b>: the voice host restarts <code>scsynth</code> when <code>field play</code> moves the device's rate, and criterion 25 runs both start orders.</li><li><b>Line 487</b>: §3's heading carries <code>(DECIDED, 2026-10-10)</code>.</li><li><b>Line 629</b>: criterion 10 ends with a layout switch that only the helper's second report can detect.</li></ul><p class=\"note\">The four suggestions from that review are addressed too, at lines 108, 202, 310, and 607.</p>"
+   },
+   {
+    "id": "chunks",
+    "title": "What each chunk ships",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Chunk</th><th>Ships</th><th>Ready</th></tr></thead><tbody><tr><td>1</td><td><code>field keys</code>, the keymap format and schema, Musical Typing, the helper and its <code>--midi-monitor</code> mode, <code>docs/keys.md</code></td><td class=\"r\">Yes</td></tr><tr><td>2</td><td>The voice host, the voice contract, <code>still-water-pad</code> in voice mode</td><td class=\"r\">Yes</td></tr><tr><td>3</td><td>The <code>tracker</code> and <code>fourths</code> keymaps</td><td class=\"r\">Yes</td></tr><tr><td>4</td><td>Recorded keys, rendered offline through the voice</td><td class=\"r\">After §7 questions 1 to 3</td></tr></tbody></table></div>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "plan",
+   "title": "The keyboard-instrument plan",
+   "kicker": "One new plan: field keys, keymaps, a SuperCollider voice host, and recorded keys",
+   "intro": [
+    "The whole pull request is this plan. It reads top to bottom in the order the repository's plans use: the problem, the solution, the reasons for the design, acceptance criteria, cost, rollout, open questions, and background.",
+    "<ol><li><b>§1 and §2: what is missing and the design.</b> §2.1 walks one key press from the terminal to sound. §2.2 to §2.5 cover the terminal protocol, how a key's position is found, the keymap format, and the native helper. §2.6 is the contract an instrument answers to be playable, and §2.7 sketches recording.</li><li><b>§3: why this design.</b> Each bullet names the design that was chosen and the alternatives it beat, such as a virtual MIDI device instead of sending straight to SuperCollider, and the kitty protocol instead of guessing releases from key repeat.</li><li><b>§4: acceptance criteria.</b> Criteria 1 to 29 are checked by hand, chunk by chunk, and a list of vitest files fails before the change.</li><li><b>§5 to §8.</b> Latency estimates, the four-chunk rollout, eight open questions, and the background research the design rests on.</li></ol>",
+    "The earlier review's four findings are fixed, and a note under each line concerned says how. The verified notes record claims about the existing code that the reviews checked against the code."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "collapsed": false,
+     "note": "The new plan, at <code>status: ready</code> and <code>priority: now</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 2,
+       "text": "<code>status: ready</code> claims the plan can be built. Chunk 4's design is left to the start of that chunk, which §6 item 4 says explicitly, so the claim covers chunks 1 to 3 only."
+      },
+      {
+       "kind": "context",
+       "line": 29,
+       "text": "This citation, and the ones at lines 553 and 580, now name <code>project-layout.md §4.6</code>. That is the decision that puts <code>shared/</code> on three shelves and says one <code>.scd</code> renders from a spec or plays from notes depending on how it is invoked. They previously named §1 decision 6, which is \"One ledger per scope\"."
+      },
+      {
+       "kind": "context",
+       "line": 52,
+       "text": "Three words carry the rest of the plan: <b>position</b> (the physical key), <b>keyboard layout</b> (what the key types), and <b>keymap</b> (what the key plays). Keep them apart while you read, because the design looks up positions and never characters."
+      },
+      {
+       "kind": "context",
+       "line": 108,
+       "text": "Two keys can hold the same note, as a chord or after a transpose does. The session counts the keys holding each note and sends the note-off only when the last one is released, so every note-on gets exactly one note-off. This answers a suggestion from the first review."
+      },
+      {
+       "kind": "context",
+       "line": 125,
+       "text": "The terminal handshake: probe for the kitty protocol, push flags 1, 2, 4, and 8 so that letter keys report releases and the base layout key, turn on focus reports, and undo both on every exit path. A focus-out releases every held note, because a terminal that lost focus never reports the release."
+      },
+      {
+       "kind": "context",
+       "line": 161,
+       "text": "Position comes from two sources. The terminal's base layout key wins when it is present. Otherwise <code>field keys</code> looks the typed character up in the keyboard layout the helper read from macOS. Neither source alone is enough, because a missing base layout key could mean a QWERTY layout or a terminal that never sends one."
+      },
+      {
+       "kind": "verify",
+       "line": 183,
+       "text": "The note counts are ranges of distinct pitches, and they hold. Musical Typing binds offsets 0 to 17, which is 18 notes. The standard FastTracker 2 layout that <code>tracker</code> follows spans offsets 0 to 31 across its two rows, which is 32, and criterion 28's 48, 60, and 72 fall on it. The <code>fourths</code> grid spans 0 to 26, which is 27. Checked by working out each keymap's offsets by hand."
+      },
+      {
+       "kind": "context",
+       "line": 202,
+       "text": "The keymap's directory is watched rather than the file. Many editors save by renaming a temporary file over the original, and on macOS and Linux a watch on the file stays with the original and goes quiet after the first such save. This answers a suggestion from the first review."
+      },
+      {
+       "kind": "verify",
+       "line": 290,
+       "text": "The <code>fourths</code> values hold: with <code>column: 1</code> and <code>row: 5</code>, <code>KeyZ</code> is offset 0 (48), <code>KeyA</code> 5 (53), <code>KeyQ</code> 10 (58), and <code>Digit1</code> 15 (63). Criterion 29's chords also check out: <code>KeyZ</code>, <code>KeyB</code>, <code>KeyD</code> give 48, 52, 55, and one key to the right gives 49, 53, 56."
+      },
+      {
+       "kind": "context",
+       "line": 310,
+       "text": "A release always ends the notes its press started, whatever modifiers it carries, and the Caps Lock and Num Lock bits that flag 8 reports on every key are ignored. So a key released while <code>Ctrl</code> is held cannot leave its note stuck. This answers a suggestion from the first review."
+      },
+      {
+       "kind": "context",
+       "line": 346,
+       "text": "The helper lives exactly as long as its input pipe. When <code>field keys</code> exits for any reason, even <code>kill -9</code>, the pipe closes, the helper removes <code>Field Keys</code>, and exits. All note logic stays in TypeScript, where vitest covers it without the native build."
+      },
+      {
+       "kind": "context",
+       "line": 368,
+       "text": "The voice contract asks an instrument for one SynthDef with SuperCollider's standard event controls. The voice host owns sustain, pitch bend, and voice stealing, so an instrument needs only a gated envelope that frees itself."
+      },
+      {
+       "kind": "context",
+       "line": 414,
+       "text": "A <code>field play</code> started after the voice host still moves the device to its song's rate, and <code>scsynth</code> on macOS never notices. So the host compares the rate <code>scsynth</code> booted at with the rate it measures from the device's clock, which every <code>/status</code> reply carries. When they differ by more than 1%, the host reboots <code>scsynth</code> on the same port. This fixes the first review's sample-rate finding. §3's last design bullet records why the host follows the device rather than booting at the project's rate."
+      },
+      {
+       "kind": "verify",
+       "line": 436,
+       "text": "<code>runScProgram</code> in <code>src/generators/supercollider.ts</code> already prints the last 15 non-empty lines of <code>sclang</code>'s standard output on failure, because <code>sclang</code> reports errors there. Checked by reading the function."
+      },
+      {
+       "kind": "verify",
+       "line": 471,
+       "text": "The code these rows build on exists with the roles the plan gives it: <code>daemonBinary()</code> in <code>src/audiod/client.ts</code>, <code>programPath()</code> in <code>src/generators/supercollider.ts</code>, and the <code>sclang</code> lookup order <code>FIELD_SCLANG</code>, then <code>PATH</code>, then the app bundle, inside <code>runScProgram</code>. Checked by reading both files."
+      },
+      {
+       "kind": "context",
+       "line": 487,
+       "text": "The heading now carries <code>(DECIDED, 2026-10-10)</code>, as this repository's convention asks, so the agents who build chunks 1 to 3 know these choices are settled. The remote plan's decisions were marked the same way in the pull request that proposed them."
+      },
+      {
+       "kind": "verify",
+       "line": 499,
+       "text": "The control plane has three runtime dependencies, <code>commander</code>, <code>yaml</code>, and <code>zod</code>, none of them native. Checked in <code>package.json</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 607,
+       "text": "<code>programPath()</code> in <code>src/generators/supercollider.ts</code> treats a source as a path only when it contains a <code>/</code>, and otherwise joins it to <code>shared/instruments</code>. The keymap rule adds one test on top, that a name ending in <code>.yaml</code> is a path. Checked by reading the function at this head."
+      },
+      {
+       "kind": "context",
+       "line": 629,
+       "text": "Criterion 10 now ends by switching to U.S. International – PC without restarting. Only the helper's second keyboard-layout report can name <code>Quote</code> as dead, so this step fails in any terminal if the helper never notices an input-source change. This fixes the first review's finding that the criterion could not fail."
+      },
+      {
+       "kind": "verify",
+       "line": 649,
+       "text": "bloom's <code>field.yaml</code> sets <code>sample_rate: 48000</code>, and <code>creek</code> sets no rate of its own, so <code>field play creek</code> moves a 44.1 kHz Apollo to 48 kHz as this criterion expects. Checked in <code>examples/bloom</code> at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 651,
+       "text": "<code>field sc render &lt;program&gt;</code> takes <code>--seed</code>, <code>--duration</code>, and <code>--output</code>, as this criterion uses them. Checked in <code>src/cli.ts</code>."
+      },
+      {
+       "kind": "context",
+       "line": 746,
+       "text": "Every open question names what it waits for. Questions 1 to 3 wait for the start of chunk 4. Questions 4 to 8 wait for another project, for play experience, or for a need, so none blocks the <code>ready</code> claim for chunks 1 to 3."
+      },
+      {
+       "kind": "verify",
+       "line": 792,
+       "text": "No MIDI input exists today. A search of <code>src/</code>, <code>native/</code>, and <code>python/</code> finds no CoreMIDI or <code>MidiInput</code> use, and <code>native/audiod/src/hosting.cpp</code> passes an empty <code>juce::MidiBuffer</code>, declared in <code>hosting.h</code>, to <code>processBlock</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 831,
+       "text": "<code>still-water-pad.scd</code> renders four chord tones with three detuned voices each under <code>Env.linen</code>, and its voice is one SynthDef, <code>\\stillWaterVoice</code>. Checked by reading the file in <code>examples/bloom</code>."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
