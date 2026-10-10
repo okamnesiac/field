@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1574,5 +1575,172 @@ describe('import reads the WAV header (multi-rate.md decision 5)', () => {
     );
     const messages = (await check(root)).diagnostics.map((d) => d.message).join('\n');
     expect(messages).toContain('WAV facts travel together');
+  });
+});
+
+describe('record entries (recording.md §3–§4)', () => {
+  // The generative pattern with a human where the model was: the entry
+  // is bare `- record:`, the takes beside the audio under the record
+  // node's name — audio/<name>/takes.yaml with `record: <name>` — and
+  // the bytes pin in the ledger rather than in the row.
+  function writeVox(lines: string[] = ['  - record:']): void {
+    writeFileSync(
+      join(root, 'songs/opener/tracks/vox.yaml'),
+      ['name: vox', 'inputs:', ...lines, ''].join('\n'),
+    );
+  }
+
+  function writeTakes(
+    node: string,
+    assets: string[],
+    opts: { key?: string; keyName?: string; chosen?: string | null; ledger?: boolean } = {},
+  ): void {
+    mkdirSync(join(root, `songs/opener/audio/${node}`), { recursive: true });
+    const rows = assets.map((asset) => {
+      const file = join(root, `songs/opener/audio/${node}/${asset}.wav`);
+      writeWavFloat32(file, 48000, [new Float32Array(480)]);
+      return (
+        `  - asset: ${asset}\n    started_at_samples: 24000\n    latency: 0\n` +
+        `    device: Apollo Twin X\n    input: 1\n    recorded_at: 2026-09-07T10:00:00.000-04:00\n`
+      );
+    });
+    const chosen = opts.chosen === null ? undefined : (opts.chosen ?? assets[0]);
+    writeFileSync(
+      join(root, `songs/opener/audio/${node}/takes.yaml`),
+      `${opts.key ?? 'record'}: ${opts.keyName ?? node}\n` +
+        (chosen !== undefined ? `chosen: ${chosen}\n` : '') +
+        `takes:\n${rows.join('')}`,
+    );
+    if (opts.ledger !== false) {
+      const ledger = assets
+        .map((asset) => {
+          const file = `audio/${node}/${asset}.wav`;
+          const bytes = readFileSync(join(root, 'songs/opener', file));
+          const sha256 = createHash('sha256').update(bytes).digest('hex');
+          return (
+            `  - name: ${asset}\n    file: ${file}\n    sha256: ${sha256}\n` +
+            `    bytes: ${bytes.length}\n    sample_rate: 48000\n    bit_depth: 32\n` +
+            `    channels: 1\n    frames: 480\n`
+          );
+        })
+        .join('');
+      writeFileSync(join(root, 'songs/opener/assets.yaml'), `assets:\n${ledger}`);
+    }
+  }
+
+  const diagnostics = async (): Promise<string[]> =>
+    (await check(root)).diagnostics.map((d) => `${d.severity ?? 'error'}: ${d.message}`);
+
+  beforeEach(() => {
+    createSong(root, 'opener');
+    createTrack(root, 'opener', 'vox');
+  });
+
+  it('a bare `- record:` is the spelling, and no takes yet is a warning, not a gate', async () => {
+    writeVox();
+    const project = loadProject(root);
+    expect(project.songs[0]!.tracks.find((t) => t.data.name === 'vox')!.data.inputs[0]!.record).toEqual({});
+    expect(await diagnostics()).toEqual([
+      'warning: input 1 ("record") has no takes yet — field record opener/track:vox',
+    ]);
+    expect((await check(root)).ok).toBe(true);
+  });
+
+  it('stitches takes in by record node name, chosen included', async () => {
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000', 'take-20260907-100100'], { chosen: 'take-20260907-100100' });
+    const project = loadProject(root);
+    expect(project.diagnostics).toEqual([]);
+    const takes = project.songs[0]!.recordTakes.get('vox')!.data;
+    expect(takes.takes.map((t) => t.asset)).toEqual(['take-20260907-100000', 'take-20260907-100100']);
+    expect(takes.chosen).toBe('take-20260907-100100');
+    // The resolver arm: a record ref answers with the chosen take's ledger file.
+    const resolve = committedFileResolver(project, project.songs[0]!);
+    expect(resolve('record:vox')).toEqual({
+      base: 'songs/opener',
+      file: 'audio/vox/take-20260907-100100.wav',
+    });
+  });
+
+  it('an entry with an id mints <track>-<id>, like a generator', async () => {
+    writeVox(['  - id: v2', '    record:']);
+    writeTakes('vox-v2', ['take-20260907-100000']);
+    const project = loadProject(root);
+    expect(project.diagnostics).toEqual([]);
+    expect(project.songs[0]!.recordTakes.has('vox-v2')).toBe(true);
+  });
+
+  it('takes with none chosen is the hand-edit case and holds the gate', async () => {
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000'], { chosen: null });
+    expect(await diagnostics()).toEqual([
+      'error: input 1 ("record") has takes but none chosen — field choose opener/vox --take <name> first',
+    ]);
+  });
+
+  it('diagnoses a chosen take that is not a row, and a row whose asset is not in the ledger', async () => {
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000'], { chosen: 'take-20260907-999999' });
+    expect(await diagnostics()).toContain('error: chosen take "take-20260907-999999" is not one of the takes');
+    writeTakes('vox', ['take-20260907-100000'], { ledger: false });
+    writeFileSync(join(root, 'songs/opener/assets.yaml'), 'assets: []\n');
+    expect(await diagnostics()).toContain(
+      'error: take "take-20260907-100000" is not in the ledger — recorded audio pins in assets.yaml (recording.md §3)',
+    );
+  });
+
+  it('a take whose bytes live outside audio/<node>/ is diagnosed against the takes file', async () => {
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000']);
+    const ledgerPath = join(root, 'songs/opener/assets.yaml');
+    writeFileSync(
+      ledgerPath,
+      readFileSync(ledgerPath, 'utf8').replace('file: audio/vox/', 'file: audio/elsewhere/'),
+    );
+    mkdirSync(join(root, 'songs/opener/audio/elsewhere'), { recursive: true });
+    renameSync(
+      join(root, 'songs/opener/audio/vox/take-20260907-100000.wav'),
+      join(root, 'songs/opener/audio/elsewhere/take-20260907-100000.wav'),
+    );
+    expect(await diagnostics()).toContain(
+      'error: take "take-20260907-100000" must live in audio/vox/: the ledger has it at audio/elsewhere/take-20260907-100000.wav',
+    );
+  });
+
+  it('a takes file that names another node, or a directory no entry claims, is a rename left behind', async () => {
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000'], { keyName: 'lead' });
+    expect(await diagnostics()).toContain('error: takes name "lead" must match the directory audio/vox/');
+    writeTakes('vox', ['take-20260907-100000']);
+    writeVox(['  - audio: take-20260907-100000']); // the entry went away; the takes did not
+    expect(await diagnostics()).toContain(
+      'error: no record entry claims audio/vox/ — a renamed track or id leaves its takes behind; ' +
+        'rename the directory (and its record: key) to follow, or add `- record:` back to the track',
+    );
+  });
+
+  it('a record entry does not loop, plays nothing else, and claims the song namespace', async () => {
+    writeVox(['  - record:', '    loop:', '      every: [1]']);
+    expect((await diagnostics()).join('\n')).toContain('a record entry does not loop');
+    writeVox(['  - record:', '    audio: tone']);
+    expect((await diagnostics()).join('\n')).toContain('an entry plays exactly one thing');
+    // The record node's name may not also be an asset's: both claim audio/vox/.
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000']);
+    const src = join(root, '..', `field-record-ns-${Math.random()}.wav`);
+    writeWavFloat32(src, 48000, [new Float32Array(480)]);
+    await expect(importAsset(root, 'opener', src, 'vox')).rejects.toThrow('already a generator');
+    rmSync(src);
+  });
+
+  it('the takes file is formatted canonically, like every other file', async () => {
+    writeVox();
+    writeTakes('vox', ['take-20260907-100000']);
+    const takesPath = join(root, 'songs/opener/audio/vox/takes.yaml');
+    // chosen: after takes: is valid YAML in the wrong canonical order.
+    const text = readFileSync(takesPath, 'utf8');
+    writeFileSync(takesPath, text.replace(/^chosen: (.*)\n/m, '') + 'chosen: take-20260907-100000\n');
+    const result = await check(root);
+    expect(result.unformatted).toContain('songs/opener/audio/vox/takes.yaml');
   });
 });

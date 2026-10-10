@@ -46,9 +46,9 @@ blobs, and `hardware/apollo.yaml`. Recorded takes are deliberately not
 on that list — they add no directory (see "Takes" below).
 
 Exact schemas are designed in
-[projects/all/project-core.md](projects/all/project-core.md); the layout
+[projects/project-core/readme.md](projects/project-core/readme.md); the layout
 and its vocabulary are decided in
-[projects/all/project-layout.md](projects/all/project-layout.md).
+[projects/project-layout/readme.md](projects/project-layout/readme.md).
 
 ### The shared library
 
@@ -68,7 +68,7 @@ exactly as there is no loops shelf (looping is a clip property).
 file under `shared/`, labeled `//shared/asset:<name>` — with one
 deliberate exception: plugin state blobs under `shared/plugins/`
 (`<slug>/<sha256>.state`,
-[projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)
+[projects/plugin-hosting/readme.md](projects/plugin-hosting/readme.md)
 decision 4) carry no ledger row, because a blob's filename *is* its
 content hash — the drift guard a pin exists to add is intrinsic there,
 and reads resolve by hash so the directory is a convention rather than
@@ -107,7 +107,7 @@ position or sample position?) is a per-track, explicitly stored
 property, not an ambient behavior.
 
 Time fields in project YAML take two spellings
-([projects/all/musical-time.md](projects/all/musical-time.md)): a scalar
+([projects/musical-time/readme.md](projects/musical-time/readme.md)): a scalar
 is ticks (samples on absolute-anchored entries), and an array is
 musical, resolved through the song's meter map.
 
@@ -154,7 +154,7 @@ supposed advantages mostly don't survive scrutiny. `field check`
 validates referential integrity (in CI, and after merges — cross-branch
 dangling references merge cleanly under *any* ID scheme). The full
 argument is preserved in
-[projects/all/project-core.md](projects/all/project-core.md) §6 — read
+[projects/project-core/readme.md](projects/project-core/readme.md) §6 — read
 it before reopening this.
 
 ## Takes
@@ -169,17 +169,16 @@ multiple valid performances of the same recipe. They reuse the same
 machinery: list, audition, select active, pin. See
 [build-graph.md](build-graph.md) for the determinism policy.
 
-The takes that exist today are generated ones: numbered WAVs with their
-record beside them under `audio/<name>/` (see "Deliberate generation").
-Recording follows the same shape when it arrives (decided 2026-08-10): a
-recorded take's record — placement, device, latency, session context —
-lives beside its bytes under `audio/`, because the decision to commit
-the audio must be the decision to commit its record
-([projects/all/bloom-in-tree.md](projects/all/bloom-in-tree.md) §7). A
+Two kinds exist: generated takes, numbered WAVs with their record beside
+them under `audio/<name>/` (see "Deliberate generation"), and recorded
+takes, timestamp-named WAVs with theirs (see "Recorded takes"). Both
+keep the record beside the bytes under `audio/`, because the decision to
+commit the audio must be the decision to commit its record
+([projects/bloom-in-tree/readme.md](projects/bloom-in-tree/readme.md) §7). A
 separate manifest directory whose gitignore rule could quietly disagree
 with the audio's — the earlier `takes/<track>/` design — is exactly what
 that fold retired for variants. Comping (one active take assembled from
-several) is part of the recording work.
+several) is part of the recording work still to come.
 
 ## Assets
 
@@ -260,6 +259,69 @@ Provenance sits on the take because that is what it describes: a request
 accumulates takes from runs months and model versions apart, and a seed
 is provenance, not reproducibility, since inference does not reproduce
 across GPU and framework versions.
+
+## Recorded takes
+
+A recorded take is the generative pattern with a person where the model
+was ([projects/recording/readme.md](projects/recording/readme.md) §1):
+a `record:` entry in a track file asks for a performance, and the takes
+beside the audio say which performances exist and which one plays.
+
+### The entry
+
+The entry carries nothing — bare `- record:` — because the device and
+input you record through are facts about your machine, not the song
+(recording.md §4). It places like every other entry: `at`, `duration`,
+`gain_db`, and the rest apply to the window the takes fill. It never
+loops.
+
+```yaml
+# songs/creek/tracks/lead-vocal.yaml
+name: lead-vocal
+inputs:
+  - record:
+```
+
+An entry with no takes yet builds as silence, and `field check` says so
+as a warning rather than an error, so you can place the track and loop
+the mix before the first take exists. `field record creek/track:lead-vocal`
+is what fills it.
+
+### The record
+
+The record is `audio/<name>/takes.yaml`, where `<name>` is the record
+node's name — the track's, or `<track>-<id>` when the entry carries an
+`id`. One row per take. The bytes pin in the song's ledger under the
+take's name, where imported audio pins, so the row carries the record
+and never a hash:
+
+```yaml
+# songs/creek/audio/lead-vocal/takes.yaml
+record: lead-vocal
+chosen: take-20260907-143012
+takes:
+  - asset: take-20260907-143012
+    started_at_samples: 806400
+    musical_position: [17]
+    latency: 270
+    device: Apollo Twin X
+    input: 1
+    monitoring: apollo-direct
+    console_preset: vocal-tracking
+    recorded_at: 2026-09-07T14:30:12.000-04:00
+```
+
+`started_at_samples` is where the take's first sample sits on the
+recording track's timeline, counted from the record entry's own `at`
+(zero for a bare entry) at the track's rate, and `latency` is how far
+the capture ran behind it — the device's declared round trip, input
+plus output. The take sounds at the entry's window start plus their
+difference and nothing else; `musical_position` records what the song's
+map said at capture and is never arithmetic. Moving the entry's `at`
+moves its takes with it, as every other entry's content moves. `field
+record` writes the row when a take lands,
+choosing it, and `field choose creek/lead-vocal --take <name>` moves
+`chosen` the way `--variant` moves a gen node's.
 
 Request and record are separate files because they answer to different
 owners: the request is shared, while the takes and the pick are what

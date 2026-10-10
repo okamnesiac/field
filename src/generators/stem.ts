@@ -7,7 +7,7 @@ import { readWavHeader } from '../audio/wav.js';
 // spelling is free and only the resulting order matters, which is why
 // the buildable sort below is spelling-blind: order is the one channel
 // a spelling change could reach the key through.
-import { convertRefName, genRef, genRefName, tapRefName, trackRef, trackRefName } from '../labels.js';
+import { convertRefName, genRef, genRefName, recordRef, tapRefName, trackRef, trackRefName } from '../labels.js';
 import type { EffectInsert, InputEntry, Track } from '../schema/index.js';
 import { isHostedInsert } from '../schema/index.js';
 import type { TempoMap } from '../time/tempo.js';
@@ -46,6 +46,7 @@ export function entryRef(entry: InputEntry, owner: string): string {
   if (entry.supercollider !== undefined || entry.generative !== undefined) {
     return genRef(generatorName(entry, owner));
   }
+  if (entry.record !== undefined) return recordRef(generatorName(entry, owner));
   return entry.audio!;
 }
 
@@ -56,6 +57,7 @@ export function entryLabel(entry: InputEntry): string {
   if (entry.id !== undefined) return entry.id;
   if (entry.supercollider !== undefined) return 'supercollider';
   if (entry.generative !== undefined) return 'generative';
+  if (entry.record !== undefined) return 'record';
   return entry.track ?? entry.audio ?? '?';
 }
 

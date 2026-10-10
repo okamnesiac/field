@@ -29,6 +29,8 @@ target_sources(field-audiod PRIVATE
   src/plan.cpp
   src/live.cpp
   src/hosting.cpp
+  src/capture.cpp
+  src/click.cpp
   src/dsp/biquad.cpp
   src/dsp/limiter.cpp
   src/dsp/hall.cpp

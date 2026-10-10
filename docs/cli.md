@@ -418,9 +418,9 @@ exists on macOS: today, off macOS, an unbuilt daemon fails with
 `pnpm build:native`. The Windows port (#161, in review) replaces that
 with a plain refusal naming the build command on every non-macOS
 platform — the decision is recorded in
-[windows-portability.md](projects/all/windows-portability.md) §2.2 as
+[windows-portability.md](projects/windows-portability/readme.md) §2.2 as
 amended. Porting the rest is tracked there and in
-[linux-portability.md](projects/all/linux-portability.md).
+[linux-portability.md](projects/linux-portability/readme.md).
 
 ## Command reference
 
