@@ -258,6 +258,11 @@ export function applyStretch(
   }
   const musical = parsed.anchor !== 'absolute';
   const w = placedWindow(parsed, tempo);
+  // Before the track's start the tempo map has no ticks to give, and
+  // samplesToTicks would throw; refuse it in words first.
+  if (edge === 'start' && w.start + offset < 0) {
+    return { ok: false, message: 'a clip cannot start before the track does' };
+  }
   // The landing place in the entry's own unit: span ticks for a musical
   // anchor, samples for an absolute one. Both edges convert the same
   // way, since both are measured from the same window start.

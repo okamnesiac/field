@@ -350,6 +350,17 @@ describe('placement stretches', () => {
     expect(eaten).toEqual({ ok: false, message: 'the clip would have no length left' });
   });
 
+  it('refuses a front trim dragged before the track starts, in words', () => {
+    // The tempo map has no ticks before sample 0, so this must be refused
+    // before the conversion rather than thrown from it.
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', '    at: [2]']);
+    const parsed = full({ audio: 'riff', at: barTicks });
+    expect(applyStretch(raw, 0, parsed, 'start', -barSamples * 2, tempo, meter)).toEqual({
+      ok: false,
+      message: 'a clip cannot start before the track does',
+    });
+  });
+
   it('refuses a front trim that reaches before the source begins', () => {
     const raw = track(['name: main', 'inputs:', '  - audio: riff', '    at: [2]']);
     const parsed = full({ audio: 'riff', at: barTicks });
