@@ -9,8 +9,7 @@ import { init } from './init.js';
 // .scd action keys, and check's byte-wise formatting gate all read
 // working-tree bytes (windows-portability.md §1.1), and a project
 // cloned to a Windows machine with core.autocrlf=true gets CRLF unless
-// the project itself pins LF. The engine repo carries this file by
-// hand; projects get theirs from here.
+// the project itself pins LF.
 
 let root: string;
 
