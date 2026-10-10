@@ -669,9 +669,17 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     const msg = parsed.data;
     try {
       if (msg.type === 'play') await client.play();
-      else if (msg.type === 'pause') await client.pause();
-      else if (msg.type === 'stop') await client.stop();
-      else if (msg.type === 'locate') {
+      else if (msg.type === 'pause' || msg.type === 'stop') {
+        // Position events stop with the transport, so the view's playhead
+        // would stay at the last one — up to 250 ms short of a pause, and
+        // wherever it was after a stop returns to 0 — and a split cuts at
+        // the playhead. The snapshot carries where the transport is now,
+        // forced through the dedupe for the reason locate gives below.
+        if (msg.type === 'pause') await client.pause();
+        else await client.stop();
+        lastSent = undefined;
+        await pushSnapshot();
+      } else if (msg.type === 'locate') {
         await client.locate(msg.sample);
         // Locate moves exactly the field the dedupe ignores, so the
         // comparison would suppress the one update that matters — and
