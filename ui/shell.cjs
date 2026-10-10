@@ -71,10 +71,33 @@ function create() {
   });
 
   // Anything that is not this session opens in the real browser, so a
-  // documentation link cannot navigate the app away from itself.
+  // documentation link cannot navigate the app away from itself. Only
+  // web links leave: openExternal hands any scheme to the OS, and a
+  // file: or custom-protocol URL is a launcher, not a link.
+  const web = (target) => {
+    try {
+      return ['http:', 'https:'].includes(new URL(target).protocol);
+    } catch {
+      return false;
+    }
+  };
   win.webContents.setWindowOpenHandler(({ url: target }) => {
-    void shell.openExternal(target);
+    if (web(target)) void shell.openExternal(target);
     return { action: 'deny' };
+  });
+  // The window stays on the session: a navigation to anywhere but the
+  // origin it was opened on goes to the browser instead, or nowhere.
+  const origin = new URL(url).origin;
+  win.webContents.on('will-navigate', (event, target) => {
+    let same = false;
+    try {
+      same = new URL(target).origin === origin;
+    } catch {
+      same = false;
+    }
+    if (same) return;
+    event.preventDefault();
+    if (web(target)) void shell.openExternal(target);
   });
 
   void win.loadURL(url);
