@@ -758,20 +758,20 @@ Each chunk is one pull request, in order:
    times diffs in review, and an agent can edit it. It also carries the
    sample time that places a take, which a MIDI file has no field for.
    The recommendation is the text list, with `field export` writing a
-   MIDI file when you need one elsewhere. Justin decides when chunk 4
-   starts.
+   MIDI file when you need one elsewhere. §12.1 answers it with the
+   text list.
 2. **The entry that plays a take (chunk 4).** It could be a `record:`
    entry with an `instrument:` field, or a new entry kind for a part
    that drives an instrument, which nested-tracks.md §18 decision 4
    expects. recording.md §4 keeps `record:` empty until a field earns
-   its place, and an instrument would be the first that does. Justin
-   decides with question 1.
+   its place, and an instrument would be the first that does. §12.2
+   answers it with the `instrument:` field.
 3. **Who builds the NRT score (chunk 4).** In chunk 4, the voice host
    builds the score for a recorded take. sc-render.md §2 rejected Field
    generating scores, because the program is the recipe. The voice
    contract narrows what Field knows to `freq`, `amp`, and `gate`. The
    alternative is a third mode that hands the program the notes and
-   lets it render. Justin decides with question 2.
+   lets it render. §12.3 answers it with Field's renderer.
 4. **Hearing the voice through the mix.** The voice skips inserts and
    the master chain until live-supercollider puts `scsynth` in the
    graph. This is deferred to that project on purpose.
@@ -1007,3 +1007,157 @@ binds pitch bend or modulation, as §3 says.
 Still owed: criteria 28 and 29 at a real keyboard in Ghostty and
 iTerm2. The runs above typed the protocol's bytes into a
 pseudo-terminal, as §9.3 explains for criteria 1 to 20.
+
+## 12 Chunk 4: recording the keys (DECIDED, 2026-10-10)
+
+Justin asked for the whole plan to be built without stopping, so this
+section answers §7 questions 1 to 3 with the recommendations §7 made,
+and records each as a decision with the alternative it beat. Merging
+the chunk is his review of them, and any of the three can be overturned
+before that.
+
+A MIDI take reuses everything about an audio take that is not audio:
+the transaction directory, the timestamped take name, `takes.yaml` with
+`chosen`, `field choose`, the placement arithmetic, and the latency
+subtraction. It differs where it must: the daemon captures MIDI
+messages instead of samples, the take lands as a text file of notes,
+and the build renders the chosen take through the instrument instead
+of summing its bytes.
+
+### 12.1 The take is a text list of notes (DECIDED)
+
+A MIDI take lands as `audio/<track>/take-<timestamp>.notes.yaml`:
+
+```yaml
+sample_rate: 48000
+length: 412800
+notes:
+  - { at: 0, length: 24000, note: 60, velocity: 100 }
+  - { at: 12000, length: 9600, note: 64, velocity: 90, channel: 2 }
+controls:
+  - { at: 30000, cc: 64, value: 127 }
+bends:
+  - { at: 50000, value: 12288 }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `sample_rate` | The rate `at`, `length`, and the other times count in: the device's rate during the take. |
+| `length` | The take's length in samples, from its start to the stop. |
+| `notes` | Each note: its onset `at`, its `length`, `note`, `velocity`, and `channel`, 1 when omitted. A note still held at the stop lasts to the end; a note-off whose note-on came before the take is dropped. |
+| `controls` | Each controller change: `at`, `cc`, `value`, and `channel`. |
+| `bends` | Each pitch bend: `at`, `value` from 0 to 16383, and `channel`. |
+
+Times are samples from the take's start, as an audio take's frames are.
+The file is pinned in the song's ledger by hash like any take, with no
+WAV facts, and stays out of LFS because it is text. Rejected: a
+Standard MIDI File, which opens in Logic but diffs as bytes and has no
+field for the sample time that places a take; and raw note-on and
+note-off events, which are what the daemon captures but which an agent
+cannot quantize or transpose without pairing them first.
+
+### 12.2 The entry is `record:` with an instrument (DECIDED)
+
+```yaml
+# songs/creek/tracks/keys.yaml
+name: keys
+inputs:
+  - record: { instrument: still-water-pad }
+```
+
+A `record:` entry with `instrument:` records MIDI takes, and one
+without records audio, as today. `instrument` resolves exactly as
+`field keys` resolves one (§2.1). Every other part of a record entry
+holds: its placement fields, `takes.yaml`, `chosen`, `field choose`,
+and silence before the first take. Rejected: a new entry kind for a
+part that drives an instrument. It would need its own takes, choosing,
+and placement machinery to do what `record:` already does, and
+recording.md §4's rule that a field enters `record:` only once it earns
+its place is met: the instrument is what decides the kind of take.
+
+A takes row for a MIDI take carries `sources`, the MIDI sources the
+daemon listened to, in place of an audio take's `device` and `input`:
+
+```yaml
+- asset: take-20261010-200000
+  started_at_samples: 806400
+  musical_position: [17]
+  latency: 240
+  sources: [Field Keys]
+  recorded_at: 2026-10-10T20:00:00.000-04:00
+```
+
+`latency` is the output latency alone. A player presses a key in time
+with what they hear, which runs behind the playhead by the output
+latency, and MIDI has no input latency worth the name. Placement
+subtracts it exactly as it does an audio take's.
+
+### 12.3 Field's renderer builds the score (DECIDED)
+
+The build renders the chosen take through `sc/voice-render.scd`, which
+loads the instrument's voice under `FIELD_MODE=voice` and drives it
+with `sc/voicer.scd`, the same voicing the live host uses: one voice
+per note, sustain, All Notes Off, and pitch bend. A take therefore
+renders as it sounded while it was played. sc-render.md §2 rejected
+Field generating scores because the program is the recipe; the voice
+contract narrows what Field knows to `freq`, `amp`, and `gate`, and the
+voicer is the one place those rules live. Rejected: a third mode that
+hands each program the notes, which would make every instrument
+re-implement sustain and bend, and let a take render differently from
+how it was heard.
+
+The render is a `gen:` node, minted for a record entry with an
+instrument whose chosen take is a notes file. Its inputs are the notes
+file's hash, the instrument program's content hash, and the content
+hashes of `sc/voice-render.scd` and `sc/voicer.scd`, so editing any of
+them re-renders. It renders at the track's rate, two channels, for the
+take's length plus a 4-second release tail, and the stem places it
+where the take started, less its latency.
+
+### 12.4 Capture in the daemon
+
+`arm` takes `kind: midi`. The daemon then opens every MIDI input it can
+see, and no audio input, so arming for MIDI never asks for the
+microphone. Each message goes from JUCE's MIDI thread into a lock-free
+queue with its arrival time. The audio callback drains the queue and
+stamps each message with the transport position at that time, from the
+block's position and the time the block began; the same latch that
+starts an audio take starts a MIDI take, and messages before the start
+or after `until` are dropped. A writer thread appends each message to
+`take.midi.ndjson` in the transaction directory as
+`{"at":<samples from the start>,"midi":[...]}`, so a crash loses at most
+the last partial line, which recovery drops. Loop takes stay audio only.
+
+| Protocol | For a MIDI take |
+| --- | --- |
+| `hello.features` | adds `record-midi` |
+| `arm` | `{track, kind: "midi"}` → `{kind: "midi", sources, sample_rate, output_latency}` |
+| `status.record` | `kind: "midi"`, `sources`, and `events`, the messages captured so far; `frames` counts the samples elapsed |
+| the take manifest | `kind: "midi"`, `file` ending `take.midi.ndjson`, `sources`, `sample_rate`, `timeline_rate`, `output_latency`, `started_at_samples`, `frames`, and `events`, with no audio fields |
+
+### 12.5 The flow
+
+1. In one terminal, run `field keys still-water-pad`, which plays the
+   voice you hear and publishes `Field Keys`.
+2. In another, run `field record creek/track:keys --at 17`, as for
+   audio. The entry's instrument makes it arm for MIDI, so `--input`
+   and `--device` are refused.
+3. The song plays; you play. `field record` shows the events captured.
+4. On stop, the take lands: the notes file, its ledger row, and its
+   row in `takes.yaml`, chosen.
+5. `field build creek` renders the chosen take through the instrument
+   and mixes it where you played it.
+
+### 12.6 Files
+
+| File | Change |
+| --- | --- |
+| `native/audiod/src/player.cpp`, `player.h` | Arm for MIDI, the MIDI queue and its stamping in the audio callback, and the status fields. |
+| `native/audiod/src/capture.cpp`, `capture.h`, `server.cpp` | A MIDI capture beside the WAV one: the NDJSON writer, its manifest, list, recovery, and the feature. |
+| `src/audiod/protocol.ts`, `client.ts` | The MIDI arm, status, and manifest shapes, and `armMidi`. |
+| `src/schema/record.ts` | `instrument` on the entry, and the MIDI takes row. |
+| `src/schema/notes.ts` (new) | The notes file's schema, and pairing captured messages into it. |
+| `src/commands/record.ts`, `land.ts`, `src/cli.ts` | Arming by the entry's kind, the MIDI status line, and landing a notes file. |
+| `src/graph/graph.ts`, `src/generators/voice-render.ts` (new), `src/generators/index.ts` | The render node for a chosen MIDI take, and its generator. |
+| `src/model/project.ts` | Validation: a MIDI take only on an entry with an instrument, and the instrument's program exists. |
+| `docs/keys.md`, `docs/tracks.md`, `docs/project-model.md`, `docs/build-graph.md`, `docs/audio-engine.md` | Recording the keys, the entry, the take, the render node, and MIDI capture. |
