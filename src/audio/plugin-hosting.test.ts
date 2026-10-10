@@ -771,6 +771,13 @@ describe('inventory cache', () => {
     utimesSync(path, pinned, pinned);
     const first = readInventory(root);
     expect(first?.plugins[0]?.name).toBe('aaa');
+    // On Windows the rewrite below can land inside the same change-time
+    // tick as the write above, so ctime does not move and the cache keeps
+    // serving 'aaa'. The cause is inferred, not measured: NTFS stamps
+    // ChangeTime from the system clock, which advances in ticks of about
+    // 15.6 ms. A real cp -p or restore is never that close to the read
+    // before it, so the test waits out one tick there.
+    if (process.platform === 'win32') await new Promise((done) => setTimeout(done, 50));
     // Same length, same pinned mtime — only ctime and content differ.
     writeFileSync(path, JSON.stringify({ plugins: [entry('bbb')], failed: [] }));
     utimesSync(path, pinned, pinned);
