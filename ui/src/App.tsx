@@ -146,9 +146,26 @@ export function App() {
   const splitRef = useRef(split);
   splitRef.current = split;
 
-  // Space is the transport, as in every DAW — unless the key is headed
-  // somewhere that uses it: a focused button would fire twice, and a
-  // fader or the device picker owns its own keys.
+  // Space is the transport, as in every DAW, unless focus is somewhere
+  // that types: a text field, or the device picker, which opens on it.
+  // Everywhere else, a focused button included, space plays or pauses
+  // and the browser's own default — pressing the focused button, or
+  // scrolling — is cancelled on both key events, since a button presses
+  // on key-up. Otherwise space after "+ reverb" would add a second one.
+  const typesHere = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true;
+    if (target.tagName !== 'INPUT') return false;
+    const type = (target as HTMLInputElement).type;
+    return !['range', 'checkbox', 'radio', 'button', 'submit'].includes(type);
+  };
+  useEffect(() => {
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !typesHere(e.target)) e.preventDefault();
+    };
+    window.addEventListener('keyup', onKeyUp);
+    return () => window.removeEventListener('keyup', onKeyUp);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -160,10 +177,9 @@ export function App() {
         splitRef.current();
         return;
       }
-      if (e.code !== 'Space' || e.repeat) return;
-      const t = e.target instanceof HTMLElement ? e.target.tagName : '';
-      if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || t === 'BUTTON') return;
-      e.preventDefault(); // space scrolls the page otherwise
+      if (e.code !== 'Space' || typesHere(e.target)) return;
+      e.preventDefault();
+      if (e.repeat) return;
       send({ type: state === 'playing' ? 'pause' : 'play' });
     };
     window.addEventListener('keydown', onKey);
