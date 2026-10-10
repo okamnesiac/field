@@ -78,8 +78,11 @@ one helper, `src/git.ts`. Tokens live in the macOS keychain or
 The daemon owns all latency-sensitive and hardware-facing work. Its
 playback half is shipped: device I/O, a sample-accurate transport with
 musical-position readout, and playback of built labels, behind a
-versioned NDJSON protocol on a Unix domain socket. It runs daemon-lite —
-`field play` spawns it on demand, a lock file guarantees one instance,
+versioned NDJSON protocol on a Unix domain socket, or on Windows a named
+pipe. It runs daemon-lite — `field play` spawns it on demand, one
+instance per project is guaranteed by a lock file on macOS and Linux and
+by `FILE_FLAG_FIRST_PIPE_INSTANCE` on Windows
+([windows-portability.md §2.1](projects/windows-portability/readme.md)),
 and it exits when idle — and `field transport`, `field devices` and
 `field record` drive the same protocol, which CI exercises against the
 real binary in null-output mode. Hosting arrived with
@@ -163,7 +166,12 @@ Python.
 
 Boring by design: versioned NDJSON over flock-owned Unix domain sockets
 — `field-audiod` on the daemon protocol, `field-aced` and `field-voiced`
-on the worker protocol with a `hello` handshake — and OSC to scsynth.
+on the worker protocol with a `hello` handshake — and OSC to scsynth. On
+Windows, `field-audiod` listens on a named pipe instead, whose first
+instance (`FILE_FLAG_FIRST_PIPE_INSTANCE`) is the single-owner guarantee
+and whose DACL admits only the user running it
+([windows-portability.md §2.1](projects/windows-portability/readme.md)).
+The workers keep their Unix sockets, so they do not run on Windows.
 All three daemons share the daemon-lite lifecycle: spawned on demand,
 one instance per project, idle exit. `field --version` reports the
 worker protocol version and what each running daemon speaks, so the
