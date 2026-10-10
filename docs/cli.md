@@ -2,7 +2,7 @@
 
 `field` is the whole interface to a Field project. It validates the
 project, builds audio through the dependency graph, plays a song live in
-the engine, and edits the YAML that describes all of it.
+the engine, records takes, and edits the YAML that describes all of it.
 
 Every command runs from inside a project. `field` finds the project root
 by walking up from your working directory until it finds `field.yaml`,
@@ -34,11 +34,13 @@ pnpm add -g .        # links `field` onto your PATH
 installing, use `pnpm field <args>`. To remove it, `pnpm remove -g
 field`.
 
-Build the daemon before you build *or* play anything. `field-audiod` is
-the renderer as well as the player: `eq`, `limit`, `reverb`, `plate` and
-`hall` targets render by spawning it, so `field build` fails without it
-rather than falling back to anything. `field play` also needs it for
-`--from`, `--device`, `--loop`, `--click` and `--watch`.
+Build the daemon before you build, play or record anything.
+`field-audiod` is the renderer as well as the player: every track's
+stem, inserts included, and every rate conversion render by spawning it, so
+`field build` fails without it rather than falling back to anything.
+`field play` needs it to play a song live, and `field record` needs it
+to capture a take; only plain artifact playback has a fallback (see
+[Platform notes](#platform-notes)).
 
 SuperCollider renders every `supercollider:` entry. `field build` runs
 `sclang` from your `PATH`, from the macOS app bundle, or from
@@ -48,8 +50,9 @@ To see what you have, ask the version:
 
 ```console
 $ field --version
-field 0.1.0  (bfa8660 on main)
+field 0.1.0  (6a310a4 on docs/cli)
 worker protocol 2
+remote        https://audiofield.io (default)  not logged in
 
 daemons in .
   field-audiod  not running
@@ -59,9 +62,12 @@ daemons in .
 
 The first line is the CLI build and the commit it came from, and it says
 so when the checkout has moved on or carries uncommitted changes. The
-rest reports which daemons run for *this* project and which build each
-one is on — a daemon started before your last `pnpm build:native` still
-runs the old code, and `field transport quit` is how you retire it.
+`remote` line names the remote this project talks to, where that URL
+came from, and whether you are logged in to it (see [Share a project
+through a remote](#share-a-project-through-a-remote)). The rest reports
+which daemons run for *this* project and which build each one is on — a
+daemon started before your last `pnpm build:native` still runs the old
+code, and `field transport quit` is how you retire it.
 
 ## Address things with labels
 
@@ -171,8 +177,10 @@ anything that depends on them stop at a message naming the
 ## Build
 
 `field build <patterns...>` builds labels. Each line says what happened:
-`built` ran the work, `cached` returned a stored artifact, and `source`
-is a committed file that was never built at all.
+`built` ran the work, `cached` returned a stored artifact, `fetched`
+downloaded the artifact from the project's remote (see [Share a project
+through a remote](#share-a-project-through-a-remote)), and `source` is a
+committed file that was never built at all.
 
 ```console
 $ field build tall-grass
@@ -233,8 +241,8 @@ to it, and one that does not runs as long as its material and its tails.
 
 Naming a bare song plays it live. Naming an explicit label — a track, a
 gen node, an asset — plays the *built artifact* from disk instead, and
-several patterns make a queue played in order. That distinction decides
-which options apply:
+several patterns make a queue played in order. The options work on
+both, except `--watch`, which follows a live song only:
 
 | Option | Does |
 | --- | --- |
@@ -242,23 +250,31 @@ which options apply:
 | `--device <name>` | picks an output device; `field devices` lists them |
 | `--watch` | follows the project so edits land mid-play (live songs only) |
 | `--from <position>` | starts at `bar[.beat[.tick]]` (one target only) |
-| `--click` | overlays a metronome (artifacts only) |
+| `--click` | plays a metronome against the song's tempo map |
 
-Two combinations are refused rather than approximated, and the error
-says what to type instead: `--click` on a live song, because the click
-renders CLI-side over a file; and `--from` with `--loop` on a live song,
-because that is a region loop and only file playback has one.
+`--from` with `--loop` loops a region. On a live song, playback starts
+at the position and wraps from the song's extent back to it, so
+`field play tall-grass --from 2 --loop` repeats bar 2 to the end. On an
+artifact, each pass replays the file from the position. `--click` puts
+the metronome in the output only: the engine synthesizes it in the
+callback, and it never reaches anything `field build` renders.
 
-`field devices` lists output devices, spawning the daemon if it is not
-already running:
+`field devices` lists output and input devices, spawning the daemon if
+it is not already running:
 
 ```console
 $ field devices
-* Speakers (FxSound Audio Enhancer)
-  Speakers (Realtek(R) Audio)
+output:
+* MacBook Pro Speakers
+  Microsoft Teams Audio
+input:
+* MacBook Pro Microphone  (1 channel)
+  Microsoft Teams Audio  (2 channels)
 ```
 
-The `*` marks the default.
+The `*` marks the system default in each list, which is what `field
+play` and `field record` use when you name no `--device`. The input
+list appears only when the machine has an input device.
 
 ### Follow your edits while it plays
 
@@ -280,8 +296,8 @@ terminal.
 ```console
 $ field transport status
 stopped (nothing loaded)
-device: Speakers (FxSound Audio Enhancer) @ 48000 Hz
-daemon: field-audiod 0.11.0
+device: MacBook Pro Speakers @ 48000 Hz
+daemon: field-audiod 0.14.0
 ```
 
 | Command | Does |
@@ -296,6 +312,64 @@ daemon: field-audiod 0.11.0
 `quit` is how you pick up a new build: the daemon respawns on the next
 `field play`, running the binary you just compiled.
 
+## Record a take
+
+`field record <track>` records a performance onto a track that asks for
+one. It arms an input on `field-audiod`, records against whatever the
+daemon is playing, and loads the track's song as the bed when nothing is
+loaded. Ctrl-c stops the take. The command then lands it: the WAV moves
+into the song's `audio/` directory, a row in `takes.yaml` beside it
+places the take on the track, and the new take is chosen.
+
+A track asks for a performance with a bare `record:` entry. `field
+track create tall-grass vocal` makes the track and places it in the
+song's `main`; add the entry, and `field check` warns that it has no
+takes until you record one:
+
+```yaml
+# songs/tall-grass/tracks/vocal.yaml
+name: vocal
+inputs:
+  - record:
+```
+
+```sh
+field record tall-grass/track:vocal --at 2 --until 3 --count-in 1
+```
+
+That command clicks one bar in, records exactly bar 2, lands the take,
+and stops.
+
+| Option | Does |
+| --- | --- |
+| `--device <name>` | picks an input device (default: the system input) |
+| `--input <n>` | records this channel of the device, counting from 1 (default 1) |
+| `--at <position>` | starts the take at `bar[.beat[.tick]]` |
+| `--until <position>` | punches out: the take ends on that exact sample |
+| `--loop` | loops `--at` to `--until`, landing a take every pass until ctrl-c |
+| `--click` | plays a metronome through the take |
+| `--count-in <bars>` | clicks this many bars before `--at` |
+| `--monitoring <mode>` | records how you monitored the take (default `apollo-direct`) |
+| `--console-preset <name>` | records the Console preset the take expects |
+
+`--until` and `--count-in` need `--at`, and `--loop` needs `--until`
+and a live song as the bed. Under `--loop`, the last pass is chosen.
+
+Every take is a transaction under `.field/recording/` until it lands, so
+a crash loses nothing that reached the disk. `field record --list`
+shows the transactions, `--recover <id>` finalizes and lands one that a
+dead daemon left behind, and `--land <id>` lands a finalized one that
+nothing landed. [audio-engine.md](audio-engine.md#crash-safe-recording)
+describes the transaction, the click, and punch-out in depth, and
+[project-model.md](project-model.md#recorded-takes) describes the entry
+and `takes.yaml`.
+
+To play an earlier take instead, choose it by name:
+
+```sh
+field choose tall-grass/vocal --take take-20261010-185553
+```
+
 ## Get a file out
 
 `field export <patterns...>` builds the labels and copies the results to
@@ -303,9 +377,18 @@ daemon: field-audiod 0.11.0
 name and a version rather than a hash.
 
 ```console
-$ field export creek --rate 44100 --bit-depth 16
-exported //songs/creek/track:main → ~/Desktop/creek-main-v3.wav
+$ field export tall-grass --to /tmp/mixes
+exported //songs/tall-grass/track:main → /tmp/mixes/tall-grass-track-main-v1.wav
+$ field export tall-grass --to /tmp/mixes
+current  //songs/tall-grass/track:main → /tmp/mixes/tall-grass-track-main-v1.wav
+$ field export tall-grass --rate 44100 --bit-depth 16 --to /tmp/mixes
+exported //songs/tall-grass/track:main → /tmp/mixes/tall-grass-track-main.44100-16-v1.wav
 ```
+
+The file is named for the label, without the `songs` prefix. A delivery
+converted with `--rate` or `--bit-depth` carries both in its name, as
+`.44100-16`, and numbers its own versions, so a conversion never bumps
+the native export's version.
 
 | Option | Does |
 | --- | --- |
@@ -317,6 +400,32 @@ Each line reports one of three outcomes. `exported` wrote a new version,
 `current` found the newest version already identical, and `reverted` is
 the one to stop on: these bytes match an *older* version, so a change was
 undone and the highest-numbered export is not what you just built.
+
+## Share a project through a remote
+
+An audiofield remote hosts a project's Git repository, keeps its audio
+in Git LFS, and holds the renders its author already built, so a fresh
+clone builds from cache hits instead of rendering. Five commands talk to
+it, and [remote.md](remote.md) covers each one in depth:
+
+| Command | Does |
+| --- | --- |
+| `field login` | logs in with a device code and stores the token |
+| `field logout` | forgets the token, revoking it on the remote when it is reachable |
+| `field clone <owner>/<project> [dir]` | clones with Git LFS and warms the build cache |
+| `field push [git args]` | runs `git push`, then offers the renders this machine holds |
+| `field pull [git args]` | runs `git pull`, then warms the build cache for the new `HEAD` |
+
+`login` and `logout` take `--remote <url>` to name a site other than the
+project's. `push` and `pull` hand everything after the verb to Git, so
+`field push -u origin main` means what `git push -u origin main` means.
+
+A project has a remote when its `origin` is an audiofield Git host, or
+when `FIELD_REMOTE` names one. Then `field build`, `field explain`,
+`field play` and `field export` ask the remote before they render a
+local cache miss, and `build` and `explain` report a hit as `fetched`.
+Pass `--no-remote` to skip the remote for one `build` or `explain`.
+Watch mode never asks the remote.
 
 ## Create and edit
 
@@ -336,10 +445,14 @@ differs from the project's. In a terminal it asks; in a script, pass
 `--allow-mismatch` to accept the mismatch deliberately.
 
 ```console
-$ field import ~/Recordings/rain.wav --song creek
-imported rain (songs/creek/audio/rain.wav, 5292044 bytes, 48000 Hz 24-bit 2ch, 882000 frames)
-sha256 9f2c1d…
+$ field import ../rain.wav --song creek
+imported rain (audio/rain/rain.wav, 920458 bytes, 48000 Hz 24-bit 2ch, 152727 frames)
+sha256 e299cf7c9e0f7481fbb721ecfdadaeb7f824c3451f3825e5a9c5698300ce92a6
 ```
+
+The path is relative to the song, so the file lands at
+`songs/creek/audio/rain/rain.wav` and its row in
+`songs/creek/assets.yaml`.
 
 ## Generate
 
@@ -367,7 +480,8 @@ and `--bpm`. Voice takes `--text`, `--voice-ref`, `--exaggeration` and
 
 `field choose <song>/<name> --variant <n>` repoints which take the label
 resolves to. Every placement follows, and in a project that commits its
-generated audio that is a one-line Git diff.
+generated audio that is a one-line Git diff. `--take <name>` does the
+same for a recorded take (see [Record a take](#record-a-take)).
 
 ## Plugins
 
@@ -418,11 +532,16 @@ somewhere other than `<program>.wav` in the current directory.
 | --- | --- |
 | `FIELD_SCLANG` | path to `sclang`, ahead of `PATH` and the macOS app bundle |
 | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
+| `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
+| `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
 
-Both point at a binary the default search does not find. `FIELD_AUDIOD`
-is resolved to an absolute path immediately, because the daemon spawns
-with its working directory at the project root, where a relative path
-would mean something else.
+`FIELD_SCLANG` and `FIELD_AUDIOD` point at a binary the default search
+does not find. `FIELD_AUDIOD` is resolved to an absolute path
+immediately, because the daemon spawns with its working directory at the
+project root, where a relative path would mean something else.
+`FIELD_TOKEN` is read and never written, and `field login` warns when it
+is set. [remote.md](remote.md#which-remote) gives the rules for which
+remote a project talks to.
 
 ## Platform notes
 
@@ -462,8 +581,14 @@ amended. Porting the rest is tracked there and in
 | `field build <patterns...>` | build labels; `--watch` to follow changes |
 | `field export <patterns...>` | build and deliver numbered versions |
 | `field play <patterns...>` | play a song live, or audition artifacts |
-| `field devices` | list output devices |
+| `field devices` | list output and input devices |
 | `field transport <op>` | drive the running daemon |
+| `field record <track>` | record a take onto a track's `record:` entry |
+| `field login` | log in to a remote and store the token |
+| `field logout` | forget the stored token |
+| `field clone <owner>/<project> [dir]` | clone a project and warm the build cache |
+| `field push [git args]` | `git push`, then offer the renders this machine holds |
+| `field pull [git args]` | `git pull`, then warm the build cache |
 | `field song create <name>` | create a song |
 | `field track create <song> <name>` | create a track |
 | `field import <file> --song <name>` | import audio and record it |
@@ -471,7 +596,8 @@ amended. Porting the rest is tracked there and in
 | `field plugins scan\|list\|pin` | the hosted plugin inventory |
 | `field setup [worker]` | set up generation worker environments |
 | `field generate <song>/<name>` | run a deliberate generator |
-| `field choose <song>/<name> --variant <n>` | repoint which take plays |
+| `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
+| `field choose <song>/<name> --take <name>` | repoint which recorded take plays |
 | `field sc render <program>` | render an SC program directly, uncached |
 
 Every command takes `--help`.
