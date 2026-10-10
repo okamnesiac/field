@@ -1,0 +1,120 @@
+{
+ "version": 1,
+ "name": "Windows port master inventory",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 158,
+  "title": "The master inventory: what remains to port, and where each piece lands (windows-portability.md §7)",
+  "head": "e6ef0ae26f8c2902bf0de9bd221145390992ef31",
+  "headRef": "windows/inventory",
+  "base": "b3fd8130133f7ab2c79c91c4e7e1ceec2a249a5a",
+  "baseRef": "windows/gitattributes",
+  "basePr": 157
+ },
+ "overview": {
+  "summary": [
+   "field is a command-line tool that keeps a music project as files in Git. Its audio engine is a C++ daemon, <code>field-audiod</code>, that the CLI talks to over a local socket. The Windows portability plan, <code>docs/projects/windows-portability/readme.md</code>, describes how field comes to build, check, play, and live-render on Windows. The plan is <code>in-progress</code> and splits the work into five numbered chunks. Chunk 1 is #157, the base of this pull request. Chunk 2 is #160, and chunks 4 and 5 are #161. Both are stacked above this pull request.",
+   "This pull request adds one section, §7, to the end of that plan. §7 is an inventory: every Windows item still open after the plan's first six sections, each tagged with where it lands. The author found the items by searching every spawn site, path literal, and platform tool in <code>src/</code>, the daemon, the Python workers, and the tests, on <code>main</code> at <code>4f90a87</code> and on chunk 2's branch. The change touches no code and leaves the plan's status alone.",
+   "Read §7 as a dated snapshot. Its line numbers point at <code>main</code> at <code>4f90a87</code>, not at this head, which carries a newer <code>main</code>. Its counts of chunk 2's test guards come with a caveat that they can move until chunk 2 lands.",
+   "The review of this head finds it clean, and a human approval is what remains. Both earlier findings are fixed here. §7.2 now says #159 claims the <code>field init</code> item, and §7.4 states its path rule instead of citing §1.5. One non-blocking suggestion remains, on §7.1's guard sentence."
+  ],
+  "cards": [
+   {
+    "id": "buckets",
+    "title": "Where each item lands",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Section</th><th>What it holds</th><th>Items</th></tr></thead><tbody><tr><td>§7.1</td><td>Work chunks 3 to 5 already own, restated with its exact scope</td><td>The named-pipe transport and the test guards it removes (chunk 4). Float determinism (chunk 3). The <code>afplay</code> refusal and a Windows CI job (chunk 5).</td></tr><tr><td>§7.2</td><td>Items the sweep found that no chunk owns, mostly standalone</td><td><code>field init</code>'s <code>.gitattributes</code>, which #159 claims. The picker's raw-mode keys. <code>homeRelative</code> and the OneDrive Desktop. The <code>sclang</code> fallback. The <code>git lfs</code> probe.</td></tr><tr><td>§7.3</td><td>Items for the Python workers, which §4 keeps out of scope</td><td>The <code>AF_UNIX</code> bind and the <code>fcntl</code> import. The <code>brew install uv</code> and <code>pkill</code> advice. Chunk 2's worker test guards. The uv shim suffix. The Windows wheels in <code>uv.lock</code>.</td></tr><tr><td>§7.4</td><td>Work that inherits the port instead of adding to it</td><td>The UI (#156). <code>field open</code>. The <code>relative()</code> calls that only print a path, and the one whose result is data.</td></tr></tbody></table></div>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Chunk</b>: one numbered step in the plan's §5, landed as one pull request or a few.</li><li><b>Standalone</b>: an item small and independent enough to land as its own pull request at any time.</li><li><b>Sweep</b>: the search the author ran to find the items, recorded as of <code>4f90a87</code>.</li><li><b>Guard</b>: a <code>skipIf(process.platform === 'win32')</code> that skips a test on Windows until the chunk that makes it pass removes the guard.</li><li><b>Named pipe</b>: Windows' local channel between processes, named under <code>\\\\.\\pipe\\</code>. Node's local sockets are named pipes on Windows, so the daemon's Unix socket has to become one in chunk 4.</li><li><b>Data path and display path</b>: a project-relative path that field stores, compares, or sends to the daemon must use <code>/</code> on every platform. A path that field only prints for a person keeps the native separator. Chunk 2 (#160) sets this rule.</li></ul>"
+   },
+   {
+    "id": "history",
+    "title": "Review history so far",
+    "html": "<ul class=\"tight\"><li><b><code>65e7566</code></b>: the author's own review found three problems. §7.1 credited 32 test guards to chunk 4 when 9 belong to it, a determinism bullet named a <code>/fp:contract-</code> flag that §1.4 says does not exist, and two citations were read off chunk 2's branch. <code>29c8f30</code> fixed all three.</li><li><b><code>29c8f30</code></b>: a later self-review found that <code>transport.ts:58</code> is data, not display. <code>4f07368</code> gave it a bullet of its own.</li><li><b><code>4f07368</code></b>: the former reviewer account requested changes because §7.2 did not say that #159 implements the <code>field init</code> item.</li><li><b><code>93451e7</code></b>: this review kept that thread open and opened one on §7.4's citation of a \"§1.5 invariant\" that §1.5 does not contain. It also made three suggestions.</li><li><b><code>e6ef0ae</code></b> (this head): fixes both findings and two of the suggestions. The review finds it clean. The remaining suggestion, on §7.1's guard sentence, can also be settled in #160.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "inventory",
+   "title": "§7: the inventory",
+   "kicker": "One new plan section that lists every Windows item still open and says where each one lands",
+   "intro": [
+    "§7 opens by saying how the sweep was done and how to read its tags. A chunk number refers to §5's list. \"Workers\" means a future chunk for the Python workers, which §4 keeps out of this plan's scope. <b>Standalone</b> marks an item that can land as its own pull request.",
+    "<h4>§7.1 restates what the chunks already own</h4>",
+    "Chunk 4 brings the named-pipe transport to both ends of the control socket. It also removes chunk 2's serve-mode stub in <code>server.cpp</code> and the 9 test guards in <code>version.test.ts</code> whose comments name chunk 4. According to §7.1, the other guards chunk 2 added wait on the workers chunk or on nothing. The section also names what chunk 4 must verify by hand, what chunk 3 must measure, and what chunk 5 adds.",
+    "<h4>§7.2 lists what no chunk owns yet</h4>",
+    "The sharpest item is <code>field init</code>. It writes a <code>.gitattributes</code> that holds only the seven Git LFS rules, so a project it creates is exposed to the same CRLF conversion that chunk 1 fixed for the engine's own repository. #159 is open and fixes it, and §7.2 keeps the item listed until #159 lands. The other items are smaller: a keyboard picker nobody has tried in a Windows terminal, a tilde shortener that never fires, an export folder that misses a OneDrive-redirected Desktop, a macOS-only SuperCollider fallback, and a <code>git lfs</code> probe nobody has run on Windows CI.",
+    "<h4>§7.3 and §7.4 hand work to others</h4>",
+    "§7.3 collects what the workers chunk will need. The Python end needs a transport of its own, because CPython's <code>socket</code> module has no named-pipe family. Before that, its <code>fcntl</code> import fails on Windows, so the single-owner lock needs a Windows answer too. The section also lists Windows install and recovery advice, chunk 2's worker test guards, and an installed-script probe that adds <code>.exe</code>. §7.4 names work that inherits the port. It states chunk 2's path rule and separates the <code>relative()</code> calls that only print a path from the one whose result field compares."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The plan is <code>in-progress</code> at both the base and this head. The questions §7 opens are each deferred to implementation. The picker gets a standalone pass that verifies first, the <code>git lfs</code> probe waits for chunk 5's Windows CI run, and the uv shim suffix belongs to the out-of-scope workers chunk."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "The Windows portability plan. This change appends §7 at the end and renumbers nothing.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "context",
+       "line": 400,
+       "text": "The citations point at <code>4f90a87</code>. This head carries a newer <code>main</code>, so some have moved. <code>homeRelative</code> is now at <code>export.ts:71</code>, the <code>relative()</code> call in <code>version.ts</code> is at line 339, and <code>init.ts:71</code> is now a <code>tryGit</code> call instead of a <code>catch</code>. Read the line numbers against <code>4f90a87</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 415,
+       "text": "The review counted the guards on chunk 2's current head, <code>18849a0</code>, by grepping each test file. It found 9 <code>itOverPosixSocket</code> guards in <code>version.test.ts</code>, 21 <code>itSpawnsAWorker</code> guards in <code>generate.test.ts</code>, 3 win32 describes across <code>aced</code> and <code>voiced</code>, and 2 sclang-stub skips in <code>build.test.ts</code>."
+      },
+      {
+       "kind": "context",
+       "line": 417,
+       "text": "\"The other guards chunk 2 planted are not chunk 4's\" does not hold for chunk 2's current branch. Its commit <code>7a7b256</code> added four more guard sites whose comments name chunk 4, in <code>audiod/client.test.ts</code>, <code>play-daemon.test.ts</code>, <code>plugin-hosting.test.ts</code>, and <code>live-session.test.ts</code>. #160's §5 amendment records them and #161 removes them. The review lists this as a suggestion that this pull request or #160 can settle."
+      },
+      {
+       "kind": "verify",
+       "line": 436,
+       "text": "The Linux job in <code>.github/workflows/ci.yml</code> installs pnpm with <code>pnpm/action-setup@v4</code>, as this bullet now says. The review read the workflow at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 444,
+       "text": "At both <code>4f90a87</code> and this head, <code>init.ts</code> writes <code>.gitattributes</code> from <code>LFS_PATTERNS</code> alone: seven <code>filter=lfs diff=lfs merge=lfs -text</code> lines, with no <code>text=auto</code> rule and no <code>*.state</code> rule. The review read the function at both commits."
+      },
+      {
+       "kind": "verify",
+       "line": 449,
+       "text": "#159 is open against <code>main</code>. At its head, <code>4eabd58</code>, <code>init.ts</code> writes <code>* text=auto eol=lf</code> before the LFS lines and <code>*.state binary</code> after them, as this bullet says. The review read that file."
+      },
+      {
+       "kind": "verify",
+       "line": 486,
+       "text": "At <code>4f90a87</code>, <code>server.py:23</code> is <code>import fcntl</code> and line 129 is the <code>AF_UNIX</code> bind. CPython ships <code>fcntl</code> only on Unix, so the import fails on Windows first."
+      },
+      {
+       "kind": "verify",
+       "line": 493,
+       "text": "At <code>4f90a87</code>, <code>workers/client.ts:345</code> builds the <code>pkill -f '&lt;script&gt; --socket'</code> remedy that the protocol-mismatch error prints."
+      },
+      {
+       "kind": "verify",
+       "line": 514,
+       "text": "The rule stated here matches #160's amendment to §5's chunk 2, read at #160's head <code>18849a0</code>: project-relative paths are slash-separated wherever they are data, such as <code>song.dir</code> and the session JSON sent to the daemon. No other \"§1.5\" reference remains in §7."
+      },
+      {
+       "kind": "verify",
+       "line": 523,
+       "text": "The review read <code>transport.ts</code> at this head and chunk 2's <code>model/project.ts</code>. <code>songDirOfPath</code> splits the <code>relative()</code> result on the native <code>sep</code> and returns <code>songs/&lt;name&gt;</code>, and line 44 compares that with <code>song.dir</code>. Chunk 2's <code>projectPath</code> makes <code>song.dir</code> slash-separated, so the two agree on Windows only after chunk 2 lands."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
