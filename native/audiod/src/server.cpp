@@ -501,7 +501,16 @@ void Server::acceptLoop()
         if (! running)
             break; // the destructor closes the parked instance
         if (! connected)
-            continue; // a client gave up mid-connect; the instance is reusable
+        {
+            // A client gave up mid-connect. One that opened the instance
+            // and closed it before ConnectNamedPipe ran leaves it failing
+            // with ERROR_NO_DATA until the server disconnects it - without
+            // this, the loop would retry the same handle forever and no
+            // instance would listen. `field --version` does exactly that
+            // open-and-close when it probes the pipe with existsSync.
+            DisconnectNamedPipe (pipe);
+            continue;
+        }
 
         // Park the next instance before serving this one, so a client
         // connecting immediately after has somewhere to land. No
