@@ -59,4 +59,19 @@ describe('timeline lanes', () => {
     const [keys] = lanesOf();
     expect(keys?.children?.map((l) => [l.name, l.entry])).toEqual([['pad', 1]]);
   });
+
+  it("draws a placed track's children where they sound, past its slip and source offset", () => {
+    // keys plays its render from source_offset - slip = 4800 - 1200 =
+    // 3600 at the window start (sample 0), so its child at local 0
+    // sounds at -3600 on the song's timeline.
+    createTrack(root, 'creek', 'keys');
+    writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), ['name: keys', 'inputs:', '  - audio: pad', ''].join('\n'));
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - track: keys', '    source_offset: 4800', '    slip: 1200', ''].join('\n'),
+    );
+    const [keys] = lanesOf();
+    expect(keys?.start).toBe(0);
+    expect(keys?.children?.map((l) => l.start)).toEqual([-3600]);
+  });
 });

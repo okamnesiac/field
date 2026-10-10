@@ -159,6 +159,17 @@ export function projectTimeline(
     const placedName = entry.track;
     const placed = placedName !== undefined ? byName.get(placedName) : undefined;
     const recurse = placed !== undefined && !seen.has(placedName!) && depth < 6;
+    // Where the placed track's own sample 0 falls on the timeline. The
+    // planner reads the placed render from `source_offset - slip`
+    // (stem.ts readOffsetFor), in the placed track's rate, so at the
+    // window start the listener hears that sample, not the track's zero.
+    // Children drawn from the window start would sit `slip` early, and a
+    // cut made where they sound would land that far off.
+    const childOrigin =
+      placed === undefined
+        ? startSample
+        : startSample -
+          Math.round(((entry.source_offset - entry.slip) * sessionRate) / (placed.data.rate ?? sessionRate));
 
     return {
       entry: index,
@@ -188,7 +199,7 @@ export function projectTimeline(
         : null,
       children: recurse
         ? placements(placed!.data.inputs).map(([child, i]) =>
-            laneFor(placed!, child, i, startSample, depth + 1, new Set([...seen, placedName!])),
+            laneFor(placed!, child, i, childOrigin, depth + 1, new Set([...seen, placedName!])),
           )
         : null,
       clips: [{ start: startSample, duration, exact: w.duration !== undefined, name: placedName ?? entry.audio ?? 'input' }],
