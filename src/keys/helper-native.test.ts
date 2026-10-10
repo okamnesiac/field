@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { afterEach, describe, expect, it, type TestContext } from 'vitest';
 import { daemonBinary } from '../audiod/client.js';
+import { TEXT_POSITIONS } from '../schema/keymap.js';
 
 // The native round trip (keyboard-instrument.md §4): `field-audiod --keys`
 // publishes a virtual MIDI source and `--midi-monitor` reads it back. The
@@ -18,56 +19,10 @@ const binary = (() => {
   }
 })();
 
-const BINDABLE_POSITIONS = [
-  'Backquote',
-  'Digit1',
-  'Digit2',
-  'Digit3',
-  'Digit4',
-  'Digit5',
-  'Digit6',
-  'Digit7',
-  'Digit8',
-  'Digit9',
-  'Digit0',
-  'Minus',
-  'Equal',
-  'KeyQ',
-  'KeyW',
-  'KeyE',
-  'KeyR',
-  'KeyT',
-  'KeyY',
-  'KeyU',
-  'KeyI',
-  'KeyO',
-  'KeyP',
-  'BracketLeft',
-  'BracketRight',
-  'Backslash',
-  'KeyA',
-  'KeyS',
-  'KeyD',
-  'KeyF',
-  'KeyG',
-  'KeyH',
-  'KeyJ',
-  'KeyK',
-  'KeyL',
-  'Semicolon',
-  'Quote',
-  'KeyZ',
-  'KeyX',
-  'KeyC',
-  'KeyV',
-  'KeyB',
-  'KeyN',
-  'KeyM',
-  'Comma',
-  'Period',
-  'Slash',
-  'IntlBackslash',
-];
+// What `keyboard-layout.cpp` must report: every position a keymap binds
+// that types a character. A position added to the schema fails here until
+// the helper reports it.
+const BINDABLE_POSITIONS = TEXT_POSITIONS;
 
 const LINE_TIMEOUT_MS = 5000;
 
