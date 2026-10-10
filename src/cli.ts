@@ -1006,14 +1006,18 @@ program
   });
 
 program
-  .command('keys')
-  .description('play the computer keyboard as the MIDI source "Field Keys" (needs a terminal with the kitty keyboard protocol; Esc quits)')
+  .command('keys [instrument]')
+  .description(
+    'play the computer keyboard as the MIDI source "Field Keys", and a SuperCollider instrument from it when you name one ' +
+      '(needs a terminal with the kitty keyboard protocol; Esc quits)',
+  )
   .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
+  .option('--device <name>', 'output device for the instrument (field devices lists them; default: the system output)')
   .option('--print', 'print the keymap as a keyboard diagram and exit')
-  .action(async (opts: { keymap?: string; print?: boolean }) => {
+  .action(async (instrument: string | undefined, opts: { keymap?: string; print?: boolean; device?: string }) => {
     try {
       const { keysCommand } = await import('./commands/keys.js');
-      await keysCommand(opts);
+      await keysCommand(instrument, opts);
     } catch (err) {
       fail(err);
     }

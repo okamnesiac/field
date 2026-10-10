@@ -124,7 +124,16 @@ async function startKeys(ctx: TestContext, name: string): Promise<{ keys: Helper
     console.warn(`skipping the native MIDI round trip: ${reason}`);
     ctx.skip(reason);
   }
-  expect(published).toEqual({ ready: true, name });
+  // On macOS the ready line also names the system output, which the
+  // voice host gives scsynth for both directions.
+  const { output, ...ready } = published;
+  expect(ready).toEqual({ ready: true, name });
+  if (process.platform === 'darwin' && output !== undefined) {
+    expect(typeof output).toBe('string');
+    expect(output).not.toBe('');
+  } else if (process.platform !== 'darwin') {
+    expect(output).toBeUndefined();
+  }
   return { keys, afterReady: index };
 }
 
