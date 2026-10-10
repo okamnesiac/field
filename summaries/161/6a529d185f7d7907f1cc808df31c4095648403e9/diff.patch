@@ -1,0 +1,1463 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d2cbafa..710e142 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -108,3 +108,31 @@ jobs:
+       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
+       - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
+ 
++
++  # Windows is a build-and-test-and-play target (windows-portability.md),
++  # and this job is what keeps the port from rotting: the same typecheck,
++  # build, example check, native build and suite as Linux. The Python
++  # pyright gates stay Linux-only — the workers keep their POSIX
++  # transport until their own chunk (§4), so gating them here would test
++  # a combination nothing supports. The JUCE FetchContent build is the
++  # expensive step; the cache key matches the Linux job's shape and adds
++  # the OS, since MSVC objects and ELF objects share nothing.
++  windows:
++    runs-on: windows-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: pnpm/action-setup@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 24
++          cache: pnpm
++      - run: pnpm install --frozen-lockfile
++      - run: pnpm typecheck
++      - run: pnpm build
++      - run: cd examples/bloom && node ../../dist/cli.js check
++      - uses: actions/cache@v4
++        with:
++          path: native/audiod/build
++          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
++      - run: pnpm build:native
++      - run: pnpm test
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index 3d50146..baf5e42 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -254,6 +254,18 @@ change making the readiness claim answers for what is still open.
+    no `--from` would be a second, worse playback path kept alive on the
+    platform with the least coverage. Without the daemon built, `field
+    play` fails with "build the daemon", which is the honest answer.
++
++   **Amended 2026-08-18: the refusal covers every non-macOS platform,
++   not Windows alone.** #162's review found the CLI manual describing a
++   deliberate macOS-only fallback while the guard was win32-only —
++   Linux without a built daemon still spawned `afplay` and died with
++   ENOENT naming a macOS binary. The reasoning here was never about
++   Windows: `field play` is live evaluation since realtime.md, `afplay`
++   is dead code off macOS by definition, and the guard is the
++   difference between the build hint and a confusing error. Linux had
++   no plan recording the call
++   ([linux-portability.md](../linux-portability/readme.md) predates the
++   fallback question), so this amendment is where it lives.
+ 3. **`socketPathFor` grows a platform branch, in the same function.**
+    `src/socketPath.ts` exists to keep the bound path inside `sun_path`'s
+    104 bytes by returning a cwd-relative path; named pipes have no such
+@@ -392,11 +404,53 @@ Recorded so the next reader does not re-derive it.
+ 4. **The transport** (§1.2). The seam, both ends, per §2.1. This is where
+    `field play`, `field transport` and live rendering arrive, and it is
+    the largest chunk by a wide margin.
++
++   **Implemented (2026-08-18).** Named pipes, as §2.1 decided, and the
++   decision's predictions held with one correction each way. What held:
++   `FILE_FLAG_FIRST_PIPE_INSTANCE` is the flock — the stampede test
++   passes with six clients racing a fresh project; Node dials the pipe
++   name natively; request handling above the I/O layer is shared with
++   the POSIX arm, so `dispatch` exists once. What the implementation
++   taught: **CancelIoEx is an event where SHUT_RD is a state.** A cancel
++   only aborts a read pending at that instant — a reader inside dispatch
++   at shutdown would issue a fresh read afterward and keep serving a
++   chatty client forever, so the daemon never exited. The reader now
++   checks the running flag each cycle (at most one request slips
++   through), and the shutdown drain is one peek deep: exactly the bytes
++   buffered at the half-close, the way SHUT_RD's EOF bounds it, because
++   re-peeking chases a client that keeps writing. Round trips measure
++   1.3 ms. One test-infrastructure find: Windows cannot delete a
++   directory that is a live process's cwd, and the daemon takes a few
++   hundred milliseconds to exit after quit — `removeTempProject`
++   (src/testing/temp.ts) retries the whole removal, because rmSync's
++   own retry knobs do not cover every op in its recursive walk. The
++   guards this chunk owed are retired: the 9 in `version.test.ts` (its
++   fake daemons now bind what `socketPathFor` answers), the serve-mode
++   describes, and live-session's four socket tests — 8/8 protocol,
++   12/12 play-daemon, 25+1 hosting with live chains, on Windows. The
++   definition-of-done transcript, from a real session with a dirty
++   chain, steered from a second terminal:
++
++   ```text
++   playing  1.4.731 (0:01.9)
++   live session: proof
++   device: Speakers (FxSound Audio Enhancer) @ 48000 Hz
++   daemon: field-audiod 0.11.0
++   ```
+ 5. **Fallback and CI** (§1.6). The `afplay` path's Windows behaviour per
+    §2.2, and a `windows-latest` job. The "V1 platform scope" amendment
+    this chunk originally carried rode chunk 1 instead, because §2.4 tied
+    the plan's `in-progress` flip to it.
+ 
++   **Implemented (2026-08-18), riding chunk 4's diff** — the fallback
++   refusal is three lines and the CI job one block, neither worth a
++   review cycle alone. `playWithAfplay` on win32 fails with the build
++   hint, per §2.2's no-fallback decision. The `windows-latest` job runs
++   what Linux runs minus the Python gates (the workers keep their POSIX
++   transport, §4). Unverified on an actual runner as of this writing:
++   Actions billing on the account is broken and no job of any kind
++   starts; the job is written to the Linux job's shape and waits there.
++
+ Chunks 2 and 4 are independent of each other given chunk 1, so offline
+ rendering on Windows can be real long before playback is.
+ 
+@@ -411,6 +465,11 @@ rendering on Windows can be real long before playback is.
+   the daemon protocol tests plus a real `field play` session are exactly
+   the verification — a separate investigation would only rehearse what
+   the chunk proves.
++
++  **Answered (2026-08-18, chunk 4): it survives.** The protocol
++  suite spawns detached daemons all day, idle-exit fires, ctrl-c during
++  a real `field play` returns the terminal, and the daemon outlives its
++  spawning CLI exactly as designed.
+ - **Is the 104-byte reasoning simply gone, or replaced?** See §2.3. If
+   named pipes win, `socketPathFor`'s entire premise is macOS/Linux-only,
+   and the comment that explains it needs to say so.
+@@ -424,6 +483,13 @@ rendering on Windows can be real long before playback is.
+   against a live daemon, which does not exist before the transport does —
+   `field devices` against WASAPI and one unplug during playback are the
+   test, and chunk 4's definition of done should name them.
++
++  **Mostly answered (2026-08-18, chunk 4)**: real
++  device names enumerate and round-trip on real hardware (`field
++  devices` lists the machine's WASAPI outputs with the default starred;
++  a live session reports its device by name), and null mode serves CI.
++  Still unexercised: a physical unplug during playback — one manual
++  test whenever a session is playing and a cable is handy.
+ - **Does anything else hash on-disk bytes?** §1.1 names four
+   consumers — three found by reading, the state-blob refusal by
+   minjudd's grep on #154, which also placed `commands/click.ts` and
+diff --git a/native/audiod/src/server.cpp b/native/audiod/src/server.cpp
+index 744307a..694fb73 100644
+--- a/native/audiod/src/server.cpp
++++ b/native/audiod/src/server.cpp
+@@ -2,41 +2,28 @@
+ #include "player.h"
+ #include "version.h"
+ 
+-#if defined(_WIN32)
+-
+-// The control socket does not exist on Windows yet: this transport is
+-// AF_UNIX by hand (see the header), and windows-portability.md chunk 4
+-// replaces it with a named pipe behind the same interface. Until then
+-// the daemon still earns its keep as a subprocess — --render,
+-// --render-live and --scan never construct a Server — and serve mode
+-// refuses at start() with a pointer, instead of the file failing to
+-// compile. The private loop methods stay declared and undefined; nothing
+-// on this path can reach them.
+-
+-Server::Server (Player& p, juce::String relativeSocketPath)
+-    : player (p), socketPath (std::move (relativeSocketPath))
+-{
+-}
+-
+-Server::~Server() = default;
+ 
+-juce::String Server::start()
+-{
+-    return "the control socket is not implemented on Windows yet (windows-portability.md chunk 4)";
+-}
+-
+-void Server::beginShutdown() {}
+-void Server::broadcast (const juce::String&) {}
+-void Server::sweepClosedConnections() {}
+-int Server::connectionCount() { return 0; }
++#if defined(_WIN32)
++// The named-pipe transport (windows-portability.md §2.1): the CLI
++// computes the \\.\pipe\ name (socketPathFor's win32 branch) and
++// hands it whole via --socket. FILE_FLAG_FIRST_PIPE_INSTANCE is the
++// flock — a second daemon on the same name fails at creation, before
++// anything is disturbed — and CancelIoEx is the SHUT_RD, aborting a
++// reader's wait while the write side finishes in-flight responses.
++// Request handling below the I/O layer is shared with the POSIX arm.
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#include <windows.h>
+ 
++#include <algorithm>
++#include <cstring>
+ #else
+-
+ #include <fcntl.h>
+ #include <sys/file.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ #include <unistd.h>
++#endif
+ 
+ namespace
+ {
+@@ -58,151 +45,22 @@ juce::var errorResponse (const juce::var& id, const juce::String& message)
+     o->setProperty ("error", message);
+     return juce::var (o.get());
+ }
+-} // namespace
+-
+-Server::Server (Player& p, juce::String relativeSocketPath)
+-    : player (p), socketPath (std::move (relativeSocketPath))
+-{
+-}
+-
+-Server::~Server()
+-{
+-    running = false;
+-    if (listenFd >= 0)
+-    {
+-        ::shutdown (listenFd, SHUT_RDWR);
+-        ::close (listenFd);
+-        ::unlink (socketPath.toRawUTF8());
+-    }
+-    if (lockFd >= 0)
+-        ::close (lockFd); // releases the flock; the lock file itself stays
+-    if (acceptThread.joinable())
+-        acceptThread.join();
+-
+-    std::vector<std::shared_ptr<Connection>> toClose;
+-    {
+-        const std::lock_guard<std::mutex> lock (connectionsMutex);
+-        toClose = connections;
+-        connections.clear();
+-    }
+-    for (auto& c : toClose)
+-    {
+-        c->open = false;
+-        ::shutdown (c->fd, SHUT_RDWR);
+-        ::close (c->fd);
+-        if (c->reader.joinable())
+-            c->reader.join();
+-    }
+-}
+ 
+-juce::String Server::start()
++// hello's pid, spelled per platform: dispatch is shared, but <unistd.h>
++// is only included on the POSIX arm.
++int processId()
+ {
+-    if (socketPath.length() >= (int) sizeof (sockaddr_un::sun_path))
+-        return "socket path too long: " + socketPath;
+-
+-    sockaddr_un addr {};
+-    addr.sun_family = AF_UNIX;
+-    std::snprintf (addr.sun_path, sizeof (addr.sun_path), "%s", socketPath.toRawUTF8());
+-
+-    // Exactly one daemon per socket, decided by flock rather than a
+-    // connect probe: two daemons spawned in the same instant could each
+-    // fail the probe and unlink the other's freshly bound socket (#12
+-    // review). The lock is held for the daemon's whole life and the OS
+-    // releases it on any death, so it cannot go stale; with the lock won,
+-    // any existing socket file is by definition a dead daemon's leftover.
+-    // The lock file itself is never unlinked — removing it would reopen
+-    // the race for the next pair of spawns.
+-    lockFd = ::open ((socketPath + ".lock").toRawUTF8(), O_CREAT | O_RDWR, 0600);
+-    if (lockFd < 0)
+-        return "cannot open lock file: " + juce::String (strerror (errno));
+-    if (::flock (lockFd, LOCK_EX | LOCK_NB) != 0)
+-        return "another field-audiod already owns " + socketPath;
+-    ::unlink (socketPath.toRawUTF8());
+-
+-    listenFd = ::socket (AF_UNIX, SOCK_STREAM, 0);
+-    if (listenFd < 0)
+-        return "socket() failed: " + juce::String (strerror (errno));
+-    if (::bind (listenFd, (sockaddr*) &addr, sizeof (addr)) != 0)
+-        return "bind() failed for " + socketPath + ": " + juce::String (strerror (errno));
+-    if (::listen (listenFd, 8) != 0)
+-        return "listen() failed: " + juce::String (strerror (errno));
+-
+-    lastActivity = juce::Time::currentTimeMillis();
+-    running = true;
+-    acceptThread = std::thread ([this] { acceptLoop(); });
+-    return {};
+-}
+-
+-void Server::acceptLoop()
+-{
+-    while (running)
+-    {
+-        int fd = ::accept (listenFd, nullptr, nullptr);
+-        if (fd < 0)
+-        {
+-            if (running)
+-                continue;
+-            break;
+-        }
+-        auto connection = std::make_shared<Connection>();
+-        connection->fd = fd;
+-        {
+-            const std::lock_guard<std::mutex> lock (connectionsMutex);
+-            connections.push_back (connection);
+-        }
+-        lastActivity = juce::Time::currentTimeMillis();
+-        connection->reader = std::thread ([this, connection] { readLoop (connection); });
+-        // A connection accepted in the same instant as beginShutdown would
+-        // miss its half-close and stall the drain loop; catch it here.
+-        if (! running)
+-            ::shutdown (fd, SHUT_RD);
+-    }
+-}
+-
+-void Server::readLoop (std::shared_ptr<Connection> connection)
+-{
+-    std::string buffer;
+-    char chunk[4096];
+-    while (connection->open)
+-    {
+-        auto n = ::read (connection->fd, chunk, sizeof (chunk));
+-        if (n <= 0)
+-            break;
+-        buffer.append (chunk, (size_t) n);
+-        size_t newline;
+-        while ((newline = buffer.find ('\n')) != std::string::npos)
+-        {
+-            auto line = buffer.substr (0, newline);
+-            buffer.erase (0, newline + 1);
+-            if (! line.empty())
+-                handleLine (*connection, juce::String::fromUTF8 (line.c_str(), (int) line.size()));
+-        }
+-    }
+-    lastActivity = juce::Time::currentTimeMillis();
+-    // Last: the sweep only joins threads whose connection is closed, and
+-    // everything above must be finished by then. The fd is closed by the
+-    // sweep too — exactly one closer, so a reused descriptor can never be
+-    // closed out from under a newer connection.
+-    connection->open = false;
++#if defined(_WIN32)
++    return (int) GetCurrentProcessId();
++#else
++    return (int) ::getpid();
++#endif
+ }
++} // namespace
+ 
+-void Server::sweepClosedConnections()
++Server::Server (Player& p, juce::String relativeSocketPath)
++    : player (p), socketPath (std::move (relativeSocketPath))
+ {
+-    const std::lock_guard<std::mutex> lock (connectionsMutex);
+-    for (auto it = connections.begin(); it != connections.end();)
+-    {
+-        if (! (*it)->open)
+-        {
+-            if ((*it)->reader.joinable())
+-                (*it)->reader.join();
+-            ::close ((*it)->fd);
+-            it = connections.erase (it);
+-        }
+-        else
+-        {
+-            ++it;
+-        }
+-    }
+ }
+ 
+ void Server::handleLine (Connection& connection, const juce::String& line)
+@@ -253,7 +111,7 @@ juce::String Server::dispatch (const juce::var& request)
+         // So a client can tell a stale daemon apart from a live one by
+         // more than its answers — and so a test can kill this process
+         // mid-take to prove the transaction survives.
+-        ok->setProperty ("pid", (int) ::getpid());
++        ok->setProperty ("pid", processId());
+         // Capability names (realtime.md §3): clients gate on these, not
+         // on parsing the version string.
+         juce::Array<juce::var> features;
+@@ -443,6 +301,262 @@ juce::String Server::dispatch (const juce::var& request)
+     return jsonLine (juce::var (ok.get()));
+ }
+ 
++
++void Server::broadcast (const juce::String& line)
++{
++    std::vector<std::shared_ptr<Connection>> current;
++    {
++        const std::lock_guard<std::mutex> lock (connectionsMutex);
++        current = connections;
++    }
++    for (auto& connection : current)
++        if (connection->open)
++            send (*connection, line);
++}
++
++int Server::connectionCount()
++{
++    const std::lock_guard<std::mutex> lock (connectionsMutex);
++    int open = 0;
++    for (auto& connection : connections)
++        if (connection->open)
++            ++open;
++    return open;
++}
++
++
++#if defined(_WIN32)
++
++// Connection::pipe and the two Server members are void* in the header to
++// keep <windows.h> out of it; this file casts at the boundary.
++static HANDLE asHandle (void* p) { return static_cast<HANDLE> (p); }
++
++Server::~Server()
++{
++    running = false;
++    if (acceptEvent != nullptr)
++        SetEvent (asHandle (acceptEvent));
++    if (acceptThread.joinable())
++        acceptThread.join();
++    if (pendingPipe != nullptr)
++        CloseHandle (asHandle (pendingPipe));
++    if (acceptEvent != nullptr)
++        CloseHandle (asHandle (acceptEvent));
++
++    std::vector<std::shared_ptr<Connection>> toClose;
++    {
++        const std::lock_guard<std::mutex> lock (connectionsMutex);
++        toClose = connections;
++        connections.clear();
++    }
++    for (auto& c : toClose)
++    {
++        c->open = false;
++        CancelIoEx (asHandle (c->pipe), nullptr);
++        if (c->reader.joinable())
++            c->reader.join();
++        CloseHandle (asHandle (c->pipe));
++    }
++}
++
++juce::String Server::start()
++{
++    if (! socketPath.startsWith ("\\\\.\\pipe\\"))
++        return "on Windows --socket must be a \\\\.\\pipe\\ name, got: " + socketPath
++               + " (an older field CLI passes the POSIX path - rebuild it)";
++
++    // First instance, and the single-owner guarantee with it: two daemons
++    // racing one name cannot both hold FILE_FLAG_FIRST_PIPE_INSTANCE, and
++    // the loser fails here with ERROR_ACCESS_DENIED - the same shape as
++    // the #12-review flock, with no lock file and no stale socket to
++    // unlink.
++    auto* first = CreateNamedPipeA (socketPath.toRawUTF8(),
++                                    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
++                                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
++                                    PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, nullptr);
++    if (first == INVALID_HANDLE_VALUE)
++        return GetLastError() == ERROR_ACCESS_DENIED
++                   ? "another field-audiod already owns " + socketPath
++                   : "CreateNamedPipe failed for " + socketPath + ": " + juce::String ((int) GetLastError());
++    pendingPipe = first;
++
++    acceptEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr); // manual-reset
++    if (acceptEvent == nullptr)
++    {
++        CloseHandle (first);
++        pendingPipe = nullptr;
++        return "CreateEvent failed: " + juce::String ((int) GetLastError());
++    }
++
++    lastActivity = juce::Time::currentTimeMillis();
++    running = true;
++    acceptThread = std::thread ([this] { acceptLoop(); });
++    return {};
++}
++
++void Server::acceptLoop()
++{
++    while (running)
++    {
++        HANDLE pipe = asHandle (pendingPipe);
++        OVERLAPPED ov {};
++        ov.hEvent = asHandle (acceptEvent);
++        ResetEvent (ov.hEvent);
++        bool connected = ConnectNamedPipe (pipe, &ov) != 0;
++        bool pending = false;
++        if (! connected)
++        {
++            auto err = GetLastError();
++            if (err == ERROR_PIPE_CONNECTED)
++                connected = true;
++            else if (err == ERROR_IO_PENDING)
++            {
++                pending = true;
++                // A bounded poll rather than an INFINITE wait: SetEvent
++                // from beginShutdown can race the ResetEvent above and be
++                // swallowed, and a missed wake here deadlocks the drain
++                // loop. 200 ms of shutdown latency beats a wake protocol
++                // that has to be right - the same trade the heartbeat
++                // rescan made for hot-plug.
++                while (WaitForSingleObject (ov.hEvent, 200) == WAIT_TIMEOUT && running) {}
++                DWORD ignored = 0;
++                if (running && GetOverlappedResult (pipe, &ov, &ignored, FALSE) != 0)
++                {
++                    connected = true;
++                    pending = false; // reaped: the kernel is done with ov
++                }
++            }
++        }
++
++        // `ov` is this thread's stack and the kernel owns it until the
++        // operation completes, so no exit from this iteration may leave a
++        // connect outstanding: the destructor joins this thread (freeing
++        // the frame) and only then closes the handle, which is when the
++        // kernel writes the completion status — into memory that is gone.
++        // Probed rather than argued on #161: the status lands *after*
++        // CloseHandle. readLoop never had this bug because every
++        // GetOverlappedResult there waits (TRUE) before its scope ends.
++        if (pending)
++        {
++            CancelIoEx (pipe, &ov);
++            DWORD ignored = 0;
++            // A connect that completed between the poll and the cancel is
++            // a real client: take it rather than dropping a connection
++            // the kernel already accepted.
++            if (GetOverlappedResult (pipe, &ov, &ignored, TRUE) != 0 && running)
++                connected = true;
++        }
++
++        if (! running)
++            break; // the destructor closes the parked instance
++        if (! connected)
++            continue; // a client gave up mid-connect; the instance is reusable
++
++        // Park the next instance before serving this one, so a client
++        // connecting immediately after has somewhere to land. No
++        // FIRST_PIPE_INSTANCE - the name is already ours.
++        auto* next = CreateNamedPipeA (socketPath.toRawUTF8(),
++                                       PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
++                                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
++                                       PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, nullptr);
++        pendingPipe = next != INVALID_HANDLE_VALUE ? next : nullptr;
++
++        auto connection = std::make_shared<Connection>();
++        connection->pipe = pipe;
++        {
++            const std::lock_guard<std::mutex> lock (connectionsMutex);
++            connections.push_back (connection);
++        }
++        lastActivity = juce::Time::currentTimeMillis();
++        connection->reader = std::thread ([this, connection] { readLoop (connection); });
++        // A connection accepted in the same instant as beginShutdown would
++        // miss its cancel and stall the drain loop; catch it here.
++        if (! running)
++            CancelIoEx (pipe, nullptr);
++
++        if (pendingPipe == nullptr)
++            break; // no instance to accept on; stop rather than spin
++    }
++}
++
++void Server::readLoop (std::shared_ptr<Connection> connection)
++{
++    std::string buffer;
++    char chunk[4096];
++    auto processLines = [&]
++    {
++        size_t newline;
++        while ((newline = buffer.find ('\n')) != std::string::npos)
++        {
++            auto line = buffer.substr (0, newline);
++            buffer.erase (0, newline + 1);
++            if (! line.empty())
++                handleLine (*connection, juce::String::fromUTF8 (line.c_str(), (int) line.size()));
++        }
++    };
++
++    // `running` in the loop condition is the SHUT_RD this platform does
++    // not have: CancelIoEx only aborts a read that is pending at that
++    // instant, and a reader that was inside dispatch at shutdown would
++    // otherwise issue a fresh ReadFile and keep serving a chatty client
++    // forever — the daemon then never exits. The state check closes
++    // that; at most one request slips through the gap.
++    bool clientGone = false;
++    while (connection->open && running)
++    {
++        // The handle is overlapped, so each read carries its own event;
++        // CancelIoEx from beginShutdown aborts the wait.
++        DWORD n = 0;
++        OVERLAPPED ov {};
++        ov.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
++        bool ok = ReadFile (asHandle (connection->pipe), chunk, sizeof (chunk), nullptr, &ov) != 0
++                      || GetLastError() == ERROR_IO_PENDING;
++        if (ok)
++            ok = GetOverlappedResult (asHandle (connection->pipe), &ov, &n, TRUE) != 0;
++        const bool aborted = ! ok && GetLastError() == ERROR_OPERATION_ABORTED;
++        CloseHandle (ov.hEvent);
++        if (! ok || n == 0)
++        {
++            clientGone = ! aborted; // an abort is shutdown, not the client leaving
++            break;
++        }
++        buffer.append (chunk, (size_t) n);
++        processLines();
++    }
++
++    if (connection->open && ! running && ! clientGone)
++    {
++        // Shutdown drain, one peek deep: SHUT_RD on the POSIX arm still
++        // delivers what the client had already written before the
++        // half-close, so in-flight requests get their responses. One
++        // peek, then exactly that many bytes - re-peeking would chase a
++        // client that keeps writing, which is the loop this replaces.
++        DWORD available = 0;
++        PeekNamedPipe (asHandle (connection->pipe), nullptr, 0, nullptr, &available, nullptr);
++        while (available > 0)
++        {
++            DWORD got = 0;
++            OVERLAPPED drainOv {};
++            drainOv.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
++            bool drained = ReadFile (asHandle (connection->pipe), chunk,
++                                     (DWORD) std::min ((size_t) available, sizeof (chunk)), nullptr, &drainOv) != 0
++                               || GetLastError() == ERROR_IO_PENDING;
++            if (drained)
++                drained = GetOverlappedResult (asHandle (connection->pipe), &drainOv, &got, TRUE) != 0;
++            CloseHandle (drainOv.hEvent);
++            if (! drained || got == 0)
++                break;
++            available -= got;
++            buffer.append (chunk, (size_t) got);
++            processLines();
++        }
++    }
++
++    lastActivity = juce::Time::currentTimeMillis();
++    // Last, for the POSIX arm's reason: the sweep is the one closer, so a
++    // reused handle can never be closed out from under a newer connection.
++    connection->open = false;
++}
+ void Server::send (Connection& connection, const juce::String& line)
+ {
+     const std::lock_guard<std::mutex> lock (connection.writeMutex);
+@@ -450,49 +564,227 @@ void Server::send (Connection& connection, const juce::String& line)
+     auto remaining = strlen (utf8);
+     while (remaining > 0 && connection.open)
+     {
+-        // A client may vanish between our poll and this write (ctrl-c mid
+-        // position stream). SIGPIPE is ignored process-wide (main.cpp), so
+-        // that write returns EPIPE and the loop below stops. There is
+-        // deliberately no second mechanism — see the note there.
+-        auto n = ::write (connection.fd, utf8, remaining);
+-        if (n <= 0)
++        // A vanished client is an error return here by construction -
++        // there is no SIGPIPE to ignore on this platform (main.cpp).
++        DWORD written = 0;
++        OVERLAPPED ov {};
++        ov.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
++        bool ok = WriteFile (asHandle (connection.pipe), utf8, (DWORD) remaining, nullptr, &ov) != 0
++                      || GetLastError() == ERROR_IO_PENDING;
++        if (ok)
++            ok = GetOverlappedResult (asHandle (connection.pipe), &ov, &written, TRUE) != 0;
++        CloseHandle (ov.hEvent);
++        if (! ok || written == 0)
+             break;
+-        utf8 += n;
+-        remaining -= (size_t) n;
++        utf8 += written;
++        remaining -= (size_t) written;
+     }
+ }
+ 
+ void Server::beginShutdown()
+ {
+     running = false;
+-    if (listenFd >= 0)
+-        ::shutdown (listenFd, SHUT_RDWR);
++    if (acceptEvent != nullptr)
++        SetEvent (asHandle (acceptEvent)); // best effort; the accept wait also polls running
+     const std::lock_guard<std::mutex> lock (connectionsMutex);
+     for (auto& connection : connections)
+         if (connection->open)
+-            ::shutdown (connection->fd, SHUT_RD); // write side stays up for in-flight responses
++            CancelIoEx (asHandle (connection->pipe), nullptr); // aborts the read; in-flight writes finish
+ }
+ 
+-void Server::broadcast (const juce::String& line)
++void Server::sweepClosedConnections()
+ {
+-    std::vector<std::shared_ptr<Connection>> current;
++    const std::lock_guard<std::mutex> lock (connectionsMutex);
++    for (auto it = connections.begin(); it != connections.end();)
++    {
++        if (! (*it)->open)
++        {
++            if ((*it)->reader.joinable())
++                (*it)->reader.join();
++            DisconnectNamedPipe (asHandle ((*it)->pipe));
++            CloseHandle (asHandle ((*it)->pipe));
++            it = connections.erase (it);
++        }
++        else
++        {
++            ++it;
++        }
++    }
++}
++
++#else
++
++Server::~Server()
++{
++    running = false;
++    if (listenFd >= 0)
++    {
++        ::shutdown (listenFd, SHUT_RDWR);
++        ::close (listenFd);
++        ::unlink (socketPath.toRawUTF8());
++    }
++    if (lockFd >= 0)
++        ::close (lockFd); // releases the flock; the lock file itself stays
++    if (acceptThread.joinable())
++        acceptThread.join();
++
++    std::vector<std::shared_ptr<Connection>> toClose;
+     {
+         const std::lock_guard<std::mutex> lock (connectionsMutex);
+-        current = connections;
++        toClose = connections;
++        connections.clear();
++    }
++    for (auto& c : toClose)
++    {
++        c->open = false;
++        ::shutdown (c->fd, SHUT_RDWR);
++        ::close (c->fd);
++        if (c->reader.joinable())
++            c->reader.join();
+     }
+-    for (auto& connection : current)
+-        if (connection->open)
+-            send (*connection, line);
+ }
+ 
+-int Server::connectionCount()
++juce::String Server::start()
++{
++    if (socketPath.length() >= (int) sizeof (sockaddr_un::sun_path))
++        return "socket path too long: " + socketPath;
++
++    sockaddr_un addr {};
++    addr.sun_family = AF_UNIX;
++    std::snprintf (addr.sun_path, sizeof (addr.sun_path), "%s", socketPath.toRawUTF8());
++
++    // Exactly one daemon per socket, decided by flock rather than a
++    // connect probe: two daemons spawned in the same instant could each
++    // fail the probe and unlink the other's freshly bound socket (#12
++    // review). The lock is held for the daemon's whole life and the OS
++    // releases it on any death, so it cannot go stale; with the lock won,
++    // any existing socket file is by definition a dead daemon's leftover.
++    // The lock file itself is never unlinked — removing it would reopen
++    // the race for the next pair of spawns.
++    lockFd = ::open ((socketPath + ".lock").toRawUTF8(), O_CREAT | O_RDWR, 0600);
++    if (lockFd < 0)
++        return "cannot open lock file: " + juce::String (strerror (errno));
++    if (::flock (lockFd, LOCK_EX | LOCK_NB) != 0)
++        return "another field-audiod already owns " + socketPath;
++    ::unlink (socketPath.toRawUTF8());
++
++    listenFd = ::socket (AF_UNIX, SOCK_STREAM, 0);
++    if (listenFd < 0)
++        return "socket() failed: " + juce::String (strerror (errno));
++    if (::bind (listenFd, (sockaddr*) &addr, sizeof (addr)) != 0)
++        return "bind() failed for " + socketPath + ": " + juce::String (strerror (errno));
++    if (::listen (listenFd, 8) != 0)
++        return "listen() failed: " + juce::String (strerror (errno));
++
++    lastActivity = juce::Time::currentTimeMillis();
++    running = true;
++    acceptThread = std::thread ([this] { acceptLoop(); });
++    return {};
++}
++
++void Server::acceptLoop()
++{
++    while (running)
++    {
++        int fd = ::accept (listenFd, nullptr, nullptr);
++        if (fd < 0)
++        {
++            if (running)
++                continue;
++            break;
++        }
++        auto connection = std::make_shared<Connection>();
++        connection->fd = fd;
++        {
++            const std::lock_guard<std::mutex> lock (connectionsMutex);
++            connections.push_back (connection);
++        }
++        lastActivity = juce::Time::currentTimeMillis();
++        connection->reader = std::thread ([this, connection] { readLoop (connection); });
++        // A connection accepted in the same instant as beginShutdown would
++        // miss its half-close and stall the drain loop; catch it here.
++        if (! running)
++            ::shutdown (fd, SHUT_RD);
++    }
++}
++
++void Server::readLoop (std::shared_ptr<Connection> connection)
++{
++    std::string buffer;
++    char chunk[4096];
++    while (connection->open)
++    {
++        auto n = ::read (connection->fd, chunk, sizeof (chunk));
++        if (n <= 0)
++            break;
++        buffer.append (chunk, (size_t) n);
++        size_t newline;
++        while ((newline = buffer.find ('\n')) != std::string::npos)
++        {
++            auto line = buffer.substr (0, newline);
++            buffer.erase (0, newline + 1);
++            if (! line.empty())
++                handleLine (*connection, juce::String::fromUTF8 (line.c_str(), (int) line.size()));
++        }
++    }
++    lastActivity = juce::Time::currentTimeMillis();
++    // Last: the sweep only joins threads whose connection is closed, and
++    // everything above must be finished by then. The fd is closed by the
++    // sweep too — exactly one closer, so a reused descriptor can never be
++    // closed out from under a newer connection.
++    connection->open = false;
++}
++
++void Server::sweepClosedConnections()
+ {
+     const std::lock_guard<std::mutex> lock (connectionsMutex);
+-    int open = 0;
++    for (auto it = connections.begin(); it != connections.end();)
++    {
++        if (! (*it)->open)
++        {
++            if ((*it)->reader.joinable())
++                (*it)->reader.join();
++            ::close ((*it)->fd);
++            it = connections.erase (it);
++        }
++        else
++        {
++            ++it;
++        }
++    }
++}
++
++
++void Server::send (Connection& connection, const juce::String& line)
++{
++    const std::lock_guard<std::mutex> lock (connection.writeMutex);
++    auto utf8 = line.toRawUTF8();
++    auto remaining = strlen (utf8);
++    while (remaining > 0 && connection.open)
++    {
++        // A client may vanish between our poll and this write (ctrl-c mid
++        // position stream). SIGPIPE is ignored process-wide (main.cpp), so
++        // that write returns EPIPE and the loop below stops. There is
++        // deliberately no second mechanism — see the note there.
++        auto n = ::write (connection.fd, utf8, remaining);
++        if (n <= 0)
++            break;
++        utf8 += n;
++        remaining -= (size_t) n;
++    }
++}
++
++
++void Server::beginShutdown()
++{
++    running = false;
++    if (listenFd >= 0)
++        ::shutdown (listenFd, SHUT_RDWR);
++    const std::lock_guard<std::mutex> lock (connectionsMutex);
+     for (auto& connection : connections)
+         if (connection->open)
+-            ++open;
+-    return open;
++            ::shutdown (connection->fd, SHUT_RD); // write side stays up for in-flight responses
+ }
+ 
+-#endif // !defined(_WIN32)
++
++#endif // platform transport
+diff --git a/native/audiod/src/server.h b/native/audiod/src/server.h
+index 886a0e9..5eb7ab4 100644
+--- a/native/audiod/src/server.h
++++ b/native/audiod/src/server.h
+@@ -12,9 +12,13 @@ class Player;
+ 
+ // The versioned NDJSON control socket (playback.md §3.3): one JSON object
+ // per line, request/response with client-chosen ids, plus broadcast events.
+-// JUCE's StreamingSocket is TCP-only, so the AF_UNIX plumbing is POSIX by
+-// hand; the socket path is bound relative to the daemon's working directory
+-// (the project root) to stay inside sun_path's 104 bytes (§3.2).
++// JUCE's StreamingSocket is TCP-only, so the transport is by hand on both
++// platforms: AF_UNIX on POSIX, with the socket path bound relative to the
++// daemon's working directory (the project root) to stay inside sun_path's
++// 104 bytes (§3.2); a named pipe on Windows, where the CLI hands the full
++// \\.\pipe\ name via --socket and no length limit applies
++// (windows-portability.md §2.1, §2.3). The request handling — framing,
++// dispatch, broadcast — is shared; only the I/O layer splits.
+ class Server
+ {
+ public:
+@@ -51,7 +55,11 @@ class Server
+ private:
+     struct Connection
+     {
++#if defined(_WIN32)
++        void* pipe = nullptr; // HANDLE, spelled void* to keep windows.h out of this header
++#else
+         int fd = -1;
++#endif
+         std::thread reader;
+         std::mutex writeMutex;
+         std::atomic<bool> open { true };
+@@ -65,8 +73,18 @@ class Server
+ 
+     Player& player;
+     const juce::String socketPath;
++#if defined(_WIN32)
++    // The instance parked in ConnectNamedPipe, and the manual-reset event
++    // its OVERLAPPED waits on — beginShutdown signals it so the accept
++    // thread wakes without a client ever arriving. The first instance is
++    // created with FILE_FLAG_FIRST_PIPE_INSTANCE, which is the flock:
++    // a second daemon on the same name fails at creation.
++    void* pendingPipe = nullptr; // HANDLE
++    void* acceptEvent = nullptr; // HANDLE
++#else
+     int lockFd = -1; // flock held for the daemon's life (single-owner guarantee)
+     int listenFd = -1;
++#endif
+     std::thread acceptThread;
+     std::atomic<bool> running { false };
+     std::mutex connectionsMutex;
+diff --git a/src/audio/plugin-hosting.test.ts b/src/audio/plugin-hosting.test.ts
+index f6f5dce..53e76ce 100644
+--- a/src/audio/plugin-hosting.test.ts
++++ b/src/audio/plugin-hosting.test.ts
+@@ -16,6 +16,7 @@ import { daemonBinary } from '../audiod/client.js';
+ import { pluginInfoSchema, type PluginInfo } from './plugins.js';
+ import { renderInsertChain } from './render-daemon.js';
+ import { writeWavFloat32 } from './wav.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ const binary = (() => {
+   try {
+@@ -358,10 +359,7 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
+   });
+ });
+ 
+-// win32: the live path runs over the control socket, which waits on the
+-// named-pipe transport (windows-portability.md chunk 4); the offline
+-// describe above renders through --render subprocesses and runs.
+-describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted chains live (plugin-hosting.md chunk 2)', () => {
++describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md chunk 2)', () => {
+   let root: string;
+ 
+   beforeEach(async () => {
+@@ -424,8 +422,8 @@ describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted
+     );
+   });
+ 
+-  afterEach(() => {
+-    rmSync(root, { recursive: true, force: true });
++  afterEach(async () => {
++    await removeTempProject(root);
+     delete process.env['FIELD_PLUGIN_PATH'];
+   });
+ 
+@@ -730,8 +728,8 @@ describe('inventory cache', () => {
+     mkdirSync(join(root, '.field'));
+   });
+ 
+-  afterEach(() => {
+-    rmSync(root, { recursive: true, force: true });
++  afterEach(async () => {
++    await removeTempProject(root);
+   });
+ 
+   it('serves an unchanged file from cache and re-reads a changed one', async () => {
+diff --git a/src/audiod/client.test.ts b/src/audiod/client.test.ts
+index 7925b1b..f5b3833 100644
+--- a/src/audiod/client.test.ts
++++ b/src/audiod/client.test.ts
+@@ -1,10 +1,11 @@
+-import { mkdtempSync, rmSync } from 'node:fs';
++import { mkdtempSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { writeWavFloat32 } from '../audio/wav.js';
+ import { AudiodClient, daemonBinary } from './client.js';
+ import type { AudiodEvent } from './protocol.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ // Protocol tests against the real daemon in null-output mode: the null
+ // clock pulls the transport at real-time pace, so spawn, handshake, load,
+@@ -27,10 +28,7 @@ describe('event schema', () => {
+   });
+ });
+ 
+-// win32: the binary exists but serve mode refuses until the named-pipe
+-// transport (windows-portability.md chunk 4); every test here dials the
+-// socket.
+-describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol', () => {
++describe.skipIf(!binary)('field-audiod protocol', () => {
+   let root: string;
+   let client: AudiodClient;
+ 
+@@ -50,7 +48,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol'
+       }
+       client.close();
+     }
+-    rmSync(root, { recursive: true, force: true });
++    await removeTempProject(root);
+   });
+ 
+   it('handshakes, lists devices in null mode, and reports empty status', async () => {
+@@ -180,7 +178,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol'
+       await clients[0]!.quit();
+       for (const c of clients) c.close();
+     } finally {
+-      rmSync(fresh, { recursive: true, force: true });
++      await removeTempProject(fresh);
+     }
+   });
+ 
+diff --git a/src/audiod/client.ts b/src/audiod/client.ts
+index c47c229..13e16bd 100644
+--- a/src/audiod/client.ts
++++ b/src/audiod/client.ts
+@@ -125,7 +125,11 @@ export class AudiodClient extends EventEmitter {
+       if (!binary) {
+         throw new Error('field-audiod is not built (pnpm build:native, or set FIELD_AUDIOD)');
+       }
+-      const args = ['--socket', SOCKET_RELATIVE];
++      // POSIX gets the relative path (the daemon binds it against its
++      // cwd, staying inside sun_path); Windows gets the full pipe name,
++      // since a pipe is not a filesystem path and cwd means nothing to
++      // it. Client and daemon agree because both strings come from here.
++      const args = ['--socket', process.platform === 'win32' ? path : SOCKET_RELATIVE];
+       // FIELD_AUDIOD_NULL covers spawns the caller doesn't parameterize
+       // (field play in CI or on a deviceless machine).
+       if (options.nullOutput ?? process.env['FIELD_AUDIOD_NULL'] === '1') args.push('--null-output');
+diff --git a/src/audiod/live-session.test.ts b/src/audiod/live-session.test.ts
+index 3982312..6082f74 100644
+--- a/src/audiod/live-session.test.ts
++++ b/src/audiod/live-session.test.ts
+@@ -13,6 +13,7 @@ import { compileSession, convertedLength, diffSessions } from '../graph/live.js'
+ import { watchLiveSession } from '../commands/watch-live.js';
+ import { AudiodClient, daemonBinary } from './client.js';
+ import { sessionInsertSchema, type Session } from './session.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ // Chunk 2's definition of correct (realtime.md decision 3 at graph
+ // level): a non-looping session rendered by the live engine is
+@@ -148,10 +149,6 @@ function wavData(path: string): Buffer {
+   return bytes.subarray(at + 8, at + 8 + size);
+ }
+ 
+-// The four tests below dial the socket; they wait on the named-pipe
+-// transport (windows-portability.md chunk 4). The --render-live tests
+-// around them run the binary as a subprocess and run everywhere.
+-const itOverSocket = it.skipIf(process.platform === 'win32');
+ 
+ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+   let root: string;
+@@ -159,8 +156,8 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+   beforeEach(() => {
+     root = mkdtempSync(join(tmpdir(), 'field-live-'));
+   });
+-  afterEach(() => {
+-    rmSync(root, { recursive: true, force: true });
++  afterEach(async () => {
++    await removeTempProject(root);
+   });
+ 
+   it('renders a non-looping session byte-identically to the offline stem', async () => {
+@@ -180,7 +177,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     expect(live.equals(stem)).toBe(true);
+   });
+ 
+-  itOverSocket('loads, plays, ramps, and locates a session over the socket', async () => {
++  it('loads, plays, ramps, and locates a session over the socket', async () => {
+     await scaffold(root);
+     const { session } = await compileSession(root, 'opener');
+ 
+@@ -256,7 +253,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     expect(diffSessions(before, before)).toEqual({ kind: 'same' });
+   });
+ 
+-  itOverSocket('a session swap carries the transport (realtime.md chunk 3)', async () => {
++  it('a session swap carries the transport (realtime.md chunk 3)', async () => {
+     await scaffold(root);
+     const { session } = await compileSession(root, 'opener');
+     const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+@@ -508,7 +505,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     expect(convertedLength(24000, 48000, 48000)).toBe(24000);
+   });
+ 
+-  itOverSocket('a device that cannot switch converts delivery instead of refusing', async () => {
++  it('a device that cannot switch converts delivery instead of refusing', async () => {
+     init({ dir: root, name: 'fortyfour', sampleRate: 44100 });
+     createSong(root, 'opener');
+     const tone = join(tmpdir(), `ff-tone-${process.pid}.wav`);
+@@ -555,7 +552,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     }
+   });
+ 
+-  itOverSocket('a swap keeps converted delivery seamless: the queued tail survives', async () => {
++  it('a swap keeps converted delivery seamless: the queued tail survives', async () => {
+     // Swap-with-carry under conversion (cross-rate-live.md decision 3,
+     // minjudd's finding on #143): the FIFO holds already-converted
+     // audio the ear has not heard yet, and a swap that keeps the rate
+diff --git a/src/cli.ts b/src/cli.ts
+index 8e0ae77..2cc3474 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -640,8 +640,24 @@ program
+   });
+ 
+ // The retiring fallback for machines without the built daemon: playback
+-// through afplay, no transport, no --from.
++// through afplay, no transport, no --from. macOS only, and deliberately
++// not replaced anywhere else: since realtime.md, `field play` IS live
++// evaluation in the daemon, and a second, worse playback path would be
++// a liability, not a feature. Decided for Windows in
++// windows-portability.md §2.2 and widened to every non-macOS platform
++// with §2.2's own reasoning (recorded there as an amendment): afplay is
++// dead code off macOS by definition, so the guard is the difference
++// between the build hint and an ENOENT naming a tool the machine never
++// had (#162 review caught the docs describing the wide guard first).
+ async function playWithAfplay(items: Playable[]): Promise<void> {
++  if (process.platform !== 'darwin') {
++    // afplay is a macOS binary: anywhere else the spawn below could only
++    // die with ENOENT naming a tool this machine never had (#162 review
++    // caught the docs describing this guard before it was this wide).
++    throw new Error(
++      'field-audiod is not built, and the afplay fallback is macOS-only — run `pnpm build:native`',
++    );
++  }
+   for (const item of items) {
+     process.stdout.write(`playing ${item.label}\n`);
+     const interrupted = await new Promise<boolean>((done, reject) => {
+diff --git a/src/commands/click-daemon.test.ts b/src/commands/click-daemon.test.ts
+index 1a307d7..b4745dc 100644
+--- a/src/commands/click-daemon.test.ts
++++ b/src/commands/click-daemon.test.ts
+@@ -12,6 +12,7 @@ import { createSong, createTrack } from './create.js';
+ import { importAsset } from './import.js';
+ import { init } from './init.js';
+ import { recordTake } from './record.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ // The metronome in the engine (recording.md §7, chunk 3). The click is a
+ // schedule the CLI projects and the daemon synthesizes, so two things
+@@ -79,7 +80,7 @@ describe.skipIf(!binary)('the engine click', () => {
+     } catch {
+       // no daemon left behind
+     }
+-    rmSync(root, { recursive: true, force: true });
++    await removeTempProject(root);
+   });
+ 
+   it('renders ticks on exactly the scheduled samples, accented on the downbeat', async () => {
+diff --git a/src/commands/play-daemon.test.ts b/src/commands/play-daemon.test.ts
+index 07eff15..14eaf2c 100644
+--- a/src/commands/play-daemon.test.ts
++++ b/src/commands/play-daemon.test.ts
+@@ -1,6 +1,6 @@
+ import { mkdtempSync, rmSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { join, sep } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { writeWavFloat32 } from '../audio/wav.js';
+ import { AudiodClient, daemonBinary } from '../audiod/client.js';
+@@ -10,6 +10,7 @@ import { importAsset } from './import.js';
+ import { init } from './init.js';
+ import { playThroughDaemon, resolvePlayables } from './play.js';
+ import { transportCommand, transportLocate, transportStatusLines } from './transport.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ // End-to-end daemon playback in null-output mode: real project, real
+ // builds where needed, real daemon pulling the transport at real-time
+@@ -22,9 +23,7 @@ const binary = (() => {
+   }
+ })();
+ 
+-// win32: serve mode refuses until the named-pipe transport
+-// (windows-portability.md chunk 4).
+-describe.skipIf(!binary || process.platform === 'win32')('field play through the daemon', () => {
++describe.skipIf(!binary)('field play through the daemon', () => {
+   let root: string;
+   let project: LoadedProject;
+ 
+@@ -53,7 +52,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field play through the
+     } catch {
+       // no daemon left behind
+     }
+-    rmSync(root, { recursive: true, force: true });
++    await removeTempProject(root);
+   });
+ 
+   it('plays a queue in order, streaming positions', async () => {
+@@ -284,7 +283,7 @@ describe.skipIf(!binary || process.platform === 'win32')('field play through the
+ 
+     const lines = await transportStatusLines(root, project);
+     expect(lines[0]).toMatch(/^playing {2}\d+\.\d+\.\d+ \(/);
+-    expect(lines[1]).toContain('songs/creek/audio/long/long.wav');
++    expect(lines[1]).toContain(['songs', 'creek', 'audio', 'long', 'long.wav'].join(sep));
+ 
+     // Bar 3 at 120 bpm = 8 beats = 192000 samples.
+     expect(await transportLocate(root, project, '3.1.1')).toBe('3.1.1 (0:04.0)');
+diff --git a/src/commands/punch-daemon.test.ts b/src/commands/punch-daemon.test.ts
+index c87381b..7822d60 100644
+--- a/src/commands/punch-daemon.test.ts
++++ b/src/commands/punch-daemon.test.ts
+@@ -12,6 +12,7 @@ import { importAsset } from './import.js';
+ import { init } from './init.js';
+ import { playLiveSession } from './play.js';
+ import { passesNote, recordTake } from './record.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ // Punch-out, the region loop, and loop takes (recording.md §10.4,
+ // chunk 4). The null clock's sawtooth (player.cpp) is what makes the
+@@ -95,7 +96,7 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
+     } catch {
+       // no daemon left behind
+     }
+-    rmSync(root, { recursive: true, force: true });
++    await removeTempProject(root);
+   });
+ 
+   it('a region loop wraps the live session between its bounds, and clears', { timeout: 15_000 }, async () => {
+diff --git a/src/commands/record-daemon.test.ts b/src/commands/record-daemon.test.ts
+index 6ee6b96..24b3792 100644
+--- a/src/commands/record-daemon.test.ts
++++ b/src/commands/record-daemon.test.ts
+@@ -13,6 +13,7 @@ import { buildLabels } from './build.js';
+ import { describeTake, meterLine, recordTake, resolveRecordTarget } from './record.js';
+ import { transportCommand, transportStatusLines } from './transport.js';
+ import { check } from './check.js';
++import { removeTempProject } from '../testing/temp.js';
+ 
+ // The input side (recording.md chunk 1) against the real daemon in
+ // null-output mode. The null clock presents an input while armed — a
+@@ -88,7 +89,7 @@ describe.skipIf(!binary)('recording through the daemon', () => {
+     } catch {
+       // no daemon left behind
+     }
+-    rmSync(root, { recursive: true, force: true });
++    await removeTempProject(root);
+   });
+ 
+   async function importTone(name: string, samples: number): Promise<string> {
+diff --git a/src/commands/version.test.ts b/src/commands/version.test.ts
+index 1350d8b..e427248 100644
+--- a/src/commands/version.test.ts
++++ b/src/commands/version.test.ts
+@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
+ import { fileStore } from '../remote/credentials.js';
+ import { git } from '../git.js';
++import { socketPathFor } from '../socketPath.js';
+ import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
+ import { SETUP_SPECS } from './generate.js';
+ import {
+@@ -36,12 +37,6 @@ afterEach(async () => {
+   rmSync(root, { recursive: true, force: true });
+ });
+ 
+-// fakeDaemon binds a Unix socket, which Node on Windows cannot do — the
+-// local domain is named pipes there. Every test that fakes a daemon goes
+-// with the transport when windows-portability.md chunk 4 moves
+-// socketPathFor to pipe names; the guard is the transport's, not each
+-// test's own.
+-const itOverPosixSocket = it.skipIf(process.platform === 'win32');
+ 
+ // A daemon that answers `hello` and nothing else, which is all this
+ // command asks of one.
+@@ -53,7 +48,9 @@ function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Pro
+       );
+     });
+     servers.push(server);
+-    server.listen(join(root, socketRelative), () => resolve());
++    // What versionReport dials: a path on POSIX, a pipe name on Windows
++    // (socketPathFor, windows-portability.md chunk 4).
++    server.listen(socketPathFor(root, socketRelative), () => resolve());
+   });
+ }
+ 
+@@ -84,7 +81,7 @@ describe('field --version', () => {
+     expect(formatVersionReport(report, root)).toContain('field-voiced  not running');
+   });
+ 
+-  itOverPosixSocket('reports what a running daemon says about itself', async () => {
++  it('reports what a running daemon says about itself', async () => {
+     await fakeDaemon('.field/voiced.sock', {
+       protocol: WORKER_PROTOCOL_VERSION,
+       daemon: 'field-voiced',
+@@ -99,7 +96,7 @@ describe('field --version', () => {
+     expect(voiced.note).toBeUndefined();
+   });
+ 
+-  itOverPosixSocket('flags a daemon whose protocol predates this build', async () => {
++  it('flags a daemon whose protocol predates this build', async () => {
+     // The reason the command exists. A worker started before a protocol
+     // change answers hello perfectly well and will then refuse — or,
+     // before the bump that made this visible, quietly do the wrong
+@@ -117,7 +114,7 @@ describe('field --version', () => {
+     expect(formatVersionReport(report, root)).toContain('!');
+   });
+ 
+-  itOverPosixSocket('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
++  it('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
+     // audiod is at protocol 1 and the workers at 2; comparing either
+     // against the other invents a disagreement. Skipping audiod was the
+     // alternative and worse: AudiodClient refuses a mismatch and
+@@ -132,7 +129,7 @@ describe('field --version', () => {
+     expect(audiod.note).toContain('rebuild the daemon');
+   });
+ 
+-  itOverPosixSocket('does not flag a current audiod merely for differing from the workers', async () => {
++  it('does not flag a current audiod merely for differing from the workers', async () => {
+     // The invented-disagreement case: audiod at its own current protocol
+     // is fine even though that number is not the workers'.
+     await fakeDaemon(AUDIOD_SOCKET, {
+@@ -145,7 +142,7 @@ describe('field --version', () => {
+     expect(audiod.note).toBeUndefined();
+   });
+ 
+-  itOverPosixSocket('does not hand audiod a remedy for a process that is not audiod', async () => {
++  it('does not hand audiod a remedy for a process that is not audiod', async () => {
+     // The interaction, not the gap: put a worker on audiod's socket and
+     // the old code reported field-audiod at the worker's version, then
+     // measured the worker's protocol 2 against audiod's 1 and printed
+@@ -162,13 +159,13 @@ describe('field --version', () => {
+     expect(audiod.note).not.toContain('rebuild the daemon');
+   });
+ 
+-  itOverPosixSocket('does not report an audiod refusal as a healthy audiod', async () => {
++  it('does not report an audiod refusal as a healthy audiod', async () => {
+     await fakeDaemon(AUDIOD_SOCKET, { ok: false, error: 'unknown op' });
+     const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
+     expect(audiod.note).toContain('refused the hello');
+   });
+ 
+-  itOverPosixSocket('says when the wrong worker is on a socket', async () => {
++  it('says when the wrong worker is on a socket', async () => {
+     // One socket convention across every worker means a stale or
+     // mis-pointed socket puts one worker's process under another's name.
+     // A version report that mislabels a process is worse than one that
+@@ -182,7 +179,7 @@ describe('field --version', () => {
+     expect(voiced.note).toContain('identifies as field-aced');
+   });
+ 
+-  itOverPosixSocket('does not report a refusal as a healthy daemon', async () => {
++  it('does not report a refusal as a healthy daemon', async () => {
+     // `ok: false` is a refusal, not a hello. Reporting it as running with
+     // an unknown version is the command's own kind of lie.
+     await fakeDaemon('.field/voiced.sock', { ok: false, error: 'unknown op' });
+@@ -190,7 +187,7 @@ describe('field --version', () => {
+     expect(voiced.note).toContain('refused the hello');
+   });
+ 
+-  itOverPosixSocket('does not flag a daemon that agrees', async () => {
++  it('does not flag a daemon that agrees', async () => {
+     // The negative half: a warning that fires on a current daemon is a
+     // warning nobody reads.
+     await fakeDaemon('.field/aced.sock', {
+diff --git a/src/remote/credentials.test.ts b/src/remote/credentials.test.ts
+index 0d8f4e1..7552250 100644
+--- a/src/remote/credentials.test.ts
++++ b/src/remote/credentials.test.ts
+@@ -25,8 +25,12 @@ describe('fileStore', () => {
+     expect(store.read('https://audiofield.io')).toEqual({ token: 'abc' });
+     expect(store.read('https://staging.audiofield.io')).toEqual({ token: 'def' });
+     // A token is a secret in a home directory: only its owner reads it.
+-    expect(statSync(path).mode & 0o777).toBe(0o600);
+-    expect(statSync(join(dir, 'home', '.field')).mode & 0o777).toBe(0o700);
++    // Windows reports no POSIX mode bits (chmod only toggles read-only
++    // there), so the profile directory's ACL is what protects the file.
++    if (process.platform !== 'win32') {
++      expect(statSync(path).mode & 0o777).toBe(0o600);
++      expect(statSync(join(dir, 'home', '.field')).mode & 0o777).toBe(0o700);
++    }
+   });
+ 
+   it('deletes one remote and leaves the others', () => {
+diff --git a/src/socketPath.ts b/src/socketPath.ts
+index 984a8d2..c6e9ae9 100644
+--- a/src/socketPath.ts
++++ b/src/socketPath.ts
+@@ -1,11 +1,20 @@
+-import { join, relative } from 'node:path';
++import { createHash } from 'node:crypto';
++import { join, relative, resolve } from 'node:path';
+ 
+ // Where a daemon's socket is, expressed so `connect()` will accept it.
+ //
+-// `sun_path` is 104 bytes on macOS and 108 on Linux, and Node's connect()
+-// is subject to the same limit as bind(). A cwd-relative path keeps it
+-// short whenever the CLI runs inside the project, which it always does —
+-// requireRoot found the manifest by walking upward.
++// POSIX: `sun_path` is 104 bytes on macOS and 108 on Linux, and Node's
++// connect() is subject to the same limit as bind(). A cwd-relative path
++// keeps it short whenever the CLI runs inside the project, which it
++// always does — requireRoot found the manifest by walking upward.
++//
++// Windows: the local domain is named pipes, which are not filesystem
++// paths and have no such limit — the same function answers a different
++// question per platform (windows-portability.md §2.3). The name is
++// derived from the resolved project root plus the relative socket path,
++// lowercased because NTFS paths compare case-insensitively and two
++// spellings of one root must not mint two daemons. The daemon binds
++// whatever --socket says, so client and daemon agree by construction.
+ //
+ // One function because it was two, in audiod/client.ts and
+ // workers/client.ts, and `field --version` was about to make it three by
+@@ -15,6 +24,13 @@ import { join, relative } from 'node:path';
+ // (#70 review). A rule kept in step by hand is a rule that drifts —
+ // the same argument that moved SETUP_SPECS in #67.
+ export function socketPathFor(root: string, socketRelative: string): string {
++  if (process.platform === 'win32') {
++    const key = createHash('sha256')
++      .update(`${resolve(root).toLowerCase()}|${socketRelative}`)
++      .digest('hex')
++      .slice(0, 24);
++    return `\\\\.\\pipe\\field-${key}`;
++  }
+   const absolute = join(root, socketRelative);
+   const rel = relative(process.cwd(), absolute);
+   return rel.length < absolute.length ? rel : absolute;
+diff --git a/src/testing/temp.ts b/src/testing/temp.ts
+new file mode 100644
+index 0000000..01983df
+--- /dev/null
++++ b/src/testing/temp.ts
+@@ -0,0 +1,21 @@
++import { rmSync } from 'node:fs';
++
++// Removes a test project directory that a daemon may still be exiting
++// from. On Windows a directory that is a live process's cwd — or that
++// holds its still-open log — cannot be deleted, and the daemon takes a
++// few hundred milliseconds to wind down after `quit`; rmSync's own
++// maxRetries does not cover every op in the recursive walk, so the
++// retry lives out here around the whole removal. POSIX deletes a live
++// process's cwd without complaint and returns on the first pass.
++export async function removeTempProject(root: string): Promise<void> {
++  const deadline = Date.now() + 10_000;
++  for (;;) {
++    try {
++      rmSync(root, { recursive: true, force: true });
++      return;
++    } catch (err) {
++      if (Date.now() > deadline) throw err;
++      await new Promise((r) => setTimeout(r, 150));
++    }
++  }
++}
