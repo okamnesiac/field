@@ -35,7 +35,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   // The gesture's own state: entry index -> value while dragging.
-  const [drag, setDrag] = useState<Record<number, number>>({});
+  // A fader's value while it moves, keyed by the placement it writes:
+  // the owner file and the entry's index in it. An index alone repeats
+  // across files, so a child row could pick up another file's value.
+  const [drag, setDrag] = useState<Record<string, number>>({});
   // The selected clip, by tree path. The timeline writes it; the
   // inserts panel reads the lane it names. A path rather than a lane
   // object, so every snapshot re-resolves to current values.
@@ -174,7 +177,15 @@ export function App() {
   // One lane's controls, for either a top-level lane or a child row —
   // the timeline places them in its header column.
   const laneControls = (lane: import('../../src/commands/ui-protocol.js').UiTimelineLane) => {
-    const gain = drag[lane.entry] ?? lane.gain_db;
+    const key = `${lane.file}#${lane.entry}`;
+    const gain = drag[key] ?? lane.gain_db;
+    // One write when the gesture ends, by pointer or by arrow keys.
+    const release = () => {
+      if (drag[key] !== undefined) {
+        edit(lane, { gain_db: drag[key] });
+        setDrag(({ [key]: _done, ...rest }) => rest);
+      }
+    };
     const soloedHere = snap.soloed === lane.name;
     const dimmed = snap.soloed !== null && !soloedHere;
     // Two rows, not one: the name above, the controls below. One row
@@ -207,13 +218,9 @@ export function App() {
             max={12}
             step={0.5}
             value={gain}
-            onChange={(e) => setDrag({ ...drag, [lane.entry]: Number(e.target.value) })}
-            onPointerUp={() => {
-              if (drag[lane.entry] !== undefined) {
-                edit(lane, { gain_db: drag[lane.entry] });
-                setDrag(({ [lane.entry]: _done, ...rest }) => rest);
-              }
-            }}
+            onChange={(e) => setDrag({ ...drag, [key]: Number(e.target.value) })}
+            onPointerUp={release}
+            onKeyUp={release}
           />
           <span className="db">{gain > 0 ? `+${gain}` : gain}</span>
           </div>

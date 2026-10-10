@@ -125,6 +125,13 @@ function Insert({
 function Knobs({ ins, op }: { ins: UiInsert; op: (msg: Record<string, unknown>) => void }) {
   const [drag, setDrag] = useState<Record<string, number>>({});
   const knobs = KNOBS[ins.effect] ?? [];
+  // One write when the gesture ends, by pointer or by arrow keys.
+  const release = (key: string) => {
+    if (drag[key] !== undefined) {
+      op({ type: 'insert-edit', entry: ins.entry, set: { [key]: drag[key] } });
+      setDrag(({ [key]: _done, ...rest }) => rest);
+    }
+  };
   return (
     <div className="ins-knobs">
       {knobs.map(({ key, min, max, step }) => {
@@ -139,12 +146,8 @@ function Knobs({ ins, op }: { ins: UiInsert; op: (msg: Record<string, unknown>) 
               step={step}
               value={value}
               onChange={(e) => setDrag({ ...drag, [key]: Number(e.target.value) })}
-              onPointerUp={() => {
-                if (drag[key] !== undefined) {
-                  op({ type: 'insert-edit', entry: ins.entry, set: { [key]: drag[key] } });
-                  setDrag(({ [key]: _done, ...rest }) => rest);
-                }
-              }}
+              onPointerUp={() => release(key)}
+              onKeyUp={() => release(key)}
             />
             <span className="knob-value">{value}</span>
           </label>
