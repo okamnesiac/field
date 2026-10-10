@@ -6,9 +6,10 @@ priority: now
 # Plan: Keyboard instrument
 
 **Goal:** `field keys` turns the computer keyboard into a MIDI device
-that any application can play from, and `field keys <instrument>` plays
-a SuperCollider instrument from it live, so you can audition an
-instrument under your fingers. Recording what you play comes last.
+that any application can play from, through a keymap you choose or
+write yourself, and `field keys <instrument>` plays a SuperCollider
+instrument from it live, so you can audition an instrument under your
+fingers. Recording what you play comes last.
 
 ## 1 The problem
 
@@ -31,18 +32,32 @@ another, depending on how it is invoked. Only the first half exists.
 
 ## 2 The solution
 
-`field keys` reads key presses and releases from the terminal, maps
-each key by its physical position so that any keyboard layout plays the
-same notes, and publishes the result as a virtual MIDI source named
+`field keys` reads key presses and releases from the terminal, finds
+the physical key behind each one, and looks it up in a *keymap*: a YAML
+file that says what each key plays. Logic Pro's Musical Typing is the
+default keymap, two alternatives are built in, and you can write your
+own. `field keys` publishes the result as a virtual MIDI source named
 `Field Keys`, through a small mode of `field-audiod`. Given an
-instrument, it also starts a
-*voice host*: an `sclang` process that boots its own `scsynth` on the
-output device, loads the instrument's *voice* (one SynthDef that plays
-one note), and plays it from every MIDI source. A USB controller
-therefore plays the same voice as the keyboard does. Last, recording
-captures the notes of a performance as a take, timed by the daemon
-against the song's transport and rendered offline through the same
-voice, so a recorded part builds like any other node.
+instrument, it also starts a *voice host*: an `sclang` process that
+boots its own `scsynth` on the output device, loads the instrument's
+*voice* (one SynthDef that plays one note), and plays it from every
+MIDI source. A USB controller therefore plays the same voice as the
+keyboard does. Last, recording captures the notes of a performance as a
+take, timed by the daemon against the song's transport and rendered
+offline through the same voice, so a recorded part builds like any
+other node.
+
+Three words carry the design, and each names one thing:
+
+- **Position.** A physical key, written as its W3C `KeyboardEvent.code`
+  value, such as `KeyA`, `Semicolon`, `Digit1`, or `Space`. The name
+  comes from the key a US keyboard has in that place, but it means the
+  place, whatever the key types.
+- **Keyboard layout.** The operating system's map from position to
+  character: QWERTY, Dvorak, AZERTY. It decides what a key types.
+- **Keymap.** Field's map from position to what the key plays: a note,
+  a chord, or a control such as transpose or sustain. It ends at MIDI,
+  and the instrument decides the sound.
 
 ### 2.1 What happens when you play
 
@@ -51,38 +66,42 @@ voice, so a recorded part builds like any other node.
 2. `field keys` checks that the terminal speaks the kitty keyboard
    protocol (§2.2). If it does not, the command exits with a message
    that names terminals that do.
-3. It spawns `field-audiod --keys "Field Keys"`. The helper creates
-   the virtual source with JUCE's `MidiOutput::createNewDevice`, reports
-   the active keyboard layout, and prints a ready line (§2.5).
-4. It adds `.scd` to a name that has no extension, and resolves the
-   result exactly as a `supercollider:` entry resolves `source:`, to
-   `shared/instruments/still-water-pad.scd`. Then it spawns `sclang`
-   on the voice host, `sc/voice-host.scd`, with the instrument path,
-   the output device, and an `scsynth` port in the environment.
-5. The voice host boots `scsynth`, runs the instrument program with
+3. It loads the keymap: Musical Typing, unless `--keymap` or
+   `FIELD_KEYMAP` names another (§2.4). A keymap that fails validation
+   stops the command with its errors.
+4. It spawns `field-audiod --keys "Field Keys"`. The helper creates the
+   virtual source with JUCE's `MidiOutput::createNewDevice`, reports
+   the keyboard layout, and prints a ready line (§2.5).
+5. It adds `.scd` to an instrument name that has no extension, and
+   resolves the result exactly as a `supercollider:` entry resolves
+   `source:`, to `shared/instruments/still-water-pad.scd`. Then it
+   spawns `sclang` on the voice host, `sc/voice-host.scd`, with the
+   instrument path, the output device, and an `scsynth` port in the
+   environment.
+6. The voice host boots `scsynth`, runs the instrument program with
    `FIELD_MODE=voice`, adds the SynthDef the program returns, connects
    every MIDI source, and prints a ready line. The status line in
    `field keys` shows the instrument as live, with the device and its
    sample rate.
-6. You press the key in the position of a US keyboard's `A`. The
-   terminal reports the press, and `field keys` resolves the key's
-   physical position (§2.3), whatever the layout types there. It maps
-   that position to note 60 at the current octave and velocity, writes
-   a note-on to the helper, and remembers that the position holds note
+7. You press `KeyA`, the key a US keyboard labels `A`. The terminal
+   reports the press, and `field keys` finds its position (§2.3),
+   whatever your keyboard layout types there. Musical Typing maps
+   `KeyA` to note 60 at the current transpose and velocity. `field keys`
+   writes a note-on to the helper and remembers that `KeyA` holds note
    60.
-7. The helper sends the note-on from `Field Keys`. CoreMIDI delivers it
+8. The helper sends the note-on from `Field Keys`. CoreMIDI delivers it
    to the voice host, which starts a voice with `freq` 261.63, `amp`
    from the velocity, and `gate` 1.
-8. You release `A`. `field keys` sends a note-off for the note that `A`
-   started, which is 60 even if you changed octave while you held it.
-   The voice host sets that voice's `gate` to 0, and the voice frees
-   itself when its envelope ends.
-9. You press `Esc` or `Ctrl-C`. `field keys` sends a note-off for each
-   held note and then All Notes Off (CC 123), and restores the
-   terminal. It closes the helper's input, which removes `Field Keys`.
-   Last, it sends `/quit` to `scsynth` and stops `sclang`.
+9. You release `KeyA`. `field keys` sends a note-off for the note that
+   `KeyA` started, which is 60 even if you transposed while you held
+   it. The voice host sets that voice's `gate` to 0, and the voice
+   frees itself when its envelope ends.
+10. You press `Esc` or `Ctrl-C`. `field keys` sends a note-off for each
+    held note and then All Notes Off (CC 123), and restores the
+    terminal. It closes the helper's input, which removes `Field Keys`.
+    Last, it sends `/quit` to `scsynth` and stops `sclang`.
 
-Without an instrument, `field keys` stops after step 3 and is a MIDI
+Without an instrument, `field keys` stops after step 4 and is a MIDI
 device for Logic, the SuperCollider IDE, or anything else that lists
 MIDI inputs.
 
@@ -97,7 +116,7 @@ implement it. Apple's Terminal does not.
 | Step | Bytes `field keys` writes | Why |
 | --- | --- | --- |
 | Probe | `CSI ? u`, then `CSI c` | A terminal with the protocol answers `CSI ? <flags> u` before its answer to `CSI c`. A terminal that answers only `CSI c` lacks it. |
-| Enable | `CSI > 15 u` | Pushes flags 1, 2, 4, and 8. Flag 2 reports event types. Flag 8 reports letter keys as escape codes, which is what gives them release events. Flag 4 adds the base layout key, one of the two sources of a key's physical position (§2.3). |
+| Enable | `CSI > 15 u` | Pushes flags 1, 2, 4, and 8. Flag 2 reports event types. Flag 8 reports letter keys as escape codes, which is what gives them release events. Flag 4 adds the base layout key, one of the two sources of a key's position (§2.3). |
 | Focus | `CSI ? 1004 h` | Turns on focus reports. On focus-out (`CSI O`), `field keys` releases every held note, because a terminal that has lost focus never reports the release. |
 | Restore | `CSI < u`, `CSI ? 1004 l` | Pops the flags and turns off focus reports, on every exit path, including a thrown error. |
 
@@ -105,82 +124,193 @@ In raw mode `Ctrl-C` never raises `SIGINT`, and under the protocol it
 arrives as an escape sequence (`CSI 99;5 u`), so `field keys` handles
 it as a key. It ignores repeat events: holding a key holds its note.
 
-### 2.3 Keys are read by physical position
+### 2.3 Keys are read by position
 
-A playing layout is geometry: the black keys sit between the white
-keys because of where the keys are, not because of what they type.
-`field keys` therefore maps positions, never characters, and this plan
-names a position by the key a US keyboard has there. On Dvorak, the
-position this plan calls `S` types `o`. On AZERTY, the position called
-`A` types `q`. Both play the same note as `S` and `A` on QWERTY, and
-nobody has to switch their layout back to play.
+A keymap is geometry: black keys sit between white keys because of
+where the keys are, not because of what they type. So `field keys`
+looks up positions, never characters. On Dvorak, `KeyS` types `o`. On
+AZERTY, `KeyA` types `q`. Both still play what `KeyS` and `KeyA` play
+on QWERTY, and nobody has to switch their keyboard layout back to play.
 
-A terminal sends characters, so `field keys` recovers the position from
-two sources:
+A terminal sends characters, so `field keys` recovers the position
+from two sources:
 
 1. **The terminal's base layout key.** Under flag 4, the kitty protocol
    lets a terminal add the key that has the same physical position on
-   the standard PC-101 (US) layout. Ghostty sends it. The protocol makes
-   it optional, and a terminal leaves it out when it equals the typed
-   key. So a missing base layout key means either a QWERTY layout or a
-   terminal that does not send one, and `field keys` cannot tell which.
-2. **The layout map, on macOS.** The helper reads the active keyboard
-   layout with the Text Input Sources API. macOS key codes name
-   positions, not characters: `kVK_ANSI_A` is the US `A` position on
-   every layout. For each position the layout table uses, the helper
+   the standard PC-101 (US) keyboard. Ghostty sends it. The protocol
+   makes it optional, and a terminal leaves it out when it equals the
+   typed key. So a missing base layout key means either a QWERTY
+   keyboard layout or a terminal that does not send one, and
+   `field keys` cannot tell which.
+2. **The keyboard layout, read on macOS.** The helper reads the active
+   keyboard layout with the Text Input Sources API. macOS key codes
+   name positions, not characters: `kVK_ANSI_A` is `KeyA` on every
+   keyboard layout. For each position any keymap can bind, the helper
    asks `UCKeyTranslate` what that key code types with no modifiers,
    and notes whether it is a dead key. It sends `field keys` the
-   resulting map at start, and again whenever the selected input source
-   changes, so switching layouts mid-session needs no restart.
+   result at start, and again whenever the selected input source
+   changes, so switching keyboard layouts mid-session needs no restart.
 
 `field keys` takes the base layout key when the terminal sends one.
-Otherwise it looks the reported character up in the layout map. On a
-QWERTY layout the map is the identity. On Linux there is no layout map
-in this plan, so `field keys` relies on the terminal's base layout key
-alone.
+Otherwise it looks the reported character up in the keyboard layout
+the helper sent. On QWERTY that lookup returns the character's own
+position. On Linux there is no helper report in this plan, so
+`field keys` relies on the terminal's base layout key alone.
 
-A dead key is one that types nothing on its own and waits to combine
-with the next key, such as `'` on US International. The terminal holds
-it for composition, so `field keys` may never see it. When the map
-marks a dead key at a position the table uses, the status line names
-that position as one that cannot play on this layout, rather than
-leaving a silent key.
+A dead key types nothing on its own and waits to combine with the next
+key, such as `'` on U.S. International. The terminal holds it for
+composition, so `field keys` may never see it. When the keyboard layout
+has a dead key at a position the keymap binds, the status line names
+that position as one that cannot play on this keyboard layout, rather
+than leaving a silent key.
 
-The status line labels positions with what the active layout types
-there. On Dvorak, the white keys read `A O E U I D H T N S -`.
+### 2.4 Keymaps are files, and Musical Typing is the default
 
-### 2.4 The layout follows Logic's Musical Typing
+A keymap is a YAML file, and the built-in keymaps use the same format
+as yours. A zod schema in `src/schema/keymap.ts` checks every keymap
+before `field keys` uses it. The built-ins live in `keymaps/` at the
+package root, found the way `python/` is.
 
-The table follows Musical Typing in Logic Pro. Ableton Live's computer
-MIDI keyboard shares its home-row piano and its octave and velocity
-keys. Each entry is a position (§2.3).
+| Built-in | What it plays | Chunk |
+| --- | --- | --- |
+| `musical-typing` (default) | Logic Pro's Musical Typing: white keys from `KeyA` to `Quote`, black keys on the row above, controls on `KeyZ` to `KeyV`, `Tab`, and the number row. 18 notes. | 1 |
+| `tracker` | The tracker keymap: the `KeyZ` row and the `KeyQ` row as two piano octaves, with black keys on the row above each. Controls on the arrows and `Space`. 32 notes. | 3 |
+| `fourths` | An isomorphic grid: one semitone per key to the right, each row a perfect fourth above the row below. Controls on the arrows and `Space`. 27 notes. | 3 |
 
-| Positions | Action |
+#### Choosing a keymap
+
+| You give | `field keys` loads |
 | --- | --- |
-| `A S D F G H J K L ; '` | White keys, C up to the F an octave above |
-| `W E`, `T Y U`, `O P` | Black keys |
-| `Z`, `X` | Octave down, octave up |
-| `C`, `V` | Velocity down, velocity up, in steps of 20 between 1 and 127, as Ableton Live steps |
-| `Tab` | Sustain pedal (CC 64) while held |
-| `1`, `2` | Pitch bend fully down, fully up, while held, back to center on release |
-| `3` | Modulation (CC 1) off |
-| `4` to `8` | Modulation in five even steps, up to 127 |
-| `Esc`, `Ctrl-C` | Quit |
+| Nothing | `musical-typing` |
+| `--keymap fourths` | The built-in `fourths`. A bare name only ever names a built-in. |
+| `--keymap ~/keymaps/mine.yaml` | That file. A value with a `/`, or ending in `.yaml`, is a path, and a leading `~/` means your home directory. |
+| `FIELD_KEYMAP=<name or path>` | The same, when there is no `--keymap`. Set it in your shell to make your own keymap the default. |
 
-`A` starts at MIDI note 60, which Logic names C3 and most other tools
-name C4. The octave keys stop where any position's note would leave 0
-to 127. Notes go out on channel 1 at velocity 100 until you change it.
+When the keymap is a file you gave by path, `field keys` watches it.
+When you save the file, the next key press uses the new keymap, and
+notes already sounding finish with the notes they started. If the saved
+file fails validation, `field keys` keeps the keymap it has and shows
+the first error in the status line.
 
-Apple's guide says `Tab` turns sustain on or off, which reads as a
-toggle. `field keys` holds sustain only while `Tab` is down, as a pedal
-does, because release events make that possible.
+`field keys --print` prints the keymap as a keyboard-shaped diagram,
+one line per keyboard row, with the note or control in each key's
+place, and exits. It names notes in scientific pitch notation, where
+MIDI note 60 is C4. It needs neither the protocol nor the helper, so it
+works in any terminal, including while you edit a keymap.
 
-The table is data in `src/keys/layout.ts`, keyed by position, so a
-second layout is a second table (§7).
+#### The format
 
-One status line shows the octave, the velocity, the held notes, and the
-instrument's state. It is drawn with raw ANSI codes the way
-`src/commands/picker.ts` draws, so it needs no new dependency.
+```yaml
+# keymaps/musical-typing.yaml
+name: musical-typing
+description: Logic Pro's Musical Typing. White keys on the home row, black keys above.
+base: 60
+notes:
+  KeyA: 0
+  KeyW: 1
+  KeyS: 2
+  KeyE: 3
+  KeyD: 4
+  KeyF: 5
+  KeyT: 6
+  KeyG: 7
+  KeyY: 8
+  KeyH: 9
+  KeyU: 10
+  KeyJ: 11
+  KeyK: 12
+  KeyO: 13
+  KeyL: 14
+  KeyP: 15
+  Semicolon: 16
+  Quote: 17
+controls:
+  KeyZ: { transpose: -12 }
+  KeyX: { transpose: 12 }
+  KeyC: { velocity: -20 }
+  KeyV: { velocity: 20 }
+  Tab: { cc: 64, value: 127, mode: hold }
+  Digit1: { bend: -1 }
+  Digit2: { bend: 1 }
+  Digit3: { cc: 1, value: 0 }
+  Digit4: { cc: 1, value: 25 }
+  Digit5: { cc: 1, value: 51 }
+  Digit6: { cc: 1, value: 76 }
+  Digit7: { cc: 1, value: 102 }
+  Digit8: { cc: 1, value: 127 }
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `name` | Required | Shown in the status line. |
+| `description` | None | One line, shown by `--print`. |
+| `base` | 60 | The MIDI note that offset 0 plays before any transpose. |
+| `velocity` | 100 | The starting velocity. |
+| `channel` | 1 | The MIDI channel, 1 to 16. |
+| `notes` | None | Each position to an offset in semitones from `base`, or to a list of offsets, which plays a chord from one key. |
+| `grid` | None | Assigns offsets to whole rows by a rule (below). An entry in `notes` or `controls` overrides the grid at that position. |
+| `controls` | None | Each position to an action (below). |
+
+A grid writes an isomorphic keymap in one line instead of forty:
+
+```yaml
+# keymaps/fourths.yaml
+name: fourths
+description: One semitone per key, each row a fourth above the row below.
+base: 48
+grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
+controls:
+  ArrowLeft: { transpose: -12 }
+  ArrowRight: { transpose: 12 }
+  ArrowDown: { velocity: -20 }
+  ArrowUp: { velocity: 20 }
+  Space: { cc: 64, value: 127, mode: hold }
+```
+
+| Grid field | Meaning |
+| --- | --- |
+| `rows` | The rows, lowest first. Each is a named row or a list of positions. The named rows are `bottom` (`KeyZ` to `Slash`), `home` (`KeyA` to `Quote`), `top` (`KeyQ` to `BracketRight`), and `number` (`Digit1` to `Equal`). In a list, `null` skips a column, which aligns rows the way you want. |
+| `column` | Semitones per key to the right. |
+| `row` | Semitones per row up. |
+
+The offset of a position is `column` times its index in its row, plus
+`row` times its row's index. In `fourths`, `KeyZ` plays 48, `KeyA` 53,
+`KeyQ` 58, and `Digit1` 63.
+
+| Action | Effect |
+| --- | --- |
+| `transpose: <n>` | Shifts every new note by n semitones, and stays shifted. `field keys` refuses a transpose that would move any bound note outside 0 to 127. |
+| `velocity: <n>` | Changes the velocity by n, kept between 1 and 127. |
+| `bend: <x>` | Pitch bend to x, from -1 to 1 of the full range, while held. Back to center on release. |
+| `cc: <n>`, `value: <v>`, `mode: <m>` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0 at each press. `value` defaults to 127. |
+| `panic` | Releases every note and sends All Notes Off. |
+
+The schema enforces these rules, and an error names the position and
+the rule it breaks:
+
+- **Every position is a known `KeyboardEvent.code` value.** The
+  bindable positions are the four named rows, `Backquote`, `Backslash`,
+  `IntlBackslash`, `Space`, `Tab`, and the four arrows.
+- **A position is a note or a control, never both.**
+- **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so
+  no keymap can trap you.
+- **Modifiers do not bind.** A key held with `Ctrl`, `Alt`, or `Cmd`
+  does nothing, and a key held with `Shift` plays as it does without
+  it. Layers that `Shift` or another held key switches to are an open
+  question (§7).
+- **Every note is in MIDI's range.** Each note at `base` is between 0
+  and 127.
+
+Musical Typing's `KeyA` plays MIDI note 60, which Logic names C3 and
+most other tools name C4. Its velocity steps by 20, as Ableton Live's
+computer keyboard does. Apple's guide says `Tab` turns sustain on or
+off, which reads as a toggle. The keymap holds sustain only while `Tab`
+is down, as a pedal does. A keymap of your own can choose `toggle`.
+
+One status line shows the keymap's name, the transpose, the velocity,
+the held notes, and the instrument's state. It is drawn with raw ANSI
+codes the way `src/commands/picker.ts` draws, so it needs no new
+dependency.
 
 ### 2.5 The helper is the native half of `field keys`
 
@@ -191,15 +321,15 @@ layout, and speaks NDJSON:
 
 | Direction | Line | Meaning |
 | --- | --- | --- |
-| helper to `field keys` | `{"layout":{"name":"Dvorak","keys":{"a":"a","s":"o",…},"dead":[]}}` | The active layout: each position and the character it types, and the positions that are dead keys. Sent before `ready`, and again when the layout changes. macOS only. |
+| helper to `field keys` | `{"keyboard":{"name":"Dvorak","keys":{"KeyA":"a","KeyS":"o",…},"dead":[]}}` | The active keyboard layout: the character each bindable position types, and the positions that are dead keys. Sent before `ready`, and again when the keyboard layout changes. macOS only. |
 | helper to `field keys` | `{"ready":true,"name":"Field Keys"}` | The virtual source exists. |
 | `field keys` to helper | `{"midi":[144,60,100]}` | Send these bytes now, as one message. |
 | helper to `field keys` | `{"error":"…"}`, then exit 1 | The platform cannot create a virtual source, or a line did not parse. |
 
 At the end of its input, the helper closes the source and exits 0. So
 when `field keys` exits for any reason, `Field Keys` disappears with
-it. The helper knows nothing about notes or the playing layout. That
-logic is TypeScript, which vitest covers without the native build.
+it. The helper knows nothing about notes or keymaps. That logic is
+TypeScript, which vitest covers without the native build.
 
 A second mode, `field-audiod --midi-monitor <name>`, prints every
 message from the named source as an NDJSON line. The round-trip test
@@ -279,7 +409,7 @@ already does. It also names the cause: the program does not answer
 
 ### 2.7 Recording the keys
 
-The third chunk records a performance against the song. It mirrors
+The fourth chunk records a performance against the song. It mirrors
 audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 §7 holds the questions it settles before it starts:
 
@@ -301,23 +431,28 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 | File | Change |
 | --- | --- |
 | `src/keys/terminal.ts` (new) | Probes, enables, and restores the kitty protocol and focus reports, and decodes key events, with their base layout keys, from stdin bytes. The decoder is a pure function over bytes. |
-| `src/keys/position.ts` (new) | Resolves a key event to a position from its base layout key or, failing that, the layout map, and finds the dead-key positions the status line names (§2.3). |
-| `src/keys/layout.ts` (new) | The Musical Typing table: each position to a semitone offset or a control (§2.4). |
-| `src/keys/session.ts` (new) | The note state: which position holds which note, octave, velocity, sustain, pitch bend, modulation, and releasing every note on focus-out and on quit. Emits MIDI bytes. |
-| `src/keys/helper.ts` (new) | Spawns and talks to `field-audiod --keys`, found with `daemonBinary()` from `src/audiod/client.ts`, and passes layout maps to `position.ts`. |
+| `src/keys/position.ts` (new) | Finds a key event's position from its base layout key or, failing that, the keyboard layout the helper reported, and finds the dead-key positions the status line names (§2.3). |
+| `src/schema/keymap.ts` (new) | The zod schema for keymap files: the fields, the grid, the actions, and the rules in §2.4. |
+| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, expands a grid into offsets, and watches a keymap given by path to reload it. |
+| `src/keys/print.ts` (new) | The `--print` diagram. |
+| `keymaps/musical-typing.yaml` (new) | The default keymap. |
+| `keymaps/tracker.yaml`, `keymaps/fourths.yaml` (new, chunk 3) | The other built-ins. Chunk 1's schema tests carry both as fixtures, so the format is known to express them before they ship. |
+| `src/keys/session.ts` (new) | The note state: which position holds which notes, transpose, velocity, controller modes, pitch bend, and releasing every note on focus-out and on quit. Emits MIDI bytes. |
+| `src/keys/helper.ts` (new) | Spawns and talks to `field-audiod --keys`, found with `daemonBinary()` from `src/audiod/client.ts`, and passes each keyboard layout report to `position.ts`. |
 | `src/keys/voice-host.ts` (new) | Resolves the instrument with `programPath()` from `src/generators/supercollider.ts`, picks the `scsynth` port, spawns and waits for the host, and quits it. |
 | `src/generators/supercollider.ts` | Extracts the `sclang` lookup (`FIELD_SCLANG`, then `PATH`, then the app bundle) into `sclangCommand()`, shared by `runScProgram` and the voice host. |
 | `sc/voice-host.scd` (new) | The voice host (§2.6). Found from the package root, as `python/` is. |
-| `src/cli.ts` | `field keys [instrument] [--device <name>]`. |
+| `src/cli.ts` | `field keys [instrument] [--device <name>] [--keymap <name or path>] [--print]`. |
 | `native/audiod/src/keys.cpp`, `keys.h` (new), `main.cpp` | The `--keys` and `--midi-monitor` modes. |
-| `native/audiod/src/keyboard-layout.cpp`, `keyboard-layout.h` (new) | The layout map and the input-source change notification, on macOS. Elsewhere it reports no map. |
+| `native/audiod/src/keyboard-layout.cpp`, `keyboard-layout.h` (new) | Reads the keyboard layout and watches for input-source changes, on macOS. Elsewhere it reports nothing. |
 | `native/audiod/CMakeLists.txt` | Links the Carbon framework on macOS, for the Text Input Sources API. |
 | `examples/bloom/shared/instruments/still-water-pad.scd` | Answers voice mode with a gated version of its voice. The render branch keeps its code. |
+| `docs/keys.md` (new) | How to play with `field keys`, the supported terminals, the built-in keymaps, and the keymap format as a reference for writing your own. `docs/README.md` links it. |
 | `docs/build-graph.md` | The `supercollider` section gains voice mode beside the render contract. |
 | `docs/architecture.md` | The daemon's modes gain `--keys` and `--midi-monitor`. The SuperCollider section's live mode describes the voice host and where its sound goes. |
-| `README.md` | `field keys` beside `field play`, with the supported terminals. |
+| `README.md` | `field keys` beside `field play`, linking `docs/keys.md`. |
 
-Chunk 3 adds its files when it appends its section (§6).
+Chunk 4 adds its files when it appends its section (§6).
 
 ## 3 Why this design
 
@@ -346,40 +481,65 @@ Chunk 3 adds its files when it appends its section (§6).
   Input Monitoring permission, plays notes while another window has
   focus, and moves keyboard handling into native code. Refusing Apple's
   Terminal costs one message.
-- **Physical positions from two sources, not characters.** Mapping
-  characters is the obvious version, and it breaks every non-QWERTY
-  layout. On Dvorak the home row types `a o e u i d h t n s -`, so the
+- **Positions from two sources, not characters.** Looking up characters
+  is the obvious version, and it breaks every keyboard layout but
+  QWERTY. On Dvorak the home row types `a o e u i d h t n s -`, so the
   white keys would scatter across the keyboard, and the only fix would
-  be switching back to QWERTY to play. The terminal's base layout key
-  alone is not enough either: the protocol makes it optional, a terminal
-  omits it when it equals the typed key, and so its absence cannot be
-  told apart from a terminal that never sends it. The layout map alone
-  is not enough because it reverses the layout's output, which is
+  be switching back to QWERTY to play. VMPK, the open-source virtual
+  MIDI keyboard, offers both kinds of map and documents the same
+  trade: a character map needs adapting for each language, and a
+  key-code map does not. The terminal's base layout key alone is not
+  enough: the protocol makes it optional, a terminal omits it when it
+  equals the typed key, and so its absence cannot be told apart from a
+  terminal that never sends it. Reading the keyboard layout alone is
+  not enough either, because it reverses the layout's output, which is
   indirect where the terminal can name the position itself. So the
-  terminal's answer wins when there is one, and the map covers every
-  terminal that gives none. The map lives in the helper because the
-  layout API is native, and the helper is already the native process
+  terminal's answer wins when there is one, and the keyboard layout
+  covers every terminal that gives none. The helper reads it because
+  the API is native, and the helper is already the native process
   `field keys` runs.
-- **Logic's layout, not a tracker layout or an isomorphic grid.** The
-  layout is the one musicians already know from a computer keyboard,
-  because Logic Pro and Ableton Live share it. It leaves the number row
-  free for pitch bend and modulation. Its weakness is range: 18 notes,
-  an octave and a half, before you press an octave key. Two
-  alternatives widen the range and lose on other counts:
+- **Keymaps are data files that the built-ins use too, not tables in
+  code.** Keymaps written as TypeScript tables would make the built-ins
+  privileged, and a keymap of your own would need a code change and a
+  rebuild. A script per keymap would load arbitrary code from a path,
+  and could be neither validated nor printed without running it. A data
+  format can be validated, printed, diffed, and reloaded on save, and
+  new behavior arrives as a new action in the schema. The grid exists
+  because an isomorphic keymap is a rule, and forty hand-typed offsets
+  invite a typo that the rule cannot make.
+- **Positions named by `KeyboardEvent.code`, not by characters.** The
+  W3C UI Events specification already gives each physical key one name,
+  taken from the US key in that place, which is exactly what a position
+  is. Characters fail as names: YAML needs quotes around `'`, `[`, `#`,
+  and others, and no character names `Space`, `Tab`, or an arrow.
+- **A bare name is a built-in, and anything else is a path.** Field
+  resolves programs the same way: a bare spelling resolves in one home,
+  an explicit spelling escapes, and there is never a search path
+  (`programPath()` in `src/generators/supercollider.ts`). A search path
+  through a directory of your keymaps would let your file shadow a
+  built-in, or a new built-in shadow your file after an upgrade.
+  `FIELD_KEYMAP` makes your keymap the default without a config file.
+- **No keymap shelf in the project.** A keymap belongs to the player,
+  not to a song. The shared shelves that project-layout.md §1 decision
+  6 settled hold what makes, is, or changes sound, and a keymap does
+  none of those.
+- **Musical Typing as the default, with the others built in.** It is
+  the keymap musicians already know from a computer keyboard, because
+  Logic Pro and Ableton Live share it, and it leaves the number row free
+  for pitch bend and modulation. Its weakness is range: 18 notes before
+  you transpose. The two other built-ins widen the range and lose the
+  default on other counts:
 
-  | Layout | Range | Who knows it | Why it loses |
+  | Keymap | Range | Who knows it | Why it is not the default |
   | --- | --- | --- | --- |
-  | Musical Typing (chosen) | 18 notes | Logic and Ableton Live users | Nothing, apart from range |
-  | Tracker: the `Z` row and the `Q` row as two piano octaves, with black keys on the row above each | About two and a half octaves | Tracker users, from FastTracker 2 to Renoise | It spends the number row on black keys and the `Z` row on notes, so the octave, velocity, bend, and modulation keys need new homes. The octaves zig-zag between rows. |
-  | Isomorphic: one semitone per key, each row a perfect fourth above the row below | About two octaves over four rows | Players of Ableton Push in fourths, LinnStrument, bass, and guitar | It is unfamiliar to keyboard players, has no piano shape, and spends every row on notes, so every control moves to a modifier. |
+  | `musical-typing` | 18 notes | Logic and Ableton Live users | Chosen |
+  | `tracker` | 32 notes | Tracker users, from FastTracker 2 to Renoise | It spends the number row on black keys and the `KeyZ` row on notes, so its controls move to the arrows and lose pitch bend and modulation. The octaves zig-zag between rows. |
+  | `fourths` | 27 notes | Players of Ableton Push in fourths, LinnStrument, bass, and guitar | It is unfamiliar to keyboard players, has no piano shape, and spends every row on notes. Its gain beyond range is that a chord shape plays the same in every key. |
 
-  The isomorphic grid is the one whose gain is more than range: a chord
-  shape plays the same in every key. Because the table is data, a
-  second layout is a small follow-up, recorded in §7.
 - **`sclang` turns MIDI into voices, not TypeScript.** The voice host
   is SuperCollider's own idiom (`MIDIdef`, `Synth`, `set(\gate, 0)`),
   `sclang` already reads CoreMIDI, and the same code builds an NRT score
-  from recorded notes in chunk 3. A TypeScript translator would need
+  from recorded notes in chunk 4. A TypeScript translator would need
   MIDI input in Node, which is the native dependency rejected above,
   and an OSC encoder for every message.
 - **A SynthDef with `freq`, `amp`, and `gate`, not a new instrument
@@ -404,75 +564,112 @@ Chunk 3 adds its files when it appends its section (§6).
   measure the alignment against.
 
 The plan builds on existing code rather than beside it: `daemonBinary()`
-for the helper, `programPath()` for the instrument, `sclang` discovery
-shared with `runScProgram`, and the picker's raw-mode pattern with its
-restore on every exit path. It replaces nothing.
+for the helper, `programPath()` for the instrument, its bare-name rule
+for keymap names, `sclang` discovery shared with
+`runScProgram`, zod for the keymap schema as for every project file,
+and the picker's raw-mode pattern with its restore on every exit path.
+It replaces nothing.
 
 ## 4 Acceptance criteria
 
-Chunks 1 and 2:
+Every criterion in these tables is checked by hand, and the pull
+request's Testing section records the ones its chunk covers.
+
+Chunk 1, the MIDI device and keymaps:
 
 | # | Do | Expect |
 | --- | --- | --- |
-| 1 | In Ghostty, run `field keys`. In another terminal, run `field-audiod --midi-monitor "Field Keys"`. Press and release `A`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
-| 2 | Hold `A`, press `X`, release `A`. | Note-off 60, not 72. |
-| 3 | Hold `A` for two seconds. | One note-on, no repeats. |
-| 4 | Hold `A`, then switch to another window. | Note-off 60 when focus leaves. |
+| 1 | In Ghostty, run `field keys`. In another terminal, run `field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
+| 2 | Hold `KeyA`, press `KeyX`, release `KeyA`. | Note-off 60, not 72. |
+| 3 | Hold `KeyA` for two seconds. | One note-on, no repeats. |
+| 4 | Hold `KeyA`, then switch to another window. | Note-off 60 when focus leaves. |
 | 5 | Hold three keys and press `Ctrl-C`. | Three note-offs, then CC 123. The shell echoes normally. `Field Keys` is gone from Audio MIDI Setup. |
 | 6 | Run `field keys` in iTerm2 and repeat criterion 1. | The same. |
 | 7 | Run `field keys` in Apple's Terminal. | Exit 1, with a message that names Ghostty, iTerm2, kitty, and WezTerm. The terminal is unchanged. |
-| 8 | In `examples/bloom`, run `field keys still-water-pad --device "<Apollo>"`. Play a chord, then hold `Tab` and release the keys. | You hear the chord. The notes ring until you release `Tab`. |
-| 9 | With criterion 8 running, play a USB controller. | It plays the same voice. |
-| 10 | Run `field keys creek-kit`. | Exit 1. The message says `creek-kit.scd` does not answer `FIELD_MODE=voice`. |
-| 11 | Run `field play creek --device "<Apollo>"` and criterion 8 together. | You hear both. The Apollo's sample rate in Audio MIDI Setup does not change. |
-| 12 | With criterion 8 running, `kill -9` the `field keys` process. | Within two seconds, `pgrep scsynth` finds no host server, and `Field Keys` is gone. |
-| 13 | In `examples/bloom`, run `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
-| 14 | Switch the macOS input source to Dvorak. In Ghostty, run `field keys` and the monitor from criterion 1, and press the position of a US `S`, which types `o`. | Note-on 62. The status line labels the white keys `A O E U I D H T N S -`. |
-| 15 | Repeat criterion 14 in iTerm2. | The same, whether or not iTerm2 sends a base layout key. |
-| 16 | With criterion 14 running, switch the input source to French (AZERTY) without restarting. Press the position of a US `A`, which types `q`, then the position of a US `Z`, which types `w`. | Note-on 60, then the status line shows the octave one lower. |
-| 17 | Switch the input source to U.S. International – PC, where `'` is a dead key, and run `field keys`. | The status line names the `'` position, the top F, as one that cannot play on this layout. Every other position plays. |
-| 18 | Hold `2`, then release it. | Pitch bend at 16383 while held, then 8192. With criterion 8 running, a sounding note bends up two semitones and returns. |
-| 19 | Press `5`, then `3`. | CC 1 at 51, then CC 1 at 0. |
+| 8 | Switch the macOS input source to Dvorak. In Ghostty, run criterion 1's two commands, and press `KeyS`, which types `o`. | Note-on 62. |
+| 9 | Repeat criterion 8 in iTerm2. | The same, whether or not iTerm2 sends a base layout key. |
+| 10 | With criterion 8 running, switch the input source to French (AZERTY) without restarting. Press `KeyA`, which types `q`, then `KeyZ`, which types `w`. | Note-on 60, then the status line shows a transpose of -12. |
+| 11 | Switch the input source to U.S. International – PC, where `'` is a dead key, and run `field keys`. | The status line names `Quote`, the top F, as a position that cannot play on this keyboard layout. Every other position plays. |
+| 12 | Hold `Digit2`, then release it. | Pitch bend at 16383 while held, then 8192. |
+| 13 | Press `Digit5`, then `Digit3`. | CC 1 at 51, then CC 1 at 0. |
+| 14 | Write `~/mine.yaml` with `name: mine`, `notes: { KeyA: 0, KeyF: [0, 4, 7] }`, and run `field keys --keymap ~/mine.yaml`. Press and release `KeyF`. | Note-ons 60, 64, and 67, then three note-offs. |
+| 15 | With criterion 14 running, hold `KeyF`, change `KeyA: 0` to `KeyA: 2`, save, release `KeyF`, and press `KeyA`. | Note-offs 60, 64, and 67, then note-on 62. |
+| 16 | With criterion 14 running, add `controls: { KeyA: { transpose: 12 } }` and save. | The status line names `KeyA` as both a note and a control. `KeyA` still plays 62. |
+| 17 | Run `field keys --keymap mine`. | Exit 1. The message says a bare name names a built-in, lists the built-ins, and asks for a path. |
+| 18 | Run `FIELD_KEYMAP=~/mine.yaml field keys`. | The status line shows `mine`. |
+| 19 | In Apple's Terminal, run `field keys --print`. | A keyboard-shaped diagram with C4 on `KeyA` and the transpose controls on `KeyZ` and `KeyX`. Exit 0. |
+| 20 | Run `field keys` with a keymap that binds `Escape`. | Exit 1. The message names `Escape` as reserved. |
+
+Chunk 2, the voice host:
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 21 | In `examples/bloom`, run `field keys still-water-pad --device "<Apollo>"`. Play a chord, then hold `Tab` and release the keys. | You hear the chord. The notes ring until you release `Tab`. |
+| 22 | With criterion 21 running, play a USB controller. | It plays the same voice. |
+| 23 | With criterion 21 running, hold `Digit2` over a sounding note, then release it. | The note bends up two semitones and returns. |
+| 24 | Run `field keys creek-kit`. | Exit 1. The message says `creek-kit.scd` does not answer `FIELD_MODE=voice`. |
+| 25 | Run `field play creek --device "<Apollo>"` and criterion 21 together. | You hear both. The Apollo's sample rate in Audio MIDI Setup does not change. |
+| 26 | With criterion 21 running, `kill -9` the `field keys` process. | Within two seconds, `pgrep scsynth` finds no host server, and `Field Keys` is gone. |
+| 27 | In `examples/bloom`, run `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
+
+Chunk 3, the other built-in keymaps:
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 28 | Run `field keys --keymap tracker` with the monitor. Press `KeyZ`, `KeyQ`, and `KeyI`, then `ArrowRight`. | Note-ons 48, 60, and 72, then the status line shows a transpose of 12. |
+| 29 | Run `field keys --keymap fourths` with the monitor. Play `KeyZ`, `KeyB`, `KeyD` together, then `KeyX`, `KeyN`, `KeyF`. | Note-ons 48, 52, 55, then 49, 53, 56: the same major-triad shape a semitone higher. |
 
 These vitest tests fail before the change:
 
 - **`src/keys/terminal.test.ts`.** Decodes press, repeat, and release of
-  `a`, a Dvorak `o` that carries the base layout key `s`, `Ctrl-C`,
-  `Esc`, focus in and out, and a sequence split across two chunks.
-  Reads probe answers with and without the protocol.
+  `a`, a Dvorak `o` that carries the base layout key `s`, `Space`, an
+  arrow, `Ctrl-C`, `Esc`, focus in and out, and a sequence split
+  across two chunks. Reads probe answers with and without the protocol.
 - **`src/keys/position.test.ts`.** The base layout key wins over the
-  map. Without one, the map resolves a Dvorak `o` to `S` and an AZERTY
-  `q` to `A`. With no map, a character is its own position. A new map
-  applies to the next key event. A dead key in the map at a used
-  position is reported.
-- **`src/keys/session.test.ts`.** Covers an octave change while a key
-  is held, ignored repeats, sustain, pitch bend held and released, the
-  five modulation steps, release on focus-out, the quit sequence, and
-  the octave bounds.
+  keyboard layout. Without one, the Dvorak layout resolves `o` to
+  `KeyS`, and AZERTY resolves `q` to `KeyA`. With no keyboard layout report, a
+  character resolves to its own position. A new report applies to the
+  next key event. A dead key at a bound position is reported.
+- **`src/schema/keymap.test.ts`.** Accepts `musical-typing` and the
+  `tracker` and `fourths` fixtures, and expands the `fourths` grid to
+  48 on `KeyZ`, 53 on `KeyA`, 58 on `KeyQ`, and 63 on `Digit1`. Rejects
+  an unknown position, a position that is both a note and a control, a
+  bound `Escape`, and a note outside 0 to 127. Lets a `notes` entry
+  override the grid, and a `null` skip a grid column.
+- **`src/keys/keymap.test.ts`.** A bare name resolves only to a
+  built-in. A path and `FIELD_KEYMAP` resolve to the file, with `~/`
+  expanded. A saved change applies to the next key press, and a saved
+  file that fails validation leaves the previous keymap in place.
+- **`src/keys/session.test.ts`.** Covers a transpose while a key is
+  held, ignored repeats, a chord pressed and released, each controller
+  mode, pitch bend held and released, release on focus-out, the quit
+  sequence, and the transpose bounds.
+- **`src/keys/print.test.ts`.** The `musical-typing` diagram matches a
+  stored copy.
 - **`src/keys/helper.test.ts`.** Runs against a stub helper. Checks a
-  layout line before the ready line, a second layout line mid-session,
-  an error line, and the stub seeing end of input when `field keys`
-  closes it.
+  keyboard layout report before the ready line, a second report
+  mid-session, an error line, and the stub seeing end of input when
+  `field keys` closes it.
 - **The native round trip.** Runs `--keys` and `--midi-monitor`
   together and checks that a note arrives. On macOS it also checks that
-  the first line from `--keys` is a layout map with a character for
-  every position the table uses. The test probes for a MIDI service
-  first, and where there is none, such as a Linux container without
-  the ALSA sequencer, it reports itself skipped by name. A green run
-  without a MIDI service never reads as coverage.
+  the first line from `--keys` reports a character for every bindable
+  position. The test probes for a MIDI service first, and where there
+  is none, such as a Linux container without the ALSA sequencer, it
+  reports itself skipped by name. A green run without a MIDI service
+  never reads as coverage.
 
 The voice host has no automated test, because it needs `sclang` and an
-audio device, and CI has neither. Every criterion in the table is
-checked by hand, and the pull request's Testing section records them.
-Chunk 3 writes its own criteria when it appends its section.
+audio device, and CI has neither. Chunk 4 writes its own criteria when
+it appends its section.
 
 ## 5 Cost
 
 CPU cost does not matter here. A key event is a few dozen bytes
-through a pipe and one CoreMIDI send, at the rate a person types. The
-layout map is about thirty lookups, at start and at each layout change.
-Latency from key to sound is what matters, and it is an estimate until
-criterion 8 is played:
+through a pipe and one CoreMIDI send, at the rate a person types.
+Reading the keyboard layout is about fifty lookups, at start and at
+each input-source change. Reloading a keymap parses one small YAML file
+per save. Latency from key to sound is what matters, and it is an
+estimate until criterion 21 is played:
 
 | Stage | Expected |
 | --- | --- |
@@ -490,31 +687,36 @@ once more.
 
 Each chunk is one pull request, in order:
 
-1. **`field keys` as a MIDI device.** The terminal, physical positions
-   and the layout map, the layout, the session, the helper and its
-   monitor mode, and the docs. It is useful alone, with Logic.
+1. **`field keys` as a MIDI device.** The terminal, positions and the
+   keyboard layout report, the keymap format with its schema, loader,
+   reload, and `--print`, the `musical-typing` keymap, the session, the
+   helper and its monitor mode, and `docs/keys.md`. It is useful alone,
+   with Logic, and with a keymap of your own.
 2. **The voice host.** `field keys <instrument>`, the voice contract,
    `still-water-pad` in voice mode, and the docs.
-3. **Recording.** It starts by settling §7 questions 1 to 3 and
+3. **The other built-in keymaps.** `tracker` and `fourths` move from
+   chunk 1's test fixtures into `keymaps/`, with their criteria and
+   their entries in `docs/keys.md`.
+4. **Recording.** It starts by settling §7 questions 1 to 3 and
    appending its design, files, and criteria as a new numbered section.
    Then it builds them.
 
 ## 7 Open questions
 
-1. **The take's file format (chunk 3).** A Standard MIDI File opens in
+1. **The take's file format (chunk 4).** A Standard MIDI File opens in
    Logic and rides LFS like audio. A text list of notes with sample
    times diffs in review, and an agent can edit it. It also carries the
    sample time that places a take, which a MIDI file has no field for.
    The recommendation is the text list, with `field export` writing a
-   MIDI file when you need one elsewhere. Justin decides when chunk 3
+   MIDI file when you need one elsewhere. Justin decides when chunk 4
    starts.
-2. **The entry that plays a take (chunk 3).** It could be a `record:`
+2. **The entry that plays a take (chunk 4).** It could be a `record:`
    entry with an `instrument:` field, or a new entry kind for a part
    that drives an instrument, which nested-tracks.md §18 decision 4
    expects. recording.md §4 keeps `record:` empty until a field earns
    its place, and an instrument would be the first that does. Justin
    decides with question 1.
-3. **Who builds the NRT score (chunk 3).** In chunk 3, the voice host
+3. **Who builds the NRT score (chunk 4).** In chunk 4, the voice host
    builds the score for a recorded take. sc-render.md §2 rejected Field
    generating scores, because the program is the recipe. The voice
    contract narrows what Field knows to `freq`, `amp`, and `gate`. The
@@ -524,22 +726,23 @@ Each chunk is one pull request, in order:
    the master chain until live-supercollider puts `scsynth` in the
    graph. This is deferred to that project on purpose.
 5. **Reloading the voice when its file changes.** The voice host could
-   re-run the program and add the new SynthDef while you play. This is
-   deferred until chunk 2 has been played with.
+   re-run the program and add the new SynthDef while you play, as a
+   keymap given by path already reloads. This is deferred until chunk 2
+   has been played with.
 6. **A control for modulation.** The voice host ignores CC 1, because
    the contract has no control for it. Adding an optional `mod` control,
    which a voice may leave out, would let an instrument respond to the
-   `4` to `8` keys and a controller's mod wheel. This is deferred until
+   modulation keys and a controller's mod wheel. This is deferred until
    chunk 2 has been played with.
-7. **A second layout.** The isomorphic grid in fourths (§3) is the
-   alternative worth adding, as `field keys --layout fourths`. It is
-   one more table in `src/keys/layout.ts`, and the controls need homes
-   on modifiers. This is deferred until the Musical Typing layout has
-   been played with.
-8. **Linux layouts.** On Linux, `field keys` relies on the terminal's
-   base layout key. A layout map from xkbcommon would match macOS. This
-   is deferred until someone plays `field keys` on Linux with a
-   non-QWERTY layout.
+7. **Layers.** A keymap could bind a second set of positions that
+   applies while `Shift` or another key is held, which would double its
+   range without a transpose. The format leaves room for a `layers`
+   field, and the rules in §2.4 keep `Shift` unbound until then. Justin
+   decides when a keymap needs it, and his own keymap may be the first.
+8. **Linux keyboard layouts.** On Linux, `field keys` relies on the
+   terminal's base layout key. Reading xkb's layout data through
+   xkbcommon would match macOS. This is deferred until someone plays
+   `field keys` on Linux with a keyboard layout other than QWERTY.
 
 ## 8 Background
 
@@ -562,20 +765,26 @@ Each chunk is one pull request, in order:
 - **The base layout key.** The kitty protocol defines it as "the key
   corresponding to the physical key in the standard PC-101 key layout",
   and a terminal "can" send it, so it is optional. Ghostty fixed its
-  reporting for non-US layouts in 2025, with tests against Cyrillic. No
-  source found says whether iTerm2 sends it, which is why the layout map
-  exists and why criterion 15 runs in iTerm2. The spec also suggests
-  detecting a partial implementation by setting the flags and then
-  querying them, but a terminal that accepts flag 4 may still omit the
-  key when it equals the typed one, so that check cannot replace the
-  map.
-- **The layout's reach.** Apple's Logic Pro guide documents `Z` and `X`
-  for octaves, `C` and `V` for velocity, `1` and `2` for pitch bend, `3`
-  to `8` for modulation, and `Tab` for sustain. Third-party guides to
-  Ableton Live document the same home-row piano with `Z` and `X` for
-  octaves and `C` and `V` for velocity in steps of 20. Neither source
-  spells out the note keys, which come from the layout Musical Typing
-  draws on screen.
+  reporting for keyboard layouts other than US in 2025, with tests
+  against Cyrillic. No source found says whether iTerm2 sends it, which
+  is why the helper reads the keyboard layout and why criterion 9 runs
+  in iTerm2. The spec also suggests detecting a partial implementation
+  by setting the flags and then querying them, but a terminal that
+  accepts flag 4 may still omit the key when it equals the typed one,
+  so that check cannot replace the helper's report.
+- **Musical Typing's reach.** Apple's Logic Pro guide documents `Z` and
+  `X` for octaves, `C` and `V` for velocity, `1` and `2` for pitch
+  bend, `3` to `8` for modulation, and `Tab` for sustain. Third-party
+  guides to Ableton Live document the same home-row piano with `Z` and
+  `X` for octaves and `C` and `V` for velocity in steps of 20. Neither
+  source spells out the note keys, which come from the keymap Musical
+  Typing draws on screen.
+- **The name.** VMPK calls its key-to-note files keyboard maps, and
+  editors call key bindings keymaps. Field uses *keymap* so that
+  *layout* keeps the meaning macOS gives it, and so that it does not
+  collide with this repository's project-layout plan. On Linux, xkb uses
+  "keymap" for the keyboard layout itself, which Field meets only in §7
+  question 8.
 - **The instruments today.** The three in `examples/bloom` are NRT
   programs that render whole passages. `still-water-pad.scd` builds a
   D-minor chord from twelve sine voices under `Env.linen`, a fixed-length
