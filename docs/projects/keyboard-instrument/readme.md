@@ -193,11 +193,17 @@ package root, found the way `python/` is.
 | `--keymap ~/keymaps/mine.yaml` | That file. A value with a `/`, or ending in `.yaml`, is a path, and a leading `~/` means your home directory. |
 | `FIELD_KEYMAP=<name or path>` | The same, when there is no `--keymap`. Set it in your shell to make your own keymap the default. |
 
-When the keymap is a file you gave by path, `field keys` watches it.
-When you save the file, the next key press uses the new keymap, and
-notes already sounding finish with the notes they started. If the saved
-file fails validation, `field keys` keeps the keymap it has and shows
-the first error in the status line.
+When the keymap is a file you gave by path, `field keys` reloads it
+when you save it. The next key press uses the new keymap, and notes
+already sounding finish with the notes they started. If the saved file
+fails validation, `field keys` keeps the keymap it has and shows the
+first error in the status line.
+
+`field keys` watches the directory that holds the keymap, not the file,
+and reacts to changes to the keymap's name. Many editors save by
+writing a temporary file and renaming it over the original. On macOS
+and Linux, Node's `fs.watch` on a file keeps watching the original
+file, so a watch on the keymap itself would end at the first such save.
 
 `field keys --print` prints the keymap as a keyboard-shaped diagram,
 one line per keyboard row, with the note or control in each key's
@@ -457,7 +463,7 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 | `src/keys/terminal.ts` (new) | Probes, enables, and restores the kitty protocol and focus reports, and decodes key events, with their base layout keys, from stdin bytes. The decoder is a pure function over bytes. |
 | `src/keys/position.ts` (new) | Finds a key event's position from its base layout key or, failing that, the keyboard layout the helper reported, and finds the dead-key positions the status line names (§2.3). |
 | `src/schema/keymap.ts` (new) | The zod schema for keymap files: the fields, the grid, the actions, and the rules in §2.4. |
-| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, expands a grid into offsets, and watches a keymap given by path to reload it. |
+| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, expands a grid into offsets, and watches the directory of a keymap given by path to reload it. |
 | `src/keys/print.ts` (new) | The `--print` diagram. |
 | `keymaps/musical-typing.yaml` (new) | The default keymap. |
 | `keymaps/tracker.yaml`, `keymaps/fourths.yaml` (new, chunk 3) | The other built-ins. Chunk 1's schema tests carry both as fixtures, so the format is known to express them before they ship. |
@@ -668,8 +674,10 @@ These vitest tests fail before the change:
   override the grid, and a `null` skip a grid column.
 - **`src/keys/keymap.test.ts`.** A bare name resolves only to a
   built-in. A path and `FIELD_KEYMAP` resolve to the file, with `~/`
-  expanded. A saved change applies to the next key press, and a saved
-  file that fails validation leaves the previous keymap in place.
+  expanded. A saved change applies to the next key press, including
+  two saves in a row that each rename a temporary file over the
+  keymap, and a saved file that fails validation leaves the previous
+  keymap in place.
 - **`src/keys/session.test.ts`.** Covers a transpose while a key is
   held, ignored repeats, a chord pressed and released, two keys that
   hold the same note released in either order, a release that carries
