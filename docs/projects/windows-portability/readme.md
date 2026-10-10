@@ -432,7 +432,8 @@ land as its own diff whenever.
   surprise.
 - **`afplay`** (§1.6, §2.2 — chunk 5): dies on Windows by decision; the
   code change is making the refusal say "build the daemon".
-- **CI** (chunk 5): a `windows-latest` job — pnpm via corepack, the VS
+- **CI** (chunk 5): a `windows-latest` job — pnpm through
+  `pnpm/action-setup@v4` as the Linux job installs it, the VS
   generator, the JUCE FetchContent cache keyed per-OS, and the same
   suite the Linux job runs.
 
@@ -444,9 +445,11 @@ land as its own diff whenever.
   override — so a project created on (or cloned to) Windows has the
   §1.1 checkout corruption against its *own* committed `.scd` programs
   and asset pins, engine fix notwithstanding. The engine's file (chunk
-  1) is the template; `init` should write both halves. **Standalone**,
-  and the sharpest item on this list: it is chunk 1's twin for user
-  projects, and cheap.
+  1) is the template; `init` should write both halves. **Standalone,
+  and claimed by #159**, which is open against `main` and does exactly
+  that: `* text=auto eol=lf` ahead of the LFS lines, and `*.state
+  binary` after them. It is chunk 1's twin for user projects, and it
+  stays listed here until #159 lands.
 - **The picker runs raw-mode VT decoding** (`commands/picker.ts:93`,
   `field insert add`'s chooser, #155): arrows are parsed as CSI
   sequences from a `setRawMode(true)` stdin. Windows Terminal and
@@ -479,10 +482,16 @@ land as its own diff whenever.
   `socket.AF_UNIX`; CPython has no named-pipe socket family, so the
   Python end is a **transport decision of its own** — loopback TCP is
   the likely answer where the daemon chose pipes, and it is not this
-  plan's §2.1 verbatim. (Citations here are against `main` at
+  plan's §2.1 verbatim. The same file fails earlier than that: line 23
+  imports `fcntl` for the single-owner `flock`, and Windows CPython has
+  no `fcntl` module, so the import raises before line 129 runs. The
+  single-owner guarantee needs its own Windows answer alongside the
+  transport. (Citations here are against `main` at
   `4f90a87`; chunk 2's branch shifts `client.ts` by ten lines.)
 - `workers/client.ts:122,305` advises `brew install uv` — needs the
-  winget/scoop spelling behind a platform switch.
+  winget/scoop spelling behind a platform switch. Line 345 is the same
+  kind of advice: it prints `pkill -f` as the remedy for a protocol
+  mismatch, and Windows has no `pkill`.
 - The chunk-2 test guards that wait here, not on chunk 4: the 21
   stub-spawning tests in `generate.test.ts` and the three `describe`s
   in `aced/client.test.ts` and `voiced/client.test.ts`, all guarded on
@@ -501,11 +510,14 @@ land as its own diff whenever.
 - **`field open`** (add-insert chunk 3, unlanded) will need `start`
   where macOS says `open` the day it exists — noted so its review asks.
 - **Display-only `relative()` calls** (`transport.ts:120`,
-  `version.ts:286`) print native separators by design and port as-is;
-  named here so nobody "fixes" them into the §1.5 invariant, which is
-  about paths that are *data*.
-- **`transport.ts:58` is data, not display — the invariant's other
-  half, already on the right side of it** (#158 review, correcting this
+  `version.ts:286`) print native separators by design and port as-is.
+  Chunk 2 (#160) sets the rule they sit outside: a project-relative
+  path is slash-separated wherever it is *data* — stored, compared, or
+  sent over the wire — and a path only printed for a person keeps the
+  platform's separator. They are named here so nobody "fixes" them
+  into slashes.
+- **`transport.ts:58` is data, not display — the data half of that
+  rule, already on the right side of it** (#158 review, correcting this
   section's first pass, which filed it under display). `songDirOfPath`
   splits its `relative()` result on the native `sep` and returns
   `songs/<name>` slash-joined, and `transport.ts:44` compares that
