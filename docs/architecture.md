@@ -73,6 +73,27 @@ one helper, `src/git.ts`. Tokens live in the macOS keychain or
 `~/.field/credentials`, Field's first per-user state. See
 [remote.md](remote.md).
 
+**`field ui <song>` is a view over the files, served by the same
+process.** It compiles the song's live session, connects to the daemon,
+and serves the client in `ui/` over HTTP and one WebSocket per view, bound
+to `127.0.0.1`. A gesture in the view ends as a YAML edit, written
+through the same comment-preserving document code every editor uses, and
+the watch loop carries it into the playing session exactly as it carries
+a hand edit; the server never pushes an edit to the daemon itself. Two
+guards stand because the socket accepts writes. The upgrade checks the
+`Origin` header against the server's own addresses and a per-launch
+token, and every edit carries the sha256 of the file bytes it was made
+against, so an edit to a file that changed underneath is refused and the
+view refreshed. Before writing, the server loads the project with the
+edited text and refuses any edit that would add an error. Solo is
+session-only: the server compiles an alternate session holding the
+soloed track's subtree, its carriers, and its send receivers
+(`src/model/solo.ts`), and writes nothing. The view opens in an Electron
+shell from the `ui/` workspace member, or in a browser with `--browser`
+or when the shell cannot start; closing the shell, or ctrl-c, stops the
+transport and ends the session. See
+[projects/ui/readme.md](projects/ui/readme.md).
+
 ## Native audio daemon (C++ / JUCE) — `field-audiod`
 
 The daemon owns all latency-sensitive and hardware-facing work. Its
