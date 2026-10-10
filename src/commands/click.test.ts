@@ -1,15 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import { sha256FileSync } from '../hash.js';
-import { playable } from '../testing/playable.js';
+import { describe, expect, it } from 'vitest';
 import { MeterMap, TempoMap } from '../time/tempo.js';
-import { beatGrid, withClick } from './click.js';
+import { beatGrid, CLICK_FALLBACK_SECONDS, clickSchedule, countInSchedule, countInStart } from './click.js';
 
 // The metronome grid projects each beat through the tempo map, so ramps
 // click at the ramped tempo and odd meters accent their own downbeats.
+// Since recording.md chunk 3 the grid is what crosses the socket — a
+// schedule the daemon synthesizes — rather than a DSP over a temp file.
 
 const ctx44 = {
   tempo: new TempoMap([{ at: 0, bpm: 120 }], 48000),
@@ -53,40 +49,52 @@ describe('beatGrid', () => {
   });
 });
 
-describe('withClick', () => {
-  let root: string;
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'field-click-'));
+describe('clickSchedule', () => {
+  it('is the grid over the bed at the bed\'s rate, as the wire wants it', () => {
+    const schedule = clickSchedule(ctx44, 96001, 48000);
+    expect(schedule.rate).toBe(48000);
+    expect(schedule.ticks).toEqual([
+      { sample: 0, accent: true },
+      { sample: 24000, accent: false },
+      { sample: 48000, accent: false },
+      { sample: 72000, accent: false },
+      { sample: 96000, accent: true },
+    ]);
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  it('projects into the bed\'s rate when it differs from the map\'s', () => {
+    // The map counts at 48 kHz; a 44.1 kHz bed's beat 2 is sample 22050.
+    const schedule = clickSchedule(ctx44, 44100, 44100);
+    expect(schedule.rate).toBe(44100);
+    expect(schedule.ticks.map((t) => t.sample)).toEqual([0, 22050]);
   });
 
-  it('overlays clicks on beats and leaves the space between silent', () => {
-    const src = join(root, 'silent.wav');
-    writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
-    const clicked = withClick(root, ctx44, playable({ path: src }));
+  it('covers ten minutes when the bed\'s extent is unknown', () => {
+    const schedule = clickSchedule(ctx44, 0, 48000);
+    expect(schedule.ticks.at(-1)!.sample).toBeLessThan(CLICK_FALLBACK_SECONDS * 48000);
+    expect(schedule.ticks.length).toBe(CLICK_FALLBACK_SECONDS * 2); // two beats a second at 120
+  });
+});
 
-    const wav = readWav(clicked.path);
-    expect(wav.channels[0]).toHaveLength(48000); // length untouched
-    expect(Math.abs(wav.channels[0]![24001]!)).toBeGreaterThan(0.01); // beat 2 clicks
-    expect(Math.abs(wav.channels[0]![23000]!)).toBe(0); // between beats: silence
-    expect(clicked.path).not.toBe(src); // the artifact itself is never touched
+describe('count-in', () => {
+  it('starts whole bars before the position, on the same beat, never before bar 1', () => {
+    const bar3beat2 = ctx44.meter.parse('3.2');
+    expect(ctx44.meter.format(countInStart(ctx44, bar3beat2, 1))).toBe('2.2.1');
+    expect(ctx44.meter.format(countInStart(ctx44, bar3beat2, 2))).toBe('1.2.1');
+    expect(ctx44.meter.format(countInStart(ctx44, bar3beat2, 5))).toBe('1.2.1');
   });
 
-  it('re-hashes: sha256 describes the clicked file, not the source', () => {
-    const src = join(root, 'silent.wav');
-    writeWavFloat32(src, 48000, [new Float32Array(48000), new Float32Array(48000)]);
-    // The source's own hash, so the assertions below are about withClick
-    // replacing it rather than about the default never matching.
-    const clicked = withClick(root, ctx44, playable({ path: src, sha256: sha256FileSync(src) }));
-
-    // The invariant the field carries — "the hash of what path holds" —
-    // is what watch seeds its baseline from, so the click must not leave
-    // a hash describing a different file (#35 review).
-    expect(clicked.sha256).toBe(sha256FileSync(clicked.path));
-    expect(clicked.sha256).not.toBe(sha256FileSync(src));
+  it('schedules only the beats from the count-in start up to the take', () => {
+    // Counting one bar into bar 3: beats at bars 2.1–2.4, nothing at 3.1
+    // or after — the performer hears the bar before and then silence.
+    const from = ctx44.tempo.ticksToSamples(ctx44.meter.parse('2.1'));
+    const to = ctx44.tempo.ticksToSamples(ctx44.meter.parse('3.1'));
+    const schedule = countInSchedule(ctx44, from, to, 48000);
+    expect(schedule.ticks).toEqual([
+      { sample: 96000, accent: true },
+      { sample: 120000, accent: false },
+      { sample: 144000, accent: false },
+      { sample: 168000, accent: false },
+    ]);
   });
 });

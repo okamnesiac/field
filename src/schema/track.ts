@@ -4,6 +4,7 @@ import { labelName, sampleRate, samples, slug, sourceRef, timePosition, timeSpan
 import { insertOrder, insertSchema } from './effects.js';
 import { meterEventSchema, tempoEventSchema, timeOrder } from './song.js';
 import { generativeEntrySchema } from './generative.js';
+import { recordEntrySchema } from './record.js';
 
 // One list (nested-tracks.md §18): a track file is a name, an optional
 // `time:`, optional `inserts:`, and `inputs:`. Every entry places one
@@ -20,6 +21,10 @@ import { generativeEntrySchema } from './generative.js';
 // siblings). `supercollider:` renders in-graph; `generative:` is
 // deliberate — its takes live beside the audio under the gen node's
 // name, and nothing in the build may run it (project-layout.md §1.2).
+// `record:` is the generative pattern with a human where the model was
+// (recording.md §1): its takes live beside the audio under the record
+// node's name, `field record` fills them, and an entry with none yet
+// builds as silence rather than refusing (§4).
 //
 // Placement fields are uniform across kinds, because none of them means
 // something different depending on what produced the audio. A window is
@@ -78,6 +83,7 @@ const inputEntryFields = z
     audio: sourceRef.optional(), // ledger name, or //shared/asset:<name>
     supercollider: supercolliderEntrySchema.optional(), // an inline render
     generative: generativeEntrySchema.optional(), // a deliberate request
+    record: recordEntrySchema.optional(), // a performance to record (recording.md §4)
     receive: labelName.optional(), // a cable's label (nested-tracks.md §19)
     anchor: z.enum(['musical', 'absolute']).default('musical'),
     // Omitted means the track's start — the leaf case reads as bare
@@ -106,6 +112,7 @@ const inputEntryFields = z
       entry.audio,
       entry.supercollider,
       entry.generative,
+      entry.record,
       entry.receive,
     ].filter((v) => v !== undefined);
     if (kinds.length !== 1) {
@@ -113,7 +120,17 @@ const inputEntryFields = z
         code: 'custom',
         message:
           'an entry plays exactly one thing — name it with track:, audio:, ' +
-          'supercollider:, generative:, or receive:',
+          'supercollider:, generative:, record:, or receive:',
+      });
+    }
+    // A take is placed where it was sung (recording.md §3); tiling it
+    // would be a placement the row cannot describe, and the entry's
+    // window is the takes' to fill.
+    if (entry.record !== undefined && entry.loop !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['loop'],
+        message: 'a record entry does not loop — a take is placed where it was sung',
       });
     }
   });
@@ -131,6 +148,7 @@ export const inputEntryOrder: KeyOrder = {
     'audio',
     'supercollider',
     'generative',
+    'record',
     'receive',
     'anchor',
     'at',

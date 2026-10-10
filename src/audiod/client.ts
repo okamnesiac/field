@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
+  armResponseSchema,
   devicesResponseSchema,
   errorResponseSchema,
   eventSchema,
@@ -14,9 +15,14 @@ import {
   loadResponseSchema,
   okResponseSchema,
   PROTOCOL_VERSION,
+  recordResponseSchema,
+  recordingsResponseSchema,
+  recoverResponseSchema,
   SOCKET_RELATIVE,
   statusResponseSchema,
+  stopResponseSchema,
   type AudiodEvent,
+  type ClickSchedule,
 } from './protocol.js';
 
 // Client for the per-project field-audiod daemon (playback.md §3): connects
@@ -86,8 +92,9 @@ export class AudiodClient extends EventEmitter {
   >();
   private buffer = '';
 
-  // What the daemon's hello declared; connect() fills both.
+  // What the daemon's hello declared; connect() fills all three.
   readonly features: string[] = [];
+  readonly pid: number | undefined = undefined;
 
   private constructor(
     private readonly socket: Socket,
@@ -154,6 +161,7 @@ export class AudiodClient extends EventEmitter {
     }
     (client as { daemonVersion: string }).daemonVersion = hello.version;
     (client as { features: string[] }).features = hello.features;
+    (client as { pid: number | undefined }).pid = hello.pid;
     return client;
   }
 
@@ -234,11 +242,74 @@ export class AudiodClient extends EventEmitter {
   play() {
     return this.request('play', {}, okResponseSchema);
   }
+  // Both end a take in progress and hand its manifest back (recording.md
+  // §6): the caller that stopped gets the take without a second
+  // round-trip; everyone else hears the `take` event.
   pause() {
-    return this.request('pause', {}, okResponseSchema);
+    return this.request('pause', {}, stopResponseSchema);
   }
   stop() {
-    return this.request('stop', {}, okResponseSchema);
+    return this.request('stop', {}, stopResponseSchema);
+  }
+  // The input side (recording.md §5–6). All require supports('record').
+  // `input` counts from 1, as a person reads it off the interface; an
+  // absent device means the system's default input.
+  arm(track: string, input: number, device?: string) {
+    return this.request(
+      'arm',
+      device !== undefined ? { track, input, device } : { track, input },
+      armResponseSchema,
+    );
+  }
+  disarm() {
+    return this.request('disarm', {}, okResponseSchema);
+  }
+  // Start a take: at `at` (a sample on the bed's timeline, needing a
+  // loaded bed) or wherever the transport is. The response carries the
+  // transaction id and the position the callback latched. With `start`
+  // (recording.md §7, needs supports('record-start')) the transport
+  // pre-rolls from there and the take begins exactly at `at`; the
+  // response's position is -1 until then, and status says pending.
+  // `until` (recording.md §10.4, supports('record-until')) ends the take
+  // on that exact sample and finalizes it while the transport keeps
+  // going; `loop` makes the live session loop [at, until) with every
+  // pass a take, each arriving as a `take` event.
+  record(at?: number, start?: number, until?: number, loop?: boolean) {
+    return this.request(
+      'record',
+      {
+        ...(at !== undefined ? { at } : {}),
+        ...(start !== undefined ? { start } : {}),
+        ...(until !== undefined ? { until } : {}),
+        ...(loop === true ? { loop: true } : {}),
+      },
+      recordResponseSchema,
+    );
+  }
+  // The live session's region loop (supports('loop-region')): the clock
+  // wraps from `to` — the content's extent when omitted — back to
+  // `from`. No arguments clears it.
+  loop(from?: number, to?: number) {
+    return this.request(
+      'loop',
+      { ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) },
+      okResponseSchema,
+    );
+  }
+  // The metronome schedule (protocol.ts clickScheduleSchema). Requires
+  // supports('click'); an empty ticks list clears it, and so does loading
+  // a new bed.
+  click(schedule: ClickSchedule) {
+    return this.request('click', schedule, okResponseSchema);
+  }
+  // Every transaction under .field/recording/, complete or not.
+  recordings() {
+    return this.request('recordings', {}, recordingsResponseSchema);
+  }
+  // Patch the header of a transaction a dead daemon left behind. The
+  // field is `transaction` because `id` is the request's own.
+  recover(id: string) {
+    return this.request('recover', { transaction: id }, recoverResponseSchema);
   }
   locate(sample: number) {
     return this.request('locate', { sample }, okResponseSchema);

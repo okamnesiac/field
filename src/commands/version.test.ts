@@ -3,7 +3,9 @@ import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatVersionReport, versionReport, resolveIdentity } from './version.js';
+import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
+import { fileStore } from '../remote/credentials.js';
+import { git } from '../git.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { SETUP_SPECS } from './generate.js';
 import {
@@ -20,6 +22,9 @@ import {
 
 let root: string;
 const servers: Server[] = [];
+// Never the real keychain (remote.md §7): a file store under the temp
+// root, and an environment with no FIELD_* overrides.
+const deps = () => ({ store: fileStore(join(root, 'credentials')), env: {} });
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'field-version-'));
@@ -57,7 +62,7 @@ describe('field --version', () => {
     // "0.1.0" is true of every build this project has ever produced. The
     // commit is what distinguishes the one running from the one that was
     // running twenty minutes ago, which is the actual question.
-    const report = await versionReport(root);
+    const report = await versionReport(root, deps());
     expect(report.cli.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(report.cli.commit).toMatch(/^[0-9a-f]{7,}$/);
     expect(report.workerProtocol).toBe(WORKER_PROTOCOL_VERSION);
@@ -67,7 +72,7 @@ describe('field --version', () => {
     // Asking a model worker its version is not worth loading a model, so
     // this path must never spawn. Nothing is listening here and the
     // report still returns — a spawn would hang or download weights.
-    const report = await versionReport(root);
+    const report = await versionReport(root, deps());
     // Sourced from the canonical list rather than typed out, so adding a
     // worker breaks this loudly instead of leaving the report quietly
     // short by one (#70 review).
@@ -86,7 +91,7 @@ describe('field --version', () => {
       version: '9.9.9',
       model_loaded: false,
     });
-    const voiced = (await versionReport(root)).daemons.find((d) => d.name === 'field-voiced')!;
+    const voiced = (await versionReport(root, deps())).daemons.find((d) => d.name === 'field-voiced')!;
     expect(voiced.running).toBe(true);
     // Reported, not assumed: a daemon's own answer is the only evidence
     // of what code it loaded, and 9.9.9 is nothing this repo declares.
@@ -105,7 +110,7 @@ describe('field --version', () => {
       version: '0.1.0',
       model_loaded: false,
     });
-    const report = await versionReport(root);
+    const report = await versionReport(root, deps());
     const voiced = report.daemons.find((d) => d.name === 'field-voiced')!;
     expect(voiced.protocol).toBe(WORKER_PROTOCOL_VERSION - 1);
     expect(voiced.note).toContain('predates this build');
@@ -123,7 +128,7 @@ describe('field --version', () => {
       daemon: AUDIOD_NAME,
       version: '9.9.9',
     });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
+    const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('rebuild the daemon');
   });
 
@@ -135,7 +140,7 @@ describe('field --version', () => {
       daemon: AUDIOD_NAME,
       version: '0.4.0',
     });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
+    const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(AUDIOD_PROTOCOL_VERSION).not.toBe(WORKER_PROTOCOL_VERSION); // the trap is real
     expect(audiod.note).toBeUndefined();
   });
@@ -152,14 +157,14 @@ describe('field --version', () => {
       daemon: 'field-voiced',
       version: '0.1.0',
     });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
+    const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('identifies as field-voiced');
     expect(audiod.note).not.toContain('rebuild the daemon');
   });
 
   itOverPosixSocket('does not report an audiod refusal as a healthy audiod', async () => {
     await fakeDaemon(AUDIOD_SOCKET, { ok: false, error: 'unknown op' });
-    const audiod = (await versionReport(root)).daemons.find((d) => d.name === AUDIOD_NAME)!;
+    const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('refused the hello');
   });
 
@@ -173,7 +178,7 @@ describe('field --version', () => {
       daemon: 'field-aced',
       version: '0.1.0',
     });
-    const voiced = (await versionReport(root)).daemons.find((d) => d.name === 'field-voiced')!;
+    const voiced = (await versionReport(root, deps())).daemons.find((d) => d.name === 'field-voiced')!;
     expect(voiced.note).toContain('identifies as field-aced');
   });
 
@@ -181,7 +186,7 @@ describe('field --version', () => {
     // `ok: false` is a refusal, not a hello. Reporting it as running with
     // an unknown version is the command's own kind of lie.
     await fakeDaemon('.field/voiced.sock', { ok: false, error: 'unknown op' });
-    const voiced = (await versionReport(root)).daemons.find((d) => d.name === 'field-voiced')!;
+    const voiced = (await versionReport(root, deps())).daemons.find((d) => d.name === 'field-voiced')!;
     expect(voiced.note).toContain('refused the hello');
   });
 
@@ -194,7 +199,7 @@ describe('field --version', () => {
       version: '0.1.0',
       model_loaded: false,
     });
-    const report = await versionReport(root);
+    const report = await versionReport(root, deps());
     expect(report.daemons.find((d) => d.name === 'field-aced')!.note).toBeUndefined();
     expect(formatVersionReport(report, root)).not.toContain('!');
   });
@@ -254,6 +259,7 @@ describe('formatVersionReport with a drifted checkout', () => {
         cli: { version: '0.1.0', commit: 'aaaa111', branch: 'feature/x', checkoutCommit: 'bbbb222' },
         workerProtocol: 2,
         daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
       },
       process.cwd(),
     );
@@ -272,6 +278,7 @@ describe('formatVersionReport with post-build edits', () => {
         cli: { version: '0.1.0', commit: 'aaaa111', branch: 'main', checkoutDirtyFiles: 4 },
         workerProtocol: 2,
         daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
       },
       process.cwd(),
     );
@@ -294,11 +301,42 @@ describe('formatVersionReport with post-build edits', () => {
         },
         workerProtocol: 2,
         daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
       },
       process.cwd(),
     );
     expect(text).toContain(
       'aaaa111 on main, 1 file uncommitted; checkout has changed since the build — pnpm build to update',
     );
+  });
+});
+
+describe('the remote line', () => {
+  // Which remote, where the URL came from, and whether a token is held
+  // for it (remote.md §3.1) — held, never printed.
+  it('names the remote and the token source without the token', () => {
+    const store = fileStore(join(root, 'credentials'));
+    const line = (env: NodeJS.ProcessEnv) => formatRemoteReport(remoteReport(root, { store, env }));
+    expect(line({})).toBe('remote        https://audiofield.io (default)  not logged in');
+    store.write('https://audiofield.io', { token: 'a-secret' });
+    expect(line({})).toBe('remote        https://audiofield.io (default)  token in file');
+    expect(line({ FIELD_TOKEN: 'x' })).toContain('token from FIELD_TOKEN');
+    expect(line({ FIELD_REMOTE: 'off' })).toBe('remote        off (FIELD_REMOTE=off)');
+    expect(line({ FIELD_REMOTE: 'http://127.0.0.1:9/' })).toBe(
+      'remote        http://127.0.0.1:9 (FIELD_REMOTE)  not logged in',
+    );
+    const full = formatVersionReport(
+      { cli: { version: '0.1.0' }, workerProtocol: 2, daemons: [], remote: remoteReport(root, { store, env: {} }) },
+      root,
+    );
+    expect(full).not.toContain('a-secret');
+  });
+
+  it("reads a project's origin", () => {
+    git(['init', '-q'], { cwd: root });
+    git(['remote', 'add', 'origin', 'https://git.audiofield.io/howlo/chemicals.git'], { cwd: root });
+    const report = remoteReport(root, { store: fileStore(join(root, 'credentials')), env: {} });
+    expect(report).toEqual({ api: 'https://audiofield.io', source: 'origin' });
+    expect(formatRemoteReport(report)).toBe('remote        https://audiofield.io (origin)  not logged in');
   });
 });
