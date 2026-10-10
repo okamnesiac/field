@@ -47,8 +47,8 @@ const stubWorker = join(
 let root: string;
 
 // The tests below that actually generate spawn the stub worker, which
-// serves on an AF_UNIX socket path — Node on Windows can neither exec it
-// bare (no shebang) nor listen there (the local domain is named pipes).
+// serves on an AF_UNIX socket path, and Node on Windows cannot listen
+// there (the local domain is named pipes).
 // The workers keep their POSIX transport until their own chunk
 // (windows-portability.md §4); validation-only tests run everywhere.
 const itSpawnsAWorker = it.skipIf(process.platform === 'win32');

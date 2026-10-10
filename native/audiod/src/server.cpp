@@ -14,9 +14,12 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <sddl.h>
+#pragma comment (lib, "advapi32.lib")
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 #else
 #include <fcntl.h>
 #include <sys/file.h>
@@ -331,6 +334,52 @@ int Server::connectionCount()
 // keep <windows.h> out of it; this file casts at the boundary.
 static HANDLE asHandle (void* p) { return static_cast<HANDLE> (p); }
 
+// The pipe's DACL: the user running the daemon, and nobody else - the
+// 0600 the POSIX socket has, which §2.1 chose pipes partly to keep. A null
+// SECURITY_ATTRIBUTES would give the default descriptor, which grants read
+// to Everyone and the anonymous account: any local account could open the
+// pipe, receive every broadcast, and hold the idle exit off. Built once and
+// kept for the process's life; nullptr when it cannot be built, which
+// start() refuses rather than falling back to the default.
+static SECURITY_ATTRIBUTES* pipeSecurity()
+{
+    static SECURITY_ATTRIBUTES attributes = []
+    {
+        SECURITY_ATTRIBUTES built {};
+        HANDLE token = nullptr;
+        if (! OpenProcessToken (GetCurrentProcess(), TOKEN_QUERY, &token))
+            return built;
+        DWORD size = 0;
+        GetTokenInformation (token, TokenUser, nullptr, 0, &size);
+        std::vector<unsigned char> user (size);
+        LPSTR sid = nullptr;
+        if (size > 0 && GetTokenInformation (token, TokenUser, user.data(), size, &size)
+            && ConvertSidToStringSidA (reinterpret_cast<TOKEN_USER*> (user.data())->User.Sid, &sid))
+        {
+            // D:P is a protected DACL (nothing inherited); GA is generic
+            // all, for this one SID.
+            const auto sddl = std::string ("D:P(A;;GA;;;") + sid + ")";
+            PSECURITY_DESCRIPTOR descriptor = nullptr;
+            if (ConvertStringSecurityDescriptorToSecurityDescriptorA (sddl.c_str(), SDDL_REVISION_1,
+                                                                      &descriptor, nullptr))
+            {
+                built.nLength = sizeof (built);
+                built.lpSecurityDescriptor = descriptor;
+                built.bInheritHandle = FALSE;
+            }
+            LocalFree (sid);
+        }
+        CloseHandle (token);
+        return built;
+    }();
+    return attributes.lpSecurityDescriptor != nullptr ? &attributes : nullptr;
+}
+
+// Byte mode, blocking semantics under overlapped I/O, and local clients
+// only: without PIPE_REJECT_REMOTE_CLIENTS a pipe accepts connections
+// from other machines and checks them against the DACL alone.
+static constexpr DWORD pipeMode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
+
 Server::~Server()
 {
     running = false;
@@ -370,10 +419,12 @@ juce::String Server::start()
     // the loser fails here with ERROR_ACCESS_DENIED - the same shape as
     // the #12-review flock, with no lock file and no stale socket to
     // unlink.
+    auto* security = pipeSecurity();
+    if (security == nullptr)
+        return "could not build the pipe's security descriptor: " + juce::String ((int) GetLastError());
     auto* first = CreateNamedPipeA (socketPath.toRawUTF8(),
                                     PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                                    PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, nullptr);
+                                    pipeMode, PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, security);
     if (first == INVALID_HANDLE_VALUE)
         return GetLastError() == ERROR_ACCESS_DENIED
                    ? "another field-audiod already owns " + socketPath
@@ -450,15 +501,24 @@ void Server::acceptLoop()
         if (! running)
             break; // the destructor closes the parked instance
         if (! connected)
-            continue; // a client gave up mid-connect; the instance is reusable
+        {
+            // A client gave up mid-connect. One that opened the instance
+            // and closed it before ConnectNamedPipe ran leaves it failing
+            // with ERROR_NO_DATA until the server disconnects it - without
+            // this, the loop would retry the same handle forever and no
+            // instance would listen. `field --version` does exactly that
+            // open-and-close when it probes the pipe with existsSync.
+            DisconnectNamedPipe (pipe);
+            continue;
+        }
 
         // Park the next instance before serving this one, so a client
         // connecting immediately after has somewhere to land. No
         // FIRST_PIPE_INSTANCE - the name is already ours.
         auto* next = CreateNamedPipeA (socketPath.toRawUTF8(),
                                        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                                       PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0, nullptr);
+                                       pipeMode, PIPE_UNLIMITED_INSTANCES, 64 * 1024, 64 * 1024, 0,
+                                       pipeSecurity());
         pendingPipe = next != INVALID_HANDLE_VALUE ? next : nullptr;
 
         auto connection = std::make_shared<Connection>();
@@ -511,6 +571,12 @@ void Server::readLoop (std::shared_ptr<Connection> connection)
         ov.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
         bool ok = ReadFile (asHandle (connection->pipe), chunk, sizeof (chunk), nullptr, &ov) != 0
                       || GetLastError() == ERROR_IO_PENDING;
+        // beginShutdown may have cleared `running` and run its CancelIoEx
+        // between the loop check and this ReadFile, so the cancel missed
+        // the read. Checking again once the read is issued closes that
+        // window: either the cancel saw this read, or this sees the flag.
+        if (ok && ! running)
+            CancelIoEx (asHandle (connection->pipe), &ov);
         if (ok)
             ok = GetOverlappedResult (asHandle (connection->pipe), &ov, &n, TRUE) != 0;
         const bool aborted = ! ok && GetLastError() == ERROR_OPERATION_ABORTED;
@@ -589,7 +655,11 @@ void Server::beginShutdown()
     const std::lock_guard<std::mutex> lock (connectionsMutex);
     for (auto& connection : connections)
         if (connection->open)
-            CancelIoEx (asHandle (connection->pipe), nullptr); // aborts the read; in-flight writes finish
+            // Aborts the pending read. A null OVERLAPPED cancels every I/O
+            // on the handle, so a WriteFile still waiting on a full pipe
+            // buffer is cancelled too; only writes that already fit the
+            // buffer are sure to finish.
+            CancelIoEx (asHandle (connection->pipe), nullptr);
 }
 
 void Server::sweepClosedConnections()
