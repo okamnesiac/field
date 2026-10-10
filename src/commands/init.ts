@@ -10,6 +10,27 @@ import { stringifyCanonical } from '../yaml/emit.js';
 // (project-model.md "Assets").
 const LFS_PATTERNS = ['*.wav', '*.aif', '*.aiff', '*.flac', '*.mp3', '*.m4a', '*.caf'];
 
+// The whole .gitattributes a new project gets. The LF rule is first and
+// the binary rules override it (last match wins): field hashes
+// working-tree bytes — asset pins, .scd action keys, check's byte-wise
+// formatting gate — so a checkout that rewrote line endings would change
+// every one of those answers while `git status` stayed clean
+// (windows-portability.md §1.1). Git for Windows defaults
+// core.autocrlf=true, which does exactly that to any project that does
+// not pin LF itself. *.state is captured plugin state, named by its own
+// sha256 and refused if the bytes move — never a conversion candidate.
+const GITATTRIBUTES = [
+  '# Text checks out LF everywhere: field hashes file bytes as they sit',
+  '# on disk, so line endings are pinned rather than platform-dependent.',
+  '# Binary rules below override (last match wins); audio and plugin',
+  '# state are never touched.',
+  '* text=auto eol=lf',
+  '',
+  ...LFS_PATTERNS.map((p) => `${p} filter=lfs diff=lfs merge=lfs -text`),
+  '*.state binary',
+  '',
+].join('\n');
+
 const IGNORE_ENTRIES = ['.field/', '.DS_Store'];
 
 export interface InitOptions {
@@ -58,10 +79,7 @@ export function init(options: InitOptions): string {
 
   const gitattributes = join(root, '.gitattributes');
   if (!existsSync(gitattributes)) {
-    writeFileSync(
-      gitattributes,
-      LFS_PATTERNS.map((p) => `${p} filter=lfs diff=lfs merge=lfs -text`).join('\n') + '\n',
-    );
+    writeFileSync(gitattributes, GITATTRIBUTES);
   }
 
   if (!existsSync(join(root, '.git'))) {

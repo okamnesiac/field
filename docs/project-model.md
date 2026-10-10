@@ -203,6 +203,19 @@ is a pluggable detail: **Git LFS is backend #1**, and a remote store
 (S3-backed) is a manifest-preserving migration later, when LFS
 storage/bandwidth costs hurt.
 
+field hashes files as they sit on disk, not as Git stores them: a
+`.scd` program's content hash is an input to its render, and `check`
+compares each manifest byte for byte with its canonical form. A
+checkout that rewrites line endings changes those answers while
+`git status` stays clean, and Git for Windows does that by default
+(`core.autocrlf=true`). So the `.gitattributes` that `field init`
+writes opens with `* text=auto eol=lf`, which checks text out with LF
+on every platform. The LFS rules for audio and `*.state binary` for
+plugin state blobs follow it and override it, because Git applies the
+last matching rule. `init` keeps a `.gitattributes` that already
+exists, so in a project created before `init` wrote the LF rule, add
+`* text=auto eol=lf` by hand above the LFS lines.
+
 Generated variants are committed with their request and provenance,
 never silently regenerated — and pinned by their own takes file's
 per-variant hashes rather than the ledger (project-layout.md §4.8), so
