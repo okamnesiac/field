@@ -359,9 +359,12 @@ rendering on Windows can be real long before playback is.
   the daemon protocol tests plus a real `field play` session are exactly
   the verification — a separate investigation would only rehearse what
   the chunk proves.
-- **Is the 104-byte reasoning simply gone, or replaced?** See §2.3. If
-  named pipes win, `socketPathFor`'s entire premise is macOS/Linux-only,
-  and the comment that explains it needs to say so.
+- **Is the 104-byte reasoning simply gone, or replaced?** **Answered by
+  §2.1 and §2.3 (2026-08-16)**: named pipes won, so `socketPathFor`'s
+  104-byte premise is macOS/Linux-only. On Windows the same function
+  returns a pipe name derived from the project root, and its comment says
+  which question each platform's branch answers. Chunk 4 writes that
+  branch.
 - **What does WASAPI do to the device story?** `field devices` and
   `--device` are built on JUCE's `AudioDeviceManager`, which on Windows
   offers WASAPI (shared and exclusive) and DirectSound, plus ASIO only
@@ -379,12 +382,15 @@ rendering on Windows can be real long before playback is.
   listed. **Answered (2026-08-17**, the systematic grep, run in #157's
   review): every non-test hasher in `src/` reaches file bytes through
   `src/hash.ts`, and every caller maps onto a family §1.1 already names —
-  the `sc-render` action key, the asset-pin family (`click`, `export`,
-  `generate`, `import`, `graph/build`, `model/project`), the state-blob
-  refusal, with `graph/build.ts:145`'s `actionKey` fed by those input
-  hashes. The one byte-consumer that is **not** a hash and that a grep
+  the `sc-render` action key, the asset-pin family (`export`,
+  `generate`, `import`, `land`, `graph/build`, `model/project`), the
+  state-blob refusal, with `graph/build.ts`'s `actionKey` fed by those
+  input hashes. Re-checked 2026-10-10: `click` no longer hashes anything,
+  `land` hashes each landed `.wav` take for its ledger row, and
+  `remote/client.ts` hashes download bytes off the network, not off
+  disk. The one byte-consumer that is **not** a hash and that a grep
   for `createHash` would miss: `field check`'s canonical-formatting gate
   compares `canonicalText(file.raw, file.order) !== file.raw` against a
-  raw `readFileSync` (`model/project.ts:1190`), so a CRLF tree fails it
-  by string comparison rather than by digest — §1.1's second consumer,
-  named here so nobody re-derives it.
+  raw `readFileSync` (the formatting check in `model/project.ts`), so a
+  CRLF tree fails it by string comparison rather than by digest — §1.1's
+  second consumer, named here so nobody re-derives it.
