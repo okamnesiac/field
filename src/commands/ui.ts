@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { dirname, extname, join, normalize } from 'node:path';
+import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -145,6 +145,17 @@ const upSchema = z.discriminatedUnion('type', [
 // is finer than any lane is wide on a normal screen, so zooming in
 // stays smooth without shipping a second resolution.
 const WAVE_BUCKETS = 1200;
+
+// The file a request path names inside the client's build output, or
+// undefined when it would land outside it. The prefix compared ends in a
+// separator, so a sibling such as `ui/dist-evil` is outside: a bare
+// `startsWith(distDir)` admits any directory whose name merely begins
+// with `dist` (#163 review).
+export function staticFile(distDir: string, pathname: string): string | undefined {
+  const rel = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const file = normalize(join(distDir, rel));
+  return file.startsWith(normalize(distDir) + sep) ? file : undefined;
+}
 
 export interface UiOptions {
   port?: number;
@@ -658,9 +669,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   };
   const serveStatic = (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    const rel = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    const file = normalize(join(distDir, rel));
-    if (!file.startsWith(normalize(distDir)) || !existsSync(file)) {
+    const file = staticFile(distDir, url.pathname);
+    if (file === undefined || !existsSync(file)) {
       res.writeHead(404).end('not found');
       return;
     }
