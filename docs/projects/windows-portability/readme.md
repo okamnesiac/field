@@ -411,9 +411,12 @@ rendering on Windows can be real long before playback is.
   the daemon protocol tests plus a real `field play` session are exactly
   the verification — a separate investigation would only rehearse what
   the chunk proves.
-- **Is the 104-byte reasoning simply gone, or replaced?** See §2.3. If
-  named pipes win, `socketPathFor`'s entire premise is macOS/Linux-only,
-  and the comment that explains it needs to say so.
+- **Is the 104-byte reasoning simply gone, or replaced?** **Answered by
+  §2.1 and §2.3 (2026-08-16)**: named pipes won, so `socketPathFor`'s
+  104-byte premise is macOS/Linux-only. On Windows the same function
+  returns a pipe name derived from the project root, and its comment says
+  which question each platform's branch answers. Chunk 4 writes that
+  branch.
 - **What does WASAPI do to the device story?** `field devices` and
   `--device` are built on JUCE's `AudioDeviceManager`, which on Windows
   offers WASAPI (shared and exclusive) and DirectSound, plus ASIO only
@@ -431,15 +434,18 @@ rendering on Windows can be real long before playback is.
   listed. **Answered (2026-08-17**, the systematic grep, run in #157's
   review): every non-test hasher in `src/` reaches file bytes through
   `src/hash.ts`, and every caller maps onto a family §1.1 already names —
-  the `sc-render` action key, the asset-pin family (`click`, `export`,
-  `generate`, `import`, `graph/build`, `model/project`), the state-blob
-  refusal, with `graph/build.ts:145`'s `actionKey` fed by those input
-  hashes. The one byte-consumer that is **not** a hash and that a grep
+  the `sc-render` action key, the asset-pin family (`export`,
+  `generate`, `import`, `land`, `graph/build`, `model/project`), the
+  state-blob refusal, with `graph/build.ts`'s `actionKey` fed by those
+  input hashes. Re-checked 2026-10-10: `click` no longer hashes anything,
+  `land` hashes each landed `.wav` take for its ledger row, and
+  `remote/client.ts` hashes download bytes off the network, not off
+  disk. The one byte-consumer that is **not** a hash and that a grep
   for `createHash` would miss: `field check`'s canonical-formatting gate
   compares `canonicalText(file.raw, file.order) !== file.raw` against a
-  raw `readFileSync` (`model/project.ts:1190`), so a CRLF tree fails it
-  by string comparison rather than by digest — §1.1's second consumer,
-  named here so nobody re-derives it.
+  raw `readFileSync` (the formatting check in `model/project.ts`), so a
+  CRLF tree fails it by string comparison rather than by digest — §1.1's
+  second consumer, named here so nobody re-derives it.
 
 ## 7 Master inventory — everything else that has to port
 
@@ -478,7 +484,8 @@ land as its own diff whenever.
   surprise.
 - **`afplay`** (§1.6, §2.2 — chunk 5): dies on Windows by decision; the
   code change is making the refusal say "build the daemon".
-- **CI** (chunk 5): a `windows-latest` job — pnpm via corepack, the VS
+- **CI** (chunk 5): a `windows-latest` job — pnpm through
+  `pnpm/action-setup@v4` as the Linux job installs it, the VS
   generator, the JUCE FetchContent cache keyed per-OS, and the same
   suite the Linux job runs.
 
@@ -490,9 +497,11 @@ land as its own diff whenever.
   override — so a project created on (or cloned to) Windows has the
   §1.1 checkout corruption against its *own* committed `.scd` programs
   and asset pins, engine fix notwithstanding. The engine's file (chunk
-  1) is the template; `init` should write both halves. **Standalone**,
-  and the sharpest item on this list: it is chunk 1's twin for user
-  projects, and cheap.
+  1) is the template; `init` should write both halves. **Standalone,
+  and claimed by #159**, which is open against `main` and does exactly
+  that: `* text=auto eol=lf` ahead of the LFS lines, and `*.state
+  binary` after them. It is chunk 1's twin for user projects, and it
+  stays listed here until #159 lands.
 - **The picker runs raw-mode VT decoding** (`commands/picker.ts:93`,
   `field insert add`'s chooser, #155): arrows are parsed as CSI
   sequences from a `setRawMode(true)` stdin. Windows Terminal and
@@ -525,10 +534,16 @@ land as its own diff whenever.
   `socket.AF_UNIX`; CPython has no named-pipe socket family, so the
   Python end is a **transport decision of its own** — loopback TCP is
   the likely answer where the daemon chose pipes, and it is not this
-  plan's §2.1 verbatim. (Citations here are against `main` at
+  plan's §2.1 verbatim. The same file fails earlier than that: line 23
+  imports `fcntl` for the single-owner `flock`, and Windows CPython has
+  no `fcntl` module, so the import raises before line 129 runs. The
+  single-owner guarantee needs its own Windows answer alongside the
+  transport. (Citations here are against `main` at
   `4f90a87`; chunk 2's branch shifts `client.ts` by ten lines.)
 - `workers/client.ts:122,305` advises `brew install uv` — needs the
-  winget/scoop spelling behind a platform switch.
+  winget/scoop spelling behind a platform switch. Line 345 is the same
+  kind of advice: it prints `pkill -f` as the remedy for a protocol
+  mismatch, and Windows has no `pkill`.
 - The chunk-2 test guards that wait here, not on chunk 4: the 21
   stub-spawning tests in `generate.test.ts` and the three `describe`s
   in `aced/client.test.ts` and `voiced/client.test.ts`, all guarded on
@@ -547,11 +562,14 @@ land as its own diff whenever.
 - **`field open`** (add-insert chunk 3, unlanded) will need `start`
   where macOS says `open` the day it exists — noted so its review asks.
 - **Display-only `relative()` calls** (`transport.ts:120`,
-  `version.ts:286`) print native separators by design and port as-is;
-  named here so nobody "fixes" them into the §1.5 invariant, which is
-  about paths that are *data*.
-- **`transport.ts:58` is data, not display — the invariant's other
-  half, already on the right side of it** (#158 review, correcting this
+  `version.ts:286`) print native separators by design and port as-is.
+  Chunk 2 (#160) sets the rule they sit outside: a project-relative
+  path is slash-separated wherever it is *data* — stored, compared, or
+  sent over the wire — and a path only printed for a person keeps the
+  platform's separator. They are named here so nobody "fixes" them
+  into slashes.
+- **`transport.ts:58` is data, not display — the data half of that
+  rule, already on the right side of it** (#158 review, correcting this
   section's first pass, which filed it under display). `songDirOfPath`
   splits its `relative()` result on the native `sep` and returns
   `songs/<name>` slash-joined, and `transport.ts:44` compares that
