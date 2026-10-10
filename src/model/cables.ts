@@ -84,7 +84,13 @@ export function entryName(entry: InputEntry, index: number): string {
   const target =
     entry.track ??
     entry.audio ??
-    (entry.supercollider ? 'supercollider' : entry.generative ? 'generative' : '?');
+    (entry.supercollider
+      ? 'supercollider'
+      : entry.generative
+        ? 'generative'
+        : entry.record
+          ? 'record'
+          : '?');
   return `input ${index + 1} ("${target}")`;
 }
 

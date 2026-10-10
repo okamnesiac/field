@@ -123,6 +123,18 @@ export async function transportStatusLines(
       const note = status.resampling ? ' (resampling)' : '';
       lines.push(`device: ${status.device.name} @ ${status.device.sample_rate} Hz${note}`);
     }
+    // The input side (recording.md §6): a `field record` blocking in
+    // another terminal shows up here, which is also how you learn why
+    // the daemon is refusing to idle-exit.
+    if (status.record !== undefined && status.record.state !== 'idle') {
+      const input = `${status.record.device} input ${status.record.input} → ${status.record.track}`;
+      if (status.record.state === 'recording') {
+        const frames = status.record.frames !== undefined ? ` (${status.record.frames} frames)` : '';
+        lines.push(`recording: ${status.record.transaction}${frames} on ${input}`);
+      } else {
+        lines.push(`armed: ${input}`);
+      }
+    }
     // Answers "am I on the latest daemon?" without folklore.
     lines.push(`daemon: field-audiod ${client.daemonVersion}`);
     return lines;
