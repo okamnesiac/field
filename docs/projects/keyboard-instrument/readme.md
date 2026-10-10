@@ -601,10 +601,12 @@ Chunk 4 adds its files when it appends its section (§6).
 
 The plan builds on existing code rather than beside it: `daemonBinary()`
 for the helper, `programPath()` for the instrument, its bare-name rule
-for keymap names, `sclang` discovery shared with
-`runScProgram`, zod for the keymap schema as for every project file,
-and the picker's raw-mode pattern with its restore on every exit path.
-It replaces nothing.
+for keymap names, `sclang` discovery shared with `runScProgram`, zod
+for the keymap schema as for every project file, and the picker's
+raw-mode pattern with its restore on every exit path. It replaces
+nothing. The keymap rule adds one test to the bare-name rule:
+`programPath()` treats a name as a path only when it contains a `/`,
+and a keymap name that ends in `.yaml` is a path too.
 
 ## 4 Acceptance criteria
 
