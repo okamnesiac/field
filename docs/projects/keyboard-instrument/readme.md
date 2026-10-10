@@ -344,7 +344,7 @@ layout, and speaks NDJSON:
 | Direction | Line | Meaning |
 | --- | --- | --- |
 | helper to `field keys` | `{"keyboard":{"name":"Dvorak","keys":{"KeyA":"a","KeyS":"o",…},"dead":[]}}` | The active keyboard layout: the character each bindable position types, and the positions that are dead keys. Sent before `ready`, and again when the keyboard layout changes. macOS only. |
-| helper to `field keys` | `{"ready":true,"name":"Field Keys"}` | The virtual source exists. |
+| helper to `field keys` | `{"ready":true,"name":"Field Keys","output":"MacBook Pro Speakers"}` | The virtual source exists. On macOS, `output` names the system output, which the voice host gives `scsynth` when there is no `--device` (§10.1). |
 | `field keys` to helper | `{"midi":[144,60,100]}` | Send these bytes now, as one message. |
 | helper to `field keys` | `{"error":"…"}`, then exit 1 | The platform cannot create a virtual source, or a line did not parse. |
 
@@ -429,8 +429,10 @@ The voice host owns everything between MIDI and voices:
   again on the same port at the device's new rate, adds the voice
   again, and prints its ready line again with the new rate. Notes
   sounding at the switch stop.
-- **No inputs.** The host sets no input channels, so `scsynth` opens
-  no input device and macOS never asks for the microphone.
+- **No inputs.** The host sets no input channels and names the output
+  device as `scsynth`'s input device too, so `scsynth` never opens the
+  microphone. No input channels alone is not enough: §10.1 records why,
+  and this bullet said otherwise until chunk 2 found it.
 - **No orphans.** `field keys` chooses the `scsynth` port, so it can
   send `/quit` even if `sclang` has died. The host checks once a second
   that `field keys` is alive, and if it is not, the host quits
@@ -897,3 +899,76 @@ Keys`, through any keymap, built-in or yours. The built-in is
   could not create the source; about sixty later starts did not. JUCE
   keeps a failed client for the life of the process, so the remedy is
   to run `field keys` again, which `docs/keys.md` says.
+
+## 10 Chunk 2 as built (2026-10-10)
+
+`field keys <instrument>` plays a SuperCollider instrument through the
+voice host in `sc/voice-host.scd`, and `still-water-pad` answers voice
+mode.
+
+### 10.1 scsynth opens the microphone unless told otherwise
+
+The first run of the voice host never became ready. `scsynth` printed
+its sample rate and stopped there, with "MacBook Pro Microphone" chosen
+as its input device, although the host asks for no input channels
+(`-i 0`). Booted alone, with the same arguments, under a pseudo-terminal,
+it stalled at the same line and ignored `/quit`. Booted with the
+speakers named as its device (`-H "MacBook Pro Speakers"`), it printed
+`SuperCollider 3 server ready.` and quit on `/quit`.
+
+So on macOS `scsynth` opens the default input device whatever the input
+channel count, and opening it waits on the microphone permission, which
+a process with no way to ask never gets. In a terminal that can ask,
+the user would see a microphone prompt for a keyboard instrument. The
+host therefore names one device for both directions, `inDevice` and
+`outDevice`, so `scsynth` never touches the microphone. With no
+`--device`, `field-audiod --keys` reports the system output's name on
+its ready line (§2.5), through JUCE's CoreAudio device type, the same
+way the daemon follows the default output. §2.6's "No inputs" bullet is
+corrected to match.
+
+### 10.2 What implementation settled
+
+- **A failure is the last thing its branch does.** `sclang`'s `exit`
+  does not stop the code that called it: a host that failed to load its
+  voice kept going and began to boot a server before it exited. The
+  host puts everything after loading the voice in one function that
+  runs only when the voice loaded.
+- **A load error names the cause first.** An instrument without a voice
+  mode, such as `creek-kit`, fails in its own render code under voice
+  mode, with an error such as `Message 'asInteger' not understood`. The
+  host reports `creek-kit.scd does not answer FIELD_MODE=voice: running
+  it in voice mode failed with ...`, and `field keys` adds what `sclang`
+  printed after its startup banner, leaving out the class library's
+  compile messages.
+- **Field reads only `@field ` lines.** `sclang` prints freely to stdout,
+  so each host line is `@field ` followed by one JSON object: `ready`
+  with the device and rate, `restarting`, `error`, and, under
+  `FIELD_VOICE_TRACE`, `voice_on` and `voice_off`, which made the host
+  testable without sound.
+- **`sclang` runs in daemon mode (`-D`)**, so it reads no input, and
+  `field keys` starts the host after the helper, so `Field Keys` exists
+  when the host connects its MIDI inputs. The keyboard plays while the
+  host boots.
+- **`sclangCommand()`** in `src/generators/supercollider.ts` resolves
+  `FIELD_SCLANG`, then `PATH`, then the app bundle, for renders and the
+  host alike.
+
+### 10.3 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| `src/keys/voice-host.test.ts`, against a stub `sclang` | 11 pass: resolution, the OSC `/quit` bytes, the host's lines, ready, an error with the output after the banner, a silent exit, a restart then a death after ready, and a missing `FIELD_SCLANG`. Close delivers `/quit` to the port the stub was given. |
+| The host on this Mac with a silent voice, `Field Keys` from the real helper | Live at 48000 Hz on MacBook Pro Speakers about two seconds after start. A note through CoreMIDI started a voice, and its note-off ended it. Nothing outlived the close. |
+| The host with `still-water-pad`, no notes played | Live at 48000 Hz; its voice loads as a SynthDef. |
+| The host with `creek-kit` | Rejected with the message in §10.2, and nothing left running. |
+| The parent killed with `SIGKILL` while the host ran | `sclang` and its `scsynth` were both gone within three seconds. |
+| Criterion 27 | `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10` before and after the edit: identical bytes (`cmp`). |
+
+### 10.4 What is still owed
+
+- **Criteria 21 to 26 by ear.** Playing a chord, sustain, bend, a USB
+  controller, `field play` beside the host, and the rate restart all
+  make sound, so no run here played them. The restart in criterion 25
+  also needs a device whose rate moves; the logic that drives it runs
+  only in `sclang`.

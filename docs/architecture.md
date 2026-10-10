@@ -150,8 +150,13 @@ OSC over UDP, which TypeScript handles fine. Two modes:
 - **Offline (NRT)** — the default: an SC program plus an explicit seed
   renders an asset via scsynth's non-realtime mode. Deterministic,
   cacheable, and the first real build rule.
-- **Live** — scsynth as a node in the real-time graph, receiving
-  timestamped OSC. Arrives with the real-time runtime.
+- **Live** — `field keys <instrument>` runs a voice host: `sclang` on
+  `sc/voice-host.scd`, which boots its own scsynth on the output device
+  and plays the instrument's voice from every MIDI source
+  ([keys.md](keys.md)). Its sound goes straight to the device, beside
+  the daemon's rather than through the session graph; scsynth as a node
+  in that graph, receiving timestamped OSC, is
+  [live-supercollider](projects/live-supercollider/readme.md)'s work.
 
 SC source is tracked in Git and treated as code.
 
