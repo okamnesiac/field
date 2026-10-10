@@ -11,7 +11,8 @@ to plan once takes accumulate, carries over to
 the device's declared latency: §13.2's loopback measurement, the
 §12.10 items owed to the first hardware session, and the `hardware/`
 schema §11 deferred all wait on a take recorded on the Apollo, which
-has not happened.
+has not happened. They carry over to
+[apollo-session](../apollo-session/readme.md).
 
 # Plan: Recording
 
