@@ -607,7 +607,7 @@ Chunk 1, the MIDI device and keymaps:
 | 7 | Run `field keys` in Apple's Terminal. | Exit 1, with a message that names Ghostty, iTerm2, kitty, and WezTerm. The terminal is unchanged. |
 | 8 | Switch the macOS input source to Dvorak. In Ghostty, run criterion 1's two commands, and press `KeyS`, which types `o`. | Note-on 62. |
 | 9 | Repeat criterion 8 in iTerm2. | The same, whether or not iTerm2 sends a base layout key. |
-| 10 | With criterion 8 running, switch the input source to French (AZERTY) without restarting. Press `KeyA`, which types `q`, then `KeyZ`, which types `w`. | Note-on 60, then the status line shows a transpose of -12. |
+| 10 | With criterion 8 running, switch the input source to French (AZERTY) without restarting. Press `KeyA`, which types `q`, then `KeyZ`, which types `w`. Then switch to U.S. International – PC, still without restarting. | Note-on 60, then the status line shows a transpose of -12. After the second switch, the status line names `Quote` as a position that cannot play on this keyboard layout. Only the helper's report of the change can name `Quote`. Ghostty sends a base layout key for `KeyA` and `KeyZ`, so the presses before it pass without that report. |
 | 11 | Switch the input source to U.S. International – PC, where `'` is a dead key, and run `field keys`. | The status line names `Quote`, the top F, as a position that cannot play on this keyboard layout. Every other position plays. |
 | 12 | Hold `Digit2`, then release it. | Pitch bend at 16383 while held, then 8192. |
 | 13 | Press `Digit5`, then `Digit3`. | CC 1 at 51, then CC 1 at 0. |
