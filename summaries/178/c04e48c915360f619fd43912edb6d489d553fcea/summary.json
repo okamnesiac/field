@@ -1,0 +1,337 @@
+{
+ "version": 1,
+ "name": "field keys: the keyboard as a MIDI source",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 178,
+  "title": "Add field keys: the computer keyboard as a MIDI source, with keymaps (keyboard-instrument.md chunk 1)",
+  "head": "c04e48c915360f619fd43912edb6d489d553fcea",
+  "headRef": "keys/chunk-1",
+  "base": "817b01fcbc235201033b3b0e5348af8fccebd096",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field makes sound by rendering files offline, and until now nothing in it took notes. This pull request adds <code>field keys</code>, which turns the computer keyboard into a MIDI instrument. It publishes a virtual MIDI source named <code>Field Keys</code>, so Logic or any other application that lists MIDI inputs can play from it. It is chunk 1 of the keyboard-instrument plan. Later chunks play a SuperCollider instrument from the same source and record what you play.",
+   "Three problems shape the design. A terminal normally reports only key presses, and a note needs its release, so <code>field keys</code> turns on the kitty keyboard protocol and refuses a terminal that lacks it. Keyboard layouts move characters around, so it reads the physical position of each key rather than the character it types. And what each key plays should be yours to change, so it comes from a <em>keymap</em>: a YAML file, checked by a zod schema, that reloads when you save it.",
+   "A key press travels through four steps:",
+   "<ol><li><b>The terminal reports the key.</b> <code>decodeTerminal</code> turns the protocol's escape sequences into key events, each a press, a repeat, or a release.</li><li><b>The event gets a position.</b> <code>PressedKeys</code> resolves a press to a position such as <code>KeyA</code>, and makes the release reuse it.</li><li><b>The session decides the MIDI.</b> <code>KeysSession</code> looks the position up in the keymap and returns note-ons, note-offs, controller changes, or pitch bend.</li><li><b>The helper sends it.</b> Each message goes as one NDJSON line to <code>field-audiod --keys</code>, which sends it from <code>Field Keys</code>.</li></ol>",
+   "The native work is two short-lived modes of the existing <code>field-audiod</code> binary rather than an npm MIDI module, so the TypeScript side gains no native dependency. Everything about notes and keymaps is TypeScript that vitest covers without the native build."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Position.</b> A physical key, named by its W3C <code>KeyboardEvent.code</code> value, such as <code>KeyA</code>. The name comes from the US key in that place, but it means the place.</li><li><b>Keyboard layout.</b> The operating system's map from position to character: QWERTY, Dvorak, AZERTY.</li><li><b>Keymap.</b> Field's map from position to what the key plays: a note, a chord, or a control.</li><li><b>Kitty keyboard protocol.</b> A terminal protocol that reports press, repeat, and release as escape sequences, for a program that asks.</li><li><b>Base layout key.</b> The protocol's optional field naming the US key at the same place as the key pressed.</li><li><b>Helper.</b> <code>field-audiod --keys</code>, the native process that owns the virtual source and reports the keyboard layout.</li><li><b>Dead key.</b> A key that types nothing alone and waits to combine with the next key.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<p>The first review, at <code>c04e48c</code>, requested changes with three findings:</p><ul class=\"tight\"><li><b>Ctrl-C under a non-Latin layout.</b> <code>isQuit</code> never matches it (<code>src/keys/terminal.ts</code> line 111).</li><li><b>The probe comment.</b> It says key events during the probe are returned, and they are dropped (line 122).</li><li><b>The monitor command in the guide.</b> <code>field-audiod</code> is not on your PATH (<code>docs/keys.md</code> line 57).</li></ul><p class=\"note\">Typecheck is clean, 76 TypeScript tests pass, 8 native round-trip cases pass on macOS against a binary built from this head, and CI's Linux job passed.</p>"
+   },
+   {
+    "id": "later",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li><b>The voice host</b>, which plays a SuperCollider instrument: chunk 2.</li><li><b>The <code>tracker</code> and <code>fourths</code> keymaps</b>: chunk 3. They are test fixtures now.</li><li><b>Recording</b>: chunk 4.</li><li><b>Linux keyboard layouts</b>: Linux relies on the base layout key alone.</li><li><b>Criteria 1 to 20 by hand</b> in Ghostty, iTerm2, and Apple's Terminal.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "keymap",
+   "title": "The keymap format",
+   "kicker": "The YAML schema every keymap passes, and the built-in Musical Typing keymap",
+   "intro": [
+    "A keymap says what each physical key plays. It names keys by <em>position</em>: the W3C <code>KeyboardEvent.code</code> value, such as <code>KeyA</code> or <code>Semicolon</code>. The name comes from the key a US keyboard has in that place, but it means the place, whatever your layout types there. A keymap binds each position to a note, written as an offset in semitones from <code>base</code>, or to a control: transpose, velocity, pitch bend, a MIDI controller, or panic.",
+    "<code>keymapSchema</code> checks every keymap, built-in or yours, and each error names the position and the rule it breaks. A <code>grid</code> assigns offsets to whole rows by a rule, so an isomorphic keymap takes one line. The schema also expands the grid, because the range rule needs the expanded notes. The rules:",
+    "<ul><li><b>Known positions only.</b> The four named rows, <code>Backquote</code>, <code>Backslash</code>, <code>IntlBackslash</code>, <code>Space</code>, <code>Tab</code>, and the arrows.</li><li><b>A note or a control, never both.</b></li><li><b><code>Escape</code> is reserved</b>, so no keymap can stop you quitting.</li><li><b>Every note is in MIDI's 0 to 127 range at <code>base</code></b>, and the keymap plays at least one note.</li></ul>"
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/schema/keymap.ts",
+     "note": "The schema, the bindable positions, grid expansion, and <code>toKeymap</code>, which turns a parsed file into the maps the session reads.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The <code>fourths</code> fixture expands to 48 on <code>KeyZ</code>, 53 on <code>KeyA</code>, 58 on <code>KeyQ</code>, and 63 on <code>Digit1</code>, as plan §2.4 says. <code>src/schema/keymap.test.ts</code> asserts it, and its 13 cases pass at this head."
+      },
+      {
+       "kind": "context",
+       "line": 103,
+       "text": "A named row's positions never enter <code>gridPositions</code>, so the \"appears twice\" rule misses <code>rows: [home, [KeyA]]</code>. Loading that keymap at this head succeeded, and <code>KeyA</code> took the later row's offset. The review lists this as a suggestion, not a finding."
+      }
+     ]
+    },
+    {
+     "path": "keymaps/musical-typing.yaml",
+     "note": "The default keymap, after Logic Pro's Musical Typing: C4 on <code>KeyA</code>, black keys on the row above, transpose and velocity on <code>KeyZ</code> to <code>KeyV</code>, sustain on <code>Tab</code> while held, and pitch bend and modulation on the number row."
+    },
+    {
+     "path": "src/schema/keymap.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "terminal",
+   "title": "Reading key events from the terminal",
+   "kicker": "The kitty keyboard protocol: probe, enable, decode, and restore",
+   "intro": [
+    "A terminal normally sends only the text a key types, and repeats a held key. The <em>kitty keyboard protocol</em> lets a program ask for press, repeat, and release events, sent as escape sequences. Ghostty, iTerm2 3.5 and later, kitty, and WezTerm implement it. Apple's Terminal does not.",
+    "<code>src/keys/terminal.ts</code> holds the byte-level half:",
+    "<ul><li><b>The probe.</b> <code>probeKittyProtocol</code> asks for the protocol's flags and then for the device attributes, which every terminal answers. A terminal with the protocol answers the first question before the second.</li><li><b>Enable and restore.</b> <code>ENABLE</code> pushes flags 1, 2, 4, and 8 and turns on focus reports, so a lost focus can release every held note. <code>RESTORE</code> undoes both.</li><li><b>The decoder.</b> <code>decodeTerminal</code> is a pure function from bytes to events. It carries a sequence cut off at the end of one chunk over to the next.</li><li><b>Quitting.</b> <code>isQuit</code> says which events quit: <code>Esc</code> and <code>Ctrl-C</code>.</li></ul>"
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/terminal.ts",
+     "note": "The protocol strings, the decoder, the quit rule, and the probe.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 111,
+       "text": "Open finding: Ctrl-C never quits under a layout with no <code>c</code> key, such as Russian. The protocol reports the typed character (<code>с</code>, 1089) and puts <code>c</code> only in the base layout key, so <code>isQuit</code> returns false and the session drops the Ctrl press. Esc still quits. The fix is to also accept a base layout key of 99 when the typed key is outside ASCII."
+      },
+      {
+       "kind": "flag",
+       "line": 122,
+       "text": "Open finding: this comment says key events that arrive during the probe are returned. The probe returns only a cut-off tail as <code>rest</code> and drops complete events, as a run at this head showed. The fix is to reword the comment."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/terminal.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "position",
+   "title": "Finding the physical key",
+   "kicker": "Turning a key event into a position, from the base layout key or the keyboard layout",
+   "intro": [
+    "The protocol reports the character a key types under the current keyboard layout. On Dvorak the key at <code>KeyS</code> types <code>o</code>, so reading characters would scatter Musical Typing across the keyboard. <code>positionOf</code> recovers the position from these sources, in order:",
+    "<ol><li><b>The base layout key.</b> A terminal can add the US key at the same place. Ghostty sends it, but the protocol lets a terminal leave it out when it equals the typed key.</li><li><b>The keyboard layout report.</b> On macOS the helper reports what each position types under the active layout, and reports again when the input source changes. <code>charactersToPositions</code> inverts each report once.</li><li><b>QWERTY.</b> With neither, a character reads as its own US position.</li></ol>",
+    "<code>PressedKeys</code> makes a release take the position its press resolved to. Without it, a release that lacks its press's base layout key, or arrives after an input-source switch, could resolve to another position and leave a note sounding. Plan §9.1 records that a run under a ColemakC layout showed this.",
+    "A <em>dead key</em> types nothing alone and waits for the next key, so the terminal may never report it. <code>unplayablePositions</code> names the bound positions that are dead keys under the current layout, for the status line."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/position.ts",
+     "note": "Position lookup, the press-to-release memory, and dead-key reporting."
+    },
+    {
+     "path": "src/keys/position.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "session",
+   "title": "The note state",
+   "kicker": "KeysSession turns positions into MIDI and pairs every note-on with one note-off",
+   "intro": [
+    "<code>KeysSession</code> holds everything between a position and MIDI bytes: transpose, velocity, which position holds which notes, held controllers, and toggles. It returns MIDI messages as byte arrays and sends nothing itself, which lets vitest cover it without a helper. It keeps four promises:",
+    "<ul><li><b>Every note-on gets exactly one note-off.</b> Two keys can sound one note, through a shared chord note or a transpose, so <code>holders</code> counts the keys that hold each note. The first press sends the note-on and the last release sends the note-off.</li><li><b>A release ends what its own press started.</b> <code>held</code> remembers the notes and channel of each press, so a transpose or a reloaded keymap in between does not change what the release turns off.</li><li><b>Modifiers block presses, never releases.</b> A press with Ctrl, Alt, Cmd, Hyper, or Meta does nothing. Shift and the lock bits change nothing. A release always ends its notes.</li><li><b>Focus-out and quit release everything.</b> <code>releaseAll</code> sends a note-off for each held note and resets held controllers. <code>quit</code> adds All Notes Off (CC 123).</li></ul>"
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/session.ts",
+     "note": "The session state machine and the MIDI byte encoders.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Its 20 tests pass at this head, including a shared note released in either order, a transpose while a key is held, a release that carries Ctrl, and the transpose bounds."
+      },
+      {
+       "kind": "context",
+       "line": 128,
+       "text": "A <code>toggle</code> controller that is on gets no 0 from <code>quit</code> or <code>panic</code>, and <code>setKeymap</code> forgets it is on, so a toggled sustain leaves the receiver at 127 after <code>field keys</code> exits. The plan does not require a reset here. The review lists it as a suggestion."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/session.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "loader",
+   "title": "Choosing, loading, reloading, and printing keymaps",
+   "kicker": "Where a keymap comes from, how a saved edit reaches the session, and --print",
+   "intro": [
+    "<code>resolveKeymapSource</code> applies the rule Field already uses for instrument programs. A bare name only ever names a built-in in <code>keymaps/</code>. A value with a <code>/</code>, or ending in <code>.yaml</code>, is a path, and a leading <code>~/</code> means your home directory. <code>--keymap</code> wins over <code>FIELD_KEYMAP</code>, which wins over <code>musical-typing</code>. There is no search path, so your file can never shadow a built-in.",
+    "<code>watchKeymap</code> watches the directory that holds the keymap, not the file. Many editors save by renaming a temporary file over the original, and a watch on the file would keep following the old one. It reloads only when the text changed. A saved file that fails validation leaves the current keymap in place, and its first error shows in the status line.",
+    "<code>printKeymap</code> draws a keymap as a keyboard, with the note or control in each key's place, for <code>field keys --print</code>. Notes use scientific pitch notation, where MIDI note 60 is C4."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/keymap.ts",
+     "note": "Resolving a name or path, loading and validating, and the reload watch."
+    },
+    {
+     "path": "src/keys/keymap.test.ts"
+    },
+    {
+     "path": "src/keys/print.ts",
+     "note": "The <code>--print</code> diagram and the control descriptions.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Running <code>field keys --print</code> at this head drew the Musical Typing diagram, with C4 on <code>A</code> and <code>T-12</code> and <code>T+12</code> on <code>Z</code> and <code>X</code>, and exited 0."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/print.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "native",
+   "title": "The native helper",
+   "kicker": "Two short-lived field-audiod modes: --keys owns the source and reports the layout, --midi-monitor prints a source",
+   "intro": [
+    "<code>field-audiod</code> is Field's native daemon, written in C++ with JUCE. This pull request adds two modes that run as their own short-lived processes, apart from the shared daemon, so they never touch its transport or socket:",
+    "<ul><li><b><code>--keys &lt;name&gt;</code>.</b> Reports the keyboard layout, creates the virtual source with JUCE's <code>MidiOutput::createNewDevice</code>, and prints a ready line. Then it sends each <code>{\"midi\":[...]}</code> line from stdin as it arrives. At the end of its input it closes the source and exits 0, so <code>Field Keys</code> disappears with <code>field keys</code>. A malformed line gets an <code>error</code> line and exit 1.</li><li><b><code>--midi-monitor &lt;name&gt;</code>.</b> Opens a named MIDI source and prints each message as NDJSON until end of input, SIGTERM, or SIGINT. The round-trip test and a person checking a controller both use it.</li></ul>",
+    "<code>keyboard-layout.cpp</code> reads the active layout through the macOS Text Input Sources API. For each bindable position it asks <code>UCKeyTranslate</code> what that key types with no modifiers, and it marks dead keys. A distributed notification reports input-source switches. The file includes no JUCE headers, and on Linux it reports nothing."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "native/audiod/src/keys.cpp",
+     "note": "Both modes: the NDJSON reader that sends MIDI, the layout report, and the monitor.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "A <code>field-audiod</code> built from this head passed all 8 round-trip cases in <code>src/keys/helper-native.test.ts</code> on macOS, and the new C++ files added no compiler warnings."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/keys.h"
+    },
+    {
+     "path": "native/audiod/src/keyboard-layout.cpp",
+     "note": "The macOS layout reader and the input-source watcher."
+    },
+    {
+     "path": "native/audiod/src/keyboard-layout.h"
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "Parses <code>--keys</code> and <code>--midi-monitor</code> and returns before any socket or audio device exists."
+    },
+    {
+     "path": "native/audiod/CMakeLists.txt",
+     "note": "Adds the two sources and links Carbon on macOS for the Text Input Sources API."
+    }
+   ]
+  },
+  {
+   "id": "helper",
+   "title": "Talking to the helper",
+   "kicker": "KeysHelper spawns field-audiod --keys and speaks its NDJSON, tested with a stub and with the real binary",
+   "intro": [
+    "<code>KeysHelper</code> spawns <code>field-audiod --keys</code>, found the way the daemon is found: <code>daemonBinary()</code>, or <code>FIELD_AUDIOD</code>. It resolves once the helper prints its ready line, passes each keyboard layout report to its caller, and reports an exit after ready with the helper's last error. Closing the helper's stdin is how <code>field keys</code> removes the source.",
+    "Two test files cover it. <code>helper.test.ts</code> runs against a Node stub, so it needs no native build. <code>helper-native.test.ts</code> runs the real <code>--keys</code> and <code>--midi-monitor</code> together and checks that notes arrive in order. On a Linux machine without the ALSA sequencer, each case skips by name and says why, so a green run without a MIDI service never reads as coverage."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/helper.ts",
+     "note": "Spawning the helper, parsing its lines with zod, and closing it.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The start promise rejects on the exit event, which Node can emit before the child's stdout is read. 300 starts of a stub that printed an error line and exited at once all rejected with the stub's message, so the error line was never lost."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/helper.test.ts"
+    },
+    {
+     "path": "src/keys/helper-native.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 21,
+       "text": "<code>BINDABLE_POSITIONS</code> copies <code>TEXT_POSITIONS</code> from <code>src/schema/keymap.ts</code>. Importing it would make a position added to the schema fail this test until <code>keyboard-layout.cpp</code> reports it. The review lists this as a suggestion."
+      }
+     ]
+    },
+    {
+     "path": ".github/workflows/ci.yml",
+     "note": "A comment only: it records that the native round trip skips by name on the Linux runner.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "CI's Linux job passed at this head, and its log shows each native case skipping by name because <code>/dev/snd/seq</code> is missing."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "command",
+   "title": "The field keys command",
+   "kicker": "Wires the terminal, positions, session, helper, and reload together, and gives the terminal back on every exit",
+   "intro": [
+    "<code>keysCommand</code> loads the keymap first, so <code>--print</code> and a broken keymap exit before the command touches the terminal. Then <code>withKittyKeyboard</code> puts the terminal in raw mode, probes for the protocol, and enables it. It undoes all three on a return, a throw, or a process exit.",
+    "<code>play</code> starts the helper, starts the reload watch for a keymap given by path, and handles stdin. A quit event stops. A focus-out releases everything and forgets remembered positions. Each key event goes through <code>PressedKeys</code> and the session to the helper. On stop, <code>play</code> sends the quit sequence and closes the helper. One status line shows the keymap, transpose, velocity, sounding notes, dead-key positions, and any reload error."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "The interactive shell: terminal setup and restore, the event loop, and the status line."
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "Registers <code>field keys</code> with <code>--keymap</code> and <code>--print</code>."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Docs and the plan",
+   "kicker": "docs/keys.md as the reference, links to it, and the plan marked in progress",
+   "intro": [
+    "<code>docs/keys.md</code> is the reference for players and keymap writers: the supported terminals, playing, how positions work, the default keymap, choosing a keymap, and the keymap format. <code>README.md</code>, <code>docs/README.md</code>, and <code>AGENTS.md</code> link it, and <code>docs/architecture.md</code> describes the two new daemon modes.",
+    "The plan moves from <code>ready</code> to <code>in-progress</code>. Its new §9 records what implementation settled, such as a release taking its press's position and the two-second probe wait. It also records what was verified and how, and what is still owed: criteria 1 to 20 by hand at a real keyboard, Linux, and a one-off CoreMIDI failure. Every open question in §7 is deferred to a later chunk."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "The new user reference for <code>field keys</code> and the keymap format.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 57,
+       "text": "Open finding: this command fails as written. Installing Field puts only <code>field</code> on your PATH, and <code>field-audiod</code> stays at <code>native/audiod/build/field-audiod_artefacts/Release/field-audiod</code> in the checkout, so the shell prints <code>command not found</code>. The fix is to write the full path, as the pull request's Testing section does."
+      }
+     ]
+    },
+    {
+     "path": "README.md"
+    },
+    {
+     "path": "docs/README.md"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "AGENTS.md"
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "Status to <code>in-progress</code>, small corrections in §2.4 and §2.8, and the new §9, chunk 1 as built."
+    }
+   ]
+  }
+ ]
+}
