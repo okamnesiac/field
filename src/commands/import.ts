@@ -6,7 +6,7 @@ import { PROJECT_MANIFEST, DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
 import { RESERVED_LABEL_NAME } from '../labels.js';
-import { assetsFileOrder, assetsFileSchema, projectSchema, songSchema } from '../schema/index.js';
+import { assetsFileOrder, assetsFileSchema, projectSchema, songSchema, type AssetsFile } from '../schema/index.js';
 import { takenSongNames } from '../model/namespace.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 
@@ -33,6 +33,66 @@ function defaultName(file: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+// A song's ledger as a document, so existing comments survive the edit,
+// plus its parsed rows for the checks a writer makes before adding one.
+// Shared with landing a take (land.ts), whose bytes go under the record
+// node's directory rather than audio/<name>/<name>.<ext>.
+export function openLedger(songDir: string): { doc: Document; assets: AssetsFile['assets'] } {
+  const assetsPath = join(songDir, 'assets.yaml');
+  let doc: Document;
+  if (existsSync(assetsPath)) {
+    const parsed = parseDocument(readFileSync(assetsPath, 'utf8'));
+    if (parsed.errors.length > 0) {
+      throw new Error(`invalid YAML in assets.yaml: ${parsed.errors[0]!.message}`);
+    }
+    doc = parsed;
+  } else {
+    doc = new Document({ assets: [] });
+  }
+  const existing = assetsFileSchema.safeParse(doc.toJS());
+  if (!existing.success) {
+    throw new Error(`assets.yaml is invalid; fix it before importing (field check)`);
+  }
+  return { doc, assets: existing.data.assets };
+}
+
+export interface LedgerRow {
+  name: string;
+  file: string; // song-relative, forward slashes
+  sha256: string;
+  bytes: number;
+  header?: WavHeader | undefined;
+}
+
+// Append one row and write the ledger back canonically. The row's WAV
+// facts travel together or not at all (multi-rate.md decision 5).
+export function appendLedgerRow(songDir: string, doc: Document, row: LedgerRow): void {
+  if (!isSeq(doc.getIn(['assets']))) {
+    // `{}` or `assets:` (null) parse fine but have no sequence for addIn
+    // to extend; without this it would set a bare map and corrupt the file.
+    doc.setIn(['assets'], doc.createNode([]));
+  }
+  doc.addIn(
+    ['assets'],
+    doc.createNode({
+      name: row.name,
+      file: row.file,
+      sha256: row.sha256,
+      bytes: row.bytes,
+      ...(row.header !== undefined
+        ? {
+            sample_rate: row.header.sampleRate,
+            bit_depth: row.header.bitsPerSample,
+            channels: row.header.channels,
+            frames: row.header.frames,
+          }
+        : {}),
+    }),
+  );
+  canonicalizeDocument(doc, assetsFileOrder);
+  writeFileSync(join(songDir, 'assets.yaml'), stringifyDocument(doc));
 }
 
 // Copy a file into the song's audio/ directory and record it in
@@ -124,27 +184,13 @@ export async function importAsset(
   const file = `audio/${assetName}/${assetName}${ext}`;
   const destPath = join(songDir, 'audio', assetName, `${assetName}${ext}`);
 
-  const assetsPath = join(songDir, 'assets.yaml');
-  let doc: Document;
-  if (existsSync(assetsPath)) {
-    const parsed = parseDocument(readFileSync(assetsPath, 'utf8'));
-    if (parsed.errors.length > 0) {
-      throw new Error(`invalid YAML in assets.yaml: ${parsed.errors[0]!.message}`);
-    }
-    doc = parsed;
-  } else {
-    doc = new Document({ assets: [] });
-  }
-  const existing = assetsFileSchema.safeParse(doc.toJS());
-  if (!existing.success) {
-    throw new Error(`assets.yaml is invalid; fix it before importing (field check)`);
-  }
+  const { doc, assets: declared } = openLedger(songDir);
   // The declaration in assets.yaml is the existence marker, and it is
   // written last. A file is an orphan of a failed import only if no
   // declared entry references it — then re-running overwrites it rather
   // than wedging. Both the name and the destination file must be free:
   // a declared entry may reference the same file under a different name.
-  if (existing.data.assets.some((a) => a.name === assetName)) {
+  if (declared.some((a) => a.name === assetName)) {
     throw new Error(`asset "${assetName}" already declared in "${song}"`);
   }
   // One namespace per song (project-layout.md §4.3): an imported asset
@@ -160,7 +206,7 @@ export async function importAsset(
   // Compare by resolved path, not string equality: check accepts any
   // relative spelling that resolves inside the project ("./audio/x.wav"),
   // so the guard must match by the same rules.
-  if (existing.data.assets.some((a) => resolve(songDir, a.file) === destPath)) {
+  if (declared.some((a) => resolve(songDir, a.file) === destPath)) {
     throw new Error(`${file} already belongs to a declared asset in "${song}"`);
   }
 
@@ -168,31 +214,7 @@ export async function importAsset(
   copyFileSync(sourcePath, destPath);
   const sha256 = await sha256File(destPath);
   const bytes = statSync(destPath).size;
-
-  if (!isSeq(doc.getIn(['assets']))) {
-    // `{}` or `assets:` (null) parse fine but have no sequence for addIn
-    // to extend; without this it would set a bare map and corrupt the file.
-    doc.setIn(['assets'], doc.createNode([]));
-  }
-  doc.addIn(
-    ['assets'],
-    doc.createNode({
-      name: assetName,
-      file,
-      sha256,
-      bytes,
-      ...(header !== undefined
-        ? {
-            sample_rate: header.sampleRate,
-            bit_depth: header.bitsPerSample,
-            channels: header.channels,
-            frames: header.frames,
-          }
-        : {}),
-    }),
-  );
-  canonicalizeDocument(doc, assetsFileOrder);
-  writeFileSync(assetsPath, stringifyDocument(doc));
+  appendLedgerRow(songDir, doc, { name: assetName, file, sha256, bytes, header });
 
   return { name: assetName, file, sha256, bytes, header, headerProblem };
 }

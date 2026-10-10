@@ -7,7 +7,7 @@ schema-validated, diffable files. Every meaningful action is a CLI
 command, and audio outputs are produced by an explicit dependency graph
 with content-addressed caching. Human users and coding agents work on
 the same underlying representation; an MCP surface exposing the CLI's
-verbs as tools is planned ([projects/later.md](projects/later.md)).
+verbs as tools is planned ([mcp-surface](projects/mcp-surface/readme.md)).
 
 For a concrete project you can read and build, see
 [`examples/bloom`](../examples/bloom/README.md) — two songs exercising
@@ -76,18 +76,17 @@ API exists — see [audio-engine.md](audio-engine.md)).
 
 Windows and Linux are build-and-test targets, not product platforms. CI
 builds the daemon and runs the whole suite on Linux
-([linux-portability](projects/all/linux-portability.md) decision 5), and
+([linux-portability](projects/linux-portability/readme.md) decision 5), and
 Windows is being brought up to build, test, and play
-([windows-portability](projects/all/windows-portability.md)). The
+([windows-portability](projects/windows-portability/readme.md)). The
 product ships on macOS.
 
 ## Two workflows
 
-**CLI-first.** You create, configure, generate, build, and play a
-project from the command line, and recording joins the same surface when
-the engine grows it. `field init` starts an empty project; on a fresh
-clone of [`examples/bloom`](../examples/bloom/README.md), this sequence
-takes creek from request to delivered file:
+**CLI-first.** You create, configure, generate, build, play, and record
+a project from the command line. `field init` starts an empty project;
+on a fresh clone of [`examples/bloom`](../examples/bloom/README.md),
+this sequence takes creek from request to delivered file:
 
 ```bash
 field generate creek/still-water-keys --seed 90210 --variants 2
@@ -107,8 +106,9 @@ project state; the widget holds no hidden state unavailable to the CLI.
 Field is built generation-first, because offline generation delivers
 unique value — prompt → recipe → committed, diffable, buildable music —
 with zero real-time code. The playback daemon arrived only after real
-use had battle-tested the project model, and the rest of the real-time
-engine (recording, monitoring, plugin hosting) follows the same rule.
+use had battle-tested the project model; the live graph, plugin hosting
+and recording's input side each followed the same rule, and monitoring
+is next in that line.
 The current build order lives in [projects/](projects/README.md).
 
 ## Documentation
@@ -118,4 +118,5 @@ The current build order lives in [projects/](projects/README.md).
 - [Project model](project-model.md) — the canonical on-disk representation
 - [Build graph](build-graph.md) — targets, caching, freezing, determinism
 - [Audio engine](audio-engine.md) — the real-time daemon (future work)
+- [Remote](remote.md) — login, clone, and the read-through cache against an audiofield remote
 - [Projects](projects/README.md) — work in progress, next, and later

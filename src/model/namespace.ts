@@ -34,7 +34,9 @@ export function takenSongNames(songDir: string): Set<string> {
       );
       if (!parsed.success) continue;
       for (const entry of parsed.data.inputs) {
-        if (entry.generative === undefined) continue;
+        // A record entry's takes claim audio/<node>/ the same way
+        // (recording.md §3).
+        if (entry.generative === undefined && entry.record === undefined) continue;
         taken.add(generatorName(entry as InputEntry, parsed.data.name));
       }
     }

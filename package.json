@@ -16,7 +16,7 @@
     "field": "tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build -j --config Release",
+    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build --parallel 4 --config Release",
     "gen:limits": "tsx scripts/gen-plan-limits.ts"
   },
   "dependencies": {

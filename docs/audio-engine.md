@@ -1,18 +1,18 @@
 # Audio engine
 
-`field-audiod` exists today as the playback daemon: device I/O, a
-sample-accurate transport, and audition of built labels, described in
-[architecture.md](architecture.md). The rest of the real-time engine —
-recording, monitoring, plugin hosting — is future work, deferred because
-the generation-first milestones need none of it. The live engine —
-the graph evaluated in the callback, with the build cache as automatic
-track freezing — is planned in
-[projects/all/realtime.md](projects/all/realtime.md); recording waits
-behind it in
-[projects/all/recording.md](projects/all/recording.md). This document records
-the decisions already settled so the phases that build it start from
-agreement, not from scratch. Language and framework decisions (C++/JUCE,
-and the alternatives rejected) also live in
+`field-audiod` exists today as the daemon that plays and captures:
+device I/O, a sample-accurate transport, audition of built labels, live
+evaluation of the session graph with the build cache as automatic track
+freezing ([projects/realtime/readme.md](projects/realtime/readme.md)),
+hosted plugins, and the input side of recording — arm, record, stop, a
+crash-safe transaction and its recovery — described in
+[architecture.md](architecture.md) and under
+[Capture as built](#capture-as-built) below. Landing a take in the
+project and monitoring through the engine are what remains of
+[projects/recording/readme.md](projects/recording/readme.md). This
+document records the decisions already settled so the phases that build
+it start from agreement, not from scratch. Language and framework
+decisions (C++/JUCE, and the alternatives rejected) also live in
 [architecture.md](architecture.md).
 
 ## Responsibilities
@@ -26,7 +26,7 @@ routing/buses/sends, real-time automation, offline rendering where
 supported, safe file writing, crash recovery, and peak generation.
 
 Sends did not wait for this engine:
-[projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19
+[projects/nested-tracks/readme.md](projects/nested-tracks/readme.md) §19
 renders them offline, and that shipped first. A label links exactly one
 send to one receive, the edge carries a level and a tap point and never
 an offset, and a receive may sit only where its path to the cable's
@@ -82,3 +82,133 @@ recoverable chunks. A normal stop finalizes the asset and writes a take
 manifest (timeline placement, device, latency, monitoring context,
 session metadata); after a crash, Field recovers any valid audio from
 the transaction.
+
+## Capture as built
+
+The daemon opens its device output-only until something arms
+([recording.md](projects/recording/readme.md) §5), so a playback-only
+session never asks for the microphone. `arm` names a track, an input
+device, and a channel counted from 1; the daemon reopens the device
+with that one input channel active and reports the input and output
+latency the device declares, in samples. `record` starts a take: it
+locates the bed to `at` when you give one, starts the transport if it
+is stopped, and captures from the next callback block. The callback
+latches that block's transport position as `started_at_samples`, so the
+first captured sample and the position it is placed at describe the
+same instant. `stop` and `pause` finalize the take and return its
+manifest; a `take` event carries the same manifest to every connected
+client, which is how a `field record` blocking in one terminal learns
+that `field transport stop` in another ended its take.
+
+A transaction is one directory, `.field/recording/take-YYYYMMDD-HHMMSS/`:
+
+- `take.wav` — float32 mono at the device's rate, appended block by
+  block. The header's sizes read zero until finalize patches them,
+  which is what marks a transaction incomplete on disk.
+- `journal.json` — the frames `fsync` has reached the disk with,
+  rewritten once a second, and the frames the FIFO refused.
+- `manifest.json` — track, device, input, the take's rate and the bed's,
+  both latencies, `started_at_samples`, and `complete: true` with
+  `frames` once finalized.
+
+The audio callback copies the armed channel into a lock-free FIFO and
+does no I/O. A writer thread drains the FIFO to the file every 20 ms. If
+the writer falls more than the FIFO holds behind — about twenty seconds
+at 48 kHz — the frames that did not fit are counted in `dropped` rather
+than blocking the callback, and the manifest carries the count.
+
+To recover a take a dead daemon left behind:
+
+1. Start the daemon. Any `field record` or `field play` does; it lists
+   incomplete transactions in `.field/audiod.log`.
+2. Run `field record --list` to see every transaction with the frames
+   on disk.
+3. Run `field record --recover <id>`. The daemon patches the header from
+   the file size and marks the manifest `recovered`.
+
+An armed or recording daemon never idle-exits. While a take runs, the
+daemon refuses `locate`, `load`, `device.select`, a second `arm`, and
+`disarm`, and it defers default-output following and sample-rate
+switching until the take ends, because each would restart the device
+and gap the capture. A session swap is allowed: it carries the
+transport.
+
+## The metronome
+
+`field play --click` and `field record --click` put a metronome in the
+output, and `field record --count-in <bars>` counts a performer in
+([recording.md](projects/recording/readme.md) §7). The CLI projects the
+song's tempo map into a schedule — `{rate, ticks: [{sample, accent}]}`,
+positions on the bed's timeline at the rate the daemon's positions count
+in — and sends it with the `click` op. The daemon synthesizes each tick
+in the callback against the same block-start position the capture
+latches on: 15 ms of sine, G6 on the downbeat and C6 elsewhere, decaying
+over 4 ms, added to every output channel and never to the capture or to
+anything `field build` renders. A schedule belongs to a bed: `load` and
+a fresh `session` clear it, a session swap keeps it and the watch loop
+re-sends it when the map may have moved, and the CLI clears it when its
+play or take ends. Positions scale into the device's rate when they
+differ, so a 48 kHz schedule lands on the same instants through a
+44.1 kHz device.
+
+A count-in is a pre-roll: `record` takes a `start` beside `at`, the
+transport locates to `start` and plays, and the callback begins the
+take on the first sample at or after `at` — mid-block, so
+`started_at_samples` is `at` exactly — while `status` reports the take
+as `pending`. `--count-in N` schedules ticks only over the N bars before
+`--at`; `--click` schedules the whole bed. The same `start` is the
+punch-in the plan's chunk 4 builds on.
+
+`field-audiod --render-live <session> <out> --click <schedule.json>`
+runs the same click layer offline at the session rate, which is how the
+suite proves tick positions to the sample; it is never used for a
+golden.
+
+## Punch-out and loop takes
+
+`record` takes an `until` beside `at`
+([recording.md](projects/recording/readme.md) §10.4): the callback
+ends the take on that exact sample, mid-block, and the heartbeat
+finalizes it on the message thread while the transport keeps rolling.
+`field record creek/track:lead-vocal --at 17 --until 21` lands exactly
+bars 17 to 20 and then stops the transport, the way ctrl-c does. An
+`at` is exact in the other direction too: the request is armed before
+the transport starts, so the first rolling block latches on `at`
+itself, and a take asked for on a bed already rolling toward `at`
+waits for it as a punch-in.
+
+With `loop`, the live session loops the region `[at, until)` and every
+pass is a take. The next transaction is opened ahead of each wrap, so
+the callback hands the frames after the wrap point to it inside the
+same block: the pass that ends and the pass that begins meet on
+consecutive samples, which the suite proves on the null clock's
+sawtooth. Each take reaches every client as a `take` event as it
+finalizes, and `field record --loop` lands them as they arrive, the last
+one chosen, until ctrl-c — whose partial pass is a take too. A pass that
+begins before the previous one was serviced is counted in
+`record.missed` rather than recorded twice; regions shorter than a
+heartbeat tick are where that would happen, and `field record` says so
+on its live line and in its closing tally.
+
+The region loop is the live session's own (`loop {from, to}`, `to`
+defaulting to the content's extent): the clock wraps from `to` back to
+`from` with the chains ringing across the wrap exactly as they do at
+the declared extent, `status` reports `loop_from` and `loop_to`, and a
+load or a fresh session clears it. `field play <song> --from 5 --loop`
+rides it now instead of being refused. A file bed loops only whole.
+
+## Landing a take
+
+When a take finalizes, `field record` lands it
+([project-model.md](project-model.md) "Recorded takes"): the bytes move
+to `audio/<node>/<take>.wav` and pin in the song's ledger, a row goes
+into `audio/<node>/takes.yaml` placing the take on the recording
+track's timeline, the new take is chosen, and the transaction directory
+is removed. The daemon reported the start on the bed's timeline; landing
+subtracts the track's origin on that timeline — the `at`s down its first
+placement path from the output track — and then the record entry's own
+window start, so the row counts from the entry's `at` the way the graph
+reads it back; the device's declared round trip, input plus output
+latency, is recorded beside it, and both are converted into the track's
+rate. `field record --recover <id>` lands what it recovers, and
+`field record --land <id>` lands a finalized transaction nothing landed.
