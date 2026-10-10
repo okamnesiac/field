@@ -108,6 +108,15 @@ export function peaksFor(path: string, buckets: number): number[] | undefined {
   return out;
 }
 
+// The entries that draw a lane, each with its index in the document's
+// `inputs:` list. Receives draw none, so the lane list is shorter than
+// `inputs:` whenever one is present; every socket op addresses the
+// document by `entry`, so the index has to survive the filter rather
+// than be re-counted after it.
+function placements(inputs: InputEntry[]): Array<[InputEntry, number]> {
+  return inputs.flatMap((entry, i): Array<[InputEntry, number]> => (entry.receive === undefined ? [[entry, i]] : []));
+}
+
 export function projectTimeline(
   root: string,
   song: LoadedSong,
@@ -178,18 +187,9 @@ export function projectTimeline(
           )
         : null,
       children: recurse
-        ? placed!.data.inputs
-            .filter((c) => c.receive === undefined)
-            .map((child, i) =>
-              laneFor(
-                placed!,
-                child,
-                i,
-                startSample,
-                depth + 1,
-                new Set([...seen, placedName!]),
-              ),
-            )
+        ? placements(placed!.data.inputs).map(([child, i]) =>
+            laneFor(placed!, child, i, startSample, depth + 1, new Set([...seen, placedName!])),
+          )
         : null,
       clips: [{ start: startSample, duration, exact: w.duration !== undefined, name: placedName ?? entry.audio ?? 'input' }],
       peaks:
@@ -199,9 +199,9 @@ export function projectTimeline(
     };
   };
 
-  const lanes = (main?.data.inputs ?? [])
-    .filter((e) => e.receive === undefined)
-    .map((entry, i) => laneFor(main!, entry, i, 0, 0, new Set(['main'])));
+  const lanes = placements(main?.data.inputs ?? []).map(([entry, i]) =>
+    laneFor(main!, entry, i, 0, 0, new Set(['main'])),
+  );
 
   return {
     rate: sessionRate,
