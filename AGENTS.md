@@ -35,7 +35,7 @@ decision, update the record with what changed, don't just diverge from it.
 ## Stack
 
 Stack choices (Node 24, pnpm, ESM-only, strict TypeScript, zod v4 +
-generated JSON Schema, commander, vitest, afconvert) are recorded in
+generated JSON Schema, commander, vitest) are recorded in
 [project-core.md §5](docs/projects/project-core/readme.md). Use pnpm — never npm
 or yarn, and never generate a package-lock.json.
 

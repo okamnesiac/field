@@ -1,6 +1,6 @@
 ---
 status: draft
-priority: later
+priority: next
 ---
 
 # Plan: Streaming rings

@@ -1,7 +1,17 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
+
+**Outcome:** Shipped: chunks 1–4 (#166, #167, #169, #170) — the
+daemon's input side with crash-safe capture, takes that land in the
+project and build in place, the metronome and count-in in the engine,
+punch-out, and loop takes over the region loop. Comping, which §10 left
+to plan once takes accumulate, carries over to
+[comping](../comping/readme.md). §9's compensated placement rests on
+the device's declared latency: §13.2's loopback measurement, the
+§12.10 items owed to the first hardware session, and the `hardware/`
+schema §11 deferred all wait on a take recorded on the Apollo, which
+has not happened.
 
 # Plan: Recording
 

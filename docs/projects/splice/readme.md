@@ -38,9 +38,12 @@ everything — and writes it down.
   and takes see committed content either way. The item is a directory
   (project-layout.md §4.11): `audio/<name>/` holds the sample, the
   recipe, and the stored license together.
-- **Browsing is a TUI** — search, filter, audition previews, pick. This
-  is Field's first *input*-interactive surface, which is most of the real
-  cost of this plan and the reason it sits in Later. It is not the first
+- **Browsing is a TUI** — search, filter, audition previews, pick. A
+  full browser is most of the real cost of this plan and the reason it
+  sits in Later. This line first called it Field's first
+  *input*-interactive surface; `field insert add`'s chooser
+  (`src/commands/picker.ts`, #155) now is, a raw-mode loop kept
+  deliberately disposable (add-insert.md §3). It is not the first
   live tty surface: `src/commands/loop-ui.ts` (watch.md §2) rendered
   ANSI with a plain sequential fallback until realtime chunk 3 retired
   it with the wrap takeover, and its discipline — rendering as a pure
@@ -103,7 +106,11 @@ reads as a reviewable diff.
    Splice". Verify what actually exists before chunking.
 2. **Whether the TUI lives in `field`** or as a separate tool that ends by
    invoking the non-interactive commands. Bears on every future interactive
-   surface, so worth deciding deliberately, not by default.
+   surface, so worth deciding deliberately, not by default. Two later
+   records bear on it: add-insert.md §3 makes the picker disposable and a
+   full TUI "its own stack decision" (DECIDED, 2026-08-12), and ui.md §5
+   carries that TUI as its own project, [tui](../tui/readme.md)
+   (DECIDED, 2026-08-12).
 3. **Preview playback** — through audiod like everything else, or something
    throwaway for auditioning short previews. Leaning audiod: auditioning in
    the mix is the ace lesson worth repeating.

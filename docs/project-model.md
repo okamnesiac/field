@@ -41,9 +41,10 @@ project/
 
 Designed but not yet built, arriving with the features that write them:
 `field.lock` (the locked plugin and model environment), `markers.yaml`,
-`automation/`, `monitoring/`, the scanned plugin inventory and AU state
-blobs, and `hardware/apollo.yaml`. Recorded takes are deliberately not
-on that list — they add no directory (see "Takes" below).
+`automation/`, `monitoring/`, and `hardware/apollo.yaml`. Recorded takes
+are deliberately not on that list — they add no directory (see "Takes"
+below) — and neither is hosted plugins' state, whose blobs live under
+`shared/plugins/` as described below.
 
 Exact schemas are designed in
 [projects/project-core/readme.md](projects/project-core/readme.md); the layout
