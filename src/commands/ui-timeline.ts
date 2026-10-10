@@ -1,6 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { readWav } from '../audio/wav.js';
+import { readWav, readWavHeader } from '../audio/wav.js';
 import { placedWindow } from '../generators/stem.js';
 import type { LoadedSong } from '../model/project.js';
 import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
@@ -51,7 +51,18 @@ function barMarks(tempo: TempoMap, meter: MeterMap, lengthSamples: number): UiMa
   return marks;
 }
 
-// Peak envelope for a lane, in buckets across the whole song.
+// A source's header, or undefined while it is missing or mid-rename.
+function headerOf(path: string): { frames: number; sampleRate: number } | undefined {
+  try {
+    const { frames, sampleRate } = readWavHeader(path);
+    return { frames, sampleRate };
+  } catch {
+    return undefined;
+  }
+}
+
+// Peak envelope for a lane: the frames [from, to) of the source the
+// placement reads, in buckets across the drawn window.
 //
 // Deliberately the cheap half of waveforms. Doing them properly means a
 // peaks artifact with a build rule, a cache and an invalidation story —
@@ -60,7 +71,7 @@ function barMarks(tempo: TempoMap, meter: MeterMap, lengthSamples: number): UiMa
 // materialized and memoises it by that file's identity, which is enough
 // for songs of a few minutes and buys the picture its content now.
 const peakCache = new Map<string, number[]>();
-export function peaksFor(path: string, buckets: number): number[] | undefined {
+export function peaksFor(path: string, buckets: number, from = 0, to?: number): number[] | undefined {
   if (!existsSync(path)) return undefined;
   // Keyed on the artifact's own identity — size and modification time —
   // rather than on anything about the song. An earlier version keyed on
@@ -77,20 +88,23 @@ export function peaksFor(path: string, buckets: number): number[] | undefined {
     // replaces this artifact by rename while the view is asking about
     // it, so it can vanish between the existsSync above and either call.
     const stat = statSync(path);
-    key = `${path}:${stat.size}:${stat.mtimeMs}`;
+    key = `${path}:${stat.size}:${stat.mtimeMs}:${from}:${to ?? ''}`;
     const cached = peakCache.get(key);
     if (cached) return cached;
     wav = readWav(path);
   } catch {
     return undefined; // an unreadable artifact is a lane without a picture
   }
-  const frames = wav.channels[0]?.length ?? 0;
-  if (frames === 0) return undefined;
+  const total = wav.channels[0]?.length ?? 0;
+  const first = Math.min(from, total);
+  const end = Math.min(total, to ?? total);
+  const frames = end - first;
+  if (frames <= 0) return undefined;
   const out: number[] = new Array(buckets).fill(0);
   const per = frames / buckets;
   for (let b = 0; b < buckets; b++) {
-    const from = Math.floor(b * per);
-    const to = Math.min(frames, Math.floor((b + 1) * per));
+    const from = first + Math.floor(b * per);
+    const to = Math.min(end, first + Math.floor((b + 1) * per));
     let peak = 0;
     // Stride large buckets: a 16-second stem at 48 k is 768 k frames and
     // the envelope only needs the shape, not every sample.
@@ -125,6 +139,10 @@ export function projectTimeline(
   peakBuckets: number,
 ): UiTimeline {
   const byName = new Map(song.tracks.map((t) => [t.data.name, t]));
+  const assetFile = (name: string): string | undefined => {
+    const row = song.assets?.data.assets.find((a) => a.name === name);
+    return row === undefined ? undefined : join(root, song.dir, row.file);
+  };
   const main = byName.get('main');
   const songTempo = new TempoMap(song.time?.tempo ?? [{ at: 0, bpm: 120 }], sessionRate);
   const songMeter = new MeterMap(song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }]);
@@ -154,10 +172,28 @@ export function projectTimeline(
       : songTempo;
     const w = placedWindow(entry, localTempo);
     const startSample = originSample + w.start;
-    const duration = w.duration ?? Math.max(0, lengthSamples - startSample);
 
     const placedName = entry.track;
     const placed = placedName !== undefined ? byName.get(placedName) : undefined;
+    // What the placement reads, where the view can find it: a placed
+    // track's rendered stem, or a song asset's file. The engine plays an
+    // open window for the source's length past the read offset
+    // (`source_offset - slip`, in source frames), so that, not the song's
+    // end, is how long an open window is, and the envelope is drawn from
+    // the slice the window reads rather than the whole source.
+    const sourcePath =
+      placedName !== undefined
+        ? join(root, '.field', 'out', song.dir, 'track', `${placedName}.wav`)
+        : entry.audio !== undefined
+          ? assetFile(entry.audio)
+          : undefined;
+    const source = sourcePath !== undefined ? headerOf(sourcePath) : undefined;
+    const readOffset = entry.source_offset - entry.slip;
+    const toSession = source ? sessionRate / source.sampleRate : 1;
+    const openLength = source
+      ? Math.round((source.frames - readOffset) * toSession)
+      : lengthSamples - startSample;
+    const duration = w.duration ?? Math.max(0, Math.min(openLength, lengthSamples - startSample));
     const recurse = placed !== undefined && !seen.has(placedName!) && depth < 6;
     // Where the placed track's own sample 0 falls on the timeline. The
     // planner reads the placed render from `source_offset - slip`
@@ -204,9 +240,14 @@ export function projectTimeline(
         : null,
       clips: [{ start: startSample, duration, exact: w.duration !== undefined, name: placedName ?? entry.audio ?? 'input' }],
       peaks:
-        placedName === undefined
+        placedName === undefined || sourcePath === undefined
           ? undefined
-          : peaksFor(join(root, '.field', 'out', song.dir, 'track', `${placedName}.wav`), peakBuckets),
+          : peaksFor(
+              sourcePath,
+              peakBuckets,
+              Math.max(0, readOffset),
+              source ? Math.max(0, readOffset) + Math.round(duration / toSession) : undefined,
+            ),
     };
   };
 

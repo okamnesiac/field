@@ -60,6 +60,19 @@ describe('timeline lanes', () => {
     expect(keys?.children?.map((l) => [l.name, l.entry])).toEqual([['pad', 1]]);
   });
 
+  it('draws an open window as long as its source plays, not to the song end', () => {
+    // riff is 4800 frames; the song here is 96000 samples long. An open
+    // window plays the source from its read offset to its end.
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: riff', '  - audio: pad', '    source_offset: 1200', ''].join('\n'),
+    );
+    expect(lanesOf().map((l) => [l.name, l.duration])).toEqual([
+      ['riff', 4800],
+      ['pad', 3600],
+    ]);
+  });
+
   it("draws a placed track's children where they sound, past its slip and source offset", () => {
     // keys plays its render from source_offset - slip = 4800 - 1200 =
     // 3600 at the window start (sample 0), so its child at local 0
