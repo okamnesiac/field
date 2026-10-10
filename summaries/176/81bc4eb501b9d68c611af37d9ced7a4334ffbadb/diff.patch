@@ -1,0 +1,681 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 4533822..81529e7 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -35,7 +35,7 @@ decision, update the record with what changed, don't just diverge from it.
+ ## Stack
+ 
+ Stack choices (Node 24, pnpm, ESM-only, strict TypeScript, zod v4 +
+-generated JSON Schema, commander, vitest, afconvert) are recorded in
++generated JSON Schema, commander, vitest) are recorded in
+ [project-core.md §5](docs/projects/project-core/readme.md). Use pnpm — never npm
+ or yarn, and never generate a package-lock.json.
+ 
+@@ -48,7 +48,7 @@ takes no direct pushes, history stays linear, every review thread must be
+ resolved before a merge, and merges are squashed with the PR title and body
+ taken as the commit message.
+ 
+-<!-- projector:begin 1 -->
++<!-- projector:begin 2 -->
+ ## Projector conventions
+ 
+ This repository keeps its project plans in Git with
+@@ -70,6 +70,13 @@ it the commit message. Match the line wrapping already used around a Markdown
+ edit, and do not hard-wrap prose you post to GitHub, because GitHub renders
+ line breaks.
+ 
++Open dependent work that is too large to review as one pull request as a
++GitHub stack with `gh stack`, as Projector's `implement` skill describes
++under "Stack dependent work". Fix stacked code on the branch that introduced
++it, and let `gh stack` carry the fix up by rebasing the layers above. Chain
++pull requests by base branch, and update them by merging, only where
++`gh stack` is unavailable.
++
+ Projector generates this section. To change it, change the template in
+ Projector and run `project init`.
+ <!-- projector:end -->
+diff --git a/docs/README.md b/docs/README.md
+index f7260c2..c5ddd96 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -110,6 +110,6 @@ The current build order lives in [projects/](projects/README.md).
+ - [Tracks](tracks.md) — the structural primitive: the track file, nesting, and cables
+ - [Project model](project-model.md) — the canonical on-disk representation
+ - [Build graph](build-graph.md) — targets, caching, freezing, determinism
+-- [Audio engine](audio-engine.md) — the real-time daemon (future work)
+-- [Remote](remote.md) — login, clone, and the read-through cache against an audiofield remote
++- [Audio engine](audio-engine.md) — the real-time daemon that plays, records, and hosts plugins
++- [Remote](remote.md) — login, clone, push and pull, and the read-through cache against an audiofield remote
+ - [Projects](projects/README.md) — work in progress, next, and later
+diff --git a/docs/architecture.md b/docs/architecture.md
+index f7c23a9..a1c23a3 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -88,15 +88,17 @@ real binary in null-output mode. Hosting arrived with
+ each, `--render` instantiates pinned plugins offline, and live sessions
+ host them in their chains — child chains on the load thread, the master
+ chain in the callback, delay compensation from declared latency.
+-Recording's input side arrived with
+-[recording.md](projects/recording/readme.md) chunk 1: the daemon opens
+-the device duplex only when something arms, captures one input channel
+-into a crash-safe transaction under `.field/recording/`, and recovers a
+-transaction a dead daemon left behind
+-([audio-engine.md](audio-engine.md) "Capture as built"). The rest —
+-landing takes in the project, monitoring, editor windows, routing,
+-metering beyond the armed input's peak — is future work whose settled
+-decisions live in [audio-engine.md](audio-engine.md).
++Recording arrived with [recording.md](projects/recording/readme.md):
++the daemon opens the device duplex only when something arms, captures
++one input channel into a crash-safe transaction under
++`.field/recording/`, and recovers a transaction a dead daemon left
++behind ([audio-engine.md](audio-engine.md) "Capture as built"); a
++stopped take lands in the project and builds in place, the metronome
++and count-in run in the engine, and punch-out and loop takes ride the
++live session's region loop. The rest — comping, monitoring through the
++engine, editor windows, routing, metering beyond the armed input's
++peak — is future work whose settled decisions live in
++[audio-engine.md](audio-engine.md).
+ 
+ The real-time audio callback never depends on TypeScript or Python: GC
+ pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives
+diff --git a/docs/audio-engine.md b/docs/audio-engine.md
+index 81f17df..421ce54 100644
+--- a/docs/audio-engine.md
++++ b/docs/audio-engine.md
+@@ -7,9 +7,10 @@ freezing ([projects/realtime/readme.md](projects/realtime/readme.md)),
+ hosted plugins, and the input side of recording — arm, record, stop, a
+ crash-safe transaction and its recovery — described in
+ [architecture.md](architecture.md) and under
+-[Capture as built](#capture-as-built) below. Landing a take in the
+-project and monitoring through the engine are what remains of
+-[projects/recording/readme.md](projects/recording/readme.md). This
++[Capture as built](#capture-as-built) below. Takes land in the project
++and build in place
++([projects/recording/readme.md](projects/recording/readme.md));
++comping and monitoring through the engine are later work. This
+ document records the decisions already settled so the phases that build
+ it start from agreement, not from scratch. Language and framework
+ decisions (C++/JUCE, and the alternatives rejected) also live in
+diff --git a/docs/project-model.md b/docs/project-model.md
+index 38214d2..5d4f9c8 100644
+--- a/docs/project-model.md
++++ b/docs/project-model.md
+@@ -41,9 +41,10 @@ project/
+ 
+ Designed but not yet built, arriving with the features that write them:
+ `field.lock` (the locked plugin and model environment), `markers.yaml`,
+-`automation/`, `monitoring/`, the scanned plugin inventory and AU state
+-blobs, and `hardware/apollo.yaml`. Recorded takes are deliberately not
+-on that list — they add no directory (see "Takes" below).
++`automation/`, `monitoring/`, and `hardware/apollo.yaml`. Recorded takes
++are deliberately not on that list — they add no directory (see "Takes"
++below) — and neither is hosted plugins' state, whose blobs live under
++`shared/plugins/` as described below.
+ 
+ Exact schemas are designed in
+ [projects/project-core/readme.md](projects/project-core/readme.md); the layout
+diff --git a/docs/projects/README.md b/docs/projects/README.md
+index 8eed5c3..d05f9f5 100644
+--- a/docs/projects/README.md
++++ b/docs/projects/README.md
+@@ -50,20 +50,6 @@ A project with no plan yet is still a project. Give it a directory and a short
+ `readme.md` that records the idea and why it matters, rather than a line in a
+ shared list.
+ 
+-Shipping the code does not finish a project. A plan whose implementation has
+-landed but which no real session has exercised stays `in-progress` at
+-`priority: now`, and its `**Outcome:**` line states the condition that would
+-close it. On this project that condition is usually that real music has been
+-made with it. Mark the project `completed` when the condition is met, not when
+-the last pull request merges.
+-
+-This is the one rule the move to Projector had to carry by hand. The old
+-layout recorded it as membership of a `now.md` list, so a merged but unplayed
+-project stayed visible by sitting there. Projector has no such list, and
+-`priority` is not displayed for a completed project, so a project marked
+-`completed` on merge would lose the distinction with nowhere to put it. Keeping
+-the project open is what preserves it.
+-
+ ## What does not go here
+ 
+ How-it-works documentation stays in the [docs root](../README.md):
+diff --git a/docs/projects/add-insert/readme.md b/docs/projects/add-insert/readme.md
+index d5fd0f4..7778176 100644
+--- a/docs/projects/add-insert/readme.md
++++ b/docs/projects/add-insert/readme.md
+@@ -1,8 +1,12 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
++**Outcome:** Shipped in #155: the pinned write, the plugin and order
++choosers, and `--at`. The editor handoff (§5) needs `field open`, which
++plugin-hosting's chunk 3 builds, so it moved into that chunk; until
++then the command prints the `field open` line it would run.
++
+ # Plan: `field insert` — add an insert with a chooser
+ 
+ **Goal:** one command that adds an insert to a track: fully pinned at
+diff --git a/docs/projects/automation/readme.md b/docs/projects/automation/readme.md
+index 45b8162..3db3e7a 100644
+--- a/docs/projects/automation/readme.md
++++ b/docs/projects/automation/readme.md
+@@ -108,3 +108,10 @@ the part Field's declarative model sidesteps.
+ 4. **v1 parameter set.** Which parameters are automatable first — insert
+    params, clip gain, mix faders — and what the action-key impact of
+    each is.
++5. **Where the tempo map runs** (added 2026-10-10). Decision 5 has the
++   engine convert sample position to musical position every block, but
++   the daemon never learns what a bar is: positions arrive as samples
++   (playback.md §3.6, realtime.md §1). Realtime curves either compile
++   to the sample domain in the CLI, which matters for tempo-locked LFOs,
++   or a new decision admits the tempo map to the daemon. Settle this
++   before speccing, and amend decision 5 with the answer.
+diff --git a/docs/projects/comping/readme.md b/docs/projects/comping/readme.md
+new file mode 100644
+index 0000000..214e3b0
+--- /dev/null
++++ b/docs/projects/comping/readme.md
+@@ -0,0 +1,17 @@
++---
++status: draft
++priority: later
++---
++
++# Plan: Comping
++
++**Goal:** one active take assembled from several, so a performance can
++be built from the best moments of each pass
++([recording.md](../recording/readme.md) §10 chunk 4 left it "big enough
++to plan when we reach it, informed by how takes actually accumulate";
++[project-model.md](../../project-model.md) "Takes" counts it as
++recording work still to come).
++
++No plan yet. This entry carries the half of recording's chunk 4 that
++had not been planned when recording completed; write the plan here
++when real takes have accumulated.
+diff --git a/docs/projects/cross-rate-live/readme.md b/docs/projects/cross-rate-live/readme.md
+index 8326fe2..152d184 100644
+--- a/docs/projects/cross-rate-live/readme.md
++++ b/docs/projects/cross-rate-live/readme.md
+@@ -1,13 +1,15 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped whole: a foreign-rate dirty track evaluates live
+-with the edge converting (byte-identical to the offline render, proven),
+-a device that cannot switch gets converted delivery, and all three rate
+-refusals are gone. Stays open until a session has actually played
+-through a live cross-rate edge in anger, per multi- rate's precedent.
++**Outcome:** Shipped whole in #143: a foreign-rate dirty track
++evaluates live with the edge converting (byte-identical to the offline
++render, proven), a device that cannot switch gets converted delivery,
++and all three rate refusals are gone. Two §4 clauses stand short. The
++watch arc on a cross-rate edit has no end-to-end test; the dirty list
++it turns on is tested. And converted delivery has run on the null
++device only, because the hardware #143 played on switched to 44.1 kHz
++rather than converting.
+ 
+ # Plan: Cross-rate live wiring
+ 
+diff --git a/docs/projects/engine-umbrella/readme.md b/docs/projects/engine-umbrella/readme.md
+index 607cc35..15e85ef 100644
+--- a/docs/projects/engine-umbrella/readme.md
++++ b/docs/projects/engine-umbrella/readme.md
+@@ -1,8 +1,13 @@
+ ---
+-status: draft
+-priority: later
++status: completed
+ ---
+ 
++**Outcome:** Abandoned. [audio-engine.md](../../audio-engine.md) uses
++"engine" for `field-audiod`, so a TypeScript `src/engine` would point a
++reader at the wrong process, and `src/` has since grown `audiod/`,
++`remote/`, `time/` and `workers/` beside `graph/` and `generators/`
++without anything needing them gathered.
++
+ # Plan: src/engine umbrella
+ 
+ **Goal:** `graph/` + `generators/` (+ `audio/`?) under one engine module;
+diff --git a/docs/projects/lint-and-format/readme.md b/docs/projects/lint-and-format/readme.md
+index a6f559c..7109d80 100644
+--- a/docs/projects/lint-and-format/readme.md
++++ b/docs/projects/lint-and-format/readme.md
+@@ -7,7 +7,16 @@ priority: later
+ 
+ **Goal:** neither is installed and no config exists, so a tool reaching for a
+ formatter applies its own defaults (#83, 312 lines); ESLint is free,
+-prettier costs a ~1,900-line reformat.
++prettier costs a ~5,200-line reformat across 86 of `src/`'s 132 files.
++
++The figure is #88's probe, re-run on 2026-10-10 with prettier 3.9.9 on a
++copy of `src/`, so the repository is never written to; #88 counted 1,916
++lines across 40 files:
++
++```sh
++pnpm dlx prettier@3 --write --single-quote --print-width 100 'src/**/*.ts'
++diff -ru <repo>/src src | grep -c '^[+-][^+-]'
++```
+ 
+ No plan yet. This entry carries the line `later.md` held before the
+ Projector migration; write the plan here when the work graduates.
+diff --git a/docs/projects/multi-rate/readme.md b/docs/projects/multi-rate/readme.md
+index 239be7d..c484693 100644
+--- a/docs/projects/multi-rate/readme.md
++++ b/docs/projects/multi-rate/readme.md
+@@ -1,11 +1,9 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped: all three steps (#107, #108, #112). Stays open
+-until a session has actually played through an edge conversion, per the
+-neighbours' precedent.
++**Outcome:** Shipped: all three steps (#107, #108, #112), with every §5
++clause discharged as that section records.
+ 
+ # Plan: Sample rate is a property of the track, converted at the edge
+ 
+diff --git a/docs/projects/nested-tracks/readme.md b/docs/projects/nested-tracks/readme.md
+index e6451ad..b2f5dfa 100644
+--- a/docs/projects/nested-tracks/readme.md
++++ b/docs/projects/nested-tracks/readme.md
+@@ -1,12 +1,11 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped: every chunk, sends last (§19). Stays open until
+-sessions have worked the folded format and wired a cable or two in anger
+-— the entry list, gen nodes, takes machinery and now sends are where
+-every edit lands.
++**Outcome:** Shipped: every chunk, sends last (§19), and §8 is met as
++its amendments record. Negative local positions, which §1.6 decided are
++how a pickup works and §9 deferred, never landed and carry over to
++[pickups](../pickups/readme.md).
+ 
+ # Plan: Nested tracks — one primitive for structure, time and mix
+ 
+diff --git a/docs/projects/pickups/readme.md b/docs/projects/pickups/readme.md
+new file mode 100644
+index 0000000..9260ec0
+--- /dev/null
++++ b/docs/projects/pickups/readme.md
+@@ -0,0 +1,16 @@
++---
++status: draft
++priority: later
++---
++
++# Plan: Pickups — negative local positions
++
++**Goal:** a placement or clip may start before its parent's zero, which
++is how a pickup works
++([nested-tracks.md](../nested-tracks/readme.md) §1.6 decided it, and §9
++deferred it); `timePosition` in `src/schema/common.ts` accepts only
++non-negative ticks and bars from 1 today.
++
++No plan yet. This entry carries the decision nested-tracks left
++unbuilt when it completed; write the plan here when the work
++graduates.
+diff --git a/docs/projects/plugin-hosting/readme.md b/docs/projects/plugin-hosting/readme.md
+index ba3cbb0..7d721e2 100644
+--- a/docs/projects/plugin-hosting/readme.md
++++ b/docs/projects/plugin-hosting/readme.md
+@@ -71,9 +71,10 @@ Decided elsewhere, restated here as constraints:
+   Said precisely: the action key stays computable from the repository
+   alone, so any machine *holding the artifact* serves it without the
+   plugin — today that means the machine that rendered it, because the
+-  cache is local and unversioned, and the remote asset store
+-  ([remote-asset-store](../remote-asset-store/readme.md)) is what
+-  turns this into a cross-machine story. Freezing
++  cache is local and unversioned, and the remote
++  ([remote.md](../remote/readme.md) §1, which took this role from the
++  remote asset store this line first named) is what turns this into
++  a cross-machine story. Freezing
+   is the collaboration story, not an optimization.
+ 
+ ## 3 Decisions (DECIDED, 2026-08-11)
+@@ -357,7 +358,7 @@ these; the two discriminants coexist in one chain.
+    keys per decision 8; the fixture plugin and its CI suite,
+    tempo-reading behavior included (decision 13);
+    RENDER_PLAN_VERSION bump with existing songs proven pure cache
+-   hits.
++   hits. *Shipped in #148.*
+ 2. **Live.** A hosted insert in the live chain: delay compensation
+    from declared latency (the stream lags and flushes, the limiter's
+    contract), warmup at locate under the chain's existing −60 dB
+@@ -386,12 +387,18 @@ these; the two discriminants coexist in one chain.
+    the rebuild runs under the engine lock, where its cost is dropped
+    audio rather than latency, so the "correct first, fast later"
+    sequencing never applied (minjudd on #150); the warmup bound
+-   carries hosted state correctness exactly as before.
++   carries hosted state correctness exactly as before. *Shipped in
++   #150; #151 and #152 followed.*
+ 3. **Editor sessions and write-back.** `field open <track>/<handle>`,
+    the `param_changed` protocol message, gesture-quantum file
+    writes, blob recapture on non-param signals, id re-binding, the
+    owner-attached window rule. The demo is decision 7's flow run
+-   under `field play creek --watch`.
++   under `field play creek --watch`. Two obligations arrive from
++   add-insert, which completed before this chunk: `field open` takes
++   the same `<song>/<track>` qualification `field insert add` refuses
++   with on a name collision (add-insert.md §2), and `field insert add`
++   runs `field open` on the insert it wrote instead of printing the
++   line (add-insert.md §5).
+ 4. **`realtime-bounce`.** The 1× capture path for plugins that
+    cannot render offline (UAD-2 DSP hardware is the motivating
+    case), flagged per build-graph.md's render strategies.
+@@ -459,9 +466,9 @@ open` shows the editor, a knob twist is heard immediately and lands
+ as a one-line YAML diff that re-freezes behind the play; a stateful
+ plugin captures a blob a fresh clone resolves by hash, and the
+ rendering machine with that plugin removed still builds the song as
+-pure cache hits — the cross-machine version of that story waits on
+-the remote asset store
+-([remote-asset-store](../remote-asset-store/readme.md)); the
++pure cache hits — the cross-machine version of that story rides the
++remote ([remote.md](../remote/readme.md) §1), not the remote asset
++store this line first named; the
+ fixture-plugin suite is green
+ in CI (VST3 on Linux; AU on the local gate, per decision 12); and
+ every existing project rebuilds as pure cache hits.
+diff --git a/docs/projects/project-core/readme.md b/docs/projects/project-core/readme.md
+index ceaffd1..6d60446 100644
+--- a/docs/projects/project-core/readme.md
++++ b/docs/projects/project-core/readme.md
+@@ -1,10 +1,11 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped: all three chunks (#4–#6). Stays open until real
+-use (bloom, new phases) stops surfacing surprises.
++**Outcome:** Shipped: all three chunks (#4–#6), which meet §4. One §6
++commitment never landed — `field track rename` and its siblings,
++rewriting every reference atomically — and carries over to
++[track-rename](../track-rename/readme.md).
+ 
+ # Plan: Project core — format, CLI, build graph skeleton
+ 
+diff --git a/docs/projects/realtime/readme.md b/docs/projects/realtime/readme.md
+index 4894ff1..016662a 100644
+--- a/docs/projects/realtime/readme.md
++++ b/docs/projects/realtime/readme.md
+@@ -1,12 +1,13 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped: all four chunks, and `field play <song>` *is* live
+-evaluation now. Stays open until live-default playback has soaked on
+-real sessions; the recorded follow-ups (streaming rings before large
+-sessions, cross-rate wiring) are where an edit would land.
++**Outcome:** Shipped: all four chunks (#137–#140), and
++`field play <song>` *is* live evaluation now; the cross-rate wiring
++follow-up shipped as its own plan (#143). §5's last clause is half met:
++a session costs the engine one live chain, but sources preload whole
++rather than streaming. Streaming rings, owed before large sessions
++(§7), carry over to [streaming-rings](../streaming-rings/readme.md).
+ 
+ # Plan: Realtime
+ 
+diff --git a/docs/projects/recording/readme.md b/docs/projects/recording/readme.md
+index 5698453..a4abcd8 100644
+--- a/docs/projects/recording/readme.md
++++ b/docs/projects/recording/readme.md
+@@ -1,18 +1,17 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Chunks 1–3 and the punch-and-loop half of chunk 4 shipped
+-(2026-09-06 to 2026-09-08): the daemon's input side; a `field record`
+-whose take lands in the project — `audio/<node>/`, the ledger row,
+-`takes.yaml`, chosen — and builds in place; the metronome in the engine
+-with a count-in that begins the take on the exact sample; punch-out;
+-and loop takes over the live session's region loop. Comping remains,
+-to be planned once real takes have accumulated, and the latency
+-arithmetic §12.3 recorded is still owed its loopback measurement.
+-Closes when a take recorded against creek on the Apollo plays back in
+-place, compensated, from `field build && field play`.
++**Outcome:** Shipped: chunks 1–4 (#166, #167, #169, #170) — the
++daemon's input side with crash-safe capture, takes that land in the
++project and build in place, the metronome and count-in in the engine,
++punch-out, and loop takes over the region loop. Comping, which §10 left
++to plan once takes accumulate, carries over to
++[comping](../comping/readme.md). §9's compensated placement rests on
++the device's declared latency: §13.2's loopback measurement, the
++§12.10 items owed to the first hardware session, and the `hardware/`
++schema §11 deferred all wait on a take recorded on the Apollo, which
++has not happened.
+ 
+ # Plan: Recording
+ 
+@@ -275,7 +274,7 @@ compensated, so what comes back sits where it was sung.
+ 1. **The input side** — duplex and null-input open, input enumeration,
+    arm/record/stop verbs, transactional capture with journal and crash
+    recovery, idle-exit pinning, `features` in hello with the two semver
+-   gates migrated.
++   gates migrated. *Shipped in #166 (§12).*
+ 2. **The take lands** — finalize into `audio/<name>/` (timestamp
+    names) plus the ledger row plus `takes.yaml`, the `record:` entry
+    and its schema with takeless-builds-as-silence, resolver arm for
+diff --git a/docs/projects/remote/readme.md b/docs/projects/remote/readme.md
+index 73db303..f16f6aa 100644
+--- a/docs/projects/remote/readme.md
++++ b/docs/projects/remote/readme.md
+@@ -1,6 +1,6 @@
+ ---
+ status: in-progress
+-priority: now
++priority: next
+ ---
+ 
+ # Plan: Remote — login, clone, push, and a read-through cache
+@@ -623,6 +623,13 @@ what make a hosted project play — which put chunks 2–4 ahead of chunk
+ 1 rather than behind it. Chunk 1 is unstarted and rides when the site
+ wants `--json`.
+ 
++Moved to `next` (2026-10-10), with chunks 2–4 shipped and chunk 1 the
++whole of what remains. The site's player computes `bar.beat` from its
++own copy of Field's tempo map (audiofield-io.md §13.9) rather than
++from `arrangement --json`, and the render worker that wants `--json`
++is moot for v1 (audiofield-io.md §10.14), so chunk 1 waits on that
++worker.
++
+ ### 9.2 Keychain, or `~/.field/credentials` everywhere
+ 
+ Decision 5 splits by platform. The alternative is the file everywhere
+@@ -749,6 +756,10 @@ because it holds the author's render and the clone does not. For the
+ sync: is by-label playback of a recipe-only clone wanted, or is the
+ label enough?
+ 
++Settled (2026-09-08, audiofield-io.md §10.15): no, for v1. The label
++and `field generate` are the answer, and by-label playback is recorded
++in that plan's §11 for the sync to reopen.
++
+ ### 9.12 Reading through in watch and live
+ 
+ Decision 15 keeps the rebuild loops local. When the network is fast
+diff --git a/docs/projects/reverbs/readme.md b/docs/projects/reverbs/readme.md
+index af810c9..5d9b887 100644
+--- a/docs/projects/reverbs/readme.md
++++ b/docs/projects/reverbs/readme.md
+@@ -1,12 +1,12 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped whole: a Dattorro `plate`, an FDN `hall` with
+-per-band decay, and the old `reverb` kept deliberately as the live
+-comparison. Stays open until the creek listening pass has flipped
+-`space` between the three rooms and picked the example's room.
++**Outcome:** Shipped whole: a Dattorro `plate` (#144), an FDN `hall`
++with per-band decay (#146), and the old `reverb` kept deliberately as
++the live comparison. §5's live A/B ran on hardware under `--watch` in
++#146. The decision it enables, which room creek ships with, has not
++been made, so `space` still uses `reverb`.
+ 
+ # Plan: Two reverbs that beat Freeverb
+ 
+diff --git a/docs/projects/splice/readme.md b/docs/projects/splice/readme.md
+index 2f06d67..b50f428 100644
+--- a/docs/projects/splice/readme.md
++++ b/docs/projects/splice/readme.md
+@@ -38,9 +38,12 @@ everything — and writes it down.
+   and takes see committed content either way. The item is a directory
+   (project-layout.md §4.11): `audio/<name>/` holds the sample, the
+   recipe, and the stored license together.
+-- **Browsing is a TUI** — search, filter, audition previews, pick. This
+-  is Field's first *input*-interactive surface, which is most of the real
+-  cost of this plan and the reason it sits in Later. It is not the first
++- **Browsing is a TUI** — search, filter, audition previews, pick. A
++  full browser is most of the real cost of this plan and the reason it
++  sits in Later. This line first called it Field's first
++  *input*-interactive surface; `field insert add`'s chooser
++  (`src/commands/picker.ts`, #155) now is, a raw-mode loop kept
++  deliberately disposable (add-insert.md §3). It is not the first
+   live tty surface: `src/commands/loop-ui.ts` (watch.md §2) rendered
+   ANSI with a plain sequential fallback until realtime chunk 3 retired
+   it with the wrap takeover, and its discipline — rendering as a pure
+@@ -103,7 +106,11 @@ reads as a reviewable diff.
+    Splice". Verify what actually exists before chunking.
+ 2. **Whether the TUI lives in `field`** or as a separate tool that ends by
+    invoking the non-interactive commands. Bears on every future interactive
+-   surface, so worth deciding deliberately, not by default.
++   surface, so worth deciding deliberately, not by default. Two later
++   records bear on it: add-insert.md §3 makes the picker disposable and a
++   full TUI "its own stack decision" (DECIDED, 2026-08-12), and ui.md §5
++   carries that TUI as its own project, [tui](../tui/readme.md)
++   (DECIDED, 2026-08-12).
+ 3. **Preview playback** — through audiod like everything else, or something
+    throwaway for auditioning short previews. Leaning audiod: auditioning in
+    the mix is the ace lesson worth repeating.
+diff --git a/docs/projects/streaming-rings/readme.md b/docs/projects/streaming-rings/readme.md
+new file mode 100644
+index 0000000..808e9f7
+--- /dev/null
++++ b/docs/projects/streaming-rings/readme.md
+@@ -0,0 +1,18 @@
++---
++status: draft
++priority: next
++---
++
++# Plan: Streaming rings
++
++**Goal:** the live engine streams sources and track buffers through
++bounded rings instead of preloading whole files and rendering every
++track into a full-length buffer, so memory stops scaling with session
++length times track count
++([realtime.md](../realtime/readme.md) §7, chunk 2's 2026-08-10
++amendment, measured creek at ~143 MB and extrapolated a five-minute
++thirty-track session to ~3.5 GB).
++
++No plan yet. Realtime recorded this as "owed before large sessions, not
++an optimisation to forget", and it carries over from that plan's
++completion; write the plan here when the work graduates.
+diff --git a/docs/projects/track-rename/readme.md b/docs/projects/track-rename/readme.md
+new file mode 100644
+index 0000000..775efa6
+--- /dev/null
++++ b/docs/projects/track-rename/readme.md
+@@ -0,0 +1,16 @@
++---
++status: draft
++priority: later
++---
++
++# Plan: `field track rename`
++
++**Goal:** `field track rename` (and its siblings) rename a track and
++rewrite every reference to it in one commit, which is what makes names
++safe to use as identity
++([project-core.md](../project-core/readme.md) §6 records the commitment;
++`src/cli.ts` has only `track create` today).
++
++No plan yet. This entry carries the operational commitment project-core
++§6 made, which no other plan owned when project-core completed; write
++the plan here when the work graduates.
+diff --git a/docs/projects/ui/readme.md b/docs/projects/ui/readme.md
+index ab39cee..2f062a8 100644
+--- a/docs/projects/ui/readme.md
++++ b/docs/projects/ui/readme.md
+@@ -1,5 +1,5 @@
+ ---
+-status: draft
++status: in-progress
+ priority: next
+ ---
+ 
+diff --git a/docs/projects/voice-generation/readme.md b/docs/projects/voice-generation/readme.md
+index 1a81900..e3d293c 100644
+--- a/docs/projects/voice-generation/readme.md
++++ b/docs/projects/voice-generation/readme.md
+@@ -1,10 +1,11 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped: committed vocals from text, and creek sings. Stays
+-open until more songs have used it.
++**Outcome:** Shipped: committed vocals from text, and creek sings
++(#58–#61, #64, #65; a generative leaf track since #113). §2's timing
++clause, start-to-audio in seconds rather than minutes on the M3 Max,
++was never measured on record.
+ 
+ # Plan: Voice generation
+ 
+diff --git a/docs/projects/watch/readme.md b/docs/projects/watch/readme.md
+index 8822463..85ee873 100644
+--- a/docs/projects/watch/readme.md
++++ b/docs/projects/watch/readme.md
+@@ -1,10 +1,13 @@
+ ---
+-status: in-progress
+-priority: now
++status: completed
+ ---
+ 
+-**Outcome:** Shipped: both chunks (#34, #35). Stays open while §5's
+-status-visibility question is open, per its neighbours' precedent.
++**Outcome:** Superseded. Both chunks shipped (#34, #35) and were used
++for real on 2026-08-06; realtime's chunk 3 (#139) then retired the play
++half — the daemon `reload` op and the loop-wrap takeover — and
++`field play <song> --watch` runs on the live engine instead.
++`field build --watch` stands as built. §5's status-visibility question
++went moot with the looped file hash it asked about.
+ 
+ # Plan: Watch mode — the loop follows the project
+ 
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index 61da623..76ef373 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -1,5 +1,5 @@
+ ---
+-status: draft
++status: in-progress
+ priority: later
+ ---
+ 
