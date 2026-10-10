@@ -3,6 +3,11 @@ status: in-progress
 priority: now
 ---
 
+**Outcome:** Chunks 1 and 2 shipped (#148, #150; #151 and #152
+followed): AU and VST3 plugins render offline and run live as inserts.
+Editor sessions and write-back (chunk 3) and `realtime-bounce`
+(chunk 4) are unstarted. Closes when §7 holds on a real session.
+
 # Plan: hosted plugins — AU and VST3 as inserts
 
 **Goal:** third-party plugins join insert chains as first-class
