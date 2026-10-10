@@ -3,11 +3,6 @@ status: in-progress
 priority: now
 ---
 
-**Outcome:** Chunks 1 and 2 shipped (#148, #150; #151 and #152
-followed): AU and VST3 plugins render offline and run live as inserts.
-Editor sessions and write-back (chunk 3) and `realtime-bounce`
-(chunk 4) are unstarted. Closes when §7 holds on a real session.
-
 # Plan: hosted plugins — AU and VST3 as inserts
 
 **Goal:** third-party plugins join insert chains as first-class
@@ -362,7 +357,7 @@ these; the two discriminants coexist in one chain.
    keys per decision 8; the fixture plugin and its CI suite,
    tempo-reading behavior included (decision 13);
    RENDER_PLAN_VERSION bump with existing songs proven pure cache
-   hits.
+   hits. *Shipped in #148.*
 2. **Live.** A hosted insert in the live chain: delay compensation
    from declared latency (the stream lags and flushes, the limiter's
    contract), warmup at locate under the chain's existing −60 dB
@@ -391,7 +386,8 @@ these; the two discriminants coexist in one chain.
    the rebuild runs under the engine lock, where its cost is dropped
    audio rather than latency, so the "correct first, fast later"
    sequencing never applied (minjudd on #150); the warmup bound
-   carries hosted state correctness exactly as before.
+   carries hosted state correctness exactly as before. *Shipped in
+   #150; #151 and #152 followed.*
 3. **Editor sessions and write-back.** `field open <track>/<handle>`,
    the `param_changed` protocol message, gesture-quantum file
    writes, blob recapture on non-param signals, id re-binding, the

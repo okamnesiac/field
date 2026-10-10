@@ -3,11 +3,6 @@ status: in-progress
 priority: now
 ---
 
-**Outcome:** Shipped in #155: the pinned write, the plugin and order
-choosers, and `--at`. The editor handoff (§5) prints the `field open`
-line instead of running it until plugin-hosting's chunk 3 lands. Closes
-when that handoff runs and real sessions have added inserts with it.
-
 # Plan: `field insert` — add an insert with a chooser
 
 **Goal:** one command that adds an insert to a track: fully pinned at

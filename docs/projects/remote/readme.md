@@ -3,13 +3,6 @@ status: in-progress
 priority: now
 ---
 
-**Outcome:** Chunks 2–4 shipped (#171, #172): login and logout, clone
-with the warm, push with the offer, pull, and the read-through cache in
-`build` and `explain`. Chunk 1 (`--json` and `license`) is unstarted.
-Closes when §8 holds, its last clause included: a real HOWLO project on
-the site, cloned on a second machine, playing from fetched artifacts
-with nothing rendered locally.
-
 # Plan: Remote — login, clone, push, and a read-through cache
 
 **Goal:** the CLI half of audiofield.io: `field login`, `field clone

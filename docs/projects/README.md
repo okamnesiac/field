@@ -50,20 +50,6 @@ A project with no plan yet is still a project. Give it a directory and a short
 `readme.md` that records the idea and why it matters, rather than a line in a
 shared list.
 
-Shipping the code does not finish a project. A plan whose implementation has
-landed but which no real session has exercised stays `in-progress` at
-`priority: now`, and its `**Outcome:**` line states the condition that would
-close it. On this project that condition is usually that real music has been
-made with it. Mark the project `completed` when the condition is met, not when
-the last pull request merges.
-
-This is the one rule the move to Projector had to carry by hand. The old
-layout recorded it as membership of a `now.md` list, so a merged but unplayed
-project stayed visible by sitting there. Projector has no such list, and
-`priority` is not displayed for a completed project, so a project marked
-`completed` on merge would lose the distinction with nowhere to put it. Keeping
-the project open is what preserves it.
-
 ## What does not go here
 
 How-it-works documentation stays in the [docs root](../README.md):
