@@ -187,7 +187,10 @@ The plan is ninjudd's from #156, brought over whole; this section is
 what the first implementation settled, added at the end so §1–§5 keep
 their numbers. Everything in §3's scope shipped as written, except
 where this section says otherwise, and the mute non-goal fell the way
-§3 predicted: the schema line came.
+§3 predicted: the schema line came. The pull request that carried the
+first version also crossed four more of §3's non-goals once the view
+was in use; the last bullets below record each, with the reason it
+was taken.
 
 - **`mute:` exists** (schema/track.ts): a boolean on the placement
   beside `gain_db` and `pan`, the loop entry's `enabled:` shape
@@ -210,11 +213,16 @@ where this section says otherwise, and the mute non-goal fell the way
   un-soloed compile's. Solo offers on track lanes only in this version:
   the walk starts from a track, and an audio placement of `main` has
   no subtree to walk.
-- **The lanes are flat**: one per `main` placement, whatever the tree
-  underneath does — creek reads as its handful of top-level lanes, and
-  the nesting stays an engine concern. Lane-per-placement rather than
-  lane-per-track is what makes mute-on-the-placement the button's exact
-  meaning.
+- **One lane per `main` placement, opening into nested rows**: the
+  top level is one lane per placement in `main`, and lane-per-placement
+  rather than lane-per-track is what makes mute-on-the-placement the
+  button's exact meaning. A lane that places a track opens, on request,
+  into the placements in that track's file, as deep as the tree goes
+  (amended 2026-10-10; this bullet first said the lanes stay flat and
+  the nesting an engine concern). Each row carries the file it lives
+  in, that file's hash, and its index in `inputs:`, so a child row's
+  edit writes the placing track's file under that file's own stale
+  guard. Which rows are open is view state, persisted nowhere.
 - **Musical time is projected in the browser after all** (amended
   2026-08-20; this bullet said the opposite for two days, and §2 said
   client-side before that). The first implementation kept the projection
@@ -265,6 +273,39 @@ where this section says otherwise, and the mute non-goal fell the way
   `ui/` workspace member against §5's single-package sentence, `ws` on
   the server, react + vite inside the member only — with the reasons
   and what each amends, where `AGENTS.md` says decided records change.
+- **The timeline, with waveforms** (amended 2026-10-10; §3 listed
+  waveforms and arrangement editing as non-goals). The lanes draw on
+  one time axis under a bar ruler, with a playhead. Geometry comes from
+  the planner's own `placedWindow`, so the picture cannot disagree with
+  the render. §3's argument against waveforms was about doing them
+  properly — a peaks artifact with a build rule, a cache, and an
+  invalidation story — and it still stands for long material. What
+  shipped is the cheap half: an envelope computed on demand from the
+  stem the build already wrote, memoised by the file's identity, which
+  is enough for songs of a few minutes. The commits cite
+  "ui-timeline.md chunk 1"; that plan was never committed, and this
+  bullet is the record in its place.
+- **Clip move, split, and trims** (amended 2026-10-10; §3 listed
+  clip manipulation as a non-goal). Selecting a clip and dragging it,
+  cutting it at the playhead, and dragging either edge were the
+  gestures the timeline asked for as soon as it existed, and each is a
+  file edit like the fader: one write on release, in the spelling the
+  author used, with the stale guard and a load of the edited project
+  before the write (`src/commands/ui-edits.ts`, `src/commands/ui.ts`).
+  A looped or cross-rate clip refuses the gestures whose arithmetic
+  would be wrong for it.
+- **The insert editor** (amended 2026-10-10; §3 kept inserts read-only
+  and pointed at `field insert add`). Selecting a clip shows its
+  track's chain, with add, edit, and remove for the built-in effects:
+  a knob strip for `limit`, `reverb`, `plate`, and `hall`, and for the
+  `eq` a response curve with draggable bands. Every write is validated
+  by the same zod objects the track schema is built from, and a hosted
+  plugin stays read-only, its parameters belonging to its own editor
+  window (plugin-hosting.md §5). The EQ curve is computed in the view
+  because it redraws under a drag at frame rate, which a socket round
+  trip per pointer move cannot; its arithmetic lives in
+  `src/audio/eq-response.ts` under the suite, as render-pipeline.md
+  decision 4's amendment records.
 - **Verified on a live session**: play through a real device with
   position streaming, a mute landing in YAML and riding the watch back
   into the running audio, solo/un-solo swapping mid-play with the
