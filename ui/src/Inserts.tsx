@@ -284,7 +284,20 @@ function EqEditor({
             max={8}
             step={0.1}
             value={band.bandwidth ?? 2}
-            onChange={(e) => setBand({ bandwidth: Number(e.target.value) })}
+            // Held in the draft while the thumb moves, and written once
+            // on release, like the handles: a write per 0.1 step would
+            // swap the session each time and leave every later step
+            // refused as stale.
+            onChange={(e) => {
+              const bandwidth = Number(e.target.value);
+              setDraft(bands.map((b, i) => (i === picked ? { ...b, bandwidth } : b)));
+            }}
+            onPointerUp={() => {
+              if (draft !== null) commit(draft);
+            }}
+            onKeyUp={() => {
+              if (draft !== null) commit(draft);
+            }}
           />
           <span className="knob-value">{(band.bandwidth ?? 2).toFixed(1)} oct</span>
         </label>
