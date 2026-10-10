@@ -1,5 +1,7 @@
 #include "live.h"
 
+#include "click.h"
+
 #include "dsp/mixdown.h"
 #include "dsp/wavfile.h"
 
@@ -630,11 +632,14 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
     // The output streams: wrapped-time input mixing, chains that never
     // reset — the wrap hears the previous pass's tails ring across it,
     // which is the fold as a performance instead of an arithmetic step.
+    // A region loop wraps the same way between its own bounds.
     while (filled < n)
     {
-        const juce::int64 t = loop && length > 0 ? clock % length : clock;
-        const juce::int64 until
-            = loop && length > 0 ? length - t : std::max<juce::int64> (1, output.postLength - t);
+        const bool region = loopTo > loopFrom && clock >= loopFrom;
+        const juce::int64 t = region ? wrap (clock) : loop && length > 0 ? clock % length : clock;
+        const juce::int64 until = region ? loopTo - t
+                                : loop && length > 0 ? length - t
+                                                     : std::max<juce::int64> (1, output.postLength - t);
         const int step = (int) std::min<juce::int64> (n - filled, std::max<juce::int64> (1, until));
 
         auto& mixed = scratchMixed;
@@ -651,7 +656,7 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
                 // or past `length` are silence, whatever the chain still
                 // holds (Codex's finding on this PR).
                 const juce::int64 outAt = delivered + filled + (juce::int64) i;
-                const bool past = ! loop && length > 0 && outAt >= length;
+                const bool past = ! loop && loopTo <= loopFrom && length > 0 && outAt >= length;
                 block[(size_t) c][(size_t) (filled + (juce::int64) i)]
                     = past ? 0.0f : mixed[(size_t) c][i];
             }
@@ -745,6 +750,36 @@ void LiveSession::locate (juce::int64 sample)
     discardUntil (sample);
 }
 
+juce::int64 LiveSession::extentSamples() const
+{
+    return length > 0 ? length : tracks[(size_t) outputTrack].postLength;
+}
+
+juce::int64 LiveSession::wrap (juce::int64 unwrapped) const
+{
+    if (loopTo > loopFrom && unwrapped >= loopFrom)
+        return loopFrom + (unwrapped - loopFrom) % (loopTo - loopFrom);
+    if (loop && length > 0)
+        return unwrapped % length;
+    return unwrapped;
+}
+
+void LiveSession::setLoopRegion (juce::int64 from, juce::int64 to)
+{
+    if (from == to)
+    {
+        loopFrom = loopTo = 0;
+        return;
+    }
+    if (from < 0 || to <= from)
+        throw std::runtime_error ("loop region needs 0 <= from < to");
+    if (to > extentSamples())
+        throw std::runtime_error ("loop region ends past the session's content ("
+                                  + std::to_string (extentSamples()) + " samples)");
+    loopFrom = from;
+    loopTo = to;
+}
+
 void LiveSession::ramp (const std::string& trackName, int input, double gainDb, double rampMs)
 {
     const auto found = trackIndex.find (trackName);
@@ -766,7 +801,8 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb, 
 
 std::string runRenderLive (const std::string& sessionPath,
                            const std::string& outputPath,
-                           const std::string& rootPath)
+                           const std::string& rootPath,
+                           const std::string& clickPath)
 {
     try
     {
@@ -776,6 +812,14 @@ std::string runRenderLive (const std::string& sessionPath,
         const auto session = juce::JSON::parse (sessionFile.loadFileAsString());
         if (! session.isObject())
             return sessionPath + ": session is not a JSON object";
+        Click click;
+        if (! clickPath.empty())
+        {
+            const juce::File clickFile { juce::String (clickPath) };
+            if (! clickFile.existsAsFile())
+                return clickPath + ": no such click schedule";
+            click.setSchedule (juce::JSON::parse (clickFile.loadFileAsString()));
+        }
 
         LiveSession live (session, juce::File (juce::String (rootPath)));
         // One pass of the declared length. Looping playback is a
@@ -793,6 +837,7 @@ std::string runRenderLive (const std::string& sessionPath,
         {
             const int n = (int) std::min<juce::int64> (blockSize, total - at);
             live.renderBlock (channels, 2, n);
+            click.render (at, (double) live.sessionRate(), channels, 2, n);
             out[0].insert (out[0].end(), left.begin(), left.begin() + n);
             out[1].insert (out[1].end(), right.begin(), right.begin() + n);
         }

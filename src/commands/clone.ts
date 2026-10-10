@@ -1,0 +1,241 @@
+import { existsSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+import { git, gitLfsAvailable } from '../git.js';
+import { explain } from '../graph/build.js';
+import { buildGraph, resolveLabel } from '../graph/graph.js';
+import { parseLabel, SONG_OUTPUT_NAME } from '../labels.js';
+import { diagnosticErrors, loadProject } from '../model/project.js';
+import { RemoteReads, projectCache } from '../remote/cache.js';
+import { RemoteClient } from '../remote/client.js';
+import { defaultCredentialStore, resolveToken, type CredentialStore } from '../remote/credentials.js';
+import { parseCloneUrl, type ProjectRemote } from '../remote/origin.js';
+import { DEFAULT_REMOTE, remoteName } from '../remote/protocol.js';
+
+// `field clone <owner>/<project> [dir]` (remote.md §3.2): expand the
+// short name to the clone URL the remote reports, run `git clone` (LFS
+// included), then warm the cache for every song's `main` and every rule
+// node beneath it — the index as well as the bytes, because readAction
+// is what makes a hit, and the whole closure rather than `main` alone,
+// because a node's key is computed from its dependencies' output hashes
+// and a clone holding only the mix would rebuild every stem before it
+// could ask whether the mix was cached (audiofield-io.md §6).
+//
+// Everything the warm writes lands under .field/, which init gitignores,
+// so a warmed checkout is a clean one (bloom-in-tree.md §7).
+
+export interface CloneOptions {
+  target: string; // <owner>/<project>, or a full clone URL
+  dir?: string | undefined;
+  cwd: string;
+  out: (line: string) => void;
+  env?: NodeJS.ProcessEnv | undefined;
+  store?: CredentialStore | undefined;
+  fetch?: typeof fetch | undefined;
+  lfsAvailable?: (() => boolean) | undefined;
+  interactive?: boolean | undefined; // let git print progress
+}
+
+export interface WarmReport {
+  song: string;
+  fetched: number; // entries brought in for this song
+  bytes: number;
+  note?: string | undefined; // why the song could not be warmed, if it could not
+}
+
+export interface CloneResult {
+  dir: string; // absolute
+  cloneUrl: string;
+  remote: ProjectRemote | undefined; // undefined: cloned from somewhere Field has no API for
+  warmed: WarmReport[];
+}
+
+const SHORT_NAME = /^([^/\s]+)\/([^/\s]+)$/;
+
+export async function clone(options: CloneOptions): Promise<CloneResult> {
+  const env = options.env ?? process.env;
+  // Refuse before touching the network (remote.md §5 decision 6): a
+  // clone without LFS lands pointer files where audio should be, and the
+  // first `field check` then fails every ledger row with a hash mismatch
+  // that looks like corruption.
+  if (!(options.lfsAvailable ?? gitLfsAvailable)()) {
+    throw new Error(
+      'git-lfs is required to clone a Field project — without it, audio arrives as pointer files. ' +
+        'Install it (brew install git-lfs, or your package manager) and run `git lfs install`, then retry.',
+    );
+  }
+
+  const store = options.store ?? defaultCredentialStore();
+  const clientFor = (api: string) =>
+    new RemoteClient(api, {
+      token: resolveToken(api, store, env)?.token,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+  const override = env['FIELD_REMOTE'];
+  const off = override === 'off';
+  const overrideApi = override !== undefined && override !== '' && !off ? override.replace(/\/+$/, '') : undefined;
+
+  // What the target is, and where the clone lands, before any request:
+  // a destination that already exists is a refusal that should not cost
+  // a round trip (audiofield on #171).
+  const short = SHORT_NAME.exec(options.target);
+  const isShort = short !== null && !options.target.includes(':');
+  const defaultName = isShort
+    ? short![2]!
+    : basename(options.target.replace(/\/+$/, '')).replace(/\.git$/, '');
+  const dirName = options.dir ?? defaultName;
+  const dir = resolve(options.cwd, dirName);
+  if (existsSync(dir)) throw new Error(`destination ${dirName} already exists`);
+
+  let cloneUrl: string;
+  let remote: ProjectRemote | undefined;
+  if (isShort) {
+    const [, owner, project] = short as unknown as [string, string, string];
+    if (!remoteName.safeParse(owner).success || !remoteName.safeParse(project).success) {
+      throw new Error(`"${options.target}" is not an <owner>/<project> name (lowercase slugs) or a clone URL`);
+    }
+    // Expanding a short name is a read of the remote, and `off` means no
+    // reads — including this one, rather than one against the default
+    // site (audiofield on #171). The URL form still works.
+    if (off) {
+      throw new Error(
+        `FIELD_REMOTE=off disables the remote, so ${options.target} cannot be expanded — clone by URL instead`,
+      );
+    }
+    const api = overrideApi ?? DEFAULT_REMOTE;
+    const info = await clientFor(api).resolveProject(owner, project);
+    if (info === undefined) {
+      // A private project the token cannot see answers the same 404 as
+      // one that does not exist (audiofield-io.md §9.9), so say both.
+      throw new Error(`no project ${owner}/${project} on ${api} — or it is private and you are not logged in (field login)`);
+    }
+    cloneUrl = info.clone_url;
+    remote = { api, owner, project };
+  } else {
+    // A full URL is accepted where a short name is expected, so a
+    // project hosted anywhere Git reaches can still be cloned; only the
+    // short form and the warm depend on the remote's API.
+    cloneUrl = options.target;
+    const parsed = parseCloneUrl(cloneUrl);
+    const api = off ? undefined : (overrideApi ?? parsed.api);
+    remote = api !== undefined && parsed.slug !== undefined ? { api, ...parsed.slug } : undefined;
+  }
+
+  options.out(`cloning ${cloneUrl} into ${dirName}`);
+  // `-c` sets the variable in the new repository's config before the
+  // fetch, so it applies to this clone and persists for every later
+  // push and pull. The helper is `field git-credential`, so Git and the
+  // API share one stored token (audiofield-io.md §5.5). Only for a host
+  // Field recognizes — a clone from GitHub gets Git's own defaults.
+  //
+  // No http.proactiveAuth here, deliberately (remote.md §5 decision 13
+  // as amended twice): it is a property of "a token is held now", and a
+  // setting written at clone time goes stale — with it set and no
+  // credential, Git asks for a username before its first request, so an
+  // anonymous clone would prompt (probed against git.audiofield.io,
+  // 2026-09-08) and so would any checkout after `field logout`. The
+  // verbs that hold a token, push and pull, pass it per invocation.
+  // The LFS filters ride every clone as `-c` too, so the checkout
+  // smudges whether or not `git lfs install` was ever run on this
+  // machine — the binary being present is not the filter being
+  // installed, and decision 6 exists to keep pointer files out of
+  // `audio/` (audiofield on #171). `git lfs install --local` afterwards
+  // writes the same filters into the clone's config for good and adds
+  // the hooks a later push needs to upload LFS objects.
+  const config = [
+    ...LFS_FILTER_CONFIG,
+    ...(remote !== undefined && /^https?:\/\//.test(cloneUrl) ? gitConfigForRemote(cloneUrl) : []),
+  ];
+  git(['clone', ...config.flatMap(([k, v]) => ['-c', `${k}=${v}`]), cloneUrl, dir], {
+    cwd: options.cwd,
+    interactive: options.interactive ?? true,
+  });
+  git(['lfs', 'install', '--local'], { cwd: dir });
+
+  const warmed = remote === undefined ? [] : await warmCache(dir, remote, clientFor(remote.api), options.out);
+  return { dir, cloneUrl, remote, warmed };
+}
+
+// What `git lfs install --local` writes, as `clone -c` pairs so they
+// apply to the initial checkout, which happens before anything can be
+// run inside the new repository.
+export const LFS_FILTER_CONFIG: [string, string][] = [
+  ['filter.lfs.clean', 'git-lfs clean -- %f'],
+  ['filter.lfs.smudge', 'git-lfs smudge -- %f'],
+  ['filter.lfs.process', 'git-lfs filter-process'],
+  ['filter.lfs.required', 'true'],
+];
+
+// The config a clone from an audiofield git host carries, as pairs, so a
+// test can assert on the list without cloning over HTTP. The empty value
+// first: it resets the helper list for this host, so a global helper —
+// osxkeychain on every Mac that has used GitHub — never sees the token.
+// Left in the list ahead of ours, it would store a copy on the first
+// successful push and serve that copy first ever after, a copy `field
+// logout` does not know to erase (audiofield on #171).
+export function gitConfigForRemote(cloneUrl: string): [string, string][] {
+  const url = new URL(cloneUrl);
+  const key = `credential.${url.protocol}//${url.host}.helper`;
+  return [
+    [key, ''],
+    [key, '!field git-credential'],
+  ];
+}
+
+// Fetch the action entries and outputs for every song's `main` and the
+// rule nodes beneath it. `explain` with a remote does exactly that walk
+// (graph/build.ts), so the warm is explain per song plus bookkeeping.
+export async function warmCache(
+  dir: string,
+  remote: ProjectRemote,
+  client: RemoteClient,
+  out: (line: string) => void,
+): Promise<WarmReport[]> {
+  const project = loadProject(dir);
+  if (diagnosticErrors(project.diagnostics).length > 0) {
+    out('cache not warmed: the project has errors (field check)');
+    return [];
+  }
+  const graph = buildGraph(project);
+  // No fallback: the warm builds nothing, so a failed remote is reported
+  // per song below in the warm's own words, never as "building locally".
+  const reads = new RemoteReads(projectCache(client, remote), { notice: (line) => out(`remote: ${line}`) });
+  const reports: WarmReport[] = [];
+  for (const song of project.songs) {
+    const before = { fetched: reads.fetched, bytes: reads.fetchedBytes };
+    const report: WarmReport = { song: song.name, fetched: 0, bytes: 0 };
+    try {
+      const main = resolveLabel(graph, parseLabel(`//${song.dir}/track:${SONG_OUTPUT_NAME}`));
+      await explain(project, graph, main, new Map(), reads);
+    } catch (err) {
+      // A song whose requests have no takes cannot key its nodes, so the
+      // remote cannot be asked for them (remote.md §9.11); a song with no
+      // `main` has nothing to warm. Either way the message is the one
+      // `build` would give, said now.
+      report.note = firstLine((err as Error).message);
+    }
+    // A remote that stopped answering is not "nothing cached": say why.
+    if (report.note === undefined && reads.failure !== undefined) report.note = reads.failure;
+    report.fetched = reads.fetched - before.fetched;
+    report.bytes = reads.fetchedBytes - before.bytes;
+    reports.push(report);
+    out(describeWarm(report));
+  }
+  return reports;
+}
+
+export function describeWarm(report: WarmReport): string {
+  if (report.note !== undefined) return `${report.song}: not warmed — ${report.note}`;
+  if (report.fetched === 0) return `${report.song}: nothing cached on the remote yet`;
+  return `${report.song}: fetched ${report.fetched} artifact${report.fetched === 1 ? '' : 's'} (${formatBytes(report.bytes)})`;
+}
+
+function firstLine(text: string): string {
+  return text.split('\n')[0] ?? text;
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}

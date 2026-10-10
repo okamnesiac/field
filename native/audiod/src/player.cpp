@@ -1,11 +1,16 @@
 #include "player.h"
 
+#include "capture.h"
 #include "live.h"
+#include "version.h"
 
 #if JUCE_MAC
 #include <CoreAudio/CoreAudio.h>
 #endif
 
+#include <chrono>
+#include <cmath>
+#include <thread>
 #include <utility>
 
 #if JUCE_MAC
@@ -75,6 +80,10 @@ Player::Player (bool useNullOutput) : nullMode (useNullOutput)
 
 Player::~Player()
 {
+    // A take still running at shutdown (a quit mid-take) finalizes while
+    // the callback can still acknowledge; what it cannot reach is left
+    // as a recoverable transaction by ~Capture.
+    stopRecording();
     removeHardwareListeners();
     if (nullClockRunning.exchange (false) && nullClock.joinable())
         nullClock.join();
@@ -116,6 +125,11 @@ void Player::refreshAudioDevice()
 {
     if (nullMode)
         return;
+    // A device restart under a take is a gap in the callback and so a
+    // gap in the audio, with no record of how long. Following the
+    // default waits until the take ends: stopRecording calls back here.
+    if (capture != nullptr)
+        return;
     auto* type = deviceManager.getCurrentDeviceTypeObject();
     if (type == nullptr)
         return;
@@ -151,17 +165,39 @@ juce::String Player::initialise()
     if (nullMode)
     {
         transport.prepareToPlay (nullBlockSize, nullSampleRate);
+        silence.assign ((size_t) nullBlockSize, 0.0f);
         nullClockRunning = true;
         nullClock = std::thread ([this]
         {
             juce::AudioBuffer<float> scratch (2, nullBlockSize);
+            // The null input (recording.md §5): channel 1 is a sawtooth
+            // over one second of the input clock — consecutive samples
+            // differ by exactly 2/48000 except at the wrap — so a test
+            // reading a take back can prove no block was lost or
+            // duplicated anywhere in it; channel 2 is a constant, so the
+            // same test can prove arm picked the channel it named.
+            std::vector<float> saw ((size_t) nullBlockSize);
+            std::vector<float> flat ((size_t) nullBlockSize, 0.25f);
+            juce::int64 inputClock = 0;
+            auto next = std::chrono::steady_clock::now();
             while (nullClockRunning)
             {
-                pullAudio (scratch.getArrayOfWritePointers(), 2, nullBlockSize);
+                for (int i = 0; i < nullBlockSize; ++i)
+                    saw[(size_t) i] = (float) ((double) ((inputClock + i) % 48000) / 48000.0 * 2.0 - 1.0);
+                inputClock += nullBlockSize;
+                // Presented the way a real duplex open presents it: only
+                // the active channel, only while armed.
+                const float* ins[1] = { nullInputChannel.load() == 2 ? flat.data() : saw.data() };
+                processBlock (ins, armed.load() ? 1 : 0, scratch.getArrayOfWritePointers(), 2, nullBlockSize);
                 // Real-time pace, so position and end-of-stream behave as
-                // they would against a device.
-                std::this_thread::sleep_for (std::chrono::microseconds (
-                    (long long) (1'000'000.0 * nullBlockSize / nullSampleRate)));
+                // they would against a device. Against an absolute
+                // deadline rather than a relative sleep: the relative
+                // form added each block's processing time to its sleep
+                // and ran a tenth slow, which a take's frame count
+                // measures where a position readout never noticed.
+                next += std::chrono::microseconds (
+                    (long long) (1'000'000.0 * nullBlockSize / nullSampleRate));
+                std::this_thread::sleep_until (next);
             }
         });
         return {};
@@ -196,6 +232,35 @@ juce::var Player::deviceList()
         }
     }
     result->setProperty ("devices", devices);
+    // The input side (recording.md §6): every input device, with how many
+    // channels arm may name on it. The count comes from a device object
+    // built and never opened, which is the only way to ask a device that
+    // is not the current one.
+    juce::Array<juce::var> inputs;
+    if (! nullMode)
+    {
+        if (auto* type = deviceManager.getCurrentDeviceTypeObject())
+        {
+            auto names = type->getDeviceNames (true);
+            auto defaultIndex = type->getDefaultDeviceIndex (true);
+            for (int i = 0; i < names.size(); ++i)
+            {
+                auto d = obj();
+                d->setProperty ("name", names[i]);
+                d->setProperty ("default", i == defaultIndex);
+                int channels = 0;
+                if (auto* current = deviceManager.getCurrentAudioDevice();
+                    current != nullptr && current->getName() == names[i])
+                    channels = current->getInputChannelNames().size();
+                else if (std::unique_ptr<juce::AudioIODevice> probe (type->createDevice ({}, names[i]));
+                         probe != nullptr)
+                    channels = probe->getInputChannelNames().size();
+                d->setProperty ("channels", channels);
+                inputs.add (juce::var (d.get()));
+            }
+        }
+    }
+    result->setProperty ("inputs", inputs);
     result->setProperty ("null_output", nullMode);
     return juce::var (result.get());
 }
@@ -204,6 +269,8 @@ juce::String Player::selectDevice (const juce::String& name)
 {
     if (nullMode)
         return "no devices in null-output mode";
+    if (capture != nullptr)
+        return "cannot change devices while recording (stop first)";
     auto setup = deviceManager.getAudioDeviceSetup();
     setup.outputDeviceName = name;
     auto error = deviceManager.setAudioDeviceSetup (setup, true);
@@ -220,6 +287,12 @@ void Player::maybeMatchDeviceRate (double fileRate)
     // so. Best-effort by design — failure here is not an error.
     if (nullMode)
         return;
+    // Under a take the device stays put: a rate switch restarts it and
+    // gaps the capture. Delivery converts instead (cross-rate-live.md
+    // decision 3), which is the same answer as a device that cannot
+    // switch.
+    if (capture != nullptr)
+        return;
     auto* device = deviceManager.getCurrentAudioDevice();
     if (device == nullptr || juce::exactlyEqual (device->getCurrentSampleRate(), fileRate))
         return;
@@ -233,6 +306,13 @@ void Player::maybeMatchDeviceRate (double fileRate)
 juce::var Player::load (const juce::File& file, bool loop)
 {
     auto result = obj();
+    // A load rewinds to zero and drops the bed the take is placed
+    // against; a session swap carries the transport and is allowed.
+    if (capture != nullptr)
+    {
+        result->setProperty ("error", "cannot load while recording (stop first)");
+        return juce::var (result.get());
+    }
     std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
     if (reader == nullptr)
     {
@@ -257,6 +337,7 @@ juce::var Player::load (const juce::File& file, bool loop)
     transport.stop();
     transport.setSource (nullptr);
     readerSource.reset();
+    click.clear(); // a schedule belongs to a bed
 
     fileSampleRate = reader->sampleRate;
     fileLengthSamples = reader->lengthInSamples;
@@ -380,7 +461,10 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             everStarted = false;
             livePlaying = false;
             if (! hadSession)
+            {
                 liveEverStarted = false;
+                click.clear(); // a fresh bed; a swap keeps the schedule, the CLI re-sends on a map change
+            }
             liveRate = next->sessionRate();
             liveLength = next->lengthSamples();
             liveLoop = next->looping();
@@ -464,6 +548,10 @@ juce::String Player::play()
 
 void Player::pause()
 {
+    // Pausing ends the take: the bed stops, and a capture that kept
+    // running against a still transport would be a take placed at a
+    // position the performer was no longer hearing.
+    stopRecording();
     if (liveSession != nullptr)
     {
         livePlaying = false;
@@ -474,6 +562,8 @@ void Player::pause()
 
 void Player::stop()
 {
+    // First, while the transport still says where the take ended.
+    stopRecording();
     if (liveSession != nullptr)
     {
         livePlaying = false;
@@ -493,9 +583,14 @@ void Player::stop()
 
 juce::String Player::locate (juce::int64 sample)
 {
+    // A seek under a take would put later samples of the take against
+    // an earlier or later bed than the ones before them; the take's one
+    // placement could not describe that.
+    if (capture != nullptr)
+        return "cannot locate while recording (stop first)";
     if (liveSession != nullptr)
     {
-        if (sample < 0 || (! liveLoop && liveLength > 0 && sample > liveLength))
+        if (sample < 0 || (! liveSession->looping() && liveLength > 0 && sample > liveLength))
             return "locate out of range";
         const juce::ScopedLock guard (liveLock);
         try
@@ -544,7 +639,7 @@ bool Player::streamFinished() const
         const juce::ScopedLock guard (liveLock);
         const bool drained = liveConverter == nullptr
                              || (convFlushed && convOut[0].size() == convOutRead);
-        return liveEverStarted && ! liveLoop && liveLength > 0
+        return liveEverStarted && ! liveSession->looping() && liveLength > 0
                && liveSession->position() >= liveLength && drained;
     }
     // A looping stream never finishes; stop is the only way out.
@@ -568,16 +663,20 @@ juce::String Player::transportState()
     return "stopped";
 }
 
-juce::var Player::status()
+juce::var Player::status (bool consumePeak)
 {
     auto result = obj();
     result->setProperty ("state", transportState());
     if (liveSession != nullptr)
     {
-        const juce::int64 raw = liveSession->position();
-        result->setProperty ("sample", liveLoop && liveLength > 0 ? raw % liveLength : raw);
+        result->setProperty ("sample", liveSession->wrappedPosition());
         result->setProperty ("samples", liveLength);
-        result->setProperty ("looping", liveLoop);
+        result->setProperty ("looping", liveSession->looping());
+        if (liveSession->loopRegionTo() > liveSession->loopRegionFrom())
+        {
+            result->setProperty ("loop_from", liveSession->loopRegionFrom());
+            result->setProperty ("loop_to", liveSession->loopRegionTo());
+        }
         result->setProperty ("path", juce::var());
         result->setProperty ("live", true);
         if (liveSong.isNotEmpty())
@@ -596,6 +695,46 @@ juce::var Player::status()
         result->setProperty ("path", loadedPath.isEmpty() ? juce::var() : juce::var (loadedPath));
     }
     result->setProperty ("null_output", nullMode);
+
+    // The input side (recording.md §6): what is armed, what is being
+    // taken, and the one meter V1 carries — the peak since the last
+    // client read, which that read resets. One reader is the blocking
+    // `field record`; two readers would each see half the peaks, which
+    // is the widget's problem to solve when it becomes a reader. The
+    // heartbeat's own reads never consume it (player.h).
+    {
+        auto rec = obj();
+        rec->setProperty ("state", recordState());
+        if (armed.load())
+        {
+            rec->setProperty ("track", armedTrack);
+            rec->setProperty ("device", armedDevice);
+            rec->setProperty ("input", armedInput);
+            rec->setProperty ("input_peak",
+                              (double) (consumePeak ? inputPeak.exchange (0.0f) : inputPeak.load()));
+        }
+        if (capture != nullptr)
+        {
+            rec->setProperty ("transaction", capture->id());
+            rec->setProperty ("file", ".field/recording/" + capture->id() + "/take.wav");
+            rec->setProperty ("started_at_samples", capture->startedAt());
+            // Counting in: the take exists and has not reached its position.
+            rec->setProperty ("pending", ! captureStarted.load());
+            if (captureUntil.load() >= 0)
+                rec->setProperty ("until", captureUntil.load());
+            if (captureLoop.load())
+            {
+                rec->setProperty ("loop", true);
+                rec->setProperty ("loop_takes", loopTakes);
+                rec->setProperty ("missed", captureMissed.load());
+            }
+            rec->setProperty ("frames", capture->pushed());
+            rec->setProperty ("written", capture->written());
+            rec->setProperty ("dropped", capture->dropped());
+        }
+        result->setProperty ("record", juce::var (rec.get()));
+    }
+    result->setProperty ("click_ticks", click.tickCount());
 
     double deviceRate = nullMode ? nullSampleRate : 0.0;
     if (! nullMode)
@@ -649,7 +788,7 @@ void Player::rebuildLiveConverter()
         ch.reserve (1 << 16);
 }
 
-void Player::pullAudio (float* const* out, int numChannels, int n)
+juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
 {
     {
         // The pointer is only readable under the lock (cursor's finding:
@@ -660,16 +799,20 @@ void Player::pullAudio (float* const* out, int numChannels, int n)
         {
             for (int c = 0; c < numChannels; ++c)
                 std::fill (out[c], out[c] + n, 0.0f);
-            return;
+            return -1;
         }
         if (liveSession != nullptr)
         {
+            // The song-timeline position this block starts at — wrapped
+            // into whichever loop is in force, as status reports it —
+            // which is where a take beginning here is placed.
+            const juce::int64 position = liveSession->wrappedPosition();
             if (livePlaying.load())
             {
                 if (liveConverter == nullptr)
                 {
                     liveSession->renderBlock (out, numChannels, n);
-                    return;
+                    return position;
                 }
                 // Converted delivery: render session-rate blocks into
                 // the resampler until n device frames wait in the FIFO.
@@ -725,30 +868,159 @@ void Player::pullAudio (float* const* out, int numChannels, int n)
                         ch.erase (ch.begin(), ch.begin() + (std::ptrdiff_t) convOutRead);
                     convOutRead = 0;
                 }
-                return;
+                return position;
             }
             for (int c = 0; c < numChannels; ++c)
                 std::fill (out[c], out[c] + n, 0.0f);
-            return;
+            // A bed that is not rolling has no position to latch a take
+            // or a tick on: the first playing block is where both start.
+            return -1;
         }
     }
+    if (readerSource == nullptr)
+    {
+        for (int c = 0; c < numChannels; ++c)
+            std::fill (out[c], out[c] + n, 0.0f);
+        return -2; // no bed: the tap places against the free clock
+    }
+    const juce::int64 position = transport.isPlaying() ? positionSamples() : -1;
     juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
     juce::AudioSourceChannelInfo info (&buffer, 0, n);
     transport.getNextAudioBlock (info);
+    return position;
 }
 
-void Player::audioDeviceIOCallbackWithContext (const float* const*, int,
+void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
+{
+    const juce::int64 position = pullAudio (out, numOutputs, n);
+    const juce::int64 freeBefore = freeClock.fetch_add (n);
+    // The metronome rides the output after the pull, positioned by the
+    // same block-start position the capture latches on; with no bed it
+    // counts on the free clock, which is a metronome by itself.
+    click.render (position == -2 ? freeBefore : position, currentDeviceRate(), out, numOutputs, n);
+    // Counted after the pull: a finalize that has seen two more epochs
+    // knows the block that was in flight when it cleared activeCapture
+    // has fully passed through here.
+    callbackEpoch.fetch_add (1);
+
+    const int channel = captureChannel.load();
+    const float* input = (in != nullptr && channel >= 0 && channel < numInputs) ? in[channel] : nullptr;
+    if (input != nullptr)
+    {
+        float peak = 0.0f;
+        for (int i = 0; i < n; ++i)
+            peak = std::max (peak, std::fabs (input[i]));
+        // One writer (this thread); status exchanges it back to zero.
+        if (peak > inputPeak.load())
+            inputPeak.store (peak);
+    }
+
+    auto* target = activeCapture.load();
+    if (target == nullptr && captureLoop.load() && captureStartRequested.load())
+    {
+        // A pass began with no standby ready and was skipped; the next
+        // standby takes over at the next block, a block late.
+        target = standbyCapture.exchange (nullptr);
+        if (target != nullptr)
+            activeCapture = target;
+    }
+    if (target == nullptr)
+        return;
+    int from = 0; // the first frame of this block the take includes
+    if (captureStartRequested.load())
+    {
+        // A missed live lock made this block silence with no position to
+        // latch; the take starts on the next block instead, so the latch
+        // and the first pushed samples always describe the same instant.
+        if (position == -1)
+            return;
+        const juce::int64 here = position == -2 ? freeBefore : position;
+        const juce::int64 startAt = captureStartAt.load();
+        if (startAt >= 0)
+        {
+            // A pre-rolled take (count-in) waits for its position, and
+            // begins mid-block when the position falls inside this one,
+            // so started_at_samples is exactly what was asked for.
+            if (here + n <= startAt)
+                return;
+            from = (int) std::max<juce::int64> (0, startAt - here);
+        }
+        captureStartRequested = false;
+        target->setStartedAt (here + from);
+        captureStarted = true;
+    }
+    if (! captureStarted.load())
+        return;
+    // Punch-out (recording.md §10.4): the take ends on `until` exactly,
+    // mid-block. Under a loop take the same frame begins the next pass
+    // — the wrap in pullAudio put the rest of this block at the region's
+    // start — so the standby transaction takes over inside this block
+    // and not one sample is lost between passes.
+    const juce::int64 untilAt = captureUntil.load();
+    const juce::int64 here = position == -2 ? freeBefore : position;
+    int cut = n;
+    bool ending = false;
+    if (untilAt >= 0 && position >= 0 && here + n > untilAt)
+    {
+        cut = (int) std::max<juce::int64> (from, untilAt - here);
+        ending = true;
+    }
+    const float* source = input != nullptr ? input : ((int) silence.size() >= n ? silence.data() : nullptr);
+    if (source == nullptr)
+        return;
+    if (cut > from)
+        target->push (source + from, cut - from);
+    if (! ending)
+        return;
+    if (captureDone.load())
+    {
+        // The heartbeat has not serviced the last pass yet (a region
+        // shorter than its tick): this pass is lost, the count says so.
+        activeCapture = nullptr;
+        captureStarted = false;
+        captureMissed.fetch_add (1);
+        return;
+    }
+    if (captureLoop.load())
+    {
+        auto* next = standbyCapture.exchange (nullptr);
+        activeCapture = next;
+        if (next != nullptr)
+        {
+            next->setStartedAt (captureStartAt.load());
+            if (n > cut)
+                next->push (source + cut, n - cut);
+        }
+        else
+        {
+            captureStarted = false;
+            captureStartRequested = true;
+            captureMissed.fetch_add (1);
+        }
+    }
+    else
+    {
+        activeCapture = nullptr;
+        captureStarted = false;
+    }
+    captureDone = true;
+}
+
+void Player::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                               int numInputChannels,
                                                float* const* outputChannelData,
                                                int numOutputChannels,
                                                int numSamples,
                                                const juce::AudioIODeviceCallbackContext&)
 {
-    pullAudio (outputChannelData, numOutputChannels, numSamples);
+    processBlock (inputChannelData, numInputChannels, outputChannelData, numOutputChannels, numSamples);
 }
 
 void Player::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     transport.prepareToPlay (device->getCurrentBufferSizeSamples(), device->getCurrentSampleRate());
+    if ((int) silence.size() < device->getCurrentBufferSizeSamples())
+        silence.assign ((size_t) device->getCurrentBufferSizeSamples(), 0.0f);
     // A device start is where a rate change becomes real (hot-plug,
     // default-follow, an explicit selection): rebuild the delivery
     // conversion against the rate the callback is about to run at.
@@ -759,4 +1031,447 @@ void Player::audioDeviceAboutToStart (juce::AudioIODevice* device)
 void Player::audioDeviceStopped()
 {
     transport.releaseResources();
+}
+
+// ---- Recording (recording.md §5–6) ----------------------------------------
+
+juce::var Player::arm (const juce::String& track, const juce::String& device, int input)
+{
+    auto result = obj();
+    auto fail = [&] (const juce::String& error)
+    {
+        result->setProperty ("error", error);
+        return juce::var (result.get());
+    };
+    if (capture != nullptr)
+        return fail ("cannot re-arm while recording (stop first)");
+    if (input < 1)
+        return fail ("input channels count from 1");
+
+    juce::String name = device;
+    int channels = 0;
+    int inputLatency = 0;
+    int outputLatency = 0;
+    if (nullMode)
+    {
+        if (device.isNotEmpty() && device != "null")
+            return fail ("no devices in null-output mode");
+        channels = 2;
+        if (input > channels)
+            return fail ("the null input has 2 channels");
+        name = "null";
+        // The clock presents the named channel as the one active input,
+        // exactly as a real duplex open would, so the tap reads index 0
+        // in both modes.
+        nullInputChannel = input;
+        captureChannel = 0;
+    }
+    else
+    {
+        auto* type = deviceManager.getCurrentDeviceTypeObject();
+        if (type == nullptr)
+            return fail ("no audio device type");
+        type->scanForDevices();
+        auto names = type->getDeviceNames (true);
+        if (names.isEmpty())
+            return fail ("no input devices");
+        if (name.isEmpty())
+            name = names[juce::jmax (0, type->getDefaultDeviceIndex (true))];
+        if (! names.contains (name))
+            return fail ("unknown input device: " + name);
+
+        // The duplex open (recording.md §5): the same device manager,
+        // now with one input channel active. Playback-only sessions
+        // never reach here, which is what keeps the microphone prompt
+        // for the first arm rather than the first play. A failure puts
+        // the previous setup back, so a bad arm leaves playback as it
+        // was.
+        const auto previous = deviceManager.getAudioDeviceSetup();
+        auto setup = previous;
+        setup.inputDeviceName = name;
+        setup.useDefaultInputChannels = false;
+        setup.inputChannels.clear();
+        setup.inputChannels.setBit (input - 1);
+        if (auto error = deviceManager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        {
+            deviceManager.setAudioDeviceSetup (previous, true);
+            return fail (error);
+        }
+        auto* opened = deviceManager.getCurrentAudioDevice();
+        if (opened == nullptr)
+        {
+            deviceManager.setAudioDeviceSetup (previous, true);
+            return fail ("the device did not open with an input");
+        }
+        channels = opened->getInputChannelNames().size();
+        // JUCE clears a channel bit the device does not have rather than
+        // erroring, so the callback would simply arrive with no input.
+        if (input > channels || ! opened->getActiveInputChannels()[input - 1])
+        {
+            deviceManager.setAudioDeviceSetup (previous, true);
+            return fail (name + " has " + juce::String (channels) + " input channel"
+                         + (channels == 1 ? "" : "s") + "; input " + juce::String (input)
+                         + " does not exist");
+        }
+        // The callback's input array holds active channels only, and
+        // exactly one is active.
+        captureChannel = 0;
+        inputLatency = opened->getInputLatencyInSamples();
+        outputLatency = opened->getOutputLatencyInSamples();
+    }
+
+    armedTrack = track;
+    armedDevice = name;
+    armedInput = input;
+    inputPeak = 0.0f;
+    freeClock = 0;
+    armed = true;
+
+    result->setProperty ("device", name);
+    result->setProperty ("input", input);
+    result->setProperty ("channels", channels);
+    result->setProperty ("sample_rate", currentDeviceRate());
+    result->setProperty ("input_latency", inputLatency);
+    result->setProperty ("output_latency", outputLatency);
+    return juce::var (result.get());
+}
+
+juce::String Player::disarm()
+{
+    if (capture != nullptr)
+        return "cannot disarm while recording (stop first)";
+    if (! armed.load())
+        return {};
+    armed = false;
+    if (! nullMode)
+    {
+        // Back to the output-only open playback has always had; the
+        // microphone is released with it.
+        auto setup = deviceManager.getAudioDeviceSetup();
+        setup.inputDeviceName.clear();
+        setup.inputChannels.clear();
+        setup.useDefaultInputChannels = true;
+        if (auto error = deviceManager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+            return error;
+    }
+    armedTrack.clear();
+    armedDevice.clear();
+    armedInput = 0;
+    return {};
+}
+
+std::unique_ptr<field::Capture> Player::openCapture()
+{
+    field::Capture::Facts facts;
+    facts.track = armedTrack;
+    facts.device = armedDevice;
+    facts.input = armedInput;
+    // The take is at the device's rate — the bytes are what the
+    // converter produced (recording.md §3) — while started_at_samples is
+    // on the bed's timeline, so both rates are recorded.
+    facts.sampleRate = currentDeviceRate();
+    facts.timelineRate = liveSession != nullptr ? (double) liveRate : fileSampleRate;
+    facts.song = liveSession != nullptr ? liveSong : juce::String();
+    facts.source = liveSession == nullptr ? loadedPath : juce::String();
+    if (! nullMode)
+        if (auto* device = deviceManager.getCurrentAudioDevice())
+        {
+            facts.inputLatency = device->getInputLatencyInSamples();
+            facts.outputLatency = device->getOutputLatencyInSamples();
+        }
+    facts.daemonVersion = field::daemonVersion;
+    return std::make_unique<field::Capture> (juce::File::getCurrentWorkingDirectory(), facts);
+}
+
+juce::var Player::record (const juce::var& at, const juce::var& start, const juce::var& until, bool loop)
+{
+    auto result = obj();
+    auto fail = [&] (const juce::String& error)
+    {
+        result->setProperty ("error", error);
+        return juce::var (result.get());
+    };
+    if (! armed.load())
+        return fail ("not armed (arm an input first)");
+    if (capture != nullptr)
+        return fail ("already recording");
+
+    const bool bed = liveSession != nullptr || readerSource != nullptr;
+    const bool preRoll = ! start.isVoid();
+    const bool punchOut = ! until.isVoid();
+    if (punchOut)
+    {
+        if (at.isVoid())
+            return fail ("record with until needs at — where the take begins");
+        if (! until.isInt() && ! until.isInt64() && ! until.isDouble())
+            return fail ("record needs a sample number for until");
+        if ((juce::int64) until <= (juce::int64) at)
+            return fail ("until must be after at");
+    }
+    if (loop)
+    {
+        if (! punchOut)
+            return fail ("a loop take needs until — the region is [at, until)");
+        if (liveSession == nullptr)
+            return fail ("loop takes need a live session (field play <song>); a file bed loops only whole");
+        // The region is the take's definition: the session loops it and
+        // every wrap ends one pass and begins the next.
+        {
+            const juce::ScopedLock guard (liveLock);
+            try
+            {
+                liveSession->setLoopRegion ((juce::int64) at, (juce::int64) until);
+            }
+            catch (const std::exception& e)
+            {
+                return fail (e.what());
+            }
+        }
+    }
+    if (preRoll)
+    {
+        if (at.isVoid())
+            return fail ("record with start needs at — the position the take begins");
+        if (! start.isInt() && ! start.isInt64() && ! start.isDouble())
+            return fail ("record needs a sample number for start");
+        if ((juce::int64) start > (juce::int64) at)
+            return fail ("start must not be after at");
+    }
+    if (! at.isVoid())
+    {
+        if (! bed)
+            return fail ("nothing loaded to record against; omit `at` for a free-running take");
+        if (! at.isInt() && ! at.isInt64() && ! at.isDouble())
+            return fail ("record needs a sample number for at");
+        if (auto error = locate (preRoll ? (juce::int64) start : (juce::int64) at); error.isNotEmpty())
+            return fail (error);
+    }
+    try
+    {
+        capture = openCapture();
+        // The next pass's transaction is opened now, so the wrap finds
+        // it ready; serviceCapture opens each one after that.
+        if (loop)
+            standby = openCapture();
+    }
+    catch (const std::exception& e)
+    {
+        capture.reset();
+        standby.reset();
+        return fail (e.what());
+    }
+
+    captureStarted = false;
+    captureDone = false;
+    captureMissed = 0;
+    loopTakes = 0;
+    // An `at` is where the take begins, exactly: the callback latches on
+    // that sample whether the transport pre-rolls to it, starts on it
+    // (the request is armed before play, so the first rolling block is
+    // the one), or is already rolling toward it. Without one, the next
+    // block, wherever it falls.
+    captureStartAt = at.isVoid() ? -1 : (juce::int64) at;
+    captureUntil = punchOut ? (juce::int64) until : -1;
+    captureLoop = loop;
+    standbyCapture = standby.get();
+    activeCapture = capture.get();
+    captureStartRequested = true;
+    if (bed && transportState() != "playing")
+        if (auto error = play(); error.isNotEmpty())
+        {
+            activeCapture = nullptr;
+            standbyCapture = nullptr;
+            captureStartRequested = false;
+            capture.reset();
+            standby.reset();
+            return fail (error);
+        }
+    // Wait for the callback to latch the start — a block or two, unless
+    // the device is not running, in which case the response reports -1
+    // and the manifest fills in when it does. A pre-rolled take is
+    // waiting for its position by design, so no wait: -1 now, and status
+    // says pending until the callback gets there.
+    for (int i = 0; ! preRoll && i < 300 && ! captureStarted.load(); ++i)
+        std::this_thread::sleep_for (std::chrono::milliseconds (1));
+
+    result->setProperty ("transaction", capture->id());
+    result->setProperty ("file", ".field/recording/" + capture->id() + "/take.wav");
+    result->setProperty ("started_at_samples", capture->startedAt());
+    return juce::var (result.get());
+}
+
+juce::var Player::stopRecording()
+{
+    // A pass the callback already ended is finalized on its own terms
+    // first, so its manifest reaches onTake before the stop's.
+    serviceCapture();
+    if (capture == nullptr)
+        return {};
+    // Detach first, then wait out the callback: the block that read
+    // activeCapture before the store may still be pushing, and the epoch
+    // counter advances only after a block's push is done. Two epochs
+    // covers that block and one more; the timeout covers a device that
+    // is not running at all, where nothing can be pushing.
+    const bool wasLoop = captureLoop.load();
+    activeCapture = nullptr;
+    standbyCapture = nullptr;
+    captureStartRequested = false;
+    captureStartAt = -1;
+    captureUntil = -1;
+    captureLoop = false;
+    const auto epoch = callbackEpoch.load();
+    for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 2; ++i)
+        std::this_thread::sleep_for (std::chrono::milliseconds (1));
+    captureStarted = false;
+    captureDone = false;
+
+    juce::var manifest;
+    try
+    {
+        manifest = capture->finalize();
+    }
+    catch (const std::exception& e)
+    {
+        auto o = obj();
+        o->setProperty ("error", juce::String (e.what()));
+        manifest = juce::var (o.get());
+    }
+    capture.reset();
+    // A standby that never took a sample is not a take.
+    if (standby != nullptr)
+    {
+        standby->discard();
+        standby.reset();
+    }
+    if (wasLoop && liveSession != nullptr)
+    {
+        // The region was the take's; the session stops looping it.
+        const juce::ScopedLock guard (liveLock);
+        liveSession->setLoopRegion (0, 0);
+    }
+    loopTakes = 0;
+    if (onTake && manifest.isObject() && ! manifest.hasProperty ("error"))
+        onTake (manifest);
+    // Default-follow waited for the take (refreshAudioDevice); catch up.
+    refreshAudioDevice();
+    return manifest;
+}
+
+void Player::serviceCapture()
+{
+    if (! captureDone.load())
+        return;
+    // The callback ended `capture` at its until and, under a loop, moved
+    // on to the standby; the message thread owns the pointers, so the
+    // hand-over of ownership happens here, after the fact.
+    finished = std::move (capture);
+    if (captureLoop.load())
+    {
+        if (standbyCapture.load() == nullptr && standby != nullptr)
+        {
+            capture = std::move (standby); // the callback took it
+            ++loopTakes;
+        }
+    }
+    captureDone = false;
+    juce::var manifest;
+    try
+    {
+        manifest = finished->finalize();
+    }
+    catch (const std::exception& e)
+    {
+        auto o = obj();
+        o->setProperty ("error", juce::String (e.what()));
+        manifest = juce::var (o.get());
+    }
+    finished.reset();
+    if (captureLoop.load())
+    {
+        // The next standby, ready well before the next wrap.
+        if (standby == nullptr)
+        {
+            try
+            {
+                standby = openCapture();
+                standbyCapture = standby.get();
+            }
+            catch (const std::exception&)
+            {
+                standby.reset();
+            }
+        }
+    }
+    else
+    {
+        captureStartAt = -1;
+        captureUntil = -1;
+        captureStarted = false;
+    }
+    if (onTake && manifest.isObject() && ! manifest.hasProperty ("error"))
+        onTake (manifest);
+}
+
+juce::String Player::setLoopRegion (juce::int64 from, juce::int64 to)
+{
+    if (liveSession == nullptr)
+        return "a loop region needs a live session (field play <song>)";
+    if (capture != nullptr)
+        return "cannot change the loop while recording (stop first)";
+    const juce::ScopedLock guard (liveLock);
+    try
+    {
+        // A region open at the end runs to the content's extent.
+        liveSession->setLoopRegion (from, to < 0 ? liveSession->extentSamples() : to);
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+    return {};
+}
+
+juce::String Player::recordState() const
+{
+    if (capture != nullptr)
+        return "recording";
+    return armed.load() ? "armed" : "idle";
+}
+
+juce::var Player::recordings() const
+{
+    return field::Capture::list (juce::File::getCurrentWorkingDirectory(),
+                                 capture != nullptr ? capture->id() : juce::String());
+}
+
+juce::var Player::recover (const juce::String& id) const
+{
+    auto result = obj();
+    if (capture != nullptr && capture->id() == id)
+    {
+        result->setProperty ("error", id + " is still being recorded");
+        return juce::var (result.get());
+    }
+    try
+    {
+        return field::Capture::recover (juce::File::getCurrentWorkingDirectory(), id);
+    }
+    catch (const std::exception& e)
+    {
+        result->setProperty ("error", juce::String (e.what()));
+        return juce::var (result.get());
+    }
+}
+
+juce::String Player::setClick (const juce::var& schedule)
+{
+    try
+    {
+        click.setSchedule (schedule);
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+    return {};
 }
