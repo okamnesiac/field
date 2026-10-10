@@ -10,7 +10,7 @@ import { AudiodClient } from '../audiod/client.js';
 import type { CompiledSession } from '../graph/live.js';
 import { compileSession } from '../graph/live.js';
 import { sha256Text } from '../hash.js';
-import { loadProject } from '../model/project.js';
+import { formatDiagnostic, loadProject, type Diagnostic, type LoadedProject } from '../model/project.js';
 import {
   applyEdit,
   applyInsertAdd,
@@ -389,6 +389,33 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // hands back, named so the helpers below can take it whole.
   type Resolved = NonNullable<Awaited<ReturnType<typeof resolvePlacement>>>;
 
+  // Every write this view makes goes through here. The edit functions
+  // keep one file in the spelling a person would type, but only the
+  // loader knows the rules that span files: no displacement on a
+  // receiver's path, one render name per generator entry, fades inside
+  // their window. So the edited text is loaded as it would be, and a
+  // write that would add an error is refused with that error rather
+  // than turning the song red with only a hand edit to undo it. Errors
+  // the project already had do not block.
+  const writeChecked = (
+    socket: WebSocket,
+    project: LoadedProject,
+    absolute: string,
+    text: string,
+  ): boolean => {
+    const isError = (d: Diagnostic) => d.severity !== 'warning';
+    const before = new Set(project.diagnostics.filter(isError).map(formatDiagnostic));
+    const added = loadProject(root, { override: { path: absolute, text } })
+      .diagnostics.filter(isError)
+      .find((d) => !before.has(formatDiagnostic(d)));
+    if (added !== undefined) {
+      socket.send(JSON.stringify({ type: 'error', message: `not written: ${added.message}` }));
+      return false;
+    }
+    writeFileSync(absolute, text);
+    return true;
+  };
+
   // The owner's own time, falling back to the song's — the same rule the
   // timeline renders by (nested-tracks.md §13), so a clip lands exactly
   // where the drag showed it.
@@ -434,13 +461,13 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   const handleEdit = async (socket: WebSocket, msg: z.infer<typeof editSchema>) => {
     const resolved = await resolvePlacement(socket, msg);
     if (resolved === null) return;
-    const { absolute, raw } = resolved;
+    const { project, absolute, raw } = resolved;
     const result = applyEdit(raw, msg.entry, msg.set);
     if (!result.ok) {
       socket.send(JSON.stringify({ type: 'error', message: result.message }));
       return;
     }
-    writeFileSync(absolute, result.text);
+    if (!writeChecked(socket, project, absolute, result.text)) return;
     // No daemon push here: the watch loop owns carrying file edits into
     // the session, for the UI exactly as for a hand edit in an editor.
     //
@@ -472,7 +499,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       socket.send(JSON.stringify({ type: 'error', message: result.message }));
       return;
     }
-    writeFileSync(absolute, result.text);
+    if (!writeChecked(socket, resolved.project, absolute, result.text)) return;
     await pushSnapshot();
   };
 
@@ -504,7 +531,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       if (result.refresh) await pushSnapshot();
       return;
     }
-    writeFileSync(absolute, result.text);
+    if (!writeChecked(socket, resolved.project, absolute, result.text)) return;
     await pushSnapshot();
   };
 
@@ -546,7 +573,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       if (result.refresh) await pushSnapshot();
       return;
     }
-    writeFileSync(absolute, result.text);
+    if (!writeChecked(socket, resolved.project, absolute, result.text)) return;
     await pushSnapshot();
   };
 
@@ -558,7 +585,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     socket: WebSocket,
     msg: { file: string; sha256: string },
   ) => {
-    const { song } = mainFile();
+    const { project, song } = mainFile();
     const owner = song.tracks.find((t) => t.path === msg.file);
     if (owner === undefined) {
       socket.send(JSON.stringify({ type: 'error', message: `no such track file: ${msg.file}` }));
@@ -571,14 +598,14 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       await pushSnapshot();
       return null;
     }
-    return { song, owner, absolute, raw };
+    return { project, song, owner, absolute, raw };
   };
 
   // The shared tail of every insert op: run the pure edit against the
   // resolved file, report failure, or write and push.
   const runInsertOp = async (
     socket: WebSocket,
-    absolute: string,
+    { project, absolute }: { project: LoadedProject; absolute: string },
     result: ReturnType<typeof applyInsertRemove>,
   ) => {
     if (!result.ok) {
@@ -586,26 +613,26 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       if (result.refresh) await pushSnapshot();
       return;
     }
-    writeFileSync(absolute, result.text);
+    if (!writeChecked(socket, project, absolute, result.text)) return;
     await pushSnapshot();
   };
 
   const handleInsertAdd = async (socket: WebSocket, msg: z.infer<typeof insertAddSchema>) => {
     const resolved = await resolveTrackFile(socket, msg);
     if (resolved === null) return;
-    await runInsertOp(socket, resolved.absolute, applyInsertAdd(resolved.raw, msg.effect));
+    await runInsertOp(socket, resolved, applyInsertAdd(resolved.raw, msg.effect));
   };
 
   const handleInsertEdit = async (socket: WebSocket, msg: z.infer<typeof insertEditSchema>) => {
     const resolved = await resolveTrackFile(socket, msg);
     if (resolved === null) return;
-    await runInsertOp(socket, resolved.absolute, applyInsertEdit(resolved.raw, msg.entry, msg.set));
+    await runInsertOp(socket, resolved, applyInsertEdit(resolved.raw, msg.entry, msg.set));
   };
 
   const handleInsertRemove = async (socket: WebSocket, msg: z.infer<typeof insertRemoveSchema>) => {
     const resolved = await resolveTrackFile(socket, msg);
     if (resolved === null) return;
-    await runInsertOp(socket, resolved.absolute, applyInsertRemove(resolved.raw, msg.entry));
+    await runInsertOp(socket, resolved, applyInsertRemove(resolved.raw, msg.entry));
   };
 
   const handle = async (socket: WebSocket, raw: string) => {

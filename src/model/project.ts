@@ -147,7 +147,7 @@ function loadFile<T>(
   const path = projectPath(project.root, absPath);
   let raw: string;
   try {
-    raw = readFileSync(absPath, 'utf8');
+    raw = pendingOverride?.path === resolve(absPath) ? pendingOverride.text : readFileSync(absPath, 'utf8');
   } catch (err) {
     project.diagnostics.push({ file: path, message: `unreadable: ${(err as Error).message}` });
     return undefined;
@@ -295,7 +295,25 @@ export function committedFileResolver(
   };
 }
 
-export function loadProject(root: string): LoadedProject {
+// A file's text as it would be, for one load: `field ui` asks whether an
+// edit leaves the project valid before it writes the edit, so the file
+// on disk never holds a state the loader refuses. Set only for the
+// duration of one synchronous loadProject call.
+let pendingOverride: { path: string; text: string } | undefined;
+
+export function loadProject(
+  root: string,
+  options: { override?: { path: string; text: string } } = {},
+): LoadedProject {
+  pendingOverride = options.override && { path: resolve(options.override.path), text: options.override.text };
+  try {
+    return loadProjectFiles(root);
+  } finally {
+    pendingOverride = undefined;
+  }
+}
+
+function loadProjectFiles(root: string): LoadedProject {
   const project: LoadedProject = { root: resolve(root), songs: [], diagnostics: [] };
 
   project.manifest = loadFile(project, join(project.root, PROJECT_MANIFEST), {
