@@ -81,6 +81,14 @@ jobs:
         with:
           path: native/audiod/build
           key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      # `build:native` bounds the build to four jobs (package.json), the
+      # runner's core count. Before the bound it passed a bare `-j`, which
+      # Make reads as unlimited, so a cold cache — every run after a week
+      # of quiet, because GitHub evicts unused caches — compiled every
+      # JUCE translation unit at once. On 2026-09-06 that killed cc1plus
+      # and took the runner VM down with it, twice: on main and on a
+      # docs-only branch. A killed job never saves the cache, so the
+      # failure fed itself until this bound.
       - run: pnpm build:native
       # Before `pnpm test`, not after: src/workers/lockfile.test.ts asks
       # real uv how `--locked` differs from `--frozen`, and skips without

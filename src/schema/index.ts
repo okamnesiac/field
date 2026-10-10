@@ -11,4 +11,5 @@ export * from './song.js';
 export * from './assets.js';
 export * from './effects.js';
 export * from './generative.js';
+export * from './record.js';
 export * from './track.js';

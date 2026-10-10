@@ -1,8 +1,8 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tryGit } from '../git.js';
 import { packageVersion } from '../packageVersion.js';
 import { socketPathFor } from '../socketPath.js';
 import {
@@ -12,6 +12,9 @@ import {
 } from '../audiod/protocol.js';
 import { SETUP_SPECS } from './generate.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
+import { defaultCredentialStore, resolveToken, type CredentialStore, type TokenSource } from '../remote/credentials.js';
+import { resolveProjectRemote } from '../remote/origin.js';
+import { DEFAULT_REMOTE } from '../remote/protocol.js';
 
 // `field --version`: which build is running, and which build each daemon is
 // running. Those are different questions and the second one is the one
@@ -49,6 +52,17 @@ export interface VersionReport {
   };
   workerProtocol: number;
   daemons: DaemonReport[];
+  // Which remote this project talks to and whether a token is held for
+  // it (remote.md §3.1) — held, never printed. `off` is FIELD_REMOTE=off.
+  remote: RemoteReport;
+}
+
+export interface RemoteReport {
+  api: string;
+  // Where the URL came from: the project's origin, the FIELD_REMOTE
+  // override, or the default site because neither said anything.
+  source: 'origin' | 'FIELD_REMOTE' | 'default' | 'off';
+  token?: TokenSource | undefined; // absent: not logged in
 }
 
 function packageRoot(): string {
@@ -69,10 +83,7 @@ interface BuildIdentity {
 }
 
 function liveIdentity(): BuildIdentity {
-  const git = (args: string[]): string | undefined => {
-    const r = spawnSync('git', ['-C', packageRoot(), ...args], { encoding: 'utf8' });
-    return r.status === 0 ? r.stdout.trim() : undefined;
-  };
+  const git = (args: string[]): string | undefined => tryGit(args, packageRoot());
   // Full sha, compared exactly — --short lengthens as the repo grows,
   // so equal objects can compare unequal as strings (Bugbot on #121).
   const commit = git(['rev-parse', 'HEAD']);
@@ -214,7 +225,29 @@ interface Hello {
   daemon?: string | undefined;
 }
 
-export async function versionReport(root: string): Promise<VersionReport> {
+// The credential store is injected so a test never reads the real
+// keychain (remote.md §7); the default is the platform's.
+export interface VersionDeps {
+  store?: CredentialStore | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+}
+
+export function remoteReport(root: string, deps: VersionDeps = {}): RemoteReport {
+  const env = deps.env ?? process.env;
+  const resolution = resolveProjectRemote(root, env);
+  if (resolution.kind === 'off') return { api: 'off', source: 'off' };
+  const override = env['FIELD_REMOTE'];
+  const [api, source]: [string, RemoteReport['source']] =
+    resolution.kind === 'remote'
+      ? [resolution.remote.api, override ? 'FIELD_REMOTE' : 'origin']
+      : override
+        ? [override.replace(/\/+$/, ''), 'FIELD_REMOTE']
+        : [DEFAULT_REMOTE, 'default'];
+  const token = resolveToken(api, deps.store ?? defaultCredentialStore(), env)?.source;
+  return { api, source, ...(token !== undefined ? { token } : {}) };
+}
+
+export async function versionReport(root: string, deps: VersionDeps = {}): Promise<VersionReport> {
   const daemons: DaemonReport[] = [];
 
   const audiod = await helloIfRunning(socketPathFor(root, AUDIOD_SOCKET));
@@ -255,7 +288,26 @@ export async function versionReport(root: string): Promise<VersionReport> {
     });
   }
 
-  return { cli: { version: packageVersion(), ...buildIdentity() }, workerProtocol: WORKER_PROTOCOL_VERSION, daemons };
+  return {
+    cli: { version: packageVersion(), ...buildIdentity() },
+    workerProtocol: WORKER_PROTOCOL_VERSION,
+    daemons,
+    remote: remoteReport(root, deps),
+  };
+}
+
+// One line: the remote, where the URL came from, and whether a token is
+// held for it. The token itself never prints — this answers "am I logged
+// in, and to what", not "what is my token".
+export function formatRemoteReport(remote: RemoteReport): string {
+  if (remote.source === 'off') return 'remote        off (FIELD_REMOTE=off)';
+  const held =
+    remote.token === undefined
+      ? 'not logged in'
+      : remote.token === 'FIELD_TOKEN'
+        ? 'token from FIELD_TOKEN'
+        : `token in ${remote.token}`;
+  return `remote        ${remote.api} (${remote.source})  ${held}`;
 }
 
 export function formatVersionReport(report: VersionReport, root: string): string {
@@ -282,6 +334,7 @@ export function formatVersionReport(report: VersionReport, root: string): string
     : 'not a git checkout';
   lines.push(`field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);
+  lines.push(formatRemoteReport(report.remote));
   lines.push('');
   const where = relative(process.cwd(), root) || '.';
   lines.push(`daemons in ${where}`);

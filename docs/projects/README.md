@@ -1,139 +1,76 @@
-# Projects
+# Project plans
 
-Work in progress lives here, in git, next to the code it describes.
+This directory follows the [Projector](https://github.com/ninjudd/projector)
+convention. Store each project in a permanent directory under `docs/projects/`.
+Use a lowercase `readme.md` entry point with YAML frontmatter carrying two
+fields: `status: draft|ready|in-progress|completed` records the lifecycle, and
+`priority: now|next|later` records when the work should happen. Priority is
+required unless the status is `completed`. Nest a project directory inside
+another project when the work is a subproject. Keep supplemental files beside
+the entry point that owns them.
 
-## How it works
+Status and priority changes edit frontmatter. Do not create shared queue
+files, status or priority directories, or symlinks, and do not move a project
+when its status or priority changes. Number plan sections and never renumber
+them after another document or code comment cites them.
 
-One directory of documents, and three short lists that point into it.
+Run `project list` to browse projects and `project check` to validate the
+tree. Both commands come from the Projector CLI:
 
-| | What it is |
-| --- | --- |
-| [Now](now.md) | What's actively being worked on. |
-| [Next](next.md) | Coming up, not started yet. |
-| [Later](later.md) | Wanted, nobody has committed to it. |
-| [All](all) | Every project document, whatever its state. Nothing here ever moves. |
-
-**A list entry is one line.** Name the work, link its plan if it has one, and
-add at most a sentence of why it matters. The moment the line wants a second
-sentence it wants a document instead — that is the whole trigger for writing
-one, and the lists stay readable at a glance because of it. A line without a
-document is fine and common; a paragraph sitting in a list is not.
-
-Work flows down the lists as it gets picked up, [Later](later.md) →
-[Next](next.md) → [Now](now.md), and off the end when it's done. It flows back
-up too: an item that turns out bigger than expected, or loses its priority,
-moves to [Later](later.md) whole, plan and all. A project is past by **not
-being on any of the three lists**. There is no `done/` directory, so there is
-nothing to move when work finishes — you delete a line from `now.md`. That is
-deliberate: a rename churns every reference to the document, and it invites
-moving things the moment code merges, which is exactly when a project is most
-likely to still need attention.
-
-Because documents never move, `docs/projects/all/<name>.md` can be linked from
-code comments, other docs, or a pull request and trusted to keep working.
-
-## Sections are part of the interface
-
-Plans are cited by section — `project-core.md §3` — because the citation
-states the behaviour and the section holds the reasoning behind it. So
-renumbering or removing a section breaks references that no compiler will
-catch. Add sections at the end, or grep for the citation before you renumber:
-
-```
-grep -rn "project-core.md §" docs src
+```sh
+pipx install git+https://github.com/ninjudd/projector.git
 ```
 
-## Starting and finishing
+## Conventions this repository adds
 
-Starting is a line in `now.md`. It does not need a document — name the work,
-and write the plan later, or never if it stays small enough to describe in a
-line.
+Open a plan with a `# Title` and a `**Goal:**` line that states the outcome
+in a sentence or two. A reader who stops after the goal should still know what
+the work delivers.
 
-Finishing is deleting that line, when the work is genuinely over: built,
-usable in a real session, and no longer something you would be surprised to
-find broken. On this project that is usually **after real music has been made
-with it** — a phase that merges but that no session has exercised still
-belongs in `now.md`. There is no cost to a line sitting there a while longer,
-and a real cost to the list quietly becoming things that are mostly finished.
+Record decisions with the alternatives they beat. Mark a settled one
+`(DECIDED)` and keep the rejected options and the reason each lost. Half of
+what these plans are read for later is why the obvious cheaper thing was not
+done, and a plan that states only the outcome cannot answer that.
 
-Nothing is deleted from `all/`. It grows forever, which is fine — greppable
-when you need it and invisible when you don't, and that is the whole advantage
-over a backlog that greets you every morning.
+Correct the plan when review proves it wrong. A finding against a plan gets
+fixed in the plan, noting what it replaced, the same as a finding against
+code.
 
-## A file, or a folder
+Cite a plan by section using the project name and a `.md` suffix, for example
+`project-core.md §3.2`, which names
+`docs/projects/project-core/readme.md`. The shorthand predates the move to
+permanent directories and survives it deliberately: several hundred citations
+carry it, most of them in code comments rather than here, and rewriting them
+to spell out `/readme.md` would change every one of those files to say what
+the short form already says. Write a link beside the citation when a reader
+needs to follow it. Code comments carry these citations, so a renumbered
+section breaks references that no compiler catches.
 
-Default to a single file, `all/<name>.md`. Promote to a folder when a project
-genuinely outgrows one document: multiple phases in flight, a design that
-needs its own space, decisions worth logging separately. Promotion is one
-`git mv` within `all/`, so there is no reason to decide up front. A folder's
-entry point is `overview.md`.
+A project with no plan yet is still a project. Give it a directory and a short
+`readme.md` that records the idea and why it matters, rather than a line in a
+shared list.
 
-## What goes in a document
+Shipping the code does not finish a project. A plan whose implementation has
+landed but which no real session has exercised stays `in-progress` at
+`priority: now`, and its `**Outcome:**` line states the condition that would
+close it. On this project that condition is usually that real music has been
+made with it. Mark the project `completed` when the condition is met, not when
+the last pull request merges.
 
-One line of YAML frontmatter, then a `# Title`, then a `**Goal:**` line:
+This is the one rule the move to Projector had to carry by hand. The old
+layout recorded it as membership of a `now.md` list, so a merged but unplayed
+project stayed visible by sitting there. Projector has no such list, and
+`priority` is not displayed for a completed project, so a project marked
+`completed` on merge would lose the distinction with nowhere to put it. Keeping
+the project open is what preserves it.
 
-```markdown
----
-status: Active
----
+## What does not go here
 
-# Offline effects
-
-**Goal:** three offline effects — `eq`, `limit`, `reverb` — as build rules ...
-```
-
-`status:` is one keyword from a fixed set, adopting triangle/app's set:
-`Draft` (written, implementation not started), `Active`
-(in progress), `Blocked` (waiting on a dependency or decision), `Stalled`
-(lost momentum, not formally dropped), `Shipped` (done; the document is now
-historical), `Superseded` (replaced by a newer document or approach),
-`Abandoned` (decided against; kept for the record), `Reference` (a standing
-document with no build lifecycle).
-
-The keyword is the only thing called status (decided 2026-08-10 — an
-earlier version of this file also required a prose `**Status:**` line,
-and two things claiming one name meant a paragraph here explaining which
-was real, with the second mostly restating the first). The story the old
-line carried — which PRs did the work, what is left, what a plan waits
-on — is still worth writing, as ordinary prose wherever the document
-wants it, dated where that helps. Existing `**Status:**` lines in past
-plans keep their stories; relabeling them is churn, not progress. Where
-prose and keyword disagree, the keyword is the state of record — a
-disagreement being a bug to fix, not a nuance to preserve.
-
-`Draft` is load-bearing: it declares the plan is not yet claiming to be
-executable, so open questions in a Draft plan do not block its pull requests
-from merging. The pull request that flips a plan out of Draft is the one
-making the readiness claim, and it answers for every question still open at
-that moment.
-
-A plan whose status is stale is worse than one with no status at all. No
-status sends a reader to the code; a wrong one sends them to the code only
-after they have believed it, and a plan is read precisely when nobody yet
-knows enough to catch the lie.
-
-Then write what the work needs. Two habits worth keeping:
-
-- **Record decisions with their alternatives.** `(DECIDED)` with the rejected
-  options and why beats a plan that only states the outcome. Half of what
-  these documents are read for later is why the obvious cheaper thing was not
-  done.
-- **Correct the plan when review proves it wrong.** A finding that lands on a
-  plan gets fixed in the plan, noting what it replaced, the same as a finding
-  against code.
-
-Not everything here is a plan. Post-mortems, decision logs, and reference
-notes belong in a project's document too, which is why the directory is `all/`
-and not `plans/`.
-
-## What doesn't go here
-
-How-it-works documentation stays in the [docs root](../):
-[overview](../README.md), [architecture](../architecture.md),
-[tracks](../tracks.md), [project model](../project-model.md),
-[build graph](../build-graph.md), [audio engine](../audio-engine.md). Those are living documents describing
-current design and behaviour. These are point-in-time execution artifacts:
-once the work has landed, the code and the docs root are the source of truth,
-and a finished project document is read for the *why* behind a design and the
-constraints it was built under. Knowledge that outlives the project belongs in
-the docs root, so don't rewrite a finished plan to match later reality.
+How-it-works documentation stays in the [docs root](../README.md):
+[architecture](../architecture.md), [tracks](../tracks.md),
+[project model](../project-model.md), [build graph](../build-graph.md), and
+[audio engine](../audio-engine.md). Those describe current design and
+behaviour. These plans are point-in-time execution artifacts, read afterwards
+for the *why* behind a design and the constraints it was built under.
+Knowledge that outlives the project belongs in the docs root, so do not
+rewrite a finished plan to match later reality.

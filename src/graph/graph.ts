@@ -17,11 +17,11 @@ import {
   type Label,
   type LabelPattern,
 } from '../labels.js';
-import { committedFileResolver, type LoadedProject } from '../model/project.js';
+import { chosenTake, committedFileResolver, type LoadedProject, type LoadedSong } from '../model/project.js';
 import type { Cable } from '../model/cables.js';
 import { generatorFor, type GeneratorSpec } from '../generators/index.js';
 import type { ResampleSpec } from '../generators/resample.js';
-import { entryRef, generatorName, planTrack } from '../generators/stem.js';
+import { entryRef, generatorName, placedWindow, planTrack } from '../generators/stem.js';
 import {
   indexStateBlobs,
   transportSegments,
@@ -29,7 +29,7 @@ import {
   type StateBlob,
 } from '../audio/plugins.js';
 import { TempoMap } from '../time/tempo.js';
-import type { Asset, Track } from '../schema/index.js';
+import type { Asset, InputEntry, Track } from '../schema/index.js';
 import { isHostedInsert } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
@@ -386,6 +386,29 @@ export function buildGraph(project: LoadedProject): Graph {
         // consumer's view of the track is minted.
         track = { ...track, inputs: track.inputs.filter((e) => !e.mute) };
         const rate = trackRate(track);
+        // A track plans in its own time (nested-tracks.md §13). The two
+        // timelines never have to be reconciled as maps: this stem's
+        // positions resolve to samples here, its parent's `at` resolves to
+        // samples under the parent's map, and the daemon sums by sample
+        // offset — so a 7/8 child inside a 4/4 parent is an addition, not
+        // a conversion. Across a rate boundary the addition holds, each
+        // side computed in its own rate (§13 as amended by multi-rate).
+        //
+        // The song's map when the track declares none — at the track's
+        // rate, because ticks project to samples differently at 96 kHz
+        // than at 48; a track at the song rate keeps the song's own
+        // map, so nothing that exists now changes key.
+        const local = track.time?.tempo
+          ? new TempoMap(track.time.tempo, rate)
+          : rate === songRate
+            ? tempoMap
+            : new TempoMap(songTempoEvents, rate);
+        // Record entries become windows over their chosen take before
+        // anything reads the inputs (recording.md §3): the take pins in
+        // the ledger, so downstream it is an `audio:` placement like any
+        // other, at the position it was sung. An entry with no chosen
+        // take contributes nothing — silence (§4).
+        const planned = withTakes(track, song, local, rate, sourceRate);
         // Rates convert at the placement (multi-rate.md decision 4): a
         // source arriving at another rate gets a resample node between it
         // and this stem, named for the source and the rate it becomes —
@@ -419,9 +442,9 @@ export function buildGraph(project: LoadedProject): Graph {
           // converted file stores rate/src as many of.
           convertBySource.set(raw, { ref: convertRef(name), scale: rate / src });
         };
-        for (const entry of track.inputs) {
+        for (const entry of planned.inputs) {
           if (entry.receive !== undefined) continue; // a cable is not a source here
-          ensureConvert(entryRef(entry, track.name));
+          ensureConvert(entryRef(entry, planned.name));
         }
         // The cables arriving here become plan inputs: the sender's stem
         // for a post tap, the tap node for pre — converted at the edge
@@ -431,23 +454,6 @@ export function buildGraph(project: LoadedProject): Graph {
           ensureConvert(raw);
           return { ref: raw, gainDb: cable.gainDb, arrivals: cable.arrivals };
         });
-        // A track plans in its own time (nested-tracks.md §13). The two
-        // timelines never have to be reconciled as maps: this stem's
-        // positions resolve to samples here, its parent's `at` resolves to
-        // samples under the parent's map, and the daemon sums by sample
-        // offset — so a 7/8 child inside a 4/4 parent is an addition, not
-        // a conversion. Across a rate boundary the addition holds, each
-        // side computed in its own rate (§13 as amended by multi-rate).
-        //
-        // The song's map when the track declares none — at the track's
-        // rate, because ticks project to samples differently at 96 kHz
-        // than at 48; a track at the song rate keeps the song's own
-        // map, so nothing that exists now changes key.
-        const local = track.time?.tempo
-          ? new TempoMap(track.time.tempo, rate)
-          : rate === songRate
-            ? tempoMap
-            : new TempoMap(songTempoEvents, rate);
         // Hosted inserts carry the track's resolved transport into their
         // keyed spec (plugin-hosting.md decision 13) and resolve state
         // refs against the blob pool. Computed only when a chain
@@ -464,7 +470,7 @@ export function buildGraph(project: LoadedProject): Graph {
               }
             : undefined;
         return planTrack(
-          withInserts ? track : { ...track, inserts: [] },
+          withInserts ? planned : { ...planned, inserts: [] },
           local,
           sha256BySource,
           framesBySource,
@@ -507,6 +513,49 @@ export function buildGraph(project: LoadedProject): Graph {
     }
   }
   return { nodes, ungenerated };
+}
+
+// A track with each `record:` entry replaced by the window its chosen
+// take fills (recording.md §3–§4), or dropped when nothing is chosen.
+// The take's row places it on this track's timeline: its first sample
+// sits at `started_at_samples`, the capture ran `latency` samples
+// behind, so the sound goes at their difference — added to the entry's
+// own window start, which is where the take's timeline zero was. A take
+// that started before the window (a negative placement) reads into its
+// source by that much instead, in the source's own samples, because
+// `source_offset` addresses the source (project-core.md §3.2) and the
+// edge conversion scales it. The result is an absolute `audio:` entry,
+// so nothing after this point knows recording exists.
+export function withTakes(
+  track: Track,
+  song: LoadedSong,
+  local: TempoMap,
+  trackRate: number,
+  sourceRate: (ref: string) => number | undefined,
+): Track {
+  if (!track.inputs.some((e) => e.record !== undefined)) return track;
+  const inputs = track.inputs.flatMap((entry): InputEntry[] => {
+    if (entry.record === undefined) return [entry];
+    const name = generatorName(entry, track.name);
+    const take = chosenTake(song.recordTakes.get(name)?.data);
+    if (take === undefined) return [];
+    const window = placedWindow(entry, local);
+    const at = window.start + take.started_at_samples - take.latency;
+    const takeRate = sourceRate(take.asset) ?? trackRate;
+    const readInto = at < 0 ? Math.round((-at * takeRate) / trackRate) : 0;
+    const { record: _record, ...placement } = entry;
+    return [
+      {
+        ...placement,
+        audio: take.asset,
+        anchor: 'absolute',
+        at: Math.max(0, at),
+        ...(window.duration !== undefined ? { duration: window.duration } : { duration: undefined }),
+        source_offset: entry.source_offset + readInto,
+      },
+    ];
+  });
+  return { ...track, inputs };
 }
 
 // The canonical spelling of a pattern, for error messages: with

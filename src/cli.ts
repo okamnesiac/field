@@ -15,12 +15,14 @@ import {
   parseExaggeration,
   parseExportBitDepth,
   parseExportRate,
+  parseCountIn,
+  parseInputChannel,
   parseSeed,
   parseVariantNumber,
   parseVariants,
   wantsVersion,
 } from './cliParsers.js';
-import { buildLabels, explainLabel, projectRelative, queryDeps } from './commands/build.js';
+import { buildLabels, explainLabel, projectRelative, queryDeps, remoteReads } from './commands/build.js';
 import { formatReach, rootNote } from './model/levels.js';
 import { formatCable } from './model/cables.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
@@ -95,6 +97,123 @@ program
     try {
       const root = init({ dir: process.cwd(), ...opts });
       process.stdout.write(`initialized Field project at ${root}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+// The remote verbs (remote.md §3). `login` and `logout` mint and forget a
+// token; `clone` expands a short name, clones with LFS, and warms the
+// cache; `push` and `pull` are Git's verbs with the artifact offer and
+// the warm behind them; `git-credential` is the helper that lets Git
+// share the stored token.
+program
+  .command('login')
+  .description('log in to an audiofield remote with a device code')
+  .option('--remote <url>', "the site to log in to (default: this project's, or audiofield.io)")
+  .action(async (opts: { remote?: string }) => {
+    try {
+      const { login, remoteForLogin } = await import('./commands/login.js');
+      const { RemoteClient } = await import('./remote/client.js');
+      const { defaultCredentialStore } = await import('./remote/credentials.js');
+      const remote = remoteForLogin(process.cwd(), process.env, opts.remote);
+      const store = defaultCredentialStore();
+      const result = await login(remote, {
+        client: new RemoteClient(remote),
+        store,
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
+      const who = result.login ? ` as ${result.login}` : '';
+      process.stdout.write(`logged in to ${remote}${who} (token in ${store.kind})\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('logout')
+  .description('forget the stored token, revoking it on the remote when reachable')
+  .option('--remote <url>', "the site to log out of (default: this project's, or audiofield.io)")
+  .action(async (opts: { remote?: string }) => {
+    try {
+      const { logout, remoteForLogin } = await import('./commands/login.js');
+      const { RemoteClient } = await import('./remote/client.js');
+      const { defaultCredentialStore } = await import('./remote/credentials.js');
+      const remote = remoteForLogin(process.cwd(), process.env, opts.remote);
+      await logout(remote, {
+        store: defaultCredentialStore(),
+        client: (token) => new RemoteClient(remote, { token }),
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('clone <target> [dir]')
+  .description('clone <owner>/<project> from the remote (or any clone URL) and warm the build cache')
+  .action(async (target: string, dir: string | undefined) => {
+    try {
+      const { clone } = await import('./commands/clone.js');
+      const result = await clone({
+        target,
+        dir,
+        cwd: process.cwd(),
+        out: (line) => process.stdout.write(`${line}\n`),
+      });
+      process.stdout.write(`cloned into ${projectRelative(process.cwd(), result.dir)}\n`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+// `push` and `pull` are `git push` and `git pull` with everything after
+// the verb handed to Git untouched, so `-u origin main` and `--force`
+// mean what they mean there; the offer and the warm follow.
+program
+  .command('push')
+  .description('git push, then offer the renders this machine holds to the remote')
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async (_opts: unknown, cmd: { args: string[] }) => {
+    try {
+      const { push } = await import('./commands/push.js');
+      await push({ cwd: process.cwd(), gitArgs: cmd.args, out: (line) => process.stdout.write(`${line}\n`) });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('pull')
+  .description('git pull, then warm the build cache for the new HEAD')
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async (_opts: unknown, cmd: { args: string[] }) => {
+    try {
+      const { pull } = await import('./commands/pull.js');
+      await pull({ cwd: process.cwd(), gitArgs: cmd.args, out: (line) => process.stdout.write(`${line}\n`) });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+// Git's credential helper, configured by `clone` as `!field
+// git-credential` for the git host and passed per invocation by `push`
+// and `pull`. Git speaks to it on stdin/stdout; nothing else calls it,
+// hence hidden from --help.
+program
+  .command('git-credential <operation>', { hidden: true })
+  .action(async (operation: string) => {
+    try {
+      if (operation !== 'get') return; // store/erase: Field manages the token itself
+      const { gitCredentialGet } = await import('./commands/login.js');
+      const { defaultCredentialStore } = await import('./remote/credentials.js');
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      const answer = gitCredentialGet(Buffer.concat(chunks).toString('utf8'), defaultCredentialStore());
+      if (answer !== undefined) process.stdout.write(answer);
     } catch (err) {
       fail(err);
     }
@@ -217,22 +336,39 @@ program
   });
 program
   .command('choose <target>')
-  .description("repoint which committed variant a gen node's label resolves to (<song>/<name>)")
+  .description("repoint which take a gen node or record entry plays (<song>/<name>)")
   .option('--song <name>', 'retired — the song rides in the name (creek/still-water-keys)')
-  .requiredOption('--variant <n>', 'variant number (1-based, as played/numbered)', parseVariantNumber)
-  .action(async (target: string, opts: { song?: string; variant: number }) => {
+  .option('--variant <n>', 'a generative variant, by number (1-based, as played/numbered)', parseVariantNumber)
+  .option('--take <name>', 'a recorded take, by name (take-YYYYMMDD-HHMMSS)')
+  .action(async (target: string, opts: { song?: string; variant?: number; take?: string }) => {
     try {
       if (opts.song !== undefined) {
         throw new Error(
           `--song has retired — the song rides in the name: ` +
-            `field choose ${opts.song}/${target} --variant ${opts.variant}`,
+            `field choose ${opts.song}/${target} --variant ${opts.variant ?? '<n>'}`,
         );
       }
       const { song, name } = parseGenTarget(target, 'choose');
+      if ((opts.variant === undefined) === (opts.take === undefined)) {
+        throw new Error('choose takes exactly one of --variant <n> (a gen node) or --take <name> (a record entry)');
+      }
+      if (opts.take !== undefined) {
+        // A record entry's take (recording.md §3): one line in
+        // audio/<node>/takes.yaml, and every placement of the track
+        // follows, exactly as a variant.
+        const { chooseTake } = await import('./commands/land.js');
+        const result = await chooseTake(requireRoot(), song, name, opts.take);
+        const moved = result.previous !== undefined && result.previous !== opts.take;
+        process.stdout.write(
+          `${moved ? 'moved' : 'chose'} ${name} → ${opts.take}\n` +
+            `the record entry in ${song}/${name} now plays it; every placement follows\n`,
+        );
+        return;
+      }
       const { chooseVariant } = await import('./commands/generate.js');
       const result = await chooseVariant(requireRoot(), name, {
         song,
-        variant: opts.variant,
+        variant: opts.variant!,
       });
       const moved = result.previous !== undefined && result.previous !== opts.variant;
       process.stdout.write(
@@ -401,7 +537,8 @@ program
 // claims a cache hit that never happened. Padded to a common width so the
 // labels line up down the column.
 function buildStatus(o: BuildOutcome): string {
-  const status = o.committed === true ? 'source' : o.cached ? 'cached' : 'built';
+  const status =
+    o.committed === true ? 'source' : o.fetched === true ? 'fetched' : o.cached ? 'cached' : 'built';
   return status.padEnd(6);
 }
 
@@ -409,12 +546,22 @@ program
   .command('build <patterns...>')
   .description('build labels (creek/track:drums, creek/..., or a bare song for its output track)')
   .option('--watch', 'rebuild on project changes until ctrl-c, reporting outputs that audibly moved')
-  .action(async (patterns: string[], opts: { watch?: boolean }) => {
+  .option('--no-remote', 'skip the remote cache for this build (remote.md §3.4)')
+  .action(async (patterns: string[], opts: { watch?: boolean; remote?: boolean }) => {
     try {
       const root = requireRoot();
       if (opts.watch !== true) {
-        const outcomes = await buildLabels(root, patterns, undefined, (line) =>
-          process.stdout.write(`check: ${line}\n`),
+        // A local miss asks the project's remote before rendering; a miss
+        // there, or no remote at all, renders as before. Watch mode does
+        // not read through: a rebuild loop that waits on a network every
+        // edit is a different trade, not yet made.
+        const outcomes = await buildLabels(
+          root,
+          patterns,
+          undefined,
+          (line) => process.stdout.write(`check: ${line}\n`),
+          undefined,
+          remoteReads(root, { noRemote: opts.remote === false }),
         );
         for (const o of outcomes) {
           const where = o.outputPath ? ` → ${projectRelative(root, o.outputPath)}` : '';
@@ -469,10 +616,12 @@ program
   .action(async (patterns: string[], opts: { to?: string; rate?: number; bitDepth?: 16 | 24 | 32 }) => {
     try {
       const { exportLabels, homeRelative } = await import('./commands/export.js');
-      const results = await exportLabels(requireRoot(), patterns, {
+      const root = requireRoot();
+      const results = await exportLabels(root, patterns, {
         to: opts.to,
         rate: opts.rate,
         bitDepth: opts.bitDepth,
+        remote: remoteReads(root),
       });
       for (const r of results) {
         // Three outcomes, one column: a new version, nothing to do, and
@@ -530,7 +679,7 @@ program
   .option('--from <position>', 'start at bar[.beat[.tick]] (one song or one artifact)')
   .option('--device <name>', 'output device (field devices lists them)')
   .option('--loop', 'loop the song at its declared extent, or replay an artifact queue')
-  .option('--click', 'overlay a metronome (artifacts only; rendered CLI-side, loops with the file)')
+  .option('--click', "overlay a metronome, synthesized in the engine against the song's tempo map")
   .option('--watch', "follow the project: edits land mid-play (a song's live session)")
   .action(async (patterns: string[], opts: { from?: string; device?: string; loop?: boolean; click?: boolean; watch?: boolean }) => {
     try {
@@ -546,13 +695,6 @@ program
           ? patterns[0]!
           : undefined;
       if (liveSong !== undefined) {
-        if (opts.click === true) {
-          // The click renders CLI-side over a file, which a live session
-          // is not; the artifact spelling still composes with it.
-          throw new Error(
-            `--click rides file playback: field play ${liveSong}/track:main --click`,
-          );
-        }
         const { playLiveSession } = await import('./commands/play.js');
         let interrupted = false;
         process.once('SIGINT', () => {
@@ -569,6 +711,7 @@ program
             ...(opts.device !== undefined ? { device: opts.device } : {}),
             ...(opts.from !== undefined ? { from: opts.from } : {}),
             ...(opts.loop === true ? { loop: true } : {}),
+            ...(opts.click === true ? { click: true } : {}),
             ...(opts.watch === true ? { watch: true, signal: liveAbort.signal } : {}),
           },
           {
@@ -594,7 +737,7 @@ program
         if (onLine) process.stdout.write('\n');
         return;
       }
-      let items = await resolvePlayables(root, patterns);
+      let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
@@ -628,10 +771,6 @@ program
         })();
       });
 
-      if (opts.click === true) {
-        const { applyClick } = await import('./commands/click.js');
-        items = applyClick(root, project, items);
-      }
       const tty = process.stdout.isTTY === true;
       let onPositionLine = false;
       const say = (line: string): void => {
@@ -726,8 +865,149 @@ program
   });
 
 program
+  .command('record [target]')
+  .description('record a take on a track through field-audiod: arms an input, takes against what is playing, ctrl-c stops and finalizes')
+  .option('--input <n>', 'input channel on the device, counting from 1 (default 1)', parseInputChannel)
+  .option('--device <name>', 'input device (field devices lists them; default: the system input)')
+  .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
+  .option('--click', 'a metronome through the take, synthesized in the engine against the song\'s map')
+  .option('--count-in <bars>', 'pre-roll this many bars before --at, clicking; the take begins exactly at --at', parseCountIn)
+  .option('--until <position>', 'punch out at bar[.beat[.tick]]: the take ends there exactly and lands while the mix plays on')
+  .option('--loop', 'loop --at to --until, landing a take every pass until ctrl-c (needs a live song as the bed)')
+  .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
+  .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
+  .option('--list', 'list the transactions under .field/recording/ instead of recording')
+  .option('--recover <id>', 'finalize a take a dead daemon left behind and land it, instead of recording')
+  .option('--land <id>', 'land a finalized transaction nothing landed, instead of recording')
+  .action(
+    async (
+      target: string | undefined,
+      opts: {
+        input?: number;
+        device?: string;
+        at?: string;
+        click?: boolean;
+        countIn?: number;
+        until?: string;
+        loop?: boolean;
+        monitoring?: string;
+        consolePreset?: string;
+        list?: boolean;
+        recover?: string;
+        land?: string;
+      },
+    ) => {
+      try {
+        const root = requireRoot();
+        const { describeTake, landRecording, listRecordings, recordTake, recoverRecording } =
+          await import('./commands/record.js');
+        const landOptions = {
+          monitoring: opts.monitoring ?? 'apollo-direct',
+          ...(opts.consolePreset !== undefined ? { consolePreset: opts.consolePreset } : {}),
+        };
+        // What landing did, in one line: the take, where it sits on the
+        // track, and where its bytes went.
+        const landedLine = (landed: import('./commands/land.js').LandedTake): string => {
+          const where =
+            landed.row.musical_position !== undefined
+              ? `bar ${landed.row.musical_position.join('.')}`
+              : `sample ${landed.placedAt}`;
+          const seconds = (landed.frames / landed.sampleRate).toFixed(1);
+          const note =
+            landed.placements > 1
+              ? `  (${landed.track} is placed ${landed.placements} times; the take counts from the first)`
+              : '';
+          return `take    ${landed.song}/${landed.node} ← ${landed.asset} at ${where}, chosen (${landed.file}, ${seconds} s)${note}`;
+        };
+        if (opts.list === true) {
+          const entries = await listRecordings(root);
+          if (entries.length === 0) process.stdout.write('no transactions under .field/recording/\n');
+          for (const entry of entries) process.stdout.write(`${describeTake(entry)}\n`);
+          return;
+        }
+        if (opts.recover !== undefined) {
+          const { landed } = await recoverRecording(root, opts.recover, landOptions);
+          process.stdout.write(`${landedLine(landed)}\n`);
+          return;
+        }
+        if (opts.land !== undefined) {
+          const { landed } = await landRecording(root, opts.land, landOptions);
+          process.stdout.write(`${landedLine(landed)}\n`);
+          return;
+        }
+        if (target === undefined) {
+          throw new Error(
+            'record needs a track to record (creek/track:lead-vocal), or --list / --recover <id> / --land <id>',
+          );
+        }
+        const project = loadProject(root);
+        let interrupted = false;
+        process.once('SIGINT', () => {
+          // The loop in recordTake sees this on its next tick and sends
+          // the stop itself — one connection, so the finalized take comes
+          // back in the stop's response.
+          interrupted = true;
+        });
+        const tty = process.stdout.isTTY === true;
+        let onPositionLine = false;
+        const say = (line: string): void => {
+          if (onPositionLine) process.stdout.write('\n');
+          onPositionLine = false;
+          process.stdout.write(`${line}\n`);
+        };
+        const { takes, missed } = await recordTake(
+          root,
+          project,
+          target,
+          {
+            ...(opts.input !== undefined ? { input: opts.input } : {}),
+            ...(opts.device !== undefined ? { device: opts.device } : {}),
+            ...(opts.at !== undefined ? { at: opts.at } : {}),
+            ...(opts.click === true ? { click: true } : {}),
+            ...(opts.countIn !== undefined ? { countIn: opts.countIn } : {}),
+            ...(opts.until !== undefined ? { until: opts.until } : {}),
+            ...(opts.loop === true ? { loop: true } : {}),
+            ...landOptions,
+          },
+          {
+            onBed: say,
+            onArmed: say,
+            onCountIn: say,
+            onStarted: say,
+            onTake: (landed) => say(landedLine(landed)),
+            onPosition: (line) => {
+              if (tty) {
+                process.stdout.write(`\r  ${line}   `);
+                onPositionLine = true;
+              }
+            },
+            interrupted: () => interrupted,
+          },
+        );
+        // Each take printed as it landed (onTake); what is left to say is
+        // the tally under a loop — passes lost included, so the count of
+        // takes is never mistaken for the count of passes — and any gaps.
+        if (takes.length > 1 || missed > 0) {
+          const lost =
+            missed > 0
+              ? `, ${missed} pass${missed === 1 ? '' : 'es'} missed (the region is shorter than the daemon's tick)`
+              : '';
+          say(`${takes.length} take${takes.length === 1 ? '' : 's'} landed${lost}; ${takes.at(-1)!.landed.asset} is chosen`);
+        }
+        for (const { take } of takes) {
+          if (take.dropped !== undefined && take.dropped > 0) {
+            say(`warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
+          }
+        }
+      } catch (err) {
+        fail(err);
+      }
+    },
+  );
+
+program
   .command('devices')
-  .description('list output devices via field-audiod (spawns it if needed)')
+  .description('list output and input devices via field-audiod (spawns it if needed)')
   .action(async () => {
     try {
       const { AudiodClient } = await import('./audiod/client.js');
@@ -738,8 +1018,19 @@ program
         process.stdout.write('daemon is in null-output mode (no devices)\n');
         return;
       }
+      // Two lists now that the input side exists (recording.md §6); the
+      // `*` marks the system default on each, which is what an unnamed
+      // --device (play) or --device (record) uses.
+      process.stdout.write('output:\n');
       for (const device of result.devices) {
         process.stdout.write(`${device.default ? '* ' : '  '}${device.name}\n`);
+      }
+      if (result.inputs.length > 0) {
+        process.stdout.write('input:\n');
+        for (const device of result.inputs) {
+          const channels = `${device.channels} channel${device.channels === 1 ? '' : 's'}`;
+          process.stdout.write(`${device.default ? '* ' : '  '}${device.name}  (${channels})\n`);
+        }
       }
     } catch (err) {
       fail(err);
@@ -762,9 +1053,11 @@ program
 program
   .command('explain <label>')
   .description('show a label\'s type, inputs, action key, and cache status')
-  .action(async (label: string) => {
+  .option('--no-remote', 'do not consult the remote cache')
+  .action(async (label: string, opts: { remote?: boolean }) => {
     try {
-      const e = await explainLabel(requireRoot(), label);
+      const root = requireRoot();
+      const e = await explainLabel(root, label, remoteReads(root, { noRemote: opts.remote === false }));
       process.stdout.write(`${e.label} (${e.kind})\n`);
       // The CLI speaks the format's language (project-layout.md §4):
       // type, not the engine's rule.
@@ -787,7 +1080,8 @@ program
         process.stdout.write(`parameters: ${JSON.stringify(e.parameters)}\n`);
       }
       if (e.actionKey) {
-        process.stdout.write(`action: ${e.actionKey.slice(0, 12)} (${e.cached ? 'cached' : 'not cached'})\n`);
+        const state = e.fetched ? 'fetched' : e.cached ? 'cached' : 'not cached';
+        process.stdout.write(`action: ${e.actionKey.slice(0, 12)} (${state})\n`);
       }
       for (const out of e.outputs ?? []) {
         process.stdout.write(`output: ${out.sha256.slice(0, 12)} (${out.bytes} bytes)\n`);
