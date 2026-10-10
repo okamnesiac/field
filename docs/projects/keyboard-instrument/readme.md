@@ -467,7 +467,7 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 
 Chunk 4 adds its files when it appends its section (§6).
 
-## 3 Why this design
+## 3 Why this design (DECIDED, 2026-10-10)
 
 - **A virtual MIDI device, not a line straight to SuperCollider.**
   `field keys` could send OSC to `scsynth` and skip MIDI. Going through
@@ -551,10 +551,11 @@ Chunk 4 adds its files when it appends its section (§6).
 
 - **`sclang` turns MIDI into voices, not TypeScript.** The voice host
   is SuperCollider's own idiom (`MIDIdef`, `Synth`, `set(\gate, 0)`),
-  `sclang` already reads CoreMIDI, and the same code builds an NRT score
-  from recorded notes in chunk 4. A TypeScript translator would need
-  MIDI input in Node, which is the native dependency rejected above,
-  and an OSC encoder for every message.
+  and `sclang` already reads CoreMIDI. The same code can build an NRT
+  score from recorded notes in chunk 4, though §7 question 3 leaves
+  that choice open. A TypeScript translator would need MIDI input in
+  Node, which is the native dependency rejected above, and an OSC
+  encoder for every message.
 - **A SynthDef with `freq`, `amp`, and `gate`, not a new instrument
   format.** These are SuperCollider's standard event controls, the same
   names `Pbind` and the default event use, so an existing SynthDef
