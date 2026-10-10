@@ -323,8 +323,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // addresses (track, input index) in the *daemon's* session, and the
   // soloed session's indexes are not the un-soloed compile's, so ramping
   // across that boundary would move the wrong fader.
-  const swapSession = async () => {
-    compiled = await compileSession(root, songName, soloed !== null ? { solo: soloed } : {});
+  const swapSession = async (solo: string | null = soloed) => {
+    compiled = await compileSession(root, songName, solo !== null ? { solo } : {});
     const swapped = await client.session(compiled.session);
     ctx = musicalContext(loadProject(root), `songs/${songName}`, swapped.sample_rate);
   };
@@ -346,6 +346,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
           return;
         }
         if (soloed !== null) {
+          // A soloed track renamed or deleted in an editor would make
+          // every later swap throw; the solo goes with the track, and the
+          // plain session plays on.
+          const held = soloed;
+          if (!mainFile().song.tracks.some((t) => t.data.name === held)) soloed = null;
           await swapSession();
         } else if (edit.kind === 'ramps') {
           for (const ramp of edit.ramps) await client.ramp(ramp.track, ramp.input, ramp.gain_db);
@@ -710,8 +715,10 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         await client.selectDevice(msg.name);
         await pushSnapshot();
       } else if (msg.type === 'solo') {
+        // Held only once the swap succeeded: a refused solo leaves the
+        // session, and the view, as they were.
+        await swapSession(msg.track);
         soloed = msg.track;
-        await swapSession();
         await pushSnapshot();
       } else if (msg.type === 'edit') {
         await oneWriteAtATime(() => handleEdit(socket, msg));
