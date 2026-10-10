@@ -611,6 +611,17 @@ land as its own diff whenever.
   whether the probe succeeds under a Windows CI shell where `git`
   resolves but the LFS subcommand may not. One CI run answers it, with
   the `windows-latest` job (chunk 5).
+- **Crash recovery on Windows** (`record-daemon.test.ts`, "a daemon
+  killed mid-take leaves a recoverable transaction"): on the
+  `windows-latest` runner a request to the freshly spawned daemon fails
+  with "field-audiod connection closed", so the daemon drops the
+  connection or dies while it lists or recovers the killed take. The
+  cause is not diagnosed. `Capture::recover`'s errors are thrown and
+  answered as error responses, so a crash would have to bypass
+  exceptions; the CRT's invalid-parameter handler in `syncAndPatch`
+  is one candidate. The test's temp project, and its `audiod.log`, is
+  removed with it. The test skips on win32 until this is found.
+  **Standalone**: start from the daemon log of one Windows run.
 
 ### 7.3 The workers chunk, when it opens (§4 stands)
 
