@@ -17,6 +17,7 @@
 #include "dsp/resample.h"
 #include "dsp/reverb.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
