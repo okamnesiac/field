@@ -258,6 +258,9 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   };
 
   const sockets = new Set<WebSocket>();
+  // Whether any view has connected yet: a shell that exits before one
+  // does never started, which is not the same as a window closed.
+  let connectedOnce = false;
   const broadcast = (message: unknown) => {
     const line = JSON.stringify(message);
     for (const socket of sockets) socket.send(line);
@@ -747,6 +750,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
+      connectedOnce = true;
       sockets.add(ws);
       ws.on('message', (data) => void handle(ws, String(data)));
       ws.on('close', () => sockets.delete(ws));
@@ -795,10 +799,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // a window of its own rather than a tab in whatever browser happens to
   // be default — it owns its lifetime, and it can mirror the page's
   // console to this terminal, which is the only reason the first blank
-  // window was diagnosable at all. --browser opts back out, and a
-  // missing Electron falls back rather than failing; the printed URL
-  // always works. The dependency's weight is recorded in
-  // project-core.md §5.
+  // window was diagnosable at all. --browser opts back out. A missing
+  // Electron, or a shell that exits before its window connects (the
+  // binary failed to download, or there is no display), falls back to a
+  // browser rather than ending the session; the printed URL always
+  // works. The dependency's weight is recorded in project-core.md §5.
   const { spawn } = await import('node:child_process');
   let shell: ReturnType<typeof spawn> | undefined;
   const openInBrowser = () => {
@@ -845,7 +850,19 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   await new Promise<void>((resolve) => {
     process.once('SIGINT', () => resolve());
     process.once('SIGTERM', () => resolve());
-    shell?.once('exit', () => resolve());
+    shell?.once('exit', (code) => {
+      // Electron's cli.js exits non-zero when the binary is missing (it
+      // downloads on first use) or cannot open a window. Before any view
+      // connected, that is a failed start: say so, open a browser, and
+      // keep the session. After one did, the window closed.
+      if (code !== 0 && !connectedOnce) {
+        process.stderr.write(`field ui: the app shell exited (${code}) before it opened; opening a browser\n`);
+        shell = undefined;
+        openInBrowser();
+        return;
+      }
+      resolve();
+    });
   });
   if (shell !== undefined && shell.exitCode === null) shell.kill();
   watchAbort.abort();

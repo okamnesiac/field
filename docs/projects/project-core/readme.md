@@ -222,9 +222,10 @@ only, where the root package never sees them.
 **Amended again 2026-08-20** ([ui.md](../ui/readme.md) §6): a fourth, and the one
 worth arguing about — **`electron`**, the desktop shell `field ui`
 opens instead of a browser tab. It is a different order of dependency
-from the other three: a whole Chromium and Node runtime, a
-post-install download, and a release cadence with security updates
-attached. It buys two things the tab could not. A local tool that owns
+from the other three: a whole Chromium and Node runtime, a download of
+that runtime the first time anything resolves the package (it has no
+install script, so `pnpm install` alone does not fetch it), and a
+release cadence with security updates attached. It buys two things the tab could not. A local tool that owns
 its window can own its lifetime — closing it ends the session — where a
 tab belongs to whatever browser is default and outlives the server.
 And the shell can mirror the renderer's console to the terminal, which
@@ -233,7 +234,8 @@ into a one-line React error; a UI whose failures are invisible to
 whoever can fix them costs more than the runtime does. Confined to the
 `ui/` workspace member and to `devDependencies`, so nothing the CLI
 ships depends on it, and `field ui` falls back to a browser tab (or
-`--browser` on request) when it is absent. Rejected: **Tauri**, which
+`--browser` on request) when it is absent or exits before its window
+opens. Rejected: **Tauri**, which
 is lighter and would add a Rust toolchain this stack does not have, for
 a window this one already knows how to draw.
 
