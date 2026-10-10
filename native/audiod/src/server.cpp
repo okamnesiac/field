@@ -571,6 +571,12 @@ void Server::readLoop (std::shared_ptr<Connection> connection)
         ov.hEvent = CreateEventA (nullptr, TRUE, FALSE, nullptr);
         bool ok = ReadFile (asHandle (connection->pipe), chunk, sizeof (chunk), nullptr, &ov) != 0
                       || GetLastError() == ERROR_IO_PENDING;
+        // beginShutdown may have cleared `running` and run its CancelIoEx
+        // between the loop check and this ReadFile, so the cancel missed
+        // the read. Checking again once the read is issued closes that
+        // window: either the cancel saw this read, or this sees the flag.
+        if (ok && ! running)
+            CancelIoEx (asHandle (connection->pipe), &ov);
         if (ok)
             ok = GetOverlappedResult (asHandle (connection->pipe), &ov, &n, TRUE) != 0;
         const bool aborted = ! ok && GetLastError() == ERROR_OPERATION_ABORTED;
@@ -649,7 +655,11 @@ void Server::beginShutdown()
     const std::lock_guard<std::mutex> lock (connectionsMutex);
     for (auto& connection : connections)
         if (connection->open)
-            CancelIoEx (asHandle (connection->pipe), nullptr); // aborts the read; in-flight writes finish
+            // Aborts the pending read. A null OVERLAPPED cancels every I/O
+            // on the handle, so a WriteFile still waiting on a full pipe
+            // buffer is cancelled too; only writes that already fit the
+            // buffer are sure to finish.
+            CancelIoEx (asHandle (connection->pipe), nullptr);
 }
 
 void Server::sweepClosedConnections()
