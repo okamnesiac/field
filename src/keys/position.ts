@@ -56,6 +56,33 @@ export function positionOf(
   return layoutPositions?.get(character) ?? US_POSITIONS[character];
 }
 
+// A release takes the position its press resolved to, not one resolved
+// afresh: an input source switched while a key is held, or a release
+// reported without the base layout key its press carried, would otherwise
+// resolve elsewhere and leave the note sounding.
+export class PressedKeys {
+  private readonly positions = new Map<number | string, string>();
+
+  resolve(
+    event: Extract<TerminalEvent, { kind: 'key' }>,
+    layoutPositions?: ReadonlyMap<string, string>,
+  ): string | undefined {
+    const remembered = this.positions.get(event.key);
+    if (event.type === 'release') {
+      this.positions.delete(event.key);
+      return remembered ?? positionOf(event, layoutPositions);
+    }
+    if (remembered !== undefined) return remembered;
+    const position = positionOf(event, layoutPositions);
+    if (position !== undefined) this.positions.set(event.key, position);
+    return position;
+  }
+
+  clear(): void {
+    this.positions.clear();
+  }
+}
+
 // The positions this keymap binds that the keyboard layout makes dead
 // keys, which the terminal may hold for composition and never report.
 export function unplayablePositions(layout: KeyboardLayout | undefined, keymap: Keymap): string[] {

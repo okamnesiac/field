@@ -1,6 +1,6 @@
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
-import { charactersToPositions, positionOf, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
 import { printKeymap } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
@@ -100,15 +100,19 @@ async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: st
         })
       : undefined;
 
+  const pressed = new PressedKeys();
   let pending = carried;
   const onData = (chunk: Buffer): void => {
     const { events, rest } = decodeTerminal(pending + chunk.toString('utf8'));
     pending = rest;
     for (const event of events) {
       if (isQuit(event)) return stop();
-      if (event.kind === 'focus' && !event.focused) send(session.releaseAll());
+      if (event.kind === 'focus' && !event.focused) {
+        send(session.releaseAll());
+        pressed.clear();
+      }
       if (event.kind === 'key') {
-        const position = positionOf(event, layoutPositions);
+        const position = pressed.resolve(event, layoutPositions);
         if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
       }
     }

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseKeymap } from './keymap.js';
-import { charactersToPositions, positionOf, unplayablePositions, type KeyboardLayout } from './position.js';
+import {
+  charactersToPositions,
+  positionOf,
+  PressedKeys,
+  unplayablePositions,
+  type KeyboardLayout,
+} from './position.js';
 
 const DVORAK: KeyboardLayout = {
   name: 'Dvorak',
@@ -53,6 +59,37 @@ describe('finding a key event position', () => {
 
   it('returns nothing for a key no position types', () => {
     expect(positionOf(press(code('ß')))).toBeUndefined();
+  });
+});
+
+describe('a release follows its press', () => {
+  const release = (key: number, base?: number) => ({ ...press(key, base), type: 'release' as const });
+
+  it('releases the position the press resolved to after the keyboard layout changes', () => {
+    const keys = new PressedKeys();
+    expect(keys.resolve(press(code('o')), charactersToPositions(DVORAK))).toBe('KeyS');
+    expect(keys.resolve(release(code('o')), charactersToPositions(AZERTY))).toBe('KeyS');
+  });
+
+  it('releases the base layout key position even when the release omits it', () => {
+    const keys = new PressedKeys();
+    expect(keys.resolve(press(code('r'), code('d')))).toBe('KeyD');
+    expect(keys.resolve(release(code('r')))).toBe('KeyD');
+  });
+
+  it('keeps a repeat on its press and forgets the key once released', () => {
+    const keys = new PressedKeys();
+    keys.resolve(press(code('o')), charactersToPositions(DVORAK));
+    expect(keys.resolve({ ...press(code('o')), type: 'repeat' }, charactersToPositions(AZERTY))).toBe('KeyS');
+    keys.resolve(release(code('o')));
+    expect(keys.resolve(press(code('o')))).toBe('KeyO');
+  });
+
+  it('resolves a release afresh after clear, as after focus-out', () => {
+    const keys = new PressedKeys();
+    keys.resolve(press(code('o')), charactersToPositions(DVORAK));
+    keys.clear();
+    expect(keys.resolve(release(code('o')))).toBe('KeyO');
   });
 });
 
