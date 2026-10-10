@@ -105,6 +105,13 @@ Without an instrument, `field keys` stops after step 4 and is a MIDI
 device for Logic, the SuperCollider IDE, or anything else that lists
 MIDI inputs.
 
+Two keys can hold the same note. A chord can share a note with
+another key, and a transpose can move one key onto a note that
+another key still holds: hold `KeyA`, press `KeyZ`, and `KeyK` plays
+60 too. The session counts the keys that hold each note. The first
+press sends the note-on, and the note-off waits until the last of
+those keys is released, so every note-on gets exactly one note-off.
+
 ### 2.2 Key releases come from the kitty keyboard protocol
 
 A terminal normally reports only key presses, as the text they type,
@@ -294,10 +301,14 @@ the rule it breaks:
 - **A position is a note or a control, never both.**
 - **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so
   no keymap can trap you.
-- **Modifiers do not bind.** A key held with `Ctrl`, `Alt`, or `Cmd`
-  does nothing, and a key held with `Shift` plays as it does without
-  it. Layers that `Shift` or another held key switches to are an open
-  question (§7).
+- **Modifiers do not bind.** A key pressed while `Ctrl`, `Alt`, or
+  `Cmd` is held does nothing, and a key pressed with `Shift` plays as
+  it does without it. Caps Lock and Num Lock change nothing: under
+  flag 8 the protocol sets their bits on every key while the lock is
+  on, and `field keys` ignores those bits. A release always ends the
+  notes its press started, whatever modifiers it carries, so pressing
+  `Ctrl` while a note sounds cannot leave the note stuck. Layers that
+  `Shift` or another held key switches to are an open question (§7).
 - **Every note is in MIDI's range.** Each note at `base` is between 0
   and 127.
 
@@ -660,8 +671,10 @@ These vitest tests fail before the change:
   expanded. A saved change applies to the next key press, and a saved
   file that fails validation leaves the previous keymap in place.
 - **`src/keys/session.test.ts`.** Covers a transpose while a key is
-  held, ignored repeats, a chord pressed and released, each controller
-  mode, pitch bend held and released, release on focus-out, the quit
+  held, ignored repeats, a chord pressed and released, two keys that
+  hold the same note released in either order, a release that carries
+  `Ctrl`, a press with the Caps Lock bit set, each controller mode,
+  pitch bend held and released, release on focus-out, the quit
   sequence, and the transpose bounds.
 - **`src/keys/print.test.ts`.** The `musical-typing` diagram matches a
   stored copy.
