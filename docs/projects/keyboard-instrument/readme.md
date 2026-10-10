@@ -394,6 +394,19 @@ The voice host owns everything between MIDI and voices:
   chooses. The host never sets a sample rate, so `scsynth` runs at the
   device's current rate and never changes it under a running `field
   play`. It asks for a 128-frame hardware buffer.
+- **A rate change restarts the server.** A `field play` that starts
+  after the host still moves the device to the rate of the song or
+  file it plays, when the device can switch (playback.md §3.5). On
+  macOS `scsynth` never notices: its CoreAudio driver listens for no
+  rate change and keeps computing at the rate it booted at, so every
+  voice plays sharp or flat, by about a semitone and a half between
+  44.1 and 48 kHz. Each `/status` reply carries both the rate
+  `scsynth` booted at and the rate it measures from the device's
+  clock, and `sclang` asks for one every 0.7 seconds. When the two
+  rates differ by more than 1%, the host quits `scsynth`, boots it
+  again on the same port at the device's new rate, adds the voice
+  again, and prints its ready line again with the new rate. Notes
+  sounding at the switch stop.
 - **No inputs.** The host sets no input channels, so `scsynth` opens
   no input device and macOS never asks for the microphone.
 - **No orphans.** `field keys` chooses the `scsynth` port, so it can
@@ -555,7 +568,13 @@ Chunk 4 adds its files when it appends its section (§6).
   to cross between processes. Audition needs the instrument's own sound
   with little latency, which the direct path gives now. The voice
   host's interface, an instrument in and sound out, stays the same when
-  live-supercollider changes where the sound goes.
+  live-supercollider changes where the sound goes. Sharing the device
+  means sharing its rate, so the host follows the device's rate rather
+  than choosing one. Booting `scsynth` at the project's `sample_rate`
+  would still be wrong for a song with its own `rate:` and for a file
+  at another rate, both of which `field play` switches the device to.
+  It would also switch the device under a `field play` that is already
+  running.
 - **The daemon stamps recorded notes, not the voice host.** A take is
   placed by the transport's sample clock (recording.md §3), and only
   the daemon has that clock. A time from `sclang` or from `field keys`
@@ -607,7 +626,7 @@ Chunk 2, the voice host:
 | 22 | With criterion 21 running, play a USB controller. | It plays the same voice. |
 | 23 | With criterion 21 running, hold `Digit2` over a sounding note, then release it. | The note bends up two semitones and returns. |
 | 24 | Run `field keys creek-kit`. | Exit 1. The message says `creek-kit.scd` does not answer `FIELD_MODE=voice`. |
-| 25 | Run `field play creek --device "<Apollo>"` and criterion 21 together. | You hear both. The Apollo's sample rate in Audio MIDI Setup does not change. |
+| 25 | Run `field play creek --device "<Apollo>"`, then criterion 21 in another terminal. Stop both, set the Apollo to 44.1 kHz in Audio MIDI Setup, and run them again in the other order. Press `KeyA` before and after `field play` starts. | In the first order you hear both, and starting criterion 21 leaves the Apollo's sample rate alone. In the second, `field play` moves the Apollo to 48 kHz, the status line shows the instrument restarting and then live at 48 kHz, and `KeyA` sounds at the same pitch before and after. A `KeyA` about a semitone and a half sharp after the switch means the host missed the rate change. |
 | 26 | With criterion 21 running, `kill -9` the `field keys` process. | Within two seconds, `pgrep scsynth` finds no host server, and `Field Keys` is gone. |
 | 27 | In `examples/bloom`, run `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
 
