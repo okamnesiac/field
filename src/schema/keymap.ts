@@ -100,11 +100,12 @@ export const keymapSchema = z
 
     const gridPositions = new Set<string>();
     keymap.grid?.rows.forEach((row, rowIndex) => {
-      if (typeof row === 'string') return;
-      row.forEach((position, column) => {
+      const named = typeof row === 'string';
+      const positions: readonly (string | null)[] = named ? NAMED_ROWS[row] : row;
+      positions.forEach((position, column) => {
         if (position === null) return;
-        const path = ['grid', 'rows', rowIndex, column];
-        checkPosition(position, path);
+        const path = named ? ['grid', 'rows', rowIndex] : ['grid', 'rows', rowIndex, column];
+        if (!named) checkPosition(position, path);
         if (gridPositions.has(position)) {
           ctx.addIssue({ code: 'custom', path, message: `${position} appears twice in the grid` });
         }

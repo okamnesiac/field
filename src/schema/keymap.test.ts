@@ -143,6 +143,15 @@ grid: { rows: [[KeyZ, KeyX], [null, KeyS]], column: 1, row: 5 }
     expect(map.notes.get('KeyS')).toEqual([6]);
   });
 
+  it('rejects a position twice in the grid, named rows included', () => {
+    expect(messages('name: twice\ngrid: { rows: [home, home], column: 1, row: 5 }\n').join('\n')).toMatch(
+      /KeyA appears twice in the grid/,
+    );
+    expect(messages('name: twice\ngrid: { rows: [home, [KeyA]], column: 1, row: 5 }\n').join('\n')).toMatch(
+      /KeyA appears twice in the grid/,
+    );
+  });
+
   it('plays a list of offsets as a chord', () => {
     const map = keymap('name: chords\nnotes: { KeyF: [0, 4, 7] }\n');
     expect(map.notes.get('KeyF')).toEqual([0, 4, 7]);
