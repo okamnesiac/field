@@ -570,7 +570,7 @@ amended. Porting the rest is tracked there and in
 
 | Command | Does |
 | --- | --- |
-| `field --version` | the CLI build, and which build each daemon runs |
+| `field --version` | the CLI build, the remote, and which build each daemon runs |
 | `field init` | initialize a project in the current directory |
 | `field check` | validate schemas, references, assets, formatting |
 | `field fmt` | rewrite project files to canonical formatting |
