@@ -1,0 +1,180 @@
+{
+ "version": 1,
+ "name": "CLI manual",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 162,
+  "title": "docs/ gains a CLI manual, and the commands stop living only in --help",
+  "head": "d0adbc371a66a490e264583edeab507c5bf0edc6",
+  "headRef": "docs/cli",
+  "base": "3d26d52705cbd9a94328e9dca4b703dd11791889",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a command-line tool for music production. A Field project is a Git repository of YAML files, and the <code>field</code> command builds its audio through a dependency graph with a content-addressed cache. The <code>docs/</code> directory explains the concepts (tracks, the project model, the build graph, the audio engine), but no page said what to type. This pull request adds <code>docs/cli.md</code>, a manual organized by task: install, labels, check, look around, build, play, the transport, record, export, sharing through a remote, create, generate, plugins, and <code>sc render</code>, then environment variables, platform notes, and a command table.",
+   "The manual's examples are transcripts taken from <code>examples/bloom</code>, the two-song example project in this repository. Most of them use the song <code>tall-grass</code>, because the other song, <code>creek</code>, depends on generated takes that bloom does not commit, so a fresh checkout cannot build it. Two one-line edits list the new page in <code>docs/README.md</code> and in <code>AGENTS.md</code>.",
+   "The branch was written in August against an older <code>main</code>. On 2026-10-10, <code>main</code> was merged into it, and the manual was then brought up to date with recording and the remote commands that the merge pulled in. Every finding thread is resolved, the latest review is clean, and a human approval is what remains. The pull request body asks for it to merge after #161, the Windows port, because the platform note cites a plan amendment that #161 carries."
+  ],
+  "cards": [
+   {
+    "id": "history",
+    "title": "Review history so far",
+    "html": "<ul class=\"tight\"><li><b>2026-08-18.</b> The author's own two passes. The play fallback paragraph was rewritten to describe today's behavior and to name the Windows port, #161, as in flight.</li><li><b>2026-09-07, on <code>dcabd76</code>.</b> A Projector review filed two findings: two plan links that the Projector layout move broke, and two transcripts on <code>creek/track:space</code> that fail on a fresh checkout.</li><li><b>2026-10-10, on <code>6a310a4</code>.</b> After the merge of <code>main</code>, the link finding was fixed. Three new findings: four transcripts that differed from what the code prints, play refusals that no longer existed, and a command reference without recording or the remote commands.</li><li><b>2026-10-10, on <code>d0adbc3</code>.</b> Three commits fixed all four open findings. The review is clean, with two suggestions about over-broad sentences.</li></ul>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms this page uses",
+    "html": "<ul class=\"tight\"><li><b>Label.</b> The address of something buildable, such as <code>//songs/creek/track:main</code>. The CLI also accepts <code>creek/track:main</code>, and a bare song name such as <code>creek</code> means that song's output track.</li><li><b>Live song and built artifact.</b> <code>field play creek</code> plays the song live, evaluated in the engine. <code>field play creek/track:main</code> plays the rendered WAV file from disk.</li><li><b><code>field-audiod</code>.</b> The audio daemon. It plays sound, records takes, and renders every stem a build produces.</li><li><b>Gen node and take.</b> A generated sound, such as <code>creek/gen:still-water-keys</code>, and one of its generated variants. A recorded take is the same idea for a performance captured by <code>field record</code>.</li><li><b>Remote.</b> An audiofield site that hosts a project's Git repository and the renders its author built, so a fresh clone can fetch them instead of rendering.</li><li><b>Bloom.</b> <code>examples/bloom</code>, the example project with the songs <code>creek</code> and <code>tall-grass</code>.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "manual",
+   "title": "The CLI manual",
+   "kicker": "One new page that walks through each task the field command does, with transcripts from examples/bloom",
+   "intro": [
+    "<code>docs/cli.md</code> is for someone with a checkout who wants to use <code>field</code>. Each section names a task, gives the command, and shows what it prints. A <b>label</b> is the address of something buildable, such as <code>//songs/creek/track:main</code>. The CLI also accepts the shorter <code>creek/track:main</code>, and a bare song name means that song's output track.",
+    "The distinction the manual leans on most is in the Play section. Naming a bare song plays it <b>live</b>, evaluated in the engine. Naming an explicit label plays the <b>built artifact</b>, a rendered WAV file, from disk. Every play option works on both, except <code>--watch</code>, which follows a live song only. <code>field-audiod</code> is the daemon that plays, records, and renders audio.",
+    "Two sections cover what the merge of <code>main</code> added. \"Record a take\" walks through recording onto a track that carries a <code>record:</code> entry. \"Share a project through a remote\" covers <code>login</code>, <code>logout</code>, <code>clone</code>, <code>push</code>, and <code>pull</code>. Each section links to <code>docs/audio-engine.md</code> or <code>docs/remote.md</code> for the depth."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The review read this head without running it, because its author has no write access to the repository. Each verified note below was traced in <code>src/cli.ts</code> and the command modules it calls."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/cli.md",
+     "collapsed": false,
+     "note": "The new manual. Read the Play section, the two new sections on recording and the remote, and the command reference most closely.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 7,
+       "text": "Suggestion: <code>init</code>, <code>clone</code>, <code>login</code>, <code>logout</code>, <code>sc render</code>, and <code>--version</code> run outside a project, and this page documents <code>clone</code>, which a reader runs before a project exists. \"Most commands\" would be accurate."
+      },
+      {
+       "kind": "verify",
+       "line": 38,
+       "text": "Every stem and every rate conversion renders by spawning <code>field-audiod</code>: the stem and resample rules both call <code>renderInsertChain</code> (<code>src/generators/stem.ts</code>, <code>src/generators/resample.ts</code>). Only artifact playback falls back to <code>afplay</code> (<code>src/cli.ts</code>)."
+      },
+      {
+       "kind": "verify",
+       "line": 55,
+       "text": "This is the line <code>formatRemoteReport</code> prints for a project with no remote and no stored token (<code>src/commands/version.ts</code>). The report always prints it, between the worker protocol and the daemons."
+      },
+      {
+       "kind": "context",
+       "line": 87,
+       "text": "Suggestion: <code>explain</code> takes one label, and <code>record</code> takes one track, because <code>resolveRecordTarget</code> refuses a pattern. Only <code>build</code>, <code>export</code>, and <code>play</code> take several."
+      },
+      {
+       "kind": "verify",
+       "line": 119,
+       "text": "These counts match bloom at this head: creek has 14 track files with 25 inputs, and tall-grass has 6 and 6. Counted by parsing the track YAML under <code>examples/bloom/songs/</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 145,
+       "text": "This resolves on a fresh checkout. <code>room</code> receives a cable from <code>drums</code>, which places <code>seven-eight-loop</code>, which renders a SuperCollider program. That program is a content-hashed input, not a graph node, so no takeless gen node is reached. <code>deps</code> lists dependencies first and the label last, which is the order shown."
+      },
+      {
+       "kind": "verify",
+       "line": 164,
+       "text": "The explain output matches <code>src/cli.ts</code> for a label whose input is not built: the input reads <code>(not built)</code>, so there is no <code>action:</code> line and no <code>output:</code> line. The cable line matches <code>formatCable</code> for one arrival."
+      },
+      {
+       "kind": "context",
+       "line": 172,
+       "text": "This replaces the creek examples that failed on a fresh checkout. <code>field query</code> and <code>field explain</code> on a label that depends on creek's generated takes stop with a message that names the <code>field generate</code> command to run."
+      },
+      {
+       "kind": "verify",
+       "line": 187,
+       "text": "The status column matches <code>buildStatus</code> in <code>src/cli.ts</code>: the word padded to six characters, two spaces, then the label and its <code>.field/out</code> path. <code>fetched</code>, the fourth word, is seven characters, so a remote hit sits one column right."
+      },
+      {
+       "kind": "verify",
+       "line": 255,
+       "text": "This matches <code>playLiveSession</code> in <code>src/commands/play.ts</code>. A live song with <code>--from</code> and <code>--loop</code> sets a region loop that wraps at the content's extent. An artifact takes the requeue path, which locates to the position on every pass. Both kinds of target send the engine click with <code>sendClick</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 267,
+       "text": "<code>field devices</code> prints an <code>output:</code> heading, then an <code>input:</code> list with channel counts only when the machine has inputs (<code>src/cli.ts</code>)."
+      },
+      {
+       "kind": "verify",
+       "line": 333,
+       "text": "A bare <code>- record:</code> with no takes is a warning, and <code>field check</code> still prints <code>ok</code>. <code>src/model/project.test.ts</code> pins this exact flow: <code>createTrack</code>, then this entry. <code>createTrack</code> also places the new track in <code>main</code>, as the sentence above says."
+      },
+      {
+       "kind": "verify",
+       "line": 337,
+       "text": "<code>recordTake</code> loads the song as the bed when nothing is loaded, refuses <code>--until</code> or <code>--count-in</code> without <code>--at</code>, and refuses <code>--loop</code> without <code>--until</code> or on a file bed (<code>src/commands/record.ts</code>). Landing moves the WAV to <code>audio/&lt;track&gt;/</code> and chooses the new take in <code>takes.yaml</code> (<code>src/commands/land.ts</code>)."
+      },
+      {
+       "kind": "verify",
+       "line": 385,
+       "text": "<code>exportBaseName</code> drops the <code>songs</code> prefix, and a converted export appends <code>.&lt;rate&gt;-&lt;depth&gt;</code>, which starts its own version family (<code>src/commands/export.ts</code>, pinned by <code>src/commands/export.test.ts</code>)."
+      },
+      {
+       "kind": "context",
+       "line": 423,
+       "text": "This paragraph follows <code>docs/remote.md</code>, \"Which remote\" and \"The read-through cache\". A live <code>field play &lt;song&gt;</code> evaluates dirty subgraphs in the engine instead of rendering them, so only artifact playback asks the remote."
+      },
+      {
+       "kind": "verify",
+       "line": 449,
+       "text": "<code>field import</code> reports the song-relative path <code>audio/&lt;name&gt;/&lt;name&gt;.wav</code> (<code>src/commands/import.ts</code>, pinned by <code>src/model/project.test.ts</code>)."
+      },
+      {
+       "kind": "context",
+       "line": 562,
+       "text": "#161 is still open, so \"in review\" is true today. On this branch, §2.2 of the Windows plan is still an open decision with a recommendation. The amendment this sentence cites arrives with #161, which is why the pull request body asks for #161 to merge first."
+      },
+      {
+       "kind": "verify",
+       "line": 565,
+       "text": "Both plan links resolve at this head. Listing the tree shows <code>docs/projects/windows-portability/readme.md</code> and <code>docs/projects/linux-portability/readme.md</code>, and the link text keeps the <code>windows-portability.md</code> form that <code>docs/projects/README.md</code> asks for."
+      },
+      {
+       "kind": "verify",
+       "line": 586,
+       "text": "The reference lists every command <code>src/cli.ts</code> registers except <code>git-credential</code>, which is hidden from <code>--help</code> because only Git calls it."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "index",
+   "title": "Index entries for the new page",
+   "kicker": "Two one-line edits that list docs/cli.md where the other docs are listed",
+   "intro": [
+    "The repository lists each document in two places: the Documentation list in <code>docs/README.md</code>, and the docs line near the top of <code>AGENTS.md</code>, which tells coding agents what to read first. Both now name the CLI manual."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "AGENTS.md",
+     "note": "Adds the CLI manual to the list of docs agents read.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 19,
+       "text": "This line is outside the block between <code>&lt;!-- projector:begin 1 --&gt;</code> and <code>&lt;!-- projector:end --&gt;</code> (lines 51 to 75), which <code>project init</code> regenerates, so a later init keeps the edit."
+      }
+     ]
+    },
+    {
+     "path": "docs/README.md",
+     "note": "Adds the CLI manual to the Documentation list."
+    }
+   ]
+  }
+ ]
+}
