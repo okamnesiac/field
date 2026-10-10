@@ -1002,4 +1002,8 @@ binds pitch bend or modulation, as §3 says.
 | The schema and keymap tests | `tracker` plays 32 notes with `KeyZ` 48, `KeyQ` 60, and `KeyI` 72; `fourths` expands to 27 notes with `KeyZ` 48, `KeyA` 53, `KeyQ` 58, and `Digit1` 63. Every built-in resolves by its bare name and loads. |
 | Criterion 28, in a pseudo-terminal through the real helper and CoreMIDI, typing as this Mac's ColemakC layout does | `z`, `q`, and `u` (which is `KeyI` there) played 48, 60, and 72, each with its own note-off, and `ArrowRight` moved the transpose to +12. |
 | Criterion 29, the same way | `z b s` together played 48, 52, and 55, and `x k t`, one key to the right, played 49, 53, and 56: the same major-triad shape a semitone higher. |
-| `field keys --keymap <name> --print` | Both diagrams draw their notes where the tables above say. |
+| `field keys --keymap <name> --print` | Both diagrams put C3 under `KeyZ`. `tracker` puts C4 under both `KeyQ` and `Comma`; `fourths` puts F3 under `KeyA`, A#3 under `KeyQ`, and D#4 under `Digit1`. |
+
+Still owed: criteria 28 and 29 at a real keyboard in Ghostty and
+iTerm2. The runs above typed the protocol's bytes into a
+pseudo-terminal, as §9.3 explains for criteria 1 to 20.
