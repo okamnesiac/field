@@ -1,0 +1,273 @@
+{
+ "version": 1,
+ "name": "Voice host for field keys",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 179,
+  "title": "Play a SuperCollider instrument from field keys through a voice host (keyboard-instrument.md chunk 2)",
+  "head": "1e9e8d60f1e9971b7413cd71714cd51ffe265df3",
+  "headRef": "keys/chunk-2",
+  "base": "d20bab9d2a7c968e0077ebb0bef620da46d64ae2",
+  "baseRef": "keys/chunk-1",
+  "basePr": 178
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a virtual MIDI source named <code>Field Keys</code>; chunk 1, in #178, built that. This pull request lets it also play a SuperCollider instrument live. Inside a project, <code>field keys still-water-pad</code> plays <code>shared/instruments/still-water-pad.scd</code> from the keyboard and from every other MIDI source, so you can hear how a sound responds under your fingers instead of only rendering it offline.",
+   "Field's instruments are <code>sclang</code> programs that render one WAV from a spec passed in environment variables. An instrument becomes playable by answering a second mode: when <code>FIELD_MODE</code> is <code>voice</code>, the program's value is a SynthDef with <code>freq</code>, <code>amp</code>, <code>gate</code>, and <code>out</code> controls. A <em>voice host</em>, which is <code>sclang</code> running Field's <code>sc/voice-host.scd</code>, boots its own <code>scsynth</code> on the output device, adds that SynthDef, and starts one voice per note.",
+   "Two findings from running it shaped the edges. On macOS <code>scsynth</code> opens the default input device even with no input channels, and that waits on the microphone permission, so the host names one device, the output, for both directions, and <code>field-audiod --keys</code> now reports the system output's name. And <code>scsynth</code> keeps computing at the rate it booted at when the device's rate changes, which leaves every voice out of tune, so the host restarts its server when the measured rate drifts more than 1% from the booted one.",
+   "The review of this head left four findings open, each flagged under its line below: a boot failure that never reaches <code>field keys</code>, a quit that can hang while the host starts, a quit during a restart that can leave <code>scsynth</code> running, and a device name that reaches <code>scsynth</code> unchecked."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>sclang and scsynth.</b> SuperCollider's language interpreter and its audio server. <code>sclang</code> runs programs and sends the server OSC messages over UDP.</li><li><b>Render mode.</b> The existing contract: the program reads <code>FIELD_SEED</code>, <code>FIELD_OUTPUT</code>, and the rest, renders offline, and exits.</li><li><b>Voice mode.</b> <code>FIELD_MODE=voice</code>: the program renders nothing, and its value is a SynthDef that plays one note.</li><li><b>Voice host.</b> <code>sclang</code> on <code>sc/voice-host.scd</code>. It owns everything between MIDI and voices.</li><li><b><code>@field</code> lines.</b> The only lines Field reads from the host's stdout: <code>@field </code> followed by one JSON object (<code>ready</code>, <code>restarting</code>, <code>error</code>, and traced voices).</li><li><b>Rate restart.</b> Quitting and rebooting <code>scsynth</code> at the device's new rate when it moves.</li></ul>"
+   },
+   {
+    "id": "status",
+    "title": "Review and what is still owed",
+    "html": "<ul class=\"tight\"><li><b>Open findings.</b> Four, all P2, from the review of this head. Each is a flag on its line.</li><li><b>Run at this head.</b> <code>pnpm typecheck</code>, the voice host, helper, and native round-trip tests (25), all nine keys suites (100), and the stub-only <code>runScProgram</code> edge tests (4). All pass.</li><li><b>Not run.</b> SuperCollider itself, because the host plays audio. Criteria 21 to 26 are owed by ear, as the plan's §10.4 says.</li><li><b>CI.</b> Linux only, where the helper's new device lookup compiles to an empty branch.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "The voice contract, answered by still-water-pad",
+   "kicker": "What an instrument returns to be playable, and the one instrument that does",
+   "intro": [
+    "The render contract does not change. An instrument opts in to live play by checking <code>FIELD_MODE</code> first: in voice mode it must not render or exit, and its last expression must be a SynthDef whose <code>gate</code> control releases an envelope that ends in <code>doneAction: 2</code>, so the voice frees itself. The host sets <code>freq</code> from the note, <code>amp</code> from the velocity divided by 127, and <code>out</code> to bus 0.",
+    "<code>still-water-pad</code> is the first instrument to answer. Its voice is a gated version of the twelve-sine pad: three slightly detuned voices panned across the field, under an <code>Env.asr</code>. Its render branch is the old program re-indented inside the <code>else</code> function."
+   ],
+   "files": [
+    {
+     "path": "examples/bloom/shared/instruments/still-water-pad.scd",
+     "note": "Wraps the existing render program in an <code>if</code> on <code>FIELD_MODE</code> and returns a gated SynthDef in voice mode.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 11,
+       "text": "The author compared renders for seed 90210 before and after the edit with <code>cmp</code> and found them identical (criterion 27). This review did not rerun it. The file's content hash still changes, so every song that places the pad renders it once more."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "host",
+   "title": "The voice host turns MIDI into voices",
+   "kicker": "<code>sc/voice-host.scd</code>: loading the voice, booting the server, playing notes, and cleaning up",
+   "intro": [
+    "The host reads its inputs from the environment: the instrument's path, the UDP port Field chose for <code>scsynth</code>, the parent's process id, and an optional device. It runs the instrument with <code>executeFile</code> inside <code>try</code>. A load error or a value that is not a SynthDef prints an <code>@field</code> error naming the file and exits 1. Everything after a good load lives in one function, <code>run</code>, because <code>sclang</code>'s <code>exit</code> does not stop the code that called it.",
+    "<code>run</code> sets the server options: no input channels, two outputs, a 128-frame hardware buffer, no sample rate, and the device for both directions. Then it connects every MIDI source, registers handlers for note-on, note-off, sustain (CC 64), All Notes Off (CC 123), and pitch bend, and starts two routines. One compares the booted and measured rates every 0.7 seconds and restarts the server past 1%. The other checks once a second that <code>field keys</code> is alive, and quits the server and exits when it is not.",
+    "A voice is keyed by channel and note, so a repeated note releases its old voice first, and sustain holds note-offs until the pedal lifts."
+   ],
+   "files": [
+    {
+     "path": "sc/voice-host.scd",
+     "note": "The whole voice host: environment, load, server options, MIDI handlers, the rate and parent checks, and the <code>@field</code> lines.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 59,
+       "text": "Open finding: this <code>onFailure</code> never runs. SuperCollider's <code>doWhenBooted</code> loops <code>while { server.serverRunning.not }</code> with its retry limit commented out (3.14.1 and its default branch). When <code>scsynth</code> exits during boot because the audio driver cannot set up or start the device, the host prints neither <code>ready</code> nor <code>error</code> and never exits, so <code>field keys</code> shows the instrument starting, or restarting, forever."
+      },
+      {
+       "kind": "context",
+       "line": 67,
+       "text": "A restart clears the voice table without releasing voices, because quitting the server ends them, and note-ons are ignored until the new server is ready."
+      },
+      {
+       "kind": "flag",
+       "line": 85,
+       "text": "Open finding: the device name reaches <code>scsynth</code> unchecked. A name <code>scsynth</code> cannot match exactly, such as a mistyped <code>--device</code>, falls back to the default output and the default input, which opens the microphone. SuperCollider also pastes the name between bare double quotes into the <code>/bin/sh -c</code> command that boots <code>scsynth</code>, so <code>\"</code>, a backtick, or <code>$(…)</code> in a name is parsed by the shell."
+      },
+      {
+       "kind": "context",
+       "line": 116,
+       "text": "Bend moves every sounding voice on every channel by up to two semitones, and a new note starts at the current bend."
+      },
+      {
+       "kind": "context",
+       "line": 137,
+       "text": "<code>server.quit</code> only sends <code>/quit</code>, which a server still loading plugins and opening the device has not bound a port to receive. The flag on <code>close()</code> in <code>src/keys/voice-host.ts</code> covers both places."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "lookup",
+   "title": "One place finds sclang",
+   "kicker": "<code>sclangCommand()</code> serves renders and the voice host alike",
+   "intro": [
+    "<code>runScProgram</code> used to run <code>FIELD_SCLANG</code> or <code>sclang</code> and retry the SuperCollider.app bundle after an <code>ENOENT</code>. A long-running spawn cannot retry that way, so the lookup now happens before the spawn. <code>sclangCommand()</code> resolves <code>FIELD_SCLANG</code>, as a path or a name on <code>PATH</code>, then <code>sclang</code> on <code>PATH</code>, then the app bundle. A missing override still throws rather than falling back, because <code>FIELD_SCLANG</code> is the escape hatch for a deterministic wrapper."
+   ],
+   "files": [
+    {
+     "path": "src/generators/supercollider.ts",
+     "note": "Adds <code>onPath</code> and <code>sclangCommand()</code>, and has <code>runScProgram</code> call it. <code>programPath</code> now takes just the <code>source</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 74,
+       "text": "The stub-only <code>runScProgram edges</code> tests in <code>src/graph/build.test.ts</code> (missing override, timeout, stdout in failures) pass at this head, so the error messages are unchanged."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "helper",
+   "title": "The helper names the system output",
+   "kicker": "<code>field-audiod --keys</code> adds <code>output</code> to its ready line on macOS",
+   "intro": [
+    "The host must name a device for both directions, so without <code>--device</code> it needs the system output's name, and only native code reads it. The helper that publishes <code>Field Keys</code> already runs JUCE, so it scans JUCE's CoreAudio device type and puts the default output's name on its ready line. Elsewhere the field is absent, and <code>scsynth</code> keeps its own defaults."
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/keys.cpp",
+     "note": "Adds <code>defaultOutputDevice()</code> and the ready line's <code>output</code> field.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 180,
+       "text": "Built <code>field-audiod</code> at this head on macOS: the native round trip passes, and a probe through <code>KeysHelper</code> read <code>output</code> as <code>MacBook Pro Speakers</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/helper.ts",
+     "note": "Accepts the optional <code>output</code> field and keeps it as <code>defaultOutput</code>."
+    },
+    {
+     "path": "src/keys/helper-native.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 131,
+       "text": "On macOS this checks <code>output</code> only when it is present, so a helper that stops sending the field still passes. The review suggests requiring it, or skipping by name on a Mac with no output device."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "adapter",
+   "title": "Starting, watching, and stopping the host from TypeScript",
+   "kicker": "<code>VoiceHost</code> in <code>src/keys/voice-host.ts</code>, tested against a stub sclang",
+   "intro": [
+    "<code>VoiceHost.start</code> binds and releases a UDP port to choose one for <code>scsynth</code>, spawns <code>sclang -D</code> on the host script with the environment above, and reads only the <code>@field</code> lines from its stdout. It resolves on the first <code>ready</code> line. When <code>sclang</code> exits first, it rejects with the host's error plus what <code>sclang</code> printed after its startup banner, which leaves out the class library's compile log.",
+    "<code>close()</code> sends an OSC <code>/quit</code> straight to the chosen port, so the server stops even if <code>sclang</code> is stuck, then sends <code>sclang</code> SIGTERM, and SIGKILL after three seconds."
+   ],
+   "files": [
+    {
+     "path": "src/keys/voice-host.ts",
+     "note": "Resolves the instrument path, picks the port, spawns and parses the host, and quits it.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 164,
+       "text": "Open finding: during a rate restart the new <code>scsynth</code> loads plugins and opens the device before it binds its port, so this <code>/quit</code> is dropped, and <code>sclang</code> has no SIGTERM handler, so it dies without quitting the new server. Pressing Esc while the status line says restarting can leave that <code>scsynth</code> holding the device."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.test.ts",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "All 11 tests pass at this head."
+      },
+      {
+       "kind": "context",
+       "line": 40,
+       "text": "The stub prints canned <code>@field</code> lines and never runs <code>sc/voice-host.scd</code>. This <code>scsynth did not boot</code> line is one the real host never reaches, which is why the boot-failure flag above has no failing test."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "command",
+   "title": "The <code>field keys &lt;instrument&gt;</code> command",
+   "kicker": "The command resolves the instrument, starts the host after the helper, and shows its state",
+   "intro": [
+    "<code>field keys</code> takes an optional instrument and a <code>--device</code> option. It resolves the instrument before the terminal goes raw: a bare name gains <code>.scd</code> and resolves on the project's <code>shared/instruments/</code> shelf, as a <code>supercollider:</code> entry's <code>source:</code> does, and a path resolves from the project root, or from the current directory outside a project.",
+    "It starts the host after the helper, so <code>Field Keys</code> exists when <code>sclang</code> connects its MIDI inputs, and the keyboard plays while the host boots. The status line gains the instrument's state: starting, live at a rate on a device, or restarting. On quit it sends note-offs and All Notes Off, waits for the host to finish starting, closes it, and closes the helper."
+   ],
+   "files": [
+    {
+     "path": "src/cli.ts",
+     "note": "Adds the <code>[instrument]</code> argument and <code>--device</code>."
+    },
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Adds <code>resolveInstrument</code>, starts and closes the host, and adds the instrument to the status line.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 26,
+       "text": "A path with a slash resolves from the project root, not the current directory, so a path typed relative to a subdirectory fails with <code>no instrument program at …</code>. <code>docs/keys.md</code> does not say so yet."
+      },
+      {
+       "kind": "context",
+       "line": 128,
+       "text": "Without <code>--device</code>, the host gets the helper's system output name, which keeps <code>scsynth</code> off the microphone only while that name matches a device exactly."
+      },
+      {
+       "kind": "flag",
+       "line": 192,
+       "text": "Open finding: after Esc, <code>play</code> waits on <code>hostStarted</code>, which settles only on the host's ready line or <code>sclang</code>'s exit. A host that does neither, such as one whose <code>scsynth</code> exited during boot, blocks quitting before the terminal is restored, and Esc and Ctrl-C are no longer read."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Docs and the plan",
+   "kicker": "How to play an instrument and make one playable, and chunk 2 recorded as built",
+   "intro": [
+    "<code>docs/keys.md</code> gains a section on playing an instrument and a reference for voice mode. <code>docs/build-graph.md</code> states voice mode beside the render contract, <code>docs/architecture.md</code>'s live SuperCollider mode now describes the voice host, and the README mentions it. The plan corrects §2.6's <code>No inputs</code> bullet, noting what it replaced as the repository's plan conventions ask, adds the ready line's <code>output</code> field to §2.5, and appends §10, chunk 2 as built."
+   ],
+   "files": [
+    {
+     "path": "README.md"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "docs/build-graph.md"
+    },
+    {
+     "path": "docs/keys.md",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 85,
+       "text": "Says a path works but not where it resolves from: the project root inside a project."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 432,
+       "text": "§10.1 showed this fix only on the speakers, which have no inputs."
+      },
+      {
+       "kind": "context",
+       "line": 970,
+       "text": "Criterion 21 uses the Apollo, which has inputs. For one named device <code>scsynth</code> starts a single IOProc with every stream on, inputs included, unless <code>ServerOptions.inputStreamsEnabled</code> turns them off. Watch for a microphone prompt there; the review could not confirm whether macOS shows one."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

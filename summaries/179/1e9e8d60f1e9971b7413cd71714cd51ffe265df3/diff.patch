@@ -1,0 +1,1260 @@
+diff --git a/README.md b/README.md
+index d650b25..d3eecc0 100644
+--- a/README.md
++++ b/README.md
+@@ -142,7 +142,9 @@ needs `field-audiod` and a terminal that reports key releases through
+ the kitty keyboard protocol: Ghostty, iTerm2 3.5 or later, kitty, or
+ WezTerm. Keys are read by physical position, so Dvorak, AZERTY, and
+ other layouts play the same notes, and a keymap of your own is a YAML
+-file away. See [docs/keys.md](docs/keys.md).
++file away. Name an instrument, as in `field keys still-water-pad` inside
++`examples/bloom`, and it plays that SuperCollider instrument live too.
++See [docs/keys.md](docs/keys.md).
+ 
+ ## Status
+ 
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 9940bfe..eecffe3 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -150,8 +150,13 @@ OSC over UDP, which TypeScript handles fine. Two modes:
+ - **Offline (NRT)** — the default: an SC program plus an explicit seed
+   renders an asset via scsynth's non-realtime mode. Deterministic,
+   cacheable, and the first real build rule.
+-- **Live** — scsynth as a node in the real-time graph, receiving
+-  timestamped OSC. Arrives with the real-time runtime.
++- **Live** — `field keys <instrument>` runs a voice host: `sclang` on
++  `sc/voice-host.scd`, which boots its own scsynth on the output device
++  and plays the instrument's voice from every MIDI source
++  ([keys.md](keys.md)). Its sound goes straight to the device, beside
++  the daemon's rather than through the session graph; scsynth as a node
++  in that graph, receiving timestamped OSC, is
++  [live-supercollider](projects/live-supercollider/readme.md)'s work.
+ 
+ SC source is tracked in Git and treated as code.
+ 
+diff --git a/docs/build-graph.md b/docs/build-graph.md
+index a3e7f3a..aef0eab 100644
+--- a/docs/build-graph.md
++++ b/docs/build-graph.md
+@@ -254,6 +254,15 @@ iteration. Full contract:
+ [projects/sc-render/readme.md](projects/sc-render/readme.md) §2 (the plan
+ predates the §4 rename).
+ 
++The same program can also be played from notes. When `FIELD_MODE` is
++`voice`, it must not render or exit, and its value — the file's last
++expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
++controls that frees itself after `gate` goes to 0. `field keys
++<instrument>` plays that voice live; the render variables are absent in
++voice mode, so a program checks `FIELD_MODE` before reading them. Voice
++mode never enters the build, so it changes no cache key except through
++the program's own content hash. See [keys.md](keys.md).
++
+ ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
+ 
+ From [projects/effects/readme.md](projects/effects/readme.md): Fyra's
+diff --git a/docs/keys.md b/docs/keys.md
+index d9513a6..da44f06 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -13,8 +13,17 @@ Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
+ Field Keys · musical-typing · transpose 0 · velocity 100 · C4 E4 G4
+ ```
+ 
+-Playing a SuperCollider instrument from `field keys` directly, and
+-recording what you play, are the later chunks of
++Name an instrument and `field keys` plays it too, from the keyboard and
++from every other MIDI source:
++
++```console
++$ cd examples/bloom
++$ field keys still-water-pad
++Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
++Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · still-water-pad live at 48000 Hz on MacBook Pro Speakers
++```
++
++Recording what you play is the last chunk of
+ [the keyboard-instrument plan](projects/keyboard-instrument/readme.md).
+ 
+ ## Before you start
+@@ -29,6 +38,9 @@ recording what you play, are the later chunks of
+ - **macOS or Linux.** On Linux the virtual source needs the ALSA
+   sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
+   `field keys` reports that.
++- **SuperCollider, to play an instrument.** `field keys` finds `sclang`
++  the way `field build` does: `FIELD_SCLANG`, then your `PATH`, then
++  the macOS app bundle.
+ 
+ You do not need to be inside a Field project.
+ 
+@@ -66,6 +78,72 @@ $ native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor
+ The monitor prints every MIDI message from the source you name, so it
+ also checks a USB controller: give it the controller's name.
+ 
++## Play an instrument
++
++`field keys <instrument>` plays a SuperCollider instrument from the
++project's `shared/instruments/` shelf, by the name a `supercollider:`
++entry gives it, with or without `.scd`. A path works too, and outside a
++project it is the only way to name one.
++
++1. `field keys` publishes `Field Keys`, then starts a *voice host*:
++   `sclang` running Field's `sc/voice-host.scd`. The status line says
++   the instrument is starting.
++2. The host boots its own `scsynth` on the output device: the one you
++   give with `--device` (`field devices` lists them), or the system
++   output. It runs at the device's current sample rate and never
++   changes it, so `field play` and `field keys` can share a device.
++3. The host loads the instrument's voice and plays it from every MIDI
++   source, so a USB controller plays it too. The status line shows the
++   instrument live, with its device and rate.
++
++The voice's sound goes straight to the device, beside `field play`'s
++rather than through the song's inserts and master chain. If something
++moves the device to another sample rate while you play, such as a
++`field play` of a song at another rate, the host restarts its server at
++the new rate, and notes sounding at the switch stop. Without that
++restart every note would play sharp or flat.
++
++An instrument that cannot play stops `field keys` with the reason, such
++as `creek-kit.scd does not answer FIELD_MODE=voice`.
++
++### Make an instrument playable
++
++An instrument program renders from a spec when Field builds it. To play
++it from notes as well, give it a voice mode: when `FIELD_MODE` is
++`voice`, its value, the file's last expression, must be a SynthDef with
++these controls, and it must not render or exit.
++
++| Control | What the voice host sets |
++| --- | --- |
++| `freq` | The note's frequency in Hz |
++| `amp` | The velocity divided by 127 |
++| `gate` | 1 at note-on, 0 at note-off |
++| `out` | The output bus, 0 |
++
++The voice writes two channels and frees itself after `gate` goes to 0,
++with an envelope that ends in `doneAction: 2`. The render variables are
++absent in voice mode, so check `FIELD_MODE` before you read them:
++
++```supercollider
++(
++if ("FIELD_MODE".getenv == "voice") {
++	SynthDef(\myKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
++		var env = EnvGen.kr(Env.asr(0.01, 1, 0.5), gate, doneAction: 2);
++		Out.ar(out, Pan2.ar(SinOsc.ar(freq) * amp * 0.2 * env));
++	})
++} {
++	// render mode: the program as it reads today
++}
++)
++```
++
++The host owns everything between MIDI and voices: one voice per
++sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
++pitch bend, which it applies to `freq` on every sounding voice, up to
++two semitones either way. It ignores modulation (CC 1) for now. In
++`examples/bloom`, `still-water-pad` answers voice mode; its render
++branch is unchanged and renders the same bytes as before.
++
+ ## Keys are read by position
+ 
+ A keymap binds *positions*: physical keys, named by their W3C
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index 7c52961..38cc5d8 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -344,7 +344,7 @@ layout, and speaks NDJSON:
+ | Direction | Line | Meaning |
+ | --- | --- | --- |
+ | helper to `field keys` | `{"keyboard":{"name":"Dvorak","keys":{"KeyA":"a","KeyS":"o",…},"dead":[]}}` | The active keyboard layout: the character each bindable position types, and the positions that are dead keys. Sent before `ready`, and again when the keyboard layout changes. macOS only. |
+-| helper to `field keys` | `{"ready":true,"name":"Field Keys"}` | The virtual source exists. |
++| helper to `field keys` | `{"ready":true,"name":"Field Keys","output":"MacBook Pro Speakers"}` | The virtual source exists. On macOS, `output` names the system output, which the voice host gives `scsynth` when there is no `--device` (§10.1). |
+ | `field keys` to helper | `{"midi":[144,60,100]}` | Send these bytes now, as one message. |
+ | helper to `field keys` | `{"error":"…"}`, then exit 1 | The platform cannot create a virtual source, or a line did not parse. |
+ 
+@@ -429,8 +429,10 @@ The voice host owns everything between MIDI and voices:
+   again on the same port at the device's new rate, adds the voice
+   again, and prints its ready line again with the new rate. Notes
+   sounding at the switch stop.
+-- **No inputs.** The host sets no input channels, so `scsynth` opens
+-  no input device and macOS never asks for the microphone.
++- **No inputs.** The host sets no input channels and names the output
++  device as `scsynth`'s input device too, so `scsynth` never opens the
++  microphone. No input channels alone is not enough: §10.1 records why,
++  and this bullet said otherwise until chunk 2 found it.
+ - **No orphans.** `field keys` chooses the `scsynth` port, so it can
+   send `/quit` even if `sclang` has died. The host checks once a second
+   that `field keys` is alive, and if it is not, the host quits
+@@ -897,3 +899,76 @@ Keys`, through any keymap, built-in or yours. The built-in is
+   could not create the source; about sixty later starts did not. JUCE
+   keeps a failed client for the life of the process, so the remedy is
+   to run `field keys` again, which `docs/keys.md` says.
++
++## 10 Chunk 2 as built (2026-10-10)
++
++`field keys <instrument>` plays a SuperCollider instrument through the
++voice host in `sc/voice-host.scd`, and `still-water-pad` answers voice
++mode.
++
++### 10.1 scsynth opens the microphone unless told otherwise
++
++The first run of the voice host never became ready. `scsynth` printed
++its sample rate and stopped there, with "MacBook Pro Microphone" chosen
++as its input device, although the host asks for no input channels
++(`-i 0`). Booted alone, with the same arguments, under a pseudo-terminal,
++it stalled at the same line and ignored `/quit`. Booted with the
++speakers named as its device (`-H "MacBook Pro Speakers"`), it printed
++`SuperCollider 3 server ready.` and quit on `/quit`.
++
++So on macOS `scsynth` opens the default input device whatever the input
++channel count, and opening it waits on the microphone permission, which
++a process with no way to ask never gets. In a terminal that can ask,
++the user would see a microphone prompt for a keyboard instrument. The
++host therefore names one device for both directions, `inDevice` and
++`outDevice`, so `scsynth` never touches the microphone. With no
++`--device`, `field-audiod --keys` reports the system output's name on
++its ready line (§2.5), through JUCE's CoreAudio device type, the same
++way the daemon follows the default output. §2.6's "No inputs" bullet is
++corrected to match.
++
++### 10.2 What implementation settled
++
++- **A failure is the last thing its branch does.** `sclang`'s `exit`
++  does not stop the code that called it: a host that failed to load its
++  voice kept going and began to boot a server before it exited. The
++  host puts everything after loading the voice in one function that
++  runs only when the voice loaded.
++- **A load error names the cause first.** An instrument without a voice
++  mode, such as `creek-kit`, fails in its own render code under voice
++  mode, with an error such as `Message 'asInteger' not understood`. The
++  host reports `creek-kit.scd does not answer FIELD_MODE=voice: running
++  it in voice mode failed with ...`, and `field keys` adds what `sclang`
++  printed after its startup banner, leaving out the class library's
++  compile messages.
++- **Field reads only `@field ` lines.** `sclang` prints freely to stdout,
++  so each host line is `@field ` followed by one JSON object: `ready`
++  with the device and rate, `restarting`, `error`, and, under
++  `FIELD_VOICE_TRACE`, `voice_on` and `voice_off`, which made the host
++  testable without sound.
++- **`sclang` runs in daemon mode (`-D`)**, so it reads no input, and
++  `field keys` starts the host after the helper, so `Field Keys` exists
++  when the host connects its MIDI inputs. The keyboard plays while the
++  host boots.
++- **`sclangCommand()`** in `src/generators/supercollider.ts` resolves
++  `FIELD_SCLANG`, then `PATH`, then the app bundle, for renders and the
++  host alike.
++
++### 10.3 What was verified, and how
++
++| Check | Result |
++| --- | --- |
++| `src/keys/voice-host.test.ts`, against a stub `sclang` | 11 pass: resolution, the OSC `/quit` bytes, the host's lines, ready, an error with the output after the banner, a silent exit, a restart then a death after ready, and a missing `FIELD_SCLANG`. Close delivers `/quit` to the port the stub was given. |
++| The host on this Mac with a silent voice, `Field Keys` from the real helper | Live at 48000 Hz on MacBook Pro Speakers about two seconds after start. A note through CoreMIDI started a voice, and its note-off ended it. Nothing outlived the close. |
++| The host with `still-water-pad`, no notes played | Live at 48000 Hz; its voice loads as a SynthDef. |
++| The host with `creek-kit` | Rejected with the message in §10.2, and nothing left running. |
++| The parent killed with `SIGKILL` while the host ran | `sclang` and its `scsynth` were both gone within three seconds. |
++| Criterion 27 | `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10` before and after the edit: identical bytes (`cmp`). |
++
++### 10.4 What is still owed
++
++- **Criteria 21 to 26 by ear.** Playing a chord, sustain, bend, a USB
++  controller, `field play` beside the host, and the rate restart all
++  make sound, so no run here played them. The restart in criterion 25
++  also needs a device whose rate moves; the logic that drives it runs
++  only in `sclang`.
+diff --git a/examples/bloom/shared/instruments/still-water-pad.scd b/examples/bloom/shared/instruments/still-water-pad.scd
+index d924b87..a754a2b 100644
+--- a/examples/bloom/shared/instruments/still-water-pad.scd
++++ b/examples/bloom/shared/instruments/still-water-pad.scd
+@@ -3,46 +3,61 @@
+ // slightly, under a slow sine envelope. Runs under Field's sc-render
+ // contract: parameters arrive in the environment, output goes to
+ // FIELD_OUTPUT, and the render is deterministic for a given FIELD_SEED.
++//
++// Under FIELD_MODE=voice it renders nothing: its value is one voice of the
++// pad, gated, which `field keys still-water-pad` plays from the keyboard
++// (keyboard-instrument.md §2.6).
+ (
+-var seed = "FIELD_SEED".getenv.asInteger;
+-var dur = "FIELD_DURATION".getenv.asFloat;
+-var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
+-var out = "FIELD_OUTPUT".getenv;
+-var chans = "FIELD_CHANNELS".getenv.asInteger;
+-var events, score;
+-thisThread.randSeed = seed;
++if ("FIELD_MODE".getenv == "voice") {
++	SynthDef(\stillWaterKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
++		var env = EnvGen.kr(Env.asr(1.5, 1, 2.5, \sine), gate, doneAction: 2);
++		var voices = [[-0.0012, -0.5], [0, 0], [0.0012, 0.5]].collect { |detunePan|
++			var f = freq * (1 + detunePan[0]);
++			Pan2.ar(SinOsc.ar(f) + (0.35 * SinOsc.ar(f * 2)), detunePan[1])
++		};
++		Out.ar(out, voices.sum * amp * 0.12 * env);
++	})
++} {
++	var seed = "FIELD_SEED".getenv.asInteger;
++	var dur = "FIELD_DURATION".getenv.asFloat;
++	var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
++	var out = "FIELD_OUTPUT".getenv;
++	var chans = "FIELD_CHANNELS".getenv.asInteger;
++	var events, score;
++	thisThread.randSeed = seed;
+ 
+-SynthDef(\stillWaterVoice, { |freq = 220, amp = 0.05, detune = 0, pan = 0, atk = 2.5, sus = 5, rel = 2.5|
+-	var env = EnvGen.kr(Env.linen(atk, sus, rel, curve: \sine), doneAction: 2);
+-	var f = freq * (1 + detune);
+-	var sig = SinOsc.ar(f) + (0.35 * SinOsc.ar(f * 2));
+-	Out.ar(0, Pan2.ar(sig * amp * env, pan));
+-}).store;
++	SynthDef(\stillWaterVoice, { |freq = 220, amp = 0.05, detune = 0, pan = 0, atk = 2.5, sus = 5, rel = 2.5|
++		var env = EnvGen.kr(Env.linen(atk, sus, rel, curve: \sine), doneAction: 2);
++		var f = freq * (1 + detune);
++		var sig = SinOsc.ar(f) + (0.35 * SinOsc.ar(f * 2));
++		Out.ar(0, Pan2.ar(sig * amp * env, pan));
++	}).store;
+ 
+-events = [];
+-[146.83, 174.61, 220.0, 293.66].do { |freq| // D3 F3 A3 D4
+-	3.do {
+-		events = events.add([0.0,
+-			Synth.basicNew(\stillWaterVoice).newMsg(args: [
+-				\freq, freq,
+-				\amp, 0.045,
+-				\detune, rrand(-0.0015, 0.0015),
+-				\pan, rrand(-0.6, 0.6),
+-				\atk, dur * 0.25,
+-				\sus, dur * 0.5,
+-				\rel, dur * 0.25
+-			])
+-		]);
++	events = [];
++	[146.83, 174.61, 220.0, 293.66].do { |freq| // D3 F3 A3 D4
++		3.do {
++			events = events.add([0.0,
++				Synth.basicNew(\stillWaterVoice).newMsg(args: [
++					\freq, freq,
++					\amp, 0.045,
++					\detune, rrand(-0.0015, 0.0015),
++					\pan, rrand(-0.6, 0.6),
++					\atk, dur * 0.25,
++					\sus, dur * 0.5,
++					\rel, dur * 0.25
++				])
++			]);
++		};
+ 	};
+-};
+-score = Score(events ++ [[dur, [0]]]);
+-score.recordNRT(
+-	outputFilePath: out,
+-	sampleRate: rate,
+-	headerFormat: "WAV",
+-	sampleFormat: "int24",
+-	options: ServerOptions.new.numOutputBusChannels_(chans),
+-	duration: dur,
+-	action: { 0.exit }
+-);
++	score = Score(events ++ [[dur, [0]]]);
++	score.recordNRT(
++		outputFilePath: out,
++		sampleRate: rate,
++		headerFormat: "WAV",
++		sampleFormat: "int24",
++		options: ServerOptions.new.numOutputBusChannels_(chans),
++		duration: dur,
++		action: { 0.exit }
++	);
++}
+ )
+diff --git a/native/audiod/src/keys.cpp b/native/audiod/src/keys.cpp
+index 2adae3b..c39e784 100644
+--- a/native/audiod/src/keys.cpp
++++ b/native/audiod/src/keys.cpp
+@@ -137,6 +137,25 @@ bool stdinEnded()
+     return false;
+ }
+ 
++// The system output's name, which the voice host names as scsynth's input
++// device too: scsynth on macOS otherwise opens the default input device
++// even with no input channels, and blocks on the microphone permission
++// (keyboard-instrument.md §10.1).
++juce::String defaultOutputDevice()
++{
++#if JUCE_MAC
++    std::unique_ptr<juce::AudioIODeviceType> type (juce::AudioIODeviceType::createAudioIODeviceType_CoreAudio());
++    if (type == nullptr)
++        return {};
++    type->scanForDevices();
++    const auto names = type->getDeviceNames (false);
++    const auto index = type->getDefaultDeviceIndex (false);
++    return juce::isPositiveAndBelow (index, names.size()) ? names[index] : juce::String();
++#else
++    return {};
++#endif
++}
++
+ std::atomic<bool> stopRequested { false };
+ } // namespace
+ 
+@@ -155,7 +174,11 @@ int runKeys (const juce::String& name)
+         printError ("cannot create a virtual MIDI source named " + name + " on this system");
+         return 1;
+     }
+-    printLine (jsonObject ({ { "ready", true }, { "name", name } }));
++    auto ready = jsonObject ({ { "ready", true }, { "name", name } });
++    const auto output = defaultOutputDevice();
++    if (output.isNotEmpty())
++        ready.getDynamicObject()->setProperty ("output", output);
++    printLine (ready);
+ 
+     // Lines are read off the main thread, whose run loop delivers the
+     // keyboard layout changes, and each message is sent as its line
+diff --git a/sc/voice-host.scd b/sc/voice-host.scd
+new file mode 100644
+index 0000000..c54b32a
+--- /dev/null
++++ b/sc/voice-host.scd
+@@ -0,0 +1,156 @@
++// The voice host behind `field keys <instrument>` (keyboard-instrument.md
++// §2.6). It boots its own scsynth on the output device, loads the
++// instrument's voice, and plays it from every MIDI source. Field reads
++// only the lines that start with "@field ", each one JSON object; the rest
++// of sclang's output is left for diagnosing a failure.
++//
++// Environment: FIELD_INSTRUMENT (the program's absolute path),
++// FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
++// FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
++// FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
++(
++var instrument = "FIELD_INSTRUMENT".getenv;
++var port = "FIELD_SC_PORT".getenv.asInteger;
++var parentPid = "FIELD_PARENT_PID".getenv;
++var device = "FIELD_DEVICE".getenv;
++var trace = "FIELD_VOICE_TRACE".getenv.notNil;
++var server, voiceDef, loadError, voices, sustained, sustainDown = false, bend = 0, restarting = false;
++var jsonValue, emit, fail, run, boot, startVoice, releaseVoice, releaseAll, restart;
++
++jsonValue = { |value|
++	if (value.isString or: { value.isKindOf(Symbol) }) {
++		"\"" ++ value.asString.replace("\\", "\\\\").replace("\"", "\\\"") ++ "\""
++	} { value.asString }
++};
++emit = { |pairs|
++	var body = pairs.clump(2).collect { |kv| jsonValue.(kv[0]) ++ ":" ++ jsonValue.(kv[1]) }.join(",");
++	("@field {" ++ body ++ "}").postln;
++};
++// exit does not stop the code that called it, so a failure is the last
++// thing its branch does.
++fail = { |message|
++	emit.(["error", message]);
++	1.exit;
++};
++
++startVoice = { |key, note, velocity|
++	voices[key] !? { |old| old.set(\gate, 0) };
++	sustained.remove(key);
++	voices[key] = Synth(voiceDef.name, [\freq, (note + bend).midicps, \amp, velocity / 127, \gate, 1, \out, 0], server);
++	if (trace) { emit.(["voice_on", note]) };
++};
++releaseVoice = { |key|
++	voices.removeAt(key) !? { |synth|
++		synth.set(\gate, 0);
++		if (trace) { emit.(["voice_off", key % 128]) };
++	};
++};
++releaseAll = {
++	voices.keys.copy.do(releaseVoice);
++	sustained.clear;
++};
++
++boot = {
++	server.waitForBoot({
++		voiceDef.add;
++		server.sync;
++		restarting = false;
++		emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
++	}, onFailure: {
++		fail.("scsynth did not boot on " ++ (device ? "the system output"));
++	});
++};
++
++// scsynth keeps computing at the rate it booted at when the device moves
++// to another, so every voice would play sharp or flat. Each status reply
++// carries the booted rate and the rate measured from the device clock.
++restart = {
++	restarting = true;
++	voices.clear;
++	sustained.clear;
++	emit.(["restarting", true]);
++	server.quit(onComplete: boot);
++};
++
++run = {
++	server = Server(\fieldKeys, NetAddr("127.0.0.1", port));
++	server.options.numInputBusChannels = 0;
++	server.options.numOutputBusChannels = 2;
++	server.options.hardwareBufferSize = 128;
++	server.options.sampleRate = nil;
++	// Named for both directions: given no input device, scsynth on macOS
++	// opens the default one even with no input channels, and blocks on the
++	// microphone permission (keyboard-instrument.md §10.1).
++	if (device.notNil) {
++		server.options.inDevice = device;
++		server.options.outDevice = device;
++	};
++	Server.default = server;
++
++	voices = Dictionary.new;
++	sustained = Set.new;
++
++	MIDIClient.init(verbose: false);
++	MIDIIn.connectAll(verbose: false);
++
++	MIDIdef.noteOn(\fieldNoteOn, { |velocity, note, chan|
++		var key = chan * 128 + note;
++		if (velocity == 0) {
++			if (sustainDown) { sustained.add(key) } { releaseVoice.(key) };
++		} {
++			if (restarting.not) { startVoice.(key, note, velocity) };
++		};
++	});
++	MIDIdef.noteOff(\fieldNoteOff, { |velocity, note, chan|
++		var key = chan * 128 + note;
++		if (sustainDown) { sustained.add(key) } { releaseVoice.(key) };
++	});
++	MIDIdef.cc(\fieldSustain, { |value|
++		if (value >= 64) { sustainDown = true } {
++			sustainDown = false;
++			sustained.copy.do(releaseVoice);
++			sustained.clear;
++		};
++	}, 64);
++	MIDIdef.cc(\fieldAllNotesOff, { releaseAll.() }, 123);
++	MIDIdef.bend(\fieldBend, { |value|
++		bend = (value - 8192) / 8192 * 2;
++		voices.keysValuesDo { |key, synth| synth.set(\freq, ((key % 128) + bend).midicps) };
++	});
++
++	Routine {
++		loop {
++			0.7.wait;
++			if (restarting.not and: { server.serverRunning }) {
++				var booted = server.sampleRate, measured = server.actualSampleRate;
++				if (booted.notNil and: { measured.notNil } and: { booted > 0 } and: { (measured / booted - 1).abs > 0.01 }) {
++					restart.();
++				};
++			};
++		};
++	}.play(AppClock);
++
++	// No orphans: once `field keys` is gone, so is this host and its server.
++	Routine {
++		loop {
++			1.wait;
++			if (("kill -0 " ++ parentPid ++ " 2>/dev/null").systemCmd != 0) {
++				server.quit;
++				0.exit;
++			};
++		};
++	}.play(AppClock);
++
++	boot.();
++};
++
++voiceDef = try { thisProcess.interpreter.executeFile(instrument) } { |error| loadError = error.errorString; nil };
++case
++	{ loadError.notNil } {
++		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: running it in voice mode failed with " ++ loadError);
++	}
++	{ voiceDef.isKindOf(SynthDef).not } {
++		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef");
++	}
++	{ run.() };
++)
+diff --git a/src/cli.ts b/src/cli.ts
+index d58c832..ac64c59 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1006,14 +1006,18 @@ program
+   });
+ 
+ program
+-  .command('keys')
+-  .description('play the computer keyboard as the MIDI source "Field Keys" (needs a terminal with the kitty keyboard protocol; Esc quits)')
++  .command('keys [instrument]')
++  .description(
++    'play the computer keyboard as the MIDI source "Field Keys", and a SuperCollider instrument from it when you name one ' +
++      '(needs a terminal with the kitty keyboard protocol; Esc quits)',
++  )
+   .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
++  .option('--device <name>', 'output device for the instrument (field devices lists them; default: the system output)')
+   .option('--print', 'print the keymap as a keyboard diagram and exit')
+-  .action(async (opts: { keymap?: string; print?: boolean }) => {
++  .action(async (instrument: string | undefined, opts: { keymap?: string; print?: boolean; device?: string }) => {
+     try {
+       const { keysCommand } = await import('./commands/keys.js');
+-      await keysCommand(opts);
++      await keysCommand(instrument, opts);
+     } catch (err) {
+       fail(err);
+     }
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index a789049..fc23299 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -1,9 +1,13 @@
++import { existsSync } from 'node:fs';
++import { basename } from 'node:path';
+ import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
+ import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
+ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+ import { printKeymap, signed } from '../keys/print.js';
+ import { KeysSession, type MidiMessage } from '../keys/session.js';
+ import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
++import { instrumentPath, VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
++import { findProjectRoot } from '../model/project.js';
+ import type { Keymap } from '../schema/keymap.js';
+ 
+ export const UNSUPPORTED_TERMINAL =
+@@ -13,20 +17,40 @@ export const UNSUPPORTED_TERMINAL =
+ export interface KeysOptions {
+   keymap?: string;
+   print?: boolean;
++  device?: string;
+ }
+ 
+-export async function keysCommand(options: KeysOptions): Promise<void> {
++// A bare instrument name resolves on the project's instruments shelf, as a
++// supercollider: entry's source does; a path resolves from the project
++// root, or from here outside a project (keyboard-instrument.md §2.1).
++export function resolveInstrument(spec: string, cwd = process.cwd()): string {
++  const root = findProjectRoot(cwd);
++  if (root === undefined && !spec.includes('/')) {
++    throw new Error(
++      `field keys ${spec}: a bare instrument name resolves in a project's shared/instruments/, ` +
++        'and this is not inside a Field project; give the program by path instead',
++    );
++  }
++  const path = instrumentPath(spec, root ?? cwd);
++  if (!existsSync(path)) throw new Error(`field keys ${spec}: no instrument program at ${path}`);
++  return path;
++}
++
++export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {
+   const source = resolveKeymapSource(options.keymap);
+   const keymap = loadKeymap(source.path);
+   if (options.print === true) {
+     process.stdout.write(printKeymap(keymap));
+     return;
+   }
++  const program = instrument !== undefined ? resolveInstrument(instrument) : undefined;
+   const { stdin, stdout } = process;
+   if (!stdin.isTTY || !stdout.isTTY) {
+     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
+   }
+-  await withKittyKeyboard({ stdin, stdout }, (rest) => play({ stdin, stdout }, source, keymap, rest));
++  await withKittyKeyboard({ stdin, stdout }, (rest) =>
++    play({ stdin, stdout }, { source, keymap, program, device: options.device }, rest),
++  );
+ }
+ 
+ // Raw mode and the protocol flags are the terminal's state, not ours, so
+@@ -54,16 +78,28 @@ async function withKittyKeyboard(tty: Tty, run: (rest: string) => Promise<void>)
+   }
+ }
+ 
+-async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: string): Promise<void> {
+-  const session = new KeysSession(initial);
++interface PlayOptions {
++  source: KeymapSource;
++  keymap: Keymap;
++  program: string | undefined;
++  device: string | undefined;
++}
++
++type InstrumentState = { name: string; status: VoiceHostStatus | { state: 'starting' } };
++
++async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
++  const { source, program } = options;
++  const session = new KeysSession(options.keymap);
+   let layout: KeyboardLayout | undefined;
+   let layoutPositions: ReadonlyMap<string, string> | undefined;
+   let reloadError: string | undefined;
++  const instrument: InstrumentState | undefined =
++    program !== undefined ? { name: basename(program, '.scd'), status: { state: 'starting' } } : undefined;
+ 
+   const draw = (): void => {
+     // A terminal that reports no size reports 0 columns.
+     const width = Math.max(20, (tty.stdout.columns || 80) - 1);
+-    tty.stdout.write(`\r\x1b[K${statusText(session, layout, reloadError).slice(0, width)}`);
++    tty.stdout.write(`\r\x1b[K${statusText(session, layout, reloadError, instrument).slice(0, width)}`);
+   };
+ 
+   let stop!: (error?: Error) => void;
+@@ -73,7 +109,7 @@ async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: st
+ 
+   // Before the helper starts, because its first keyboard layout report
+   // draws the status line.
+-  tty.stdout.write(`Playing ${initial.name} as the MIDI source "${SOURCE_NAME}". Esc or Ctrl-C quits.\n`);
++  tty.stdout.write(`Playing ${options.keymap.name} as the MIDI source "${SOURCE_NAME}". Esc or Ctrl-C quits.\n`);
+   if (source.kind === 'file') tty.stdout.write(`Saving ${source.path} reloads it.\n`);
+ 
+   const helper = await KeysHelper.start(SOURCE_NAME, {
+@@ -86,6 +122,29 @@ async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: st
+   });
+   const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
+ 
++  // The host starts after the helper, so `Field Keys` exists when sclang
++  // connects its MIDI inputs; the keyboard plays while it boots.
++  let host: VoiceHost | undefined;
++  const device = options.device ?? helper.defaultOutput;
++  const hostStarted =
++    program !== undefined
++      ? VoiceHost.start({
++          instrument: program,
++          ...(device !== undefined ? { device } : {}),
++          onStatus: (status) => {
++            if (status.state === 'voice') return;
++            instrument!.status = status;
++            draw();
++          },
++          onExit: (reason) => stop(new Error(`the voice host stopped: ${reason}`)),
++        }).then(
++          (started) => {
++            host = started;
++          },
++          (err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)),
++        )
++      : Promise.resolve();
++
+   const stopWatching =
+     source.kind === 'file'
+       ? watchKeymap(source.path, (result) => {
+@@ -130,12 +189,25 @@ async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: st
+   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
+   stopWatching?.();
+   send(session.quit());
++  await hostStarted;
++  await host?.close();
+   await helper.close();
+   tty.stdout.write('\n');
+   if (error !== undefined) throw error;
+ }
+ 
+-function statusText(session: KeysSession, layout: KeyboardLayout | undefined, reloadError: string | undefined): string {
++function instrumentText({ name, status }: InstrumentState): string {
++  if (status.state === 'live') return `${name} live at ${status.sampleRate} Hz on ${status.device}`;
++  if (status.state === 'restarting') return `${name} restarting for a new sample rate`;
++  return `${name} starting`;
++}
++
++function statusText(
++  session: KeysSession,
++  layout: KeyboardLayout | undefined,
++  reloadError: string | undefined,
++  instrument: InstrumentState | undefined,
++): string {
+   const notes = session.soundingNotes();
+   const parts = [
+     SOURCE_NAME,
+@@ -144,6 +216,7 @@ function statusText(session: KeysSession, layout: KeyboardLayout | undefined, re
+     `velocity ${session.velocity}`,
+     notes.length > 0 ? notes.join(' ') : '–',
+   ];
++  if (instrument !== undefined) parts.push(instrumentText(instrument));
+   const unplayable = unplayablePositions(layout, session.keymap);
+   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
+   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
+diff --git a/src/generators/supercollider.ts b/src/generators/supercollider.ts
+index 62612e1..c54ff03 100644
+--- a/src/generators/supercollider.ts
++++ b/src/generators/supercollider.ts
+@@ -1,6 +1,6 @@
+ import { execFile } from 'node:child_process';
+-import { existsSync } from 'node:fs';
+-import { join, posix } from 'node:path';
++import { accessSync, constants, existsSync } from 'node:fs';
++import { delimiter, join, posix } from 'node:path';
+ import { promisify } from 'node:util';
+ import { sha256File } from '../hash.js';
+ import type { SupercolliderSound } from './types.js';
+@@ -48,10 +48,41 @@ function formatScError(err: ExecError, programPath: string, timeoutMs: number):
+ 
+ // The home-shelf resolution (§4.3): every bare spelling resolves in its
+ // natural home, explicit spellings escape — never a search path.
+-export function programPath(sound: SupercolliderSound): string {
++export function programPath(sound: Pick<SupercolliderSound, 'source'>): string {
+   return sound.source.includes('/') ? sound.source : posix.join('shared/instruments', sound.source);
+ }
+ 
++function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
++  for (const dir of (env['PATH'] ?? '').split(delimiter)) {
++    if (dir === '') continue;
++    const candidate = join(dir, name);
++    try {
++      accessSync(candidate, constants.X_OK);
++      return candidate;
++    } catch {
++      // not here
++    }
++  }
++  return undefined;
++}
++
++// The sclang to run: FIELD_SCLANG, then PATH, then the app bundle. One
++// lookup for a render and for the long-running voice host
++// (keyboard-instrument.md §2.8). The override is the determinism escape
++// hatch (sc-render.md §2); a typo'd wrapper must never silently run the
++// app bundle instead.
++export function sclangCommand(env: NodeJS.ProcessEnv = process.env): string {
++  const override = env['FIELD_SCLANG'];
++  if (override) {
++    const found = override.includes('/') ? (existsSync(override) ? override : undefined) : onPath(override, env);
++    if (found === undefined) throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
++    return found;
++  }
++  const found = onPath('sclang', env) ?? (existsSync(SCLANG_APP_FALLBACK) ? SCLANG_APP_FALLBACK : undefined);
++  if (found === undefined) throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
++  return found;
++}
++
+ // Run an SC program under the supercollider contract. Used by the rule
+ // and by `field sc render` (direct, uncached iteration).
+ export async function runScProgram(
+@@ -78,28 +109,11 @@ export async function runScProgram(
+   // hangs, not to race legitimate work.
+   const timeout = params.timeoutMs ?? Math.max(180_000, 60_000 + params.duration * 10_000);
+   const options = { env, timeout };
+-  const override = process.env['FIELD_SCLANG'];
++  const sclang = sclangCommand();
+   try {
+-    await execFileAsync(override ?? 'sclang', [programPath], options);
++    await execFileAsync(sclang, [programPath], options);
+   } catch (err) {
+-    const e = err as ExecError;
+-    if (e.code === 'ENOENT') {
+-      if (override) {
+-        // The override is the determinism escape hatch (sc-render.md §2); a
+-        // typo'd wrapper must never silently render through the app bundle.
+-        throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
+-      }
+-      if (existsSync(SCLANG_APP_FALLBACK)) {
+-        try {
+-          await execFileAsync(SCLANG_APP_FALLBACK, [programPath], options);
+-          return;
+-        } catch (fallbackErr) {
+-          throw formatScError(fallbackErr as ExecError, programPath, timeout);
+-        }
+-      }
+-      throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
+-    }
+-    throw formatScError(e, programPath, timeout);
++    throw formatScError(err as ExecError, programPath, timeout);
+   }
+ }
+ 
+diff --git a/src/keys/helper-native.test.ts b/src/keys/helper-native.test.ts
+index ee8f675..d42ebce 100644
+--- a/src/keys/helper-native.test.ts
++++ b/src/keys/helper-native.test.ts
+@@ -124,7 +124,16 @@ async function startKeys(ctx: TestContext, name: string): Promise<{ keys: Helper
+     console.warn(`skipping the native MIDI round trip: ${reason}`);
+     ctx.skip(reason);
+   }
+-  expect(published).toEqual({ ready: true, name });
++  // On macOS the ready line also names the system output, which the
++  // voice host gives scsynth for both directions.
++  const { output, ...ready } = published;
++  expect(ready).toEqual({ ready: true, name });
++  if (process.platform === 'darwin' && output !== undefined) {
++    expect(typeof output).toBe('string');
++    expect(output).not.toBe('');
++  } else if (process.platform !== 'darwin') {
++    expect(output).toBeUndefined();
++  }
+   return { keys, afterReady: index };
+ }
+ 
+diff --git a/src/keys/helper.ts b/src/keys/helper.ts
+index be0f30e..0a60970 100644
+--- a/src/keys/helper.ts
++++ b/src/keys/helper.ts
+@@ -10,7 +10,7 @@ export const SOURCE_NAME = 'Field Keys';
+ // The helper's lines (keyboard-instrument.md §2.5).
+ const helperLine = z.union([
+   z.object({ keyboard: z.object({ name: z.string(), keys: z.record(z.string(), z.string()), dead: z.array(z.string()) }) }),
+-  z.object({ ready: z.literal(true), name: z.string() }),
++  z.object({ ready: z.literal(true), name: z.string(), output: z.string().optional() }),
+   z.object({ error: z.string() }),
+ ]);
+ 
+@@ -27,6 +27,8 @@ export interface HelperOptions {
+ // removes the source, so the source never outlives this process.
+ export class KeysHelper {
+   private closing = false;
++  // The system output on macOS, which the voice host names for scsynth.
++  defaultOutput: string | undefined;
+ 
+   private constructor(private readonly child: ChildProcessWithoutNullStreams) {
+     // A write after the helper died must not kill this process; the exit
+@@ -68,6 +70,7 @@ export class KeysHelper {
+         else if ('error' in parsed) lastError = parsed.error;
+         else if (!ready) {
+           ready = true;
++          helper.defaultOutput = parsed.output;
+           resolve(helper);
+         }
+       });
+diff --git a/src/keys/voice-host.test.ts b/src/keys/voice-host.test.ts
+new file mode 100644
+index 0000000..34908f1
+--- /dev/null
++++ b/src/keys/voice-host.test.ts
+@@ -0,0 +1,165 @@
++import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { resolveInstrument } from '../commands/keys.js';
++import { freeUdpPort, instrumentPath, oscMessage, parseHostLine, VoiceHost, type VoiceHostStatus } from './voice-host.js';
++
++// A stand-in for sclang running the voice host: it records its
++// environment, listens on the scsynth port it was given, records an OSC
++// /quit there, and behaves as STUB_MODE says.
++const STUB = `#!/usr/bin/env node
++const { appendFileSync, writeFileSync } = require('node:fs');
++const log = process.env.STUB_LOG;
++writeFileSync(log + '.env', JSON.stringify({
++  args: process.argv.slice(2),
++  mode: process.env.FIELD_MODE,
++  instrument: process.env.FIELD_INSTRUMENT,
++  device: process.env.FIELD_DEVICE ?? null,
++  parent: process.env.FIELD_PARENT_PID,
++}));
++const socket = require('node:dgram').createSocket('udp4');
++socket.on('message', (msg) => appendFileSync(log, msg.toString('latin1') + '\\n'));
++socket.bind(Number(process.env.FIELD_SC_PORT), '127.0.0.1', () => {
++  console.log('compiling class library...');
++  console.log('*** Welcome to SuperCollider 3.14.1. *** For help type cmd-d.');
++  switch (process.env.STUB_MODE) {
++    case 'ready':
++      console.log('@field {"ready":true,"device":"Test Out","sample_rate":48000}');
++      break;
++    case 'error':
++      console.log('ERROR: a parse error the user needs to see');
++      console.log('@field {"error":"x.scd does not answer FIELD_MODE=voice"}');
++      process.exit(1);
++    case 'silent':
++      process.exit(0);
++    case 'ready-then-die':
++      console.log('@field {"ready":true,"device":"Test Out","sample_rate":48000}');
++      setTimeout(() => {
++        console.log('@field {"restarting":true}');
++        console.log('@field {"error":"scsynth did not boot on Test Out"}');
++        process.exit(1);
++      }, 100);
++      break;
++  }
++});
++process.on('SIGTERM', () => process.exit(0));
++`;
++
++let dir: string;
++let stub: string;
++let log: string;
++
++beforeEach(() => {
++  dir = mkdtempSync(join(tmpdir(), 'field-voice-host-'));
++  stub = join(dir, 'sclang');
++  log = join(dir, 'received.log');
++  writeFileSync(stub, STUB);
++  chmodSync(stub, 0o755);
++});
++
++afterEach(() => {
++  rmSync(dir, { recursive: true, force: true });
++});
++
++function env(mode: string): NodeJS.ProcessEnv {
++  return { ...process.env, FIELD_SCLANG: stub, STUB_LOG: log, STUB_MODE: mode };
++}
++
++describe('resolving an instrument', () => {
++  it('adds .scd and resolves a bare name on the instruments shelf', () => {
++    expect(instrumentPath('still-water-pad', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
++    expect(instrumentPath('still-water-pad.scd', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
++  });
++
++  it('resolves a slashed path from the root, and leaves an absolute path alone', () => {
++    expect(instrumentPath('songs/creek/voice', '/p')).toBe('/p/songs/creek/voice.scd');
++    expect(instrumentPath('/elsewhere/voice.scd', '/p')).toBe('/elsewhere/voice.scd');
++  });
++
++  it('refuses a bare name outside a project, and a program that does not exist', () => {
++    expect(() => resolveInstrument('pad', dir)).toThrow(/not inside a Field project/);
++    writeFileSync(join(dir, 'field.yaml'), 'name: t\n');
++    mkdirSync(join(dir, 'shared/instruments'), { recursive: true });
++    expect(() => resolveInstrument('pad', dir)).toThrow(/no instrument program at .*shared\/instruments\/pad\.scd/);
++    writeFileSync(join(dir, 'shared/instruments/pad.scd'), '');
++    expect(resolveInstrument('pad', dir)).toBe(join(dir, 'shared/instruments/pad.scd'));
++  });
++});
++
++describe('the voice host protocol', () => {
++  it('encodes an OSC message with no arguments', () => {
++    expect(oscMessage('/quit').toString('latin1')).toBe('/quit\0\0\0,\0\0\0');
++    expect(oscMessage('/quit').length % 4).toBe(0);
++  });
++
++  it('reads only @field lines', () => {
++    expect(parseHostLine('@field {"ready":true,"device":"Out","sample_rate":44100}')).toEqual({
++      ready: true,
++      device: 'Out',
++      sample_rate: 44100,
++    });
++    expect(parseHostLine('@field {"voice_on":60}')).toEqual({ voice_on: 60 });
++    expect(parseHostLine('Booting server on 127.0.0.1')).toBeUndefined();
++    expect(parseHostLine('@field {not json')).toBeUndefined();
++    expect(parseHostLine('@field {"surprise":1}')).toBeUndefined();
++  });
++
++  it('finds a free UDP port', async () => {
++    const port = await freeUdpPort();
++    expect(port).toBeGreaterThan(0);
++  });
++});
++
++describe('the voice host process', () => {
++  it('starts sclang on the host script in voice mode and resolves when it is ready', async () => {
++    const statuses: VoiceHostStatus[] = [];
++    const host = await VoiceHost.start({
++      instrument: '/p/pad.scd',
++      device: 'Test Out',
++      env: env('ready'),
++      onStatus: (s) => statuses.push(s),
++    });
++    expect(statuses).toEqual([{ state: 'live', device: 'Test Out', sampleRate: 48000 }]);
++    const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
++    expect(seen.args[0]).toBe('-D');
++    expect(seen.args[1]).toMatch(/sc\/voice-host\.scd$/);
++    expect(existsSync(seen.args[1])).toBe(true);
++    expect(seen).toMatchObject({ mode: 'voice', instrument: '/p/pad.scd', device: 'Test Out', parent: String(process.pid) });
++    await host.close();
++    expect(readFileSync(log, 'latin1')).toContain('/quit');
++  });
++
++  it('rejects with the host error and what sclang printed after its banner', async () => {
++    const start = VoiceHost.start({ instrument: '/p/x.scd', env: env('error') });
++    await expect(start).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
++    await expect(start).rejects.not.toThrow(/compiling class library/);
++  });
++
++  it('rejects when sclang exits before it is ready', async () => {
++    await expect(VoiceHost.start({ instrument: '/p/x.scd', env: env('silent') })).rejects.toThrow(
++      /exited with code 0 before the voice host was ready/,
++    );
++  });
++
++  it('reports a restart, then a host that dies on its own, with its error', async () => {
++    const statuses: VoiceHostStatus[] = [];
++    const reasons: string[] = [];
++    await VoiceHost.start({
++      instrument: '/p/x.scd',
++      env: env('ready-then-die'),
++      onStatus: (s) => statuses.push(s),
++      onExit: (reason) => reasons.push(reason),
++    });
++    await new Promise((r) => setTimeout(r, 500));
++    expect(statuses.at(-1)).toEqual({ state: 'restarting' });
++    expect(reasons).toHaveLength(1);
++    expect(reasons[0]).toMatch(/^scsynth did not boot on Test Out/);
++  });
++
++  it('refuses a FIELD_SCLANG that does not exist', async () => {
++    await expect(
++      VoiceHost.start({ instrument: '/p/x.scd', env: { ...process.env, FIELD_SCLANG: join(dir, 'missing') } }),
++    ).rejects.toThrow('FIELD_SCLANG points at a missing binary');
++  });
++});
+diff --git a/src/keys/voice-host.ts b/src/keys/voice-host.ts
+new file mode 100644
+index 0000000..05e9149
+--- /dev/null
++++ b/src/keys/voice-host.ts
+@@ -0,0 +1,175 @@
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import { createSocket } from 'node:dgram';
++import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
++import { createInterface } from 'node:readline';
++import { fileURLToPath } from 'node:url';
++import { z } from 'zod';
++import { programPath, sclangCommand } from '../generators/supercollider.js';
++
++export function voiceHostScript(): string {
++  return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sc', 'voice-host.scd');
++}
++
++// An instrument name resolves exactly as a supercollider: entry's source
++// does, after `.scd` is added to a name without an extension
++// (keyboard-instrument.md §2.1).
++export function instrumentPath(spec: string, root: string): string {
++  const source = extname(spec) === '' ? `${spec}.scd` : spec;
++  const relative = programPath({ source });
++  return isAbsolute(relative) ? relative : resolve(root, relative);
++}
++
++// Field chooses scsynth's port so that it can send /quit itself, even
++// after sclang has died (§2.6).
++export function freeUdpPort(): Promise<number> {
++  return new Promise((resolvePort, reject) => {
++    const socket = createSocket('udp4');
++    socket.once('error', reject);
++    socket.bind(0, '127.0.0.1', () => {
++      const { port } = socket.address();
++      socket.close(() => resolvePort(port));
++    });
++  });
++}
++
++// An OSC message with an address and no arguments: the address, then the
++// type tag string ",", each NUL-terminated and padded to four bytes.
++export function oscMessage(address: string): Buffer {
++  const pad = (text: string): Buffer => {
++    const bytes = Buffer.from(`${text}\0`, 'ascii');
++    return Buffer.concat([bytes, Buffer.alloc((4 - (bytes.length % 4)) % 4)]);
++  };
++  return Buffer.concat([pad(address), pad(',')]);
++}
++
++function sendQuit(port: number): Promise<void> {
++  return new Promise((done) => {
++    const socket = createSocket('udp4');
++    socket.send(oscMessage('/quit'), port, '127.0.0.1', () => socket.close(() => done()));
++  });
++}
++
++const hostLine = z.union([
++  z.object({ ready: z.literal(true), device: z.string(), sample_rate: z.number() }),
++  z.object({ restarting: z.literal(true) }),
++  z.object({ error: z.string() }),
++  z.object({ voice_on: z.number() }),
++  z.object({ voice_off: z.number() }),
++]);
++
++export type VoiceHostStatus =
++  | { state: 'live'; device: string; sampleRate: number }
++  | { state: 'restarting' }
++  | { state: 'voice'; note: number; on: boolean };
++
++export function parseHostLine(line: string): z.infer<typeof hostLine> | undefined {
++  if (!line.startsWith('@field ')) return undefined;
++  try {
++    return hostLine.parse(JSON.parse(line.slice('@field '.length)));
++  } catch {
++    return undefined;
++  }
++}
++
++export interface VoiceHostOptions {
++  instrument: string;
++  device?: string;
++  onStatus?: (status: VoiceHostStatus) => void;
++  // Called when the host exits on its own after it was ready.
++  onExit?: (reason: string) => void;
++  trace?: boolean;
++  env?: NodeJS.ProcessEnv;
++}
++
++const OUTPUT_TAIL = 15;
++
++export class VoiceHost {
++  private closing = false;
++
++  private constructor(
++    private readonly child: ChildProcessWithoutNullStreams,
++    private readonly port: number,
++  ) {}
++
++  static async start(options: VoiceHostOptions): Promise<VoiceHost> {
++    const env = options.env ?? process.env;
++    const port = await freeUdpPort();
++    const child = spawn(sclangCommand(env), ['-D', voiceHostScript()], {
++      stdio: ['pipe', 'pipe', 'pipe'],
++      env: {
++        ...env,
++        FIELD_MODE: 'voice',
++        FIELD_INSTRUMENT: options.instrument,
++        FIELD_SC_PORT: String(port),
++        FIELD_PARENT_PID: String(process.pid),
++        ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
++        ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
++      },
++    });
++    const host = new VoiceHost(child, port);
++    // sclang reports compile and runtime errors on stdout, so the tail of
++    // it is what explains a host that never became ready.
++    const tail: string[] = [];
++
++    return new Promise((resolveHost, reject) => {
++      let ready = false;
++      let lastError: string | undefined;
++      const why = (code: number | null): string => {
++        // What sclang printed before its banner is the class library
++        // compiling, which explains nothing about this instrument.
++        const banner = tail.findLastIndex((l) => l.includes('*** Welcome to SuperCollider'));
++        const detail = tail
++          .slice(banner + 1)
++          .filter((l) => !l.startsWith('@field ') && l.trim() !== '')
++          .slice(-OUTPUT_TAIL)
++          .join('\n');
++        const cause = lastError ?? `sclang exited with code ${code} before the voice host was ready`;
++        return detail === '' ? cause : `${cause}\n${detail}`;
++      };
++
++      child.on('error', (err) => reject(new Error(`could not start sclang: ${err.message}`)));
++      child.on('exit', (code) => {
++        if (!ready) {
++          void sendQuit(port);
++          reject(new Error(why(code)));
++        } else if (!host.closing) {
++          void sendQuit(port);
++          options.onExit?.(why(code));
++        }
++      });
++      child.stderr.on('data', () => {});
++      createInterface({ input: child.stdout }).on('line', (line) => {
++        tail.push(line);
++        if (tail.length > OUTPUT_TAIL * 4) tail.splice(0, tail.length - OUTPUT_TAIL * 4);
++        const parsed = parseHostLine(line);
++        if (parsed === undefined) return;
++        if ('error' in parsed) lastError = parsed.error;
++        else if ('ready' in parsed) {
++          options.onStatus?.({ state: 'live', device: parsed.device, sampleRate: parsed.sample_rate });
++          if (!ready) {
++            ready = true;
++            resolveHost(host);
++          }
++        } else if ('restarting' in parsed) options.onStatus?.({ state: 'restarting' });
++        else if ('voice_on' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_on, on: true });
++        else options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
++      });
++    });
++  }
++
++  // /quit goes to scsynth directly, so the server stops even when sclang
++  // is wedged; sclang then gets SIGTERM, and SIGKILL if it lingers.
++  async close(timeoutMs = 3000): Promise<void> {
++    this.closing = true;
++    await sendQuit(this.port);
++    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
++    await new Promise<void>((done) => {
++      const timer = setTimeout(() => this.child.kill('SIGKILL'), timeoutMs);
++      this.child.once('exit', () => {
++        clearTimeout(timer);
++        done();
++      });
++      this.child.kill('SIGTERM');
++    });
++  }
++}
