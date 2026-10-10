@@ -866,6 +866,14 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   });
   if (shell !== undefined && shell.exitCode === null) shell.kill();
   watchAbort.abort();
+  // Ending the session ends the playback it started: the daemon stops
+  // only at the end of the stream and stays up while playing, so closing
+  // the window mid-song would otherwise leave it playing with nothing
+  // left to stop it. `field play` stops on its way out the same way.
+  await client.stop().catch(() => {});
+  // http.close() leaves upgraded sockets alone, and an open tab would
+  // keep this process alive past the first ctrl-c.
+  for (const socket of sockets) socket.terminate();
   http.close();
   client.close();
   await watchDone.catch(() => {});
