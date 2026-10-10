@@ -233,6 +233,10 @@ footer {
 }
 .tl-lane {
   position: relative;
+  /* Its own stacking context, so nothing inside a lane (the edge grips
+     sit at z-index 1) can rise above the sticky header column and take
+     a press meant for a fader. */
+  isolation: isolate;
   border-bottom: 1px solid #23272f;
   cursor: pointer;
   height: 64px;
