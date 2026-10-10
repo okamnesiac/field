@@ -171,8 +171,6 @@ export function App() {
   }
 
 
-  // One lane's controls. Extracted so the timeline can place them in its
-  // header column without the handlers changing at all.
   // One lane's controls, for either a top-level lane or a child row —
   // the timeline places them in its header column.
   const laneControls = (lane: import('../../src/commands/ui-protocol.js').UiTimelineLane) => {
@@ -264,8 +262,8 @@ export function App() {
           </button>
         </div>
       )}
-      {/* The controls are unchanged; the timeline lays them out as its
-          header column so a lane's fader sits on the lane's own row. */}
+      {/* The timeline lays the lane controls out as its header column, so
+          a lane's fader sits on the lane's own row. */}
       <Timeline
         snap={snap}
         playSample={playSample}

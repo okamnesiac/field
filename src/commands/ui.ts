@@ -37,12 +37,12 @@ import { watchLiveSession } from './watch-live.js';
 // other editor uses, and the existing watch loop carries it into the
 // live session exactly as a hand edit would.
 //
-// Musical time is projected here, not in the daemon (playback.md §3.6:
-// samples cross the socket, music does not) and not re-derived in the
-// browser: this process already owns formatPosition and the tempo map,
-// and shipping rendered strings beats porting the projection to a second
-// runtime. ui.md asked for client-side projection; the plan's amendment
-// records this as the settled spelling and why.
+// Musical time is projected in the view, never in the daemon (playback.md
+// §3.6: samples cross the socket, music does not). The snapshot carries
+// the song's tempo and meter events, and the client builds the same
+// TempoMap and MeterMap from src/time/tempo.ts, so it can run its own
+// playhead between the daemon's 250 ms position events (ui.md §6). This
+// process still formats a `musical` string for a song with no tempo map.
 //
 // Two guards, both because the socket accepts writes (ui.md §4): the
 // upgrade checks Origin against this server's own addresses and a
@@ -362,9 +362,12 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     },
   );
 
-  // Shared by edit and move: the placement a message names, resolved to
-  // its owner file and parsed document with the stale guard enforced. A
-  // null return means the socket was already answered.
+  // Shared by edit, move, split, and stretch: the placement a message
+  // names, resolved to its owner file and that file's text, with the
+  // stale guard enforced. The guard hashes the text the model was parsed
+  // from (owner.raw), so a handler that passes the stale check can trust
+  // the parsed entry and the text to describe the same bytes. A null
+  // return means the socket was already answered.
   const resolvePlacement = async (
     socket: WebSocket,
     msg: { file?: string | undefined; sha256: string; entry: number },
@@ -380,7 +383,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       return null;
     }
     const absolute = join(root, owner.path);
-    const raw = readFileSync(absolute, 'utf8');
+    const raw = owner.raw;
     if (sha256Text(raw) !== msg.sha256) {
       // Stale base: the file moved underneath this view. Refresh rather
       // than write through — placement ids are optional and duplicates
@@ -617,7 +620,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       return null;
     }
     const absolute = join(root, owner.path);
-    const raw = readFileSync(absolute, 'utf8');
+    const raw = owner.raw;
     if (sha256Text(raw) !== msg.sha256) {
       socket.send(JSON.stringify({ type: 'error', message: 'file changed underneath — refreshed' }));
       await pushSnapshot();
