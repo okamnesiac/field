@@ -26,8 +26,8 @@ So the only way to hear an instrument is to edit its program, render
 it, and play the file. That loop suits a pad that renders a fixed
 chord. It cannot tell you how a sound responds to a player, which is
 how a player judges an instrument. The design expects both:
-[project-layout.md](../project-layout/readme.md) §1 decision 6 says the
-same `.scd` renders from a spec in one place and responds to notes in
+[project-layout.md](../project-layout/readme.md) §4.6 says the same
+`.scd` renders from a spec in one place and responds to notes in
 another, depending on how it is invoked. Only the first half exists.
 
 ## 2 The solution
@@ -520,8 +520,8 @@ Chunk 4 adds its files when it appends its section (§6).
   built-in, or a new built-in shadow your file after an upgrade.
   `FIELD_KEYMAP` makes your keymap the default without a config file.
 - **No keymap shelf in the project.** A keymap belongs to the player,
-  not to a song. The shared shelves that project-layout.md §1 decision
-  6 settled hold what makes, is, or changes sound, and a keymap does
+  not to a song. The shared shelves that project-layout.md §4.6
+  settled hold what makes, is, or changes sound, and a keymap does
   none of those.
 - **Musical Typing as the default, with the others built in.** It is
   the keymap musicians already know from a computer keyboard, because
@@ -546,8 +546,7 @@ Chunk 4 adds its files when it appends its section (§6).
   format.** These are SuperCollider's standard event controls, the same
   names `Pbind` and the default event use, so an existing SynthDef
   usually needs only a gated envelope. One file that answers both modes
-  is the shape project-layout.md §1 decision 6 chose for the
-  instruments shelf.
+  is the shape project-layout.md §4.6 chose for the instruments shelf.
 - **Straight to the device, not through the live session.** `scsynth`
   opens the output device itself, and Core Audio mixes it with `field
   play` when both run. The voice skips the session's inserts and master
