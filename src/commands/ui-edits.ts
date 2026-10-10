@@ -254,9 +254,26 @@ export function applyStretch(
     ? Math.round(tempo.samplesToTicks(w.start + offset)) - parsed.at
     : Math.round(offset);
   const setDuration = durationSpeller(doc, meter, entry, musical);
+  // Fades live inside the window, and check refuses an entry whose fades
+  // outgrow it (model/project.ts). A trim that shrinks the window under
+  // its fades is refused like the arithmetic refusals here, not clamped:
+  // rewriting a fade the author set is its own surprise, and the message
+  // says what to shorten first.
+  const fadesOutgrow = (window: InputEntry): EditOutcome | undefined => {
+    const { duration } = placedWindow(window, tempo);
+    if (duration === undefined || parsed.fade_in + parsed.fade_out <= duration) return undefined;
+    return {
+      ok: false,
+      message:
+        `the fades (${parsed.fade_in} + ${parsed.fade_out} samples) would outgrow ` +
+        `the ${duration}-sample clip — shorten them first`,
+    };
+  };
 
   if (edge === 'end') {
     if (units < 1) return { ok: false, message: 'a clip cannot end where it starts' };
+    const refused = fadesOutgrow({ ...parsed, duration: units });
+    if (refused !== undefined) return refused;
     setDuration(entry, parsed.at, units);
     canonicalizeDocument(doc, trackOrder);
     return { ok: true, text: stringifyDocument(doc) };
@@ -279,6 +296,8 @@ export function applyStretch(
   if (parsed.duration !== undefined) {
     const remaining = parsed.duration - units;
     if (remaining < 1) return { ok: false, message: 'the clip would have no length left' };
+    const refused = fadesOutgrow({ ...parsed, at, duration: remaining });
+    if (refused !== undefined) return refused;
     setDuration(entry, at, remaining);
   }
   // An open window stays open, exactly as it does across a split: the

@@ -243,6 +243,30 @@ describe('placement stretches', () => {
     expect(result.text).toBe(track(['name: main', 'inputs:', '  - audio: riff', '    at: [5]', '    duration: [2]']));
   });
 
+  it('refuses a trim that would leave the fades longer than the clip', () => {
+    // Two bars with half-second fades, trimmed to a quarter-second: check
+    // would refuse the file (fades 96000 samples, window 12000), so the
+    // drag is refused instead of written.
+    const raw = track([
+      'name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`,
+      '    fade_in: 48000', '    fade_out: 48000',
+    ]);
+    const parsed = full({ audio: 'riff', duration: barTicks * 2, fade_in: 48000, fade_out: 48000 });
+    expect(applyStretch(raw, 0, parsed, 'end', 12000, tempo, meter)).toEqual({
+      ok: false,
+      message: 'the fades (48000 + 48000 samples) would outgrow the 12000-sample clip — shorten them first',
+    });
+    // The front edge shrinks the window too.
+    expect(applyStretch(raw, 0, parsed, 'start', barSamples * 2 - 12000, tempo, meter)).toEqual({
+      ok: false,
+      message: 'the fades (48000 + 48000 samples) would outgrow the 12000-sample clip — shorten them first',
+    });
+    // A trim the fades still fit is written as before.
+    const fits = applyStretch(raw, 0, parsed, 'end', barSamples, tempo, meter);
+    if (!fits.ok) throw new Error(fits.message);
+    expect(fits.text).toContain(`duration: ${barTicks}`);
+  });
+
   it('trims the front through at, duration and source_offset together', () => {
     const raw = track([
       'name: main',
