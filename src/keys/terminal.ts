@@ -120,7 +120,7 @@ export interface Tty {
 // attributes, which every terminal answers. A terminal with the protocol
 // answers the first before the second (keyboard-instrument.md §2.2).
 // Any key events that arrive meanwhile are returned unconsumed.
-export function probeKittyProtocol(tty: Tty, timeoutMs = 1000): Promise<{ supported: boolean; rest: string }> {
+export function probeKittyProtocol(tty: Tty, timeoutMs = 2000): Promise<{ supported: boolean; rest: string }> {
   return new Promise((resolve) => {
     let buffered = '';
     let supported = false;
