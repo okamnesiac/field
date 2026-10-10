@@ -50,6 +50,11 @@ the kind lives in the field name, never in a value prefix:
   `text:` (voice) plus conditioning. Nothing in the build may run it;
   the node resolves to the chosen committed take. See
   [project-model.md](project-model.md) "Deliberate generation".
+- **`record:`** — a performance to record, with no payload: bare
+  `- record:`. `field record` fills its takes, the entry plays the
+  chosen one at the position it was sung, and an entry with no takes
+  yet plays silence. See [project-model.md](project-model.md)
+  "Recorded takes".
 - **`receive: <label>`** — the receiving end of a cable. A receive
   admits signal rather than placing it, so it carries nothing but its
   label; `check` rejects any other key on it. See
@@ -153,7 +158,7 @@ Dattorro tank with a modulated tail; `hall`, the FDN whose lows and
 highs decay on their own clocks) — or a **hosted plugin**,
 discriminated on `plugin:` the way input entries are discriminated by
 field name
-([projects/all/plugin-hosting.md](projects/all/plugin-hosting.md)):
+([projects/plugin-hosting/readme.md](projects/plugin-hosting/readme.md)):
 
 ```yaml
 inserts:
@@ -172,7 +177,7 @@ entry already pinned — with an incremental-search chooser over the
 inventory when no plugin is named, an order chooser when the chain
 already has inserts (`--at <position|end>` scripts it), and id prompts
 when the chain would repeat a plugin
-([projects/all/add-insert.md](projects/all/add-insert.md)).
+([projects/add-insert/readme.md](projects/add-insert/readme.md)).
 State beyond the parameter list lives in a content-addressed blob under
 `shared/plugins/`, referenced as `state: <short-hash>` and resolved by
 hash — the directory is a convention, never load-bearing. One chain
@@ -250,7 +255,7 @@ tall-grass
 ## Sends are cables
 
 A send is the one edge that is not containment
-([projects/all/nested-tracks.md](projects/all/nested-tracks.md) §19).
+([projects/nested-tracks/readme.md](projects/nested-tracks/readme.md) §19).
 The sending track declares it under `sends:`, a map keyed by label; the
 receiving track carries `- receive: <label>` among its `inputs:`. One
 label links exactly one send to exactly one receive, like a patch cable.

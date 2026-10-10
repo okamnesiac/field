@@ -6,6 +6,7 @@ import { renderInsertChain } from '../audio/render-daemon.js';
 import { sha256File } from '../hash.js';
 import { resolvePlayables, type Playable } from './play.js';
 import type { GeneratorRunner } from '../graph/build.js';
+import type { RemoteReads } from '../remote/cache.js';
 
 // field export: build a label and drop the result somewhere a human
 // works, under a name a human can read. The build's own outputs live at
@@ -56,6 +57,7 @@ export interface ExportOptions {
   rate?: number | undefined;
   bitDepth?: 16 | 24 | 32 | undefined;
   runner?: GeneratorRunner | undefined;
+  remote?: RemoteReads | undefined; // the read-through cache, when the project has one
 }
 
 export function defaultExportDir(): string {
@@ -186,7 +188,7 @@ export async function exportLabels(
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {
     throw new Error(`no such directory: ${dir}`);
   }
-  const items = await resolvePlayables(root, patterns, options.runner);
+  const items = await resolvePlayables(root, patterns, options.runner, options.remote);
   const convert = options.rate !== undefined || options.bitDepth !== undefined;
   // Converted bytes are staged out of sight and versioned from there —
   // the destination only ever sees finished files, same as writeVersion's

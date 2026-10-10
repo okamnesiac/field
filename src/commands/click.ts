@@ -1,18 +1,17 @@
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import { sha256FileSync } from '../hash.js';
-import { DEFAULT_SAMPLE_RATE } from '../constants.js';
+import type { ClickSchedule } from '../audiod/protocol.js';
 import { beatTicks } from '../time/tempo.js';
-import type { LoadedProject } from '../model/project.js';
-import { musicalContext, songDirOfPkg, type MusicalContext } from './transport.js';
-import type { Playable } from './play.js';
+import type { MusicalContext } from './transport.js';
 
-// --click: a metronome over whatever is auditioning. The click renders
-// CLI-side into a temp copy of the artifact — the daemon stays
-// artifacts-only (playback.md §1), and the click loops with the file.
-// Each beat projects through the tempo map individually, so ramps click
-// at the ramped tempo and odd meters accent their own downbeats.
+// --click, and the count-in (recording.md §7): the metronome is a
+// *schedule* — sample positions with accent flags on the bed's timeline —
+// that the CLI projects from the tempo map and hands over the socket. The
+// daemon synthesizes the ticks in its callback against the same clock the
+// capture uses, and still never learns what a bar is (playback.md §3.6).
+// This replaced a CLI-side DSP that baked ticks into a temp copy of the
+// artifact, which is why --click used to refuse --watch and live songs:
+// there was a file to swap out from under it. Each beat projects through
+// the tempo map individually, so ramps click at the ramped tempo and odd
+// meters accent their own downbeats.
 
 export function beatGrid(
   ctx: MusicalContext,
@@ -35,56 +34,36 @@ export function beatGrid(
   return out;
 }
 
-const CLICK_SECONDS = 0.015;
-const CLICK_DECAY_SECONDS = 0.004;
-const CLICK_GAIN = 0.4;
-const ACCENT_HZ = 1568; // G6 on the downbeat
-const BEAT_HZ = 1046.5; // C6 elsewhere
+// The schedule for a bed: every beat from the top to `frames`, at the
+// rate the bed's positions count in. A bed with no known extent gets ten
+// minutes of ticks; the transport stops where the content does, and a
+// tick past that is one nobody hears.
+export const CLICK_FALLBACK_SECONDS = 600;
 
-export function withClick(root: string, ctx: MusicalContext, item: Playable): Playable {
-  const wav = readWav(item.path);
-  const frames = wav.channels[0]!.length;
-  const left = Float32Array.from(wav.channels[0]!);
-  const right = Float32Array.from(wav.channels[1] ?? wav.channels[0]!);
-  for (const { sample, accent } of beatGrid(ctx, frames, wav.sampleRate)) {
-    const hz = accent ? ACCENT_HZ : BEAT_HZ;
-    const n = Math.min(Math.round(wav.sampleRate * CLICK_SECONDS), frames - sample);
-    for (let i = 0; i < n; i++) {
-      const blip =
-        Math.sin((2 * Math.PI * hz * i) / wav.sampleRate) *
-        Math.exp(-i / (wav.sampleRate * CLICK_DECAY_SECONDS)) *
-        CLICK_GAIN;
-      left[sample + i] = left[sample + i]! + blip;
-      right[sample + i] = right[sample + i]! + blip;
-    }
-  }
-  // Under the label's package path, so the copy keeps a songs/<song>/
-  // segment — that is what lets transport status and the position stream
-  // show musical time for a clicked file (songDirOfPath).
-  const dir = join(root, '.field', 'tmp', item.pkg);
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, `click-${item.label.split(':').pop() ?? 'target'}.wav`);
-  writeWavFloat32(path, wav.sampleRate, [left, right]);
-  // sha256 describes what `path` holds, and path now points at the clicked
-  // copy — carrying the source's hash through would quietly break that
-  // invariant for anything that trusts it (watch seeds its baseline from
-  // it). --click and --watch don't compose today; the field stays honest
-  // anyway, because the next composition is where it would bite (#35 review).
-  return { ...item, path, sha256: sha256FileSync(path) };
+export function clickSchedule(ctx: MusicalContext, frames: number, sampleRate: number): ClickSchedule {
+  const extent = frames > 0 ? frames : CLICK_FALLBACK_SECONDS * sampleRate;
+  return { rate: sampleRate, ticks: beatGrid(ctx, extent, sampleRate) };
 }
 
-// Every playable gets its own song's grid; a playable outside any song
-// (no tempo map) is a clear error rather than a silent no-click.
-export function applyClick(root: string, project: LoadedProject, items: Playable[]): Playable[] {
-  return items.map((item) => {
-    // Any rate serves here — beatGrid normalizes through seconds against
-    // the clicked file's own header — so the project's is fine.
-    const ctx = musicalContext(
-      project,
-      songDirOfPkg(item.pkg),
-      project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE,
-    );
-    if (!ctx) throw new Error(`--click needs a song's tempo map; ${item.label} has none`);
-    return withClick(root, ctx, item);
-  });
+// The count-in's schedule: the beats from `from` up to but not including
+// `to` (samples on the bed's timeline). A performer counting in hears the
+// bars before the take and nothing after it.
+export function countInSchedule(
+  ctx: MusicalContext,
+  from: number,
+  to: number,
+  sampleRate: number,
+): ClickSchedule {
+  return {
+    rate: sampleRate,
+    ticks: beatGrid(ctx, to, sampleRate).filter((tick) => tick.sample >= from),
+  };
+}
+
+// Where a count-in of `bars` bars before the position at `ticks` begins,
+// in ticks: the same beat and tick, `bars` bars earlier, clamped to the
+// first bar. Whole bars, because that is what a musician counts.
+export function countInStart(ctx: MusicalContext, ticks: number, bars: number): number {
+  const [bar, beat, tick] = ctx.meter.format(ticks).split('.').map(Number) as [number, number, number];
+  return ctx.meter.positionTicks(Math.max(1, bar - bars), beat, tick);
 }
