@@ -1,0 +1,249 @@
+diff --git a/docs/keys.md b/docs/keys.md
+index da44f06..6efa807 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -197,6 +197,20 @@ musical-typing: Logic Pro's Musical Typing. White keys on the home row, black ke
+ Logic's guide describes `Tab` as turning sustain on or off. This keymap
+ holds sustain only while `Tab` is down, as a pedal does.
+ 
++## The other built-in keymaps
++
++Two more keymaps ship with Field. Each puts octave and velocity on the
++arrows and sustain on `Space`, because notes take the rows Musical
++Typing keeps for controls.
++
++| Keymap | What it plays | Range |
++| --- | --- | --- |
++| `tracker` | The layout trackers use, from FastTracker 2 to Renoise: the `Z` row and the `Q` row as two piano octaves, each with its black keys on the row above. `Z` plays C3. | 32 notes |
++| `fourths` | An isomorphic grid: one semitone per key to the right, and each row a perfect fourth above the row below, as on a bass guitar or Ableton Push. A chord shape plays the same in every key. `Z` plays C3. | 27 notes |
++
++Run `field keys --keymap tracker --print` or `--keymap fourths --print`
++to see either one laid out on the keyboard.
++
+ ## Choose a keymap
+ 
+ | You give | `field keys` loads |
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index 38cc5d8..e3d19f4 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -972,3 +972,21 @@ corrected to match.
+   make sound, so no run here played them. The restart in criterion 25
+   also needs a device whose rate moves; the logic that drives it runs
+   only in `sclang`.
++
++## 11 Chunk 3 as built (2026-10-10)
++
++`tracker` and `fourths` ship in `keymaps/`, exactly as chunk 1's schema
++tests carried them, and those tests now read the shipped files. Both
++put transpose and velocity on the arrows and sustain on `Space`; neither
++binds pitch bend or modulation, as §3 says.
++
++| Check | Result |
++| --- | --- |
++| The schema and keymap tests | `tracker` plays 32 notes with `KeyZ` 48, `KeyQ` 60, and `KeyI` 72; `fourths` expands to 27 notes with `KeyZ` 48, `KeyA` 53, `KeyQ` 58, and `Digit1` 63. Every built-in resolves by its bare name and loads. |
++| Criterion 28, in a pseudo-terminal through the real helper and CoreMIDI, typing as this Mac's ColemakC layout does | `z`, `q`, and `u` (which is `KeyI` there) played 48, 60, and 72, each with its own note-off, and `ArrowRight` moved the transpose to +12. |
++| Criterion 29, the same way | `z b s` together played 48, 52, and 55, and `x k t`, one key to the right, played 49, 53, and 56: the same major-triad shape a semitone higher. |
++| `field keys --keymap <name> --print` | Both diagrams put C3 under `KeyZ`. `tracker` puts C4 under both `KeyQ` and `Comma`; `fourths` puts F3 under `KeyA`, A#3 under `KeyQ`, and D#4 under `Digit1`. |
++
++Still owed: criteria 28 and 29 at a real keyboard in Ghostty and
++iTerm2. The runs above typed the protocol's bytes into a
++pseudo-terminal, as §9.3 explains for criteria 1 to 20.
+diff --git a/keymaps/fourths.yaml b/keymaps/fourths.yaml
+new file mode 100644
+index 0000000..e99e3f0
+--- /dev/null
++++ b/keymaps/fourths.yaml
+@@ -0,0 +1,10 @@
++name: fourths
++description: One semitone per key, each row a fourth above the row below.
++base: 48
++grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
++controls:
++  ArrowLeft: { transpose: -12 }
++  ArrowRight: { transpose: 12 }
++  ArrowDown: { velocity: -20 }
++  ArrowUp: { velocity: 20 }
++  Space: { cc: 64, value: 127, mode: hold }
+diff --git a/keymaps/tracker.yaml b/keymaps/tracker.yaml
+new file mode 100644
+index 0000000..b03c8d9
+--- /dev/null
++++ b/keymaps/tracker.yaml
+@@ -0,0 +1,47 @@
++name: tracker
++description: Two piano octaves on the bottom and top rows, black keys on the row above each.
++base: 48
++notes:
++  KeyZ: 0
++  KeyS: 1
++  KeyX: 2
++  KeyD: 3
++  KeyC: 4
++  KeyV: 5
++  KeyG: 6
++  KeyB: 7
++  KeyH: 8
++  KeyN: 9
++  KeyJ: 10
++  KeyM: 11
++  Comma: 12
++  KeyL: 13
++  Period: 14
++  Semicolon: 15
++  Slash: 16
++  KeyQ: 12
++  Digit2: 13
++  KeyW: 14
++  Digit3: 15
++  KeyE: 16
++  KeyR: 17
++  Digit5: 18
++  KeyT: 19
++  Digit6: 20
++  KeyY: 21
++  Digit7: 22
++  KeyU: 23
++  KeyI: 24
++  Digit9: 25
++  KeyO: 26
++  Digit0: 27
++  KeyP: 28
++  BracketLeft: 29
++  Equal: 30
++  BracketRight: 31
++controls:
++  ArrowLeft: { transpose: -12 }
++  ArrowRight: { transpose: 12 }
++  ArrowDown: { velocity: -20 }
++  ArrowUp: { velocity: 20 }
++  Space: { cc: 64, value: 127, mode: hold }
+diff --git a/src/keys/keymap.test.ts b/src/keys/keymap.test.ts
+index 0270308..2b7bcf5 100644
+--- a/src/keys/keymap.test.ts
++++ b/src/keys/keymap.test.ts
+@@ -32,7 +32,15 @@ describe('resolving a keymap', () => {
+   });
+ 
+   it('lists the built-ins', () => {
+-    expect(builtinKeymapNames()).toContain('musical-typing');
++    expect(builtinKeymapNames()).toEqual(['fourths', 'musical-typing', 'tracker']);
++  });
++
++  it('resolves and loads every built-in by its bare name', () => {
++    for (const name of builtinKeymapNames()) {
++      const source = resolveKeymapSource(name, {});
++      expect(source.kind).toBe('builtin');
++      expect(loadKeymap(source.path).name).toBe(name);
++    }
+   });
+ 
+   it('resolves a bare name only to a built-in', () => {
+diff --git a/src/schema/keymap.test.ts b/src/schema/keymap.test.ts
+index e22687e..d6f6b37 100644
+--- a/src/schema/keymap.test.ts
++++ b/src/schema/keymap.test.ts
+@@ -5,70 +5,9 @@ import { parseDocument } from 'yaml';
+ import { builtinKeymapDir } from '../keys/keymap.js';
+ import { keymapSchema, toKeymap } from './keymap.js';
+ 
+-// The tracker and fourths keymaps ship in chunk 3 (keyboard-instrument.md
+-// §6); carrying them here proves the format expresses both before then.
+-const TRACKER = `
+-name: tracker
+-description: Two piano octaves on the bottom and top rows, black keys on the row above each.
+-base: 48
+-notes:
+-  KeyZ: 0
+-  KeyS: 1
+-  KeyX: 2
+-  KeyD: 3
+-  KeyC: 4
+-  KeyV: 5
+-  KeyG: 6
+-  KeyB: 7
+-  KeyH: 8
+-  KeyN: 9
+-  KeyJ: 10
+-  KeyM: 11
+-  Comma: 12
+-  KeyL: 13
+-  Period: 14
+-  Semicolon: 15
+-  Slash: 16
+-  KeyQ: 12
+-  Digit2: 13
+-  KeyW: 14
+-  Digit3: 15
+-  KeyE: 16
+-  KeyR: 17
+-  Digit5: 18
+-  KeyT: 19
+-  Digit6: 20
+-  KeyY: 21
+-  Digit7: 22
+-  KeyU: 23
+-  KeyI: 24
+-  Digit9: 25
+-  KeyO: 26
+-  Digit0: 27
+-  KeyP: 28
+-  BracketLeft: 29
+-  Equal: 30
+-  BracketRight: 31
+-controls:
+-  ArrowLeft: { transpose: -12 }
+-  ArrowRight: { transpose: 12 }
+-  ArrowDown: { velocity: -20 }
+-  ArrowUp: { velocity: 20 }
+-  Space: { cc: 64, value: 127, mode: hold }
+-`;
+-
+-const FOURTHS = `
+-name: fourths
+-description: One semitone per key, each row a fourth above the row below.
+-base: 48
+-grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
+-controls:
+-  ArrowLeft: { transpose: -12 }
+-  ArrowRight: { transpose: 12 }
+-  ArrowDown: { velocity: -20 }
+-  ArrowUp: { velocity: 20 }
+-  Space: { cc: 64, value: 127, mode: hold }
+-`;
++function builtin(name: string): string {
++  return readFileSync(join(builtinKeymapDir(), `${name}.yaml`), 'utf8');
++}
+ 
+ function parse(text: string) {
+   return keymapSchema.safeParse(parseDocument(text).toJS());
+@@ -92,7 +31,7 @@ function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
+ 
+ describe('keymap schema', () => {
+   it('accepts musical-typing with its 18 notes and the defaults', () => {
+-    const map = keymap(readFileSync(join(builtinKeymapDir(), 'musical-typing.yaml'), 'utf8'));
++    const map = keymap(builtin('musical-typing'));
+     expect(map.notes.get('KeyA')).toEqual([0]);
+     expect(map.notes.get('Quote')).toEqual([17]);
+     expect(notesPlayed(map).size).toBe(18);
+@@ -102,16 +41,16 @@ describe('keymap schema', () => {
+     expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
+   });
+ 
+-  it('accepts the tracker fixture with 32 notes', () => {
+-    const map = keymap(TRACKER);
++  it('accepts the tracker built-in with 32 notes', () => {
++    const map = keymap(builtin('tracker'));
+     expect(notesPlayed(map).size).toBe(32);
+     expect(map.base + map.notes.get('KeyZ')![0]!).toBe(48);
+     expect(map.base + map.notes.get('KeyQ')![0]!).toBe(60);
+     expect(map.base + map.notes.get('KeyI')![0]!).toBe(72);
+   });
+ 
+-  it('expands the fourths grid', () => {
+-    const map = keymap(FOURTHS);
++  it('expands the fourths built-in grid', () => {
++    const map = keymap(builtin('fourths'));
+     const at = (p: string) => map.base + map.notes.get(p)![0]!;
+     expect(at('KeyZ')).toBe(48);
+     expect(at('KeyA')).toBe(53);
