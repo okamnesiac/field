@@ -90,6 +90,17 @@ function durationSpeller(doc: Document, meter: MeterMap, source: number, musical
   };
 }
 
+// How far, in samples, a window's start moved when it advanced by `units`
+// of the entry's own unit. The read has to advance by exactly that, so
+// the content under the moved edge does not slide: for a musical entry
+// the edge lands on a whole tick, which can sit up to half a tick from
+// the sample the gesture named, so the distance is measured from the
+// tick it landed on. An absolute entry's units are already samples.
+function windowAdvance(parsed: InputEntry, units: number, start: number, tempo: TempoMap): number {
+  if (parsed.anchor === 'absolute') return units;
+  return Math.round(tempo.ticksToSamples(parsed.at + units)) - Math.round(start);
+}
+
 // One placement edit: set or clear gain_db / pan / mute on an input
 // entry. Defaults stay implicit: writing `mute: false` or `pan: 0` onto
 // an entry that never spelled them would churn the file.
@@ -192,7 +203,7 @@ export function applySplit(
   // the source from where the first half stopped, keeps what remains
   // of the duration, and drops what the first half kept.
   setAt(doc, meter, entry + 1, parsed.at + cut, musical);
-  doc.setIn(['inputs', entry + 1, 'source_offset'], parsed.source_offset + Math.round(offset));
+  doc.setIn(['inputs', entry + 1, 'source_offset'], parsed.source_offset + windowAdvance(parsed, cut, w.start, tempo));
   if (parsed.duration === undefined) {
     // An open window stays open: the second half plays to the source's
     // end, which is still "the whole of what remains" after the
@@ -289,7 +300,7 @@ export function applyStretch(
   // agree. Backwards past the source's first sample has nothing to
   // reveal, so it is refused rather than clamped — a clamp would leave
   // the window and the content disagreeing about where the edge went.
-  const sourceOffset = parsed.source_offset + Math.round(offset);
+  const sourceOffset = parsed.source_offset + windowAdvance(parsed, units, w.start, tempo);
   if (sourceOffset < 0) {
     return { ok: false, message: 'the source has nothing before its first sample' };
   }

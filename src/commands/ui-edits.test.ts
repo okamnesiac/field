@@ -106,6 +106,23 @@ describe('placement splits', () => {
     );
   });
 
+  it('advances the read by the tick the window moved to, so the halves still meet', () => {
+    // At 120 bpm and 48 kHz a tick is 25 samples. A cut at sample 30010
+    // starts the second half on tick 1200 = sample 30000, so the read
+    // must advance by 30000 too, not by the 30010 the playhead said.
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
+    const parsed = full({ audio: 'riff', duration: barTicks * 2 });
+    const result = applySplit(raw, 0, parsed, 30010, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toContain('    at: 1200\n');
+    expect(result.text).toContain('    source_offset: 30000\n');
+    // The front trim moves the window and the read the same way.
+    const trimmed = applyStretch(raw, 0, parsed, 'start', 30010, tempo, meter);
+    if (!trimmed.ok) throw new Error(trimmed.message);
+    expect(trimmed.text).toContain('    at: 1200\n');
+    expect(trimmed.text).toContain('    source_offset: 30000\n');
+  });
+
   it('keeps the at spelling and comments, and leaves an open window open', () => {
     const raw = track([
       'name: main',
