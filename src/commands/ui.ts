@@ -643,6 +643,20 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     await runInsertOp(socket, resolved, applyInsertRemove(resolved.raw, msg.entry));
   };
 
+  // File-writing messages run one at a time, each read, hash check, and
+  // write finishing before the next one reads. ws delivers every message
+  // in one socket read back to back in the same tick, so two gestures
+  // that arrived while the server was busy would otherwise both pass the
+  // stale-hash check against the same bytes, and the second write would
+  // silently replace the first. In sequence, the second sees the first's
+  // write and is refused as stale, with a refresh.
+  let writes: Promise<void> = Promise.resolve();
+  const oneWriteAtATime = (op: () => Promise<void>): Promise<void> => {
+    const next = writes.then(op, op);
+    writes = next.catch(() => {});
+    return next;
+  };
+
   const handle = async (socket: WebSocket, raw: string) => {
     const parsed = upSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) {
@@ -672,19 +686,19 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         await swapSession();
         await pushSnapshot();
       } else if (msg.type === 'edit') {
-        await handleEdit(socket, msg);
+        await oneWriteAtATime(() => handleEdit(socket, msg));
       } else if (msg.type === 'move') {
-        await handleMove(socket, msg);
+        await oneWriteAtATime(() => handleMove(socket, msg));
       } else if (msg.type === 'split') {
-        await handleSplit(socket, msg);
+        await oneWriteAtATime(() => handleSplit(socket, msg));
       } else if (msg.type === 'stretch') {
-        await handleStretch(socket, msg);
+        await oneWriteAtATime(() => handleStretch(socket, msg));
       } else if (msg.type === 'insert-add') {
-        await handleInsertAdd(socket, msg);
+        await oneWriteAtATime(() => handleInsertAdd(socket, msg));
       } else if (msg.type === 'insert-edit') {
-        await handleInsertEdit(socket, msg);
+        await oneWriteAtATime(() => handleInsertEdit(socket, msg));
       } else if (msg.type === 'insert-remove') {
-        await handleInsertRemove(socket, msg);
+        await oneWriteAtATime(() => handleInsertRemove(socket, msg));
       }
     } catch (err) {
       socket.send(
