@@ -103,12 +103,16 @@ export function decodeTerminal(input: string): { events: TerminalEvent[]; rest: 
 const QUIT_KEYS = { escape: 27, c: 99 };
 
 // Escape always quits, and so does Ctrl-C, so no keymap can trap you
-// (keyboard-instrument.md §2.4).
+// (keyboard-instrument.md §2.4). Ctrl-C is the key that types `c`; on a
+// layout with no `c`, such as Russian or Greek, it is the key at the US
+// `c` position, which the base layout key names. A layout that does type
+// ASCII there, such as Dvorak's `j`, keeps its own Ctrl-C.
 export function isQuit(event: TerminalEvent): boolean {
   if (event.kind === 'interrupt') return true;
   if (event.kind !== 'key' || event.type !== 'press') return false;
   if (event.key === QUIT_KEYS.escape) return true;
-  return event.key === QUIT_KEYS.c && (event.mods & MOD_CTRL) !== 0;
+  if ((event.mods & MOD_CTRL) === 0 || typeof event.key !== 'number') return false;
+  return event.key === QUIT_KEYS.c || (event.key > 127 && event.base === QUIT_KEYS.c);
 }
 
 export interface Tty {
@@ -119,7 +123,9 @@ export interface Tty {
 // Asks the terminal for its protocol flags, then its primary device
 // attributes, which every terminal answers. A terminal with the protocol
 // answers the first before the second (keyboard-instrument.md §2.2).
-// Any key events that arrive meanwhile are returned unconsumed.
+// Complete key events that arrive during the probe are dropped, since
+// nothing plays until the protocol is on; only a sequence cut off at the
+// end of the input comes back as `rest`, for the next chunk.
 export function probeKittyProtocol(tty: Tty, timeoutMs = 2000): Promise<{ supported: boolean; rest: string }> {
   return new Promise((resolve) => {
     let buffered = '';

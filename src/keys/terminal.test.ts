@@ -81,6 +81,18 @@ describe('quitting', () => {
     }
   });
 
+  it('quits on Ctrl at the c position under a layout with no c', () => {
+    // Russian: the key at the US c position types с (U+0441).
+    const [russian] = decodeTerminal(`${CSI}1089::99;${1 + MOD_CTRL}u`).events;
+    expect(isQuit(russian!)).toBe(true);
+  });
+
+  it('does not take Ctrl at the c position for Ctrl-C where that key types ASCII', () => {
+    // Dvorak: the key at the US c position types j.
+    const [dvorak] = decodeTerminal(`${CSI}106::99;${1 + MOD_CTRL}u`).events;
+    expect(isQuit(dvorak!)).toBe(false);
+  });
+
   it('does not quit on a plain c, on a release, or on a repeat', () => {
     for (const input of [`${CSI}99u`, `${CSI}27;1:3u`, `${CSI}99;5:2u`]) {
       const [event] = decodeTerminal(input).events;
@@ -115,6 +127,13 @@ describe('probing for the protocol', () => {
     const result = probeKittyProtocol(tty);
     reply(`${CSI}?62;22c`);
     expect((await result).supported).toBe(false);
+  });
+
+  it('drops complete key events that arrive during the probe, and returns only a cut-off sequence', async () => {
+    const { tty, reply } = fakeTty();
+    const result = probeKittyProtocol(tty);
+    reply(`${CSI}97u${CSI}?15u${CSI}?62c${CSI}115u${CSI}1`);
+    expect(await result).toEqual({ supported: true, rest: `${CSI}1` });
   });
 
   it('is unsupported when the terminal answers nothing', async () => {
