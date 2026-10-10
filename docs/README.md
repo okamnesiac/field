@@ -110,6 +110,6 @@ The current build order lives in [projects/](projects/README.md).
 - [Tracks](tracks.md) — the structural primitive: the track file, nesting, and cables
 - [Project model](project-model.md) — the canonical on-disk representation
 - [Build graph](build-graph.md) — targets, caching, freezing, determinism
-- [Audio engine](audio-engine.md) — the real-time daemon (future work)
-- [Remote](remote.md) — login, clone, and the read-through cache against an audiofield remote
+- [Audio engine](audio-engine.md) — the real-time daemon that plays, records, and hosts plugins
+- [Remote](remote.md) — login, clone, push and pull, and the read-through cache against an audiofield remote
 - [Projects](projects/README.md) — work in progress, next, and later

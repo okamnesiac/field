@@ -7,9 +7,10 @@ freezing ([projects/realtime/readme.md](projects/realtime/readme.md)),
 hosted plugins, and the input side of recording — arm, record, stop, a
 crash-safe transaction and its recovery — described in
 [architecture.md](architecture.md) and under
-[Capture as built](#capture-as-built) below. Landing a take in the
-project and monitoring through the engine are what remains of
-[projects/recording/readme.md](projects/recording/readme.md). This
+[Capture as built](#capture-as-built) below. Takes land in the project
+and build in place
+([projects/recording/readme.md](projects/recording/readme.md));
+comping and monitoring through the engine are later work. This
 document records the decisions already settled so the phases that build
 it start from agreement, not from scratch. Language and framework
 decisions (C++/JUCE, and the alternatives rejected) also live in

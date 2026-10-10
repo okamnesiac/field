@@ -1,12 +1,11 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped: every chunk, sends last (§19). Stays open until
-sessions have worked the folded format and wired a cable or two in anger
-— the entry list, gen nodes, takes machinery and now sends are where
-every edit lands.
+**Outcome:** Shipped: every chunk, sends last (§19), and §8 is met as
+its amendments record. Negative local positions, which §1.6 decided are
+how a pickup works and §9 deferred, never landed and carry over to
+[pickups](../pickups/readme.md).
 
 # Plan: Nested tracks — one primitive for structure, time and mix
 
