@@ -200,6 +200,20 @@ musical-typing: Logic Pro's Musical Typing. White keys on the home row, black ke
 Logic's guide describes `Tab` as turning sustain on or off. This keymap
 holds sustain only while `Tab` is down, as a pedal does.
 
+## The other built-in keymaps
+
+Two more keymaps ship with Field. Each puts octave and velocity on the
+arrows and sustain on `Space`, because notes take the rows Musical
+Typing keeps for controls.
+
+| Keymap | What it plays | Range |
+| --- | --- | --- |
+| `tracker` | The layout trackers use, from FastTracker 2 to Renoise: the `Z` row and the `Q` row as two piano octaves, each with its black keys on the row above. `Z` plays C3. | 32 notes |
+| `fourths` | An isomorphic grid: one semitone per key to the right, and each row a perfect fourth above the row below, as on a bass guitar or Ableton Push. A chord shape plays the same in every key. `Z` plays C3. | 27 notes |
+
+Run `field keys --keymap tracker --print` or `--keymap fourths --print`
+to see either one laid out on the keyboard.
+
 ## Choose a keymap
 
 | You give | `field keys` loads |

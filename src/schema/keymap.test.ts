@@ -5,70 +5,9 @@ import { parseDocument } from 'yaml';
 import { builtinKeymapDir } from '../keys/keymap.js';
 import { keymapSchema, toKeymap } from './keymap.js';
 
-// The tracker and fourths keymaps ship in chunk 3 (keyboard-instrument.md
-// §6); carrying them here proves the format expresses both before then.
-const TRACKER = `
-name: tracker
-description: Two piano octaves on the bottom and top rows, black keys on the row above each.
-base: 48
-notes:
-  KeyZ: 0
-  KeyS: 1
-  KeyX: 2
-  KeyD: 3
-  KeyC: 4
-  KeyV: 5
-  KeyG: 6
-  KeyB: 7
-  KeyH: 8
-  KeyN: 9
-  KeyJ: 10
-  KeyM: 11
-  Comma: 12
-  KeyL: 13
-  Period: 14
-  Semicolon: 15
-  Slash: 16
-  KeyQ: 12
-  Digit2: 13
-  KeyW: 14
-  Digit3: 15
-  KeyE: 16
-  KeyR: 17
-  Digit5: 18
-  KeyT: 19
-  Digit6: 20
-  KeyY: 21
-  Digit7: 22
-  KeyU: 23
-  KeyI: 24
-  Digit9: 25
-  KeyO: 26
-  Digit0: 27
-  KeyP: 28
-  BracketLeft: 29
-  Equal: 30
-  BracketRight: 31
-controls:
-  ArrowLeft: { transpose: -12 }
-  ArrowRight: { transpose: 12 }
-  ArrowDown: { velocity: -20 }
-  ArrowUp: { velocity: 20 }
-  Space: { cc: 64, value: 127, mode: hold }
-`;
-
-const FOURTHS = `
-name: fourths
-description: One semitone per key, each row a fourth above the row below.
-base: 48
-grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
-controls:
-  ArrowLeft: { transpose: -12 }
-  ArrowRight: { transpose: 12 }
-  ArrowDown: { velocity: -20 }
-  ArrowUp: { velocity: 20 }
-  Space: { cc: 64, value: 127, mode: hold }
-`;
+function builtin(name: string): string {
+  return readFileSync(join(builtinKeymapDir(), `${name}.yaml`), 'utf8');
+}
 
 function parse(text: string) {
   return keymapSchema.safeParse(parseDocument(text).toJS());
@@ -92,7 +31,7 @@ function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
 
 describe('keymap schema', () => {
   it('accepts musical-typing with its 18 notes and the defaults', () => {
-    const map = keymap(readFileSync(join(builtinKeymapDir(), 'musical-typing.yaml'), 'utf8'));
+    const map = keymap(builtin('musical-typing'));
     expect(map.notes.get('KeyA')).toEqual([0]);
     expect(map.notes.get('Quote')).toEqual([17]);
     expect(notesPlayed(map).size).toBe(18);
@@ -102,16 +41,16 @@ describe('keymap schema', () => {
     expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
   });
 
-  it('accepts the tracker fixture with 32 notes', () => {
-    const map = keymap(TRACKER);
+  it('accepts the tracker built-in with 32 notes', () => {
+    const map = keymap(builtin('tracker'));
     expect(notesPlayed(map).size).toBe(32);
     expect(map.base + map.notes.get('KeyZ')![0]!).toBe(48);
     expect(map.base + map.notes.get('KeyQ')![0]!).toBe(60);
     expect(map.base + map.notes.get('KeyI')![0]!).toBe(72);
   });
 
-  it('expands the fourths grid', () => {
-    const map = keymap(FOURTHS);
+  it('expands the fourths built-in grid', () => {
+    const map = keymap(builtin('fourths'));
     const at = (p: string) => map.base + map.notes.get(p)![0]!;
     expect(at('KeyZ')).toBe(48);
     expect(at('KeyA')).toBe(53);
