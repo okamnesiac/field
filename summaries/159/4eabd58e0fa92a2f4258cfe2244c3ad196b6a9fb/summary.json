@@ -1,0 +1,135 @@
+{
+ "version": 1,
+ "name": "LF pinning in field init",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 159,
+  "title": "field init pins LF in every project it creates (windows-portability.md §1.1)",
+  "head": "4eabd58e0fa92a2f4258cfe2244c3ad196b6a9fb",
+  "headRef": "windows/init-eol",
+  "base": "3d26d52705cbd9a94328e9dca4b703dd11791889",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field init</code> creates a new field project: a Git repository holding <code>field.yaml</code>, <code>shared/</code>, and <code>songs/</code>, plus a <code>.gitignore</code> and a <code>.gitattributes</code>. field identifies many of a project's files by the SHA-256 of their bytes on disk. Asset pins in <code>assets.yaml</code> are such hashes, the action key that names a cached render of a <code>.scd</code> SuperCollider program includes one, and <code>field check</code> compares YAML files byte for byte against their canonical form.",
+   "Git for Windows installs with <code>core.autocrlf=true</code>, which converts LF line endings to CRLF when Git writes a text file to disk. A project cloned on Windows therefore hashes differently from the same commit on macOS, and <code>git status</code> shows nothing, because Git compares normalized content. Before this change, <code>init</code> wrote only the seven Git LFS rules for audio, so every text file in a new project was exposed.",
+   "Now <code>init</code> writes a <code>.gitattributes</code> that opens with <code>* text=auto eol=lf</code>: Git decides which files are text and always writes them to disk with LF. The seven LFS rules and a new <code>*.state binary</code> rule follow it. In a <code>.gitattributes</code> file, the last line that matches a path wins for each attribute, so audio files and captured plugin state are never converted.",
+   "The change covers only projects that <code>init</code> creates. A directory that already has a <code>.gitattributes</code> keeps its own, and <code>init</code> refuses a directory that is already a project, so a project created earlier gets the rule only by hand. A new paragraph in <code>docs/project-model.md</code> explains why field needs the rule and tells owners of those projects to add it. The same rule for the engine repository itself is #157, and #158 is the inventory that lists this item."
+  ],
+  "cards": [
+   {
+    "id": "rules",
+    "title": "What each rule does",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Files</th><th>Rule that wins</th><th>Line endings on disk</th></tr></thead><tbody><tr><td>Text, such as <code>.scd</code> and <code>.yaml</code></td><td><code>* text=auto eol=lf</code></td><td class=\"r\">Always LF</td></tr><tr><td>Audio: <code>.wav</code>, <code>.aif</code>, <code>.aiff</code>, <code>.flac</code>, <code>.mp3</code>, <code>.m4a</code>, <code>.caf</code></td><td><code>filter=lfs &hellip; -text</code></td><td class=\"r\">Untouched; stored in Git LFS</td></tr><tr><td>Plugin state: <code>.state</code></td><td><code>binary</code></td><td class=\"r\">Untouched</td></tr></tbody></table></div><p class=\"note\"><code>-text</code> and <code>binary</code> both unset the <code>text</code> attribute, and <code>eol=lf</code> has no effect on a file whose <code>text</code> is unset.</p>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>LF, CRLF</b>: a line ending of one byte (<code>\\n</code>, macOS and Linux) or two (<code>\\r\\n</code>, Windows).</li><li><b><code>core.autocrlf</code></b>: a Git setting that converts line endings when Git reads and writes files. Git for Windows sets it to <code>true</code>.</li><li><b><code>text=auto</code></b>: lets Git guess whether a file is text. A file with NUL bytes, lone CRs, or mostly unprintable bytes counts as binary.</li><li><b>Git LFS</b>: Large File Storage. Git keeps a small pointer file and stores the audio bytes elsewhere.</li><li><b><code>.state</code> blob</b>: a plugin's saved settings under <code>shared/plugins/</code>, named by the SHA-256 of its own bytes.</li><li><b>Action key</b>: the hash that names a cached render. It includes the hashes of the render's inputs.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review history",
+    "html": "<ul class=\"tight\"><li><b><code>6babd61</code>, changes requested.</b> The code had no findings. One earlier thread was open: the title cited <code>windows-portability.md</code> &sect;7.2, a section that exists only on #158's branch. The review also suggested dropping a test comment's claim that the engine repository has a <code>.gitattributes</code>, and adding a line to <code>docs/project-model.md</code> for owners of existing projects.</li><li><b><code>4eabd58</code>, clean.</b> The title now cites &sect;1.1, which is on <code>main</code>, and the thread is resolved. Two new commits take both suggestions. Both reviews read the head without running it, because the first commit's author has no write access to the repository. A human approval is what remains.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "gitattributes",
+   "title": "The file every new project gets",
+   "kicker": "init writes one fixed .gitattributes: the LF rule first, then the audio and plugin-state overrides",
+   "intro": [
+    "<code>init.ts</code> replaces the expression that built the LFS-only file with a constant, <code>GITATTRIBUTES</code>, that holds the whole file. The file opens with four comment lines that explain it to the project's owner, then <code>* text=auto eol=lf</code>, then the LFS rules built from the existing <code>LFS_PATTERNS</code> list, then <code>*.state binary</code>.",
+    "The order is what makes the file work. Git applies every line that matches a path, and a later line overrides an earlier one for the same attribute. The LF rule must therefore come first, so that the audio and <code>.state</code> lines after it can switch conversion off for those files.",
+    "The <code>.state</code> rule matters more than its size suggests. A plugin's saved state can be plain XML with no NUL bytes, which Git's guess would treat as text. <code>toPluginWire</code> in <code>src/audio/plugins.ts</code> refuses to render when a blob's bytes stop hashing to its filename, so a converted blob would stop a render rather than miss a cache."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "<code>text=auto</code> also normalizes on commit. A CRLF text file added on macOS or Linux is stored as LF, but the author's own copy keeps its CRLF bytes until Git next rewrites the file, and Git warns about this at <code>git add</code>. For a <code>.scd</code> program that costs a cache miss between the author's machine and a clone. The plan's &sect;1.1 chose this shape for the engine repository too."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/init.ts",
+     "note": "Adds the <code>GITATTRIBUTES</code> constant and writes it in place of the LFS-only file.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 27,
+       "text": "The precedence holds. In a scratch repository with a hand-made copy of this file, <code>git check-attr</code> reports <code>text: auto</code> for <code>.scd</code> and <code>.yaml</code>, <code>text: unset</code> with <code>filter: lfs</code> for <code>.wav</code>, and <code>text: unset</code> for <code>.state</code>. After a commit and a checkout under <code>core.autocrlf=true</code>, a CRLF <code>.scd</code> came out with no CR bytes, and a CRLF <code>.state</code> blob kept all of its CR bytes."
+      },
+      {
+       "kind": "verify",
+       "line": 30,
+       "text": "The comment's claim about <code>.state</code> is accurate. <code>indexStateBlobs</code> in <code>src/audio/plugins.ts</code> accepts only files named by a 64-character SHA-256, and <code>toPluginWire</code> throws when the bytes hash to anything else."
+      },
+      {
+       "kind": "context",
+       "line": 82,
+       "text": "The <code>existsSync</code> guard is unchanged. A directory with its own <code>.gitattributes</code> gets neither the LFS rules nor the LF rule, as before."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "test",
+   "title": "The test that guards the order",
+   "kicker": "A new test runs init in a temporary directory and checks the rules and their order",
+   "intro": [
+    "<code>init.test.ts</code> is new. It calls <code>init()</code> in a temporary directory, reads the <code>.gitattributes</code> it wrote, drops blank and comment lines, and checks three things: the first rule is <code>* text=auto eol=lf</code>, all seven LFS rules are present, and <code>*.state binary</code> is present.",
+    "Checking that the LF rule is first is enough to prove it precedes every override. The test does not check that a directory with its own <code>.gitattributes</code> keeps it, but that guard did not change."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "The test runs and typechecks. <code>vitest.config.ts</code> includes <code>src/**/*.test.ts</code>, and every import in the file is used, as <code>noUnusedLocals</code> in <code>tsconfig.json</code> requires. 32 other test files call <code>init()</code> to build fixtures. None of them asserts this file's content or writes a carriage return, so the new rules change nothing they check."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/init.test.ts",
+     "note": "New test: the LF rule comes first, and the LFS and <code>.state</code> overrides follow it. Its header explains why the file matters.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 34,
+       "text": "This one assertion carries the ordering guarantee. Before the change, the first rule was the <code>*.wav</code> LFS line, so the assertion fails against the old <code>init</code>."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "What the docs tell project owners",
+   "kicker": "A paragraph in project-model.md says why projects pin LF and how to add the rule to an older project",
+   "intro": [
+    "<code>docs/project-model.md</code> describes how a field project is laid out and how its files are identified. Its \"Assets\" section already says that an asset's SHA-256 is also its Git LFS identifier. The new paragraph follows that one.",
+    "The paragraph gives the reason first: field hashes files as they sit on disk, and Git for Windows rewrites line endings by default. It then describes the file <code>init</code> writes and why its order matters. It ends with an instruction for a project created before this change: add <code>* text=auto eol=lf</code> by hand above the LFS lines."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/project-model.md",
+     "note": "Adds one paragraph to \"Assets\": why line endings matter to field, what <code>init</code> writes, and what to do in an older project.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 206,
+       "text": "The paragraph's claims match the code. <code>src/generators/supercollider.ts:126</code> hashes the <code>.scd</code> program file into the render's inputs, and <code>unformattedFiles</code> in <code>src/model/project.ts</code> compares each file's raw text with its canonical form."
+      },
+      {
+       "kind": "context",
+       "line": 216,
+       "text": "Adding the line changes how Git writes files from then on, not the files already on disk. In a scratch test, a clone made under <code>core.autocrlf=true</code> before the line arrived still had CRLF in its <code>.scd</code> after <code>git pull</code> brought the line in, and <code>git status</code> stayed clean. Such a checkout needs its files written again, for example by cloning afresh. The review lists this as a suggestion."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
