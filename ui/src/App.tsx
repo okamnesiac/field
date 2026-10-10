@@ -32,6 +32,9 @@ export function App() {
   // sample plus however long ago it landed — which is what makes the
   // readout move at frame rate instead of four times a second.
   const anchor = useRef<{ sample: number; at: number } | null>(null);
+  // Bumped whenever the anchor moves, so a stopped playhead redraws once
+  // without a frame loop running behind it.
+  const [anchorMoves, setAnchorMoves] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   // The gesture's own state: entry index -> value while dragging.
@@ -62,6 +65,7 @@ export function App() {
         setSnap(msg);
         setState(msg.status.state);
         anchor.current = { sample: msg.status.sample, at: performance.now() };
+        setAnchorMoves((n) => n + 1);
         setPosition(msg.status.musical);
         setError(null);
       } else if (msg.type === 'event') {
@@ -70,6 +74,10 @@ export function App() {
         // daemon's sample is truth, and the frame loop below spells it.
         if (msg.event.event === 'position' && typeof msg.event.sample === 'number') {
           anchor.current = { sample: msg.event.sample, at: performance.now() };
+          setAnchorMoves((n) => n + 1);
+          // The server spells each position for a song with no tempo
+          // map; with one, the frame loop below overwrites this.
+          if (msg.musical !== undefined) setPosition(msg.musical);
         }
       } else if (msg.type === 'error') {
         setError(msg.message);
@@ -80,32 +88,38 @@ export function App() {
   }, []);
 
 
-  // Runs the readout at the display's rate off the anchor, and stops
-  // entirely when nothing is playing — a paused transport has a fixed
-  // position, and a rAF loop spinning behind a still clock is the kind
-  // of idle cost a machine with a hundred things open should not pay.
+  // Runs the playhead at the display's rate off the anchor while the
+  // transport plays, and not at all otherwise: a paused transport has a
+  // fixed position, and a rAF loop spinning behind a still clock is the
+  // kind of idle cost a machine with a hundred things open should not
+  // pay. While stopped, each anchor move draws one frame. A song with no
+  // tempo map still moves its playhead, at the session's rate, and its
+  // readout is the server's spelling of each position event.
   const clock = snap?.clock;
+  const rate = clock?.sampleRate ?? snap?.timeline?.rate;
   useEffect(() => {
-    if (!clock) return; // no tempo map: the server's sample readout stands
-    const tempo = new TempoMap(clock.tempo, clock.sampleRate);
-    const meter = new MeterMap(clock.meter);
+    if (rate === undefined) return;
+    const tempo = clock ? new TempoMap(clock.tempo, clock.sampleRate) : undefined;
+    const meter = clock ? new MeterMap(clock.meter) : undefined;
     let frame = 0;
     const tick = () => {
       const a = anchor.current;
       if (a) {
         const elapsed = state === 'playing' ? (performance.now() - a.at) / 1000 : 0;
-        const sample = a.sample + elapsed * clock.sampleRate;
-        const seconds = sample / clock.sampleRate;
-        const mins = Math.floor(seconds / 60);
-        const secs = (seconds - mins * 60).toFixed(1).padStart(4, '0');
-        setPosition(`${meter.format(Math.round(tempo.samplesToTicks(sample)))} (${mins}:${secs})`);
+        const sample = a.sample + elapsed * rate;
+        if (tempo !== undefined && meter !== undefined) {
+          const seconds = sample / rate;
+          const mins = Math.floor(seconds / 60);
+          const secs = (seconds - mins * 60).toFixed(1).padStart(4, '0');
+          setPosition(`${meter.format(Math.round(tempo.samplesToTicks(sample)))} (${mins}:${secs})`);
+        }
         setPlaySample(sample);
       }
-      frame = requestAnimationFrame(tick);
+      if (state === 'playing') frame = requestAnimationFrame(tick);
     };
-    frame = requestAnimationFrame(tick);
+    tick();
     return () => cancelAnimationFrame(frame);
-  }, [clock, state]);
+  }, [clock, rate, state, anchorMoves]);
 
   const send = (msg: unknown) => ws.current?.send(JSON.stringify(msg));
 
