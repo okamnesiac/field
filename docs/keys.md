@@ -51,10 +51,13 @@ Holding a key holds its note; the terminal's key repeat does nothing.
 When the terminal loses focus, `field keys` releases every held note,
 because a terminal that has lost focus never reports the release.
 
-To check that notes go out, watch the source from another terminal:
+To check that notes go out, watch the source from another terminal.
+`field-audiod` is not on your `PATH`, because installing Field links
+only `field`; run it from your Field checkout, or through
+`$FIELD_AUDIOD` if you set that:
 
 ```console
-$ field-audiod --midi-monitor "Field Keys"
+$ native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor "Field Keys"
 {"ready":true,"name":"Field Keys"}
 {"midi":[144,60,100]}
 {"midi":[128,60,0]}

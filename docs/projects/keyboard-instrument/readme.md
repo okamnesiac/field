@@ -623,7 +623,7 @@ Chunk 1, the MIDI device and keymaps:
 
 | # | Do | Expect |
 | --- | --- | --- |
-| 1 | In Ghostty, run `field keys`. In another terminal, run `field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
+| 1 | In Ghostty, run `field keys`. In another terminal, from the Field checkout, run `native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
 | 2 | Hold `KeyA`, press `KeyX`, release `KeyA`. | Note-off 60, not 72. |
 | 3 | Hold `KeyA` for two seconds. | One note-on, no repeats. |
 | 4 | Hold `KeyA`, then switch to another window. | Note-off 60 when focus leaves. |
