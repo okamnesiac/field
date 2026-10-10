@@ -13,6 +13,7 @@ import { buildLabels } from './build.js';
 import { describeTake, meterLine, recordTake, resolveRecordTarget } from './record.js';
 import { transportCommand, transportStatusLines } from './transport.js';
 import { check } from './check.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // The input side (recording.md chunk 1) against the real daemon in
 // null-output mode. The null clock presents an input while armed — a
@@ -88,7 +89,7 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     } catch {
       // no daemon left behind
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempProject(root);
   });
 
   async function importTone(name: string, samples: number): Promise<string> {
