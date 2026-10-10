@@ -376,6 +376,52 @@ describe('insert ops', () => {
     expect(dry.text).toBe(raw);
   });
 
+  it('changes only the parameter it was sent, leaving the authored ones alone', () => {
+    // The schema fills every default it was not sent; only the keys the
+    // gesture set may change.
+    const raw = track([
+      'name: room',
+      'inserts:',
+      '  - effect: reverb',
+      '    decay: 1.2',
+      '    predelay_ms: 10',
+      '    damping: 0.7',
+      'inputs:',
+      '  - audio: bass',
+    ]);
+    const result = applyInsertEdit(raw, 0, { mix: 0.9 });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(
+      track([
+        'name: room',
+        'inserts:',
+        '  - effect: reverb',
+        '    mix: 0.9',
+        '    decay: 1.2',
+        '    predelay_ms: 10',
+        '    damping: 0.7',
+        'inputs:',
+        '  - audio: bass',
+      ]),
+    );
+    // A band drag sends only `bands`; an authored `normalize: false` stays.
+    const eq = track([
+      'name: room',
+      'inserts:',
+      '  - effect: eq',
+      '    bands:',
+      '      - type: bell',
+      '        frequency: 500',
+      '    normalize: false',
+      'inputs:',
+      '  - audio: bass',
+    ]);
+    const banded = applyInsertEdit(eq, 0, { bands: [{ type: 'bell', frequency: 600 }] });
+    if (!banded.ok) throw new Error(banded.message);
+    expect(banded.text).toContain('normalize: false');
+    expect(banded.text).toContain('frequency: 600');
+  });
+
   it('re-spells bands minimally with defaults derived from the schema', () => {
     const raw = track([
       'name: bass',

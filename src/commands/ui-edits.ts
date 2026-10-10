@@ -381,7 +381,13 @@ export function applyInsertEdit(raw: string, entry: number, set: Record<string, 
     return { ok: false, message: `bad ${effect} parameters` };
   }
   const defaults = effectDefaults[effect as EffectName];
-  for (const [key, value] of Object.entries(parsed.data)) {
+  // The keys the gesture sent, and only those: `.partial()` still fills
+  // every field's default, so parsed.data carries values for keys the
+  // client never touched, and writing those would reset what the file
+  // holds. The parse validates; `set` says what changes.
+  const validated = parsed.data as Record<string, unknown>;
+  for (const key of Object.keys(set)) {
+    const value = validated[key];
     if (key === 'bands' && Array.isArray(value)) {
       // Bands re-spelled minimally: per-band defaults stay implicit,
       // so an untouched band keeps the two fields its author wrote.
