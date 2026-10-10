@@ -449,7 +449,10 @@ export function buildGraph(project: LoadedProject): Graph {
         // The cables arriving here become plan inputs: the sender's stem
         // for a post tap, the tap node for pre — converted at the edge
         // like any source when the sender renders at another rate.
-        const cableIns = (cablesByReceiver.get(track.name) ?? []).map((cable) => {
+        // A cable with no arrivals — every sender placement muted — is
+        // silent, so it is no input at all, and the receiver stops
+        // depending on the sender.
+        const cableIns = (cablesByReceiver.get(track.name) ?? []).filter((cable) => cable.arrivals.length > 0).map((cable) => {
           const raw = cable.tap === 'pre' ? tapRef(cable.sender) : trackRef(cable.sender);
           ensureConvert(raw);
           return { ref: raw, gainDb: cable.gainDb, arrivals: cable.arrivals };

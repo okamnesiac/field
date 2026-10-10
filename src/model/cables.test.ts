@@ -127,6 +127,30 @@ describe('checkCables: arrival derivation', () => {
     expect(cables[0]!.arrivals).toEqual(at(96000, 288000));
   });
 
+  it('a muted sender placement sends nothing, and an all-muted cable is silent, not dangling', () => {
+    // A muted placement is absent from the mix, sends included: muting
+    // the second verse drops its arrival, and muting both leaves the
+    // cable joined with nothing arriving — no "never arrives" error.
+    const keys = trackData('keys', { sends: { verb: { gain_db: -6, tap: 'post' } } });
+    const verse = trackData('verse', { inputs: [entry({ track: 'keys', at: 3840 })] });
+    const space = trackData('space', { inputs: [entry({ receive: 'verb' })] });
+    const main = (mute: [boolean, boolean]) =>
+      trackData('main', {
+        inputs: [
+          entry({ track: 'verse', mute: mute[0] }),
+          entry({ track: 'verse', at: 7680, mute: mute[1] }),
+          entry({ track: 'space' }),
+        ],
+      });
+    const one = run([keys, verse, space, main([false, true])]);
+    expect(one.pushed).toEqual([]);
+    expect(one.cables[0]!.arrivals).toEqual(at(96000));
+    const none = run([keys, verse, space, main([true, true])]);
+    expect(none.pushed).toEqual([]);
+    expect(none.cables).toHaveLength(1);
+    expect(none.cables[0]!.arrivals).toEqual([]);
+  });
+
   it('a looped sender placement arrives once per repetition', () => {
     const kick = trackData('kick', { sends: { verb: { gain_db: 0, tap: 'post' } } });
     const main = trackData('main', {
@@ -516,6 +540,39 @@ describe('cables render (nested-tracks.md §19 chunk 4)', () => {
       { input: 0, start: 0, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
       { input: 0, start: 192000, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
     ]);
+  });
+
+  it('a muted sender placement leaves the receiver, in the plan and in the deps', async () => {
+    track('keys', ['sends:', '  verb:', '    gain_db: -6']);
+    track('verse', ['inputs:', '  - track: keys']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', [
+      'inputs:',
+      '  - track: verse',
+      '    mute: true',
+      '  - track: verse',
+      '    at: 7680',
+      '  - track: space',
+    ]);
+    const specs: Record<string, unknown> = {};
+    await buildLabels(root, ['//songs/opener/track:space'], captureRunner(specs));
+    // Only the unmuted verse at bar 3 arrives.
+    expect((specs['//songs/opener/track:space'] as StemSpec).clips).toEqual([
+      { input: 0, start: 192000, read_offset: 0, gain_db: -6, fade_in: 0, fade_out: 0 },
+    ]);
+    // Both muted: the cable is joined but silent — no error, and the
+    // receiver no longer depends on the sender at all.
+    track('main', [
+      'inputs:',
+      '  - track: verse',
+      '    mute: true',
+      '  - track: verse',
+      '    at: 7680',
+      '    mute: true',
+      '  - track: space',
+    ]);
+    expect((await messages()).errors).toEqual([]);
+    expect(queryDeps(root, 'deps(//songs/opener/track:space)')).not.toContain('//songs/opener/track:keys');
   });
 
   it('tap: pre consumes a pre-insert tap node instead of the stem', async () => {
