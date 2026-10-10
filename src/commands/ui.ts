@@ -332,6 +332,14 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     { signal: watchAbort.signal },
     {
       onEdit: async (edit, fresh) => {
+        // A recompile that changed nothing in the session — the watch's
+        // first pass at launch, a comment edit, a save with no change, a
+        // synced folder's churn — reloads nothing. The snapshot still goes
+        // out, because a comment edit moves the file hashes the view holds.
+        if (edit.kind === 'same') {
+          await pushSnapshot();
+          return;
+        }
         if (soloed !== null) {
           await swapSession();
         } else if (edit.kind === 'ramps') {
