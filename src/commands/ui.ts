@@ -9,7 +9,9 @@ import { z } from 'zod';
 import { AudiodClient } from '../audiod/client.js';
 import type { CompiledSession } from '../graph/live.js';
 import { compileSession } from '../graph/live.js';
+import { readWavHeader } from '../audio/wav.js';
 import { sha256Text } from '../hash.js';
+import { sharedAssetName } from '../labels.js';
 import { formatDiagnostic, loadProject, type Diagnostic, type LoadedProject } from '../model/project.js';
 import {
   applyEdit,
@@ -458,11 +460,23 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       return `a cross-rate track cannot be ${verb} yet`;
     }
     if (entry.audio !== undefined) {
-      const shared = /^\/\/shared\/asset:(.+)$/.exec(entry.audio);
-      const ledger = shared
-        ? project?.shared?.data.assets.find((a) => a.name === shared[1])
-        : song.assets?.data.assets.find((a) => a.name === entry.audio);
-      if (ledger?.sample_rate !== undefined && ledger.sample_rate !== loaded.sample_rate) {
+      const shared = sharedAssetName(entry.audio);
+      const ledger =
+        shared !== undefined
+          ? project?.shared?.data.assets.find((a) => a.name === shared)
+          : song.assets?.data.assets.find((a) => a.name === entry.audio);
+      // Older ledgers record no sample_rate, and the graph then reads the
+      // file's WAV header (graph.ts sourceRate); so does this check, or a
+      // 44.1 kHz asset in such a ledger would pass as same-rate.
+      let rate = ledger?.sample_rate;
+      if (ledger !== undefined && rate === undefined) {
+        try {
+          rate = readWavHeader(join(root, shared !== undefined ? 'shared' : song.dir, ledger.file)).sampleRate;
+        } catch {
+          rate = undefined;
+        }
+      }
+      if (rate !== undefined && rate !== loaded.sample_rate) {
         return `a cross-rate clip cannot be ${verb} yet`;
       }
     }
