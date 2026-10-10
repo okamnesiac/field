@@ -1,0 +1,399 @@
+{
+ "version": 1,
+ "name": "Project status audit",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 176,
+  "title": "Close shipped projects on delivery and bring every plan's status up to date",
+  "head": "66b04ee498828290a904d5c87095fd14dcd0d22f",
+  "headRef": "docs/project-status-audit",
+  "base": "3d26d52705cbd9a94328e9dca4b703dd11791889",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field keeps one plan per project under <code>docs/projects/&lt;name&gt;/readme.md</code>, following the Projector convention. Each plan's YAML frontmatter carries a <code>status</code> (<code>draft</code>, <code>ready</code>, <code>in-progress</code> or <code>completed</code>) and, while the project is open, a <code>priority</code> (<code>now</code>, <code>next</code> or <code>later</code>). <code>project list</code> groups the plans by those two fields, so they are what a reader uses to see what is being built and what is finished.",
+   "Those fields had drifted from <code>main</code>. One repository rule caused most of the drift: a project whose code had shipped stayed <code>in-progress</code> at <code>priority: now</code> until real music had been made with it. As a result, twelve projects sat at <code>now</code>, and most of them had nothing left to build. This pull request deletes that rule and closes a project when its work is done, the way Projector defines <code>completed</code>.",
+   "<ul><li><b>Eleven projects close.</b> Nine shipped, <code>watch</code> was superseded by the realtime engine, and <code>engine-umbrella</code> is abandoned. Each gets an <code>**Outcome:**</code> line that says what shipped and which acceptance clauses stand short.</li><li><b>Owed work stays visible.</b> Five new draft plans (<code>track-rename</code>, <code>pickups</code>, <code>streaming-rings</code>, <code>comping</code> and <code>apollo-session</code>) carry the work that would otherwise have closed with its parent, and add-insert's editor handoff moves into plugin-hosting's chunk 3.</li><li><b>Priorities reset.</b> Only <code>plugin-hosting</code> stays at <code>now</code>. <code>remote</code>, <code>ui</code> and <code>streaming-rings</code> are at <code>next</code>, and everything else open is at <code>later</code>.</li><li><b>Two plans stay draft.</b> Open pull requests (#157–#161, #163) implement <code>ui</code> and <code>windows-portability</code>, but each plan gives its move to <code>in-progress</code> to the change that answers its open questions. #157 and #163 make that move along with their answers.</li><li><b>Stale text is corrected</b> in four root docs, five open plans, and the stack line of <code>AGENTS.md</code>.</li></ul>",
+   "The change is Markdown only. No code, test or build file changes, and nothing reads these files at run time."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Plan</b>: a project's <code>readme.md</code> under <code>docs/projects/</code>.</li><li><b>Status</b>: the lifecycle field. <code>in-progress</code> and <code>ready</code> claim the plan can be executed now. <code>draft</code> and <code>completed</code> claim nothing about readiness.</li><li><b>Priority</b>: when the work should happen. It schedules work and never claims readiness, and a completed plan drops it.</li><li><b>Outcome line</b>: the <code>**Outcome:**</code> paragraph above a plan's title that records how it ended.</li><li><b>Stub</b>: a draft plan with only a goal, holding an idea until someone writes the plan.</li><li><b>Flip</b>: the change that moves a plan from <code>draft</code> to <code>in-progress</code>.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review state at this head",
+    "html": "<p>The Projector review of <code>66b04ee</code> is <b>clean</b>. All 4 finding threads are resolved, each fixed on the branch:</p><ul class=\"tight\"><li><b>At <code>81bc4eb</code></b>: <code>windows-portability</code> and <code>ui</code> moved to <code>in-progress</code> before their open questions were answered. Both now stay <code>draft</code>, so neither file is in the diff any more.</li><li><b>At <code>81bc4eb</code></b>: the <code>lint-and-format</code> probe had no copy step. It now reformats a temporary copy of <code>src/</code>.</li><li><b>At <code>ac6e450</code></b>: closing <code>recording</code> left its Apollo session work in no open project. The <code>apollo-session</code> stub now carries it.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "rule",
+   "title": "The rule that kept shipped projects open",
+   "kicker": "The convention change everything else follows from",
+   "intro": [
+    "The deleted paragraphs in <code>docs/projects/README.md</code> said that shipping the code does not finish a project. A plan whose implementation had landed stayed <code>in-progress</code> at <code>priority: now</code>, and its Outcome line named the condition that would close it, usually that real music had been made with it. The rule existed because the layout before Projector showed unplayed projects by listing them in <code>now.md</code>, and Projector has no such list.",
+    "Projector defines <code>completed</code> as \"the project no longer needs work\", so the rule stretched both fields. With it gone, a project closes when its work is done, and what was never proven goes in the Outcome line instead of holding the project open.",
+    "<code>AGENTS.md</code> changes in two unrelated ways. <code>project init</code> regenerated its Projector section to version 2, which adds a paragraph on stacking dependent pull requests with <code>gh stack</code>. Separately, the hand-written stack line drops <code>afconvert</code>, which project-core §5 already records as superseded."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/README.md",
+     "collapsed": false,
+     "note": "Deletes the two paragraphs that held shipped projects open. Nothing else in the README changes.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "No plan or root doc still applies the deleted rule's wording. Run from the head, <code>grep -rn \"Stays open\\|neighbours' precedent\\|Shipping the code does not finish\" docs/</code> prints nothing. One leftover phrased differently is project-core's Status paragraph, noted on that file."
+      }
+     ]
+    },
+    {
+     "path": "AGENTS.md",
+     "note": "The Projector section is regenerated to version 2, and the stack line drops <code>afconvert</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The generated block matches Projector 0.7.3's <code>agents-block.md</code> template line for line, apart from the filled-in projects directory. <code>project check</code> at the head no longer prints the <code>instructions-outdated</code> warning."
+      },
+      {
+       "kind": "verify",
+       "text": "<code>afconvert</code> is gone from the code. <code>git grep afconvert</code> outside <code>docs/</code> finds only comments that describe its retirement, and project-core §5 records it as superseded on 2026-08-07.",
+       "line": 38
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "shipped",
+   "title": "Nine projects close as shipped",
+   "kicker": "Each Outcome line names what shipped and what stands short",
+   "intro": [
+    "Each of these plans goes from <code>in-progress</code> at <code>now</code> to <code>completed</code>, and its frontmatter loses <code>priority</code>, as Projector requires for a completed plan. The old Outcome line, which named a close condition such as \"until a session has actually played through an edge conversion\", becomes a record of what shipped, with the pull requests that shipped it.",
+    "When an acceptance clause was not fully met, the Outcome line says so and cites the plan section that holds the clause. For example, <code>cross-rate-live</code> notes that converted delivery has run on the null output device only, and <code>reverbs</code> notes that creek's room was never chosen. Where unbuilt work remains, the line links the stub that now carries it.",
+    "Completed plans make no readiness claim, so their remaining open questions, such as nested-tracks §6, do not block closing them."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Every pull request these Outcome lines cite is a squash commit on <code>main</code> at <code>3d26d52</code>: #4–#6, #58–#61, #64, #65, #107, #108, #112, #113, #137–#140, #143, #144, #146, #155, #166, #167, #169 and #170."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/project-core/readme.md",
+     "note": "Closes project-core. The one unbuilt §6 commitment, <code>field track rename</code>, moves to the <code>track-rename</code> stub.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>src/cli.ts</code> defines only <code>track create</code> under <code>track</code>, so the rename commitment really is unbuilt.",
+       "line": 5
+      },
+      {
+       "kind": "context",
+       "text": "The body's <b>Status:</b> paragraph, below the title and outside this diff, still says the phase \"finishes when the build-graph PR merges and real use (bloom, then sc-render) stops surfacing surprises\". That is the retired close condition. The repository's plan README asks that a finished plan not be rewritten to match later reality, so the Outcome line above the title is where the ending is recorded."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/multi-rate/readme.md",
+     "note": "Closes multi-rate. §5 already records how each done clause was met, including two carried by <code>rates.test.ts</code> rather than by the bloom example project.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>src/graph/rates.test.ts</code> exists, and <code>grep -rn 'type: normalize' examples/</code> finds nothing, as §5 requires."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/cross-rate-live/readme.md",
+     "note": "Closes cross-rate-live, the plan that lets a track at a different sample rate play live. Two §4 clauses stand short: no end-to-end test of the watch loop on a cross-rate edit, and converted delivery tried only on the null device.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Both short clauses match the code and #143. <code>live-session.test.ts</code> asserts the dirty list names the <code>convert:</code> label, but its watch test uses a same-rate track. #143's description says the MacBook speakers switched to 44.1 kHz rather than converting.",
+       "line": 9
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/realtime/readme.md",
+     "note": "Closes realtime. §5's last clause is half met: a session costs one live chain, but sources still preload whole instead of streaming. Streaming moves to the <code>streaming-rings</code> stub."
+    },
+    {
+     "path": "docs/projects/reverbs/readme.md",
+     "note": "Closes reverbs. The live A/B ran in #146, but the decision it was for, which room creek ships with, was never made.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>examples/bloom/songs/creek/tracks/space.yaml</code> still uses <code>effect: reverb</code>, and #146's description records the hardware A/B under <code>--watch</code>.",
+       "line": 9
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/nested-tracks/readme.md",
+     "note": "Closes nested-tracks. Negative local positions, which decision 6 allows for pickups and §9 deferred, move to the <code>pickups</code> stub."
+    },
+    {
+     "path": "docs/projects/voice-generation/readme.md",
+     "note": "Closes voice-generation. §2's timing clause, seconds rather than minutes from start to audio on the M3 Max, was never measured on record."
+    },
+    {
+     "path": "docs/projects/recording/readme.md",
+     "note": "Closes recording after all four chunks. Comping moves to the <code>comping</code> stub. The work that waits on a take recorded on the Apollo interface moves to <code>apollo-session</code>: the loopback check of the latency compensation §9 promises, the first-hardware-session checks, and the <code>hardware/</code> schema.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 15,
+       "text": "The loopback measurement (§13.2), the §12.10 items owed to the first hardware session, and the <code>hardware/</code> schema §11 deferred now carry over to <code>apollo-session</code>, the way comping carries over to <code>comping</code>. Without that stub they would have sat only in a completed plan, which <code>project list</code> shows as done."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/add-insert/readme.md",
+     "note": "Closes add-insert, the <code>field insert add</code> command. Its editor handoff needs <code>field open</code>, so that step moves into plugin-hosting's chunk 3.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>field insert add</code> has <code>--at</code>, and after the write it prints the <code>field open</code> line it would run (<code>src/cli.ts</code>), as §5 says it should until chunk 3 lands.",
+       "line": 6
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ended",
+   "title": "Two projects end without shipping as planned",
+   "kicker": "One superseded, one abandoned",
+   "intro": [
+    "Projector marks a superseded or abandoned project <code>completed</code> as well. The Outcome line says which, and why.",
+    "<code>watch</code> made the playing loop follow project edits by reloading the daemon at each loop wrap. The realtime engine replaced that mechanism, so the play half retired while <code>field build --watch</code> stands as built. <code>engine-umbrella</code> was a stub to gather <code>graph/</code> and <code>generators/</code> under <code>src/engine</code>. It is abandoned because the docs now use \"engine\" for the <code>field-audiod</code> daemon."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/watch/readme.md",
+     "note": "Completes watch as superseded by realtime's chunk 3 (#139).",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 7,
+       "text": "The daemon has no <code>reload</code> op at the head. Its op list ends at <code>stop</code>, and realtime's plan records retiring <code>reload(path)</code> and the loop-wrap takeover in chunk 3. <code>field build --watch</code> and <code>field play &lt;song&gt; --watch</code> both exist in <code>src/cli.ts</code>."
+      },
+      {
+       "kind": "context",
+       "line": 6,
+       "text": "The Outcome links <code>realtime</code>, the project that superseded watch, as Projector's finish convention asks of a superseded project."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/engine-umbrella/readme.md",
+     "note": "Completes engine-umbrella as abandoned.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>src/</code> has <code>audiod/</code>, <code>remote/</code>, <code>time/</code> and <code>workers/</code> beside <code>graph/</code> and <code>generators/</code>, and <code>docs/audio-engine.md</code> opens by naming <code>field-audiod</code> as the engine.",
+       "line": 6
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "stubs",
+   "title": "Five stubs carry the owed work",
+   "kicker": "New draft plans, so unbuilt work does not close with its parent",
+   "intro": [
+    "Each stub is a draft plan with a goal, the plan section it came from, and a sentence saying that no plan exists yet. Four are at <code>later</code>. <code>streaming-rings</code> is at <code>next</code>, because realtime recorded it as owed before large sessions."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/track-rename/readme.md",
+     "note": "Carries project-core §6's commitment that renaming a track rewrites every reference in one commit."
+    },
+    {
+     "path": "docs/projects/pickups/readme.md",
+     "note": "Carries negative local positions, which a pickup (a lead-in that starts before the bar it belongs to) needs.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>timePosition</code> in <code>src/schema/common.ts</code> is a union of <code>ticks</code> (<code>min(0)</code>) and a musical position whose numbers start at 1, as the goal says.",
+       "line": 12
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/streaming-rings/readme.md",
+     "note": "Carries realtime's streaming follow-up.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The figures and the quote match realtime §7's chunk 2 amendment of 2026-08-10: creek at about 143 MB, a five-minute thirty-track session at about 3.5 GB, and \"owed before large sessions, not an optimisation to forget\".",
+       "line": 13
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/comping/readme.md",
+     "note": "Carries comping, which builds one take from the best parts of several. Recording §10 left it to plan once real takes accumulate."
+    },
+    {
+     "path": "docs/projects/apollo-session/readme.md",
+     "note": "Carries the work recording owed to its first session on the Apollo interface: the loopback latency measurement, the microphone-prompt and duplex-open checks, and the <code>hardware/</code> schema.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 8,
+       "text": "The goal is recording §9's definition of done: a take recorded against creek plays back in place, compensated, from <code>field build &amp;&amp; field play</code>. Checked against recording §9 at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 16,
+       "text": "Each item cites the recording section that owes it, and the sections say so. §12.3 leaves the choice of which latency placement subtracts to the loopback measurement, and §13.2 calls that measurement \"still owed\". §12.10 lists the microphone prompt, the duplex opens, and the latency arithmetic as \"owed to the first hardware session\". §11 defers the <code>hardware/</code> schema until a real Apollo session."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "open",
+   "title": "Open plans: new priorities",
+   "kicker": "remote moves to next, and plugin-hosting picks up add-insert's obligations",
+   "intro": [
+    "<code>remote</code> keeps <code>in-progress</code> and moves from <code>now</code> to <code>next</code>, with the reasoning added to its §9.1. <code>plugin-hosting</code> stays at <code>now</code>. It gains shipped markers on chunks 1 and 2, the two obligations add-insert hands to chunk 3, and a corrected pointer from the <code>remote-asset-store</code> stub to the <code>remote</code> plan as the cross-machine cache.",
+    "No plan in this pull request moves to <code>ready</code> or <code>in-progress</code>, so none makes a new claim that it can be built now. <code>ui</code> and <code>windows-portability</code> stay <code>draft</code> until #163 and #157 answer their open questions."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/remote/readme.md",
+     "note": "Moves from <code>now</code> to <code>next</code>, with chunk 1 (<code>--json</code> output) the only work left. §9.11 gains the answer the site's plan gave.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The audiofield-io citations match that plan on the <code>audiofield</code> repository's <code>main</code>: §13.9 has the site's player compute <code>bar.beat</code> from its own copy of Field's tempo map, §10.14 makes the render worker moot for v1, and §10.15 answers by-label playback with no for v1.",
+       "line": 627
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/plugin-hosting/readme.md",
+     "note": "Adds shipped markers and chunk 3's new obligations, and points the cross-machine cache at the <code>remote</code> plan.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "remote §1 says it \"makes the holder a server\" for the shared cache, quoting this plan's §2, and it treats <code>remote-asset-store</code> as a separate question about where LFS objects live.",
+       "line": 75
+      },
+      {
+       "kind": "verify",
+       "text": "Both obligations match add-insert: §2 decides the <code>&lt;song&gt;/&lt;track&gt;</code> spelling on a name collision, and §5 hands off to <code>field open</code> once chunk 3 lands.",
+       "line": 396
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "later-plans",
+   "title": "Corrections in three later plans",
+   "kicker": "Stale figures and claims, checked against the code",
+   "intro": [
+    "These plans stay <code>draft</code> at <code>later</code>. Their status claims nothing about readiness, so a new open question in one of them blocks nothing."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/lint-and-format/readme.md",
+     "collapsed": false,
+     "note": "Re-measures what adopting prettier would cost: about 5,200 changed lines across 86 of <code>src/</code>'s 132 files, up from #88's 1,916 across 40.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 10,
+       "text": "<code>src/</code> holds 132 <code>.ts</code> files, the denominator of the 86-file figure."
+      },
+      {
+       "kind": "verify",
+       "line": 19,
+       "text": "The probe copies <code>src/</code> into a <code>mktemp</code> directory and points prettier at the copy by absolute path, so a failed copy leaves prettier nothing to match instead of the real tree. Run verbatim on this head's <code>src/</code>, it printed <code>5209</code> and <code>86</code> with prettier 3.9.9, and the worktree stayed clean."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/splice/readme.md",
+     "note": "Stops calling the sample browser Field's first interactive surface, because <code>field insert add</code>'s chooser (<code>src/commands/picker.ts</code>, #155) came first.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "add-insert §3 records the picker as \"deliberately disposable (DECIDED, 2026-08-12)\" with a full TUI as \"its own stack decision\", and ui §5 records the TUI as its own project, as the new lines cite.",
+       "line": 110
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/automation/readme.md",
+     "note": "Adds open question 5: automation decision 5 has the engine convert samples to musical time every block, but the daemon never learns what a bar is.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "playback.md §3.6 (decision 6) says \"the daemon never learns what a bar is\", and realtime §1 repeats it.",
+       "line": 114
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "root-docs",
+   "title": "Root docs stop calling shipped work future",
+   "kicker": "Descriptions of the engine, recording and the project layout catch up",
+   "intro": [
+    "The docs at <code>docs/</code>'s root describe how the system works today, and the repository's instructions require them to keep up with behavior. These edits move recording's landed takes, the metronome, punch-out and loop takes out of \"future work\", and list comping and monitoring through the engine as what remains."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/README.md",
+     "note": "The index lines for the audio engine and remote docs now describe what exists.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>docs/remote.md</code> has \"Push a project\" and \"Pull\" sections, so the new index line is accurate.",
+       "line": 114
+      }
+     ]
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "The recording paragraph covers all four chunks."
+    },
+    {
+     "path": "docs/audio-engine.md",
+     "note": "The opening says takes land in the project and build in place."
+    },
+    {
+     "path": "docs/project-model.md",
+     "note": "Removes the plugin inventory and plugin state blobs from the \"designed but not yet built\" list.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "State blobs are described under <code>shared/plugins/</code> later in this file. The inventory is machine-local at <code>.field/plugins.json</code> (<code>src/audio/plugins.ts</code>), which is why it is simply dropped from a list of project files.",
+       "line": 47
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
