@@ -233,6 +233,16 @@ describe('placement stretches', () => {
     );
   });
 
+  it('spells a new duration the way the entry spells its at', () => {
+    // An open window has no duration node to copy, so a musical `at`
+    // decides: the author who typed `at: [5]` gets bars back, not ticks.
+    const raw = track(['name: main', 'inputs:', '  - audio: riff', '    at: [5]']);
+    const parsed = full({ audio: 'riff', at: barTicks * 4 });
+    const result = applyStretch(raw, 0, parsed, 'end', barSamples * 2, tempo, meter);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.text).toBe(track(['name: main', 'inputs:', '  - audio: riff', '    at: [5]', '    duration: [2]']));
+  });
+
   it('trims the front through at, duration and source_offset together', () => {
     const raw = track([
       'name: main',

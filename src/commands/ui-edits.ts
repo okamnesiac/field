@@ -65,11 +65,16 @@ function setAt(doc: Document, meter: MeterMap, index: number, at: number, musica
 // starts, since a meter change inside it changes what a bar is worth. So
 // a span is re-spelled through span() from its own anchor. The spelling
 // is read once and handed back as a writer, because a split writes both
-// halves out of the original entry's node.
+// halves out of the original entry's node. An open window has no
+// duration node to read, so the new key follows the entry's `at`, the
+// way setAt reads it: `at: [5]` gets `duration: [2]`, not 7680 beside it,
+// and an entry with no `at` at all claims no musical spelling, so it
+// gets ticks.
 function durationSpeller(doc: Document, meter: MeterMap, source: number, musical: boolean) {
   const oldDur = doc.getIn(['inputs', source, 'duration'], true);
   const comment = isNode(oldDur) ? oldDur.comment : undefined;
-  const wasSeq = isSeq(oldDur) && musical;
+  const spelledLike = oldDur === undefined ? doc.getIn(['inputs', source, 'at'], true) : oldDur;
+  const wasSeq = isSeq(spelledLike) && musical;
   return (index: number, from: number, span: number): void => {
     if (wasSeq) {
       const [bars, beats, rest] = meter.span(from, span);
