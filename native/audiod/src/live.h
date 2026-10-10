@@ -138,11 +138,14 @@ private:
 
     struct Track
     {
-        // Move-only, and said so: the chain holds unique_ptrs, nothing
-        // ever copies a Track, and MSVC eagerly compiles the vector
-        // copy path an implicit copy constructor would reference —
-        // clang and gcc never instantiate it, which is why this only
-        // surfaced on Windows.
+        // Move-only, and said so: the chain holds unique_ptrs and
+        // nothing ever copies a Track. MSVC's std::map move constructor
+        // is not noexcept, so the two maps below make Track's implicit
+        // move constructor not noexcept either, and vector<Track>
+        // reallocation falls back through move_if_noexcept to the
+        // implicit copy constructor, which cannot copy the chain.
+        // libstdc++ and libc++ maps move noexcept, which is why this
+        // only surfaced on Windows.
         Track() = default;
         Track (const Track&) = delete;
         Track& operator= (const Track&) = delete;

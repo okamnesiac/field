@@ -37,12 +37,12 @@
 // bit-identical (decision 3). CPU scales with what is being edited,
 // not with the session.
 
-import { join, relative, sep } from 'node:path';
+import { join } from 'node:path';
 import { wavFrameCount } from '../audio/wav.js';
 import { SESSION_VERSION, insertGrowth, insertLatency, type Session, type SessionInsert, type SessionTrack } from '../audiod/session.js';
 import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
-import { formatDiagnostic, loadProject } from '../model/project.js';
+import { formatDiagnostic, loadProject, projectPath } from '../model/project.js';
 import type { SpecInsert } from '../generators/stem.js';
 import { toPluginWire } from '../audio/plugins.js';
 import { explain, type Explanation } from './build.js';
@@ -283,7 +283,7 @@ export async function compileSession(
           // Slash-separated like every path in the session JSON: the
           // daemon resolves them against its cwd, and Windows accepts
           // the forward slashes there too.
-          path: relative(root, outcome.outputPath).split(sep).join('/'),
+          path: projectPath(root, outcome.outputPath),
           sha256: outcome.sha256,
         });
     }
