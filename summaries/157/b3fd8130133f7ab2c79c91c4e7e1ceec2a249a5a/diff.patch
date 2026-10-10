@@ -1,0 +1,291 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..7cae0f9
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,22 @@
++# Text checks out LF on every platform, whatever core.autocrlf says.
++# field hashes file content as it sits on disk — .scd programs are
++# action-key inputs by content hash, `field check`'s canonical-formatting
++# comparison is byte-wise, and asset pins are the sha256 of committed
++# bytes — so a CRLF checkout changes every one of those answers while
++# `git status` stays clean (git compares normalized content; field reads
++# the working tree). windows-portability.md §1.1 has the measurement.
++* text=auto eol=lf
++
++# Last match wins: committed audio and captured plugin state (*.state
++# under shared/plugins/, named by its own sha256 — plugins.ts refuses a
++# blob that stops hashing to its filename) are bytes, never candidates
++# for conversion. Neither type is in the tree today; these rules exist so
++# the first one arrives safely rather than riding the binary heuristic.
++*.wav   binary
++*.aif   binary
++*.aiff  binary
++*.flac  binary
++*.mp3   binary
++*.m4a   binary
++*.caf   binary
++*.state binary
+diff --git a/docs/README.md b/docs/README.md
+index f7260c2..e962edb 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -69,10 +69,17 @@ where practical), Apollo interfaces as reference hardware, UAD-2 DSP and
+ UADx native plugins, SuperCollider, and ACE-Step generative audio.
+ 
+ Explicitly out of scope for V1: Logic (integration, import/export,
+-plugins), Windows, Linux, VST/CLAP/AAX, other DAW integrations, a full
+-graphical DAW interface, cloud collaboration, remote rendering, notation,
+-video scoring, surround/Atmos, and Apollo Console automation (no
+-supported API exists — see [audio-engine.md](audio-engine.md)).
++plugins), VST/CLAP/AAX, other DAW integrations, a full graphical DAW
++interface, cloud collaboration, remote rendering, notation, video
++scoring, surround/Atmos, and Apollo Console automation (no supported
++API exists — see [audio-engine.md](audio-engine.md)).
++
++Windows and Linux are build-and-test targets, not product platforms. CI
++builds the daemon and runs the whole suite on Linux
++([linux-portability](projects/linux-portability/readme.md) decision 5), and
++Windows is being brought up to build, test, and play
++([windows-portability](projects/windows-portability/readme.md)). The
++product ships on macOS.
+ 
+ ## Two workflows
+ 
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index 61da623..aa0653b 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -1,6 +1,6 @@
+ ---
+-status: draft
+-priority: later
++status: in-progress
++priority: now
+ ---
+ 
+ # Plan: Windows portability — the checkout, the socket, and the last bits
+@@ -8,14 +8,17 @@ priority: later
+ **Goal:** field builds, checks, plays and **live-renders** on Windows, so
+ that the realtime engine — which has no platform-bound code in it at all —
+ stops being unreachable from the platform it happens not to be developed
+-on. Assessment written 2026-08-12 by reading `main` at `766e532`; no code
+-has been changed and nothing here is committed to.
++on. Assessment written 2026-08-12 by reading `main` at `766e532`; work
++began 2026-08-16 with chunk 1, and the flip to `in-progress` rode that diff,
++answering §2's decisions as it went.
+ 
+ This is scoped to the **core**: the CLI, the build graph, and the daemon
+ including live evaluation. The generative Python workers and SuperCollider
+-are deliberately out (§4), and Windows is currently written down as an
+-explicit V1 non-goal in [docs/README.md](../../README.md) "V1 platform
+-scope" — §3 says what that means for this plan.
++are deliberately out (§4). Windows was written down as an explicit V1
++non-goal in [docs/README.md](../../README.md) "V1 platform scope" until
++chunk 1: per §2.4 that diff moved it, with Linux, into the
++build-and-test-targets paragraph there — §3 says what the claim is and
++is not.
+ 
+ The headline, because it is not what you would guess: **live rendering is
+ not the hard part.** `live.cpp`, `render.cpp`, `plan.cpp` and every file
+@@ -33,10 +36,11 @@ any of the others.
+ 
+ ### 1.1 The checkout corrupts content hashes before any code runs
+ 
+-There is **no `.gitattributes` in this repository**. Git for Windows
+-defaults to `core.autocrlf=true` (it is set on the assessment machine),
+-so a fresh Windows clone rewrites every text file to CRLF on the way to
+-disk.
++As assessed (2026-08-12), this repository had **no `.gitattributes` at
++all** — chunk 1 is the file that ended this finding, and the measurements
++below are from before it. Git for Windows defaults to
++`core.autocrlf=true` (it is set on the assessment machine), so a fresh
++Windows clone rewrote every text file to CRLF on the way to disk.
+ 
+ Measured, not assumed, on `examples/bloom/shared/instruments/creek-kit.scd`:
+ 
+@@ -70,8 +74,8 @@ Four things break — three silently, one loudly:
+   rather than a guarantee, which is exactly the dependence chunk 1
+   exists to end.
+ 
+-The fix is one committed file and it must land first, because it is the
+-instrument every other measurement depends on. It is a file to be
++The fix was one committed file, landed first because it is the
++instrument every other measurement depends on. It was a file to be
+ written and verified, not copied from anywhere: the standalone
+ sample-project repo's `.gitattributes` — seven LFS lines, each ending
+ `-text` — protected the audio binaries and nothing else, so every text
+@@ -80,17 +84,21 @@ the surviving clone's history ever carried `* text=auto eol=lf`
+ (minjudd traced that clone on #154 — the deleted upstream can hide
+ nothing reachable; the precedent this section previously claimed does not
+ exist, and the file that does exist solves the adjacent problem). The
+-shape chunk 1 writes is `* text=auto eol=lf` with per-extension binary
++shape chunk 1 wrote is `* text=auto eol=lf` with per-extension binary
+ overrides for `.wav/.aif/.aiff/.flac/.mp3/.m4a/.caf` **and `.state`**
+ — the loud consumer above falls through to the binary heuristic
+-without it, and neither file type exists in the tree today (minjudd on
+-#154), so the rule must be written before the first blob arrives to
++without it, and neither file type existed in the tree (minjudd on
++#154), so the rule is written before the first blob arrives to
+ exercise it — last-match-wins so audio and captured plugin state are
+-never touched — and its proof is §1.1's measurement re-run
+-against a real Windows clone, not a provenance story. The engine
+-repository has never had a `.gitattributes` at all, and when the sample
+-project moved in-tree ([bloom-in-tree.md](../bloom-in-tree/readme.md)) not even
+-the LFS lines came with it.
++never touched. Its proof is §1.1's measurement re-run against a real
++Windows clone, not a provenance story: the chunk 1 pull request carries
++that transcript — 0 CR bytes across the clone, `creek-kit.scd` back at
++its committed hash — and #157's review reproduced it independently,
++including the `.state` override holding against a CRLF blob with no NUL
++bytes. Until chunk 1, the engine repository had never had a
++`.gitattributes` at all: when the sample project moved in-tree
++([bloom-in-tree.md](../bloom-in-tree/readme.md)) not even the LFS lines
++came with it.
+ 
+ This is not only a Windows concern, which is the argument for landing it
+ regardless of whether the rest of this plan is ever built: it makes the
+@@ -223,33 +231,43 @@ installed. CMake 3.25.2 satisfies the `cmake_minimum_required(3.24)`, and
+ Visual Studio Community 2022 is present. `uv` and `sclang` are absent,
+ which only matters for §4.
+ 
+-## 2 Decisions to make
+-
+-Recorded as open because this plan is `draft`; the change that flips it to
+-`in-progress` is the one that answers them.
+-
+-1. **Named pipes or loopback TCP** for the control socket (§1.2). The
+-   recommendation is **named pipes**: the single-owner guarantee and the
+-   permission model both come free, and a per-project daemon that lives
+-   for hours is the wrong place to open a standing local port. Loopback
+-   TCP is the cheap path if the goal is working-this-week, and the seam is
+-   the same either way, so this is reversible at the cost of one file.
+-2. **Whether `field play` keeps a non-daemon fallback on Windows** (§1.6).
+-   Recommendation: no fallback.
+-3. **Whether `socketPathFor` grows a platform branch.** `src/socketPath.ts`
+-   exists to keep the bound path inside `sun_path`'s 104 bytes by
+-   returning a cwd-relative path, and its comment records that it is one
+-   function because it was nearly three. Named pipes have no such limit
+-   and are not filesystem paths at all, so on Windows it would return a
+-   pipe name derived from the project root instead — the same function,
+-   answering a different question per platform.
+-4. **When [docs/README.md](../../README.md) "V1 platform scope" changes.**
+-   It currently lists Windows as explicitly out of scope alongside Linux,
+-   which Linux then shipped as a build-and-test target without becoming a
+-   supported product ([linux-portability.md](../linux-portability/readme.md)
+-   decision 5). The same framing is available here and is probably right:
++## 2 Decisions (DECIDED, 2026-08-16)
++
++Written as open questions while the plan was `draft`; the chunk 1 diff
++flipped it to `in-progress` and answered them, per the convention that the
++change making the readiness claim answers for what is still open.
++
++1. **Named pipes** for the control socket (§1.2), not loopback TCP. The
++   single-owner guarantee that `flock` provides today comes free from
++   `FILE_FLAG_FIRST_PIPE_INSTANCE`, pipes take ACLs so the permission
++   model matches the 0600 Unix socket, and a per-project daemon that
++   lives for hours is the wrong place to open a standing local port any
++   process can connect to. Rejected: **loopback TCP with a port file** —
++   far less code, since JUCE's `StreamingSocket` is already in the
++   dependency set, but the port-file staleness story reopens exactly the
++   race #12 review closed by choosing `flock` over a connect probe. The
++   seam is the same either way, so this is reversible at the cost of one
++   file if the pipe accept loop turns out worse than expected.
++2. **`field play` gets no non-daemon fallback on Windows** (§1.6). Since
++   [realtime.md](../realtime/readme.md) shipped, `field play` *is* live evaluation
++   in the daemon; a `SoundPlayer`-shaped fallback with no transport and
++   no `--from` would be a second, worse playback path kept alive on the
++   platform with the least coverage. Without the daemon built, `field
++   play` fails with "build the daemon", which is the honest answer.
++3. **`socketPathFor` grows a platform branch, in the same function.**
++   `src/socketPath.ts` exists to keep the bound path inside `sun_path`'s
++   104 bytes by returning a cwd-relative path; named pipes have no such
++   limit and are not filesystem paths at all, so on Windows the function
++   returns a pipe name derived from the project root instead — one
++   function answering a different question per platform, which its
++   comment must then say.
++4. **The [docs/README.md](../../README.md) "V1 platform scope" amendment
++   rode the chunk 1 diff** — this plan's own rule was "until that line
++   moves, this plan stays `draft`", so the flip and the line move are one
++   change by construction. The framing reuses
++   [linux-portability.md](../linux-portability/readme.md) decision 5:
+    Windows as a build-and-test-and-play target, not a second product
+-   platform. Until that line moves, this plan stays `draft`.
++   platform.
+ 
+ ## 3 Definition of done
+ 
+@@ -304,6 +322,9 @@ Recorded so the next reader does not re-derive it.
+ 1. **`.gitattributes`** (§1.1). One committed file. Lands first because
+    every later measurement depends on the checkout being byte-defined,
+    and it is worth landing even if nothing else here is built.
++   **Landed** (2026-08-16, the diff that carries this line): proof per
++   §1.1 — a fresh clone on a Windows machine with `core.autocrlf=true`
++   checks out 0 CR bytes and `creek-kit.scd` at its committed hash.
+ 2. **Build and paths** (§1.5, §1.3). MSVC compiles the daemon: the
+    SIGPIPE guard, the `.exe` suffix, multi-config `--config Release` in
+    `build:native`. Ends at a real milestone with no socket work at all —
+@@ -319,8 +340,10 @@ Recorded so the next reader does not re-derive it.
+ 4. **The transport** (§1.2). The seam, both ends, per §2.1. This is where
+    `field play`, `field transport` and live rendering arrive, and it is
+    the largest chunk by a wide margin.
+-5. **Fallback, CI, docs** (§1.6, §2.4). The `afplay` decision, a
+-   `windows-latest` job, and the "V1 platform scope" amendment.
++5. **Fallback and CI** (§1.6). The `afplay` path's Windows behaviour per
++   §2.2, and a `windows-latest` job. The "V1 platform scope" amendment
++   this chunk originally carried rode chunk 1 instead, because §2.4 tied
++   the plan's `in-progress` flip to it.
+ 
+ Chunks 2 and 4 are independent of each other given chunk 1, so offline
+ rendering on Windows can be real long before playback is.
+@@ -331,20 +354,43 @@ rendering on Windows can be real long before playback is.
+   the daemon with `detached: true` and `stdio: ['ignore','ignore', log]`,
+   then `unref()`s it. Windows has different semantics for detachment and
+   process groups, and the daemon's idle-exit and ctrl-c handling both ride
+-  on it. Unverified.
+-- **Is the 104-byte reasoning simply gone, or replaced?** See §2.3. If
+-  named pipes win, `socketPathFor`'s entire premise is macOS/Linux-only,
+-  and the comment that explains it needs to say so.
++  on it. **Deferred to chunk 4, and resolved by building it**: the spawn
++  path first runs on Windows when the transport exists to connect to, and
++  the daemon protocol tests plus a real `field play` session are exactly
++  the verification — a separate investigation would only rehearse what
++  the chunk proves.
++- **Is the 104-byte reasoning simply gone, or replaced?** **Answered by
++  §2.1 and §2.3 (2026-08-16)**: named pipes won, so `socketPathFor`'s
++  104-byte premise is macOS/Linux-only. On Windows the same function
++  returns a pipe name derived from the project root, and its comment says
++  which question each platform's branch answers. Chunk 4 writes that
++  branch.
+ - **What does WASAPI do to the device story?** `field devices` and
+   `--device` are built on JUCE's `AudioDeviceManager`, which on Windows
+   offers WASAPI (shared and exclusive) and DirectSound, plus ASIO only
+   with a non-redistributable SDK. Whether device *names* round-trip
+   through `device.select` the way they do on Core Audio is unverified,
+   and the periodic rescan fallback has never been exercised against real
+-  Windows hot-plug.
++  Windows hot-plug. **Deferred to chunk 4**: both are observable only
++  against a live daemon, which does not exist before the transport does —
++  `field devices` against WASAPI and one unplug during playback are the
++  test, and chunk 4's definition of done should name them.
+ - **Does anything else hash on-disk bytes?** §1.1 names four
+   consumers — three found by reading, the state-blob refusal by
+   minjudd's grep on #154, which also placed `commands/click.ts` and
+   `graph/build.ts`'s hashers inside the asset-pin family already
+-  listed; a systematic grep is still cheap insurance before trusting
+-  chunk 1, and this question stays open until someone runs it.
++  listed. **Answered (2026-08-17**, the systematic grep, run in #157's
++  review): every non-test hasher in `src/` reaches file bytes through
++  `src/hash.ts`, and every caller maps onto a family §1.1 already names —
++  the `sc-render` action key, the asset-pin family (`export`,
++  `generate`, `import`, `land`, `graph/build`, `model/project`), the
++  state-blob refusal, with `graph/build.ts`'s `actionKey` fed by those
++  input hashes. Re-checked 2026-10-10: `click` no longer hashes anything,
++  `land` hashes each landed `.wav` take for its ledger row, and
++  `remote/client.ts` hashes download bytes off the network, not off
++  disk. The one byte-consumer that is **not** a hash and that a grep
++  for `createHash` would miss: `field check`'s canonical-formatting gate
++  compares `canonicalText(file.raw, file.order) !== file.raw` against a
++  raw `readFileSync` (the formatting check in `model/project.ts`), so a
++  CRLF tree fails it by string comparison rather than by digest — §1.1's
++  second consumer, named here so nobody re-derives it.

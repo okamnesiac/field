@@ -1,0 +1,147 @@
+{
+ "version": 1,
+ "name": "Windows LF checkout (chunk 1)",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 157,
+  "title": "LF on every platform: content hashes survive a Windows clone (windows-portability.md chunk 1)",
+  "head": "b3fd8130133f7ab2c79c91c4e7e1ceec2a249a5a",
+  "headRef": "windows/gitattributes",
+  "base": "3d26d52705cbd9a94328e9dca4b703dd11791889",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "field is a command-line music production tool that keeps a project as a Git repository of text files and audio assets. Several of its answers come from file bytes as they sit on disk: the cache key of a SuperCollider render, the canonical-formatting check in <code>field check</code>, and the sha256 that pins each asset. Git for Windows defaults to <code>core.autocrlf=true</code>, which rewrites text files to CRLF line endings on checkout. A fresh Windows clone therefore produced different answers from every other platform, while <code>git status</code> stayed clean because Git compares normalized content.",
+   "This pull request is chunk 1 of the Windows portability plan. It adds a root <code>.gitattributes</code> that checks text out with LF endings everywhere and exempts audio and captured plugin state from any conversion. In the same diff, the plan moves from <code>draft</code> to <code>in-progress</code> and answers its open decisions, and <code>docs/README.md</code> names Windows and Linux as build-and-test targets rather than leaving them out of scope.",
+   "The pull request was opened in August against the older plan layout. Its head merges <code>main</code>, which moves the plan edits onto the layout <code>main</code> adopted in #164, and a follow-up commit gives §6's last question its disposition. Together they fixed all four findings from the September review."
+  ],
+  "cards": [
+   {
+    "id": "review",
+    "title": "Review status at b3fd813",
+    "html": "<ul class=\"tight\"><li><b>Verdict:</b> clean. A human approval is what remains.</li><li><b>Fixed and resolved:</b> all four findings from the review of <code>db2f3e3</code>: the queue-file conflict on <code>now.md</code>, the dead <code>projects/all/</code> links, the old frontmatter vocabulary, and the wording of §6's 104-byte question.</li><li><b>Suggestion left:</b> record that <code>field init</code> still writes an LFS-only <code>.gitattributes</code> into new projects.</li><li><b>Method:</b> the head was reviewed by reading only, because its author has no write access to the repository.</li></ul>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms",
+    "html": "<ul class=\"tight\"><li><b><code>core.autocrlf</code></b>: a Git setting. <code>true</code>, the Git for Windows default, converts LF to CRLF on checkout.</li><li><b><code>text=auto</code></b>: lets Git decide which files are text and normalize their line endings.</li><li><b><code>eol=lf</code></b>: checks text out with LF endings on every platform.</li><li><b><code>binary</code></b>: Git's shorthand for <code>-text -diff -merge</code>, so no line-ending conversion.</li><li><b>Action key</b>: the cache key of a build step, hashed from its inputs.</li><li><b>Asset pin</b>: the sha256 recorded for a committed asset.</li><li><b>State blob</b>: a captured plugin state file under <code>shared/plugins/</code>, named by its own sha256.</li></ul>"
+   },
+   {
+    "id": "later",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li><b>Chunks 2 to 5:</b> the MSVC build and paths, render determinism, the named-pipe transport, and a Windows CI job.</li><li><b>New projects:</b> <code>field init</code> still writes an LFS-only <code>.gitattributes</code> into each project it creates, which the review suggests recording in the plan.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "attributes",
+   "title": "One file makes the checkout byte-defined",
+   "kicker": "The root .gitattributes: LF for text, binary for audio and plugin state.",
+   "intro": [
+    "Before this change the repository had no <code>.gitattributes</code>, so each clone's line endings followed the cloner's Git settings. On Windows that meant CRLF, and four things field computes from file bytes changed: the action key of an <code>sc-render</code> step, <code>field check</code>'s canonical-formatting comparison, asset pins, and the check that a plugin state blob still hashes to its filename. The last one refuses to render rather than quietly differing.",
+    "The file sets two rules. <code>* text=auto eol=lf</code> tells Git to detect text files and always check them out with LF endings, whatever <code>core.autocrlf</code> says. The <code>binary</code> lines that follow exempt seven audio extensions and <code>*.state</code> from any conversion. For each attribute the last matching line wins, so the overrides must come after the <code>*</code> line.",
+    "No audio or <code>.state</code> file is committed today. The overrides exist so the first one arrives protected. Without them, Git's binary detection, which looks for a NUL byte, would treat a state blob that happens to contain none as text."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": ".gitattributes",
+     "note": "All of chunk 1: the LF rule, the binary overrides, and comments recording why each exists.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 8,
+       "text": "<code>git ls-files --eol</code> at this head shows 283 blobs with LF endings and 6 with none. No blob carries CRLF and none is detected as binary, so this rule changes no committed content and no <code>git add --renormalize</code> step is missing."
+      },
+      {
+       "kind": "verify",
+       "line": 11,
+       "text": "The comment's claim holds: <code>src/audio/plugins.ts:296-299</code> throws when a state blob's sha256 differs from its filename."
+      },
+      {
+       "kind": "verify",
+       "line": 22,
+       "text": "<code>git check-attr</code> gives <code>text: auto</code> and <code>eol: lf</code> for <code>creek-kit.scd</code>, and <code>text: unset</code> for <code>.wav</code>, <code>.aiff</code>, and <code>.state</code> paths. With <code>text</code> unset, <code>eol</code> has no effect, so the binary overrides win. No nested <code>.gitattributes</code> exists to override this file."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The Windows plan goes in-progress and answers its own questions",
+   "kicker": "The frontmatter flip, §2's decisions, the chunk 1 record, and §6's dispositions.",
+   "intro": [
+    "<code>docs/projects/windows-portability/readme.md</code> is the plan for making field build, check, play, and live-render on Windows. Each plan in this repository carries <code>status</code> (<code>draft</code>, <code>ready</code>, <code>in-progress</code>, or <code>completed</code>) and <code>priority</code> (<code>now</code>, <code>next</code>, or <code>later</code>) in its frontmatter. Moving a plan to <code>in-progress</code> claims it is ready to execute, so the change that does it must answer, or explicitly defer, every question the plan still has open.",
+    "This diff moves the plan from <code>draft</code> at <code>later</code> to <code>in-progress</code> at <code>now</code>, and does that answering:",
+    "<ul><li><b>§2 Decisions.</b> The four open choices become decided: named pipes rather than loopback TCP for the daemon's control socket, no non-daemon playback fallback for <code>field play</code> on Windows, one <code>socketPathFor</code> function with a platform branch, and the <code>docs/README.md</code> scope change riding this diff.</li><li><b>§1.1 and §5.</b> The prose now records that chunk 1 landed, with its Windows proof.</li><li><b>§6 Open questions.</b> Each gets a disposition. Two are deferred to chunk 4 with their tests named. The 104-byte question is answered by §2.1 and §2.3. Whether anything else hashes on-disk bytes is answered by a grep of <code>src/</code>, re-checked at this head.</li></ul>"
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The readiness claim holds. Each §6 question carries an explicit disposition: the detached-spawn and WASAPI questions are deferred to chunk 4, the 104-byte question is answered by §2.1 and §2.3, and the hasher question is answered. §4's question about CPython and <code>AF_UNIX</code> sits in the out-of-scope list and needs no answer."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "collapsed": false,
+     "note": "The plan itself: the frontmatter flip, §2 decided, §1.1 and §5 updated for chunk 1, and a disposition on each §6 question.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 2,
+       "text": "<code>project check</code> reports the plans valid at this head, with <code>status: in-progress</code> and <code>priority: now</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 45,
+       "text": "<code>creek-kit.scd</code> at this head is 2,252 bytes with sha256 <code>49f970a7…</code>, the LF form recorded a few lines below."
+      },
+      {
+       "kind": "flag",
+       "line": 77,
+       "text": "Non-blocking suggestion from the review: <code>field init</code> still writes an LFS-only <code>.gitattributes</code> into every new project (<code>src/commands/init.ts:59-65</code>), with the same seven audio patterns as the sample-project file this paragraph describes. A Windows clone of a project made by <code>field init</code> still checks its text out as CRLF. Consider recording that gap as a chunk or an open question. It predates this pull request."
+      },
+      {
+       "kind": "verify",
+       "line": 362,
+       "text": "The disposition agrees with the plan: §2.1 decides named pipes, §2.3 says <code>socketPathFor</code> returns a pipe name on Windows, and §5's chunk 4 owns both ends of the transport. This fixes the last open review thread."
+      },
+      {
+       "kind": "verify",
+       "line": 385,
+       "text": "The list matches this head: the eight modules that import <code>src/hash.ts</code> are <code>export</code>, <code>generate</code>, <code>import</code>, <code>land</code>, <code>graph/build</code>, <code>model/project</code>, <code>audio/plugins</code> (the state-blob refusal), and <code>generators/supercollider</code> (the <code>sc-render</code> key). <code>click.ts</code> has no hash reference, and <code>land.ts:231</code> writes each take's sha256 into its ledger row."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "scope",
+   "title": "docs/README.md names Windows and Linux as build-and-test targets",
+   "kicker": "The V1 platform scope section, amended as the plan's §2.4 requires.",
+   "intro": [
+    "The \"V1 platform scope\" section of <code>docs/README.md</code> says what version 1 of field supports and what it leaves out. It listed Windows and Linux as out of scope, although CI already builds and tests on Linux. This diff removes both from that list and adds a paragraph: they are build-and-test targets, not product platforms, and the product ships on macOS.",
+    "The plan made this change a precondition of its own flip to <code>in-progress</code>, which is why it rides the same diff."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/README.md",
+     "collapsed": false,
+     "note": "Windows and Linux leave the out-of-scope list, and a new paragraph says what they are instead.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 78,
+       "text": "<code>.github/workflows/ci.yml</code> runs <code>pnpm build:native</code> and <code>pnpm test</code> on <code>ubuntu-latest</code>, and linux-portability.md decision 5 calls Linux a build-and-test target, as this paragraph cites. Both links resolve, and no other root document states a platform scope that contradicts it."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
