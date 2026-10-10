@@ -349,8 +349,9 @@ Recorded so the next reader does not re-derive it.
    `shell` on win32); the stub worker is a shebang script Windows cannot
    exec, so a `.js`/`.mjs` interpreter override now runs through
    `process.execPath` (more hermetic everywhere); a test helper built
-   `.venv/bin` where the probe reads `.venv/Scripts`; and two suffix
-   assertions compared native paths against `/`-joined strings. The
+   `.venv/bin` where the probe reads `.venv/Scripts`; and four path
+   assertions, two in `watch.test.ts` and two in `build.test.ts`,
+   compared native paths against `/`-joined strings. The
    `server.cpp` chunk-4 stub earns its place here rather than there:
    without it the binary does not link, and chunk 2's milestone is the
    binary. Transport-bound tests (fake daemons on `.sock` paths, the
@@ -384,6 +385,17 @@ Recorded so the next reader does not re-derive it.
    fresh exe per spawn) drops an occasional spawn — every such failure
    re-ran green in isolation, and a CI runner shares none of those
    conditions.
+
+   **Amended when recording arrived from `main` (2026-10-10).** The
+   merge of recording chunks 1 to 4 (#166, #167, #169, #170) brought one
+   more POSIX-only daemon file and three more socket test files.
+   `capture.cpp` now spells `fsync` and `ftruncate` as the CRT's
+   `_commit` and `_chsize_s` on Windows. The socket tests in
+   `click-daemon`, `punch-daemon`, and `record-daemon` skip on win32
+   naming chunk 4, the same serve-mode guard as above: three
+   `itOverSocket` tests in `click-daemon`, and the whole daemon describe
+   in each of the other two. `click-daemon`'s `--render-live` test runs
+   everywhere.
 3. **Determinism** (§1.4). Measure a Windows render against macOS and
    Linux; the toolchain floor or `clang-cl` depending on what the
    measurement says, and the UCRT — the unmeasured third libm — is where
@@ -464,8 +476,12 @@ land as its own diff whenever.
   `shutdown(SHUT_RD)`, single-owner via `FILE_FLAG_FIRST_PIPE_INSTANCE`
   replacing `flock`), `socketPathFor`'s pipe-name branch (§2.3), and
   `audiod/client.ts` connecting to `\\.\pipe\…`. Removes the chunk-2
-  serve-mode stub in `server.cpp` and the 9 guards in
-  `version.test.ts` — the ones whose comment names chunk 4. The other
+  serve-mode stub in `server.cpp` and every guard whose comment names
+  chunk 4: the 9 in `version.test.ts`, and the serve-mode guards §5's
+  chunk 2 amendments list — the describes in `audiod/client`,
+  `play-daemon`, plugin-hosting's live chains, `punch-daemon`, and
+  `record-daemon`, the 4 `itOverSocket` tests in `live-session`, and
+  the 3 in `click-daemon`. The other
   guards chunk 2 planted are not chunk 4's to remove: the 21 in
   `generate.test.ts` and 3 describes in `aced`/`voiced` are the workers
   chunk's (§7.3 carries them), and `build.test.ts`'s 2 sclang stubs are

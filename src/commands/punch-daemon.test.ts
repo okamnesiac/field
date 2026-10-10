@@ -68,7 +68,9 @@ describe('the loop line', () => {
   });
 });
 
-describe.skipIf(!binary)('punch-out and loop takes', () => {
+// win32: serve mode refuses until the named-pipe transport
+// (windows-portability.md chunk 4); every test here dials the socket.
+describe.skipIf(!binary || process.platform === 'win32')('punch-out and loop takes', () => {
   let root: string;
 
   beforeEach(async () => {
