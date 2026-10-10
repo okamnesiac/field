@@ -70,9 +70,7 @@ describe('record helpers', () => {
   });
 });
 
-// win32: serve mode refuses until the named-pipe transport
-// (windows-portability.md chunk 4); every test here dials the socket.
-describe.skipIf(!binary || process.platform === 'win32')('recording through the daemon', () => {
+describe.skipIf(!binary)('recording through the daemon', () => {
   let root: string;
 
   beforeEach(() => {

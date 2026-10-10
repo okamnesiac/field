@@ -438,7 +438,9 @@ Recorded so the next reader does not re-derive it.
    own retry knobs do not cover every op in its recursive walk. The
    guards this chunk owed are retired: the 9 in `version.test.ts` (its
    fake daemons now bind what `socketPathFor` answers), the serve-mode
-   describes, and live-session's four socket tests — 8/8 protocol,
+   describes, live-session's four socket tests, and the recording
+   guards from chunk 2's third amendment (three tests in `click-daemon`,
+   the describes in `punch-daemon` and `record-daemon`) — 8/8 protocol,
    12/12 play-daemon, 25+1 hosting with live chains, on Windows. The
    definition-of-done transcript, from a real session with a dirty
    chain, steered from a second terminal:
@@ -486,8 +488,8 @@ rendering on Windows can be real long before playback is.
   §2.1 and §2.3 (2026-08-16)**: named pipes won, so `socketPathFor`'s
   104-byte premise is macOS/Linux-only. On Windows the same function
   returns a pipe name derived from the project root, and its comment says
-  which question each platform's branch answers. Chunk 4 writes that
-  branch.
+  which question each platform's branch answers. Chunk 4 wrote that
+  branch, in `src/socketPath.ts`.
 - **What does WASAPI do to the device story?** `field devices` and
   `--device` are built on JUCE's `AudioDeviceManager`, which on Windows
   offers WASAPI (shared and exclusive) and DirectSound, plus ASIO only
