@@ -136,20 +136,37 @@ where playback stops.
 everything a label depends on:
 
 ```console
-$ field query "deps(creek/track:space)"
+$ field query "deps(tall-grass/track:room)"
+//songs/tall-grass/gen:seven-eight-loop
+//songs/tall-grass/track:seven-eight-loop
+//songs/tall-grass/track:drums
+//songs/tall-grass/track:room
 ```
 
 `field explain <label>` is the one to reach for when something surprises
-you. It reports the label's type, its inputs and their hashes, its
-action key and whether that key is cached, and — for a track — where the
-signal actually goes:
+you. It reports the label's type, its inputs, its parameters, and — for
+a track — where the signal actually goes, including the cables it
+receives:
 
 ```console
-$ field explain creek/track:space
-...
-reaches: track:main -3.0 dB
-cable: receive "keys-verb" ← track:keys, -14.0 dB (tap post), 3 arrivals at samples 0, 480000, 960000
+$ field explain tall-grass/track:room
+//songs/tall-grass/track:room (rule)
+type: stem v1
+input: //songs/tall-grass/track:drums (not built)
+parameters: {"clips":[{"input":0,"start":0,"read_offset":0,"gain_db":-10,"fade_in":0,"fade_out":0}],"inserts":[{"effect":"reverb","mix":1,"decay":1.2,"predelay_ms":10,"damping":0.7}]}
+reaches: track:main -6.0 dB
+cable: receive "drum-verb" ← track:drums, -10.0 dB (tap post), arrives at sample 0
 ```
+
+Once the inputs are built, each input shows its hash in place of
+`(not built)`, and an `action:` line reports the action key and whether
+it is cached. Once the label itself is built, an `output:` line gives
+the output's hash and size.
+
+`creek` cannot answer either command on a fresh checkout. Its generated
+takes are not committed, so `field query` and `field explain` on
+anything that depends on them stop at a message naming the
+`field generate` command that fills them.
 
 ## Build
 
@@ -177,12 +194,20 @@ output-hash question: a fader move re-runs one sum, a comment edit
 reports silence.
 
 ```console
-$ field build creek --watch
-...
+$ field build tall-grass --watch
+cached  //songs/tall-grass/track:bass
+cached  //songs/tall-grass/gen:seven-eight-loop
+cached  //songs/tall-grass/track:seven-eight-loop
+cached  //songs/tall-grass/track:drums
+cached  //songs/tall-grass/track:room
+cached  //songs/tall-grass/track:main
 watching for changes (ctrl-c stops)
 · no audible change
-↻ //songs/creek/track:main 4f2a91c0b8de
+↻ //songs/tall-grass/track:main bc412911da7a
 ```
+
+That session saw two edits to `songs/tall-grass/tracks/main.yaml`: a
+changed comment, then the room's `gain_db` moved from `-6` to `-4`.
 
 A project that fails `check` mid-edit — a half-saved file, the common
 case — prints its diagnostics, keeps the last good outputs, and retries
