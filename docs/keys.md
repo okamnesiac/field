@@ -32,6 +32,10 @@ recording what you play, are the later chunks of
 
 You do not need to be inside a Field project.
 
+If `field keys` says it cannot create a virtual MIDI source on macOS,
+run it again. CoreMIDI has refused the first source a new process asked
+for, once, and a new process gets a new MIDI client.
+
 ## Play
 
 1. Run `field keys` in a supported terminal.
