@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { curlRequest, installerPath, upgrade } from './upgrade.js';
+import { curlRequest, packageRoot as upgradeRoot, upgrade } from './upgrade.js';
 
 // `field upgrade` is a doorway to install.sh and nothing else
 // (install.md §2.5): it has to find the right installer, hand it the
@@ -29,9 +29,9 @@ function standIn(dir: string, status: number): { installer: string; argsFile: st
 }
 
 describe('field upgrade', () => {
-  it('finds the install.sh beside the package it runs from', () => {
-    expect(installerPath()).toBe(join(packageRoot, 'install.sh'));
-    expect(existsSync(installerPath())).toBe(true);
+  it('finds the package it runs from, with install.sh beside it', () => {
+    expect(join(upgradeRoot(), 'install.sh')).toBe(join(packageRoot, 'install.sh'));
+    expect(existsSync(join(upgradeRoot(), 'install.sh'))).toBe(true);
   });
 
   it('refuses on Windows, naming the build steps instead', () => {

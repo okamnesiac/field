@@ -26,10 +26,6 @@ export function packageRoot(): string {
   return fileURLToPath(new URL('../..', import.meta.url));
 }
 
-export function installerPath(): string {
-  return join(packageRoot(), 'install.sh');
-}
-
 // The test install.sh makes (install.md §2.1, as amended): a git work tree
 // with the CLI's source beside the installer. A release version has the
 // source and no .git.
