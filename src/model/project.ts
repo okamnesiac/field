@@ -32,6 +32,7 @@ import {
   generativeTakesSchema,
   TAKES_FILENAME,
   RECORD_TAKES_FILENAME,
+  isMidiTakeRow,
   recordTakesOrder,
   recordTakesSchema,
   trackOrder,
@@ -784,6 +785,30 @@ function validate(project: LoadedProject): void {
               track.path,
               `${what} has takes but none chosen — field choose ${song.name}/${rname} --take <name> first`,
             );
+          }
+          // The instrument decides the kind of take the entry records
+          // (keyboard-instrument.md §12.2): it must exist, and every take
+          // must be of the entry's kind.
+          const instrument = entry.record.instrument;
+          if (instrument !== undefined) {
+            // Through the render's own rule, as a supercollider: entry is,
+            // so check and the build resolve the program the same way. The
+            // take plays no part in it.
+            const spec = { name: rname, type: 'voice-render' as const, take: takes?.chosen ?? '', instrument };
+            generatorFor(spec).validate(spec, {
+              root: project.root,
+              songDir: song.dir,
+              names,
+              push: (message: string) => push(track.path, `${what} ${message}`),
+              resolveFile: (baseDir: string, file: string) => resolveAssetFile(project.root, baseDir, file),
+            });
+          }
+          for (const take of takes?.takes ?? []) {
+            if (isMidiTakeRow(take) && instrument === undefined) {
+              push(track.path, `take "${take.asset}" is a MIDI take, and ${what} names no instrument to play it`);
+            } else if (!isMidiTakeRow(take) && instrument !== undefined) {
+              push(track.path, `take "${take.asset}" is an audio take, and ${what} records MIDI for ${instrument}`);
+            }
           }
         }
         // Musical arrays need the musical anchor: an absolute entry's

@@ -134,6 +134,18 @@ The CLI looks for the binary inside the checkout it was linked from, so
 one build serves every project directory. `FIELD_AUDIOD` overrides that
 path. It builds on macOS and Linux, and CI builds it on both.
 
+### Playing the keyboard
+
+`field keys` turns the computer keyboard into the MIDI source `Field
+Keys`, which Logic or any other MIDI application can play from. It
+needs `field-audiod` and a terminal that reports key releases through
+the kitty keyboard protocol: Ghostty, iTerm2 3.5 or later, kitty, or
+WezTerm. Keys are read by physical position, so Dvorak, AZERTY, and
+other layouts play the same notes, and a keymap of your own is a YAML
+file away. Name an instrument, as in `field keys still-water-pad` inside
+`examples/bloom`, and it plays that SuperCollider instrument live too.
+See [docs/keys.md](docs/keys.md).
+
 ## Status
 
 The offline half is real and in daily use: nested tracks, per-track

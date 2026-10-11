@@ -1,7 +1,11 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
+
+**Outcome:** Shipped in #155: the pinned write, the plugin and order
+choosers, and `--at`. The editor handoff (§5) needs `field open`, which
+plugin-hosting's chunk 3 builds, so it moved into that chunk; until
+then the command prints the `field open` line it would run.
 
 # Plan: `field insert` — add an insert with a chooser
 

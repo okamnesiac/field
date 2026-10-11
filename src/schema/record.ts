@@ -7,12 +7,20 @@ import { labelName } from './common.js';
 // record node's name — `audio/<name>/takes.yaml` — say which
 // performances exist and which one the entry plays.
 //
-// The entry's payload is empty on purpose (§4): device and input are
-// local state, so they ride `field record` flags and the take row, never
-// the committed recipe. Bare `- record:` is the spelling — YAML's null
-// preprocesses to the empty table, the way a bare send label already
-// does (track.ts sendSchema; §11 resolved 2026-09-06).
-export const recordEntrySchema = z.preprocess((v) => v ?? {}, z.strictObject({}));
+// The entry's payload stays empty until a field earns its place (§4):
+// device and input are local state, so they ride `field record` flags and
+// the take row, never the committed recipe. Bare `- record:` is the
+// spelling — YAML's null preprocesses to the empty table, the way a bare
+// send label already does (track.ts sendSchema; §11 resolved 2026-09-06).
+//
+// `instrument` is the field that earned it (keyboard-instrument.md §12.2):
+// it decides the kind of take. With one, the entry records MIDI and the
+// build renders the chosen take through that instrument's voice; without,
+// it records audio. It resolves as `field keys` resolves an instrument.
+export const recordEntrySchema = z.preprocess(
+  (v) => v ?? {},
+  z.strictObject({ instrument: z.string().min(1).optional() }),
+);
 export type RecordEntry = z.infer<typeof recordEntrySchema>;
 
 // Take names are timestamps (§3): sortable, and two clones recording
@@ -37,10 +45,12 @@ export const takeName = z
 // the song's map said at capture and is never arithmetic. A take that
 // started before the window has a negative `started_at_samples`; the
 // placement reads into the take by that much.
-export const recordedTakeSchema = z.strictObject({
+const musicalPosition = z.array(z.number().int().min(1)).min(1).max(3).optional();
+
+export const audioTakeRowSchema = z.strictObject({
   asset: takeName,
   started_at_samples: z.number().int(),
-  musical_position: z.array(z.number().int().min(1)).min(1).max(3).optional(),
+  musical_position: musicalPosition,
   latency: z.number().int().min(0),
   device: z.string().min(1),
   input: z.number().int().min(1),
@@ -51,7 +61,29 @@ export const recordedTakeSchema = z.strictObject({
   console_preset: z.string().min(1).optional(),
   recorded_at: z.iso.datetime({ offset: true }),
 });
+
+// A MIDI take (keyboard-instrument.md §12.2): its bytes are a notes file,
+// and it carries the MIDI sources the daemon listened to in place of an
+// audio take's device and input. `latency` is the output latency alone,
+// because a player presses a key in time with what they hear, and MIDI
+// has no input latency worth the name; placement subtracts it as for
+// audio.
+export const midiTakeRowSchema = z.strictObject({
+  asset: takeName,
+  started_at_samples: z.number().int(),
+  musical_position: musicalPosition,
+  latency: z.number().int().min(0),
+  sources: z.array(z.string().min(1)),
+  recorded_at: z.iso.datetime({ offset: true }),
+});
+
+export const recordedTakeSchema = z.union([audioTakeRowSchema, midiTakeRowSchema]);
 export type RecordedTake = z.infer<typeof recordedTakeSchema>;
+export type MidiTakeRow = z.infer<typeof midiTakeRowSchema>;
+
+export function isMidiTakeRow(take: RecordedTake): take is MidiTakeRow {
+  return 'sources' in take;
+}
 
 // `audio/<name>/takes.yaml` — beside the WAVs it describes, for the same
 // reason variants.yaml sits beside its takes (generative.ts): one
@@ -80,11 +112,12 @@ export const recordTakesOrder: KeyOrder = {
           'latency',
           'device',
           'input',
+          'sources',
           'monitoring',
           'console_preset',
           'recorded_at',
         ],
-        children: { musical_position: { flow: true } },
+        children: { musical_position: { flow: true }, sources: { flow: true } },
       },
     },
   },

@@ -50,11 +50,14 @@ the kind lives in the field name, never in a value prefix:
   `text:` (voice) plus conditioning. Nothing in the build may run it;
   the node resolves to the chosen committed take. See
   [project-model.md](project-model.md) "Deliberate generation".
-- **`record:`** — a performance to record, with no payload: bare
-  `- record:`. `field record` fills its takes, the entry plays the
-  chosen one at the position it was sung, and an entry with no takes
-  yet plays silence. See [project-model.md](project-model.md)
-  "Recorded takes".
+- **`record:`** — a performance to record: bare `- record:` for audio,
+  or `record:` with `instrument: <name>` under it to record what is
+  played on `field keys` or a controller and hear it through that
+  instrument.
+  `field record` fills its takes, the entry plays the chosen one at the
+  position it was played, and an entry with no takes yet plays silence.
+  A MIDI take sounds through a `gen:` node the build renders from it.
+  See [project-model.md](project-model.md) "Recorded takes".
 - **`receive: <label>`** — the receiving end of a cable. A receive
   admits signal rather than placing it, so it carries nothing but its
   label; `check` rejects any other key on it. See
