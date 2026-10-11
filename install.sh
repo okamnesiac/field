@@ -576,13 +576,26 @@ current_version() {
 
 is_version() { [[ $1 =~ $VERSION_PATTERN ]]; }
 
+# FIELD_DATA_DIR can name a directory that holds other things, so the
+# installer lists, replaces, and removes only what it can show it made: a
+# version, named X.Y.Z, whose install.sh carries the marker download_release
+# requires of every version, and the download it unpacks a version in.
+is_field_version() {
+  is_version "${1##*/}" && [ -d "$1" ] && [ ! -L "$1" ] && grep -qF "$SHIM_MARKER" "$1/install.sh" 2>/dev/null
+}
+
+is_field_download() {
+  local name="${1##*/}"
+  case "$name" in .download-*) ;; *) return 1 ;; esac
+  is_version "${name#.download-}" && [ -d "$1/unpacked" ] && [ ! -L "$1" ]
+}
+
 # The versions installed beside current, which prune has kept.
 kept_versions() {
   local entry name current="$1"
   for entry in "$DATA_DIR"/*; do
     name="${entry##*/}"
-    [ -d "$entry" ] && [ ! -L "$entry" ] || continue
-    [ "$name" != "$current" ] && is_version "$name" || continue
+    [ "$name" != "$current" ] && is_field_version "$entry" || continue
     printf '%s\n' "$name"
   done
 }
@@ -620,6 +633,19 @@ require_shim_free() {
   while [ ! -d "$dir" ]; do dir="$(dirname -- "$dir")"; done
   [ -w "$dir" ] ||
     die "the shim goes in $(tilde "$BIN_DIR"), and you cannot write to $(tilde "$dir") — set FIELD_BIN_DIR to a directory you can write" 69
+}
+
+# download_release replaces the version's directory and its download, so
+# either one that the installer did not make stops it before anything
+# changes.
+require_version_free() {
+  local path
+  for path in "$DATA_DIR/$1" "$DATA_DIR/.download-$1"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      is_field_version "$path" || is_field_download "$path" ||
+        die "$(tilde "$path") is in the way, and it is not a version Field installed — move it aside, or set FIELD_DATA_DIR to a directory of Field's own" 69
+    fi
+  done
 }
 
 require_installed() {
@@ -736,22 +762,18 @@ write_record() {
 
 # Keeps the version just installed and the one it replaced, so a broken
 # release can be switched back from by hand, and removes every other
-# version and any download a failed run left behind.
+# version and any download a killed run left behind.
 prune() {
   local entry name
   for entry in "$DATA_DIR"/* "$DATA_DIR"/.download-*; do
-    [ -d "$entry" ] && [ ! -L "$entry" ] || continue
     name="${entry##*/}"
-    case "$name" in
-      "$1" | "${2:-$1}") ;;
-      .download-*) if is_version "${name#.download-}"; then rm -rf "$entry"; fi ;;
-      *)
-        if is_version "$name"; then
-          rm -rf "$entry"
-          row removed "$name"
-        fi
-        ;;
-    esac
+    case "$name" in "$1" | "${2:-$1}") continue ;; esac
+    if is_field_download "$entry"; then
+      rm -rf "$entry"
+    elif is_field_version "$entry"; then
+      rm -rf "$entry"
+      row removed "$name"
+    fi
   done
 }
 
@@ -853,9 +875,10 @@ show_release_status() {
 release_failed() {
   [ "$1" -ne 0 ] || return 0
   # Never the version current names, should a run stop after the switch.
-  if [ "$(current_version)" != "$INSTALLING" ]; then
-    rm -rf "${DATA_DIR:?}/${INSTALLING:?}" "$DATA_DIR/.download-$INSTALLING"
+  if [ "$(current_version)" != "$INSTALLING" ] && is_field_version "$DATA_DIR/$INSTALLING"; then
+    rm -rf "${DATA_DIR:?}/${INSTALLING:?}"
   fi
+  if is_field_download "$DATA_DIR/.download-$INSTALLING"; then rm -rf "$DATA_DIR/.download-$INSTALLING"; fi
   if [ -n "$REPLACING" ]; then
     echo "install.sh: $INSTALLING did not install, so $REPLACING stays current and field still runs it" >&2
   else
@@ -884,6 +907,7 @@ install_release() {
     [ -x "$REPO/$AUDIOD_RELATIVE" ] || install_audiod
     install_workers
   else
+    require_version_free "$version"
     INSTALLING="$version"
     REPLACING="$current"
     mkdir -p "$DATA_DIR"

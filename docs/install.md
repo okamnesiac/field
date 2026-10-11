@@ -120,6 +120,12 @@ for the first install.
 the bin directory in `release.conf`, so `field upgrade` rewrites the
 same shim.
 
+Give `FIELD_DATA_DIR` a directory of Field's own, because the installer
+writes `current`, `release.conf`, and `cache/` there. It removes only
+the versions and downloads it can show it installed, and stops before
+changing anything when another directory has the name of the version it
+is about to install.
+
 The shim is a two-line script that runs
 `node ~/.local/share/field/current/dist/cli.js`. Switching `current`
 moves `field` to the new version with nothing to relink, and a release

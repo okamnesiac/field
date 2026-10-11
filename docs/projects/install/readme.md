@@ -242,9 +242,14 @@ Without a checkout, `install.sh` installs a release by building it.
    replaces (§7.5).
 5. It switches `<data>/current`, a relative symlink, to the new version
    atomically, writes the `field` shim, records `release.conf`, and
-   removes every version but the new one and the one it replaced. Only
-   a directory named `X.Y.Z` is a version, so a data directory shared
-   with other files loses none of them.
+   removes every version but the new one and the one it replaced.
+   `FIELD_DATA_DIR` can name a directory that holds other things, so the
+   installer lists, replaces, and removes only what it can show it made:
+   a directory named `X.Y.Z` whose `install.sh` carries the shim's
+   marker, which step 2 requires of every version, and the
+   `.download-X.Y.Z` directory it unpacks a version in. Any other
+   directory where it would put the version stops it with exit status
+   69 before anything changes.
 
 Steps 1 to 4 leave the installed version alone, so a failed download,
 build, or worker setup leaves it current, and an exit trap says so and
@@ -780,10 +785,12 @@ building it found.
   modes: the release version read from `package.json`, the archive's
   checks, the switch, the shim and its refusal to replace another
   `field` or to start in a bin directory it cannot write, `release.conf`,
-  pruning only `X.Y.Z` directories, the workers set up again, a failure
-  at each step leaving the old version current and removing the new
-  one, the refusals of a version from before release installs and of a
-  Windows shell, and every status row in each mode.
+  pruning, which in a data directory that holds other things removes
+  only what the installer made and replaces nothing else, the workers
+  set up again, a failure at each step leaving the old version current
+  and removing the new one, the refusals of a version from before
+  release installs and of a Windows shell, and every status row in each
+  mode.
   `src/commands/upgrade.test.ts` covers `field upgrade` downloading the
   installer at the recorded ref, `FIELD_REPO` and `FIELD_REF` ahead of
   the record, running the installed version's own installer under

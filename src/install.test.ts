@@ -806,15 +806,33 @@ posix('install.sh installs a release', () => {
     expect(rows(run.stdout).get('removed')).toBe('0.2.0');
   });
 
-  it('leaves a directory that only looks like a version alone', () => {
-    const photos = join(data, '2024.01.15 photos');
-    mkdirSync(photos, { recursive: true });
+  it('removes only the versions and downloads it made, in a data directory that holds other things', () => {
+    const others = ['2024.01.15 photos/a.jpg', '3.11.4/bin/python3', '.download-9.9.9/notes', 'notes/todo'];
+    for (const path of others) write(join(data, path), '');
+    // What a run killed while it downloaded leaves.
+    mkdirSync(join(data, '.download-0.1.0', 'unpacked'), { recursive: true });
     publish('0.2.0');
     release();
     publish('0.3.0');
-    expect(release().status).toBe(0);
-    expect(existsSync(photos)).toBe(true);
-    expect(release('status').stdout).not.toContain('photos');
+    const run = release();
+    expect(run.status).toBe(0);
+    for (const path of others) expect(existsSync(join(data, path))).toBe(true);
+    expect(existsSync(join(data, '.download-0.1.0'))).toBe(false);
+    expect(run.stdout).not.toContain('3.11.4');
+    const status = release('status').stdout;
+    expect(status).not.toContain('3.11.4');
+    expect(rows(status).get('previous')).toBe('0.2.0 in ~/.local/share/field/0.2.0, kept to switch back to by hand');
+  });
+
+  it('refuses to replace a directory named for the version that it did not install', () => {
+    write(join(data, '0.2.0', 'mine'), 'keep\n');
+    publish('0.2.0');
+    const run = release();
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('~/.local/share/field/0.2.0 is in the way, and it is not a version Field installed');
+    expect(readFileSync(join(data, '0.2.0', 'mine'), 'utf8')).toBe('keep\n');
+    expect(existsSync(join(data, 'current'))).toBe(false);
+    expect(run.log.some((line) => line.startsWith('pnpm') || line.includes('archive'))).toBe(false);
   });
 
   it('leaves the installed version current when the download fails', () => {
