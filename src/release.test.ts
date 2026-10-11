@@ -86,7 +86,12 @@ describe('the release version', () => {
   });
 });
 
-describe('tagging a release', () => {
+// Each test here runs a dozen git commands against a fresh repository and a
+// bare remote. On the Windows runner one took 10.4 s, past vitest's
+// 5-second default, where Linux takes under one.
+const GIT_HEAVY = { timeout: 30_000 };
+
+describe('tagging a release', GIT_HEAVY, () => {
   it('tags the merged version, moves the major tag, and creates the GitHub release', () => {
     const calls: string[][] = [];
     const head = git(checkout, 'rev-parse', 'HEAD');
@@ -204,7 +209,7 @@ describe('tagging a release', () => {
   });
 });
 
-describe('the command line', () => {
+describe('the command line', GIT_HEAVY, () => {
   function run(...argv: string[]): { status: number; lines: string[] } {
     const lines: string[] = [];
     return { status: main(argv, checkout, (line) => lines.push(line)), lines };
