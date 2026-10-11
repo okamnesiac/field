@@ -56,12 +56,14 @@ for, once, and a new process gets a new MIDI client.
    input. In Logic, `Field Keys` appears with your other MIDI inputs.
 3. Play. The status line shows the keymap, the transpose, the velocity,
    the pitch bend and the modulation wheel when the keymap has keys that
-   set them, and last the notes sounding, so playing changes only the
-   end of the line. The bend runs from `-1` to `+1` and always carries
-   its sign, so bending a chord does not move the notes; the wheel runs
-   from 0 to 127. Both are what `field keys` last sent; a controller's
-   bender and wheel do not change them. On a narrow terminal the text before the notes is shortened,
-   and the notes only when they alone are wider than the terminal.
+   set them or their value is away from rest, and last the notes
+   sounding, so playing changes only the end of the line. The bend runs
+   from `-1` to `+1` and always carries its sign, so bending a chord
+   does not move the notes; the wheel runs from 0 to 127. Both are what
+   `field keys` last sent; a USB controller's bender and wheel do not
+   change them. On a narrow terminal the text before the notes is
+   shortened, and the notes only when they alone are wider than the
+   terminal.
 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
    every held note and then All Notes Off, so nothing is left sounding,
    and `Field Keys` disappears.
