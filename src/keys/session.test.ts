@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { builtinKeymapDir, loadKeymap, parseKeymap } from './keymap.js';
 import { knobList, loadKnobs } from './knobs.js';
-import { bendValue, KeysSession } from './session.js';
+import { bendValue, KeysSession, type MidiMessage } from './session.js';
 import { MOD_ALT, MOD_CAPS_LOCK, MOD_CTRL, MOD_NUM_LOCK, MOD_SHIFT, MOD_SUPER } from './terminal.js';
 
 const ON = 0x90;
@@ -385,5 +385,152 @@ describe('knobs', () => {
   it('binds the knobs only in a keymap with a knob action', () => {
     expect(musical().bindsKnobs()).toBe(true);
     expect(new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml'))).bindsKnobs()).toBe(false);
+    expect(new KeysSession(parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { type: 1 } }\n', 't.yaml')).bindsKnobs()).toBe(true);
   });
 });
+
+describe('typing a knob\'s value', () => {
+  const juno = loadKnobs(join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments', 'juno.knobs.yaml'));
+  const onCutoff = (): KeysSession => {
+    const session = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
+    session.press('ArrowRight');
+    session.release('ArrowRight');
+    return session;
+  };
+  const type = (session: KeysSession, keys: string[], now = 0): MidiMessage[] =>
+    keys.flatMap((key) => {
+      const sent = session.press(key, 0, now);
+      session.release(key);
+      return sent;
+    });
+
+  it('opens an entry on the first typing key and sends nothing until it completes', () => {
+    const session = onCutoff();
+    expect(type(session, ['Digit8', 'Digit0', 'Digit0'])).toEqual([]);
+    expect(session.entry).toEqual({ text: '800' });
+    expect(session.ticking()).toBe(false);
+  });
+
+  it('types the decimal point on Period only while an entry is open, and bends otherwise', () => {
+    const session = onCutoff();
+    expect(session.press('Period')).toEqual([[BEND, 0x7f, 0x7f]]);
+    session.release('Period');
+    type(session, ['Digit0']);
+    expect(session.press('Period')).toEqual([]);
+    expect(session.bend).toBe(0);
+    session.release('Period');
+    expect(session.entry?.text).toBe('0.');
+  });
+
+  it('ends a bend Period began on its release, even after an entry opened', () => {
+    const session = onCutoff();
+    session.press('Period');
+    type(session, ['Digit1']);
+    expect(session.release('Period')).toEqual([[BEND, 0, 64]]);
+    expect(session.entry?.text).toBe('1');
+  });
+
+  it('ignores a second decimal point and a minus sign after the first character, and cannot open on a point', () => {
+    const session = onCutoff();
+    session.press('Period');
+    session.release('Period');
+    expect(session.entry).toBeUndefined();
+    type(session, ['Minus', 'Digit1', 'Period', 'Digit5', 'Period', 'Minus', 'Digit2']);
+    expect(session.entry?.text).toBe('-1.52');
+  });
+
+  it('deletes on Backspace and closes an empty entry', () => {
+    const session = onCutoff();
+    type(session, ['Digit1', 'Digit2', 'Backspace', 'Digit5']);
+    expect(session.entry?.text).toBe('15');
+    type(session, ['Backspace', 'Backspace']);
+    expect(session.entry).toBeUndefined();
+    expect(type(session, ['Backspace', 'Enter'])).toEqual([]);
+  });
+
+  it('cancels on Escape, and says Ctrl-C quits when no entry is open', () => {
+    const session = onCutoff();
+    type(session, ['Digit1', 'Digit2', 'Escape']);
+    expect(session.entry).toBeUndefined();
+    expect(session.message).toBeUndefined();
+    expect(session.controllers.has(74)).toBe(false);
+    type(session, ['Escape']);
+    expect(session.message).toBe('Ctrl-C quits');
+  });
+
+  it('lets a note play while an entry is open', () => {
+    const session = onCutoff();
+    type(session, ['Digit8']);
+    expect(session.press('KeyA')).toEqual([[ON, 60, 100]]);
+    expect(session.entry?.text).toBe('8');
+  });
+
+  it('glides a completed value to its nearest controller value, one control change a tick', () => {
+    const session = onCutoff();
+    type(session, ['Digit9', 'Digit9', 'Digit9', 'Digit9', 'Digit9', 'Enter']);
+    let now = 0;
+    while (session.ticking()) session.tick((now += 40));
+    expect(session.controllers.get(74)).toBe(127);
+    expect(type(session, ['Digit8', 'Digit0', 'Digit0', 'Enter'], now)).toEqual([]);
+    const sent: MidiMessage[][] = [];
+    while (session.ticking()) sent.push(session.tick((now += 40)));
+    expect(sent).toHaveLength(13);
+    expect(sent.every((tick) => tick.length === 1)).toBe(true);
+    expect(sent.at(-1)).toEqual([[CC, 74, 62]]);
+  });
+
+  it('sets a value at once with glide 0', () => {
+    const session = new KeysSession(
+      parseKeymap('name: g\nnotes: { KeyA: 0 }\ncontrols: { Digit6: { type: 6 }, Digit4: { type: 4 } }\n', 'g.yaml'),
+    );
+    expect(type(session, ['Digit6', 'Digit4', 'Enter'])).toEqual([[CC, 1, 64]]);
+    expect(session.ticking()).toBe(false);
+  });
+
+  it('completes before a knob action: a move glides on, and a turn stops the glide it started', () => {
+    const session = onCutoff();
+    type(session, ['Digit3', 'Digit0', 'Digit0']);
+    expect(session.press('ArrowRight', 0, 0)).toEqual([]);
+    session.release('ArrowRight');
+    expect(session.knobs[session.chosen]!.label).toBe('res');
+    expect(session.ticking()).toBe(true);
+    let now = 0;
+    while (session.ticking()) session.tick((now += 40));
+    expect(session.controllers.get(74)).toBe(nearestTo300);
+    session.press('ArrowLeft');
+    session.release('ArrowLeft');
+    type(session, ['Digit1', 'Digit5', 'Digit0', 'Digit0', 'Digit0', 'Enter'], now);
+    session.tick(now + 120);
+    const stoppedAt = session.controllers.get(74)!;
+    type(session, ['Digit8']);
+    expect(session.press('ArrowUp', 0, now + 130)).toEqual([[CC, 74, stoppedAt + 1]]);
+    session.release('ArrowUp');
+    expect(session.ticking()).toBe(false);
+  });
+
+  it('stops every glide on panic and on a keymap reload, which also closes the entry', () => {
+    const panicking = new KeysSession(
+      parseKeymap('name: p\nglide: 1\nnotes: { KeyA: 0 }\ncontrols: { Digit9: { type: 9 }, KeyN: panic }\n', 'p.yaml'),
+    );
+    type(panicking, ['Digit9', 'Digit9', 'Enter']);
+    expect(panicking.ticking()).toBe(true);
+    panicking.press('KeyN');
+    expect(panicking.ticking()).toBe(false);
+    const reloaded = onCutoff();
+    type(reloaded, ['Digit9', 'Digit9', 'Enter', 'Digit5']);
+    reloaded.setKeymap(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')));
+    expect(reloaded.ticking()).toBe(false);
+    expect(reloaded.entry).toBeUndefined();
+  });
+
+  it('closes an entry whose knob a knob file reload removes, without completing it', () => {
+    const session = onCutoff();
+    type(session, ['Digit8']);
+    session.setKnobs(knobList([{ name: 'juno', knobs: juno.slice(1) }]));
+    expect(session.entry).toBeUndefined();
+    expect(session.controllers.has(74)).toBe(false);
+  });
+});
+
+// cutoff's controller value nearest 300 Hz, which maps to 301 Hz.
+const nearestTo300 = 40;

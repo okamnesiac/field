@@ -1069,7 +1069,7 @@ program
   .description(
     'play the computer keyboard as the MIDI source "Field Keys", and SuperCollider instruments from it: name instruments, ' +
       'or tracks (creek/track:keys) to play the instrument each MIDI track names, all at once ' +
-      '(needs a terminal with the kitty keyboard protocol; Esc quits)',
+      '(needs a terminal with the kitty keyboard protocol; Ctrl-C quits)',
   )
   .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical)')
   .option(

@@ -977,3 +977,49 @@ and the glide wait for chunk 2, and the starting positions for chunk 3.
   session already running on the machine, so it saw none of the run's
   control changes. `src/keys/session.test.ts` pins what a turn sends
   and when.
+
+## 10 Chunk 2 as built (2026-10-11)
+
+The number row types a knob's value in `musical`, `Enter` completes it,
+and the knob glides there at the keymap's `glide`. `Period` types the
+decimal point while an entry is open and bends otherwise, `Backspace`
+edits, and `Esc` cancels an entry or, with none open, puts `Ctrl-C
+quits` on the status line; `Ctrl-C` alone quits. The starting positions
+wait for chunk 3.
+
+### 10.1 What implementation settled
+
+- **The session handles `Enter`, `Backspace`, and `Escape` as
+  positions.** `positionOf` names them, from `CSI 13 u`, `CSI 127 u`,
+  and `CSI 27 u`, and `KeysSession.press` acts on them before the
+  keymap, so no keymap binds them and `src/commands/keys.ts` needs no
+  case of its own for `Esc`.
+- **A glide is kept per controller,** since two knobs on one controller
+  share its value, and moves by the time since it started, so a late
+  tick catches up rather than slowing the glide. Each tick sends at most
+  one control change per gliding controller.
+- **The 40 ms timer runs while a turn key is held or a glide moves,**
+  as `tickWhileMoving` in `src/commands/keys.ts`, so a session with
+  neither keeps no interval. §9.1's turn timer becomes this one.
+- **A completed value that lands where the knob already is sends one
+  control change** rather than nothing, so a receiver still at its own
+  default takes the value the line shows.
+- **A `type`-only keymap shows the knob line,** as one with `knob` or
+  `turn` does: typing a value means nothing without the line.
+- **Focus-out leaves glides running.** §2.6 stops a held turn on
+  focus-out, and §2.7 names only a panic, a keymap reload, and quitting
+  as what stops a glide.
+
+### 10.2 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| The vitest tests §4 lists for chunk 2 | Pass, in `src/schema/keymap.test.ts`, `src/keys/terminal.test.ts`, `src/keys/position.test.ts`, `src/keys/knobs.test.ts`, `src/keys/session.test.ts`, `src/commands/keys.test.ts`, and `src/keys/print.test.ts` with `musical`'s stored copy. A value from 127 to 62 glides in 13 ticks and lands on 62. |
+| The full suite, against a `field-audiod` and FieldOut built from this branch | 90 files: 1187 tests pass, and 1 skips. |
+| `field keys --knobs` in a pseudo-terminal, against a stub helper that logs what it is sent | Criterion 4: `800` read `cutoff  800_ Hz` and glided CC 74 from 82 down to 62, five values a tick, to `810 Hz`. Criterion 6: `12`, `Backspace`, `5` read `15_ Hz`; the first `Esc` closed it at `810 Hz`, the second put `Ctrl-C quits` on the status line, and `Ctrl-C` quit with All Notes Off. Criterion 7: `300` and `ArrowRight` glided to `301 Hz` and moved the choice. Criterion 23: `0`, `.`, `8` read `0.8_ s` and landed `attack` on `782 ms`, and `.` with the entry closed sent a bend up and its release. At most 5 control changes went out in any second. |
+
+### 10.3 What is still owed
+
+- **Criteria 4 to 8, 12, 14, 18, and 23 by hand,** in Ghostty or
+  iTerm2 and by ear. The pseudo-terminal run sent the protocol's bytes
+  and heard nothing.

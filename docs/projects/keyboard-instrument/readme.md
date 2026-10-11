@@ -309,7 +309,12 @@ the rule it breaks:
   `IntlBackslash`, `Space`, `Tab`, and the four arrows.
 - **A position is a note or a control, never both.**
 - **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so
-  no keymap can trap you.
+  no keymap can trap you. *Amended (2026-10-11, instrument-knobs.md
+  chunk 2):* `Escape` cancels a typed knob value and no longer quits;
+  with no value open it says that `Ctrl-C` quits. `Ctrl-C` always
+  quits, and no keymap binds `Escape` or a `Ctrl` chord, so no keymap
+  can trap you still ([instrument-knobs.md](../instrument-knobs/readme.md)
+  §2.7, §3.1).
 - **Modifiers do not bind.** A key pressed while `Ctrl`, `Alt`, or
   `Cmd` is held does nothing, and a key pressed with `Shift` plays as
   it does without it. Caps Lock and Num Lock change nothing: under

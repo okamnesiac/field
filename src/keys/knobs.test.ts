@@ -18,6 +18,7 @@ import {
   MOD_KNOB,
   parseKnobs,
   resolveKnobsPath,
+  nearestController,
   stepFrom,
 } from './knobs.js';
 
@@ -108,6 +109,15 @@ describe('controller values', () => {
     expect(controllerOf(knob('cutoff'), 2000)).toBe(82);
     expect(controllerOf(knob('res'), 0.3)).toBe(40);
     expect(controllerOf(MOD_KNOB, 0)).toBe(0);
+  });
+
+  it('lands a typed value on the nearest controller value, clamped to the range', () => {
+    // 62 maps to 809.6 Hz and 61 to 774.0 Hz.
+    expect(nearestController(knob('cutoff'), 800)).toBe(62);
+    expect(nearestController(knob('cutoff'), 99999)).toBe(127);
+    expect(nearestController(knob('cutoff'), 20)).toBe(0);
+    expect(formatKnobValue(knob('attack'), knobValue(knob('attack'), nearestController(knob('attack'), 0.8)))).toBe('782 ms');
+    expect(nearestController(MOD_KNOB, 64)).toBe(64);
   });
 
   it('steps one controller value, and stops at either end', () => {
