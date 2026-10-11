@@ -47,7 +47,26 @@ function which(tool: string): string | undefined {
 }
 
 const BASH = which('bash')!;
-const TOOLS = ['bash', 'git', 'node', 'dirname', 'uname', 'sed', 'grep', 'cat', 'mkdir', 'ln', 'rm', 'chmod', 'touch'];
+// curl is a stand-in too; tar and gzip unpack the stand-in releases.
+const TOOLS = [
+  'bash',
+  'git',
+  'node',
+  'dirname',
+  'uname',
+  'sed',
+  'grep',
+  'cat',
+  'mkdir',
+  'ln',
+  'rm',
+  'chmod',
+  'touch',
+  'mv',
+  'readlink',
+  'tar',
+  'gzip',
+];
 
 let root: string;
 let upstream: string;
@@ -55,6 +74,12 @@ let repo: string;
 let bin: string;
 let pnpmHome: string;
 let log: string;
+// A release install's directories, under the temporary HOME, and where the
+// stand-in curl serves GitHub from.
+let data: string;
+let shim: string;
+let serve: string;
+let downloaded: string;
 
 function git(cwd: string, ...args: string[]): string {
   const result = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
@@ -104,6 +129,9 @@ case "$1 \${2:-}" in
     printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
   "run build:native")
     [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
+    # Where native/audiod/CMakeLists.txt would have FetchContent put JUCE.
+    mkdir -p "$dir/native/audiod/build"
+    printf '%s\\n' "\${FIELD_FETCHCONTENT_BASE_DIR:-unset}" > "$dir/native/audiod/build/fetchcontent"
     # A daemon already built is left alone, as CMake leaves field-audiod
     # when the edit was to another target's source.
     [ ! -e "$dir/${AUDIOD}" ] || exit 0
@@ -120,6 +148,60 @@ if (process.argv.includes('--check')) {
   console.log('worker-current field-aced');
   console.log('worker-stale   field-voiced is out of date — run field setup voiced');
   process.exitCode = 1;
+}
+`;
+
+// A stand-in curl, which serves GitHub's two hosts from FAKE_SERVE and a
+// file:// URL from the disk, and records each request with the config it
+// read on stdin, which is where a token travels.
+const CURL = `#!${BASH}
+url="" out="" config=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    --config) [ "$2" != - ] || config="$(cat)"; shift 2 ;;
+    --retry) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+echo "curl $url\${config:+ [$config]}" >> "$FAKE_LOG"
+case "$url" in
+  https://raw.githubusercontent.com/*) path="$FAKE_SERVE/raw/\${url#https://raw.githubusercontent.com/}" ;;
+  https://github.com/*) path="$FAKE_SERVE/github/\${url#https://github.com/}" ;;
+  file://*) path="\${url#file://}" ;;
+  *) echo "curl: (6) Could not resolve host" >&2; exit 6 ;;
+esac
+[ -f "$path" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+if [ -n "$out" ]; then cat "$path" > "$out"; else cat "$path"; fi
+`;
+
+// The CLI a stand-in release builds. It logs which version ran it, and
+// keeps its worker environments in its own version directory, as the real
+// one keeps python/<worker>/.venv.
+const RELEASE_CLI = `const fs = require('fs');
+const path = require('path');
+const root = path.join(__dirname, '..');
+const { version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_LOG, 'field@' + version + ' ' + args.join(' ') + '\\n');
+const marker = (name) => path.join(root, 'python', name.replace(/^field-/, ''), '.venv', 'set-up');
+if (args[0] === '--version') console.log(version);
+if (args[0] === 'setup' && args.includes('--check')) {
+  for (const name of ['field-aced', 'field-voiced']) {
+    if (!fs.existsSync(marker(name))) {
+      console.log('worker-absent  ' + name + ' is not set up — field setup ' + name.slice(6) + ' sets it up');
+    } else if (process.env.FAKE_NO_UV) {
+      console.log('worker-no-uv   ' + name + ' is set up, and uv is not installed (brew install uv)');
+      process.exitCode = 1;
+    } else {
+      console.log('worker-current ' + name);
+    }
+  }
+} else if (args[0] === 'setup' && args[1] !== undefined && !args[1].startsWith('--')) {
+  if (process.env.FAKE_SETUP_FAILS) process.exit(3);
+  fs.mkdirSync(path.dirname(marker(args[1])), { recursive: true });
+  fs.writeFileSync(marker(args[1]), '');
 }
 `;
 
@@ -157,8 +239,17 @@ beforeEach(() => {
   }
   write(join(bin, 'pnpm'), PNPM, 0o755);
   write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
+  write(join(bin, 'curl'), CURL, 0o755);
   write(join(root, 'cli.js'), CLI);
+  write(join(root, 'release-cli.js'), RELEASE_CLI);
   writeFileSync(log, '');
+
+  data = join(root, '.local', 'share', 'field');
+  shim = join(root, '.local', 'bin', 'field');
+  serve = join(root, 'serve');
+  // The installer on its own, as `field upgrade` downloads it.
+  downloaded = join(root, 'download', 'install.sh');
+  write(downloaded, readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
 });
 
 afterEach(() => {
@@ -214,6 +305,58 @@ function linkTo(target: string): void {
   mkdirSync(join(pnpmHome, 'global'), { recursive: true });
   mkdirSync(join(pnpmHome, 'bin'), { recursive: true });
   symlinkSync(target, join(pnpmHome, 'global', 'field'));
+}
+
+interface Publish {
+  repo?: string;
+  ref?: string;
+  // The archive's top-level directory, which GitHub names <repo>-<version>.
+  prefix?: string;
+  archive?: boolean;
+}
+
+// Releases a version as the Release workflow does: package.json raised on
+// upstream's main and tagged vX.Y.Z, and the ref (v0) moved to it. The
+// stand-in curl serves the ref's package.json and installer from "raw",
+// and the tag's source archive, made as GitHub makes one, from "github".
+function publish(version: string, options: Publish = {}): void {
+  const slug = options.repo ?? 'okamnesiac/field';
+  const ref = options.ref ?? 'v0';
+  const manifest = `{\n  "name": "field",\n  "version": "${version}"\n}\n`;
+  write(join(upstream, 'package.json'), manifest);
+  git(upstream, 'commit', '--quiet', '-am', `release ${version}`);
+  git(upstream, 'tag', `v${version}`);
+  write(join(serve, 'raw', slug, ref, 'package.json'), manifest);
+  write(join(serve, 'raw', slug, ref, 'install.sh'), readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
+  if (options.archive === false) return;
+  const archive = join(serve, 'github', slug, 'archive', 'refs', 'tags', `v${version}.tar.gz`);
+  mkdirSync(dirname(archive), { recursive: true });
+  git(upstream, 'archive', '--format=tar.gz', `--prefix=${options.prefix ?? `field-${version}`}/`, '-o', archive, `v${version}`);
+}
+
+// The downloaded installer, which is a release installer, with the release
+// CLI and the bin directory on PATH.
+function release(target?: string, env: Record<string, string> = {}): Run {
+  return install(
+    target,
+    {
+      FAKE_SERVE: serve,
+      FAKE_CLI: join(root, 'release-cli.js'),
+      PATH: [join(pnpmHome, 'bin'), join(root, '.local', 'bin'), bin].join(delimiter),
+      ...env,
+    },
+    downloaded,
+  );
+}
+
+// The shim, run as a shell runs `field`.
+function field(...args: string[]): { status: number | null; stdout: string } {
+  const result = spawnSync(shim, args, { encoding: 'utf8', env: { PATH: bin, FAKE_LOG: log } });
+  return { status: result.status, stdout: result.stdout };
+}
+
+function current(dir = data): string {
+  return readlinkSync(join(dir, 'current'));
 }
 
 posix('install.sh cli', () => {
@@ -332,6 +475,11 @@ posix('install.sh audiod and workers', () => {
   it('takes a CMake of a newer major version', () => {
     write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 4.0.0"\n`, 0o755);
     expect(install('audiod').status).toBe(0);
+  });
+
+  it("leaves JUCE's download in the checkout's own build directory", () => {
+    expect(install('audiod').status).toBe(0);
+    expect(readFileSync(join(repo, 'native/audiod/build/fetchcontent'), 'utf8')).toBe('unset\n');
   });
 
   it('fails when the daemon does not build', () => {
@@ -494,6 +642,15 @@ posix('install.sh status', () => {
     );
   });
 
+  it("names a release install's shim when it is ahead of pnpm's field on PATH", () => {
+    install('cli');
+    write(shim, "#!/bin/sh\n# Field's release shim, written by install.sh. It runs the version that\n", 0o755);
+    const run = install('status', { PATH: [join(root, '.local', 'bin'), join(pnpmHome, 'bin'), bin].join(delimiter) });
+    expect(rows(run.stdout).get('cli-shadowed')).toBe(
+      "field on PATH is ~/.local/bin/field, a release install's shim, ahead of pnpm's ~/pnpm/bin/field",
+    );
+  });
+
   it('says how far the checkout is behind its upstream', () => {
     write(join(upstream, 'src/new.ts'), '');
     git(upstream, 'add', '.');
@@ -540,16 +697,388 @@ describe('install.sh constants', () => {
     expect(/^CMAKE_MAJOR=(\d+)$/m.exec(script)?.[1]).toBe(required![1]);
     expect(/^CMAKE_MINOR=(\d+)$/m.exec(script)?.[1]).toBe(required![2]);
   });
+
+  it('sets the JUCE download directory that native/audiod/CMakeLists.txt reads before it fetches JUCE', () => {
+    const cmake = readFileSync(join(packageRoot, 'native/audiod/CMakeLists.txt'), 'utf8');
+    const script = readFileSync(join(packageRoot, 'install.sh'), 'utf8');
+    const reads = cmake.indexOf('$ENV{FIELD_FETCHCONTENT_BASE_DIR}');
+    expect(reads).toBeGreaterThan(-1);
+    expect(reads).toBeLessThan(cmake.indexOf('include(FetchContent)'));
+    expect(script).toContain('export FIELD_FETCHCONTENT_BASE_DIR="$FETCH_CACHE"');
+  });
+});
+
+// install.md §2.1, as amended: a checkout is the script in a git work tree
+// with the CLI's source beside it, and anything else is a release.
+posix('install.sh tells a checkout from a release', () => {
+  it('installs a checkout as a checkout', () => {
+    const status = rows(install('status').stdout);
+    expect(status.has('checkout')).toBe(true);
+    expect(status.has('release')).toBe(false);
+  });
+
+  it('installs a release from a copy of the source without .git, as a source archive is', () => {
+    publish('0.2.0');
+    const unpacked = join(root, 'unpacked');
+    write(join(unpacked, 'install.sh'), readFileSync(join(repo, 'install.sh'), 'utf8'));
+    write(join(unpacked, 'src/cli.ts'), '');
+    const run = install('status', { FAKE_SERVE: serve }, join(unpacked, 'install.sh'));
+    const status = rows(run.stdout);
+    expect(status.has('checkout')).toBe(false);
+    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.2.0');
+    expect(status.get('not-installed')).toContain('no release of Field is installed in ~/.local/share/field');
+  });
+
+  it('installs a release when bash reads it from curl', () => {
+    publish('0.2.0');
+    const result = spawnSync(BASH, ['-s', '--', 'status'], {
+      input: readFileSync(downloaded, 'utf8'),
+      encoding: 'utf8',
+      env: { PATH: bin, HOME: root, FAKE_LOG: log, FAKE_SERVE: serve },
+    });
+    expect(result.status).toBe(0);
+    expect(rows(result.stdout).get('not-installed')).toBe(
+      'no release of Field is installed in ~/.local/share/field — run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash',
+    );
+  });
+});
+
+posix('install.sh installs a release', () => {
+  it('builds the version v0 names in a directory of its own, switches current to it, and links the shim', () => {
+    publish('0.2.0');
+    const run = release();
+    expect(run.stderr).toBe('');
+    expect(run.status).toBe(0);
+    const version = join(data, '0.2.0');
+    expect(changes(run)).toEqual([
+      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
+      'curl https://github.com/okamnesiac/field/archive/refs/tags/v0.2.0.tar.gz',
+      `pnpm --dir ${version} install --frozen-lockfile`,
+      `pnpm --dir ${version} run build`,
+      `pnpm --dir ${version} run build:ui`,
+      `pnpm --dir ${version} run build:native`,
+    ]);
+    expect(current()).toBe('0.2.0');
+    expect(readFileSync(join(data, 'release.conf'), 'utf8')).toBe(
+      `repo=okamnesiac/field\nref=v0\nbin=${join(root, '.local', 'bin')}\n`,
+    );
+    // JUCE's download goes to a cache beside the versions, not into this one.
+    expect(readFileSync(join(version, 'native/audiod/build/fetchcontent'), 'utf8')).toBe(
+      `${join(data, 'cache', 'fetchcontent')}\n`,
+    );
+    const status = rows(run.stdout);
+    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.2.0');
+    expect(status.get('switched')).toBe('~/.local/share/field/current -> 0.2.0');
+    expect(status.get('linked')).toBe('~/.local/bin/field -> ~/.local/share/field/current');
+    expect(status.get('cli')).toBe('~/.local/bin/field -> ~/.local/share/field/current');
+    expect(field('--version')).toEqual({ status: 0, stdout: '0.2.0\n' });
+  });
+
+  it('upgrades to the next release, keeps the version it replaced, and removes the one before that', () => {
+    publish('0.2.0');
+    expect(release().status).toBe(0);
+    publish('0.3.0');
+    expect(release().status).toBe(0);
+    expect(current()).toBe('0.3.0');
+    expect(field('--version').stdout).toBe('0.3.0\n');
+    expect(existsSync(join(data, '0.2.0'))).toBe(true);
+    publish('0.4.0');
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(current()).toBe('0.4.0');
+    expect(existsSync(join(data, '0.3.0'))).toBe(true);
+    expect(existsSync(join(data, '0.2.0'))).toBe(false);
+    expect(rows(run.stdout).get('removed')).toBe('0.2.0');
+  });
+
+  it('leaves the installed version current when the download fails', () => {
+    publish('0.2.0');
+    release();
+    publish('0.3.0', { archive: false });
+    const run = release();
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('could not download https://github.com/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz');
+    expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current and field still runs it');
+    expect(current()).toBe('0.2.0');
+    expect(field('--version').stdout).toBe('0.2.0\n');
+  });
+
+  it('leaves the installed version current when the new one does not build, and installs it on the next run', () => {
+    publish('0.2.0');
+    release();
+    publish('0.3.0');
+    const run = release(undefined, { FAKE_NATIVE_FAILS: '1' });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current');
+    expect(current()).toBe('0.2.0');
+    expect(field('--version').stdout).toBe('0.2.0\n');
+    expect(release().status).toBe(0);
+    expect(current()).toBe('0.3.0');
+  });
+
+  it('says nothing was switched when the first install fails', () => {
+    publish('0.2.0');
+    const run = release(undefined, { FAKE_UI_FAILS: '1' });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain('0.2.0 did not install, and nothing was switched to it');
+    expect(existsSync(join(data, 'current'))).toBe(false);
+    expect(existsSync(shim)).toBe(false);
+  });
+
+  it('sets up again in the new version each worker set up in the version it replaces, before switching', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    publish('0.3.0');
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(run.log).toContain('field@0.2.0 setup --check');
+    expect(run.log).toContain('field@0.3.0 setup field-aced');
+    expect(run.log).not.toContain('field@0.3.0 setup field-voiced');
+    expect(existsSync(join(data, '0.3.0', 'python', 'aced', '.venv', 'set-up'))).toBe(true);
+    expect(rows(run.stdout).get('setting-up')).toBe('field-aced in 0.3.0, as it was in 0.2.0');
+  });
+
+  it('leaves the installed version current when a worker does not set up in the new one', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    publish('0.3.0');
+    const run = release(undefined, { FAKE_SETUP_FAILS: '1' });
+    expect(run.status).toBe(3);
+    expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current');
+    expect(current()).toBe('0.2.0');
+  });
+
+  it('skips a worker whose uv is gone, which could not run in the old version either', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    publish('0.3.0');
+    const run = release(undefined, { FAKE_NO_UV: '1' });
+    expect(run.status).toBe(0);
+    expect(current()).toBe('0.3.0');
+    expect(run.log).not.toContain('field@0.3.0 setup field-aced');
+    expect(rows(run.stdout).get('worker-skipped')).toBe(
+      'field-aced was set up in 0.2.0, and uv is not installed, so 0.3.0 does not set it up — brew install uv, then field setup field-aced',
+    );
+  });
+
+  it('downloads and builds nothing when the newest release is installed, and re-syncs its workers', () => {
+    publish('0.2.0');
+    release();
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([
+      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
+      'field@0.2.0 setup --existing',
+    ]);
+    expect(rows(run.stdout).get('installed')).toBe('0.2.0 is installed');
+  });
+
+  it('builds only the missing piece of the installed version', () => {
+    publish('0.2.0');
+    release();
+    rmSync(join(data, '0.2.0', AUDIOD));
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(run.log).toContain(`pnpm --dir ${join(data, '0.2.0')} run build:native`);
+    expect(run.log).not.toContain(`pnpm --dir ${join(data, '0.2.0')} run build`);
+  });
+
+  it('takes the archive\'s single top-level directory whatever it is called', () => {
+    publish('0.2.0', { prefix: 'okamnesiac-field-1a2b3c4' });
+    expect(release().status).toBe(0);
+    expect(field('--version').stdout).toBe('0.2.0\n');
+  });
+
+  it('refuses a version that is not X.Y.Z, since it names a directory', () => {
+    write(join(serve, 'raw/okamnesiac/field/v0/package.json'), '{\n  "version": "../../x"\n}\n');
+    const run = release();
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("names version '../../x', which is not X.Y.Z");
+    expect(existsSync(data)).toBe(false);
+  });
+
+  it('follows the repository and ref it was installed from', () => {
+    publish('0.2.0', { repo: 'someone/field', ref: 'main' });
+    expect(release(undefined, { FIELD_REPO: 'someone/field', FIELD_REF: 'main' }).status).toBe(0);
+    expect(readFileSync(join(data, 'release.conf'), 'utf8')).toContain('repo=someone/field\nref=main\n');
+    publish('0.3.0', { repo: 'someone/field', ref: 'main' });
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(run.log).toContain('curl https://raw.githubusercontent.com/someone/field/main/package.json');
+    expect(current()).toBe('0.3.0');
+  });
+
+  it('refuses a FIELD_REPO that is not owner/repository', () => {
+    const run = release(undefined, { FIELD_REPO: 'someone/../field' });
+    expect(run.status).toBe(64);
+    expect(run.stderr).toContain('FIELD_REPO is owner/repository');
+  });
+
+  it('sends GITHUB_TOKEN to GitHub in curl config, and never to a URL FIELD_RAW_URL names', () => {
+    publish('0.2.0');
+    const run = release(undefined, { GITHUB_TOKEN: 'secret-token' });
+    expect(run.status).toBe(0);
+    const header = '[header = "Authorization: Bearer secret-token"]';
+    expect(run.log).toContain(`curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json ${header}`);
+    expect(run.log).toContain(`curl https://github.com/okamnesiac/field/archive/refs/tags/v0.2.0.tar.gz ${header}`);
+    publish('0.3.0');
+    const elsewhere = release(undefined, {
+      GITHUB_TOKEN: 'secret-token',
+      FIELD_RAW_URL: `file://${serve}/raw`,
+      FIELD_ARCHIVE_URL: `file://${serve}/github`,
+    });
+    expect(elsewhere.status).toBe(0);
+    expect(elsewhere.log).toContain(`curl file://${serve}/raw/okamnesiac/field/v0/package.json`);
+    expect(elsewhere.log).toContain(`curl file://${serve}/github/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz`);
+    expect(current()).toBe('0.3.0');
+  });
+
+  it('installs where FIELD_DATA_DIR and FIELD_BIN_DIR say, quoting a path that needs it', () => {
+    publish('0.2.0');
+    const dataDir = join(root, "a user's data");
+    const binDir = join(root, 'my bin');
+    const run = release(undefined, { FIELD_DATA_DIR: dataDir, FIELD_BIN_DIR: binDir });
+    expect(run.status).toBe(0);
+    expect(current(dataDir)).toBe('0.2.0');
+    const result = spawnSync(join(binDir, 'field'), ['--version'], { encoding: 'utf8', env: { PATH: bin, FAKE_LOG: log } });
+    expect(result.stdout).toBe('0.2.0\n');
+    expect(readFileSync(join(dataDir, 'release.conf'), 'utf8')).toContain(`bin=${binDir}\n`);
+  });
+
+  it('refuses to replace a field in the bin directory that is not its shim', () => {
+    publish('0.2.0');
+    write(shim, '#!/bin/sh\necho mine\n', 0o755);
+    const run = release();
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain("~/.local/bin/field exists and is not Field's release shim");
+    expect(run.log).toEqual([]);
+    expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho mine\n');
+  });
+
+  it('refuses to install offline', () => {
+    const run = release(undefined, { FIELD_OFFLINE: '1' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('FIELD_OFFLINE is set');
+  });
+
+  it('says how to put the bin directory on PATH when it is not', () => {
+    publish('0.2.0');
+    const run = release(undefined, { PATH: [join(pnpmHome, 'bin'), bin].join(delimiter), SHELL: '/bin/zsh' });
+    expect(run.status).toBe(0);
+    expect(rows(run.stdout).get('not-on-path')).toBe(
+      '~/.local/bin is not on PATH, so your shell does not find the shim — add export PATH="$HOME/.local/bin:$PATH" to ~/.zshrc, then open a new shell',
+    );
+    expect(rows(release('status').stdout).has('not-on-path')).toBe(false);
+  });
+
+  it("says when a checkout's field is ahead of the release's on PATH", () => {
+    publish('0.2.0');
+    write(join(pnpmHome, 'bin', 'field'), '#!/bin/sh\n', 0o755);
+    const run = release();
+    expect(rows(run.stdout).get('cli-shadowed')).toBe(
+      "field on PATH is ~/pnpm/bin/field, ahead of the release's ~/.local/bin/field",
+    );
+  });
+
+  it("finds the data directory beside a version's own installer", () => {
+    publish('0.2.0');
+    const dataDir = join(root, 'elsewhere');
+    release(undefined, { FIELD_DATA_DIR: dataDir });
+    const run = install('status', { FAKE_SERVE: serve, FAKE_CLI: join(root, 'release-cli.js') }, join(dataDir, '0.2.0', 'install.sh'));
+    expect(rows(run.stdout).get('installed')).toBe('0.2.0 in ~/elsewhere/0.2.0');
+  });
+});
+
+posix('install.sh release targets', () => {
+  it('rebuild a piece of the installed version where it is', () => {
+    publish('0.2.0');
+    release();
+    const version = join(data, '0.2.0');
+    rmSync(join(version, AUDIOD));
+    const audiod = release('audiod');
+    expect(audiod.status).toBe(0);
+    expect(changes(audiod)).toEqual([
+      `pnpm --dir ${version} run build:native`,
+      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
+    ]);
+    expect(readFileSync(join(version, 'native/audiod/build/fetchcontent'), 'utf8')).toBe(
+      `${join(data, 'cache', 'fetchcontent')}\n`,
+    );
+    expect(rows(audiod.stdout).get('release-latest')).toBe('0.2.0 is installed');
+    const cli = release('cli');
+    expect(cli.status).toBe(0);
+    expect(cli.log).toContain(`pnpm --dir ${version} run build`);
+    expect(cli.log).toContain(`pnpm --dir ${version} run build:ui`);
+    const workers = release('workers');
+    expect(workers.status).toBe(0);
+    expect(workers.log).toContain('field@0.2.0 setup --existing');
+  });
+
+  it('say there is nothing to rebuild before a release is installed', () => {
+    for (const target of ['cli', 'audiod', 'workers']) {
+      const run = release(target);
+      expect(run.status).toBe(69);
+      expect(run.stderr).toContain('no release of Field is installed in ~/.local/share/field');
+    }
+  });
+});
+
+posix('install.sh status in a release install', () => {
+  it('reports the newest release as current, and every piece of it', () => {
+    publish('0.2.0');
+    release();
+    const run = release('status');
+    expect(run.status).toBe(0);
+    const status = rows(run.stdout);
+    expect(status.get('installed')).toBe('0.2.0 in ~/.local/share/field/0.2.0');
+    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.2.0');
+    expect(status.get('release-latest')).toBe('0.2.0 is installed');
+    expect(status.get('cli')).toBe('~/.local/bin/field -> ~/.local/share/field/current');
+    expect(status.get('ui-current')).toBe('~/.local/share/field/0.2.0/ui/dist');
+    expect(status.get('audiod-current')).toBe(`~/.local/share/field/0.2.0/${AUDIOD}`);
+    expect(status.get('worker-absent')).toBe('field-voiced is not set up — field setup voiced sets it up');
+    expect(status.has('previous')).toBe(false);
+  });
+
+  it('says when a newer release is out, and names field upgrade', () => {
+    publish('0.2.0');
+    release();
+    publish('0.3.0');
+    const status = rows(release('status').stdout);
+    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.3.0');
+    expect(status.get('release-behind')).toBe('0.2.0 is installed, and v0 is at 0.3.0 — run field upgrade all');
+  });
+
+  it('names the version kept after an upgrade', () => {
+    publish('0.2.0');
+    release();
+    publish('0.3.0');
+    release();
+    expect(rows(release('status').stdout).get('previous')).toBe(
+      '0.2.0 in ~/.local/share/field/0.2.0, kept to switch back to by hand',
+    );
+  });
+
+  it('compares nothing offline', () => {
+    publish('0.2.0');
+    release();
+    const run = release('status', { FIELD_OFFLINE: '1' });
+    expect(rows(run.stdout).get('release')).toBe('okamnesiac/field v0 (offline; not compared)');
+    expect(run.log.some((line) => line.startsWith('curl'))).toBe(false);
+  });
+
+  it('names the token when GitHub does not answer', () => {
+    const status = rows(release('status').stdout);
+    expect(status.get('release')).toBe(
+      'okamnesiac/field v0 (could not read its version from https://raw.githubusercontent.com — for a private repository, set GITHUB_TOKEN)',
+    );
+  });
 });
 
 posix('install.sh refuses', () => {
-  it('outside a checkout, and says to clone', () => {
-    const run = install(undefined, {}, join(root, 'install.sh'));
-    expect(run.status).toBe(69);
-    expect(run.stderr).toContain('run this from a Field checkout');
-    expect(run.log).toEqual([]);
-  });
-
   it('an unknown target, as a usage error', () => {
     const run = install('everything');
     expect(run.status).toBe(64);
