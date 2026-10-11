@@ -81,8 +81,8 @@ function env(mode: string): NodeJS.ProcessEnv {
 
 describe('resolving an instrument', () => {
   it('adds .scd and resolves a bare name on the instruments shelf', () => {
-    expect(instrumentPath('still-water-pad', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
-    expect(instrumentPath('still-water-pad.scd', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
+    expect(instrumentPath('pad', '/p')).toBe('/p/shared/instruments/pad.scd');
+    expect(instrumentPath('pad.scd', '/p')).toBe('/p/shared/instruments/pad.scd');
   });
 
   it('resolves a slashed path from the root, and leaves an absolute path alone', () => {
@@ -97,6 +97,25 @@ describe('resolving an instrument', () => {
     expect(() => resolveInstrument('pad', dir)).toThrow(/no instrument program at .*shared\/instruments\/pad\.scd/);
     writeFileSync(join(dir, 'shared/instruments/pad.scd'), '');
     expect(resolveInstrument('pad', dir)).toBe(join(dir, 'shared/instruments/pad.scd'));
+  });
+
+  it('lists the shelf when a name is not on it, split by whether each plays from notes', () => {
+    writeFileSync(join(dir, 'field.yaml'), 'name: t\n');
+    mkdirSync(join(dir, 'shared/instruments'), { recursive: true });
+    expect(() => resolveInstrument('bass', dir)).toThrow(/shared\/instruments\/ has no programs yet\.$/);
+    writeFileSync(join(dir, 'shared/instruments/pad.scd'), '(\nif ("FIELD_MODE".getenv == "voice") { SynthDef(\\pad, {}) } { 0.exit }\n)\n');
+    writeFileSync(join(dir, 'shared/instruments/kit.scd'), '// renders only\n');
+    writeFileSync(join(dir, 'shared/instruments/pad.v2.scd'), '// FIELD_MODE, a later pad\n');
+    writeFileSync(join(dir, 'shared/instruments/notes.txt'), 'FIELD_MODE\n');
+    mkdirSync(join(dir, 'shared/instruments/folder.scd'));
+    expect(() => resolveInstrument('bass', dir)).toThrow(
+      `field keys bass: no instrument program at ${join(dir, 'shared/instruments/bass.scd')}\n` +
+        'In shared/instruments/:\n' +
+        '  plays from notes: pad, pad.v2.scd\n' +
+        "  renders only:     kit (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)",
+    );
+    // Every listed name resolves.
+    expect(resolveInstrument('pad.v2.scd', dir)).toBe(join(dir, 'shared/instruments/pad.v2.scd'));
   });
 });
 

@@ -287,7 +287,7 @@ changing *level* — boosting stops being a free loudness win. Set
 
 ## Recipes
 
-`shared/instruments/still-water-pad.scd` is the D-minor pad as **code**:
+`shared/instruments/pad.scd` is the D-minor pad as **code**:
 twelve detuned sine voices whose detunes and pans are drawn from a seeded
 random stream. The track pins the seed — `songs/creek/tracks/pad-sc.yaml`
 in full:
@@ -297,7 +297,7 @@ in full:
 name: pad-sc
 inputs:
   - supercollider:
-      source: still-water-pad.scd
+      source: pad.scd
       seed: 90210
       duration: 10
       channels: 2
@@ -313,7 +313,7 @@ recipe.
 To iterate on a program before pinning it in a track:
 
 ```bash
-field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10
+field sc render shared/instruments/pad.scd --seed 90210 --duration 10
 ```
 
 And to hear the committed recipe exactly as pinned:

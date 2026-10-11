@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
 import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
@@ -32,8 +32,44 @@ export function resolveInstrument(spec: string, cwd = process.cwd()): string {
     );
   }
   const path = instrumentPath(spec, root ?? cwd);
-  if (!existsSync(path)) throw new Error(`field keys ${spec}: no instrument program at ${path}`);
+  if (!existsSync(path)) {
+    const shelf = root !== undefined ? `\n${describeShelf(root)}` : '';
+    throw new Error(`field keys ${spec}: no instrument program at ${path}${shelf}`);
+  }
   return path;
+}
+
+// The programs on a project's instruments shelf, by name, split by whether
+// they can play from notes. A program that never reads FIELD_MODE cannot
+// answer voice mode, so its text is enough to tell, without starting
+// sclang for each one (keys.md "Make an instrument playable"). Each is
+// listed by a name field keys resolves: `.scd` is added back only to a
+// name with no extension, so pad.v2.scd lists whole.
+function shelfInstruments(root: string): { playable: string[]; renderOnly: string[] } {
+  const dir = join(root, 'shared', 'instruments');
+  const playable: string[] = [];
+  const renderOnly: string[] = [];
+  if (!existsSync(dir)) return { playable, renderOnly };
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.scd'))
+    .map((entry) => entry.name)
+    .sort();
+  for (const file of files) {
+    const stem = file.slice(0, -'.scd'.length);
+    const name = extname(stem) === '' ? stem : file;
+    (readFileSync(join(dir, file), 'utf8').includes('FIELD_MODE') ? playable : renderOnly).push(name);
+  }
+  return { playable, renderOnly };
+}
+
+function describeShelf(root: string): string {
+  const { playable, renderOnly } = shelfInstruments(root);
+  if (playable.length + renderOnly.length === 0) return 'shared/instruments/ has no programs yet.';
+  const lines = ['In shared/instruments/:', `  plays from notes: ${playable.length > 0 ? playable.join(', ') : 'none'}`];
+  if (renderOnly.length > 0) {
+    lines.push(`  renders only:     ${renderOnly.join(', ')} (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)`);
+  }
+  return lines.join('\n');
 }
 
 export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {
@@ -96,10 +132,21 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   const instrument: InstrumentState | undefined =
     program !== undefined ? { name: basename(program, '.scd'), status: { state: 'starting' } } : undefined;
 
+  // An instrument has a line of its own above the status line: its state
+  // changes a few times a session, the status line with every key. That
+  // line is drawn once, then redrawn in place only when its text changes.
+  let instrumentLine: string | undefined;
   const draw = (): void => {
     // A terminal that reports no size reports 0 columns.
     const width = Math.max(20, (tty.stdout.columns || 80) - 1);
-    tty.stdout.write(`\r\x1b[K${statusText(session, layout, reloadError, instrument).slice(0, width)}`);
+    let above = '';
+    if (instrument !== undefined) {
+      const line = instrumentText(instrument).slice(0, width);
+      if (instrumentLine === undefined) above = `\r\x1b[K${line}\n`;
+      else if (line !== instrumentLine) above = `\x1b[1A\r\x1b[K${line}\n`;
+      instrumentLine = line;
+    }
+    tty.stdout.write(`${above}\r\x1b[K${statusText(session, layout, reloadError, width)}`);
   };
 
   let stop!: (error?: Error) => void;
@@ -109,7 +156,6 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
 
   // Before the helper starts, because its first keyboard layout report
   // draws the status line.
-  tty.stdout.write(`Playing ${options.keymap.name} as the MIDI source "${SOURCE_NAME}". Esc or Ctrl-C quits.\n`);
   if (source.kind === 'file') tty.stdout.write(`Saving ${source.path} reloads it.\n`);
 
   const helper = await KeysHelper.start(SOURCE_NAME, {
@@ -197,24 +243,26 @@ function instrumentText({ name, status }: InstrumentState): string {
   return `${name} starting`;
 }
 
-function statusText(
+// The sounding notes come last, so playing changes only the end of the
+// line and nothing after the notes moves as you play. A line wider than
+// the terminal gives up the text before the notes, and the notes only
+// when they alone are wider than it.
+export function statusText(
   session: KeysSession,
   layout: KeyboardLayout | undefined,
   reloadError: string | undefined,
-  instrument: InstrumentState | undefined,
+  width: number,
 ): string {
-  const notes = session.soundingNotes();
-  const parts = [
-    SOURCE_NAME,
-    session.keymap.name,
-    `transpose ${signed(session.transpose)}`,
-    `velocity ${session.velocity}`,
-    notes.length > 0 ? notes.join(' ') : '–',
-  ];
-  if (instrument !== undefined) parts.push(instrumentText(instrument));
+  const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
   const unplayable = unplayablePositions(layout, session.keymap);
   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
   if (session.message !== undefined) parts.push(session.message);
-  return parts.join(' · ');
+  const sounding = session.soundingNotes();
+  const notes = sounding.length > 0 ? sounding.join(' ') : '–';
+  const head = parts.join(' · ');
+  const separator = ' · ';
+  if (head.length + separator.length + notes.length <= width) return `${head}${separator}${notes}`;
+  const room = width - separator.length - notes.length - 1; // 1 for the ellipsis
+  return room > 0 ? `${head.slice(0, room)}…${separator}${notes}` : notes.slice(0, width);
 }
