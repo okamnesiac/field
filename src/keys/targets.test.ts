@@ -49,14 +49,23 @@ const program = (name: string): string => join(root, 'shared/instruments', `${na
 
 describe('field keys targets', () => {
   it('arms a MIDI track by its record entry, with no takes yet', () => {
+    // createTrack places every track in main, so keys-bus, which places
+    // keys, is on keys' way to the speakers.
     expect(resolveKeysTargets(['creek/track:keys'], root)).toEqual([
-      { program: program('juno'), track: 'creek/keys', unheardEffects: [] },
+      { program: program('juno'), track: 'creek/keys', unheardEffects: ['keys-bus'] },
     ]);
   });
 
   it('arms the one MIDI track under a bus, and names the effects it does not hear yet', () => {
     expect(resolveKeysTargets(['creek/track:keys-bus'], root)).toEqual([
       { program: program('juno'), track: 'creek/keys', unheardEffects: ['keys-bus'] },
+    ]);
+  });
+
+  it('names the effects above the track too, top-down from main', () => {
+    writeTrack('main', ['inserts:', '  - effect: limit', '    ceiling_db: -1', 'inputs:', '  - track: band']);
+    expect(resolveKeysTargets(['creek/track:keys'], root)).toEqual([
+      { program: program('juno'), track: 'creek/keys', unheardEffects: ['main', 'keys-bus'] },
     ]);
   });
 
@@ -89,7 +98,7 @@ describe('field keys targets', () => {
 
   it('arms every target at once, instruments and tracks mixed, each once', () => {
     expect(resolveKeysTargets(['creek/track:keys', 'creek/track:bass', 'creek/track:keys', 'juno'], root)).toEqual([
-      { program: program('juno'), track: 'creek/keys', unheardEffects: [] },
+      { program: program('juno'), track: 'creek/keys', unheardEffects: ['keys-bus'] },
       { program: program('bass'), track: 'creek/bass', unheardEffects: [] },
       { program: program('juno'), unheardEffects: [] },
     ]);

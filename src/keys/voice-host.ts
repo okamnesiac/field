@@ -1,13 +1,28 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createSocket } from 'node:dgram';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import { instrumentProgram, sclangCommand, scScript } from '../generators/supercollider.js';
-import { oscMessage } from './synthdef.js';
+import { oscMessage, routeSynthDef } from './synthdef.js';
 
 export function voiceHostScript(): string {
   return scScript('voice-host.scd');
+}
+
+// Where the built FieldOut plugin is (live-supercollider.md chunk 2): the
+// directory FIELD_FIELDOUT names, which must hold it, or when that is
+// unset, the checkout's build; undefined when the one that applies does
+// not hold it.
+export function fieldOutPluginDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const holds = (dir: string): boolean => ['FieldOut.scx', 'FieldOut.so'].some((name) => existsSync(join(dir, name)));
+  const override = env['FIELD_FIELDOUT'];
+  if (override !== undefined && override !== '') return holds(override) ? override : undefined;
+  const built = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'native', 'sc-fieldout', 'build', 'plugins');
+  return holds(built) ? built : undefined;
 }
 
 // An instrument name resolves exactly as a supercollider: entry's source
@@ -33,10 +48,11 @@ export function freeUdpPort(): Promise<number> {
 
 export { oscMessage };
 
-function sendOsc(address: string, port: number): Promise<void> {
+function sendOsc(address: string | Buffer, port: number): Promise<void> {
   return new Promise((done) => {
     const socket = createSocket('udp4');
-    socket.send(oscMessage(address), port, '127.0.0.1', () => socket.close(() => done()));
+    const message = typeof address === 'string' ? oscMessage(address) : address;
+    socket.send(message, port, '127.0.0.1', () => socket.close(() => done()));
   });
 }
 
@@ -97,6 +113,11 @@ export interface VoiceHostOptions {
   onExit?: (reason: string) => void;
   trace?: boolean;
   env?: NodeJS.ProcessEnv;
+  // Playing through the effects (live-supercollider.md chunk 3): for
+  // each instrument, the daemon ring its voices go to, or null to play
+  // straight to the device; and the directory holding FieldOut.
+  rings?: (number | null)[];
+  fieldOut?: string;
 }
 
 const OUTPUT_TAIL = 15;
@@ -111,6 +132,8 @@ export class VoiceHost {
   private reloadError: string | undefined;
   // Settles when the host first goes live, or rejects with why it did not.
   readonly ready: Promise<void>;
+  // The directory holding the route's SynthDef, which close removes.
+  private routeDir: string | undefined;
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
@@ -180,6 +203,28 @@ export class VoiceHost {
     const port = await freeUdpPort();
     // sclang's own port, where `reload` reaches it.
     const langPort = await freeUdpPort();
+    // The route the host loads by file: sclang has no FieldOut class, so
+    // Field writes the SynthDef itself.
+    const routeDir =
+      options.rings !== undefined && options.fieldOut !== undefined && options.rings.some((r) => r !== null)
+        ? mkdtempSync(join(tmpdir(), 'field-route-'))
+        : undefined;
+    const routing =
+      routeDir !== undefined
+        ? (() => {
+            const routeDef = join(routeDir, 'field-route.scsyndef');
+            writeFileSync(routeDef, routeSynthDef());
+            // scsynth searches SC_PLUGIN_PATH beside its own plugins;
+            // naming a plugin path any other way replaces them, which on
+            // Linux loses the core UGens.
+            const pluginPath = [env['SC_PLUGIN_PATH'], options.fieldOut!].filter((p) => p !== undefined && p !== '').join(delimiter);
+            return {
+              FIELD_RINGS: JSON.stringify(options.rings),
+              FIELD_ROUTE_DEF: routeDef,
+              SC_PLUGIN_PATH: pluginPath,
+            };
+          })()
+        : {};
     const child = spawn(sclangCommand(env), ['-u', String(langPort), '-D', voiceHostScript()], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -190,9 +235,12 @@ export class VoiceHost {
         FIELD_PARENT_PID: String(process.pid),
         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
         ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
+        ...routing,
       },
     });
-    return new VoiceHost(child, port, langPort, options);
+    const host = new VoiceHost(child, port, langPort, options);
+    host.routeDir = routeDir;
+    return host;
   }
 
   // Asks the host to load every program again, as one has changed; if one
@@ -208,6 +256,7 @@ export class VoiceHost {
   async close(timeoutMs = 3000): Promise<void> {
     this.closing = true;
     await this.stopServer();
+    if (this.routeDir !== undefined) rmSync(this.routeDir, { recursive: true, force: true });
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
     await new Promise<void>((done) => {
       const timer = setTimeout(() => this.child.kill('SIGKILL'), timeoutMs);
@@ -220,6 +269,10 @@ export class VoiceHost {
   }
 
   private async stopServer(): Promise<void> {
+    // Every node first: at shutdown scsynth unloads its plugins before it
+    // frees the synths still running, and a FieldOut among them would
+    // call a destructor that is gone.
+    await sendOsc(oscMessage('/g_freeAll', 0), this.port);
     await sendOsc('/quit', this.port);
     const pid = this.serverPid;
     if (pid === undefined || (await exited(pid, 500))) return;

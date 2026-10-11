@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong, createTrack } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { compileSession } from '../graph/live.js';
-import { nrtScore, oscBundle, oscMessage, synthDefFile } from '../keys/synthdef.js';
+import { writeWavFloat32 } from '../audio/wav.js';
+import { nrtScore, oscBundle, oscMessage, routeSynthDef, synthDefFile } from '../keys/synthdef.js';
 import { removeTempProject } from '../testing/temp.js';
 import { AudiodClient, daemonBinary } from './client.js';
 
@@ -80,6 +81,14 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
     expect(JSON.parse(stdout)).toEqual({ ok: true });
   });
 
+  it('refuses --ring-feed with a ring that is not a number, rather than starting a daemon', async () => {
+    const failed = await execFileAsync(binary!, ['--ring-feed', 'abc', 'take.wav']).then(
+      () => '',
+      (err: { code?: number; stderr?: string }) => `${err.code} ${err.stderr ?? ''}`,
+    );
+    expect(failed).toMatch(/^2 .*--ring-feed wants a ring number, not "abc"/);
+  });
+
   it('opens and closes an input, reports it in status, and refuses what it cannot do', async () => {
     client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
     expect(client.supports('live-input')).toBe(true);
@@ -90,11 +99,27 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
     await expect(client.openInput('mic')).rejects.toThrow('input "mic" is already open');
     await expect(client.openInput('')).rejects.toThrow('input needs a name');
     expect((await client.status()).inputs).toEqual([
-      { name: 'mic', ring: opened.ring, written: 0, read: 0, dropped: 0, underruns: 0, skipped: 0 },
+      { name: 'mic', ring: opened.ring, written: 0, read: 0, dropped: 0, underruns: 0, skipped: 0, peak: 0 },
     ]);
     await client.closeInput('mic');
     expect((await client.status()).inputs).toBeUndefined();
     await expect(client.closeInput('mic')).rejects.toThrow('no input named "mic"');
+  });
+
+  it('closes an input when the connection that opened it drops', async () => {
+    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    // A second connection opens it, as `field keys` does, and goes away
+    // without closing it, as a killed `field keys` would.
+    const owner = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    await owner.openInput('keys:creek/bass');
+    expect((await client.status()).inputs).toHaveLength(1);
+    owner.close();
+    let inputs = (await client.status()).inputs;
+    for (let i = 0; i < 40 && inputs !== undefined; i++) {
+      await sleep(100);
+      inputs = (await client.status()).inputs;
+    }
+    expect(inputs).toBeUndefined();
   });
 
   it('loads a session whose input window names an open input, and refuses one that names none', async () => {
@@ -115,6 +140,67 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
     await client.closeInput('mic');
     expect((await client.status()).state).toBe('playing');
   });
+
+  it('plays an input while the transport is stopped (live-supercollider.md §7 question 2)', { timeout: 20_000 }, async () => {
+    scaffold(root);
+    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    const { ring } = await client.openInput('mic');
+    const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'mic' }] });
+    await client.session(session);
+    // Half a second of a sine into the ring at its own pace, as FieldOut
+    // writes, with nothing playing.
+    const tone = new Float32Array(24000).map((_, i) => 0.25 * Math.sin((2 * Math.PI * 440 * i) / 48000));
+    writeWavFloat32(join(root, 'tone.wav'), 48000, [tone, tone]);
+    await execFileAsync(binary!, ['--ring-feed', String(ring), 'tone.wav'], { cwd: root });
+    const status = await client.status();
+    expect(status.state).toBe('stopped');
+    const fed = status.inputs![0]!;
+    expect(fed.written).toBe(24000);
+    expect(fed.dropped).toBe(0);
+    // The idle path read it as it came, keeping at most its block and
+    // margin in hand, and heard the sine's level.
+    expect(fed.read).toBeGreaterThan(24000 - 2048);
+    expect(fed.peak).toBeCloseTo(0.25, 2);
+  });
+
+  it.skipIf(!scsynth || !fieldOutBuilt)(
+    'the route the voice host plays through carries a bus into the ring through FieldOut',
+    { timeout: 30_000 },
+    async () => {
+      client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+      const { ring, capacity } = await client.openInput('mic');
+      // A sine on private bus 20, where the voice host's voices play, and
+      // the route at the tail reading it into the ring.
+      const tone = synthDefFile({
+        name: 'field-bus-tone',
+        params: [],
+        ugens: [
+          { name: 'SinOsc', rate: 'audio', inputs: [{ constant: 440 }, { constant: 0 }], outputs: ['audio'] },
+          { name: 'BinaryOpUGen', rate: 'audio', special: 2, inputs: [{ ugen: 0 }, { constant: 0.25 }], outputs: ['audio'] },
+          { name: 'Out', rate: 'audio', inputs: [{ constant: 20 }, { ugen: 1 }, { ugen: 1 }], outputs: [] },
+        ],
+      });
+      writeFileSync(
+        join(root, 'score.osc'),
+        nrtScore([
+          oscBundle(0, [
+            oscMessage('/d_recv', tone),
+            oscMessage('/d_recv', routeSynthDef()),
+            oscMessage('/s_new', 'field-bus-tone', 1000, 0, 0),
+            oscMessage('/s_new', 'field-route', 1001, 1, 0, 'in', { float: 20 }, 'ring', { float: ring }),
+          ]),
+          oscBundle(1, [oscMessage('/n_free', 1000), oscMessage('/n_free', 1001), oscMessage('/c_set', 0, 0)]),
+        ]),
+      );
+      const { stdout } = await execFileAsync(
+        scsynth!.bin,
+        ['-N', 'score.osc', '_', 'out.aiff', '48000', 'AIFF', 'int16', '-o', '2', '-U', `${scsynth!.plugins}:${fieldOutDir}`],
+        { cwd: root },
+      );
+      expect(stdout).not.toContain('FieldOut: ring');
+      expect((await client.status()).inputs![0]).toMatchObject({ written: capacity, dropped: 48000 - capacity });
+    },
+  );
 
   it.skipIf(!scsynth || !fieldOutBuilt)(
     'FieldOut writes into the ring the daemon made, and a playing session reads it',

@@ -82,6 +82,19 @@ freeze still never collapses a track on the path.
 6. When `field keys` exits, the daemon drops the input and the live
    marking, and the session renders as before.
 
+*Amended (2026-10-11, as built in chunk 3):* `field keys` opens the
+inputs and compiles and loads the song itself, rather than the daemon
+loading it "if none is loaded" (step 2): it always loads the song with
+every open `keys:` input, keeping the loaded session's loop, region, and
+solo, and `field play`, its watch, `field ui`, and `field record` do the
+same when they load it. The voice host does not call `FieldOut.ar(ring)`
+in place of `Out.ar(0)` (step 3): each routed instrument's voices write
+to its private bus through `out`, and a route synth Field writes,
+`In` into `FieldOut`, carries the bus to the ring, on the daemon's
+device. On exit `field keys` closes the inputs and loads the song again
+with what remains (step 6), and the daemon closes an input whose
+connection drops.
+
 ### 2.2 Shapes
 
 | Shape | Change |
@@ -90,7 +103,7 @@ freeze still never collapses a track on the path.
 | Live tracks (`live.cpp`) | A track with an input below it evaluates per block; `comp_delay` on its path becomes non-zero for the first time. |
 | Freeze (`src/graph/live.ts`) | A track with an input below it is never collapsed into its stem. |
 | Daemon protocol | `input` op: attach a ring to a track, answer its name; `input_close`. |
-| Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. |
+| Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. *Amended (2026-10-11, as built in chunk 3):* `FIELD_RINGS`, a ring or null per instrument, and `FIELD_ROUTE_DEF`, the route's SynthDef file; FieldOut's directory reaches scsynth on `SC_PLUGIN_PATH`. |
 | `FieldOut` (new, `native/sc-fieldout/`) | An `scsynth` UGen plugin writing its input into a POSIX shared-memory, single-producer, single-consumer ring. |
 
 *Amended (2026-10-11, as built in chunk 2):* the `input` op takes a
@@ -224,7 +237,12 @@ timeline. A session swap builds the overlay afresh in the new session:
 the input goes silent for its path's latency and any tail its chains
 were ringing stops. Chunk 3 swaps sessions under a playing input, and
 decides there whether that gap is acceptable or the overlay's state
-should carry across.
+should carry across. Glides on the overlay run on a clock of its own,
+which keeps moving while the transport is stopped, so a fader moved
+while stopped finishes its glide. The idle path's second instance of
+the output's chain is rebuilt when the transport stops or pauses, on the
+message thread beside the output chain's own rebuild, so playing over
+silence after a stop carries no tail from before play.
 
 **Why not evaluate the path in place.** A track's content sits on a
 timeline its placement offsets, and a track placed more than once would
@@ -265,8 +283,9 @@ must sit under `main`.
   meeting offset, which step 3 now aligns; a second golden holds an
   input reaching `main` three ways, at 0, 145, and 290 samples, to the
   offline render late by 290, with the tone loud enough that all three
-  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2 holds in the compiled
-  session: the input's track and the bus above it keep their chains,
+  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2
+  holds in the compiled session: the input's track and the bus above it
+  keep their chains,
   and a sibling fed by a file is served from its stem. The daemon's
   `session` op refuses an input window until chunk 2 gives it a source,
   so nothing outside the tests can attach one yet.
@@ -295,6 +314,46 @@ must sit under `main`.
   stated rate is the device's when the input opens, and a session that
   moves the device leaves it stale; chunk 3 checks the rates before it
   routes a voice.
+
+- 2026-10-11 — Chunk 3 (branch `live/keys`, stacked on chunk 2).
+  `field keys` on tracks opens an input per armed track, loads the song's
+  session with them, and starts the voice host with a ring per
+  instrument; each routed instrument's voices play into a private bus
+  that a route synth, `In` into `FieldOut`, carries to its ring.
+  `src/keys/synthdef.ts` writes the route because sclang has no
+  `FieldOut` class, and the host loads it by file. Every way the host
+  stops frees its nodes first, which chunk 2 found scsynth needs. With
+  the transport stopped the daemon plays the overlay through a second
+  instance of `main`'s chain (§7 question 2), so the song's chain and
+  position do not move; open inputs pin the daemon open as an arm does.
+  Each input now reports a `peak`, and `--ring-feed` writes a file into a
+  ring as FieldOut would. `src/keys/routing-voice.test.ts` runs the whole
+  path through real sclang and scsynth: a note from a published MIDI
+  source reaches the track's input in the daemon. When routing is not
+  possible, the line keeps the dry note and says why. The review of the
+  chunk found five gaps, now closed: an input closes with the connection
+  that opened it, in place of pinning the daemon open, and `field keys`
+  closes its routing in a `finally`; `field play`, its watch,
+  `field ui`, and `field record` compile in the open `keys:` inputs for
+  their song, so their loads keep a routed voice heard; the voice host
+  boots on the daemon's device and plays dry when `--device` names
+  another or the daemon converts the song's rate, and each ring carries
+  the device's rate once a session has settled it; FieldOut reaches
+  scsynth through `SC_PLUGIN_PATH`, beside its own plugins, which on
+  Linux the replaced plugin path had lost; and the voice contract says
+  a voice writes to `out`, a private bus when routed. Its second review
+  found five more: a `field keys` load dropped another terminal's loop,
+  region, and solo, now carried through `status`, which reports the
+  solo; a ramp while stopped restarted its glide every block, now on the
+  overlay's own clock; a failed route said nothing when no named track
+  had inserts, and the dry note now names the effects above the track
+  too and always gives the reason; `field keys` checks that FieldOut is
+  writing once the voice goes live; and §2.1, §2.2, arming.md, and
+  keyboard-instrument.md carry dated amendments for what chunk 3
+  changed. Criterion 3 by ear,
+  and criteria 4 and 5 on the real device, are still owed; a swap under
+  a playing input, which §9 leaves to this chunk, rebuilds the overlay
+  cold, a gap of the path's latency, accepted for now.
 
 ## 11 FieldOut's license (DECIDED, 2026-10-11)
 

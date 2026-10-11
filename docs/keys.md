@@ -143,7 +143,7 @@ these controls, and it must not render or exit.
 | `freq` | The note's frequency in Hz |
 | `amp` | The velocity divided by 127 |
 | `gate` | 1 at note-on, 0 at note-off |
-| `out` | The output bus, 0 |
+| `out` | The bus to write to: 0 when the voice plays straight to the device, a private bus when it plays through a track's effects. A voice must write to `out`, never to bus 0 itself |
 | `mod` | Optional: the modulation wheel (CC 1), from 0 to 1, at note-on and whenever it moves |
 
 A voice may leave `mod` out, and then the wheel does nothing to it. In
@@ -218,12 +218,45 @@ naming a bus plays the part it carries. If more than one MIDI track is
 under it, `field keys` lists them and stops, and you name the ones you
 mean.
 
-The instrument still plays straight to the device, so the inserts on
-the track and on the tracks above it are not heard yet. When a track you
-named has any, the instrument's line ends
-`· dry: the effects on keys-bus are not heard yet`. Hearing them is the
-work of
-[the live-supercollider plan](projects/live-supercollider/readme.md).
+A track you name plays through its effects and the effects of every
+track above it, up to `main`'s, as the song would play it. `field keys`
+opens an input for the track in `field-audiod`, loads the song's live
+session with it, and the voice host writes the track's voice into that
+input through FieldOut, a SuperCollider plugin that ships with Field
+([audio-engine.md](audio-engine.md) "Live inputs"). With the song
+stopped, you play over silence; press play in another terminal
+(`field transport play`) and you play over the song. When you quit,
+`field keys` closes the inputs and loads the song again without them,
+keeping the loop, region, and solo another terminal set.
+
+Each track gets a voice of its own, even when two share an instrument.
+An instrument you name without a track still plays straight to the
+device. The voice plays on the daemon's device, so the two share a
+clock, and reaches the speakers late by the daemon's block plus 256
+frames, the margin its reader keeps, and the latency of the limiters
+and hosted plugins on its way up, a few milliseconds for the built-in
+limiter. `field play`, its `--watch`, `field ui`, and `field record`
+keep the voice routed when they load the song again, and the inputs
+close with `field keys`, even when it is killed.
+
+When a track's voice cannot go through the daemon, it plays straight to
+the device, and the instrument's line says why, and which effects on its
+way to the speakers, from `main` down, you are not hearing:
+
+```console
+keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on main, keys-bus are not heard (FieldOut is not built: run field upgrade audiod)
+```
+
+With no effects on its way, the line ends `· dry (<why>)`.
+
+That happens when FieldOut is not built, on Windows, which has no
+POSIX shared memory, when the daemon predates live inputs, when the
+tracks you name are in two songs, because one session plays one song,
+when `--device` names a device other than the daemon's, when the
+device cannot run at the song's rate and the daemon converts it, or
+when `FIELD_FIELDOUT` names a directory with no FieldOut in it. If
+FieldOut does not load in `scsynth`, the ring stays empty, and the line
+says so within two seconds of the voice going live.
 
 ## Record what you play
 

@@ -90,6 +90,18 @@ public:
     // Channel counts beyond stereo are zero-filled.
     void renderBlock (float* const* out, int numChannels, int n);
 
+    // Stopped, with an input (live-supercollider.md §7 question 2): the
+    // overlay alone, through a second instance of the output's chain, so
+    // what you play is heard over silence while the song's clock and
+    // chains stay where they are.
+    void renderIdle (float* const* out, int numChannels, int n);
+    bool hasInputs() const { return ! inputSources.empty(); }
+    // Clears renderIdle's chain and its delay, so playing over silence
+    // after a stop or a pause carries nothing from before play. Message
+    // thread, under the player's lock: it rebuilds stages, which
+    // allocates.
+    void resetIdle();
+
     void locate (juce::int64 sample);
     // What has been delivered to the device — the honest transport
     // position; the input clock runs ahead of it by any limiter window.
@@ -152,6 +164,9 @@ private:
         // timeline; produceUntil evaluates it per sample.
         double rampFromDb = 0.0;
         juce::int64 rampStart = -1;
+        // Where the same glide starts on the overlay's clock, which keeps
+        // moving while the transport is stopped (live-supercollider.md §9).
+        juce::int64 overlayRampStart = -1;
         juce::int64 rampLength = 0;
     };
 
@@ -214,6 +229,9 @@ private:
                       const std::vector<ChainSpec>& specs,
                       int trackRate,
                       juce::int64 startClock) const;
+    // The samples a chain withholds before its first output: its limiters'
+    // lookahead and its hosted plugins' reported latency.
+    static juce::int64 chainLatency (const std::vector<ChainStage>& chain);
     // The history the output chain must hear for its state at a
     // position to be right within the design's audibility threshold —
     // what locate renders and discards after a rebuild.
@@ -233,6 +251,8 @@ private:
     // A window's linear gain at a position on the unwrapped timeline:
     // `baseGain` unless a ramp is gliding it.
     static double rampedGain (const Window& window, juce::int64 absoluteAt, double baseGain);
+    // The glide itself, `into` samples after it started.
+    static double glide (const Window& window, juce::int64 into);
     // Runs `working` through the chain from `fromStage`; a limiter stage
     // re-points working at what it emitted (which may be shorter while
     // its window primes).
@@ -322,14 +342,20 @@ private:
         std::vector<std::vector<float>> pre, post, delayed;
     };
     void buildOverlay();
-    // `absoluteFrom` is the clock at the block's start: a ramp on a
-    // window the input passes through glides on the same timeline the
-    // song's does.
-    void renderOverlay (int n, juce::int64 absoluteFrom);
+    // Glides on the overlay's own clock, which advances with every block
+    // the overlay renders, playing or stopped, so a ramp issued while the
+    // transport is stopped finishes in real time instead of restarting
+    // with every block.
+    void renderOverlay (int n);
+    juce::int64 overlayClock = 0;
     std::vector<std::shared_ptr<LiveInput>> inputSources;
     std::vector<OverlayTrack> overlay; // children before the tracks that read them
     std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay
     std::vector<std::vector<float>> inputScratch;
+    // renderIdle's instance of the output chain, its block, and the delay
+    // that keeps each block whole across a limiter's varying lag.
+    std::vector<ChainStage> idleChain;
+    std::vector<std::vector<float>> idleBlock, idleDelayed;
     // Off while locate renders into the void: a source read there is
     // consumed off the audio thread and heard by nobody.
     bool overlayReadsInputs = true;

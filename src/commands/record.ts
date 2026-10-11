@@ -236,7 +236,11 @@ async function captureTakes(
     let status = await client.status();
     if (status.live !== true && status.path === null) {
       const { compileSession } = await import('../graph/live.js');
-      const compiled = await compileSession(root, resolved.song);
+      // A `field keys` routed into this song keeps its inputs through
+      // the bed's load (live-supercollider.md chunk 3).
+      const { keysInputsFor } = await import('../keys/routing.js');
+      const keysInputs = await keysInputsFor(client, resolved.song);
+      const compiled = await compileSession(root, resolved.song, keysInputs.length > 0 ? { inputs: keysInputs } : {});
       await client.session(compiled.session);
       hooks.onBed?.(`live    ${resolved.song}`);
       status = await client.status();

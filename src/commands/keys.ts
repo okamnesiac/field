@@ -5,7 +5,9 @@ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardL
 import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+import { routeArmed, type Routing, type Unrouted } from '../keys/routing.js';
 import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
+import { findProjectRoot } from '../model/project.js';
 import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
 import { watchText } from '../keys/watch.js';
 import type { Keymap } from '../schema/keymap.js';
@@ -32,9 +34,15 @@ export async function keysCommand(targets: string[], options: KeysOptions): Prom
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
   }
-  await withKittyKeyboard({ stdin, stdout }, (rest) =>
-    play({ stdin, stdout }, { source, keymap, armed, device: options.device }, rest),
-  );
+  const root = findProjectRoot(process.cwd());
+  let abandoned = false;
+  await withKittyKeyboard({ stdin, stdout }, async (rest) => {
+    abandoned = (await play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest)) === 'abandoned';
+  });
+  // Quit before routing landed: the daemon may still be answering, and
+  // waiting for it would hold the prompt. Any input it opens late closes
+  // with this process's connection.
+  if (abandoned) process.exit(0);
 }
 
 // Raw mode and the protocol flags are the terminal's state, not ours, so
@@ -67,24 +75,73 @@ interface PlayOptions {
   keymap: Keymap;
   armed: ArmedInstrument[];
   device: string | undefined;
+  root: string | undefined;
 }
 
 export type InstrumentState = {
   name: string; // what is armed, as the line names it
   dry: string[]; // tracks whose effects the voices do not pass through yet
+  // Why the voices do not pass through them (live-supercollider.md
+  // chunk 3), when routing them was not possible.
+  dryReason?: string;
+  // Why nothing is heard at all: routed, but scsynth never ran the route.
+  silent?: string;
   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
   // What the last save of the program did (keyboard-instrument.md §14).
   reload?: { loaded: true } | { failed: string };
 };
 
-async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
+async function play(tty: Tty, options: PlayOptions, carried: string): Promise<'abandoned' | undefined> {
+  // Armed tracks play through their effects when the daemon can take
+  // their voices (live-supercollider.md chunk 3): each track then gets a
+  // voice of its own, writing into its own input. Otherwise each program
+  // plays once, straight to the device, and the line says why.
+  // Ctrl-C quits while the daemon is still answering: the key handler
+  // that would see it does not exist yet, and a daemon starting cold can
+  // take seconds.
+  let pending = carried;
+  let onQuit: ((chunk: Buffer) => void) | undefined;
+  const quit = new Promise<'quit'>((resolve) => {
+    onQuit = (chunk) => {
+      const { events, rest } = decodeTerminal(pending + chunk.toString('utf8'));
+      pending = rest;
+      if (events.some(isQuit)) resolve('quit');
+    };
+    tty.stdin.on('data', onQuit);
+  });
+  const routing0 =
+    options.root !== undefined
+      ? routeArmed(options.armed, options.root, options.device !== undefined ? { device: options.device } : {})
+      : Promise.resolve(undefined);
+  const first = await Promise.race([routing0, quit]);
+  tty.stdin.removeListener('data', onQuit!);
+  if (first === 'quit') return 'abandoned';
+  const routed = first;
+  const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
+  try {
+    await playRouted(tty, options, pending, routed, routing);
+  } finally {
+    // However the session ends, a throw included, its inputs close; a
+    // process killed outright has the daemon close them with its
+    // connection.
+    await routing?.close();
+  }
+}
+
+async function playRouted(
+  tty: Tty,
+  options: PlayOptions,
+  carried: string,
+  routed: Routing | Unrouted | undefined,
+  routing: Routing | undefined,
+): Promise<void> {
   const { source, armed } = options;
-  const programs = [...new Set(armed.map((a) => a.program))];
+  const programs = routing?.programs ?? [...new Set(armed.map((a) => a.program))];
   const session = new KeysSession(options.keymap);
   let layout: KeyboardLayout | undefined;
   let layoutPositions: ReadonlyMap<string, string> | undefined;
   let reloadError: string | undefined;
-  const instrument = instrumentState(armed);
+  const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
 
   // An instrument has a line of its own above the status line: its state
   // changes a few times a session, the status line with every key. That
@@ -124,12 +181,14 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
 
   // The host starts after the helper, so `Field Keys` exists when sclang
   // connects its MIDI inputs; the keyboard plays while it boots.
-  const device = options.device ?? helper.defaultOutput;
+  // A routed voice is heard on the daemon's device, so it is made there.
+  const device = routing !== undefined ? routing.device : (options.device ?? helper.defaultOutput);
   const host =
     programs.length > 0
       ? await VoiceHost.start({
           instruments: programs,
           ...(device !== undefined ? { device } : {}),
+          ...(routing !== undefined ? { rings: routing.rings, fieldOut: routing.fieldOut } : {}),
           onStatus: (status) => {
             if (status.state === 'voice') return;
             if (status.state === 'reloaded') instrument!.reload = { loaded: true };
@@ -141,10 +200,25 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
         })
       : undefined;
   host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
+  // A route scsynth never ran, because FieldOut did not load in it, leaves
+  // its ring empty: the voice is then nowhere, and the line says so.
+  if (host !== undefined && routing !== undefined) {
+    void host.ready
+      .then(() => routing.flowing())
+      .then((flowing) => {
+        if (flowing || instrument === undefined) return;
+        // The voices play into a bus nothing reads: not dry, silent.
+        instrument.silent = 'FieldOut did not load in scsynth, so nothing reaches the daemon';
+        draw();
+      })
+      .catch(() => {});
+  }
 
   // Saving a program loads it again, as saving a keymap does
   // (keyboard-instrument.md §14).
-  const stopWatchingPrograms = host !== undefined ? programs.map((p) => watchText(p, () => void host.reload())) : [];
+  // Each program once, however many tracks play it: one save, one reload.
+  const stopWatchingPrograms =
+    host !== undefined ? [...new Set(programs)].map((p) => watchText(p, () => void host.reload())) : [];
   const stopWatching =
     source.kind === 'file'
       ? watchKeymap(source.path, (result) => {
@@ -190,7 +264,8 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   stopWatching?.();
   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
   send(session.quit());
-  // A host still booting closes too: quitting never waits for it.
+  // A host still booting closes too: quitting never waits for it. The
+  // inputs close after it, in play, once nothing writes them.
   await host?.close();
   await helper.close();
   tty.stdout.write('\n');
@@ -198,20 +273,24 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
 }
 
 // What the instrument's line starts from: the armed tracks and
-// instruments by name, and the tracks whose effects are not heard yet.
-export function instrumentState(armed: ArmedInstrument[]): InstrumentState | undefined {
+// instruments by name, and the tracks whose effects are not heard, which
+// is none when the voices pass through them.
+export function instrumentState(armed: ArmedInstrument[], heard = false, dryReason?: string): InstrumentState | undefined {
   if (armed.length === 0) return undefined;
+  const dry = heard ? [] : [...new Set(armed.flatMap((a) => a.unheardEffects))];
   return {
     name: armed.map(armedName).join(' + '),
-    dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
+    dry,
+    ...(!heard && dryReason !== undefined ? { dryReason } : {}),
     status: { state: 'starting' },
   };
 }
 
 // A save that did not load leads with why, so a narrow terminal keeps the
 // error rather than the device; the voice that loaded last still plays.
-export function instrumentText({ name, dry, status, reload }: InstrumentState): string {
+export function instrumentText({ name, dry, dryReason, silent, status, reload }: InstrumentState): string {
   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
+  if (silent !== undefined) return `${name} is silent: ${silent}`;
   const state =
     status.state === 'live'
       ? `${name} live at ${status.sampleRate} Hz on ${status.device}`
@@ -219,8 +298,11 @@ export function instrumentText({ name, dry, status, reload }: InstrumentState): 
         ? `${name} restarting for a new sample rate`
         : `${name} starting`;
   // The voice plays straight to the device, so a track's inserts are not
-  // heard yet (arming.md §2.1, live-supercollider.md).
-  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard yet` : '';
+  // heard (arming.md §2.1); routing them was not possible, and the reason
+  // says why (live-supercollider.md chunk 3).
+  const why = dryReason !== undefined ? ` (${dryReason})` : '';
+  const unheard =
+    dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard${why}` : dryReason !== undefined ? ` · dry${why}` : '';
   return `${state}${reload === undefined ? '' : ' · reloaded'}${unheard}`;
 }
 

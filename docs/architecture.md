@@ -203,8 +203,9 @@ OSC over UDP, which TypeScript handles fine. Two modes:
   The engine's half has landed: a live session carries an input up
   through every chain above its track ([audio-engine.md](audio-engine.md)
   "Live inputs"), fed from a shared-memory ring that FieldOut, a GPL-3.0
-  scsynth plugin in `native/sc-fieldout`, writes. Pointing the voice host
-  at FieldOut is next.
+  scsynth plugin in `native/sc-fieldout`, writes. `field keys` on a track
+  routes the voice host through FieldOut into that input, so the track's
+  effects and those above it process what you play.
 
 SC source is tracked in Git and treated as code.
 

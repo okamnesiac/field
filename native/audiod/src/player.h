@@ -94,8 +94,11 @@ public:
     // FieldOut writes, under a name a session's input window reads, and
     // answers the ring's number. A session holds the rings it reads, so
     // closing one it still plays only frees the name.
-    juce::var openInput (const juce::String& name);
+    juce::var openInput (const juce::String& name, const void* owner = nullptr);
     juce::String closeInput (const juce::String& name);
+    // Closes every input `owner`, a connection, opened: the server calls
+    // it when that connection drops.
+    void closeInputsOwnedBy (const void* owner);
     // Retires every ring: they are system-wide objects that outlive the
     // process unless unlinked, and an exit that skips destructors would
     // leave them behind.
@@ -305,10 +308,18 @@ private:
     // The rings by input name; the session op reads it outside the
     // message lock, so it has its own.
     std::mutex inputsLock;
-    std::map<std::string, std::shared_ptr<field::RingInput>> rings;
+    struct OpenInput
+    {
+        std::shared_ptr<field::RingInput> ring;
+        const void* owner = nullptr; // the connection that opened it
+    };
+    std::map<std::string, OpenInput> rings;
     std::atomic<bool> livePlaying { false };
     juce::int64 liveLength = 0;
     juce::String liveSong;
+    // The track soloed in the loaded session, when its compile had one,
+    // so a command reloading the song can keep it.
+    juce::String liveSolo;
     bool liveLoop = false;
     int liveRate = 0;
     bool liveEverStarted = false;

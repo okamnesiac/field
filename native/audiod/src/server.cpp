@@ -102,19 +102,19 @@ void Server::handleLine (Connection& connection, const juce::String& line)
         // for the install, so player state stays message-thread-owned
         // and the heavy build no longer serializes other connections'
         // requests.
-        response = dispatch (request);
+        response = dispatch (request, &connection);
     }
     else
     {
         // Player state belongs to the message thread; every request takes
         // the lock, which also serializes requests across connections.
         const juce::MessageManagerLock mml;
-        response = dispatch (request);
+        response = dispatch (request, &connection);
     }
     send (connection, response);
 }
 
-juce::String Server::dispatch (const juce::var& request)
+juce::String Server::dispatch (const juce::var& request, const void* owner)
 {
     auto id = request.getProperty ("id", juce::var());
     auto op = request.getProperty ("op", juce::var()).toString();
@@ -204,7 +204,7 @@ juce::String Server::dispatch (const juce::var& request)
     {
         // A live input (live-supercollider.md §2): a ring FieldOut writes
         // and the session's input window of this name reads.
-        auto info = player.openInput (request.getProperty ("name", juce::var()).toString());
+        auto info = player.openInput (request.getProperty ("name", juce::var()).toString(), owner);
         if (info.getProperty ("error", juce::var()).isString())
             return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
         if (auto* o = info.getDynamicObject())
@@ -718,6 +718,9 @@ void Server::sweepClosedConnections()
         {
             if ((*it)->reader.joinable())
                 (*it)->reader.join();
+            // An input dies with the connection that opened it: a
+            // `field keys` killed outright never closes its own.
+            player.closeInputsOwnedBy (it->get());
             DisconnectNamedPipe (asHandle ((*it)->pipe));
             CloseHandle (asHandle ((*it)->pipe));
             it = connections.erase (it);
@@ -861,6 +864,9 @@ void Server::sweepClosedConnections()
         {
             if ((*it)->reader.joinable())
                 (*it)->reader.join();
+            // An input dies with the connection that opened it: a
+            // `field keys` killed outright never closes its own.
+            player.closeInputsOwnedBy (it->get());
             ::close ((*it)->fd);
             it = connections.erase (it);
         }

@@ -521,6 +521,7 @@ export async function compileSession(
   const session: Session = {
     version: SESSION_VERSION,
     song: songName,
+    ...(options.solo !== undefined ? { solo: options.solo } : {}),
     rate: output.rate,
     ...(extent > 0 ? { length_samples: extent } : {}),
     ...(options.loop === true ? { loop: true } : {}),

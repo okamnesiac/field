@@ -106,26 +106,40 @@ name and answers its number, which FieldOut takes:
 { "ok": true, "name": "keys-voice", "ring": 4213871, "capacity": 8192, "channels": 2, "sample_rate": 48000 }
 ```
 
-A session whose input window names an open input reads it every block
-while the transport plays; one that names no open input is refused. The
-reader keeps a block plus 256 frames in hand, the block being the
-largest it has been asked for, drops the oldest frames when the writer
-runs fast enough to hold twice that, and when the writer stops, plays
-what it holds and waits to fill again. When nothing read for longer than
-the ring holds, about 170 ms at 48 kHz, the writer drops what does not
-fit, and the reader starts again at the present rather than play the
-past. `status` lists each open input with its
-counters: frames `written`, `read`, and `dropped` for want of room, and
-the reader's `underruns` and `skipped` frames. `input_close` frees the
-name; a session still reading the ring keeps it until the session goes.
+A session whose input window names an open input reads it every block;
+one that names no open input is refused. With the transport stopped,
+the daemon still plays what the inputs reach, through a second instance
+of the output's chain, so you play over silence while the song's own
+chain and position stay where they were. A gain ramp on a window the
+input passes through glides on a clock of the overlay's own, which keeps
+moving while the transport is stopped, so the glide finishes either way.
+A stop or a pause clears that second chain, so what you play next over
+silence carries nothing from before play. That idle path needs the device
+at the session's rate; under converted delivery a stopped session is
+silent and reads nothing. The reader keeps a block plus 256 frames in
+hand, the block being the largest it has been asked for, drops the
+oldest frames when the writer runs fast enough to hold twice that, and
+when the writer stops, plays what it holds and waits to fill again.
+When nothing read for longer than the ring holds, about 170 ms at
+48 kHz, the writer drops what does not fit, and the reader starts again
+at the present rather than play the past. `status` lists each open
+input with its counters: frames `written`, `read`, and `dropped` for
+want of room, the reader's `underruns` and `skipped` frames, and the
+`peak` it read since a client last asked. `input_close` frees the name;
+a session still reading the ring keeps it until the session goes, and an
+input closes on its own when the connection that opened it drops, so a
+`field keys` killed outright leaves nothing open.
 A daemon that does this lists `live-input` in `hello.features`. The ring
 is POSIX shared memory, so Windows has no live inputs yet.
 
-`field-audiod --render-live` feeds an input from a file instead, and
-`--ring-selftest` checks the reader against the writer FieldOut runs:
+`field-audiod --render-live` feeds an input from a file instead,
+`--ring-feed` writes a file into an open input's ring at real-time pace
+as FieldOut would, and `--ring-selftest` checks the reader against the
+writer FieldOut runs:
 
 ```sh
 field-audiod --render-live session.json out.wav --input keys-voice=take.wav
+field-audiod --ring-feed 4213871 take.wav
 field-audiod --ring-selftest
 ```
 

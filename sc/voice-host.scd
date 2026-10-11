@@ -10,6 +10,12 @@
 // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
 // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
 // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
+// To play through the effects (live-supercollider.md chunk 3):
+// FIELD_RINGS (a JSON list beside FIELD_INSTRUMENTS, each the daemon ring
+// that instrument's voices go to, or null for the device) and
+// FIELD_ROUTE_DEF (the route's SynthDef file, which Field writes because
+// sclang has no FieldOut class). Field puts FieldOut's directory on
+// SC_PLUGIN_PATH, which scsynth searches beside its own plugins.
 // sclang's own port, which Field also chooses (-u), takes /field/reload:
 // load every program again, as one has changed (§14), keeping them all as
 // they were if one does not load.
@@ -21,6 +27,10 @@ var port = "FIELD_SC_PORT".getenv.asInteger;
 var parentPid = "FIELD_PARENT_PID".getenv;
 var device = "FIELD_DEVICE".getenv;
 var trace = "FIELD_VOICE_TRACE".getenv.notNil;
+var rings = "FIELD_RINGS".getenv !? (_.parseJSON);
+var routeDef = "FIELD_ROUTE_DEF".getenv;
+// Each routed instrument's private bus and its route, made at each boot.
+var buses = [], routes = [], startRoutes, stopRoutes;
 // True until the server answers, at the first boot and at each restart:
 // a note then has no server to sound on, so it is ignored.
 var server, voiceDefs, problem, voicer, booting = true;
@@ -36,9 +46,30 @@ emit = { |pairs|
 	var body = pairs.clump(2).collect { |kv| jsonValue.(kv[0]) ++ ":" ++ jsonValue.(kv[1]) }.join(",");
 	("@field {" ++ body ++ "}").postln;
 };
+// A route per instrument with a ring: two channels from its private bus
+// into the ring, at the tail, after every voice. JSON's null arrives as
+// nil or as the string "null", depending on the parser.
+startRoutes = {
+	var ring = { |i| rings !? { |list| list[i] } };
+	buses = instruments.collect { |path, i|
+		var r = ring.(i);
+		if (r.notNil and: { r != "null" }) { Bus.audio(server, 2) }
+	};
+	routes = buses.collect { |bus, i|
+		bus !? { Synth.tail(server, 'field-route', [\in, bus.index, \ring, ring.(i).asInteger]) }
+	};
+};
+// At shutdown scsynth unloads its plugins before it frees the synths
+// still running, and a FieldOut among them would call a destructor that
+// is gone: free every node first.
+stopRoutes = {
+	if (server.notNil and: { server.serverRunning }) { server.freeAll };
+	routes = [];
+};
 // A server that is still booting has not bound its port, so a /quit would
 // miss it: the host stops its server by process.
 stopServer = {
+	stopRoutes.();
 	server !? { |s| s.pid !? { |pid| ("kill " ++ pid ++ " 2>/dev/null").systemCmd } };
 };
 // exit does not stop the code that called it, so a failure is the last
@@ -82,6 +113,9 @@ boot = {
 			{ server.serverRunning } {
 				waiting = false;
 				addAll.();
+				routeDef !? { |path| server.sendMsg(\d_load, path) };
+				server.sync;
+				startRoutes.();
 				server.sync;
 				booting = false;
 				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
@@ -122,6 +156,7 @@ restart = {
 	booting = true;
 	voicer.forgetVoices;
 	emit.(["restarting", true]);
+	stopRoutes.();
 	server.quit(onComplete: boot);
 };
 
@@ -142,8 +177,9 @@ run = {
 
 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
 		{ |note, velocity, freq, mod|
-			voiceDefs.collect { |def|
-				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod], server)
+			voiceDefs.collect { |def, i|
+				var out = buses[i] !? (_.index) ? 0;
+				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, out, \mod, mod], server)
 			}
 		},
 		{ |synths, control, value| synths.do(_.set(control, value)) },

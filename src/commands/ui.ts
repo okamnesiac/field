@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
+import { keysInputsFor } from '../keys/routing.js';
 import { AudiodClient } from '../audiod/client.js';
 import { BUILD_UI, INSTALL_UI } from '../remedies.js';
 import type { CompiledSession } from '../graph/live.js';
@@ -222,6 +223,10 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         `field-audiod ${connected.daemonVersion} predates live sessions — field transport quit, then retry`,
       );
     }
+    // A `field keys` routed into this song (live-supercollider.md chunk
+    // 3) keeps its inputs through this load, or its voice goes silent.
+    const keysInputs = await keysInputsFor(connected, songName);
+    if (keysInputs.length > 0) compiled = await compileSession(root, songName, { inputs: keysInputs });
     return { client: connected, loaded: await connected.session(compiled.session) };
   };
   let client: AudiodClient;
@@ -344,7 +349,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // soloed session's indexes are not the un-soloed compile's, so ramping
   // across that boundary would move the wrong fader.
   const swapSession = async (solo: string | null = soloed) => {
-    compiled = await compileSession(root, songName, solo !== null ? { solo } : {});
+    const keysInputs = await keysInputsFor(client, songName);
+    compiled = await compileSession(root, songName, {
+      ...(solo !== null ? { solo } : {}),
+      ...(keysInputs.length > 0 ? { inputs: keysInputs } : {}),
+    });
     const swapped = await client.session(compiled.session);
     ctx = musicalContext(loadProject(root), `songs/${songName}`, swapped.sample_rate);
   };
@@ -354,7 +363,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     root,
     songName,
     compiled,
-    { signal: watchAbort.signal },
+    { signal: watchAbort.signal, inputs: () => keysInputsFor(client, songName) },
     {
       onEdit: async (edit, fresh) => {
         // A recompile that changed nothing in the session — the watch's

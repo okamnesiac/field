@@ -391,8 +391,8 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         field::LiveInputs inputs;
         {
             std::lock_guard<std::mutex> hold (inputsLock);
-            for (const auto& [name, ring] : rings)
-                inputs[name] = ring;
+            for (const auto& [name, input] : rings)
+                inputs[name] = input.ring;
         }
         auto next = std::make_unique<field::LiveSession> (session, projectRoot, inputs);
         // Pre-roll outside the lock too: a swap lands at the old
@@ -486,6 +486,7 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveLength = next->lengthSamples();
             liveLoop = next->looping();
             liveSong = session.getProperty ("song", juce::var()).toString();
+            liveSolo = session.getProperty ("solo", juce::var()).toString();
             retired = std::move (liveSession);
             liveSession = std::move (next);
             if (hadSession)
@@ -519,6 +520,13 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             }
         }
         retireOnMessageThread (std::move (retired));
+        {
+            // The device is settled now: each ring says the rate it is
+            // read at, for a FieldOut started from here on to check.
+            std::lock_guard<std::mutex> hold (inputsLock);
+            for (auto& [name, input] : rings)
+                input.ring->setSampleRate ((uint32_t) std::lround (currentDeviceRate()));
+        }
         result->setProperty ("samples", liveLength);
         result->setProperty ("sample_rate", liveRate);
         result->setProperty ("channels", 2);
@@ -572,6 +580,9 @@ void Player::pause()
     if (liveSession != nullptr)
     {
         livePlaying = false;
+        // What you play next over silence starts clean.
+        const juce::ScopedLock guard (liveLock);
+        liveSession->resetIdle();
         return;
     }
     transport.stop();
@@ -587,6 +598,7 @@ void Player::stop()
         liveEverStarted = false;
         const juce::ScopedLock guard (liveLock);
         liveSession->locate (0);
+        liveSession->resetIdle();
         // A transport discontinuity resets delivery conversion to its
         // primed starting state and drops queued output — pre-seek
         // audio never leaks (cross-rate-live.md decision 3).
@@ -680,7 +692,7 @@ juce::String Player::transportState()
     return "stopped";
 }
 
-juce::var Player::openInput (const juce::String& name)
+juce::var Player::openInput (const juce::String& name, const void* owner)
 {
     auto result = obj();
     if (name.isEmpty())
@@ -702,7 +714,7 @@ juce::var Player::openInput (const juce::String& name)
         result->setProperty ("capacity", (int) ring->capacity());
         result->setProperty ("channels", 2);
         result->setProperty ("sample_rate", currentDeviceRate());
-        rings[name.toStdString()] = std::move (ring);
+        rings[name.toStdString()] = { std::move (ring), owner };
     }
     catch (const std::exception& e)
     {
@@ -714,9 +726,28 @@ juce::var Player::openInput (const juce::String& name)
 void Player::closeInputs()
 {
     std::lock_guard<std::mutex> hold (inputsLock);
-    for (auto& [name, ring] : rings)
-        ring->retire();
+    for (auto& [name, input] : rings)
+        input.ring->retire();
     rings.clear();
+}
+
+void Player::closeInputsOwnedBy (const void* owner)
+{
+    if (owner == nullptr)
+        return;
+    std::lock_guard<std::mutex> hold (inputsLock);
+    for (auto it = rings.begin(); it != rings.end();)
+    {
+        if (it->second.owner == owner)
+        {
+            it->second.ring->retire();
+            it = rings.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }
 
 juce::String Player::closeInput (const juce::String& name)
@@ -725,7 +756,7 @@ juce::String Player::closeInput (const juce::String& name)
     const auto found = rings.find (name.toStdString());
     if (found == rings.end())
         return "no input named \"" + name + "\"";
-    found->second->retire();
+    found->second.ring->retire();
     rings.erase (found);
     return {};
 }
@@ -741,9 +772,9 @@ juce::var Player::status (bool consumePeak)
         if (! rings.empty())
         {
             juce::Array<juce::var> list;
-            for (const auto& [name, ring] : rings)
+            for (const auto& [name, input] : rings)
             {
-                auto stats = ring->stats();
+                auto stats = input.ring->stats (consumePeak);
                 stats.getDynamicObject()->setProperty ("name", juce::String (name));
                 list.add (stats);
             }
@@ -764,6 +795,8 @@ juce::var Player::status (bool consumePeak)
         result->setProperty ("live", true);
         if (liveSong.isNotEmpty())
             result->setProperty ("song", liveSong);
+        if (liveSolo.isNotEmpty())
+            result->setProperty ("solo", liveSolo);
         result->setProperty ("sample_rate", liveRate);
         // The in-flight converted audio decision 3's skew bound talks
         // about: already-converted frames the ear has not heard yet.
@@ -1004,8 +1037,15 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
                 }
                 return position;
             }
-            for (int c = 0; c < numChannels; ++c)
-                std::fill (out[c], out[c] + n, 0.0f);
+            // Stopped with a live input (live-supercollider.md §7
+            // question 2): what you play is heard over silence. Converted
+            // delivery has no idle path, because an input plays at the
+            // device's rate, which is then not the session's.
+            if (liveConverter == nullptr && liveSession->hasInputs())
+                liveSession->renderIdle (out, numChannels, n);
+            else
+                for (int c = 0; c < numChannels; ++c)
+                    std::fill (out[c], out[c] + n, 0.0f);
             // A bed that is not rolling has no position to latch a take
             // or a tick on: the first playing block is where both start.
             return -1;

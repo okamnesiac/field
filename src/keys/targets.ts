@@ -62,7 +62,8 @@ function describeShelf(root: string): string {
 export interface ArmedInstrument {
   program: string; // absolute path to the instrument's program
   track?: string; // the MIDI track it plays for, `song/track`
-  // Tracks from the one named down to the MIDI track whose inserts the
+  // Tracks above the one named, the one named, and those down to the
+  // MIDI track, top-down, whose inserts the
   // voice does not pass through yet (live-supercollider.md).
   unheardEffects: string[];
 }
@@ -110,9 +111,34 @@ export function resolveKeysTargets(targets: string[], cwd = process.cwd()): Arme
     // resolveRecordTarget loads a valid project, and validation already
     // refuses an instrument with no program.
     const [midi] = found as [MidiTrack];
-    add({ program: instrumentPath(midi.instrument, root), track: `${songName}/${midi.track}`, unheardEffects: midi.effects });
+    add({
+      program: instrumentPath(midi.instrument, root),
+      track: `${songName}/${midi.track}`,
+      unheardEffects: [...new Set([...effectsAbove(song, track), ...midi.effects])],
+    });
   }
   return [...armed.values()];
+}
+
+// The tracks above `name` with inserts, top-down from main: what a voice
+// on `name` passes through on its way to the speakers, besides the
+// effects on and under `name` itself.
+function effectsAbove(song: LoadedSong, name: string): string[] {
+  const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
+  const found = new Set<string>();
+  const visit = (trackName: string, above: string[], path: Set<string>): void => {
+    if (trackName === name) {
+      for (const effect of above) found.add(effect);
+      return;
+    }
+    const track = byName.get(trackName);
+    if (track === undefined || path.has(trackName)) return;
+    const effects = track.inserts.length > 0 ? [...above, trackName] : above;
+    const onPath = new Set(path).add(trackName);
+    for (const entry of track.inputs) if (entry.track !== undefined) visit(entry.track, effects, onPath);
+  };
+  visit('main', [], new Set());
+  return [...found];
 }
 
 interface MidiTrack {

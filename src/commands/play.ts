@@ -417,7 +417,7 @@ export async function playLiveSession(
   const compiled = await compileSession(root, song, {
     ...(options.loop === true ? { loop: true } : {}),
   });
-  const session = compiled.session;
+  let session = compiled.session;
   const client = await AudiodClient.connect(root);
   try {
     if (!client.supports('session')) {
@@ -437,6 +437,15 @@ export async function playLiveSession(
       );
     }
     if (options.device !== undefined) await client.selectDevice(options.device);
+    // A `field keys` routed into this song (live-supercollider.md chunk
+    // 3) keeps its inputs through this load, or its voice goes silent.
+    const { keysInputsFor } = await import('../keys/routing.js');
+    const keysInputs = await keysInputsFor(client, song);
+    if (keysInputs.length > 0) {
+      session = (
+        await compileSession(root, song, { ...(options.loop === true ? { loop: true } : {}), inputs: keysInputs })
+      ).session;
+    }
     const loaded = await client.session(session);
     let ctx = musicalContext(project, `songs/${song}`, loaded.sample_rate);
     // The schedule rides the session's clock and rate; a swap keeps it,
@@ -488,10 +497,11 @@ export async function playLiveSession(
       watchDone = watchLiveSession(
         root,
         song,
-        compiled,
+        { ...compiled, session },
         {
           signal: watchAbort.signal,
           ...(options.loop === true ? { loop: true } : {}),
+          inputs: () => keysInputsFor(client, song),
         },
         {
           onEdit: async (edit, fresh) => {
