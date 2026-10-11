@@ -881,7 +881,9 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         shell = launched;
         launched.once('exit', () => {
           try {
-            rmSync(profile, { recursive: true, force: true });
+            // Retried, because on Windows a Chromium helper can still be
+            // letting go of the profile's files as the shell exits.
+            rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
           } catch {
             // An orphaned Electron can still hold it on Windows after a
             // kill; the temp directory is the OS's to clear then.
