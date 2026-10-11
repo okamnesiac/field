@@ -121,7 +121,7 @@ export class AudiodClient extends EventEmitter {
       }
       const binary = daemonBinary();
       if (!binary) {
-        throw new Error('field-audiod is not built (pnpm build:native, or set FIELD_AUDIOD)');
+        throw new Error('field-audiod is not built (field upgrade audiod, or set FIELD_AUDIOD)');
       }
       const args = ['--socket', SOCKET_RELATIVE];
       // FIELD_AUDIOD_NULL covers spawns the caller doesn't parameterize

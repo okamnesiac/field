@@ -94,7 +94,7 @@ export class KeysHelper {
 function requireDaemon(): string {
   const binary = daemonBinary();
   if (binary === undefined) {
-    throw new Error('field keys needs field-audiod, which is not built (pnpm build:native, or set FIELD_AUDIOD)');
+    throw new Error('field keys needs field-audiod, which is not built (field upgrade audiod, or set FIELD_AUDIOD)');
   }
   return binary;
 }

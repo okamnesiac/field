@@ -83,22 +83,35 @@ build, and audition a project with no DAW in the loop.
 
 ## Try it
 
-Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm or
-yarn — and [SuperCollider](https://supercollider.github.io/): every
-render in the example project is an SC recipe, and `field build` runs
-`sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`:
+You need Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm
+or yarn — with `pnpm setup` run once, CMake 3.24 or newer with a C++
+compiler (Xcode's command line tools on macOS), and
+[SuperCollider](https://supercollider.github.io/): every render in the
+example project is an SC recipe, and `field build` runs `sclang` from
+your PATH, the macOS app bundle, or `FIELD_SCLANG`.
 
 ```sh
-pnpm install
-pnpm build
-pnpm add -g .        # links `field` onto your PATH (needs `pnpm setup` once)
-pnpm build:native    # field-audiod, the playback and render daemon
+git clone https://github.com/okamnesiac/field
+cd field
+./install.sh             # the field command and field-audiod
 ```
 
-`pnpm add -g .` links this checkout rather than copying it, so a later
-`pnpm build` takes effect with no re-linking, and `field` works from
-any directory. To run from source without installing: `pnpm field
-<args>`. To remove: `pnpm remove -g field`.
+The installer builds the checkout, links it onto your PATH as `field`,
+and builds `field-audiod`, the playback and render daemon. The first
+daemon build compiles JUCE, which takes a few minutes. Because `field`
+is a link to the checkout rather than a copy, it works from any
+directory and runs whatever the checkout last built. To pick up new
+commits, pull in the checkout, then upgrade from anywhere:
+
+```sh
+git pull                 # in the checkout
+field upgrade            # runs the checkout's ./install.sh
+field upgrade status     # what is installed, and what is out of date
+```
+
+[docs/install.md](docs/install.md) describes each step and each status
+row. To run from source without installing: `pnpm field <args>`. To
+remove: `pnpm remove -g field`.
 
 Then open the example project — two songs that exercise most of the
 system, checked by CI on every change:
@@ -121,7 +134,8 @@ from SuperCollider recipes alone. See the
 ### The audio daemon
 
 `field-audiod` is a separate native binary (CMake and JUCE), built by
-`pnpm build:native`. Build it before playing **or building** anything:
+`./install.sh` or `field upgrade audiod`. Build it before playing **or
+building** anything:
 the daemon is also the renderer — `eq`, `limit` and `reverb` targets
 render by spawning it, so `field build` fails without it rather than
 falling back to anything.

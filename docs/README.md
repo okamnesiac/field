@@ -113,4 +113,5 @@ The current build order lives in [projects/](projects/README.md).
 - [Audio engine](audio-engine.md) — the real-time daemon that plays, records, and hosts plugins
 - [Remote](remote.md) — login, clone, push and pull, and the read-through cache against an audiofield remote
 - [Keys](keys.md) — the computer keyboard as a MIDI instrument, and how to write a keymap
+- [Install](install.md) — `./install.sh` and `field upgrade`: what each step runs, and how to read the status
 - [Projects](projects/README.md) — work in progress, next, and later

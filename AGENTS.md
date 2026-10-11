@@ -20,7 +20,7 @@ The docs are [overview](docs/README.md),
 [architecture](docs/architecture.md), [tracks](docs/tracks.md),
 [project model](docs/project-model.md), [build graph](docs/build-graph.md),
 [audio engine](docs/audio-engine.md), [remote](docs/remote.md),
-[keys](docs/keys.md).
+[keys](docs/keys.md), [install](docs/install.md).
 
 Where code does not exist yet these describe how the system is *designed* to
 work and are the source of truth for it, which is less of the repo than it

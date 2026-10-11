@@ -263,7 +263,7 @@ export async function versionReport(root: string, deps: VersionDeps = {}): Promi
     note: daemonNote(audiod, {
       name: AUDIOD_NAME,
       protocol: AUDIOD_PROTOCOL_VERSION,
-      remedy: 'rebuild the daemon (pnpm build:native)',
+      remedy: 'rebuild the daemon (field upgrade audiod)',
     }),
   });
 

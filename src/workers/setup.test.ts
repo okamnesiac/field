@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { VOICED_SPEC } from '../voiced/client.js';
-import { SETUP_SPECS } from '../commands/generate.js';
+import { checkWorkers, partitionExisting, selectWorkers, SETUP_SPECS } from '../commands/generate.js';
 import {
   environmentVerdict,
   workerAvailable,
@@ -302,5 +302,65 @@ describe('the shared lifecycle is edited in place, not copied', () => {
         'editable = true',
       );
     }
+  });
+});
+
+// An upgrade keeps current what someone set up and sets up nothing new
+// (install.md §2.4), and `install.sh status` reports from the same probe
+// `field generate` gates on, so these hold the upgrade to the gate.
+describe('an upgrade re-syncs only what was set up', () => {
+  it('syncs an installed worker and skips a dev-only one', () => {
+    installedWorker();
+    const absent: WorkerSpec = { ...tempSpec, packageDir: `${tempDir}-absent` };
+    expect(partitionExisting([tempSpec, absent])).toEqual({ sync: [tempSpec], skip: [absent] });
+
+    devOnlyWorker();
+    expect(partitionExisting([tempSpec])).toEqual({ sync: [], skip: [tempSpec] });
+  });
+
+  it('names a worker by its package directory or its daemon name', () => {
+    expect(selectWorkers()).toBe(SETUP_SPECS);
+    expect(selectWorkers('voiced')).toEqual([VOICED_SPEC]);
+    expect(selectWorkers('field-voiced')).toEqual([VOICED_SPEC]);
+    expect(() => selectWorkers('nope')).toThrow('unknown worker "nope" — try aced or voiced');
+  });
+});
+
+describe('field setup --check', () => {
+  const label = (line: string): string => line.split(' ')[0]!;
+
+  it('reports a worker nobody set up without asking uv about it, and as no problem', () => {
+    devOnlyWorker();
+    const { calls, run } = recorder([{ status: 0 }]);
+    const { lines, ok } = checkWorkers([tempSpec], run);
+    expect(lines.map(label)).toEqual(['worker-absent']);
+    expect(lines[0]).toContain(`field setup ${tempDir}`);
+    expect(ok).toBe(true);
+    expect(calls).toEqual([['uv', '--version']]);
+  });
+
+  it('reports an installed, synced worker as current', () => {
+    installedWorker();
+    const { lines, ok } = checkWorkers([tempSpec], recorder([{ status: 0 }, { status: 0 }]).run);
+    expect(lines).toEqual([`${'worker-current'.padEnd(14)} ${tempSpec.name}`]);
+    expect(ok).toBe(true);
+  });
+
+  it('reports an installed worker that fails the check as stale, and fails', () => {
+    installedWorker();
+    const { lines, ok } = checkWorkers([tempSpec], recorder([{ status: 0 }, { status: 1 }]).run);
+    expect(lines.map(label)).toEqual(['worker-stale']);
+    expect(lines[0]).toContain(`run field setup ${tempDir}`);
+    expect(ok).toBe(false);
+  });
+
+  it('reports an installed worker with uv gone, and does not send anyone to setup', () => {
+    installedWorker();
+    const noUv = recorder([{ status: null, error: new Error('ENOENT') }]);
+    const { lines, ok } = checkWorkers([tempSpec], noUv.run);
+    expect(lines.map(label)).toEqual(['worker-no-uv']);
+    expect(lines[0]).toContain('brew install uv');
+    expect(lines[0]).not.toContain('field setup');
+    expect(ok).toBe(false);
   });
 });
