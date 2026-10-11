@@ -60,6 +60,23 @@ describe('timeline lanes', () => {
     expect(keys?.children?.map((l) => [l.name, l.entry])).toEqual([['pad', 1]]);
   });
 
+  it('names a record entry by its generator name, not by its position', () => {
+    createTrack(root, 'creek', 'vocal');
+    writeFileSync(
+      join(root, 'songs/creek/tracks/vocal.yaml'),
+      ['name: vocal', 'inputs:', '  - id: lead', '    record:', '  - id: dub', '    record:', ''].join('\n'),
+    );
+    createTrack(root, 'creek', 'harmony');
+    writeFileSync(join(root, 'songs/creek/tracks/harmony.yaml'), ['name: harmony', 'inputs:', '  - record:', ''].join('\n'));
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - track: vocal', '  - track: harmony', ''].join('\n'),
+    );
+    const [vocal, harmony] = lanesOf();
+    expect(vocal?.children?.map((l) => l.name)).toEqual(['vocal-lead', 'vocal-dub']);
+    expect(harmony?.children?.map((l) => l.name)).toEqual(['harmony']);
+  });
+
   it('draws an open window as long as its source plays, not to the song end', () => {
     // riff is 4800 frames; the song here is 96000 samples long. An open
     // window plays the source from its read offset to its end.
