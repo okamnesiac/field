@@ -1,0 +1,356 @@
+{
+ "version": 1,
+ "name": "field ui, first version",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 163,
+  "title": "The UI's first version, implemented: transport and lanes over the files, with mute and solo",
+  "head": "f61b4a1f42c00ed6693b9306bcc30b5787e388d0",
+  "headRef": "ui/first",
+  "base": "b912ce8524d9753afa13e7f870f5ef37068b14f5",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a Git-native music production tool: a song is a directory of YAML files, a build graph renders them into stems, and a native daemon, <code>field-audiod</code>, plays the result. Until this pull request, you worked with a song through CLI commands and hand edits. It adds <code>field ui &lt;song&gt;</code>, a desktop window onto a playing song.",
+   "The files stay the only store. <code>field ui</code> runs a local HTTP and WebSocket server inside field's own Node process, and a React client talks to it from an Electron window or a browser tab. Every gesture that changes the song ends as a YAML edit written through the same comment-preserving <code>Document</code> machinery the CLI's editors use. The existing watch loop then carries the file change into the playing session, exactly as it does for a hand edit. Each edit carries the sha256 of the file bytes it was derived from, so the server refuses a stale one and refreshes the view, and the server loads the project with the edited text before writing, so an edit that would add an error is refused instead of turning the song red.",
+   "<ul><li><b>Mute.</b> A new <code>mute:</code> field on a placement, beside <code>gain_db</code> and <code>pan</code>. The build graph leaves muted placements out of the plan, and a muted placement's sends go silent with it.</li><li><b>Solo.</b> A session-only alternate feed: the server compiles a filtered copy of the song and swaps it into the daemon, and nothing is written.</li><li><b>Timeline.</b> One row per placement, nested rows for placed tracks, waveforms, and clip move, split, and front and end trim.</li><li><b>Insert panel.</b> Add, edit, and remove built-in effects on a track, with an EQ curve drawn by a TypeScript port of the native biquad arithmetic.</li><li><b>Plans.</b> The UI plan flips to <code>in-progress</code> with a new §6, two other plans gain amendments, and a draft <code>daw-features</code> catalogue arrives, with its four picks as project stubs at <code>priority: later</code>.</li></ul>",
+   "The Projector review at <code>f61b4a1</code> is clean: all 24 finding threads from its reviews are resolved, and a human approval is what remains. The last one asked for <code>field ui</code> in <code>main</code>'s new CLI manual, and <code>docs/cli.md</code> now has it. The author's own self-review threads are the author's to resolve. The head is untrusted, because its author has no write access to the repository, so the reviews read the code and ran none of it."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms used on this page",
+    "html": "<ul class=\"tight\"><li><b>Placement</b> or <b>entry</b>: one item in a track file's <code>inputs:</code> list, such as <code>- track: drums</code> or <code>- audio: riff</code>, with its position, length, level, and fades.</li><li><b>Lane</b> or <b>row</b>: the timeline's drawing of one placement. Its <code>entry</code> is the placement's index in <code>inputs:</code>.</li><li><b>Send</b>, <b>receive</b>, <b>cable</b>: a track's <code>sends:</code> feed a labelled cable, and a <code>- receive: label</code> entry in another track hears it, for example a shared reverb.</li><li><b>Stem</b>: a track's rendered audio file. A <b>frozen</b> track is served to the daemon as its cached stem instead of being evaluated live.</li><li><b>Swap</b> and <b>ramp</b>: the two ways the watch loop updates a playing session. A swap replaces the session, and a ramp moves one gain in place.</li><li><b>Carrier</b>: under solo, a track the soloed track is heard through on its way to <code>main</code>.</li><li><b>Stale-hash guard</b>: the check that an edit's sha256 still matches the file on disk.</li></ul>"
+   },
+   {
+    "id": "history",
+    "title": "Review history so far",
+    "html": "<ul class=\"tight\"><li><b>The author's own reviews.</b> <code>eve-nyx-13</code> reviewed each push of this branch, from August 18 to August 22. Five of those threads are still open and are the author's to resolve. At <code>739fc22</code> the receive-index, duration-spelling, and fades ones are fixed, and the other two point at files that moved or no longer exist.</li><li><b>Review on <code>04a0857</code>.</b> Requested changes with two findings. The duplicate UI plan is fixed, and the <code>ui/dist</code> prefix finding was withdrawn as unreachable.</li><li><b>Review on <code>eb413a8</code>.</b> Requested changes with 21 threads, one P1. Twenty commits answered them, ending at <code>203c91a</code>, and each fix was checked against the code.</li><li><b>Review on <code>739fc22</code>.</b> Clean, with suggestions only. Four more commits answered earlier suggestions: the front-trim refusal, solo commitment, the space key on a focused button, and the shell's navigation guard.</li><li><b>Review on <code>02f988e</code>.</b> Clean. The base moved to <code>beb3394</code> with main's keyboard stack, and the only change to this pull request's own diff is the four project stubs from <code>daw-features</code>' picks.</li><li><b>Review on <code>ff0e86e</code>.</b> Clean. The base moved one comment in <code>build.test.ts</code>, and this pull request's own diff is unchanged.</li><li><b>Review on <code>0ecfc4d</code>.</b> Requested changes with one thread. The base is now <code>main</code>, after the stack beneath this pull request merged. The diff is unchanged, but <code>main</code>'s new CLI manual leaves out <code>field ui</code>.</li><li><b>Review on <code>f61b4a1</code>.</b> Clean. A new section and a command-reference row in <code>docs/cli.md</code> fixed the CLI manual finding.</li></ul>"
+   },
+   {
+    "id": "ops",
+    "title": "What each socket operation writes",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Operation</th><th>Writes</th><th>Into</th></tr></thead><tbody><tr><td><code>edit</code></td><td><code>gain_db</code>, <code>pan</code>, or <code>mute</code></td><td>The placement's owner file</td></tr><tr><td><code>move</code></td><td><code>at</code>, in the author's spelling</td><td>The placement's owner file</td></tr><tr><td><code>split</code></td><td>Two entries cloned from one, with <code>duration</code>, <code>at</code>, and <code>source_offset</code></td><td>The placement's owner file</td></tr><tr><td><code>stretch</code></td><td>End: <code>duration</code>. Start: <code>at</code>, <code>duration</code>, and <code>source_offset</code></td><td>The placement's owner file</td></tr><tr><td><code>insert-add</code>, <code>insert-edit</code>, <code>insert-remove</code></td><td>The track's <code>inserts:</code> chain</td><td>The track's own file</td></tr><tr><td><code>solo</code></td><td>Nothing: the server swaps a filtered session</td><td>None</td></tr><tr><td><code>play</code>, <code>pause</code>, <code>stop</code>, <code>locate</code>, <code>device</code></td><td>Nothing: daemon transport commands</td><td>None</td></tr></tbody></table></div>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "engine",
+   "title": "Mute and solo in the engine",
+   "kicker": "A placement field the build graph drops, and a filtered copy of the song for solo",
+   "intro": [
+    "Mute is a boolean on a placement, stored in the file like <code>gain_db</code>. It is a field rather than a gain gesture because a gesture would overwrite the authored level, and remembering the old level anywhere but the file would be a second store. <code>planFor</code> in <code>graph.ts</code> filters muted placements out before anything else reads the track, so the stem's spec, its cache key, and the live session all leave them out. <code>cables.ts</code> walks each cable twice when a song has a muted placement: once with every placement, for structure and diagnostics, and once without the muted ones, for the arrivals that sound. A cable whose senders are all muted is silent, and <code>graph.ts</code> drops it as an input.",
+    "Solo is a listening gesture, so it lives in the running session and is never written. <code>soloView</code> in <code>solo.ts</code> walks the song and keeps three groups: the soloed track's own subtree, its carriers with only the inputs that lead to it, and the receivers of its sends. <code>compileSession</code> applies that filter to the loaded song before it builds the graph, and builds the session's files from that soloed graph, so a carrier frozen under the solo is served its soloed stem.",
+    "The <code>build.ts</code> changes are separate: they let a rebuild replace a stem that a Windows daemon holds open, and stop leaking temporary copies when it cannot."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/schema/track.ts",
+     "note": "Adds <code>mute: z.boolean().default(false)</code> to a placement, and puts <code>mute</code> after <code>pan</code> in the canonical key order."
+    },
+    {
+     "path": "src/graph/graph.ts",
+     "note": "The one-line filter in <code>planFor</code> that drops muted placements before the track is planned."
+    },
+    {
+     "path": "src/model/solo.ts",
+     "note": "The solo walk: the soloed subtree, carriers, and send receivers, then <code>applySolo</code> filters each track's inputs and the cable list in place."
+    },
+    {
+     "path": "src/model/cables.ts",
+     "note": "The second, audible pass of the arrival walk, which skips muted edges once the structural pass has decided whether the cable joins."
+    },
+    {
+     "path": "src/model/project.ts",
+     "note": "<code>loadProject</code> takes an optional override, one file's text as it would be, for a single synchronous load. <code>field ui</code> uses it to check an edit before writing."
+    },
+    {
+     "path": "src/graph/live.ts",
+     "note": "<code>compileSession</code> takes <code>solo</code>, applies it to the loaded song before building the graph, and builds the session's files with <code>build(project, graph, nodes)</code> from that graph instead of reloading the files."
+    },
+    {
+     "path": "src/graph/build.ts",
+     "note": "<code>renameOverwrite</code> retries a rename that Windows refuses while the daemon holds the stem open, and <code>materialize</code> skips the copy when the output already has the same bytes. The head's merge keeps this beside main's <code>fetchAction</code>."
+    },
+    {
+     "path": "src/model/solo.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/graph/build.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/model/cables.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/graph/live.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/model/project.test.ts",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "protocol",
+   "title": "The wire protocol",
+   "kicker": "The messages between the server and the client, as TypeScript types",
+   "intro": [
+    "<code>ui-protocol.ts</code> defines what the server sends down: a <code>snapshot</code> of the song, transport, devices, and timeline, daemon <code>event</code>s such as position, and <code>error</code>s. The client imports the types, so a change to one side that the other cannot read fails the typecheck. The messages the client sends up are zod schemas in <code>ui.ts</code>, because the server must validate them."
+   ],
+   "files": [
+    {
+     "path": "src/commands/ui-protocol.ts",
+     "note": "The snapshot, event, and timeline-lane types. A lane's <code>entry</code> is the placement's index in its file's <code>inputs:</code>."
+    }
+   ],
+   "checks": []
+  },
+  {
+   "id": "arithmetic",
+   "title": "Arithmetic the client shares with the engine",
+   "kicker": "Tempo and meter conversions and the EQ response, importable by the browser",
+   "intro": [
+    "The client runs its own playhead between the daemon's 250 ms position events, so it needs the tempo and meter maps. It imports <code>src/time/tempo.ts</code> directly rather than porting it, so the two cannot drift. <code>MeterMap</code> gains <code>position</code> and <code>span</code>, the inverses of <code>positionTicks</code> and <code>spanTicks</code>, which the edits use to keep the author's bar-and-beat spelling.",
+    "The EQ editor redraws its curve during a drag, so <code>eq-response.ts</code> ports the native biquad design, magnitude, and auto-gain to TypeScript. The render still runs only in the daemon. A test holds the port equal to the C++ through a new <code>eq-response</code> mode in <code>field-dsp-check</code>."
+   ],
+   "files": [
+    {
+     "path": "src/time/tempo.ts",
+     "note": "Adds <code>MeterMap.position</code>, which turns ticks into <code>[bar, beat, tick]</code>, and <code>MeterMap.span</code>, which turns ticks into a span from an anchor."
+    },
+    {
+     "path": "src/audio/eq-response.ts",
+     "note": "A line-for-line port of <code>design</code>, <code>magnitudeDb</code>, and <code>autoGainDb</code> from <code>biquad.cpp</code>, for drawing only."
+    },
+    {
+     "path": "native/audiod/src/dsp-check.cpp",
+     "note": "An <code>eq-response</code> mode that prints the native curve and auto-gain for given bands, so a test can compare the port against it. <code>cdd4388</code> added the <code>&lt;cmath&gt;</code> include that Linux needed."
+    },
+    {
+     "path": "src/time/tempo.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/audio/eq-response.test.ts",
+     "collapsed": true
+    }
+   ],
+   "checks": []
+  },
+  {
+   "id": "server",
+   "title": "The field ui server",
+   "kicker": "One process that owns the session, the socket, and every write",
+   "intro": [
+    "<code>runUi</code> compiles the session, connects to the daemon, and starts the watch loop. It then serves the built client and accepts WebSockets only on <code>/ws</code>, with a matching Origin and the per-launch token. Each message is validated with zod and dispatched: transport commands go to the daemon, and pause and stop push a snapshot with the transport's position. Solo recompiles and swaps the session, and holds the solo only once the swap succeeds. File edits run one at a time: each resolves the owner file, checks the hash, calls a pure function in <code>ui-edits.ts</code>, loads the project with the result, and writes it only when that load adds no error. Snapshots go out through their own promise chain and only when they differ.",
+    "At the end it opens the Electron shell, or a browser tab with <code>--browser</code> or when the shell exits before any view connects. It waits for Ctrl-C or for the window to close, then stops the transport and closes every open socket."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/ui.ts",
+     "note": "The server: upgrade guards, message schemas, the snapshot and write chains, <code>writeChecked</code>, the watch-loop hooks, the edit handlers, static files, the shell launch with its browser fallback, and teardown."
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "Registers <code>field ui &lt;song&gt;</code> with <code>--port</code>, <code>--no-open</code>, and <code>--browser</code>. The head's merge keeps it beside main's <code>field record</code>."
+    },
+    {
+     "path": "src/commands/ui.test.ts",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "edits",
+   "title": "Edits and the timeline projection",
+   "kicker": "Pure text-to-text YAML edits, and the lanes the view draws",
+   "intro": [
+    "<code>ui-edits.ts</code> holds every file edit as a pure function from document text to document text, so a test can write, read back, and compare bytes. Each one keeps the author's spelling: a musical <code>at: [5]</code> stays an array, defaults stay implicit, and comments survive. Split clones the entry node so both halves keep every field and comment.",
+    "<code>ui-timeline.ts</code> turns the loaded song into lanes: one per placement, children for placed tracks, each with its window in session samples, the hash of the file it came from, and a waveform envelope read from the built stem."
+   ],
+   "files": [
+    {
+     "path": "src/commands/ui-edits.ts",
+     "note": "Edit, move, split, stretch, and the three insert operations, each returning the new text or a refusal."
+    },
+    {
+     "path": "src/commands/ui-timeline.ts",
+     "note": "Builds the timeline lanes and their waveform envelopes. <code>07447dd</code> keeps each lane's index in the unfiltered <code>inputs:</code>, so a receive no longer shifts it.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The receive-index fix holds at <code>f61b4a1</code>: <code>placements()</code> pairs each non-receive entry with its index in <code>inputs:</code> before filtering, at both the top level and the child rows. Checked by reading <code>07447dd</code> and its new test.",
+       "line": 131
+      }
+     ]
+    },
+    {
+     "path": "src/commands/ui-edits.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/commands/ui-timeline.test.ts",
+     "collapsed": true
+    }
+   ],
+   "checks": []
+  },
+  {
+   "id": "client",
+   "title": "The client and its shell",
+   "kicker": "A React app in an Electron window, with local state only inside a gesture",
+   "intro": [
+    "<code>App.tsx</code> opens the WebSocket, keeps the latest snapshot, and runs a frame loop that advances the playhead from the last position event. <code>Timeline.tsx</code> draws the ruler, rows, clips, waveforms, and drag handles, and follows the playhead during playback. <code>Inserts.tsx</code> shows the selected track's chain, with knobs for each effect and an EQ curve with draggable bands.",
+    "<code>shell.cjs</code> is the Electron main process: one window on the server's URL, with the renderer's console mirrored to the terminal, which is how a blank window was diagnosed."
+   ],
+   "files": [
+    {
+     "path": "ui/src/App.tsx",
+     "note": "The socket, the playhead loop that runs only while playing, the transport bar, the lane controls that write on pointer-up or key-up, and the keyboard shortcuts."
+    },
+    {
+     "path": "ui/src/Timeline.tsx",
+     "note": "The timeline: rows, clip drags, trims, selection, and the follow-the-playhead scroll."
+    },
+    {
+     "path": "ui/src/Inserts.tsx",
+     "note": "The insert panel: add and remove effects, knobs, and the EQ editor."
+    },
+    {
+     "path": "ui/shell.cjs",
+     "note": "The Electron main process: profile directory, window, console mirroring, an <code>http</code> and <code>https</code> only window-open handler, and a <code>will-navigate</code> guard that keeps the window on the session."
+    },
+    {
+     "path": "ui/src/app.css",
+     "note": "Hand-rolled styles, including the sticky header column and the clip grips."
+    },
+    {
+     "path": "ui/src/main.tsx",
+     "note": "Mounts the app and turns a render crash into a visible message."
+    },
+    {
+     "path": "ui/index.html",
+     "note": "The page, with a content security policy limited to the local server."
+    }
+   ],
+   "checks": []
+  },
+  {
+   "id": "workspace",
+   "title": "Workspace, dependencies, and CI",
+   "kicker": "A second pnpm workspace member for the client, and CI that builds it",
+   "intro": [
+    "The client is its own pnpm workspace member, <code>ui/</code>, so its DOM and JSX toolchain stays out of the CLI's strict Node-only config. The root package gains <code>ws</code> for the server. React, Vite, and Electron live only in <code>ui/</code>. CI typechecks and builds the client on Linux."
+   ],
+   "files": [
+    {
+     "path": "package.json",
+     "note": "Adds <code>ws</code> and <code>@types/ws</code>, and a <code>build:ui</code> script."
+    },
+    {
+     "path": "ui/package.json",
+     "note": "The client's dependencies: React 18, Vite 6, and Electron 43."
+    },
+    {
+     "path": "pnpm-workspace.yaml",
+     "note": "Declares the two workspace members, <code>.</code> and <code>ui</code>."
+    },
+    {
+     "path": ".github/workflows/ci.yml",
+     "note": "Builds <code>ui/</code> on Linux, with a comment on why the install fetches no Electron runtime."
+    },
+    {
+     "path": "ui/vite.config.ts",
+     "note": "The Vite config, with only the React plugin, and a comment on why there is no dev-server mode against a running <code>field ui</code>."
+    },
+    {
+     "path": "ui/tsconfig.json",
+     "note": "The client's own TypeScript config, with DOM types and JSX."
+    },
+    {
+     "path": "pnpm-lock.yaml"
+    }
+   ],
+   "checks": []
+  },
+  {
+   "id": "docs",
+   "title": "Root docs",
+   "kicker": "How mute and field ui work, in the docs that describe the system today",
+   "intro": [
+    "The root docs describe the system as it is, and the repository asks for them to change in the same pull request as the behavior. <code>tracks.md</code> adds <code>mute</code> to what an entry can carry, <code>build-graph.md</code> says how a muted entry leaves the plan and its cables, <code>architecture.md</code> describes <code>field ui</code>: the loopback server, its guards, the session-only solo, and the shell. <code>cli.md</code>, the command manual that <code>main</code> gained in #162, tells you how to open it."
+   ],
+   "files": [
+    {
+     "path": "docs/tracks.md",
+     "note": "<code>mute</code> among an entry's fields, and what it does to the placement and its sends."
+    },
+    {
+     "path": "docs/build-graph.md",
+     "note": "A muted entry leaves the stem's spec, key, and dependencies, and an all-muted cable carries nothing."
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "A paragraph on <code>field ui</code> in the control plane section."
+    },
+    {
+     "path": "docs/cli.md",
+     "note": "An \"Open a song in the UI\" section, with the client build step and the three options, and a row in the command reference."
+    }
+   ],
+   "checks": []
+  },
+  {
+   "id": "plans",
+   "title": "Plans",
+   "kicker": "The UI plan flips to in-progress, two plans record amendments, and a catalogue arrives",
+   "intro": [
+    "The UI plan, <code>docs/projects/ui/readme.md</code>, moves from <code>draft</code> to <code>in-progress</code> at <code>priority: now</code> and gains §6, the record of what the first implementation settled, including the four §3 non-goals the first version crossed: the timeline, its waveforms, the clip edits, and the insert editor. Every question in §5 is answered or settled, so the flip owes no open question. <code>project-core</code> §5 records the new stack pieces, the <code>ui/</code> workspace member, <code>ws</code>, React, Vite, and Electron, against its single-package decision. <code>render-pipeline</code> decision 4 records the TypeScript EQ arithmetic as a bounded reversal.",
+    "<code>daw-features</code> is a draft catalogue of what users of other DAWs praise and wish for, with what each would mean for Field. It claims no readiness. Its four picks now have project directories of their own at <code>draft</code> and <code>later</code>: <code>detail-pane</code>, <code>actions-and-macros</code>, <code>sound-browser</code>, and <code>key-conforming</code>. Each is a stub with a goal and a pointer back to its catalogue section, as the repository asks of a project with no plan yet."
+   ],
+   "files": [
+    {
+     "path": "docs/projects/ui/readme.md",
+     "note": "Frontmatter flip, §5's shell question settled, and §6, which now records the nested rows, the timeline, the clip edits, and the insert editor with their reasons."
+    },
+    {
+     "path": "docs/projects/project-core/readme.md",
+     "note": "Two dated amendments to §5's stack record: the workspace member with <code>ws</code>, React, and Vite, and then Electron, which downloads its runtime on first use."
+    },
+    {
+     "path": "docs/projects/render-pipeline/readme.md",
+     "note": "An amendment to decision 4: response arithmetic, never sample processing, exists in TypeScript again, held equal to the C++ by a test."
+    },
+    {
+     "path": "docs/projects/daw-features/readme.md",
+     "note": "A draft research catalogue at <code>priority: later</code>. §16 links each of its four picks to its new project."
+    },
+    {
+     "path": "docs/projects/detail-pane/readme.md",
+     "collapsed": true
+    },
+    {
+     "path": "docs/projects/actions-and-macros/readme.md",
+     "collapsed": true
+    },
+    {
+     "path": "docs/projects/sound-browser/readme.md",
+     "collapsed": true
+    },
+    {
+     "path": "docs/projects/key-conforming/readme.md",
+     "collapsed": true
+    }
+   ],
+   "checks": []
+  }
+ ]
+}
