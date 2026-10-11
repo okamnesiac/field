@@ -41,26 +41,49 @@ pnpm add -g .
 
 ## Before you install
 
-Before it changes anything, the installer checks for the tools the
-target needs, and stops with exit status 69 and a message naming the one
-that is missing or too old. It does not look for git, a C++ compiler,
-or the Linux development headers. When one is missing, the daemon build
-fails and says so. A checkout's `all` has installed the CLI by then; a
-release install has changed nothing.
+Before it changes anything, the installer checks for every tool the
+target needs. When any is missing or too old, it lists them all, prints
+the commands that install them, and stops with exit status 69:
 
-- **Node 24 or newer.** The version in `.nvmrc`.
-- **pnpm.** `corepack enable pnpm` installs the version `package.json`
-  names. A release builds with pnpm too. For a checkout, also run
-  `pnpm setup` once, then open a new shell, so pnpm has a global bin
-  directory on your PATH to link `field` into.
-- **CMake 3.24 or newer and a C++20 compiler**, for `field-audiod`. On
-  macOS, `brew install cmake` and Xcode's command line tools. On Linux,
-  JUCE also needs the ALSA, X11, and freetype development headers;
-  `.github/workflows/ci.yml` installs the packages it needs on Ubuntu.
+```console
+$ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+install.sh: this machine is missing what Field needs to build:
+
+  node-missing       Field needs Node 24 or newer
+  pnpm-missing       Field builds with pnpm
+  cmake-missing      building field-audiod needs CMake 3.24 or newer
+
+Install what is missing:
+
+  # Homebrew first, from https://brew.sh
+  brew install node pnpm cmake
+
+Then open a new shell and run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash again.
+```
+
+On macOS the commands use Homebrew. On Linux they use `apt-get` and the
+Debian and Ubuntu package names; on another distribution, install the
+same packages with its package manager. `all` needs everything below,
+`audiod` everything but Node and curl and tar, `cli` Node and pnpm, and
+`workers` Node alone.
+
+- **Node 24 or newer.** The version in `.nvmrc`. On Linux, install it
+  from [nodejs.org](https://nodejs.org/en/download), because Debian and
+  Ubuntu package an older one.
+- **pnpm.** On Linux, `corepack enable pnpm` installs the version
+  `package.json` names. For a checkout, also run `pnpm setup` once, then
+  open a new shell, so pnpm has a global bin directory on your PATH to
+  link `field` into.
+- **CMake 3.24 or newer**, for `field-audiod`.
+- **A C++20 compiler and git**, for `field-audiod`, whose build clones
+  JUCE with git. On macOS, Xcode's command line tools hold both, and
+  `xcode-select --install` installs them.
+- **The ALSA, X11, and freetype development headers**, on Linux, which
+  JUCE builds against. The installer looks for them with `pkg-config`,
+  and the packages it names are the ones `.github/workflows/ci.yml`
+  installs on Ubuntu.
 - **curl and tar**, for a release install, which downloads the release's
   source.
-- **git**, for a release install too, because the daemon build clones
-  JUCE with it. A checkout has it already.
 
 `field build` also needs [SuperCollider](https://supercollider.github.io/),
 and `field generate` needs [uv](https://docs.astral.sh/uv/). The

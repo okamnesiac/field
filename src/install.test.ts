@@ -52,13 +52,14 @@ function which(tool: string): string | undefined {
 }
 
 const BASH = which('bash')!;
-// curl is a stand-in too; tar and gzip unpack the stand-in releases.
+const UNAME = which('uname')!;
+// curl is a stand-in too, and so are uname and the compiler checks; tar
+// and gzip unpack the stand-in releases.
 const TOOLS = [
   'bash',
   'git',
   'node',
   'dirname',
-  'uname',
   'sed',
   'grep',
   'cat',
@@ -245,6 +246,22 @@ beforeEach(() => {
   write(join(bin, 'pnpm'), PNPM, 0o755);
   write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
   write(join(bin, 'curl'), CURL, 0o755);
+  // The platform is the machine's unless FAKE_UNAME names another, so the
+  // macOS and Linux checks both run wherever the suite does. A compiler and
+  // every header module are there unless a test removes them, or names the
+  // modules FAKE_NO_HEADERS leaves out.
+  write(
+    join(bin, 'uname'),
+    `#!${BASH}\nif [ -n "\${FAKE_UNAME:-}" ] && [ "\${1:-}" = -s ]; then echo "$FAKE_UNAME"; else exec ${UNAME} "$@"; fi\n`,
+    0o755,
+  );
+  write(join(bin, 'xcode-select'), `#!${BASH}\necho ${root}\n`, 0o755);
+  write(join(bin, 'c++'), `#!${BASH}\n`, 0o755);
+  write(
+    join(bin, 'pkg-config'),
+    `#!${BASH}\ncase " \${FAKE_NO_HEADERS:-} " in *" $2 "*) exit 1 ;; esac\n`,
+    0o755,
+  );
   write(join(root, 'cli.js'), CLI);
   write(join(root, 'release-cli.js'), RELEASE_CLI);
   writeFileSync(log, '');
@@ -444,11 +461,90 @@ posix('install.sh cli', () => {
     expect(run.log.some((line) => line.includes('install'))).toBe(false);
   });
 
-  it('names corepack when pnpm is missing', () => {
+  it('names corepack on Linux when pnpm is missing', () => {
     rmSync(join(bin, 'pnpm'));
-    const run = install('cli');
+    const run = install('cli', { FAKE_UNAME: 'Linux' });
     expect(run.status).toBe(69);
-    expect(run.stderr).toContain('corepack enable pnpm');
+    expect(run.stderr).toContain('  corepack enable pnpm\n');
+  });
+
+  it('names Homebrew on macOS when pnpm is missing', () => {
+    rmSync(join(bin, 'pnpm'));
+    const run = install('cli', { FAKE_UNAME: 'Darwin' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  brew install pnpm\n');
+  });
+
+  it('builds the CLI without the tools only the daemon needs', () => {
+    rmSync(join(bin, 'cmake'));
+    rmSync(join(bin, 'c++'));
+    rmSync(join(bin, 'xcode-select'));
+    expect(install('cli').status).toBe(0);
+  });
+});
+
+posix('install.sh before it changes anything', () => {
+  // Every check runs before the installer stops, so one run names all that
+  // is missing, with one command per package manager, rather than one tool
+  // a run, or a failure minutes into compiling JUCE.
+  it('names everything missing on macOS at once, and the commands that install it', () => {
+    for (const tool of ['node', 'pnpm', 'cmake', 'xcode-select']) rmSync(join(bin, tool));
+    const run = install(undefined, { FAKE_UNAME: 'Darwin' });
+    expect(run.status).toBe(69);
+    for (const label of ['node-missing', 'pnpm-missing', 'cmake-missing', 'xcode-missing']) {
+      expect(run.stderr).toContain(`  ${label} `);
+    }
+    // The command line tools first, because Homebrew needs them too.
+    expect(run.stderr).toContain(
+      '  xcode-select --install\n  # Homebrew first, from https://brew.sh\n  brew install node pnpm cmake\n',
+    );
+    expect(run.stderr).toContain(`Then open a new shell and run ~/checkout/install.sh all again.`);
+    expect(changes(run)).toEqual([]);
+  });
+
+  it('leaves Homebrew out of the steps when it is installed', () => {
+    rmSync(join(bin, 'cmake'));
+    write(join(bin, 'brew'), `#!${BASH}\n`, 0o755);
+    const run = install('audiod', { FAKE_UNAME: 'Darwin' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('Install what is missing:\n\n  brew install cmake\n\n');
+  });
+
+  it('names the Debian packages on Linux, and what no package covers', () => {
+    for (const tool of ['node', 'c++', 'git']) rmSync(join(bin, tool));
+    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
+    const run = install(undefined, { FAKE_UNAME: 'Linux', FAKE_NO_HEADERS: 'alsa x11' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  compiler-missing ');
+    expect(run.stderr).toContain('  git-missing ');
+    expect(run.stderr).toContain('pkg-config finds no alsa x11');
+    expect(run.stderr).toContain(
+      '  sudo apt-get install -y build-essential git libasound2-dev libfreetype-dev libfontconfig1-dev',
+    );
+    expect(run.stderr).toContain('  # Node 24 or newer, from https://nodejs.org/en/download\n');
+    expect(run.stderr).not.toContain("your distribution's package manager");
+    expect(changes(run)).toEqual([]);
+  });
+
+  it("says the Debian names are to translate on a Linux without apt-get", () => {
+    const run = install('audiod', { FAKE_UNAME: 'Linux', FAKE_NO_HEADERS: 'glu' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain("install the same with your distribution's package manager");
+    expect(run.stderr).toContain('libglu1-mesa-dev');
+  });
+
+  it('asks for the headers too when there is no pkg-config to look for them', () => {
+    rmSync(join(bin, 'pkg-config'));
+    const run = install('audiod', { FAKE_UNAME: 'Linux' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  pkg-config-missing ');
+    expect(run.stderr).toContain('  headers-unchecked ');
+    expect(run.stderr).toContain('apt-get install -y pkg-config libasound2-dev');
+  });
+
+  it('checks for no headers on macOS, where JUCE uses the system frameworks', () => {
+    rmSync(join(bin, 'pkg-config'));
+    expect(install('audiod', { FAKE_UNAME: 'Darwin' }).status).toBe(0);
   });
 });
 
@@ -1045,6 +1141,19 @@ posix('install.sh installs a release', () => {
     const run = release(undefined, { FIELD_OFFLINE: '1' });
     expect(run.status).toBe(69);
     expect(run.stderr).toContain('FIELD_OFFLINE is set');
+  });
+
+  it('names curl and tar, and the download to run again, before it makes a directory', () => {
+    rmSync(join(bin, 'curl'));
+    rmSync(join(bin, 'tar'));
+    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
+    const run = release(undefined, { FAKE_UNAME: 'Linux' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  sudo apt-get install -y curl tar\n');
+    expect(run.stderr).toContain(
+      'Then open a new shell and run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash again.',
+    );
+    expect(existsSync(data)).toBe(false);
   });
 
   it('says how to put the bin directory on PATH when it is not', () => {
