@@ -595,7 +595,10 @@ What landed, and the decisions it made:
    and the heartbeat hands ownership over by that count rather than by
    reading the standby slot. It also opens the next standby before it
    finalizes the last pass. A take still waiting for its wrap reports as
-   `pending`, and stop discards it as it discards an unused standby.
+   `pending`, and stop discards it as it discards an unused standby. A
+   `session` swap also dropped the take's region, so the clock ran on
+   past `until`. A swap now carries the region onto the incoming
+   session, and the daemon refuses a session the region does not fit.
 5. **`field record --loop` lands takes as they arrive**, each `take`
    event landing in order while the next pass records, the last one
    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs

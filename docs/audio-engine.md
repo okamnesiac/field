@@ -198,6 +198,12 @@ reports it as `pending` until then, so every take is a whole pass that
 starts at `at`. `field record` reports the skipped passes on its live
 line and in its closing tally.
 
+A `session` swap during a loop take, such as the one `field play
+--watch` sends after an edit, carries the take's region onto the
+incoming session, as it carries the transport. The daemon refuses a
+session that the region does not fit, and the take goes on against the
+session already playing.
+
 The region loop is the live session's own (`loop {from, to}`, `to`
 defaulting to the content's extent): the clock wraps from `to` back to
 `from` with the chains ringing across the wrap exactly as they do at

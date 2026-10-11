@@ -393,6 +393,12 @@ private:
     std::atomic<int> captureMissed { 0 };
     std::unique_ptr<field::Capture> standby;
     int loopTakes = 0; // takes finalized in the current loop
+    // A loop take's region is the take itself, so a session swap carries
+    // it onto the incoming session as it carries the transport; without
+    // it the clock would run on past `until` and every block would end a
+    // pass. Outside a loop take it clears the incoming session's region.
+    // Returns an error, empty on success, when the region does not fit.
+    juce::String carryTakeRegion (field::LiveSession& session) const;
     // Everything a new transaction needs, kept for the standbys a loop
     // opens after the first.
     field::Transaction::Facts takeFacts() const;

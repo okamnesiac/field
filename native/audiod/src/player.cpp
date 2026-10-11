@@ -406,11 +406,18 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
                 if (liveSession != nullptr)
                     predicted = liveSession->position();
             }
+            // A loop take's region goes on first, so the chain warms on
+            // it. The take can start or stop while this runs, so the
+            // check under the lock below is the one that decides.
+            carryTakeRegion (*next);
             if (predicted >= 0)
             {
-                if (next->looping() && next->lengthSamples() > 0)
+                // The position counts every pass of a region, which wraps
+                // it itself; a session's own loop wraps at its length.
+                const bool region = next->loopRegionTo() > next->loopRegionFrom();
+                if (! region && next->looping() && next->lengthSamples() > 0)
                     predicted %= next->lengthSamples();
-                else if (next->lengthSamples() > 0)
+                else if (! region && next->lengthSamples() > 0)
                     predicted = std::min (predicted, next->lengthSamples());
                 next->locate (predicted);
             }
@@ -420,6 +427,14 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         // to the end of the install this thread holds its lock, exactly
         // what every other request gets from handleLine.
         const juce::MessageManagerLock mml;
+        if (auto error = carryTakeRegion (*next); error.isNotEmpty())
+        {
+            // Refused: the session dies on the message thread, as a
+            // retired one does (retireOnMessageThread).
+            retireOnMessageThread (std::move (next));
+            result->setProperty ("error", error);
+            return juce::var (result.get());
+        }
         // Prefer running the device at the session's rate (bit-perfect
         // delivery); when it cannot switch, the prepared converter below
         // sets up converted delivery instead of refusing
@@ -487,9 +502,11 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveSession = std::move (next);
             if (hadSession)
             {
-                if (liveLoop && liveLength > 0)
+                // As at the pre-roll: a carried region wraps the position.
+                const bool region = liveSession->loopRegionTo() > liveSession->loopRegionFrom();
+                if (! region && liveLoop && liveLength > 0)
                     carry %= liveLength;
-                else if (liveLength > 0)
+                else if (! region && liveLength > 0)
                     carry = std::min (carry, liveLength);
                 liveSession->locate (carry);
                 livePlaying = wasPlaying;
@@ -1995,9 +2012,12 @@ juce::Array<juce::var> Player::stopRecording()
     }
     if (wasLoop && liveSession != nullptr)
     {
-        // The region was the take's; the session stops looping it.
+        // The region was the take's; the session stops looping it. A swap
+        // during the take installed the session looping, so the copy
+        // converted delivery reads follows it back.
         const juce::ScopedLock guard (liveLock);
         liveSession->setLoopRegion (0, 0);
+        liveLoop = liveSession->looping();
     }
     loopTakes = 0;
     announceTakes (manifests);
@@ -2093,6 +2113,26 @@ void Player::serviceCapture()
         captureStarted = false;
     }
     announceTakes (manifests);
+}
+
+juce::String Player::carryTakeRegion (field::LiveSession& session) const
+{
+    // Outside a loop take, the incoming session starts with no region.
+    if (! captureLoop.load())
+    {
+        session.setLoopRegion (0, 0);
+        return {};
+    }
+    try
+    {
+        session.setLoopRegion (captureStartAt.load(), captureUntil.load());
+    }
+    catch (const std::exception& e)
+    {
+        return "a loop take is recording, and its region does not fit this session (stop first): "
+               + juce::String (e.what());
+    }
+    return {};
 }
 
 juce::String Player::setLoopRegion (juce::int64 from, juce::int64 to)

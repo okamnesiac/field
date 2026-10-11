@@ -306,6 +306,63 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
     }
   });
 
+  // `field play --watch` swaps the session on an edit, and landing a
+  // loop take is one. The region is the take's, so the swap must carry
+  // it, or the clock runs past `until` and every block ends a pass.
+  it('a session swap mid-loop carries the take region, and one it does not fit is refused', { timeout: 20_000 }, async () => {
+    // A second song whose bed, three quarters of a second, ends before
+    // the region does.
+    createSong(root, 'rill');
+    const src = join(root, '..', `field-punch-short-${Math.random()}.wav`);
+    writeWavFloat32(src, NULL_RATE, [new Float32Array(36000).fill(0.1)]);
+    await importAsset(root, 'rill', src, 'bed');
+    rmSync(src);
+    writeFileSync(
+      join(root, 'songs/rill/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: bed', '    anchor: absolute', '    at: 0', ''].join('\n'),
+    );
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    const takes: AnyTake[] = [];
+    client.on('event', (e: AudiodEvent) => {
+      if (e.event === 'take') takes.push(e.take);
+    });
+    try {
+      const { session } = await compileSession(root, 'creek');
+      const { session: short } = await compileSession(root, 'rill');
+      await client.session(session);
+      await client.arm('//songs/creek/track:main', 1);
+      await client.record(24000, undefined, 48000, true);
+      await followLoop(client, takes, 1, 6000);
+      await expect(client.session(short)).rejects.toThrow('does not fit');
+      await client.session(session);
+      const landed = takes.length;
+      const status = await client.status();
+      expect(status.loop_from).toBe(24000);
+      expect(status.loop_to).toBe(48000);
+      // The swap fell in pass `landed`, or in the next one when its wrap
+      // had not been serviced yet, so the pass after those is wholly the
+      // swapped session's.
+      await followLoop(client, takes, landed + 3, 8000);
+      const passes = [...takes]; // whole passes; the stop's partial one lands after
+      await client.stop();
+      for (const take of passes) {
+        expect(take.started_at_samples).toBe(24000);
+        expect(take.frames).toBeGreaterThanOrEqual(24000);
+        assertGapless(readWav(join(root, take.file)).channels[0]!);
+      }
+      // A block the callback misses while the swap holds the session's
+      // lock still records, so only the passes clear of the swap are
+      // held to the region's length exactly.
+      expect(passes[0]!.frames).toBe(24000);
+      expect(passes[landed + 2]!.frames).toBe(24000);
+      const { recordings } = await client.recordings();
+      expect(recordings.every((r) => r.complete)).toBe(true);
+      expect(recordings).toHaveLength(takes.length);
+    } finally {
+      client.close();
+    }
+  });
+
   it('field record --until lands the take and stops; --loop lands one per pass until ctrl-c', { timeout: 30_000 }, async () => {
     createTrack(root, 'creek', 'lead-vocal');
     writeFileSync(
