@@ -8,9 +8,10 @@ priority: now
 **Goal:** one command installs Field and another keeps it current, the
 way Projector's `install.sh` and `project upgrade` do. `./install.sh`
 installs a checkout today, and `field upgrade` runs it from any
-directory. Once Field has releases, `curl -fsSL https://field.one/install.sh | bash`
-installs one with no clone, no pnpm, and no compiler, and `field upgrade`
-moves it to the next release.
+directory. Field has releases now, and once the release installer
+exists, `curl -fsSL https://field.one/install.sh | bash` installs one
+with no clone, building it as the checkout installer does, and
+`field upgrade` moves it to the next release.
 
 ## 1 The problem
 
@@ -181,46 +182,62 @@ decide the rest.
 
 ### 3.1 Releases (chunk 2)
 
-Projector releases need no artifact: pip builds the package from
-GitHub's source archive of the `v0` tag. Field cannot do that cheaply,
-because turning its source into something that runs needs pnpm, `tsc`,
-CMake, a C++ compiler, and three minutes of compiling JUCE. So a Field
-release publishes built artifacts:
+A release is a version tag and a GitHub release, as Projector's are,
+and publishes no files. Whoever installs it builds it from the tag's
+source, the daemon included, because Field publishes no daemon binary
+(§7.1). `docs/release.md` describes how to cut one.
 
-- **`field-<version>.tgz`.** The CLI, platform-independent: `dist/`,
-  `package.json`, `LICENSE`, production `node_modules/` (commander,
-  yaml, and zod, all plain JavaScript), and the directories the CLI
-  reads from its package root, which are `keymaps/`, `sc/`, and
-  `python/`. It needs only Node 24 to run.
-- **`field-audiod-<version>-<platform>.tgz`.** The daemon, one per
-  platform: `darwin-arm64` and `linux-x64` first (§7.2), under the
-  terms §7.1 settles.
-- **`SHA256SUMS`**, which the installer verifies.
+The version is `package.json`'s, the one `field --version` prints.
+`scripts/release.ts`, modeled on Projector's `.github/scripts/release.py`,
+has four commands:
 
-The version is `package.json`'s. A release script, like Projector's
-`.github/scripts/release.py`, bumps it and, once the bump merges, pushes
-an immutable `v0.2.0` tag, moves `v0` to the same commit, and creates
-the GitHub release. `v0` is the channel the installer follows.
+| Command | Does |
+| --- | --- |
+| `bump patch\|minor\|major` | Raises one part of the version, writes it to `package.json`, and prints it. |
+| `set X.Y.Z` | Writes an exact version. Both refuse a version that does not go up. |
+| `released` | Exits 0 when the version on `origin/main` is tagged, and 3 when it is not. |
+| `tag` | Tags that version `vX.Y.Z`, force-moves the major tag `v0` to the same commit, pushes both, and creates the GitHub release with generated notes. `--no-release` skips the GitHub release. |
+
+`.github/workflows/release.yml` runs them as Projector's Release
+workflow does. Started by hand with `patch`, `minor`, or `major`, its
+propose job runs `bump` on a `release/vX.Y.Z` branch and opens the
+release pull request. When a change to `package.json` reaches `main`,
+its publish job runs `released`, and `tag` when that exits 3. Node 24
+runs the script directly by stripping its types, and the script imports
+only Node's own modules, so neither job installs a dependency.
+
+`field-audiod` (`native/audiod/src/version.h`) and the model workers
+(`DAEMON_VERSION`) keep versions of their own. They report them in
+`hello`, the daemon stamps its version into take manifests, and they
+move with what each process does, so a release leaves them alone.
 
 ### 3.2 The release installer (chunk 3)
 
-Without a checkout, `install.sh` installs a release:
+Without a checkout, `install.sh` installs a release by building it:
 
 1. It reads the version from `package.json` at `FIELD_REF` (default
    `v0`) in `FIELD_REPO` (default `okamnesiac/field`), which is how
    Projector's installer learns the version it is installing.
-2. It downloads the CLI and the daemon for this platform from that
-   GitHub release, and verifies both against `SHA256SUMS`.
-3. It unpacks them into `~/.local/share/field/<version>/`, with the daemon
-   where `daemonBinary()` looks, switches
-   `~/.local/share/field/current` to it, and links `~/.local/bin/field`
-   to `current/dist/cli.js`. The previous version stays until the switch
-   succeeds, so a failed download leaves the old install working.
-4. It sets up again each worker that was set up in the previous version
+2. It downloads GitHub's source archive of the immutable tag for that
+   version, `vX.Y.Z` rather than `v0`, and unpacks it into
+   `~/.local/share/field/<version>/`.
+3. It runs the same steps a checkout install runs, with the same
+   prerequisite checks: `pnpm install --frozen-lockfile`, the CLI and UI
+   builds, and the daemon build.
+4. It switches `~/.local/share/field/current` to the new version and
+   links `field` to it. The previous version stays until the switch
+   succeeds, so a failed download or build leaves the old install
+   working.
+5. It sets up again each worker that was set up in the previous version
    (§7.5).
 
-It needs Node 24, curl, and tar, and no pnpm and no compiler. A platform
-with no prebuilt daemon stops and says to install from a checkout.
+It needs what `./install.sh` needs, plus curl and tar: Node 24, pnpm,
+CMake 3.24 or newer, and a C++ compiler. The first install compiles
+JUCE, which takes a few minutes. Each version unpacks into a directory
+of its own, so chunk 3 keeps JUCE's download outside it, for example
+with CMake's `FETCHCONTENT_BASE_DIR`, so that an upgrade does not fetch
+JUCE again. Whether `field` is linked by `pnpm add -g`, as a checkout
+is, or through `~/.local/bin`, is chunk 3's to settle (§4).
 
 `field upgrade` in a release install finds no checkout beside its
 package, so it downloads the newest installer, from
@@ -263,9 +280,10 @@ a private one. The website and the README then lead with this command.
   - A shim in `~/.local/bin` that runs `node <checkout>/dist/cli.js`.
     It would spare newcomers `pnpm setup`, but every existing install is
     a pnpm link and moving them means migrating each one. Release
-    installs (chunk 3) use `~/.local/bin` because they must not need
-    pnpm, and `status` reports `cli-shadowed` when both exist and the
-    wrong one is first on PATH.
+    installs (chunk 3) were to use `~/.local/bin` because they would not
+    need pnpm. Since §7.1 they build with pnpm too, so chunk 3 settles
+    how they link `field`. `status` reports `cli-shadowed` when two
+    `field` commands exist and the wrong one is first on PATH.
 - **Never pull, never switch branches.** The checkout may hold work in
   progress. `status` reports how far behind it is, which is Projector's
   choice too.
@@ -285,9 +303,18 @@ a private one. The website and the README then lead with this command.
   and the installer touches the binary after each build, so
   `audiod-stale` means a source changed since the installer last built
   the daemon, and the build it asks for clears it (§8.1).
-- **Releases ship built artifacts**, not a source archive (§3.1). The
-  source archive is what Projector installs from, and for Field it would
-  make every user install pnpm and a compiler and wait out a JUCE build.
+- **Releases are tags, and whoever installs one builds it** (§3.1,
+  amended 2026-10-11). This first said releases ship built artifacts, a
+  CLI tarball and a daemon per platform, so that a release install would
+  need no pnpm and no compiler. What changed is §7.1: a published daemon
+  binary is a distribution of JUCE and the VST3 SDK under copyleft
+  terms, and a user who builds the daemon from the release's source
+  distributes nothing. Once every user needs a compiler for the daemon,
+  a prebuilt CLI saves only the three seconds `tsc` takes, so it went
+  too, and with it the checksums and the per-platform builds. A release
+  install runs the steps a checkout install runs. Prebuilt binaries
+  remain the optimization to make if the toolchain turns out to be the
+  barrier (§7.3).
 - **The UI builds with the CLI.** `field ui` serves `ui/dist`, which
   bundles code from `src/`, so a CLI built without its UI leaves
   `field ui` stale or refusing. The `cli` target builds both rather than
@@ -312,19 +339,26 @@ Chunk 1:
 - `field upgrade workers` re-syncs the worker environments that are set
   up and creates none.
 
-Chunks 2 to 4:
+Chunk 2:
 
-- A release publishes the CLI, a daemon for each supported platform, and
-  checksums, and moves `v0`.
-- On a machine with Node 24 and no checkout,
-  `curl -fsSL https://field.one/install.sh | bash` installs `field` and
-  `field-audiod`, and `field upgrade` later moves both to the next
-  release.
+- Running the Release workflow with `patch`, `minor`, or `major` opens a
+  pull request that changes only the version in `package.json`.
+- Merging it tags `vX.Y.Z`, moves `v0` to the same commit, and creates
+  the GitHub release. A `package.json` change that leaves the version
+  alone releases nothing.
+- A release publishes no files.
+
+Chunks 3 and 4:
+
+- On a machine with the checkout installer's prerequisites and no
+  checkout, `curl -fsSL https://field.one/install.sh | bash` installs
+  `field` and builds `field-audiod`, and `field upgrade` later moves both
+  to the next release.
 
 ## 6 Chunks
 
-1. **The checkout installer and `field upgrade`.** §2. This change.
-2. **Releases.** §3.1. Blocked on §7.1.
+1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
+2. **Releases.** §3.1. This change.
 3. **The release installer.** §3.2. Needs chunk 2, and decides whether
    Windows gets an `install.ps1` (§7.6).
 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
@@ -332,7 +366,7 @@ Chunks 2 to 4:
 
 ## 7 Open questions
 
-### 7.1 The daemon binary's license
+### 7.1 The daemon binary's license (DECIDED, 2026-10-11)
 
 Field's code is under the MIT License (#184). The daemon carries more
 than Field's code: `field-audiod` links JUCE, which is AGPLv3 or
@@ -342,18 +376,34 @@ commercial JUCE license does not cover the SDK.
 [README.md](../../../README.md) "License" and
 [architecture.md](../../architecture.md) "Licensing" record these terms.
 
-So a daemon binary that chunk 2 publishes is a distribution under AGPLv3
-and GPLv3, unless the publisher holds both commercial licenses. Decide
-which before chunk 2 publishes one:
+So a daemon binary that a release published would be a distribution
+under AGPLv3 and GPLv3, unless the publisher held both commercial
+licenses.
 
-- **Publish under the copyleft terms.** The daemon's archive carries the
-  license notices, and the repository at the release tag is its source,
-  which needs the repository to be public by then.
+**Decided: Field publishes no daemon binary, and whoever installs Field
+builds it.** What a release distributes is Field's MIT source. JUCE is
+not in the repository either: `native/audiod/CMakeLists.txt` fetches it
+from JUCE's own repository at build time. A user's build is under the
+copyleft terms for that user's own use, and those terms attach only to
+someone who distributes it. The two options this beat:
+
+- **Publish under the copyleft terms**, with the license notices in the
+  daemon's archive and the repository at the release tag as its source.
+  It would make the one-line install need no compiler, at the price of
+  building, signing, and hosting a binary per platform (§7.3), and of a
+  source obligation on every release.
 - **Hold both commercial licenses**: a commercial JUCE license and
-  Steinberg's proprietary VST3 license.
+  Steinberg's proprietary VST3 license. It costs money every month to
+  remove an obligation that publishing nothing removes for free.
 
-A newer JUCE narrows the choice. Steinberg released VST3 SDK 3.8.0
-under the MIT License
+One obligation remains outside this plan: if audiofield.io ever runs
+`field-audiod` on its servers to render for users, AGPLv3 §13 asks it to
+offer those users the daemon's source. The source is public, so that is
+easy to meet, but it is an obligation.
+
+If prebuilt binaries become worth making, a newer JUCE narrows the
+choice they need. Steinberg released VST3 SDK 3.8.0 under the MIT
+License
 ([announcement](https://forums.steinberg.net/t/vst-3-8-0-sdk-released/1011988),
 and `LICENSE.txt` at the SDK's `v3.8.0_build_66` tag), and JUCE 8.0.11
 is the first JUCE release that bundles it: its
@@ -367,18 +417,22 @@ enable. Moving the daemon's pin off 8.0.4 is a change of its own.
 
 ### 7.2 Platforms
 
-`darwin-arm64` and `linux-x64` first. Intel Macs (`darwin-x64`) and
-`linux-arm64` each cost one more build per release. A platform with no
-binary can still install from a checkout.
+Answered by §7.1. A release has no per-platform files, so it installs
+wherever the checkout installer builds: macOS and Linux, on any
+architecture CMake and JUCE support. Windows is §7.6.
 
-### 7.3 Where the macOS daemon builds
+### 7.3 Where the macOS daemon builds (DECIDED, 2026-10-11)
 
-GitHub bills a macOS runner at ten times the Linux rate, a cold JUCE
-build takes minutes, and this account caps Actions spending at $40 a
-month. Either the release workflow builds the macOS daemon with a warm
-cache, or the release script builds it locally and uploads it with
-`gh release upload`. The second is cheaper, and makes a release depend
-on one machine.
+Nowhere, for now: after §7.1 a release builds nothing that depends on
+the platform, so the release workflow runs on Linux in seconds.
+
+If prebuilt binaries come later, they build locally, on a maintainer's
+Mac, and `gh release upload` attaches them to the release. GitHub bills
+a macOS runner at ten times the Linux rate, a cold JUCE build takes
+minutes, and this account caps Actions spending at $40 a month. Building
+in the release workflow with a warm cache lost to that cost, and the
+price of the local build, a release that depends on one machine, is one
+to pay only once binaries exist.
 
 ### 7.4 Which domain serves the installer
 
@@ -406,9 +460,8 @@ with the steps, and the installer's tests skip there.
 Chunk 3 decides whether Windows gets an `install.ps1` of its own. A
 checkout on Windows installs with the four commands in
 `docs/install.md`, but a release install has no checkout to run them
-in, and the release installer is bash too. The answer goes with whether
-releases publish a Windows daemon at all, which §7.2 leaves out of the
-first platforms.
+in, and the release installer is bash too. Since §7.1 a Windows release
+install would build the daemon with MSVC, as a Windows checkout does.
 
 ## 8 Chunk 1 as built (2026-10-11)
 
@@ -471,3 +524,47 @@ first platforms.
 ### 8.3 What is still owed
 
 - Chunks 2 to 4, and the decisions in §7 that gate them.
+
+## 9 Chunk 2 as built (2026-10-11)
+
+### 9.1 What implementation settled
+
+- **The script is TypeScript that Node runs directly.** Projector's
+  release script is Python, its own language; Field's is
+  `scripts/release.ts`. Node 24 strips its types, verified on 24.19.0
+  with no warning, and it imports only Node's modules, so the workflow
+  sets up Node and runs it with no `pnpm install`. `src/release.test.ts`
+  imports it, which is what puts it under `pnpm typecheck`.
+- **One version file.** Projector's script checks that three version
+  files agree. Field releases only `package.json`'s version, because the
+  daemon's and the workers' versions describe their protocols (§3.1).
+- **The GitHub repository comes from the configured remote URL.**
+  `git remote get-url` applies `insteadOf` rewrites, which can turn a
+  GitHub URL into a mirror's, so the script reads
+  `remote.<name>.url` instead.
+- **Tags are fetched with `--force`.** Every release moves `v0`, and a
+  local copy of the old one would otherwise refuse the fetch that
+  `released` and `tag` start with.
+- **This repository does not let GitHub Actions open pull requests**
+  (`can_approve_pull_request_reviews` is `false` on 2026-10-11), so the
+  propose job can push the release branch but not open its pull
+  request. The job then fails with the link that opens it by hand, and
+  `docs/release.md` names the setting.
+
+### 9.2 What was verified, and how
+
+- `src/release.test.ts` runs the script's functions against a temporary
+  repository whose `origin` is a bare repository standing in for the
+  GitHub URL. It covers each `bump` part, `set` refusing a version that
+  does not go up, `tag` pushing both tags and moving `v0` on the next
+  release, tagging what `origin/main` holds rather than an unpushed
+  bump, refusing a tagged version, a remote that is not GitHub, a failed
+  GitHub release naming the command that finishes it, `released`'s exit
+  codes, and plain `node` running the file.
+- The workflow itself has not run. Its first run is the first release.
+
+### 9.3 What is still owed
+
+- The first release. Run the Release workflow with `minor` to release
+  0.2.0, which tags `v0.2.0` and creates `v0`.
+- Chunks 3 and 4.
