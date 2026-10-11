@@ -381,7 +381,7 @@ and stops.
 | Option | Does |
 | --- | --- |
 | `--device <name>` | picks an input device (default: the system input) |
-| `--input <n>` | records this channel of the device, counting from 1 (default 1) |
+| `--input <n,...>` | records these channels of the device, counting from 1, one per audio track in the order named (default 1, 2, ...) |
 | `--at <position>` | starts the take at `bar[.beat[.tick]]` |
 | `--until <position>` | punches out: the take ends on that exact sample |
 | `--loop` | loops `--at` to `--until`, landing a take every pass until ctrl-c |
@@ -392,6 +392,17 @@ and stops.
 
 `--until` and `--count-in` need `--at`, and `--loop` needs `--until`
 and a live song as the bed. Under `--loop`, the last pass is chosen.
+
+Name several tracks to record them in one pass, audio, MIDI, or both:
+every take starts on the same sample and lands on its own track. A
+track whose record entry names an instrument records MIDI
+([keys.md](keys.md#record-what-you-play)). The audio tracks take
+`--input` channels in the order you name them, 1, 2, and on when you
+give none; `--loop` records one track only:
+
+```sh
+field record tall-grass/track:vocal tall-grass/track:guitar tall-grass/track:keys --input 1,2
+```
 
 Every take is a transaction under `.field/recording/` until it lands, so
 a crash loses nothing that reached the disk. `field record --list`
@@ -622,7 +633,8 @@ amended. Porting the rest is tracked there and in
 | `field devices` | list output and input devices |
 | `field transport <op>` | drive the running daemon |
 | `field ui <song>` | open a song in the UI window, served on `127.0.0.1` |
-| `field record <track>` | record a take onto a track's `record:` entry |
+| `field record <tracks...>` | record a take onto each track's `record:` entry, in one pass |
+| `field keys [targets...]` | play the keyboard as a MIDI source, and instruments or MIDI tracks from it |
 | `field login` | log in to a remote and store the token |
 | `field logout` | forget the stored token |
 | `field clone <owner>/<project> [dir]` | clone a project and warm the build cache |

@@ -183,6 +183,12 @@ export function parseInputChannel(value: string): number {
   return n;
 }
 
+// `field record --input 1,2`: an input per armed audio track, in the order
+// the tracks are named (arming.md §2.2).
+export function parseInputChannels(value: string): number[] {
+  return value.split(',').map((part) => parseInputChannel(part.trim()));
+}
+
 // `field record --count-in`: whole bars, because that is what a musician
 // counts (recording.md §7).
 export function parseCountIn(value: string): number {

@@ -259,6 +259,14 @@ because you play in time with what you hear. `field choose` picks
 among takes as it does for audio. For the files a take leaves, see
 [project-model.md](project-model.md) "MIDI takes".
 
+Name several tracks to record them in one pass: every MIDI track you
+name records the same notes, and an audio track records its own input,
+so you can sing and play at once:
+
+```console
+$ field record creek/track:vox creek/track:keys --at 17
+```
+
 A take starts with the modulation wheel at 0, because it records only
 the messages that arrive once it has started. A wheel you left up
 before then plays live but not in the take's render, so set it again

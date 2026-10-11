@@ -7,6 +7,7 @@ import {
   parseBpm,
   parseChannels,
   parseDurationSeconds,
+  parseInputChannels,
   parseSeed,
   parseVariantNumber,
   parseVariants,
@@ -139,5 +140,14 @@ describe('formatSeeds', () => {
     // returning [3, 9] must not be reported as "seeds 3–9", which names
     // seeds that never ran (a8920be review).
     expect(formatSeeds([3, 9])).toBe('seeds 3, 9');
+  });
+});
+
+describe('parseInputChannels', () => {
+  it('reads one input per armed audio track, in order (arming.md §2.2)', () => {
+    expect(parseInputChannels('2')).toEqual([2]);
+    expect(parseInputChannels('1, 3')).toEqual([1, 3]);
+    expect(() => parseInputChannels('1,0')).toThrow('channels count from 1');
+    expect(() => parseInputChannels('1,')).toThrow('channels count from 1');
   });
 });

@@ -222,3 +222,41 @@ does not load, every voice stays as it was.
 | The real host with two silent programs that both name their SynthDef `\quiet`, a note from `field-audiod --keys` | Live, then a voice on and a voice off for the note, with no error. |
 
 Still owed: criterion 4 by ear, hearing two instruments sound one key.
+
+## 10 Chunk 2 as built (2026-10-11)
+
+`field record` takes any number of tracks. `planArm` in
+`src/commands/record.ts` resolves each to its record entry and kind,
+refuses a track named twice, tracks in two songs, MIDI-only sets with
+audio flags, and `--loop` with more than one track, and gives each audio
+track its `--input` in order. One track arms as before; several arm
+through the daemon's `arm` with `tracks`.
+
+In the daemon, the first armed track is the *primary*, and every capture
+rule that existed runs on it unchanged: the latch, the count-in,
+punch-out, and loop takes. The others are *companions* in fixed slots
+the callback reads through atomics. They start on the primary's latch,
+an audio companion pushes the same span of its own input, and they end
+with its pass. An audio track is the primary whenever one is armed, so
+`--until` still cuts audio on its exact sample. The MIDI clock's
+stamping, which a MIDI take had inline, is now one step that a MIDI
+primary's companions mirror and that an audio primary's MIDI companions
+run on their own. Those end a block after the audio, as a MIDI take
+ends, and the pass finalizes when every take has. `stop` returns every
+manifest, `status.record` lists `armed`, and `recordings` and `recover`
+know every take in flight. The null input presents each armed channel
+in order, so a test can tell input 1's sawtooth from input 2's constant.
+
+| Check | Result |
+| --- | --- |
+| `src/commands/record-tracks-daemon.test.ts`, against the daemon in null mode | Two audio tracks on inputs 1 and 2: one take holds the sawtooth, the other the constant, with the same start and length; an input or a track armed twice is refused, and so is a loop over two. An audio and a MIDI track: both takes start together, and the MIDI one holds the note. A punch-out at 24000 over a live session: the audio take is 24000 frames, the MIDI take ends a block later at 24000, and both land. Two MIDI tracks hold the same notes. `field record` with an audio and a MIDI track lands both, each on its own track, and `field check` is clean. |
+| `src/commands/record-plan.test.ts` | Inputs 1, 2, and on by default, `--input` in order, and each refusal. |
+| The existing daemon tests (`record-daemon`, `punch-daemon`, `record-midi-daemon`, `click-daemon`, `play-daemon`) | All pass against the reworked daemon: one track records exactly as before. |
+
+Found along the way, and not this chunk's: an audio punch-out against a
+*file* bed ends 3 samples short of `until` (24000 asked, 23997 taken),
+with one track as with several. A live session's position is exact, so
+the punch-out tests, which use one, never saw it. A file bed's position
+comes from JUCE's transport, which reports a few samples ahead of what it
+has delivered. Still owed: criteria 6 to 8 by hand, on a real interface
+with two inputs and a controller.

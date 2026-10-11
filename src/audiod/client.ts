@@ -8,6 +8,7 @@ import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
   armMidiResponseSchema,
+  armTracksResponseSchema,
   armResponseSchema,
   devicesResponseSchema,
   errorResponseSchema,
@@ -22,6 +23,7 @@ import {
   SOCKET_RELATIVE,
   statusResponseSchema,
   stopResponseSchema,
+  type ArmTrack,
   type AudiodEvent,
   type ClickSchedule,
 } from './protocol.js';
@@ -272,6 +274,12 @@ export class AudiodClient extends EventEmitter {
   // loop takes are refused.
   armMidi(track: string) {
     return this.request('arm', { track, kind: 'midi' }, armMidiResponseSchema);
+  }
+
+  // Arms every track at once (arming.md §2.2), on `device` for the audio
+  // ones; daemon feature "record-tracks".
+  armTracks(tracks: ArmTrack[], device?: string) {
+    return this.request('arm', { tracks, ...(device !== undefined ? { device } : {}) }, armTracksResponseSchema);
   }
   disarm() {
     return this.request('disarm', {}, okResponseSchema);

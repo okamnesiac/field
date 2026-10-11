@@ -93,7 +93,7 @@ public:
     // What lives under root/.field/recording/: one entry per
     // transaction, complete or not, with what is on disk and whether it
     // is the one still being written.
-    static juce::var list (const juce::File& root, const juce::String& activeId);
+    static juce::var list (const juce::File& root, const juce::StringArray& activeIds);
     // Make an incomplete transaction whole from what is on disk and mark
     // the manifest recovered. Throws on an unknown id, an already
     // complete take, or an unreadable file. Never call on the active

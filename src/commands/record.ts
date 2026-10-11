@@ -5,7 +5,7 @@ import { expandPattern } from '../graph/graph.js';
 import { formatLabel, parsePattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
-import { landAnyTake, readTransaction, recordNodeFor, type LandedTake, type LandOptions } from './land.js';
+import { landAnyTake, readTransaction, recordNodeFor, type LandedTake, type LandOptions, type RecordNode } from './land.js';
 import {
   formatPosition,
   musicalContext,
@@ -28,7 +28,9 @@ import {
 // through the bed's tempo map here and the daemon receives a sample.
 
 export interface RecordOptions extends LandOptions {
-  input?: number | undefined; // 1-based channel on the input device
+  // 1-based channels on the input device, one per audio track in the
+  // order the tracks are named (arming.md §2.2); default 1, 2, and on.
+  input?: number | number[] | undefined;
   device?: string | undefined; // the input device; default: the system's
   at?: string | undefined; // bar[.beat[.tick]] on the loaded song
   click?: boolean | undefined; // the metronome through the take (recording.md §7)
@@ -126,26 +128,68 @@ export function passesNote(record: {
   return `  take ${(record.loop_takes ?? 0) + 1}${missed > 0 ? `, ${missed} pass${missed === 1 ? '' : 'es'} missed` : ''}`;
 }
 
+// One track armed for this pass (arming.md §2.2): its record entry, the
+// kind its instrument decides, and an audio track's input channel.
+export interface ArmedTrack {
+  resolved: RecordTarget;
+  node: RecordNode;
+  kind: 'audio' | 'midi';
+  input?: number;
+}
+
+// Every target resolved to its record entry before anything opens: a
+// track with nowhere to attach a take, a flag that cannot be honoured, or
+// inputs that do not match the audio tracks are errors to give before the
+// performance, not after it (recording.md §4).
+export function planArm(root: string, project: LoadedProject, targets: string[], options: RecordOptions): ArmedTrack[] {
+  if (targets.length === 0) throw new Error('record needs a track to record (creek/track:lead-vocal)');
+  const tracks: ArmedTrack[] = [];
+  for (const target of targets) {
+    const resolved = resolveRecordTarget(root, target);
+    if (tracks.some((t) => t.resolved.label === resolved.label)) throw new Error(`${resolved.label} is named twice`);
+    const node = recordNodeFor(project, resolved.label);
+    // A record entry with an instrument records MIDI
+    // (keyboard-instrument.md §12.2).
+    tracks.push({ resolved, node, kind: node.entry.record?.instrument !== undefined ? 'midi' : 'audio' });
+  }
+  const songs = [...new Set(tracks.map((t) => t.resolved.song))];
+  if (songs.length > 1) {
+    throw new Error(`armed tracks record against one song, and these are in ${songs.join(' and ')}`);
+  }
+  const audio = tracks.filter((t) => t.kind === 'audio');
+  if (audio.length === 0 && (options.input !== undefined || options.device !== undefined || options.loop === true)) {
+    const only = tracks.length === 1 ? tracks[0]! : undefined;
+    throw new Error(
+      only !== undefined
+        ? `${only.node.trackName} records MIDI for ${only.node.entry.record!.instrument}: --input, --device, and --loop are for audio takes`
+        : 'every track named records MIDI: --input, --device, and --loop are for audio takes',
+    );
+  }
+  if (options.loop === true && tracks.length > 1) {
+    throw new Error('a loop take records one track; name only the track to loop');
+  }
+  const inputs =
+    options.input === undefined ? audio.map((_, i) => i + 1) : Array.isArray(options.input) ? options.input : [options.input];
+  if (inputs.length !== audio.length) {
+    throw new Error(
+      `--input names ${inputs.length} input${inputs.length === 1 ? '' : 's'} for ${audio.length} audio ` +
+        `track${audio.length === 1 ? '' : 's'}; give one per audio track, in the order you name them`,
+    );
+  }
+  audio.forEach((track, i) => {
+    track.input = inputs[i]!;
+  });
+  return tracks;
+}
+
 export async function recordTake(
   root: string,
   project: LoadedProject,
-  target: string,
+  target: string | string[],
   options: RecordOptions = {},
   hooks: RecordHooks = {},
 ): Promise<RecordedTakes> {
-  const resolved = resolveRecordTarget(root, target);
-  // Before arming: a track with nowhere to attach a take is an error to
-  // give before the performance, not after it (recording.md §4).
-  const node = recordNodeFor(project, resolved.label);
-  // A record entry with an instrument records MIDI (keyboard-instrument.md
-  // §12.2), which has no input channel or device to choose; and loop
-  // takes record audio only.
-  const kind = node.entry.record?.instrument !== undefined ? 'midi' : 'audio';
-  if (kind === 'midi' && (options.input !== undefined || options.device !== undefined || options.loop === true)) {
-    throw new Error(
-      `${node.trackName} records MIDI for ${node.entry.record!.instrument}: --input, --device, and --loop are for audio takes`,
-    );
-  }
+  const tracks = planArm(root, project, Array.isArray(target) ? target : [target], options);
   if (options.loop === true && options.until === undefined) {
     throw new Error('--loop needs --until — the region is --at to --until, a take per pass');
   }
@@ -153,9 +197,10 @@ export async function recordTake(
     throw new Error('--until needs --at (where the take begins)');
   }
   // Each take lands as it arrives — under a loop, while the next one is
-  // already recording — so the flow is one landing per manifest.
+  // already recording, and with several tracks armed, one per track — so
+  // the flow is one landing per manifest.
   const takes: RecordedTakes['takes'] = [];
-  const { missed } = await captureTakes(root, project, resolved, kind, options, hooks, async (take) => {
+  const { missed } = await captureTakes(root, project, tracks, options, hooks, async (take) => {
     const landed = await landAnyTake(root, take, options);
     takes.push({ take, landed });
     hooks.onTake?.(landed);
@@ -169,12 +214,13 @@ export async function recordTake(
 async function captureTakes(
   root: string,
   project: LoadedProject,
-  resolved: RecordTarget,
-  kind: 'audio' | 'midi',
+  tracks: ArmedTrack[],
   options: RecordOptions,
   hooks: RecordHooks,
   land: (take: AnyTake) => Promise<void>,
 ): Promise<{ missed: number }> {
+  // Every track is in one song (planArm), whose session is the bed.
+  const resolved = tracks[0]!.resolved;
   const client = await AudiodClient.connect(root);
   try {
     if (!client.supports('record')) {
@@ -218,7 +264,31 @@ async function captureTakes(
       throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
     }
     let armedRate: number;
-    if (kind === 'midi') {
+    if (tracks.length > 1) {
+      if (!client.supports('record-tracks')) {
+        throw new Error(
+          `field-audiod ${client.daemonVersion} predates recording several tracks — field transport quit, then record again`,
+        );
+      }
+      const armed = await client.armTracks(
+        tracks.map((t) =>
+          t.kind === 'midi' ? { track: t.resolved.label, kind: 'midi' as const } : { track: t.resolved.label, kind: 'audio' as const, input: t.input! },
+        ),
+        options.device,
+      );
+      armedRate = armed.sample_rate;
+      // In the daemon's order, the primary first.
+      const named = new Map(tracks.map((t) => [t.resolved.label, t.node.trackName]));
+      const each = armed.armed.map((a) =>
+        a.kind === 'midi'
+          ? `${named.get(a.track)}: MIDI from ${(armed.sources ?? []).join(', ')}`
+          : `${named.get(a.track)}: ${armed.device} input ${a.input}`,
+      );
+      const latency = armed.input_latency !== undefined ? `in ${armed.input_latency} / ` : '';
+      hooks.onArmed?.(
+        `armed   ${each.join(', ')}  (${armed.sample_rate} Hz, latency ${latency}out ${armed.output_latency} samples)`,
+      );
+    } else if (tracks[0]!.kind === 'midi') {
       if (!client.supports('record-midi')) {
         throw new Error(
           `field-audiod ${client.daemonVersion} predates MIDI recording — field transport quit, then record again`,
@@ -230,7 +300,7 @@ async function captureTakes(
         `armed   MIDI from ${armed.sources.join(', ')}  (${armed.sample_rate} Hz, latency out ${armed.output_latency} samples)`,
       );
     } else {
-      const armed = await client.arm(resolved.label, options.input ?? 1, options.device);
+      const armed = await client.arm(resolved.label, tracks[0]!.input!, options.device);
       armedRate = armed.sample_rate;
       hooks.onArmed?.(
         `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +
@@ -343,7 +413,11 @@ async function captureTakes(
     }
     return { missed };
 
-    async function followTake(started: { transaction: string; started_at_samples: number }): Promise<void> {
+    async function followTake(started: {
+      transaction: string;
+      started_at_samples: number;
+      takes?: { transaction: string }[] | undefined;
+    }): Promise<void> {
       // A pre-rolled take reports -1 until the callback reaches its
       // position; the recording line waits for that, and the count-in
       // shows as its own line meanwhile.
@@ -364,7 +438,7 @@ async function captureTakes(
       for (;;) {
         if (hooks.interrupted?.() === true) {
           const stopped = await client.stop();
-          if (stopped.take !== undefined) landOnce(stopped.take);
+          for (const take of stopped.takes ?? (stopped.take !== undefined ? [stopped.take] : [])) landOnce(take);
           break;
         }
         const s = await client.status();
@@ -382,22 +456,34 @@ async function captureTakes(
         const elapsed = s.record.frames !== undefined ? ` ${(s.record.frames / armedRate).toFixed(1)}s` : '';
         missed = s.record.missed ?? missed;
         // A MIDI take has no level to meter; what it has is the events it
-        // has caught.
+        // has caught. With several tracks armed, each says its own.
+        const events = (count: number | undefined): string => `${count ?? 0} event${count === 1 ? '' : 's'}`;
         const level =
-          s.record.kind === 'midi'
-            ? `${s.record.events ?? 0} event${s.record.events === 1 ? '' : 's'}`
-            : meterLine(s.record.input_peak);
+          (s.record.armed?.length ?? 0) > 1
+            ? s.record
+                .armed!.map(
+                  (a) =>
+                    `${a.track.split(':').pop()} ${a.kind === 'midi' ? events(a.events) : meterLine(a.input_peak)}`,
+                )
+                .join(' · ')
+            : s.record.kind === 'midi'
+              ? events(s.record.events)
+              : meterLine(s.record.input_peak);
         hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${level}${elapsed}${passesNote(s.record)}`);
         await sleep(250);
       }
       if (endedItself) await client.stop().catch(() => {});
-      // A remote stop's `take` event can trail the status tick that
-      // showed the state change; the recordings list is the fallback.
-      for (let i = 0; i < 20 && seen.size === 0; i++) await sleep(50);
-      if (seen.size === 0) {
+      // A remote stop's `take` events can trail the status tick that
+      // showed the state change; the recordings list is the fallback, for
+      // every armed track's take.
+      const transactions = started.takes?.map((t) => t.transaction) ?? [started.transaction];
+      for (let i = 0; i < 20 && seen.size < transactions.length; i++) await sleep(50);
+      if (seen.size < transactions.length) {
         const { recordings } = await client.recordings();
-        const entry = recordings.find((r) => r.id === started.transaction && r.complete);
-        if (entry !== undefined) landOnce(anyTakeSchema.parse(entry));
+        for (const id of transactions) {
+          const entry = recordings.find((r) => r.id === id && r.complete);
+          if (entry !== undefined) landOnce(anyTakeSchema.parse(entry));
+        }
       }
     }
   } finally {

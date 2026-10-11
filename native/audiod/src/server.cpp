@@ -49,6 +49,23 @@ juce::var errorResponse (const juce::var& id, const juce::String& message)
     return juce::var (o.get());
 }
 
+// What a stop answers with (arming.md §2.2): `take`, the primary track's
+// manifest, as a one-track stop always has, and `takes`, every armed
+// track's, the primary's first. A take whose finalize failed is left out.
+void addTakes (juce::DynamicObject& ok, const juce::Array<juce::var>& manifests)
+{
+    if (manifests.isEmpty())
+        return;
+    const auto finalized = [] (const juce::var& m) { return m.isObject() && ! m.hasProperty ("error"); };
+    if (finalized (manifests.getFirst()))
+        ok.setProperty ("take", manifests.getFirst());
+    juce::Array<juce::var> takes;
+    for (const auto& manifest : manifests)
+        if (finalized (manifest))
+            takes.add (manifest);
+    ok.setProperty ("takes", takes);
+}
+
 // hello's pid, spelled per platform: dispatch is shared, but <unistd.h>
 // is only included on the POSIX arm.
 int processId()
@@ -140,6 +157,7 @@ juce::String Server::dispatch (const juce::var& request)
         // arm's kind "midi" and the MIDI take (keyboard-instrument.md
         // §12.4).
         features.add ("record-midi");
+        features.add ("record-tracks");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -201,24 +219,22 @@ juce::String Server::dispatch (const juce::var& request)
         // finalized manifest back so the caller that ended it has it
         // without a second round-trip; the `take` event reaches everyone
         // else.
-        auto take = player.stopRecording();
+        addTakes (*ok, player.stopRecording());
         player.pause();
-        if (take.isObject() && ! take.hasProperty ("error"))
-            ok->setProperty ("take", take);
     }
     else if (op == "stop")
     {
-        auto take = player.stopRecording();
+        addTakes (*ok, player.stopRecording());
         player.stop();
-        if (take.isObject() && ! take.hasProperty ("error"))
-            ok->setProperty ("take", take);
     }
     else if (op == "arm")
     {
         const auto track = request.getProperty ("track", juce::var()).toString();
         const auto kind = request.getProperty ("kind", juce::var());
         juce::var info;
-        if (kind.toString() == "midi")
+        if (auto* tracks = request.getProperty ("tracks", juce::var()).getArray())
+            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString());
+        else if (kind.toString() == "midi")
             info = player.armMidi (track);
         else if (! kind.isVoid())
             return jsonLine (errorResponse (id, "arm's kind is \"midi\", or absent for an audio input"));
