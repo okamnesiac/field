@@ -37,4 +37,4 @@ const info =
         dirtyFiles: status === undefined ? undefined : status.split('\n').filter((l) => l.trim()).length,
       };
 writeFileSync(stampPath, JSON.stringify(info, null, 2) + '\n');
-process.stdout.write(`stamped dist/build-info.json (${info.commit?.slice(0, 7) ?? 'not a git checkout'})\n`);
+process.stdout.write(`stamped dist/build-info.json${info.commit ? ` (${info.commit.slice(0, 7)})` : ''}\n`);

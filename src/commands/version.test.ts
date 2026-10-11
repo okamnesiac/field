@@ -250,6 +250,36 @@ describe('resolveIdentity', () => {
   });
 });
 
+describe('formatVersionReport for a release install', () => {
+  it('prints the version alone, with nothing about a checkout', () => {
+    // A release is built from GitHub's source archive, which carries no
+    // commit, and that is the install most people have.
+    const text = formatVersionReport(
+      {
+        cli: { version: '0.3.0' },
+        workerProtocol: 2,
+        daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
+      },
+      process.cwd(),
+    );
+    expect(text.split('\n')[0]).toBe('field 0.3.0');
+  });
+
+  it('still names the commit for a build from a checkout', () => {
+    const text = formatVersionReport(
+      {
+        cli: { version: '0.3.0', commit: 'aaaa111', branch: 'main' },
+        workerProtocol: 2,
+        daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
+      },
+      process.cwd(),
+    );
+    expect(text.split('\n')[0]).toBe('field 0.3.0  (aaaa111 on main)');
+  });
+});
+
 describe('formatVersionReport with a drifted checkout', () => {
   it('names both shas and the command that reconciles them', () => {
     const text = formatVersionReport(

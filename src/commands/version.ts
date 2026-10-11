@@ -317,6 +317,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
   // Shortened at display alone; the report and the drift comparison
   // carry full shas.
   const short = (sha: string): string => sha.slice(0, 7);
+  // A release install is no checkout, and it is the usual install, so its
+  // line is the version alone; only a build from a checkout names a commit.
   const build = cli.commit
     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
@@ -332,8 +334,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
           ? `; checkout has changed since the build — ${BUILD_CLI} to update`
           : ''
       }`
-    : 'not a git checkout';
-  lines.push(`field ${cli.version}  (${build})`);
+    : undefined;
+  lines.push(build === undefined ? `field ${cli.version}` : `field ${cli.version}  (${build})`);
   lines.push(`worker protocol ${report.workerProtocol}`);
   lines.push(formatRemoteReport(report.remote));
   lines.push('');
