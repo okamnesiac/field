@@ -93,6 +93,18 @@ describe('timeline lanes', () => {
     ]);
   });
 
+  it('names supercollider entries by their generator name too', () => {
+    createTrack(root, 'creek', 'synth');
+    const sc = (id: string) => [`  - id: ${id}`, '    supercollider:', '      source: pad', '      seed: 1', '      duration: 1'];
+    writeFileSync(
+      join(root, 'songs/creek/tracks/synth.yaml'),
+      ['name: synth', 'inputs:', ...sc('low'), ...sc('high'), ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: synth', ''].join('\n'));
+    const [synth] = lanesOf();
+    expect(synth?.children?.map((l) => l.name)).toEqual(['synth-low', 'synth-high']);
+  });
+
   it('draws an open window as long as its source plays, not to the song end', () => {
     // riff is 4800 frames; the song here is 96000 samples long. An open
     // window plays the source from its read offset to its end.

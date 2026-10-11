@@ -224,16 +224,13 @@ export function projectTimeline(
       entry: index,
       file: owner.path,
       sha256: sha256Text(owner.raw),
-      // A record entry is named as the graph names it, by its generator
-      // name: the track's own name, or `<track>-<id>` when it has an id.
+      // A generator entry (record, supercollider, generative) is named as
+      // the graph names it, by its generator name: the track's own name,
+      // or `<track>-<id>` when it has an id, so two in one track differ.
       name: placedName ?? entry.audio ?? entry.receive ??
-        (entry.record !== undefined
+        (entry.record !== undefined || entry.supercollider !== undefined || entry.generative !== undefined
           ? generatorName(entry, owner.data.name)
-          : entry.supercollider
-            ? 'supercollider'
-            : entry.generative
-              ? 'generative'
-              : `input ${index + 1}`),
+          : `input ${index + 1}`),
       start: startSample,
       duration,
       depth,
