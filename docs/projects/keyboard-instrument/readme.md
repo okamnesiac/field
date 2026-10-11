@@ -759,7 +759,7 @@ Each chunk is one pull request, in order:
    sample time that places a take, which a MIDI file has no field for.
    The recommendation is the text list, with `field export` writing a
    MIDI file when you need one elsewhere. §12.1 answers it with the
-   text list.
+   text list and defers the MIDI export.
 2. **The entry that plays a take (chunk 4).** It could be a `record:`
    entry with an `instrument:` field, or a new entry kind for a part
    that drives an instrument, which nested-tracks.md §18 decision 4
@@ -1056,6 +1056,13 @@ field for the sample time that places a take; and raw note-on and
 note-off events, which are what the daemon captures but which an agent
 cannot quantize or transpose without pairing them first.
 
+`field export` writing a Standard MIDI File from a take, which §7
+recommended beside the text list, is deferred, not dropped. Nothing in
+this plan reads one, and the notes file holds everything it needs, so it
+is an addition to `field export` alone, for when a take must open in
+Logic as notes. Until then a take reaches Logic as audio:
+`field export creek/gen:keys` copies its render.
+
 ### 12.2 The entry is `record:` with an instrument (DECIDED)
 
 ```yaml
@@ -1182,7 +1189,7 @@ record entry has `instrument: still-water-pad`.
 | 31 | `field build creek`, then `field play creek`. | You hear what you played, through the pad, where you played it against the song. |
 | 32 | Run criterion 30's `field record` with `--input 2`, then with `--device <name>`, then with `--loop --until 19`. | Each is refused before anything arms: `keys records MIDI for still-water-pad: --input, --device, and --loop are for audio takes`. |
 | 33 | Edit `still-water-pad.scd` and build again; then build once more without an edit. | The first build renders `creek/gen:keys` again; the second is a cache hit. |
-| 34 | Change the instrument to a name with no program, and run `field check`. Then remove `instrument:` while a MIDI take is chosen, and run it again. | `... instrument ghost has no program at shared/instruments/ghost.scd`, then `take "<take>" is a MIDI take, and input 1 ("record") names no instrument to play it`. |
+| 34 | Change the instrument to `ghost`, which has no program, and run `field check`. Then remove `instrument:` while a MIDI take is chosen, and run it again. | `input 1 ("record") instrument file not found: shared/instruments/ghost.scd`, then `take "<take>" is a MIDI take, and input 1 ("record") names no instrument to play it`. |
 | 35 | Hold a note through the stop. | The notes file has it last to the take's end, and its render rings on through the 4-second tail. |
 | 36 | Hold sustain (`Tab` in `musical-typing`, `Space` in `tracker` and `fourths`) across a few note releases while you record. | The render holds them as the live voice did. |
 
@@ -1213,6 +1220,17 @@ record entry has `instrument: still-water-pad`.
 - **A dropped count means messages for a MIDI take.** `field record`
   says so, and that a lost note-on is a missing note and a lost
   note-off holds its note to the take's end.
+- **The first review settled six behaviors.** The voicer's reset is
+  `forgetVoices`, because an Event entry named `clear` loses to
+  `Set.clear`, which emptied the voicer and left `field keys` silent
+  after a rate restart. A note whose on and off share a sample
+  releases right after its own on in a render. A MIDI take's `until`
+  converts from the bed's samples to the device's, so a 44.1 kHz song
+  on a 48 kHz device ends on time. The writer flushes each 20 ms tick
+  to the kernel, so a daemon crash loses at most a partial line. The
+  instrument resolves through the `supercollider:` path rule in
+  `field check`. A take render unsets the render variables before it
+  loads the instrument, so voice mode looks the same as live.
 - **CoreMIDI can refuse a new source for a moment.** Run whole,
   `src/commands/record-midi-daemon.test.ts` saw its last
   `field-audiod --keys` refused every time, right after earlier tests
@@ -1237,6 +1255,9 @@ record entry has `instrument: still-water-pad`.
   runs above used the null output so that nothing played aloud, which
   also means the output latency they subtracted was 0; the subtraction
   itself is checked with 128 in `land.test.ts`.
+- **A take as a MIDI file.** `field export` writing a Standard MIDI
+  File is deferred, as §12.1 says; a take reaches Logic as its render
+  until a take must open there as notes.
 - **Editing a notes file by hand.** The build refuses an edited notes
   file, as it refuses any pinned file whose bytes changed, and
   `field import` takes audio only, so there is no way yet to pin an
