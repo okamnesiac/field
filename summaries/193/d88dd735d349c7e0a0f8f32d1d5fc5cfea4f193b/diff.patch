@@ -1,0 +1,442 @@
+diff --git a/docs/cli.md b/docs/cli.md
+index c5a540f..30d32c1 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -134,6 +134,10 @@ creek (12 bars)
+   9.1.1 0:20.0  phrase
+ ```
+ 
++`--json` prints the same structure as JSON, with the field names of
++`ArrangementView` in `src/commands/arrangement.ts`, for a program to
++read.
++
+ The bar count appears when the song declares a `length:`. A song that
+ declares none is as long as its material, which is also what governs
+ where playback stops.
+@@ -167,7 +171,9 @@ cable: receive "drum-verb" ← track:drums, -10.0 dB (tap post), arrives at samp
+ Once the inputs are built, each input shows its hash in place of
+ `(not built)`, and an `action:` line reports the action key and whether
+ it is cached. Once the label itself is built, an `output:` line gives
+-the output's hash and size.
++the output's hash and size. `--json` prints the whole explanation as
++JSON, with the field names of `Explanation` in `src/graph/build.ts`; an
++input that is not built yet has an empty `sha256`.
+ 
+ `creek` cannot answer either command on a fresh checkout. Its generated
+ takes are not committed, so `field query` and `field explain` on
+@@ -475,7 +481,13 @@ Watch mode never asks the remote.
+ | `field import <file> --song <name>` | copy audio in and record it in `assets.yaml` |
+ 
+ `field init` takes `--name <slug>` and `--sample-rate <hz>`; without
+-them it uses the directory name and the default rate.
++them it uses the directory name and the default rate. `--license <spdx>`
++writes the project's license, an SPDX identifier such as `CC-BY-4.0`,
++`CC0-1.0`, or `MIT`, into `field.yaml` as `license:`. Without it,
++`field.yaml` carries no license. The license speaks for the work the
++project's authors made; an imported asset keeps the license it arrived
++under. `field check` reports a `license:` that is not an SPDX
++identifier.
+ 
+ `field import` records the file's content hash and its WAV facts — rate,
+ bit depth, channels, frame count — and refuses a WAV whose sample rate
+diff --git a/docs/project-model.md b/docs/project-model.md
+index 1289ec0..eed1d83 100644
+--- a/docs/project-model.md
++++ b/docs/project-model.md
+@@ -21,7 +21,7 @@ library; build labels address both (`//songs/opener/track:main`,
+ 
+ ```text
+ project/
+-├── field.yaml            # project manifest: name, engine versions
++├── field.yaml            # project manifest: name, license, sample rate
+ ├── shared/               # material reused across songs, by contract
+ │   ├── instruments/      # definitions that make sound (.scd, model defs, AU)
+ │   ├── samples/          # committed sound that just is
+diff --git a/docs/projects/remote/readme.md b/docs/projects/remote/readme.md
+index f16f6aa..815e03e 100644
+--- a/docs/projects/remote/readme.md
++++ b/docs/projects/remote/readme.md
+@@ -307,11 +307,17 @@ export const REMOTE_API_VERSION = 1;
+ 
+ Two things the contract deliberately does not carry: musical time
+ (the action key already covers the resolved placement plan, and the
+-site derives `bar.beat` from `arrangement --json`), and any request to
+-render. The remote never asks the CLI for anything; every conversation
+-starts here. The request and response shapes are zod schemas in
+-`src/remote/protocol.ts`, the way `helloResponseSchema` is, so the
+-site's tests can import the same file (§7).
++site derives `bar.beat` from its own copy of Field's tempo map,
++audiofield-io.md §13.9), and any request to render. The remote never
++asks the CLI for anything; every conversation starts here. The request
++and response shapes are zod schemas in `src/remote/protocol.ts`, the
++way `helloResponseSchema` is, so the site's tests can import the same
++file (§7).
++
++*Amended (2026-10-11, review of #193):* this said the site derives
++`bar.beat` "from `arrangement --json`", which §9.1 had already
++overtaken on 2026-10-10: the site computes it from its own copy of the
++tempo map.
+ 
+ Paths, as the CLI speaks them since chunk 2 shipped (`paths` in
+ `src/remote/protocol.ts`; the site is built to these, and either side
+@@ -596,13 +602,23 @@ remote, and exits 0. `field push` after a one-line change to a track
+ file uploads exactly the entries the change re-rendered and reports
+ them by label, and a second `field push` uploads nothing. `field
+ explain //songs/creek/track:main --json` and `field arrangement creek
+---json` print the values their text forms show. A `license: not a
+-license` line fails `field check` with the file and line and a missing
+-`license` passes. `field clone` on a machine without `git-lfs` stops
+-before cloning and names the package to install. And real music has
+-been cloned and built through it: a HOWLO project on the site, on a
+-second machine, playing from fetched artifacts with nothing rendered
+-locally.
++--json` print the values their text forms are built from: positions in
++ticks and as bar.beat.tick, with seconds left to a reader that brings
++the song's tempo map, as the site does (audiofield-io.md §13.9). A
++`license: not a license` line fails `field check` with the file and the
++key, and a missing `license` passes. `field clone` on a machine without
++`git-lfs` stops before cloning and names the package to install. And
++real music has been cloned and built through it: a HOWLO project on
++the site, on a second machine, playing from fetched artifacts with
++nothing rendered locally.
++
++*Amended (2026-10-11, review of #193):* the two JSON commands were to
++"print the values their text forms show", but the text forms derive
++seconds and a bar span that `Explanation` and `ArrangementView` do not
++hold, and carrying those would give the JSON a second vocabulary
++(§3.6). A malformed license was to fail `field check` "with the file
++and line", but a diagnostic carries no line, so it names the file and
++the key.
+ 
+ ## 9 Open questions
+ 
+@@ -630,6 +646,11 @@ from `arrangement --json`, and the render worker that wants `--json`
+ is moot for v1 (audiofield-io.md §10.14), so chunk 1 waits on that
+ worker.
+ 
++Landed ahead of the worker (2026-10-11): Justin chose chunk 1 for the
++overnight batch, since it needs no remote at all, and it landed before
++the render worker exists. The priority stays `next`; §8's definition
++of done is what keeps the plan open.
++
+ ### 9.2 Keychain, or `~/.field/credentials` everywhere
+ 
+ Decision 5 splits by platform. The alternative is the file everywhere
+@@ -706,7 +727,8 @@ and the document ([docs/remote.md](../../remote.md)).
+ `CheckResult` already) are the obvious next three; not in this plan
+ unless the worker turns out to want them.
+ 
+-Unchanged (2026-09-08): chunk 1 is unstarted and this belongs to it.
++Unchanged (2026-10-11): chunk 1 landed `--json` on `explain` and
++`arrangement`; these three stay out until the worker asks for them.
+ 
+ ### 9.9 What `pull` does to `.field/out`
+ 
+@@ -733,7 +755,8 @@ an asset's license is stricter than the project's — a CC-BY-SA sample
+ in a CC0 project — is a question splice.md's chunk owns once both
+ keys exist.
+ 
+-Open (2026-09-08): chunk 1 is unstarted; nothing here changes it.
++Open (2026-10-11): chunk 1 landed the project license; whether `check`
++compares it with an asset's stays splice.md's question.
+ 
+ ### 9.11 A recipe-only song cannot be warmed by action key
+ 
+@@ -834,3 +857,14 @@ watch and misses it.
+   token is reported per song; `pull` from a plain clone warms two
+   entries and a build with a refusing runner is hits throughout.
+   Chunk 1 (`--json` and `license`) is what remains of the plan.
++- 2026-10-11 — Chunk 1 (branch `remote/json-license`), ahead of the site
++  worker that wants it, at Justin's call. `field.yaml` takes an optional
++  `license:`, an SPDX identifier checked for shape (`SPDX_IDENTIFIER` in
++  `src/schema/manifest.ts`), which `projectOrder` places after `name`;
++  `field init --license <id>` writes it and refuses one of the wrong
++  shape, and `field check` reports a malformed one through the manifest
++  schema. `field explain --json` and `field arrangement --json` print
++  `Explanation` and `ArrangementView` through `explanationJson` and
++  `arrangementJson`, each in its command module. With this, every chunk
++  of §6 has landed; §8's definition of done, a real project on a second
++  machine, and the open questions in §9 are what keep the plan open.
+diff --git a/docs/remote.md b/docs/remote.md
+index bd1155f..e8e58ff 100644
+--- a/docs/remote.md
++++ b/docs/remote.md
+@@ -243,6 +243,9 @@ creek: fetched 2 artifacts (2.1 MB)
+ A plain `git pull` keeps working and skips the warm; the next `field
+ build` then reads through per miss instead.
+ 
+-With `push` and `pull` the remote's verbs are complete. What remains of
+-[remote.md](projects/remote/readme.md) is its first chunk: `--json` on
+-`explain` and `arrangement`, and `license` in `field.yaml`.
++With `push` and `pull` the remote's verbs are complete, and so is the
++rest of [remote.md](projects/remote/readme.md): `--json` on `explain`
++and `arrangement`, and `license` in `field.yaml`, are in the
++[CLI manual](cli.md). What remains is the plan's definition of done, a
++real project cloned and built on a second machine, playing from fetched
++artifacts.
+diff --git a/src/cli.ts b/src/cli.ts
+index 0edafa2..2758f37 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -22,7 +22,7 @@ import {
+   parseVariants,
+   wantsVersion,
+ } from './cliParsers.js';
+-import { buildLabels, explainLabel, projectRelative, queryDeps, remoteReads } from './commands/build.js';
++import { buildLabels, explainLabel, explanationJson, projectRelative, queryDeps, remoteReads } from './commands/build.js';
+ import { formatReach, rootNote } from './model/levels.js';
+ import { formatCable } from './model/cables.js';
+ import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
+@@ -93,7 +93,8 @@ program
+   .description('initialize a Field project in the current directory')
+   .option('--name <slug>', 'project name (defaults to the directory name)')
+   .option('--sample-rate <hz>', 'project sample rate', (v) => Number(v))
+-  .action((opts: { name?: string; sampleRate?: number }) => {
++  .option('--license <spdx>', "the project's license, an SPDX identifier such as CC-BY-4.0 (default: none)")
++  .action((opts: { name?: string; sampleRate?: number; license?: string }) => {
+     try {
+       const root = init({ dir: process.cwd(), ...opts });
+       process.stdout.write(`initialized Field project at ${root}\n`);
+@@ -1075,10 +1076,15 @@ program
+   .command('explain <label>')
+   .description('show a label\'s type, inputs, action key, and cache status')
+   .option('--no-remote', 'do not consult the remote cache')
+-  .action(async (label: string, opts: { remote?: boolean }) => {
++  .option('--json', 'print the explanation as JSON')
++  .action(async (label: string, opts: { remote?: boolean; json?: boolean }) => {
+     try {
+       const root = requireRoot();
+       const e = await explainLabel(root, label, remoteReads(root, { noRemote: opts.remote === false }));
++      if (opts.json === true) {
++        process.stdout.write(`${explanationJson(e)}\n`);
++        return;
++      }
+       process.stdout.write(`${e.label} (${e.kind})\n`);
+       // The CLI speaks the format's language (project-layout.md §4):
+       // type, not the engine's rule.
+@@ -1207,10 +1213,11 @@ program
+ program
+   .command('arrangement <song>')
+   .description("the song's structure, derived from its output track's placements")
+-  .action(async (songName: string) => {
++  .option('--json', 'print the arrangement as JSON')
++  .action(async (songName: string, opts: { json?: boolean }) => {
+     try {
+-      const { arrangement } = await import('./commands/arrangement.js');
+-      process.stdout.write(`${arrangement(requireRoot(), songName)}\n`);
++      const { arrangement, arrangementJson } = await import('./commands/arrangement.js');
++      process.stdout.write(`${(opts.json === true ? arrangementJson : arrangement)(requireRoot(), songName)}\n`);
+     } catch (err) {
+       fail(err);
+     }
+diff --git a/src/commands/arrangement.test.ts b/src/commands/arrangement.test.ts
+index 8fe05f8..281a4b2 100644
+--- a/src/commands/arrangement.test.ts
++++ b/src/commands/arrangement.test.ts
+@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+-import { arrangement } from './arrangement.js';
++import { arrangement, arrangementJson } from './arrangement.js';
+ import { check } from './check.js';
+ import { createSong } from './create.js';
+ import { init } from './init.js';
+@@ -174,3 +174,18 @@ describe('field arrangement', () => {
+     expect(() => arrangement(root, 'ghost')).toThrow('no such song');
+   });
+ });
++
++describe('field arrangement --json', () => {
++  it('prints the ArrangementView with its own field names (remote.md §3.6)', () => {
++    threePasses();
++    const view = JSON.parse(arrangementJson(root, 'creek'));
++    expect(view.song).toBe('creek');
++    expect(view.placements.map((p: { track: string; bars: string }) => [p.track, p.bars])).toEqual([
++      ['phrase', '1.1.1'],
++      ['phrase', '5.1.1'],
++      ['vox', '5.1.1'],
++      ['phrase', '9.1.1'],
++    ]);
++    expect(view.placements[2]).toMatchObject({ track: 'vox', gainDb: 3, pan: 0.2, absolute: false });
++  });
++});
+diff --git a/src/commands/arrangement.ts b/src/commands/arrangement.ts
+index 20c5706..cdf62a9 100644
+--- a/src/commands/arrangement.ts
++++ b/src/commands/arrangement.ts
+@@ -141,14 +141,25 @@ function fmtSeconds(s: number): string {
+ }
+ 
+ export function arrangement(root: string, songName: string): string {
++  const project = validProject(root);
++  return formatArrangement(songArrangement(project, songName), project);
++}
++
++// `field arrangement --json` (remote.md §3.6): the same view, as the
++// ArrangementView it is, with the interface's field names.
++export function arrangementJson(root: string, songName: string): string {
++  return JSON.stringify(songArrangement(validProject(root), songName), null, 2);
++}
++
++// A derived view is only worth trusting if it refuses to guess, and
++// unresolved musical time is exactly where it would: positions that
++// never resolved print as raw arrays, which read like bar numbers.
++// `build` (loadValid) and `fmt` both stop here; this was the outlier.
++function validProject(root: string): LoadedProject {
+   const project = loadProject(root);
+-  // A derived view is only worth trusting if it refuses to guess, and
+-  // unresolved musical time is exactly where it would: positions that
+-  // never resolved print as raw arrays, which read like bar numbers.
+-  // `build` (loadValid) and `fmt` both stop here; this was the outlier.
+   if (diagnosticErrors(project.diagnostics).length > 0) {
+     const lines = project.diagnostics.map(formatDiagnostic).join('\n');
+     throw new Error(`project has errors (field check):\n${lines}`);
+   }
+-  return formatArrangement(songArrangement(project, songName), project);
++  return project;
+ }
+diff --git a/src/commands/build.ts b/src/commands/build.ts
+index 6d03736..2f48e2b 100644
+--- a/src/commands/build.ts
++++ b/src/commands/build.ts
+@@ -128,3 +128,9 @@ export async function explainLabel(
+   const { project, graph } = loadValid(root);
+   return explain(project, graph, resolveLabel(graph, parseLabel(label)), new Map(), remote);
+ }
++
++// `field explain --json` (remote.md §3.6): the Explanation as it is, with
++// the interface's field names, so a reader needs no second vocabulary.
++export function explanationJson(explanation: Explanation): string {
++  return JSON.stringify(explanation, null, 2);
++}
+diff --git a/src/commands/init.test.ts b/src/commands/init.test.ts
+index a5587cb..d1e6b7f 100644
+--- a/src/commands/init.test.ts
++++ b/src/commands/init.test.ts
+@@ -1,7 +1,8 @@
+-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
++import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { check } from './check.js';
+ import { init } from './init.js';
+ 
+ // The .gitattributes init writes is what stands between a project's
+@@ -41,3 +42,26 @@ describe('init .gitattributes', () => {
+     expect(lines).toContain('*.state binary');
+   });
+ });
++
++describe('the project license (remote.md §3.5)', () => {
++  it('writes license after name when given, and no line without one', () => {
++    init({ dir: join(root, 'licensed'), name: 'licensed', license: 'CC-BY-4.0' });
++    expect(readFileSync(join(root, 'licensed/field.yaml'), 'utf8')).toBe(
++      'field: 1\nname: licensed\nlicense: CC-BY-4.0\nsample_rate: 48000\n',
++    );
++    init({ dir: join(root, 'plain'), name: 'plain' });
++    expect(readFileSync(join(root, 'plain/field.yaml'), 'utf8')).not.toContain('license');
++  });
++
++  it('refuses a license that is not an SPDX identifier, in init and in check', async () => {
++    expect(() => init({ dir: join(root, 'bad'), name: 'bad', license: 'CC BY 4.0' })).toThrow(
++      'license "CC BY 4.0" must be an SPDX license identifier',
++    );
++    init({ dir: join(root, 'edited'), name: 'edited' });
++    writeFileSync(join(root, 'edited/field.yaml'), 'field: 1\nname: edited\nlicense: CC BY 4.0\nsample_rate: 48000\n');
++    const { diagnostics } = await check(join(root, 'edited'));
++    expect(diagnostics.map((d) => d.message).join('\n')).toMatch(/must be an SPDX license identifier/);
++    writeFileSync(join(root, 'edited/field.yaml'), 'field: 1\nname: edited\nlicense: LicenseRef-mine\nsample_rate: 48000\n');
++    expect((await check(join(root, 'edited'))).diagnostics).toEqual([]);
++  });
++});
+diff --git a/src/commands/init.ts b/src/commands/init.ts
+index cc6f05f..a1b47bd 100644
+--- a/src/commands/init.ts
++++ b/src/commands/init.ts
+@@ -3,7 +3,7 @@ import { basename, join, resolve } from 'node:path';
+ import { DEFAULT_SAMPLE_RATE, PROJECT_MANIFEST } from '../constants.js';
+ import { git, tryGit } from '../git.js';
+ import { isSlug } from '../ids.js';
+-import { projectOrder, projectSchema } from '../schema/index.js';
++import { projectOrder, projectSchema, SPDX_IDENTIFIER } from '../schema/index.js';
+ import { stringifyCanonical } from '../yaml/emit.js';
+ 
+ // Audio and MIDI assets ride Git LFS; manifests stay plain text
+@@ -37,6 +37,9 @@ export interface InitOptions {
+   dir: string;
+   name?: string;
+   sampleRate?: number;
++  // An SPDX identifier for the project's own work (remote.md §3.5);
++  // without one, field.yaml carries no license line rather than a guess.
++  license?: string | undefined;
+ }
+ 
+ export function init(options: InitOptions): string {
+@@ -51,9 +54,15 @@ export function init(options: InitOptions): string {
+     throw new Error(`project name "${name}" must be a lowercase-slug (use --name)`);
+   }
+ 
++  if (options.license !== undefined && !SPDX_IDENTIFIER.test(options.license)) {
++    throw new Error(
++      `license "${options.license}" must be an SPDX license identifier, such as CC-BY-4.0, CC0-1.0, or MIT`,
++    );
++  }
+   const manifest = projectSchema.parse({
+     field: 1,
+     name,
++    ...(options.license !== undefined ? { license: options.license } : {}),
+     sample_rate: options.sampleRate ?? DEFAULT_SAMPLE_RATE,
+   });
+ 
+diff --git a/src/graph/build.test.ts b/src/graph/build.test.ts
+index 6fb02c1..31f925c 100644
+--- a/src/graph/build.test.ts
++++ b/src/graph/build.test.ts
+@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { createSong } from '../commands/create.js';
+ import { importAsset } from '../commands/import.js';
+ import { init } from '../commands/init.js';
+-import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
++import { buildLabels, explainLabel, explanationJson, projectRelative, queryDeps } from '../commands/build.js';
+ import { resolvePlayables } from '../commands/play.js';
+ import { runScProgram } from '../generators/supercollider.js';
+ import type { GeneratorRunner } from './build.js';
+@@ -683,6 +683,9 @@ describe('query and explain', () => {
+     expect(after.cached).toBe(true);
+     expect(after.actionKey).toBe(before.actionKey);
+     expect(after.outputs).toHaveLength(1);
++    // --json prints the same Explanation, with the interface's field
++    // names (remote.md §3.6).
++    expect(JSON.parse(explanationJson(after))).toEqual(after);
+   });
+ });
+ 
+diff --git a/src/schema/manifest.ts b/src/schema/manifest.ts
+index 69b6456..9ec825e 100644
+--- a/src/schema/manifest.ts
++++ b/src/schema/manifest.ts
+@@ -2,11 +2,21 @@ import { z } from 'zod';
+ import type { KeyOrder } from '../yaml/emit.js';
+ import { sampleRate, slug } from './common.js';
+ 
++// The license the project's own work is offered under (remote.md §3.5):
++// an SPDX identifier, checked for shape and nothing else. A project may
++// leave it out; whether a public project must carry one is the site's
++// rule, which a project on disk cannot know.
++export const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/;
++export const spdxIdentifier = z
++  .string()
++  .regex(SPDX_IDENTIFIER, 'must be an SPDX license identifier, such as CC-BY-4.0, CC0-1.0, or MIT');
++
+ // field.yaml — the project manifest.
+ export const projectSchema = z.strictObject({
+   field: z.literal(1), // format version
+   name: slug,
++  license: spdxIdentifier.optional(),
+   sample_rate: sampleRate,
+ });
+ export type Project = z.infer<typeof projectSchema>;
+-export const projectOrder: KeyOrder = { keys: ['field', 'name', 'sample_rate'] };
++export const projectOrder: KeyOrder = { keys: ['field', 'name', 'license', 'sample_rate'] };
