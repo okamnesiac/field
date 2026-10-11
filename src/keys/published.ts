@@ -16,12 +16,19 @@ const publishedSchema = z.object({
 });
 
 // Written to a temporary file and renamed over the last, so a reader
-// never sees half of it.
-export function publishControllers(root: string, controllers: ChasedController[], pid = process.pid): void {
+// never sees half of it. A write that fails, such as on a `.field` that
+// another user owns, returns why rather than throwing: `field keys` still
+// plays, and only a take's starting knobs miss it.
+export function publishControllers(root: string, controllers: ChasedController[], pid = process.pid): string | undefined {
   const path = join(root, PUBLISHED_PATH);
-  mkdirSync(join(root, '.field'), { recursive: true });
-  writeFileSync(`${path}.${pid}.tmp`, JSON.stringify({ pid, controllers }));
-  renameSync(`${path}.${pid}.tmp`, path);
+  try {
+    mkdirSync(join(root, '.field'), { recursive: true });
+    writeFileSync(`${path}.${pid}.tmp`, JSON.stringify({ pid, controllers }));
+    renameSync(`${path}.${pid}.tmp`, path);
+    return undefined;
+  } catch (err) {
+    return `${PUBLISHED_PATH} not written, so a take starts without these knobs: ${(err as Error).message}`;
+  }
 }
 
 // Removes the file when this process wrote it, so a `field keys` that

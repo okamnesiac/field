@@ -285,7 +285,8 @@ async function playRouted(
   const send = (messages: MidiMessage[]): void => {
     messages.forEach((m) => helper.send(m));
     if (root !== undefined && messages.some(([status]) => (status! & 0xf0) === 0xb0)) {
-      publishControllers(root, session.sentControllers());
+      const problem = publishControllers(root, session.sentControllers());
+      if (problem !== undefined) session.message = problem;
     }
   };
 

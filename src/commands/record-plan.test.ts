@@ -108,4 +108,12 @@ describe('the controllers a MIDI take starts from (instrument-knobs.md §2.8)', 
     unpublishControllers(dir);
     expect(existsSync(join(dir, PUBLISHED_PATH))).toBe(false);
   });
+
+  it('says why it could not publish, rather than throwing out of field keys', () => {
+    writeFileSync(join(dir, '.field'), '');
+    expect(publishControllers(dir, knobs)).toMatch(/^\.field[/\\]keys\.json not written, so a take starts without these knobs: /);
+    rmSync(join(dir, '.field'));
+    expect(publishControllers(dir, knobs)).toBeUndefined();
+    expect(controllersToChase(dir, true)).toEqual(knobs);
+  });
 });

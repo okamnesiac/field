@@ -521,10 +521,12 @@ A take records every knob you turn while it runs, and its render turns
 the instrument's knobs where you did. It also starts where your knobs
 are. Run inside a project, `field keys` keeps the controllers it has
 sent, the wheel among them, in `.field/keys.json`, and removes the file
-when it quits. `field record` passes them to the daemon when it arms,
-and the daemon writes them at the take's first sample with every
-control change that arrives after the arm and before the start,
-including during a count-in. So a knob you turned before the take, on
+when it quits. When it cannot write the file, it keeps playing and names
+the error on the status line, and a take starts without those knobs.
+`field record` passes them to the daemon when it arms, and the daemon
+writes them at the take's first sample with every control change that
+arrives after the arm and before the start, including during a
+count-in. So a knob you turned before the take, on
 `field keys` or a hardware controller, renders where you left it. A
 daemon that predates this starts a take with every knob at its default:
 `field transport quit`, then record again, and it respawns on the new
