@@ -567,11 +567,22 @@ install would build the daemon with MSVC, as a Windows checkout does.
   release pull request lowers the version, so it releases nothing
   either. Tagging 0.1.0 as a baseline would also stop it, but that tag
   would name a version nobody released.
-- **This repository does not let GitHub Actions open pull requests**
-  (`can_approve_pull_request_reviews` is `false` on 2026-10-11), so the
-  propose job can push the release branch but not open its pull
-  request. The job then fails with the link that opens it by hand, and
-  `docs/release.md` names the setting.
+- **GitHub Actions may open pull requests only where the enterprise
+  allows it.** The first release run (38167355504) pushed
+  `release/v0.2.0` and then could not open its pull request, because the
+  `amnesiac` enterprise's policy forbade it, and an enterprise policy
+  overrides the organization's and the repository's settings. On
+  2026-10-11 the enterprise allowed it, the `okamnesiac` organization and
+  this repository were set to allow it, and a re-run opened #207.
+  `docs/release.md` names all three levels.
+- **A pull request the workflow opens gets no CI of its own.** GitHub
+  starts no workflow for an event that a workflow's own token caused, so
+  #207 showed no checks. `workflow_dispatch` is the exception, so the
+  propose job dispatches `ci.yml` on the release branch after opening the
+  pull request, and `ci.yml` accepts `workflow_dispatch`. The checks land
+  on the branch's commit, the pull request's head. A token from a GitHub
+  App would have avoided the rule instead, and lost to this because it
+  needs an App and two secrets to do what one extra trigger does.
 
 ### 9.2 What was verified, and how
 

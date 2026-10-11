@@ -14,18 +14,28 @@ the GitHub release with notes generated from the merged pull requests.
 1. On GitHub, open **Actions > Release > Run workflow**, and choose which
    part of the version to raise: `patch`, `minor`, or `major`.
 2. The workflow opens a pull request titled `Release X.Y.Z` that changes
-   only the version in `package.json`. Review and merge it like any other
-   pull request.
+   only the version in `package.json`, and starts CI on it. Review and
+   merge it like any other pull request.
 3. Merging is the decision to ship. The workflow's publish job sees the
    new version on `main`, tags it, moves `v0`, and creates the GitHub
    release.
 
-The workflow can open the pull request only when the repository allows
-GitHub Actions to create pull requests, under **Settings > Actions >
-General > Workflow permissions**. Without that setting, the job pushes
-the `release/vX.Y.Z` branch, fails, and prints the link that opens the
-pull request by hand. Merging that pull request publishes the release
-just the same.
+GitHub starts no workflow for a pull request that a workflow's own token
+opened, so CI would never run on the release pull request by itself. The
+workflow dispatches CI on the release branch instead, because
+`workflow_dispatch` is the one event that token may trigger, and the
+checks land on the branch's commit, which is the pull request's head.
+That is why `.github/workflows/ci.yml` lists `workflow_dispatch` among
+its triggers.
+
+The workflow can open the pull request only when GitHub Actions may
+create pull requests. That is **Allow GitHub Actions to create and
+approve pull requests**, under **Workflow permissions**, at three
+levels, each of which must allow it before the one below can: the
+enterprise (for Field, `amnesiac`, under **Policies > Actions**), the
+organization, and the repository (each under **Settings > Actions >
+General**). Without it, the job pushes the `release/vX.Y.Z` branch,
+fails, and prints the link that opens the pull request by hand.
 
 Only a merge that raises the version releases. A change to `package.json`
 that leaves the version alone releases nothing, even while that version
