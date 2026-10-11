@@ -8,7 +8,9 @@
 //   start.(note, velocity, freq) -> a voice
 //   setFreq.(voice, freq)
 //   release.(voice)
-// and returns an Event that takes noteOn, noteOff, cc, bend, and clear.
+// and returns an Event that takes noteOn, noteOff, cc, bend, and
+// forgetVoices. No entry may share a name with a method Event already has,
+// such as clear (Set.clear): the method runs instead, and empties the Event.
 { |start, setFreq, release, onVoice|
 	var voices = Dictionary.new, sustained = Set.new, sustainDown = false, bend = 0;
 	var releaseKey, freqOf;
@@ -51,7 +53,7 @@
 			bend = (value - 8192) / 8192 * 2;
 			voices.keysValuesDo { |key, voice| setFreq.(voice, freqOf.(key % 128)) };
 		},
-		clear: { |self|
+		forgetVoices: { |self|
 			voices.clear;
 			sustained.clear;
 			sustainDown = false;

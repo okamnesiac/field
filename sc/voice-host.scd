@@ -95,7 +95,7 @@ boot = {
 // carries the booted rate and the rate measured from the device clock.
 restart = {
 	booting = true;
-	voicer.clear;
+	voicer.forgetVoices;
 	emit.(["restarting", true]);
 	server.quit(onComplete: boot);
 };
