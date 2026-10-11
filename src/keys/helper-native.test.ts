@@ -128,10 +128,12 @@ async function startKeys(ctx: TestContext, name: string): Promise<{ keys: Helper
   // voice host gives scsynth for both directions.
   const { output, ...ready } = published;
   expect(ready).toEqual({ ready: true, name });
-  if (process.platform === 'darwin' && output !== undefined) {
+  // macOS always reports the system output, so a helper that stops
+  // sending it fails here; every other platform reports none.
+  if (process.platform === 'darwin') {
     expect(typeof output).toBe('string');
     expect(output).not.toBe('');
-  } else if (process.platform !== 'darwin') {
+  } else {
     expect(output).toBeUndefined();
   }
   return { keys, afterReady: index };
