@@ -353,15 +353,17 @@ report_ui() {
   fi
 }
 
-# install_audiod touches the binary after each build, so a daemon source
-# newer than it changed since the installer last built the daemon.
+# install_audiod touches the binary after each build, so a source newer
+# than it changed since the installer last built the daemon. The same
+# build compiles the ring header the daemon includes and the FieldOut
+# plugin, so their sources count too.
 report_audiod() {
   local binary="$REPO/$AUDIOD_RELATIVE" changed
   [ -z "${FIELD_AUDIOD:-}" ] ||
     row audiod-override "FIELD_AUDIOD is set, so field runs $(tilde "$FIELD_AUDIOD") instead of this build"
   if [ ! -x "$binary" ]; then
     warn_row audiod-missing "field-audiod is not built — run $(rerun audiod)"
-  elif changed="$(newer_than "$binary" native/audiod)"; then
+  elif changed="$(newer_than "$binary" native/audiod native/ring native/sc-fieldout)"; then
     warn_row audiod-stale "$changed changed since field-audiod was built — run $(rerun audiod)"
   else
     row audiod-current "$(tilde "$binary")"
