@@ -18,9 +18,9 @@ from every other MIDI source:
 
 ```console
 $ cd examples/bloom
-$ field keys still-water-pad
+$ field keys pad
 Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
-Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · still-water-pad live at 48000 Hz on MacBook Pro Speakers
+Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · pad live at 48000 Hz on MacBook Pro Speakers
 ```
 
 To keep what you play, record it into a track; see
@@ -116,7 +116,7 @@ notes and those that only render, by whether each program reads
 $ field keys organ
 field keys organ: no instrument program at …/examples/bloom/shared/instruments/organ.scd
 In shared/instruments/:
-  plays from notes: bass, juno, still-water-pad
+  plays from notes: bass, juno, pad
   renders only:     creek-kit, seven-eight-loop (no FIELD_MODE=voice branch; see docs/keys.md)
 ```
 
@@ -158,7 +158,7 @@ two semitones either way. It ignores modulation (CC 1) for now.
 
 `examples/bloom` has three instruments that answer voice mode:
 
-- **`still-water-pad`** — the song's sine pad; its render branch is
+- **`pad`** — the song's sine pad; its render branch is
   unchanged and renders the same bytes as before.
 - **`juno`** — the JU-06A, a model of the Roland Juno's chain from
   [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
@@ -183,11 +183,11 @@ changes every take recorded for it.
    name: keys
    inputs:
      - record:
-         instrument: still-water-pad
+         instrument: pad
    ```
 
 2. In one terminal, play the instrument so you hear it while you
-   record: `field keys still-water-pad`.
+   record: `field keys pad`.
 3. In another, record against the song. With nothing playing, `field
    record` loads the song as the bed. Press Ctrl-C to stop.
 

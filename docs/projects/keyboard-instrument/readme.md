@@ -61,7 +61,7 @@ Three words carry the design, and each names one thing:
 
 ### 2.1 What happens when you play
 
-1. You run `field keys still-water-pad` in Ghostty or iTerm2, inside a
+1. You run `field keys pad` in Ghostty or iTerm2, inside a
    project.
 2. `field keys` checks that the terminal speaks the kitty keyboard
    protocol (§2.2). If it does not, the command exits with a message
@@ -74,7 +74,7 @@ Three words carry the design, and each names one thing:
    the keyboard layout, and prints a ready line (§2.5).
 5. It adds `.scd` to an instrument name that has no extension, and
    resolves the result exactly as a `supercollider:` entry resolves
-   `source:`, to `shared/instruments/still-water-pad.scd`. Then it
+   `source:`, to `shared/instruments/pad.scd`. Then it
    spawns `sclang` on the voice host, `sc/voice-host.scd`, with the
    instrument path, the output device, and an `scsynth` port in the
    environment.
@@ -385,7 +385,7 @@ voice mode, so a program checks `FIELD_MODE` before it reads them:
 ```supercollider
 (
 if ("FIELD_MODE".getenv == "voice") {
-	SynthDef(\stillWaterKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+	SynthDef(\padKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
 		var env = EnvGen.kr(Env.asr(1.5, 1, 2.5, \sine), gate, doneAction: 2);
 		var sig = SinOsc.ar(freq) + (0.35 * SinOsc.ar(freq * 2));
 		Out.ar(out, Pan2.ar(sig * amp * 0.2 * env));
@@ -484,7 +484,7 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 | `native/audiod/src/keys.cpp`, `keys.h` (new), `main.cpp` | The `--keys` and `--midi-monitor` modes. |
 | `native/audiod/src/keyboard-layout.cpp`, `keyboard-layout.h` (new) | Reads the keyboard layout and watches for input-source changes, on macOS. Elsewhere it reports nothing. |
 | `native/audiod/CMakeLists.txt` | Links the Carbon framework on macOS, for the Text Input Sources API. |
-| `examples/bloom/shared/instruments/still-water-pad.scd` | Answers voice mode with a gated version of its voice. The render branch keeps its code. |
+| `examples/bloom/shared/instruments/pad.scd` | Answers voice mode with a gated version of its voice. The render branch keeps its code. |
 | `docs/keys.md` (new) | How to play with `field keys`, the supported terminals, the built-in keymaps, and the keymap format as a reference for writing your own. `docs/README.md` links it. |
 | `docs/build-graph.md` | The `supercollider` section gains voice mode beside the render contract. |
 | `docs/architecture.md` | The daemon's modes gain `--keys` and `--midi-monitor`. The SuperCollider section's live mode describes the voice host and where its sound goes. |
@@ -650,13 +650,13 @@ Chunk 2, the voice host:
 
 | # | Do | Expect |
 | --- | --- | --- |
-| 21 | In `examples/bloom`, run `field keys still-water-pad --device "<Apollo>"`. Play a chord, then hold `Tab` and release the keys. | You hear the chord. The notes ring until you release `Tab`. |
+| 21 | In `examples/bloom`, run `field keys pad --device "<Apollo>"`. Play a chord, then hold `Tab` and release the keys. | You hear the chord. The notes ring until you release `Tab`. |
 | 22 | With criterion 21 running, play a USB controller. | It plays the same voice. |
 | 23 | With criterion 21 running, hold `Digit2` over a sounding note, then release it. | The note bends up two semitones and returns. |
 | 24 | Run `field keys creek-kit`. | Exit 1. The message says `creek-kit.scd` does not answer `FIELD_MODE=voice`. |
 | 25 | Run `field play creek --device "<Apollo>"`, then criterion 21 in another terminal. Stop both, set the Apollo to 44.1 kHz in Audio MIDI Setup, and run them again in the other order. Press `KeyA` before and after `field play` starts. | In the first order you hear both, and starting criterion 21 leaves the Apollo's sample rate alone. In the second, `field play` moves the Apollo to 48 kHz, the status line shows the instrument restarting and then live at 48 kHz, and `KeyA` sounds at the same pitch before and after. A `KeyA` about a semitone and a half sharp after the switch means the host missed the rate change. |
 | 26 | With criterion 21 running, `kill -9` the `field keys` process. | Within two seconds, `pgrep scsynth` finds no host server, and `Field Keys` is gone. |
-| 27 | In `examples/bloom`, run `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
+| 27 | In `examples/bloom`, run `field sc render shared/instruments/pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
 
 Chunk 3, the other built-in keymaps:
 
@@ -729,7 +729,7 @@ estimate until criterion 21 is played:
 | `scsynth`'s hardware buffer | 128 frames, 2.7 ms at 48 kHz, plus the device's output latency |
 
 If playing feels late, the hardware buffer is the first thing to
-reduce. The one build cost is the `still-water-pad` edit. Its content
+reduce. The one build cost is the `pad` edit. Its content
 hash is a cache input, so every song that places it renders the pad
 once more.
 
@@ -743,7 +743,7 @@ Each chunk is one pull request, in order:
    helper and its monitor mode, and `docs/keys.md`. It is useful alone,
    with Logic, and with a keymap of your own.
 2. **The voice host.** `field keys <instrument>`, the voice contract,
-   `still-water-pad` in voice mode, and the docs.
+   `pad` in voice mode, and the docs.
 3. **The other built-in keymaps.** `tracker` and `fourths` move from
    chunk 1's test fixtures into `keymaps/`, with their criteria and
    their entries in `docs/keys.md`.
@@ -836,7 +836,7 @@ Each chunk is one pull request, in order:
   "keymap" for the keyboard layout itself, which Field meets only in §7
   question 8.
 - **The instruments today.** The three in `examples/bloom` are NRT
-  programs that render whole passages. `still-water-pad.scd` builds a
+  programs that render whole passages. `pad.scd` builds a
   D-minor chord from twelve sine voices under `Env.linen`, a fixed-length
   envelope. Its voice is already one SynthDef, and a gated envelope
   makes it playable.
@@ -903,7 +903,7 @@ Keys`, through any keymap, built-in or yours. The built-in is
 ## 10 Chunk 2 as built (2026-10-10)
 
 `field keys <instrument>` plays a SuperCollider instrument through the
-voice host in `sc/voice-host.scd`, and `still-water-pad` answers voice
+voice host in `sc/voice-host.scd`, and `pad` answers voice
 mode.
 
 ### 10.1 scsynth opens the microphone unless told otherwise
@@ -1071,7 +1071,7 @@ Logic as notes. Until then a take reaches Logic as audio:
 name: keys
 inputs:
   - record:
-      instrument: still-water-pad
+      instrument: pad
 ```
 
 A `record:` entry with `instrument:` records MIDI takes, and one
@@ -1146,7 +1146,7 @@ the last partial line, which recovery drops. Loop takes stay audio only.
 
 ### 12.5 The flow
 
-1. In one terminal, run `field keys still-water-pad`, which plays the
+1. In one terminal, run `field keys pad`, which plays the
    voice you hear and publishes `Field Keys`.
 2. In another, run `field record creek/track:keys --at 17`, as for
    audio. The entry's instrument makes it arm for MIDI, so `--input`
@@ -1182,14 +1182,14 @@ chunk 4 would append, and what building it settled and proved.
 ### 13.1 Acceptance criteria
 
 Each runs in a project whose song builds, with a track `keys` whose
-record entry has `instrument: still-water-pad`.
+record entry has `instrument: pad`.
 
 | # | Do | Expect |
 | --- | --- | --- |
-| 30 | Run `field keys still-water-pad` in one terminal and `field record creek/track:keys --at 17` in another. Play a few notes, then press Ctrl-C. | The armed line lists `Field Keys` among its sources, the position line counts events, and the take lands as `audio/keys/<take>.notes.yaml`, chosen. `field check` says ok. |
+| 30 | Run `field keys pad` in one terminal and `field record creek/track:keys --at 17` in another. Play a few notes, then press Ctrl-C. | The armed line lists `Field Keys` among its sources, the position line counts events, and the take lands as `audio/keys/<take>.notes.yaml`, chosen. `field check` says ok. |
 | 31 | `field build creek`, then `field play creek`. | You hear what you played, through the pad, where you played it against the song. |
-| 32 | Run criterion 30's `field record` with `--input 2`, then with `--device <name>`, then with `--loop --until 19`. | Each is refused before anything arms: `keys records MIDI for still-water-pad: --input, --device, and --loop are for audio takes`. |
-| 33 | Edit `still-water-pad.scd` and build again; then build once more without an edit. | The first build renders `creek/gen:keys` again; the second is a cache hit. |
+| 32 | Run criterion 30's `field record` with `--input 2`, then with `--device <name>`, then with `--loop --until 19`. | Each is refused before anything arms: `keys records MIDI for pad: --input, --device, and --loop are for audio takes`. |
+| 33 | Edit `pad.scd` and build again; then build once more without an edit. | The first build renders `creek/gen:keys` again; the second is a cache hit. |
 | 34 | Change the instrument to `ghost`, which has no program, and run `field check`. Then remove `instrument:` while a MIDI take is chosen, and run it again. | `input 1 ("record") instrument file not found: shared/instruments/ghost.scd`, then `take "<take>" is a MIDI take, and input 1 ("record") names no instrument to play it`. |
 | 35 | Hold a note through the stop. | The notes file has it last to the take's end, and its render rings on through the 4-second tail. |
 | 36 | Hold sustain (`Tab` in `musical-typing`, `Space` in `tracker` and `fourths`) across a few note releases while you record. | The render holds them as the live voice did. |
@@ -1235,6 +1235,8 @@ record entry has `instrument: still-water-pad`.
   suggestions, a MIDI stop waits two callback blocks before it detaches,
   so a message that arrived before the stop is never skipped, and the
   docs say a take hears only the sources that exist when it arms.
+- **`still-water-pad` is `pad` now** (#183). The rows in §10.3 and
+  §13.3 keep the old name, because that is the name the runs used.
 - **CoreMIDI can refuse a new source for a moment.** Run whole,
   `src/commands/record-midi-daemon.test.ts` saw its last
   `field-audiod --keys` refused every time, right after earlier tests

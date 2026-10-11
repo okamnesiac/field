@@ -2,7 +2,7 @@
 name: pad-sc
 inputs:
   - supercollider:
-      source: still-water-pad.scd
+      source: pad.scd
       seed: 90210
       duration: 10
       channels: 2

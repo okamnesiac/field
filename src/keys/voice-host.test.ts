@@ -81,8 +81,8 @@ function env(mode: string): NodeJS.ProcessEnv {
 
 describe('resolving an instrument', () => {
   it('adds .scd and resolves a bare name on the instruments shelf', () => {
-    expect(instrumentPath('still-water-pad', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
-    expect(instrumentPath('still-water-pad.scd', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
+    expect(instrumentPath('pad', '/p')).toBe('/p/shared/instruments/pad.scd');
+    expect(instrumentPath('pad.scd', '/p')).toBe('/p/shared/instruments/pad.scd');
   });
 
   it('resolves a slashed path from the root, and leaves an absolute path alone', () => {

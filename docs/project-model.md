@@ -359,7 +359,7 @@ without `.scd` gets it, and a name without a `/` is under
 name: keys
 inputs:
   - record:
-      instrument: still-water-pad
+      instrument: pad
 ```
 
 A MIDI take is a notes file, `audio/<name>/<take>.notes.yaml`, pinned
