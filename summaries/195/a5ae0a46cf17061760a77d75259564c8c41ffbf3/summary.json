@@ -1,0 +1,144 @@
+{
+ "version": 1,
+ "name": "Status line bend and mod",
+ "project": "keyboard-instrument",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 195,
+  "title": "Show the pitch bend and the modulation wheel on field keys' status line",
+  "head": "a5ae0a46cf17061760a77d75259564c8c41ffbf3",
+  "headRef": "keys/mod-display",
+  "base": "8472df55978ef137bc18ad7c89b4ca47bf942620",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI instrument. While it runs, it draws one status line in the terminal: the keymap's name, the transpose, the velocity, and last the notes that are sounding. The default keymap, <code>musical-typing</code>, also sends pitch bend from keys <code>1</code> and <code>2</code> and the modulation wheel from keys <code>3</code> to <code>8</code>, and since #188 the bloom instruments respond to both. The status line said nothing about either, so a player could not tell whether a bend key had registered or where the wheel sat after a few presses.",
+   "This pull request has the session remember the bend and the wheel value it last sent, and has the status line print them after the velocity, before the notes:",
+   "<pre>Field Keys · musical-typing · transpose 0 · velocity 100 · bend -1 · mod 76 · C4 E4 F4</pre>",
+   "Each field shows only when the keymap has keys that set it, or when its value is away from rest. The bend always carries its sign and as many decimal places as the finest bend in the keymap needs, up to four, so every bend the keymap can send prints at one width and bending a held chord does not move the notes. <code>tracker</code> and <code>fourths</code> bind neither, so their line is unchanged. The values are what <code>field keys</code> sent. A hardware controller's bender and wheel go straight to whatever receives the MIDI, so they do not change the line."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Controller 1 (CC 1)</b>: the MIDI control-change number for the modulation wheel, with values from 0 to 127. A synth often maps it to vibrato or a filter.</li><li><b>Pitch bend</b>: a MIDI message that bends every sounding note. The keymap gives it as a number from -1 (fully down) to 1 (fully up), and 0 is center.</li><li><b>Control modes</b>: a keymap key on a controller number has a mode. <code>set</code> sends its value at each press, <code>hold</code> sends it while held and 0 on release, and <code>toggle</code> alternates its value and 0.</li><li><b>Panic</b>: a keymap action that releases every held key, turns off every toggled controller, and sends All Notes Off.</li><li><b>Reload</b>: saving a keymap file while <code>field keys</code> runs loads it again, and turns off any controller that was toggled on.</li><li><b>Receiver</b>: whatever plays from <code>Field Keys</code>, such as Logic or the voice host that plays a SuperCollider instrument.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li><b><code>326d629</code>: changes requested.</b> The review found that a fractional bend, such as <code>{ bend: 0.5 }</code>, widened <code>bend +0</code> to <code>bend +0.5</code> and moved the held notes two columns, and that one line of <code>docs/keys.md</code> ran to 100 columns.</li><li><b><code>36b3343</code> and <code>a5ae0a4</code>: both fixed.</b> The docs step is rewrapped and takes the review's two wording suggestions. The bend now prints with the decimal places of the finest bend in the keymap.</li><li><b><code>a5ae0a4</code>: clean.</b> Both finding threads are resolved, and the review confirmed each fix at this head.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "session",
+   "title": "The session remembers what it sent",
+   "kicker": "KeysSession records the last bend and the last controller-1 value it sent",
+   "intro": [
+    "<code>KeysSession</code>, in <code>src/keys/session.ts</code>, is the state behind <code>field keys</code>. It turns each key press and release into MIDI messages, and the command sends them. It now keeps two public fields beside <code>transpose</code> and <code>velocity</code>: <code>bend</code>, from -1 to 1, and <code>mod</code>, from 0 to 127. Both start at 0, which is where a receiver starts them.",
+    "Every controller message now goes through one private method, <code>cc</code>, which records the value whenever the controller number is 1. So <code>mod</code> follows each way a key moves the wheel:",
+    "<ul><li><b>Set mode</b> sends the key's value at each press, and <code>mod</code> keeps it after the release.</li><li><b>Hold mode</b> sends the value while the key is down and 0 when it comes up.</li><li><b>Toggle mode</b> alternates the value and 0, and goes back to 0 at panic, at a keymap reload, and at quit.</li></ul>",
+    "The bend is set beside the pitch-bend message when a bend key goes down, and cleared beside the center message when it comes up. That also covers a focus-out, panic, and quit, because each of those releases every held key. <code>bends</code> lists the bends the keymap binds, and <code>setsMod</code> says whether any key can move the wheel. The status line uses them to decide whether to show a field at rest, and uses <code>bends</code> to choose how many decimal places the bend prints with."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "The reviewer ran a throwaway test at <code>326d629</code>. It showed a toggle key on the wheel reading 0 after a reload, after panic, and after quit, a hold key reading 0 after a focus-out, and the bend reading 0 after panic, quit, and a focus-out. Since then <code>session.ts</code> has changed only by replacing <code>setsBend</code> with <code>bends</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/keys/session.ts",
+     "note": "The two new fields, the <code>cc</code> method that every controller message now goes through, and <code>bends</code> and <code>setsMod</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 51,
+       "text": "The voice host's <code>sc/voicer.scd</code>, which plays an instrument from MIDI, keeps one <code>mod</code> for every channel and keeps it across a program reload and a server restart. So <code>mod</code> here is the value an instrument named to <code>field keys</code> plays with."
+      },
+      {
+       "kind": "context",
+       "line": 125,
+       "text": "All Notes Off (controller 123) now goes through <code>cc</code> too. That changes nothing it sends, because <code>cc</code> records a value only for controller 1."
+      },
+      {
+       "kind": "context",
+       "line": 96,
+       "text": "Releasing any bend key sends center and sets <code>bend</code> to 0, even while a second bend key is still down. That matches what the session already sent, so the line agrees with the receiver."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/session.test.ts",
+     "note": "Pins <code>bend</code> through press, release, and focus-out, and <code>mod</code> through set, hold, and the wheel-off key <code>3</code>."
+    }
+   ]
+  },
+  {
+   "id": "status-line",
+   "title": "The status line prints them before the notes",
+   "kicker": "statusText adds bend and mod after the velocity",
+   "intro": [
+    "<code>statusText</code>, in <code>src/commands/keys.ts</code>, builds the status line from the session. It keeps the notes last, so that playing changes only the end of the line. On a narrow terminal it cuts the text before the notes rather than the notes. The two new fields go after the velocity, so the cut takes them before it reaches the notes.",
+    "A field shows when the keymap binds a key that sets it, or when its value is away from rest. The second case arises after you save a keymap that drops those keys while the wheel is up.",
+    "The bend has to print at one width, or a bend over a held chord would push the notes along the line. So <code>bendText</code> gives every bend its sign and the decimal places of the finest bend in the keymap, up to four. <code>musical-typing</code> binds only -1 and 1, so its line reads <code>bend +0</code>, <code>-1</code>, and <code>+1</code>. A keymap with a 0.25 bend reads <code>+0.00</code> at rest and <code>+0.25</code> while the key is down."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "With a keymap that binds bends of -1, -0.25, 0, 0.5, and 1 over a held chord, the field read <code>+0.00</code> at rest and <code>-1.00</code>, <code>-0.25</code>, <code>+0.00</code>, <code>+0.50</code>, and <code>+1.00</code> while each key was held. The chord stayed at column 59 throughout, and each release brought back the line at rest."
+    },
+    {
+     "kind": "verify",
+     "text": "The cutting code for a narrow terminal is unchanged since <code>326d629</code>. There, at widths 70, 40, and 20, with the wheel at 127, the bend at -1, and C4 and E4 held, <code>statusText</code> cut the text before the notes and kept <code>C4 E4</code>. At width 5 it printed only the notes."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Two lines in <code>statusText</code> add the <code>bend</code> and <code>mod</code> fields, and <code>bendText</code> prints the bend at one width.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 269,
+       "text": "With bends of 0.333333, -1, 0.00001, and 0.99999 in one keymap, <code>decimalPlaces</code> stopped at four places, and every value printed seven characters wide, from <code>+0.3333</code> to <code>-1.0000</code>."
+      },
+      {
+       "kind": "context",
+       "line": 263,
+       "text": "Four places is enough because a pitch-bend message carries the bend in steps of 1/8192, about 0.0001. A bend that needs more prints rounded."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/keys.test.ts",
+     "note": "Updates the expected lines, checks that <code>tracker</code> shows neither field, checks that a bend of -1 keeps the line's length, and pins the decimal places for bends of -1, 0.25, and 0.333333."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The keys guide shows the new fields",
+   "kicker": "docs/keys.md updates its examples and the Play steps",
+   "intro": [
+    "The guide's three status-line examples gain <code>bend +0 · mod 0</code>, since each uses <code>musical-typing</code>, which binds both. Step 3 of <b>Play</b> now says when the two fields show, their ranges, how the bend keeps one width, and that a USB controller does not change them. No other document shows the status line."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "Three examples and step 3 of <b>Play</b>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 64,
+       "text": "Step 3, lines 57 to 68, wraps at 64 to 72 columns like the rest of the list. Its <code>+0.00</code> reading for a keymap with a 0.25 bend is the one the new test in <code>keys.test.ts</code> pins."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,309 @@
+diff --git a/docs/keys.md b/docs/keys.md
+index 98fceee8..422d5ba0 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -9,7 +9,7 @@ the default keymap, and you can write your own.
+ 
+ ```console
+ $ field keys
+-Field Keys · musical-typing · transpose 0 · velocity 100 · C4 E4 G4
++Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · C4 E4 G4
+ ```
+ 
+ Name an instrument and `field keys` plays it too, from the keyboard and
+@@ -19,7 +19,7 @@ from every other MIDI source:
+ $ cd examples/bloom
+ $ field keys pad
+ pad live at 48000 Hz on MacBook Pro Speakers
+-Field Keys · musical-typing · transpose 0 · velocity 100 · D4
++Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · D4
+ ```
+ 
+ To keep what you play, record it into a track; see
+@@ -55,9 +55,17 @@ for, once, and a new process gets a new MIDI client.
+ 2. In the application you want to play, choose `Field Keys` as the MIDI
+    input. In Logic, `Field Keys` appears with your other MIDI inputs.
+ 3. Play. The status line shows the keymap, the transpose, the velocity,
+-   and last the notes sounding, so playing changes only the end of the
+-   line. On a narrow terminal the text before the notes is shortened,
+-   and the notes only when they alone are wider than the terminal.
++   the pitch bend and the modulation wheel when the keymap has keys that
++   set them or their value is away from rest, and last the notes
++   sounding, so playing changes only the end of the line. The bend runs
++   from `-1` to `+1`. It always carries its sign and as many decimal
++   places as the finest bend in the keymap needs, up to four, so bending
++   a chord does not move the notes: with a `0.25` bend in the keymap,
++   the bend at rest reads `+0.00`. The wheel runs from 0 to 127. Both
++   are what `field keys` last sent; a USB controller's bender and wheel
++   do not change them. On a narrow terminal the text before the notes
++   is shortened, and the notes only when they alone are wider than the
++   terminal.
+ 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
+    every held note and then All Notes Off, so nothing is left sounding,
+    and `Field Keys` disappears.
+@@ -200,7 +208,7 @@ any takes yet. Name several, and every key plays all of them at once:
+ ```console
+ $ field keys creek/track:keys creek/track:bass
+ keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers
+-Field Keys · musical-typing · transpose 0 · velocity 100 · C3
++Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · C3
+ ```
+ 
+ A target with `track:` in it is a track; anything else is an
+diff --git a/src/commands/keys.test.ts b/src/commands/keys.test.ts
+index 20c3455d..954c4e1b 100644
+--- a/src/commands/keys.test.ts
++++ b/src/commands/keys.test.ts
+@@ -1,6 +1,6 @@
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+-import { builtinKeymapDir, loadKeymap } from '../keys/keymap.js';
++import { builtinKeymapDir, loadKeymap, parseKeymap } from '../keys/keymap.js';
+ import { KeysSession } from '../keys/session.js';
+ import { instrumentState, instrumentText, statusText } from './keys.js';
+ 
+@@ -16,15 +16,54 @@ describe('the status line', () => {
+   it('ends with the sounding notes, after anything else it has to say', () => {
+     const session = musicalTyping();
+     expect(statusText(session, undefined, undefined, 200)).toBe(
+-      'Field Keys · musical-typing · transpose 0 · velocity 100 · –',
++      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · –',
+     );
+     session.press('KeyA');
+     session.press('KeyD');
+     expect(statusText(session, undefined, 'KeyA is both a note and a control', 200)).toBe(
+-      'Field Keys · musical-typing · transpose 0 · velocity 100 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
++      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
+     );
+   });
+ 
++  it('shows the modulation wheel where the keymap can set it', () => {
++    const session = musicalTyping();
++    session.press('Digit6');
++    session.release('Digit6');
++    expect(statusText(session, undefined, undefined, 200)).toBe(
++      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 76 · –',
++    );
++    const tracker = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')));
++    expect(statusText(tracker, undefined, undefined, 200)).not.toMatch(/bend|mod/);
++  });
++
++  it('shows the pitch bend while a bend key is held, at the same width', () => {
++    const session = musicalTyping();
++    session.press('KeyA');
++    const rest = statusText(session, undefined, undefined, 200);
++    session.press('Digit1');
++    const bent = statusText(session, undefined, undefined, 200);
++    expect(bent).toBe('Field Keys · musical-typing · transpose 0 · velocity 100 · bend -1 · mod 0 · C4');
++    expect(bent).toHaveLength(rest.length);
++    session.release('Digit1');
++    expect(statusText(session, undefined, undefined, 200)).toBe(rest);
++  });
++
++  it('prints every bend with the decimal places of the finest bend in the keymap', () => {
++    const session = new KeysSession(
++      parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { bend: -1 }, Digit2: { bend: 0.25 } }\n', 't.yaml'),
++    );
++    session.press('KeyA');
++    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.00 · C4');
++    session.press('Digit2');
++    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.25 · C4');
++    session.release('Digit2');
++    session.press('Digit1');
++    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend -1.00 · C4');
++    const third = new KeysSession(parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { bend: 0.333333 } }\n', 't.yaml'));
++    third.press('Digit1');
++    expect(statusText(third, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.3333 · –');
++  });
++
+   it('shortens the text before the notes to fit, never the notes', () => {
+     const session = musicalTyping();
+     session.press('KeyA');
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index 73963ccb..caa0d56e 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -242,6 +242,9 @@ export function statusText(
+   width: number,
+ ): string {
+   const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
++  const bends = session.bends();
++  if (bends.length > 0 || session.bend !== 0) parts.push(`bend ${bendText(session.bend, bends)}`);
++  if (session.setsMod() || session.mod !== 0) parts.push(`mod ${session.mod}`);
+   const unplayable = unplayablePositions(layout, session.keymap);
+   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
+   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
+@@ -254,3 +257,21 @@ export function statusText(
+   const room = width - separator.length - notes.length - 1; // 1 for the ellipsis
+   return room > 0 ? `${head.slice(0, room)}…${separator}${notes}` : notes.slice(0, width);
+ }
++
++// A pitch-bend message carries the bend in steps of 1/8192, about 0.0001,
++// so four decimal places show it as finely as it is sent.
++const BEND_PLACES = 4;
++
++// Every bend prints with its sign and with the decimal places the finest
++// bend in the keymap needs, so bending a held chord does not move the
++// notes after it.
++function bendText(bend: number, bends: number[]): string {
++  const places = Math.max(...[bend, ...bends].map(decimalPlaces));
++  return `${bend < 0 ? '-' : '+'}${Math.abs(bend).toFixed(places)}`;
++}
++
++function decimalPlaces(x: number): number {
++  let places = 0;
++  while (places < BEND_PLACES && Number(x.toFixed(places)) !== x) places++;
++  return places;
++}
+diff --git a/src/keys/session.test.ts b/src/keys/session.test.ts
+index 63075d3c..23abc239 100644
+--- a/src/keys/session.test.ts
++++ b/src/keys/session.test.ts
+@@ -115,6 +115,33 @@ describe('controls', () => {
+     expect(session.press('Digit3')).toEqual([[CC, 1, 0]]);
+   });
+ 
++  it('remembers the bend while its key is held', () => {
++    const session = musicalTyping();
++    session.press('Digit1');
++    expect(session.bend).toBe(-1);
++    session.release('Digit1');
++    expect(session.bend).toBe(0);
++    session.press('Digit2');
++    expect(session.bend).toBe(1);
++    session.releaseAll();
++    expect(session.bend).toBe(0);
++  });
++
++  it('remembers the modulation wheel it last set', () => {
++    const session = musicalTyping();
++    expect(session.mod).toBe(0);
++    expect(session.press('Digit6')).toEqual([[CC, 1, 76]]);
++    session.release('Digit6');
++    expect(session.mod).toBe(76);
++    session.press('Digit3');
++    expect(session.mod).toBe(0);
++    const held = new KeysSession(parseKeymap('name: held\nnotes: { KeyA: 0 }\ncontrols:\n  KeyM: { cc: 1, value: 90, mode: hold }\n', 'held.yaml'));
++    held.press('KeyM');
++    expect(held.mod).toBe(90);
++    held.release('KeyM');
++    expect(held.mod).toBe(0);
++  });
++
+   it('holds a controller in hold mode', () => {
+     const session = musicalTyping();
+     expect(session.press('Tab')).toEqual([[CC, 64, 127]]);
+diff --git a/src/keys/session.ts b/src/keys/session.ts
+index 6deecf4b..1945a7fc 100644
+--- a/src/keys/session.ts
++++ b/src/keys/session.ts
+@@ -11,6 +11,7 @@ const BLOCKING_MODS = MOD_ALT | MOD_CTRL | MOD_SUPER | MOD_HYPER | MOD_META;
+ 
+ const BEND_CENTER = 8192;
+ const BEND_MAX = 16383;
++const MOD_WHEEL = 1;
+ const ALL_NOTES_OFF = 123;
+ 
+ function noteOn(channel: number, note: number, velocity: number): MidiMessage {
+@@ -43,6 +44,11 @@ export class KeysSession {
+   keymap: Keymap;
+   transpose = 0;
+   velocity: number;
++  // The pitch bend, from -1 to 1, and the modulation wheel (CC 1), from
++  // 0 to 127, as this session last sent them, for the status line; the
++  // receiver starts both at rest.
++  bend = 0;
++  mod = 0;
+   message: string | undefined;
+   private readonly held = new Map<string, { channel: number; notes: number[] }>();
+   private readonly holders = new Map<number, number>();
+@@ -86,8 +92,11 @@ export class KeysSession {
+     if (control !== undefined) {
+       this.heldControls.delete(position);
+       const { action, channel } = control;
+-      if (action !== 'panic' && 'bend' in action) return [pitchBend(channel, BEND_CENTER)];
+-      if (action !== 'panic' && 'cc' in action) return [controlChange(channel, action.cc, 0)];
++      if (action !== 'panic' && 'bend' in action) {
++        this.bend = 0;
++        return [pitchBend(channel, BEND_CENTER)];
++      }
++      if (action !== 'panic' && 'cc' in action) return [this.cc(channel, action.cc, 0)];
+       return [];
+     }
+     const held = this.held.get(position);
+@@ -113,7 +122,7 @@ export class KeysSession {
+   }
+ 
+   quit(): MidiMessage[] {
+-    return [...this.releaseAll(), ...this.untoggleAll(), controlChange(this.keymap.channel, ALL_NOTES_OFF, 0)];
++    return [...this.releaseAll(), ...this.untoggleAll(), this.cc(this.keymap.channel, ALL_NOTES_OFF, 0)];
+   }
+ 
+   // A reloaded keymap applies to the next press; notes sounding finish
+@@ -132,11 +141,21 @@ export class KeysSession {
+   // A toggled sustain left on would hold the receiver's notes after
+   // `field keys` has gone.
+   private untoggleAll(): MidiMessage[] {
+-    const messages = [...this.toggledOn.values()].map(({ channel, cc }) => controlChange(channel, cc, 0));
++    const messages = [...this.toggledOn.values()].map(({ channel, cc }) => this.cc(channel, cc, 0));
+     this.toggledOn.clear();
+     return messages;
+   }
+ 
++  // The bends the keymap can send, and whether it can move the modulation
++  // wheel, so the status line has a value of its own to show.
++  bends(): number[] {
++    return [...this.keymap.controls.values()].flatMap((a) => (a !== 'panic' && 'bend' in a ? [a.bend] : []));
++  }
++
++  setsMod(): boolean {
++    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'cc' in a && a.cc === MOD_WHEEL);
++  }
++
+   soundingNotes(): string[] {
+     return [...this.holders.keys()].sort((a, b) => a - b).map((key) => noteName(key % 128));
+   }
+@@ -151,10 +170,15 @@ export class KeysSession {
+     return true;
+   }
+ 
++  private cc(channel: number, cc: number, value: number): MidiMessage {
++    if (cc === MOD_WHEEL) this.mod = value;
++    return controlChange(channel, cc, value);
++  }
++
+   private control(position: string, action: KeymapAction): MidiMessage[] {
+     const channel = this.keymap.channel;
+     if (action === 'panic') {
+-      return [...this.releaseAll(), ...this.untoggleAll(), controlChange(channel, ALL_NOTES_OFF, 0)];
++      return [...this.releaseAll(), ...this.untoggleAll(), this.cc(channel, ALL_NOTES_OFF, 0)];
+     }
+     if ('transpose' in action) {
+       const next = this.transpose + action.transpose;
+@@ -168,21 +192,22 @@ export class KeysSession {
+     }
+     if ('bend' in action) {
+       this.heldControls.set(position, { channel, action });
++      this.bend = action.bend;
+       return [pitchBend(channel, bendValue(action.bend))];
+     }
+     if (action.mode === 'hold') {
+       this.heldControls.set(position, { channel, action });
+-      return [controlChange(channel, action.cc, action.value)];
++      return [this.cc(channel, action.cc, action.value)];
+     }
+     if (action.mode === 'toggle') {
+       const on = this.toggledOn.get(position);
+       if (on !== undefined) {
+         this.toggledOn.delete(position);
+-        return [controlChange(on.channel, on.cc, 0)];
++        return [this.cc(on.channel, on.cc, 0)];
+       }
+       this.toggledOn.set(position, { channel, cc: action.cc });
+-      return [controlChange(channel, action.cc, action.value)];
++      return [this.cc(channel, action.cc, action.value)];
+     }
+-    return [controlChange(channel, action.cc, action.value)];
++    return [this.cc(channel, action.cc, action.value)];
+   }
+ }
