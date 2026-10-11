@@ -18,7 +18,12 @@ import {
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// A test here runs install.sh one or more times, each a few dozen processes.
+// Under a full parallel suite one took longer than vitest's 5-second
+// default, so the file gets thirty.
+vi.setConfig({ testTimeout: 30_000 });
 
 // install.sh, run by real bash against a clone of its own in a temporary
 // directory (install.md §2). pnpm, cmake, and the field CLI are stand-ins
@@ -252,8 +257,15 @@ beforeEach(() => {
   write(downloaded, readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
 });
 
-afterEach(() => {
+// Every test here is synchronous, spawnSync from start to finish, so between
+// tests the worker drains only microtasks and never reads a message. Vitest's
+// worker sends its task updates to the main thread and waits for the reply,
+// which sat unread across the whole file, more than a minute, until the call
+// timed out as an unhandled "Timeout calling onTaskUpdate" with every test
+// passed. One turn of the event loop after each test lets the reply in.
+afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 interface Run {

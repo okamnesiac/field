@@ -89,10 +89,13 @@ and the error says so:
 install.sh: 0.3.0 did not install, so 0.2.0 stays current and field still runs it
 ```
 
-The first install compiles JUCE, which takes a few minutes. Every later
-version compiles it again, but none downloads it again: the download
-stays in `~/.local/share/field/cache/fetchcontent`, which
+The first install downloads and compiles JUCE, which takes a few
+minutes. Every later version compiles JUCE's modules again, but none
+downloads JUCE again: the download stays in
+`~/.local/share/field/cache/fetchcontent`, which
 `native/audiod/CMakeLists.txt` reads from `FIELD_FETCHCONTENT_BASE_DIR`.
+On a Mac, an upgrade took about a minute, against about four minutes
+for the first install.
 
 ### Where a release install lives
 

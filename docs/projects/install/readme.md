@@ -267,8 +267,9 @@ either direction.
 installer exports it, in release mode only, as
 `<data>/cache/fetchcontent`. An environment variable, because
 `pnpm build:native` passes no `-D` and a `${VAR:+-D…}` in the script
-would break under Windows' `cmd.exe`. JUCE's build lands in that
-directory too, so an upgrade skips the download but compiles JUCE again.
+would break under Windows' `cmd.exe`. JUCE's helper build lands in that
+directory too, so an upgrade skips the download and the helper, and
+compiles JUCE's modules again as part of `field-audiod` (§10.1).
 
 **`field upgrade`.** `src/commands/upgrade.ts` tells the two installs
 apart by the same test as the installer. In a release install it reads
@@ -684,14 +685,84 @@ and upgrading on Windows", which owns it from here.
   release naming the command that finishes it, `released`'s exit codes,
   `released --since` releasing nothing unless the version went up, and
   plain `node` running the file.
-- The workflow itself has not run. Its first run is the first release.
-  Its publish step was run verbatim against a local bare remote, with
-  `tag --no-release` in place of `tag`. After a push that changed only
-  a script in `package.json`, it released nothing, and after one that
-  raised the version to 0.2.0, it tagged `v0.2.0` and created `v0`.
+- Before the merge, the publish step ran verbatim against a local bare
+  remote, with `tag --no-release` in place of `tag`. After a push that
+  changed only a script in `package.json`, it released nothing, and
+  after one that raised the version to 0.2.0, it tagged `v0.2.0` and
+  created `v0`.
+- After the merge, on GitHub: a push to `main` that changed
+  `package.json` without raising the version (878cdbc) released nothing,
+  printing "v0.1.0 is not above v0.1.0". The first release, 0.2.0, went
+  out through the workflow: #207, opened by the propose job, merged as
+  5f7cd66, and publish run 38167947880 tagged `v0.2.0`, created `v0`, and
+  published the GitHub release on 2026-10-11.
 
 ### 9.3 What is still owed
 
-- The first release. Run the Release workflow with `minor` to release
-  0.2.0, which tags `v0.2.0` and creates `v0`.
 - Chunks 3 and 4.
+
+## 10 Chunk 3 as built (2026-10-11)
+
+### 10.1 What implementation settled
+
+§3.2 records the design as built. What this section adds is what
+building it found.
+
+- **A version directory that is not current is never trusted.** A
+  half-unpacked or half-built directory from an interrupted install is
+  deleted and downloaded again, rather than resumed, because nothing
+  records how far it got.
+- **The archive's top-level directory is taken whatever its name.**
+  GitHub names it `<repo>-<version>`, and a fork's differs, so the
+  installer checks that there is exactly one and that its
+  `package.json` names the version, and moves it into place. macOS `tar`
+  adds `._` entries unless `COPYFILE_DISABLE=1` is set, which that check
+  rejects, so a stand-in archive made on a Mac needs it.
+- **The shared directory holds JUCE's helper build too.**
+  `FETCHCONTENT_BASE_DIR` holds `juce-build` beside `juce-src`, so
+  CMake builds JUCE's helper tool once. JUCE's modules compile as part
+  of `field-audiod`, in each version's own build directory, so an
+  upgrade compiles them again. Together, the skipped clone and helper
+  build took an upgrade to 58 seconds here, against 258 for the first
+  install (§10.2).
+- **The first install's clone of JUCE is the slow step.** CMake clones
+  JUCE with `--depth 1 --no-single-branch`, which fetches every branch's
+  tip, and it took minutes here.
+
+### 10.2 What was verified, and how
+
+- `src/install.test.ts` runs the real `install.sh` under real bash with
+  stand-ins for pnpm, cmake, curl's targets, and the CLI, for both
+  modes: the release version read from `package.json`, the archive's
+  checks, the switch, the shim and its refusal to replace another
+  `field`, `release.conf`, pruning, the workers set up again, a failure
+  at each step leaving the old version current, and every status row.
+  `src/commands/upgrade.test.ts` covers `field upgrade` downloading the
+  installer at the recorded ref, `FIELD_REPO` and `FIELD_REF` ahead of
+  the record, and `GITHUB_TOKEN` going only to GitHub in curl's
+  configuration.
+- By hand, on macOS with stand-in releases cut from this branch and
+  served from `file://` URLs through `FIELD_RAW_URL` and
+  `FIELD_ARCHIVE_URL`, into throwaway data and bin directories:
+  - A first install of 0.90.0 took 258 seconds, cloning and compiling
+    JUCE, and left `current -> 0.90.0`, the shim, and `release.conf`.
+    `field --version` through the shim printed `field 0.90.0`.
+  - `field upgrade`, run through that shim, downloaded the newest
+    installer, installed 0.91.0 beside 0.90.0 in 58 seconds with no
+    clone of JUCE, switched `current`, and kept 0.90.0.
+  - Run again with 0.91.0 current, it finished in a second: workers
+    re-synced and the shim rewritten.
+  - With `v0` naming a 0.92.0 that had no archive, it exited 1 with
+    "0.92.0 did not install, so 0.91.0 stays current and field still
+    runs it", and `field --version` still printed 0.91.0.
+  - `field upgrade status` reported `release-behind` against 0.92.0 and
+    `previous` for 0.90.0.
+- Not verified: Linux, a real install from GitHub, and pruning a third
+  version by hand. The first real one is the release that carries this
+  change.
+
+### 10.3 What is still owed
+
+- Release this change, then install it for real with `curl` from
+  `raw.githubusercontent.com` on a machine that has no checkout.
+- Chunk 4.
