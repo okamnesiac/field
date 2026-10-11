@@ -85,17 +85,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # A package.json change that leaves the version alone, or one whose version
-      # is already tagged, releases nothing.
+      # Only a push that raises the version releases: BEFORE is main's commit
+      # before the push. Checking for a tag alone would release an untagged
+      # version, such as the 0.1.0 main starts at, on any later change to
+      # package.json. A version that is already tagged releases nothing either.
       - name: Tag and publish the merged version
         env:
+          BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           status=0
-          node scripts/release.ts released || status=$?
+          node scripts/release.ts released --since "$BEFORE" || status=$?
           case "$status" in
             0) exit 0 ;;
             3) ;;

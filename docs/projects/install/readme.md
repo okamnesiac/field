@@ -195,14 +195,17 @@ has four commands:
 | --- | --- |
 | `bump patch\|minor\|major` | Raises one part of the version, writes it to `package.json`, and prints it. |
 | `set X.Y.Z` | Writes an exact version. Both refuse a version that does not go up. |
-| `released` | Exits 0 when the version on `origin/main` is tagged, and 3 when it is not. |
+| `released` | Exits 0 when the version on `origin/main` is tagged, and 3 when it is not. With `--since COMMIT`, it also exits 0 when that version is not above `COMMIT`'s. |
 | `tag` | Tags that version `vX.Y.Z`, force-moves the major tag `v0` to the same commit, pushes both, and creates the GitHub release with generated notes. `--no-release` skips the GitHub release. |
 
 `.github/workflows/release.yml` runs them as Projector's Release
 workflow does. Started by hand with `patch`, `minor`, or `major`, its
 propose job runs `bump` on a `release/vX.Y.Z` branch and opens the
 release pull request. When a change to `package.json` reaches `main`,
-its publish job runs `released`, and `tag` when that exits 3. Node 24
+its publish job runs `released --since` with the commit `main` held
+before the push, and `tag` when that exits 3. So only a push that raises
+the version releases, though 0.1.0, the version `main` starts at, has no
+tag (§9.1). Node 24
 runs the script directly by stripping its types, and the script imports
 only Node's own modules, so neither job installs a dependency.
 
@@ -545,6 +548,16 @@ install would build the daemon with MSVC, as a Windows checkout does.
 - **Tags are fetched with `--force`.** Every release moves `v0`, and a
   local copy of the old one would otherwise refuse the fetch that
   `released` and `tag` start with.
+- **Only a push that raises the version releases.** Projector's publish
+  job asks only whether the merged version is tagged, which holds there
+  because its version was tagged when its workflow landed. Field's
+  `main` starts at 0.1.0 with no tag, so that check alone would release
+  0.1.0 on the first change to `package.json` of any kind, such as a new
+  script. The job passes `github.event.before` to `released --since`,
+  which exits 0 unless the push raised the version. A revert of a
+  release pull request lowers the version, so it releases nothing
+  either. Tagging 0.1.0 as a baseline would also stop it, but that tag
+  would name a version nobody released.
 - **This repository does not let GitHub Actions open pull requests**
   (`can_approve_pull_request_reviews` is `false` on 2026-10-11), so the
   propose job can push the release branch but not open its pull
@@ -567,8 +580,13 @@ install would build the daemon with MSVC, as a Windows checkout does.
   refusing a tagged version, a remote that is not GitHub, the GitHub
   repository read from a remote's configured URL, a failed GitHub
   release naming the command that finishes it, `released`'s exit codes,
-  and plain `node` running the file.
+  `released --since` releasing nothing unless the version went up, and
+  plain `node` running the file.
 - The workflow itself has not run. Its first run is the first release.
+  Its publish step was run verbatim against a local bare remote, with
+  `tag --no-release` in place of `tag`. After a push that changed only
+  a script in `package.json`, it released nothing, and after one that
+  raised the version to 0.2.0, it tagged `v0.2.0` and created `v0`.
 
 ### 9.3 What is still owed
 

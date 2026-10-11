@@ -27,8 +27,10 @@ the `release/vX.Y.Z` branch, fails, and prints the link that opens the
 pull request by hand. Merging that pull request publishes the release
 just the same.
 
-A change to `package.json` that leaves the version alone, or whose version
-is already tagged, releases nothing.
+Only a merge that raises the version releases. A change to `package.json`
+that leaves the version alone releases nothing, even while that version
+has no tag, as `0.1.0` has none. A version that is already tagged
+releases nothing either.
 
 ## Run the steps by hand
 
@@ -36,13 +38,16 @@ is already tagged, releases nothing.
 Node 24 runs it directly, with no `pnpm install`:
 
 ```sh
-node scripts/release.ts bump minor      # raise the version, write it, print it
-node scripts/release.ts set 0.3.0       # write an exact version instead
-node scripts/release.ts released        # exit 0 if main's version is tagged, 3 if not
-node scripts/release.ts tag             # tag main's version, move v0, create the GitHub release
+node scripts/release.ts bump minor                 # raise the version, write it, print it
+node scripts/release.ts set 0.3.0                  # write an exact version instead
+node scripts/release.ts released                   # exit 0 if main's version is tagged, 3 if not
+node scripts/release.ts released --since abc1234   # also exit 0 if that version is not above abc1234's
+node scripts/release.ts tag                        # tag main's version, move v0, create the GitHub release
 ```
 
-`bump` and `set` refuse a version that does not go up. `tag` reads the
+The publish job runs `released --since` with the commit that `main` held
+before the merge, and `tag` only when that exits 3. `bump` and `set`
+refuse a version that does not go up. `tag` reads the
 version from `origin/main`, not from your checkout, so an unmerged bump
 cannot name a release, and it refuses a version that is already tagged.
 It needs an authenticated `gh` for the GitHub release, and

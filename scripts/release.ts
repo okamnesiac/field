@@ -5,6 +5,10 @@
 //   node scripts/release.ts released                 exit 0 if origin/main's version is tagged, 3 if not
 //   node scripts/release.ts tag [--no-release]       tag vX.Y.Z at origin/main, move vX, and create the GitHub release
 //
+// `released --since COMMIT` also exits 0 when origin/main's version is not
+// above COMMIT's, so a push that changes package.json but not its version
+// releases nothing, even while that version has no tag.
+//
 // The Release workflow (.github/workflows/release.yml) runs these, as
 // Projector's runs its .github/scripts/release.py, and they work by hand
 // from any checkout. Node 24 runs this file directly by stripping its
@@ -99,9 +103,14 @@ export function repoSlug(url: string): string | undefined {
 export function merged(root: string, remote: string, branch: string): { commit: string; version: string; tagged: boolean } {
   git(root, 'fetch', '--quiet', '--tags', '--force', remote, branch);
   const commit = git(root, 'rev-parse', `refs/remotes/${remote}/${branch}`);
+  const version = versionAt(root, commit);
+  return { commit, version, tagged: git(root, 'tag', '--list', `v${version}`) !== '' };
+}
+
+function versionAt(root: string, commit: string): string {
   const version = versionOf(git(root, 'show', `${commit}:package.json`));
   parse(version);
-  return { commit, version, tagged: git(root, 'tag', '--list', `v${version}`) !== '' };
+  return version;
 }
 
 // The repository the remote's configured URL names. `git remote get-url`
@@ -162,15 +171,19 @@ export function tag(root: string, options: TagOptions = {}): string {
   return `${done}, and published the ${release} GitHub release`;
 }
 
-const USAGE = 'usage: node scripts/release.ts bump patch|minor|major | set X.Y.Z | released | tag [--no-release]';
+const USAGE =
+  'usage: node scripts/release.ts bump patch|minor|major | set X.Y.Z | released [--since COMMIT] | tag [--no-release]';
 
-function options(args: string[], flags: string[]): Map<string, string | true> {
+function options(args: string[], accepted: string[]): Map<string, string | true> {
   const found = new Map<string, string | true>();
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === '--no-release' && flags.includes(arg)) {
+    if (arg === '--no-release' && accepted.includes(arg)) {
       found.set(arg, true);
-    } else if ((arg === '--remote' || arg === '--branch') && args[i + 1] !== undefined) {
+    } else if (
+      (arg === '--remote' || arg === '--branch' || (arg === '--since' && accepted.includes(arg))) &&
+      args[i + 1] !== undefined
+    ) {
       found.set(arg, args[++i]!);
     } else {
       throw new ReleaseError(`unexpected argument ${arg}\n${USAGE}`);
@@ -188,8 +201,17 @@ export function main(argv: string[], root: string = ROOT, out: (line: string) =>
       setVersion(root, rest[0]!);
       out(`set ${rest[0]} in package.json`);
     } else if (command === 'released') {
-      const found = options(rest, []);
+      const found = options(rest, ['--since']);
       const { version, tagged } = merged(root, (found.get('--remote') as string) ?? 'origin', (found.get('--branch') as string) ?? 'main');
+      const since = found.get('--since') as string | undefined;
+      if (since !== undefined) {
+        const commit = git(root, 'rev-parse', '--verify', `${since}^{commit}`);
+        const previous = versionAt(root, commit);
+        if (!above(parse(version), parse(previous))) {
+          out(`v${version} is not above v${previous} at ${commit.slice(0, 9)}, so there is nothing to release`);
+          return 0;
+        }
+      }
       out(`v${version} is ${tagged ? 'released' : 'not released yet'}`);
       return tagged ? 0 : NOT_RELEASED;
     } else if (command === 'tag') {

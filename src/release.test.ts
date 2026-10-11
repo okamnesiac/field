@@ -196,6 +196,30 @@ describe('the command line', () => {
     expect(run('released')).toEqual({ status: 0, lines: ['v0.1.0 is released'] });
   });
 
+  it('releases nothing since a commit unless the version went up from it, though the version has no tag', () => {
+    const start = git(checkout, 'rev-parse', 'HEAD');
+    writeFileSync(join(checkout, 'package.json'), PACKAGE.replace('"type"', '"private": true,\n  "type"'));
+    commit('a change to package.json that leaves the version alone');
+    expect(run('released', '--since', start)).toEqual({
+      status: 0,
+      lines: [`v0.1.0 is not above v0.1.0 at ${start.slice(0, 9)}, so there is nothing to release`],
+    });
+    expect(run('released').status).toBe(NOT_RELEASED);
+
+    bump(checkout, 'minor');
+    commit('release 0.2.0');
+    expect(run('released', '--since', start)).toEqual({ status: NOT_RELEASED, lines: ['v0.2.0 is not released yet'] });
+
+    // A revert of the release pull request lowers the version.
+    const raised = git(checkout, 'rev-parse', 'HEAD');
+    git(checkout, 'revert', '--no-edit', 'HEAD');
+    git(checkout, 'push', '--quiet', 'origin', 'HEAD:main');
+    expect(run('released', '--since', raised).lines).toEqual([
+      `v0.1.0 is not above v0.2.0 at ${raised.slice(0, 9)}, so there is nothing to release`,
+    ]);
+    expect(run('released', '--since', 'no-such-commit').status).toBe(1);
+  });
+
   it('prints the new version from bump, which is what the workflow reads', () => {
     expect(run('bump', 'minor')).toEqual({ status: 0, lines: ['0.2.0'] });
     expect(run('set', '0.3.0')).toEqual({ status: 0, lines: ['set 0.3.0 in package.json'] });
@@ -206,6 +230,7 @@ describe('the command line', () => {
     expect(run('publish').status).toBe(2);
     expect(run('set', '0.0.1').status).toBe(1);
     expect(run('tag', '--force').status).toBe(1);
+    expect(run('tag', '--since', 'HEAD').status).toBe(1);
   });
 
   it('runs under plain node with no dependencies installed, as the workflow runs it', () => {
