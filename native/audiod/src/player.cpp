@@ -1813,8 +1813,10 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
         if (! at.isInt() && ! at.isInt64() && ! at.isDouble())
             return fail ("record needs a sample number for at");
     }
-    // What a refused jump or play leaves behind: no take, no standby, and
-    // nothing the callback could reach.
+    // What a refused jump or play, or a failed open, leaves behind: no
+    // take, no standby, nothing the callback could reach, and nothing on
+    // disk, because a transaction left unfinalized stays there for
+    // `recordings` to offer back as a take that never was.
     auto abandon = [&]
     {
         activeCapture = nullptr;
@@ -1822,14 +1824,23 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
         standbyCapture = nullptr;
         captureStartRequested = false;
         captureLoop = false; // or every later stop would end a loop that never ran
-        capture.reset();
-        standby.reset();
         for (int c = 0; c < companionCount; ++c)
         {
             companions[(size_t) c].audio = nullptr;
             companions[(size_t) c].midiTake = nullptr;
-            companions[(size_t) c].take.reset();
         }
+        if (capture != nullptr)
+            capture->discard();
+        if (standby != nullptr)
+            standby->discard();
+        capture.reset();
+        standby.reset();
+        for (int c = 0; c < companionCount; ++c)
+            if (auto& take = companions[(size_t) c].take; take != nullptr)
+            {
+                take->discard();
+                take.reset();
+            }
     };
     field::Capture* audioTake = nullptr;
     field::MidiCapture* midiTake = nullptr;

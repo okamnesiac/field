@@ -132,6 +132,11 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
         expect(started.started_at_samples).toBe(24000);
         const take = (await client.stop()).take!;
         expect(take.started_at_samples).toBe(24000);
+        // An `at` past the bed's end is refused once the transactions are
+        // open, and leaves none of them behind.
+        const before = (await client.recordings()).recordings.length;
+        await expect(client.record(NULL_RATE * 100)).rejects.toThrow('locate out of range');
+        expect((await client.recordings()).recordings).toHaveLength(before);
         await client.disarm();
       }
     } finally {
