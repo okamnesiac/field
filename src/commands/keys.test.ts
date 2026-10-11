@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { builtinKeymapDir, loadKeymap } from '../keys/keymap.js';
+import { builtinKeymapDir, loadKeymap, parseKeymap } from '../keys/keymap.js';
 import { KeysSession } from '../keys/session.js';
 import { instrumentState, instrumentText, statusText } from './keys.js';
 
@@ -46,6 +46,22 @@ describe('the status line', () => {
     expect(bent).toHaveLength(rest.length);
     session.release('Digit1');
     expect(statusText(session, undefined, undefined, 200)).toBe(rest);
+  });
+
+  it('prints every bend with the decimal places of the finest bend in the keymap', () => {
+    const session = new KeysSession(
+      parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { bend: -1 }, Digit2: { bend: 0.25 } }\n', 't.yaml'),
+    );
+    session.press('KeyA');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.00 · C4');
+    session.press('Digit2');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.25 · C4');
+    session.release('Digit2');
+    session.press('Digit1');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend -1.00 · C4');
+    const third = new KeysSession(parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { bend: 0.333333 } }\n', 't.yaml'));
+    third.press('Digit1');
+    expect(statusText(third, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.3333 · –');
   });
 
   it('shortens the text before the notes to fit, never the notes', () => {

@@ -58,11 +58,13 @@ for, once, and a new process gets a new MIDI client.
    the pitch bend and the modulation wheel when the keymap has keys that
    set them or their value is away from rest, and last the notes
    sounding, so playing changes only the end of the line. The bend runs
-   from `-1` to `+1` and always carries its sign, so bending a chord
-   does not move the notes; the wheel runs from 0 to 127. Both are what
-   `field keys` last sent; a USB controller's bender and wheel do not
-   change them. On a narrow terminal the text before the notes is
-   shortened, and the notes only when they alone are wider than the
+   from `-1` to `+1`. It always carries its sign and as many decimal
+   places as the finest bend in the keymap needs, up to four, so bending
+   a chord does not move the notes: with a `0.25` bend in the keymap,
+   the bend at rest reads `+0.00`. The wheel runs from 0 to 127. Both
+   are what `field keys` last sent; a USB controller's bender and wheel
+   do not change them. On a narrow terminal the text before the notes
+   is shortened, and the notes only when they alone are wider than the
    terminal.
 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
    every held note and then All Notes Off, so nothing is left sounding,

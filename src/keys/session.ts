@@ -146,10 +146,10 @@ export class KeysSession {
     return messages;
   }
 
-  // Whether the keymap can bend or move the modulation wheel, so the
-  // status line has a value of its own to show.
-  setsBend(): boolean {
-    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'bend' in a);
+  // The bends the keymap can send, and whether it can move the modulation
+  // wheel, so the status line has a value of its own to show.
+  bends(): number[] {
+    return [...this.keymap.controls.values()].flatMap((a) => (a !== 'panic' && 'bend' in a ? [a.bend] : []));
   }
 
   setsMod(): boolean {
