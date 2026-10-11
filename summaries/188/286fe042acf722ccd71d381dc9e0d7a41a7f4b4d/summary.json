@@ -1,0 +1,318 @@
+{
+ "version": 1,
+ "name": "Voice reload and mod wheel",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 188,
+  "title": "Reload an instrument's voice when its program is saved, and give voices the modulation wheel (keyboard-instrument.md §14)",
+  "head": "286fe042acf722ccd71d381dc9e0d7a41a7f4b4d",
+  "headRef": "keys/voice-reload-mod",
+  "base": "6a628173793bd9d84311808706899d3473326195",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys &lt;instrument&gt;</code> plays a SuperCollider instrument live from the computer keyboard or any MIDI controller. It starts a <em>voice host</em>: <code>sclang</code>, SuperCollider's language process, running Field's <code>sc/voice-host.scd</code>. The host boots its own <code>scsynth</code> audio server and plays the instrument's <em>voice</em>, the SynthDef its program returns when <code>FIELD_MODE</code> is <code>voice</code>. A recorded take renders offline through the same voice and the same <em>voicer</em>, <code>sc/voicer.scd</code>, which holds the rules that turn MIDI into voices.",
+   "Before this pull request, changing an instrument meant quitting <code>field keys</code>, editing the program, and starting again, which waits several seconds while <code>scsynth</code> boots. The modulation wheel (MIDI CC 1) did nothing, because the voice contract had no control for it. The keyboard-instrument plan deferred both, as §7 questions 5 and 6. This pull request answers them in a new §14:",
+   "<ul><li><b>Saving the program reloads it.</b> Field watches the program file. On a change, it sends an OSC message, <code>/field/reload</code>, to <code>sclang</code>'s own UDP port, which Field now chooses and passes with <code>-u</code>. The host loads the program again with a new shared loader, <code>sc/voice-load.scd</code>. The next note plays the new voice, and notes already sounding finish on the old one. A save that does not load keeps the last good voice, and the instrument's line says why.</li><li><b>The wheel reaches the voice as <code>mod</code>.</b> CC 1 divided by 127 becomes <code>mod</code>, an optional SynthDef control from 0 to 1. The voicer passes it to each new voice and sets it on every sounding voice when the wheel moves, live and in a take's render. <code>juno</code> turns it into vibrato, and <code>bass</code> into an opening filter.</li></ul>",
+   "§14.5 leaves two things for later. Acceptance criteria 37 to 41 need a real speaker and ears. A save in a session's first seconds can arrive before the host listens for it; that save is lost, and the next one reloads."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Voice host</b>: <code>sclang</code> running <code>sc/voice-host.scd</code>, started by <code>field keys</code>. It reports to Field in stdout lines that start <code>@field </code>, each one JSON object.</li><li><b>Voice</b>: the SynthDef an instrument program returns in voice mode, with <code>freq</code>, <code>amp</code>, <code>gate</code>, <code>out</code>, and now an optional <code>mod</code>.</li><li><b>Voice mode and render mode</b>: an instrument program checks <code>FIELD_MODE</code>. In voice mode it returns a voice; in render mode it renders a file under Field's sc-render contract.</li><li><b>Voicer</b>: <code>sc/voicer.scd</code>, the MIDI-to-voices rules that the live host and the take render share.</li><li><b>Take render</b>: the build's offline render of a recorded take through its instrument, by <code>sc/voice-render.scd</code>.</li><li><b>Harness</b>: Field's own SuperCollider files that decide a take's sound, now <code>voice-render.scd</code>, <code>voice-load.scd</code>, and <code>voicer.scd</code>.</li><li><b>OSC</b>: Open Sound Control, the UDP message format SuperCollider speaks.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<p>The first review, at <code>286fe04</code>, opened two findings. Both are open:</p><ul class=\"tight\"><li><b>A take recorded with the wheel already up renders without it.</b> A take holds only messages sent after it starts, and the render starts the voicer at <code>mod = 0</code>. The note is on <code>sc/voicer.scd</code>.</li><li><b>Two doc edits break the wrapping around them</b>, in <code>docs/keys.md</code> and <code>docs/build-graph.md</code>, against <code>AGENTS.md</code>.</li></ul><p class=\"note\">It also checked the typecheck, 99 focused tests with real <code>sclang</code>, the render branches byte for byte, and what a reload does to sounding notes. The verified notes below say how.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "voicer",
+   "title": "The voicer carries the mod wheel",
+   "kicker": "CC 1 becomes mod on every new and sounding voice, live and in renders",
+   "intro": [
+    "The voicer is <code>sc/voicer.scd</code>: one function, shared by the live host and the take render, that turns MIDI into voices. Its caller passes callbacks that start, change, and release a voice. It returns an Event, SuperCollider's dictionary-like object, whose entries <code>noteOn</code>, <code>noteOff</code>, <code>cc</code>, <code>bend</code>, and <code>forgetVoices</code> the caller invokes as MIDI arrives.",
+    "CC 1 now sets <code>mod</code>, the wheel's value from 0 to 1. A new voice starts with the current <code>mod</code>, and a wheel move sets it on every voice in the voicer's table. To carry both pitch bend and <code>mod</code>, the callback that retuned a voice, <code>setFreq.(voice, freq)</code>, becomes <code>set.(voice, control, value)</code>."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "No new Event entry can collide with a built-in method. An entry named like a method of Event's class chain runs the method instead, as <code>clear</code> once did. The entries are unchanged, and <code>set</code> and <code>mod</code> are a closure argument and a local variable, which SuperCollider resolves lexically. The real-<code>sclang</code> voicer test prints from the <code>set</code> callback, so the callback is what runs."
+    }
+   ],
+   "files": [
+    {
+     "path": "sc/voicer.scd",
+     "note": "The CC 1 branch, <code>mod</code> passed to <code>start</code>, and <code>set</code> in place of <code>setFreq</code>.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 18,
+       "text": "Open finding: a take recorded with the wheel already up renders without it. A take holds only messages that arrive after it starts (the daemon's <code>recordMidiBlock</code> discards earlier ones), and the render starts here at <code>mod = 0</code>. The wheel stays where you leave it, on a controller and on <code>musical-typing</code>'s <code>Digit3</code> to <code>Digit8</code>, so <code>juno</code> plays vibrato live and none in the render. The fix is to carry the wheel's value at the take's start into the take, or to document the limit in <code>docs/keys.md</code> and §14.5."
+      },
+      {
+       "kind": "context",
+       "line": 45,
+       "text": "The wheel reaches only voices still in <code>voices</code>. A released voice in its release tail has left the table, so a wheel move no longer reaches it, as a bend does not."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voicer.test.ts",
+     "note": "Through real <code>sclang</code>: a note starts with <code>mod</code> 0, CC 1 at 127 sets 1.0 on the sounding voice and starts the next with it, and CC 1 at 0 sets both back."
+    }
+   ]
+  },
+  {
+   "id": "loader",
+   "title": "One loader for every voice load",
+   "kicker": "sc/voice-load.scd: the first load, each reload, and the take render load a program the same way",
+   "intro": [
+    "An instrument program is a SuperCollider file. In voice mode, when the environment variable <code>FIELD_MODE</code> is <code>voice</code>, its value, the file's last expression, must be a SynthDef. The host and the take render each ran the program with <code>executeFile</code> and checked the result themselves. They now share <code>sc/voice-load.scd</code>, a function of the program's path that answers <code>[voiceDef, nil]</code>, or <code>[nil, why]</code>.",
+    "The loader compiles before it runs, so a syntax error gets a reason of its own, <code>juno.scd does not compile</code>. A runtime error, and a value that is not a SynthDef, keep the reasons the host already gave."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "sc/voice-load.scd",
+     "note": "The loader. It sets <code>thisProcess.nowExecutingPath</code> while the program runs, as <code>executeFile</code> does, so a program can find its own directory.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 10,
+       "text": "<code>compileFile</code> answers nil for a syntax error, and <code>sclang</code> prints its own <code>ERROR:</code> line saying what is wrong. The loader's reason does not carry that line; <code>src/keys/voice-host.ts</code> attaches it on Field's side."
+      },
+      {
+       "kind": "context",
+       "line": 16,
+       "text": "<code>try</code> keeps a runtime error from printing, so a reload that fails at run time reports only the loader's reason, with the error's own text in it."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "host",
+   "title": "The live host reloads when Field asks",
+   "kicker": "An OSC responder in sc/voice-host.scd, and reload() in voice-host.ts",
+   "intro": [
+    "The voice host is <code>sclang</code> running <code>sc/voice-host.scd</code>. It reports to Field on its standard output, where each line that starts <code>@field </code> is one JSON object, such as <code>{\"ready\":true,…}</code>. <code>src/keys/voice-host.ts</code> starts the host and parses those lines into statuses.",
+    "Field now picks a second free UDP port and starts <code>sclang</code> with <code>-u &lt;port&gt;</code>, so it knows where <code>sclang</code> listens. <code>reload()</code> sends <code>/field/reload</code> there. The host's responder accepts the message only from <code>127.0.0.1</code>, loads the program again, and answers with one of two new lines:",
+    "<ul><li><b><code>{\"reloaded\":true}</code></b>: the new SynthDef is on the server, and the next note plays it.</li><li><b><code>{\"reload_error\":\"…\"}</code></b>: the program did not load, and the last good voice still plays. Field attaches the first <code>ERROR:</code> line that <code>sclang</code> printed since the reload, which is where a syntax error is explained.</li></ul>",
+    "While the server is <em>booting</em>, at the first start or after a sample-rate restart, there is nothing to add the SynthDef to. The responder then only replaces <code>voiceDef</code>, which the boot adds once the server answers."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "A reload leaves sounding notes alone. An offline render replaced a SynthDef under a running node: the node kept its old sound, and a node started afterwards used the new definition. The voicer's held and sustained notes are not touched by a reload."
+    },
+    {
+     "kind": "verify",
+     "text": "A reload's <code>server.sync</code> cannot hold up a rate restart's boot. In the installed SuperCollider, <code>NetAddr.sync</code> gives each call its own condition and responder, so the two syncs wait independently."
+    }
+   ],
+   "files": [
+    {
+     "path": "sc/voice-host.scd",
+     "note": "Loads with <code>voice-load.scd</code> at start and in the new <code>/field/reload</code> responder, and passes <code>mod</code> to each new <code>Synth</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 145,
+       "text": "Only a datagram from this machine reloads. Any local process can send one, but a reload only reads again the program Field named at start."
+      },
+      {
+       "kind": "context",
+       "line": 150,
+       "text": "While booting, the responder swaps <code>voiceDef</code> without adding it to a server. The boot routine adds whatever <code>voiceDef</code> holds once <code>serverRunning</code> is true."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.ts",
+     "note": "Chooses <code>sclang</code>'s port, sends <code>/field/reload</code>, and turns the two new host lines into <code>reloaded</code> and <code>reload-failed</code> statuses.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 154,
+       "text": "Every <code>ERROR:</code> line since the last <code>reload()</code> is kept, but only the first is read. The review suggests keeping only the first."
+      },
+      {
+       "kind": "context",
+       "line": 188,
+       "text": "<code>-u</code> fixes <code>sclang</code>'s port. <code>-D</code> keeps <code>sclang</code> from reading standard input, which is why the plan rejected stdin as the reload channel."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.test.ts",
+     "note": "The stub <code>sclang</code> listens on its <code>-u</code> port and answers reloads from <code>STUB_RELOADS</code>. The new case checks both answers, with <code>sclang</code>'s error line attached, and that each reload reached the port."
+    }
+   ]
+  },
+  {
+   "id": "watch",
+   "title": "field keys watches the program and shows what each save did",
+   "kicker": "watchText, shared with the keymap watch, and the instrument's line",
+   "intro": [
+    "<code>field keys</code> already reloaded a keymap given by path when you saved it. That watch moves unchanged from <code>watchKeymap</code> into <code>src/keys/watch.ts</code>, as <code>watchText</code>, and now also watches the instrument's program. It watches the file's directory, not the file, because many editors save by renaming a temporary file over the original, and a watch on the file would keep following the old one. It calls back only when the text has changed.",
+    "<code>field keys</code> shows the instrument on a line of its own above the status line. That line now also says what the last save did. A save that loaded adds <code>· reloaded</code>. A save that failed replaces the line with <code>juno kept its last voice: …</code>, which leads with the reason so a narrow terminal keeps it."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/watch.ts",
+     "note": "The directory watch, moved from <code>keymap.ts</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The rename-on-save handling survives the move: the body is the old <code>watchKeymap</code> body line for line. The keymap reload tests, which re-save every 500 ms so a missed event cannot hang them, passed five runs of five."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/keymap.ts",
+     "note": "<code>watchKeymap</code> now parses the text that <code>watchText</code> reads."
+    },
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Starts the program watch, keeps each reload result beside the host's state, and draws it.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 198,
+       "text": "The watch starts as soon as <code>sclang</code> is spawned. A save after the host has read the program, but before it registers its responder, is lost, and the next save reloads (§14.5)."
+      },
+      {
+       "kind": "context",
+       "line": 254,
+       "text": "A failed reload hides the live or restarting state until a save loads again."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "render",
+   "title": "A take renders with the loader and the wheel",
+   "kicker": "voice-render.scd uses voice-load.scd and passes mod; the harness grows to three files",
+   "intro": [
+    "A take is a recording of what you played, kept as a notes file. The build renders it offline through the instrument with <code>sc/voice-render.scd</code>, which turns the take's events into a score through the same voicer the live host uses. The take's CC 1 events now reach the voicer, so a wheel moved during the take moves <code>mod</code> in the render.",
+    "The render's cache key covers the program and Field's harness, the SuperCollider files that decide the sound. <code>sc/voice-load.scd</code> joins the harness, so a change to any of the three files renders every take again."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A take holds only the messages that arrive after it starts. The open finding on <code>sc/voicer.scd</code> line 18 covers a wheel set before the take."
+    }
+   ],
+   "files": [
+    {
+     "path": "sc/voice-render.scd",
+     "note": "Loads with <code>voice-load.scd</code>, passes <code>mod</code> in each <code>/s_new</code>, and sets any control through <code>set</code>."
+    },
+    {
+     "path": "src/generators/voice-render.ts",
+     "note": "Adds <code>voice-load.scd</code> to <code>HARNESS</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 27,
+       "text": "Each harness file's SHA-256 is an input of the render, through <code>extraInputs</code>. So the changed <code>voicer.scd</code> and <code>voice-render.scd</code> re-render takes without a <code>version</code> bump."
+      }
+     ]
+    },
+    {
+     "path": "src/generators/voice-render.test.ts",
+     "note": "Lists the new harness file among the inputs, and renders a voice whose level is <code>mod</code>: silent without CC 1, sounding with it."
+    }
+   ]
+  },
+  {
+   "id": "instruments",
+   "title": "juno and bass respond to the wheel",
+   "kicker": "Vibrato on juno, an opening filter on bass, and render branches left as they were",
+   "intro": [
+    "Both instruments in <code>examples/bloom/shared/instruments/</code> are the JU-06A, a model of the Roland Juno's signal chain, set up two ways. Each builds its sound with <code>ju06a.(freq, gate, k, mod)</code>, where <code>k</code> holds the instrument's fixed knob settings. Two new knobs say what the wheel does. <code>modVibrato</code> is the vibrato depth in semitones, at 5.5 Hz, and <code>modOpen</code> is how far the filter opens. <code>juno</code> gets half a semitone of vibrato, and <code>bass</code> opens its filter up to four times its cutoff.",
+    "Only the voice-mode SynthDef passes <code>mod</code>, smoothed over 50 ms. The render-mode branch calls <code>ju06a</code> with three arguments, so <code>mod</code> is nil there and the graph has neither term."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "The render branches are unchanged. <code>juno</code> and <code>bass</code>, rendered in render mode with seed 1 for 4 seconds in stereo and in mono, give the same SHA-256 at the merge base and at this head, with real sound (peaks from 0.34 to 0.53)."
+    }
+   ],
+   "files": [
+    {
+     "path": "examples/bloom/shared/instruments/juno.scd",
+     "note": "<code>modVibrato: 0.5</code>, and <code>mod</code> on the <code>junoKey</code> SynthDef.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 35,
+       "text": "With <code>mod</code> at 0 the vibrato factor is <code>2 ** 0</code>, exactly 1, so a voice with the wheel down plays the pitch it did before."
+      }
+     ]
+    },
+    {
+     "path": "examples/bloom/shared/instruments/bass.scd",
+     "note": "<code>modOpen: 3</code>, and <code>mod</code> on the <code>bassKey</code> SynthDef."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The docs describe mod and reload, and the plan records §14",
+   "kicker": "keys.md, build-graph.md, and keyboard-instrument.md §7 and §14",
+   "intro": [
+    "<code>docs/keys.md</code> adds <code>mod</code> to the voice contract's table and describes reloading. <code>docs/build-graph.md</code> names <code>sc/voice-load.scd</code> as a third harness file and the wheel among what a take render plays. The plan points §7 questions 5 and 6 at §14. §14 records what was built, four decisions with the alternatives they beat, criteria 37 to 41, what was verified, and what is still owed."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "The <code>mod</code> row, reloading with an example of a failed save's line, and what the wheel does on <code>juno</code> and <code>bass</code>.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 141,
+       "text": "Open finding: this line runs to 88 columns in a paragraph wrapped near 70, and <code>docs/build-graph.md</code> line 265 leaves a 14-column line. <code>AGENTS.md</code> asks an edit to match the wrapping around it. The fix is to reflow both paragraphs."
+      }
+     ]
+    },
+    {
+     "path": "docs/build-graph.md",
+     "note": "The optional <code>mod</code> control, and the take render's loader and three harness files.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 264,
+       "text": "\"and optionally <code>mod</code>, that frees itself\" reads as if <code>mod</code> frees itself. The review suggests a sentence of its own for the optional control."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "§7 questions 5 and 6 point at §14, and §14 records the work.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "§2.6 still says the host ignores CC 1, and its contract table has no <code>mod</code>. §14 supersedes both. The review suggests pointing §2.6 at §14."
+      },
+      {
+       "kind": "context",
+       "line": 1338,
+       "text": "§14.5 lists checks still owed, not open questions, so the plan's <code>in-progress</code> status leaves nothing from this change unanswered."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "keyboard-instrument"
+}

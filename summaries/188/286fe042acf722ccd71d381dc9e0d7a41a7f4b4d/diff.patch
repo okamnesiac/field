@@ -1,0 +1,1054 @@
+diff --git a/docs/build-graph.md b/docs/build-graph.md
+index 430d868..5a8943e 100644
+--- a/docs/build-graph.md
++++ b/docs/build-graph.md
+@@ -261,7 +261,8 @@ predates the §4 rename).
+ The same program can also be played from notes. When `FIELD_MODE` is
+ `voice`, it must not render or exit, and its value — the file's last
+ expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
+-controls that frees itself after `gate` goes to 0. `field keys
++controls, and optionally `mod`, that frees itself after `gate` goes to
++0. `field keys
+ <instrument>` plays that voice live; the render variables are absent in
+ voice mode, so a program checks `FIELD_MODE` before reading them. A
+ `supercollider:` entry never runs in voice mode, so voice mode changes
+@@ -276,16 +277,17 @@ the record node's, and the entry places it where the take was played
+ (keyboard-instrument.md §12.3). Nobody declares it.
+ 
+ It runs `sc/voice-render.scd` through `sclang`, which loads the
+-instrument in voice mode and drives its voice from the take's notes
+-file with `sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
+-all-notes-off, and pitch bend (±2 semitones) act as they did live. The
+-render is stereo at the track's rate and runs 4 seconds past the take,
+-so the last notes' release is heard; scsynth rounds it up to a whole
+-control block, as it does every NRT render. Its cache inputs are the
+-notes file, the instrument's content hash, and both harness files, so
+-editing any of them renders the take again. The harness adds nothing
+-random, so an instrument that renders reproducibly renders its takes
+-reproducibly, bit for bit.
++instrument in voice mode with `sc/voice-load.scd`, as `field keys`
++loads it, and drives its voice from the take's notes file with
++`sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
++all-notes-off, pitch bend (±2 semitones), and the modulation wheel act
++as they did live. The render is stereo at the track's rate and runs 4
++seconds past the take, so the last notes' release is heard; scsynth
++rounds it up to a whole control block, as it does every NRT render. Its
++cache inputs are the notes file, the instrument's content hash, and the
++three harness files, so editing any of them renders the take again. The
++harness adds nothing random, so an instrument that renders reproducibly
++renders its takes reproducibly, bit for bit.
+ 
+ ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
+ 
+diff --git a/docs/keys.md b/docs/keys.md
+index a0a1ecd..5b93b65 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -134,8 +134,11 @@ these controls, and it must not render or exit.
+ | `amp` | The velocity divided by 127 |
+ | `gate` | 1 at note-on, 0 at note-off |
+ | `out` | The output bus, 0 |
++| `mod` | Optional: the modulation wheel (CC 1), from 0 to 1, at note-on and whenever it moves |
+ 
+-The voice writes two channels and frees itself after `gate` goes to 0,
++A voice may leave `mod` out, and then the wheel does nothing to it. In
++`musical-typing`, the keys `3` to `8` set the wheel from 0 to full, as
++they do in Logic. The voice writes two channels and frees itself after `gate` goes to 0,
+ with an envelope that ends in `doneAction: 2`. The render variables are
+ absent in voice mode, so check `FIELD_MODE` before you read them:
+ 
+@@ -153,9 +156,22 @@ if ("FIELD_MODE".getenv == "voice") {
+ ```
+ 
+ The host owns everything between MIDI and voices: one voice per
+-sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
+-pitch bend, which it applies to `freq` on every sounding voice, up to
+-two semitones either way. It ignores modulation (CC 1) for now.
++sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), pitch
++bend, which it applies to `freq` on every sounding voice, up to two
++semitones either way, and the modulation wheel, which it sets as `mod`
++on every sounding voice and on each new one.
++
++Saving the program while `field keys` plays loads it again. The next
++note plays the new voice, and notes already sounding finish as they
++started. A save that does not load, such as one with a syntax error,
++leaves the last voice that loaded playing, and the instrument's line
++says why:
++
++```console
++juno kept its last voice: juno.scd does not compile: syntax error, unexpected end of file
++```
++
++The next save that loads puts `· reloaded` on the line instead.
+ 
+ `examples/bloom` has three instruments that answer voice mode:
+ 
+@@ -164,11 +180,13 @@ two semitones either way. It ignores modulation (CC 1) for now.
+ - **`juno`** — the JU-06A, a model of the Roland Juno's chain from
+   [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
+   classic Juno pad: saw and pulse with the width swept, a slow attack,
+-  and the chorus on.
++  and the chorus on. The modulation wheel adds vibrato, as the lever on
++  a Juno's bender does.
+ - **`bass`** — the same JU-06A set as offset's bass: a saw with a square
+   sub an octave down, a short envelope that opens the filter on each
+-  note, and no chorus. It plays at true pitch, so in `musical-typing`
+-  press `Z` to drop an octave.
++  note, and no chorus. The modulation wheel opens the filter, up to four
++  times its cutoff. It plays at true pitch, so in `musical-typing` press
++  `Z` to drop an octave.
+ 
+ ## Record what you play
+ 
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index 9067c74..b29a1be 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -778,13 +778,12 @@ Each chunk is one pull request, in order:
+    graph. This is deferred to that project on purpose.
+ 5. **Reloading the voice when its file changes.** The voice host could
+    re-run the program and add the new SynthDef while you play, as a
+-   keymap given by path already reloads. This is deferred until chunk 2
+-   has been played with.
++   keymap given by path already reloads. §14 answers it: it reloads.
+ 6. **A control for modulation.** The voice host ignores CC 1, because
+    the contract has no control for it. Adding an optional `mod` control,
+    which a voice may leave out, would let an instrument respond to the
+-   modulation keys and a controller's mod wheel. This is deferred until
+-   chunk 2 has been played with.
++   modulation keys and a controller's mod wheel. §14 answers it with
++   that control.
+ 7. **Layers.** A keymap could bind a second set of positions that
+    applies while `Shift` or another key is held, which would double its
+    range without a transpose. The format leaves room for a `layers`
+@@ -1270,3 +1269,75 @@ record entry has `instrument: pad`.
+   `field import` takes audio only, so there is no way yet to pin an
+   edit. A command that re-pins a notes file is the follow-up if editing
+   notes turns out to matter.
++
++## 14 Voice reload and the modulation wheel (2026-10-11)
++
++§7 deferred questions 5 and 6 "until chunk 2 has been played with".
++Justin has played with it, and asked for both. Saving an instrument's
++program while `field keys` plays now loads it again, and the modulation
++wheel reaches the voice as an optional `mod` control.
++
++### 14.1 What was built
++
++- **Reload.** `field keys` watches the instrument's program the way it
++  watches a keymap given by path: `watchText` in `src/keys/watch.ts`,
++  which `watchKeymap` now uses too, watches the directory and calls only
++  when the text changes. On a change, Field sends `/field/reload` to
++  `sclang`'s own port, which it chooses and passes with `-u`, as it
++  already chooses `scsynth`'s. The host loads the program again with
++  `sc/voice-load.scd`, the loader its first load and the take render
++  also use. A voice that loads is what the next note plays, and notes
++  already sounding finish as they started. One that does not leaves the
++  last good voice playing, and the instrument's line says why, with
++  `sclang`'s own `ERROR:` line attached when the program does not
++  compile.
++- **The modulation wheel.** CC 1 divided by 127 is `mod`, which the
++  voicer passes to each new voice and sets on every sounding voice when
++  it moves, live and in a take's render. The voicer's `setFreq` became
++  `set.(voice, control, value)`, which carries both `freq` and `mod`. A
++  voice may leave `mod` out; `scsynth` ignores a control a SynthDef does
++  not have. `juno` turns it into vibrato, up to half a semitone at
++  5.5 Hz, as the lever on a Juno's bender does; `bass` opens its filter,
++  up to four times its cutoff; `pad` has none.
++- **Renders.** `juno`'s and `bass`'s render branches pass no `mod`, so
++  their graphs, and their renders, are unchanged.
++
++### 14.2 Decisions (DECIDED, 2026-10-11)
++
++- **Field watches; the host loads.** Rejected: `sclang` polling the
++  program's modification time, which would be a second watcher with
++  one-second resolution and none of the rename-on-save handling the
++  keymap watch already proves.
++- **The reload is an OSC message to `sclang`'s port,** accepted only
++  from `127.0.0.1`. Rejected: `sclang`'s standard input, which `-D`
++  turns off.
++- **A failed reload keeps the last good voice.** Silence, or a host
++  that exits, would end the session over a typo.
++- **`mod` is one value for every channel,** as the voicer's bend is.
++
++### 14.3 Acceptance criteria
++
++| # | Do | Expect |
++| --- | --- | --- |
++| 37 | In `examples/bloom`, run `field keys juno`. Hold a note, change `juno.scd`'s `level` from 0.12 to 0.05, and save. Play another note. | The instrument's line ends `· reloaded`. The held note keeps sounding as it started; the new note is quieter. |
++| 38 | Save `juno.scd` with a syntax error, then play. | The line reads `juno kept its last voice: juno.scd does not compile: …`, and the keys still play `juno`. Fixing the file brings back `· reloaded`. |
++| 39 | With `field keys juno`, hold a note and press `8`, then `3`. | Vibrato appears, then stops. |
++| 40 | With `field keys bass`, hold a note and press `8`. | The filter opens. |
++| 41 | Record a take on a track whose record entry has `instrument: juno`, moving the wheel while you play, then build. | The render has the vibrato where you played it. |
++
++### 14.4 What was verified, and how
++
++| Check | Result |
++| --- | --- |
++| `src/keys/voicer.test.ts`, through real `sclang` | A note starts with `mod` 0; CC 1 at 127 sets 1.0 on the sounding voice, a new voice starts with 1.0, and CC 1 at 0 sets 0.0 on both. The voicer still plays after `forgetVoices`. |
++| `src/keys/voice-host.test.ts`, against a stub `sclang` | `sclang` starts with `-u <port> -D <script>`; `reload` sends `/field/reload` to that port, and the host's answers become `reloaded` and `reload-failed` with `sclang`'s `ERROR:` line attached. |
++| `src/generators/voice-render.test.ts`, through real `sclang` | With a voice whose level is `mod`, a take with no CC 1 renders silent, and one with CC 1 at 127 before its note renders sound. The render's cache inputs now include `sc/voice-load.scd`. |
++| `juno` and `bass` render branches | With seed 1 and 4 s, in stereo and mono, the same bytes as before `mod`. |
++| `field keys juno` in a pseudo-terminal, with the real host and no keys pressed | Live at 48000 Hz on this Mac's speakers. A good save of `juno.scd` showed `· reloaded`; one without a semicolon showed `juno kept its last voice: juno.scd does not compile: syntax error, unexpected …`; restoring the file showed `· reloaded` again. |
++
++### 14.5 What is still owed
++
++- **Criteria 37 to 41 by ear.** The runs above pressed no keys.
++- **A save in the first seconds of a session** can arrive before
++  `sclang` has registered its reload responder, and is then lost; the
++  next save reloads.
+diff --git a/examples/bloom/shared/instruments/bass.scd b/examples/bloom/shared/instruments/bass.scd
+index f5d296d..bb20de9 100644
+--- a/examples/bloom/shared/instruments/bass.scd
++++ b/examples/bloom/shared/instruments/bass.scd
+@@ -6,7 +6,8 @@
+ // because a program's own bytes are the cache key for what it renders.
+ //
+ // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
+-// bass` plays and a record entry with `instrument: bass` renders
++// bass` plays, with the mod wheel opening its filter (§14), and a
++// record entry with `instrument: bass` renders
+ // (keyboard-instrument.md §2.6). It plays at true pitch, so press Z in
+ // musical-typing to drop an octave. Otherwise it runs under Field's
+ // sc-render contract and renders offset's sequence from sessions/juno.scd,
+@@ -19,17 +20,22 @@ var bass = (
+ 	hpfFreq: 20,
+ 	vcfFreq: 1200, vcfRes: 0.4, vcfEnv: 0.6, vcfLfo: 0, vcfKeyFollow: 0,
+ 	atk: 0.005, dec: 0.2, sus: 0.3, rel: 0.15,
+-	chorusOn: 0, chorusRate: 0.5, chorusDepth: 0.005
++	chorusOn: 0, chorusRate: 0.5, chorusDepth: 0.005,
++	modVibrato: 0, modOpen: 3 // the mod wheel opens the filter, up to four times its cutoff
+ );
+ var level = 0.3; // a voice's gain: a bass line rarely stacks notes
+ 
+ // One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
+ // ends after the gate closes. The knobs are fixed per instrument, so they
+-// shape the graph rather than arriving as controls.
+-var ju06a = { |freq, gate, k|
++// shape the graph rather than arriving as controls. `mod`, the mod wheel
++// from 0 to 1, comes only in voice mode: it adds vibrato of up to
++// modVibrato semitones and opens the filter by up to modOpen times its
++// cutoff. A render passes none, so its graph is the one without them.
++var ju06a = { |freq, gate, k, mod|
+ 	var lfo, pw, sig, env, cutoff;
+ 	lfo = SinOsc.kr(k[\lfoRate]) * EnvGen.kr(Env([0, 0, 1], [k[\lfoDelay], 0.01]));
+ 	freq = freq * (8 / k[\range]) * (2 ** (lfo * k[\dcoLfo] / 12));
++	if (mod.notNil) { freq = freq * (2 ** (SinOsc.kr(5.5) * mod * k[\modVibrato] / 12)) };
+ 	pw = if (k[\pwmMode] == 1) { SinOsc.kr(k[\lfoRate]).range(0.1, 0.9) } { k[\pwm] };
+ 	pw = (pw + (lfo * k[\pwmLfo])).clip(0.05, 0.95);
+ 	sig = (Saw.ar(freq) * k[\sawLevel]) + (Pulse.ar(freq, pw) * k[\pulseLevel]);
+@@ -38,6 +44,7 @@ var ju06a = { |freq, gate, k|
+ 	sig = HPF.ar(sig, k[\hpfFreq].clip(20, 20000));
+ 	env = EnvGen.kr(Env.adsr(k[\atk], k[\dec], k[\sus], k[\rel]), gate, doneAction: 2);
+ 	cutoff = k[\vcfFreq] * (1 + (env * k[\vcfEnv]) + (lfo * k[\vcfLfo])) + (freq * k[\vcfKeyFollow]);
++	if (mod.notNil) { cutoff = cutoff * (1 + (mod * k[\modOpen])) };
+ 	sig = RLPF.ar(sig, cutoff.clip(20, 20000), 1 - k[\vcfRes].clip(0, 0.95)) * env;
+ 	if (k[\chorusOn] == 1) {
+ 		[0, pi].collect { |phase|
+@@ -49,8 +56,8 @@ var ju06a = { |freq, gate, k|
+ };
+ 
+ if ("FIELD_MODE".getenv == "voice") {
+-	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+-		Out.ar(out, ju06a.(freq, gate, bass) * amp * level);
++	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
++		Out.ar(out, ju06a.(freq, gate, bass, mod.lag(0.05)) * amp * level);
+ 	})
+ } {
+ 	var seed = "FIELD_SEED".getenv.asInteger;
+diff --git a/examples/bloom/shared/instruments/juno.scd b/examples/bloom/shared/instruments/juno.scd
+index 165f8a1..1c2a57a 100644
+--- a/examples/bloom/shared/instruments/juno.scd
++++ b/examples/bloom/shared/instruments/juno.scd
+@@ -5,9 +5,10 @@
+ // swept by the LFO, a slow attack, a long release, and the chorus on.
+ //
+ // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
+-// juno` plays and a record entry with `instrument: juno` renders
+-// (keyboard-instrument.md §2.6). Otherwise it runs under Field's sc-render
+-// contract and renders a held C minor ninth chord for FIELD_DURATION.
++// juno` plays, with vibrato from the mod wheel (§14), and a record
++// entry with `instrument: juno` renders (keyboard-instrument.md §2.6).
++// Otherwise it runs under Field's sc-render contract and renders a held
++// C minor ninth chord for FIELD_DURATION.
+ (
+ var pad = (
+ 	lfoRate: 0.3, lfoDelay: 0, dcoLfo: 0,
+@@ -16,17 +17,22 @@ var pad = (
+ 	hpfFreq: 20,
+ 	vcfFreq: 2000, vcfRes: 0.3, vcfEnv: 0.3, vcfLfo: 0.1, vcfKeyFollow: 0,
+ 	atk: 0.8, dec: 0.5, sus: 0.7, rel: 1.5,
+-	chorusOn: 1, chorusRate: 0.5, chorusDepth: 0.005
++	chorusOn: 1, chorusRate: 0.5, chorusDepth: 0.005,
++	modVibrato: 0.5, modOpen: 0 // the mod wheel is vibrato, as on a Juno's bender
+ );
+ var level = 0.12; // a voice's gain: room for chords under 0 dBFS
+ 
+ // One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
+ // ends after the gate closes. The knobs are fixed per instrument, so they
+-// shape the graph rather than arriving as controls.
+-var ju06a = { |freq, gate, k|
++// shape the graph rather than arriving as controls. `mod`, the mod wheel
++// from 0 to 1, comes only in voice mode: it adds vibrato of up to
++// modVibrato semitones and opens the filter by up to modOpen times its
++// cutoff. A render passes none, so its graph is the one without them.
++var ju06a = { |freq, gate, k, mod|
+ 	var lfo, pw, sig, env, cutoff;
+ 	lfo = SinOsc.kr(k[\lfoRate]) * EnvGen.kr(Env([0, 0, 1], [k[\lfoDelay], 0.01]));
+ 	freq = freq * (8 / k[\range]) * (2 ** (lfo * k[\dcoLfo] / 12));
++	if (mod.notNil) { freq = freq * (2 ** (SinOsc.kr(5.5) * mod * k[\modVibrato] / 12)) };
+ 	pw = if (k[\pwmMode] == 1) { SinOsc.kr(k[\lfoRate]).range(0.1, 0.9) } { k[\pwm] };
+ 	pw = (pw + (lfo * k[\pwmLfo])).clip(0.05, 0.95);
+ 	sig = (Saw.ar(freq) * k[\sawLevel]) + (Pulse.ar(freq, pw) * k[\pulseLevel]);
+@@ -35,6 +41,7 @@ var ju06a = { |freq, gate, k|
+ 	sig = HPF.ar(sig, k[\hpfFreq].clip(20, 20000));
+ 	env = EnvGen.kr(Env.adsr(k[\atk], k[\dec], k[\sus], k[\rel]), gate, doneAction: 2);
+ 	cutoff = k[\vcfFreq] * (1 + (env * k[\vcfEnv]) + (lfo * k[\vcfLfo])) + (freq * k[\vcfKeyFollow]);
++	if (mod.notNil) { cutoff = cutoff * (1 + (mod * k[\modOpen])) };
+ 	sig = RLPF.ar(sig, cutoff.clip(20, 20000), 1 - k[\vcfRes].clip(0, 0.95)) * env;
+ 	if (k[\chorusOn] == 1) {
+ 		[0, pi].collect { |phase|
+@@ -46,8 +53,8 @@ var ju06a = { |freq, gate, k|
+ };
+ 
+ if ("FIELD_MODE".getenv == "voice") {
+-	SynthDef(\junoKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+-		Out.ar(out, ju06a.(freq, gate, pad) * amp * level);
++	SynthDef(\junoKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
++		Out.ar(out, ju06a.(freq, gate, pad, mod.lag(0.05)) * amp * level);
+ 	})
+ } {
+ 	var seed = "FIELD_SEED".getenv.asInteger;
+diff --git a/sc/voice-host.scd b/sc/voice-host.scd
+index 89647a6..e60a5c6 100644
+--- a/sc/voice-host.scd
++++ b/sc/voice-host.scd
+@@ -8,7 +8,11 @@
+ // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
+ // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
+ // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
++// sclang's own port, which Field also chooses (-u), takes /field/reload:
++// load the program again, as its file has changed (§14).
+ (
++var here = PathName(thisProcess.nowExecutingPath).pathOnly;
++var loadVoice = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd");
+ var instrument = "FIELD_INSTRUMENT".getenv;
+ var port = "FIELD_SC_PORT".getenv.asInteger;
+ var parentPid = "FIELD_PARENT_PID".getenv;
+@@ -16,7 +20,7 @@ var device = "FIELD_DEVICE".getenv;
+ var trace = "FIELD_VOICE_TRACE".getenv.notNil;
+ // True until the server answers, at the first boot and at each restart:
+ // a note then has no server to sound on, so it is ignored.
+-var server, voiceDef, loadError, voicer, booting = true;
++var server, voiceDef, problem, voicer, booting = true;
+ var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, restart;
+ 
+ jsonValue = { |value|
+@@ -115,9 +119,11 @@ run = {
+ 	};
+ 	Server.default = server;
+ 
+-	voicer = thisProcess.interpreter.executeFile(PathName(thisProcess.nowExecutingPath).pathOnly +/+ "voicer.scd").(
+-		{ |note, velocity, freq| Synth(voiceDef.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0], server) },
+-		{ |synth, freq| synth.set(\freq, freq) },
++	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
++		{ |note, velocity, freq, mod|
++			Synth(voiceDef.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod], server)
++		},
++		{ |synth, control, value| synth.set(control, value) },
+ 		{ |synth| synth.set(\gate, 0) },
+ 		if (trace) { { |note, on| emit.([if (on) { "voice_on" } { "voice_off" }, note]) } }
+ 	);
+@@ -132,6 +138,31 @@ run = {
+ 	MIDIdef.cc(\fieldControl, { |value, number, chan| voicer.cc(chan, number, value) });
+ 	MIDIdef.bend(\fieldBend, { |value, chan| voicer.bend(chan, value) });
+ 
++	// The program's file changed: load it again. A voice that loads is
++	// what the next note plays, and the notes sounding finish as they
++	// started; one that does not leaves the last good voice playing.
++	OSCdef(\fieldReload, { |msg, time, addr|
++		if (addr.ip == "127.0.0.1") {
++			var next, why;
++			# next, why = loadVoice.(instrument);
++			case
++			{ why.notNil } { emit.(["reload_error", why]) }
++			{ booting } {
++				// The boot adds whatever voiceDef holds when the server answers.
++				voiceDef = next;
++				emit.(["reloaded", true]);
++			}
++			{
++				voiceDef = next;
++				fork {
++					voiceDef.add;
++					server.sync;
++					emit.(["reloaded", true]);
++				};
++			};
++		};
++	}, '/field/reload');
++
+ 	Routine {
+ 		loop {
+ 			0.7.wait;
+@@ -158,14 +189,9 @@ run = {
+ 	boot.();
+ };
+ 
+-voiceDef = try { thisProcess.interpreter.executeFile(instrument) } { |error| loadError = error.errorString; nil };
++# voiceDef, problem = loadVoice.(instrument);
+ case
+-	{ loadError.notNil } {
+-		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: running it in voice mode failed with " ++ loadError);
+-	}
+-	{ voiceDef.isKindOf(SynthDef).not } {
+-		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef");
+-	}
++	{ problem.notNil } { fail.(problem) }
+ 	{ device.notNil and: { deviceProblem.(device).notNil } } { fail.(deviceProblem.(device)) }
+ 	{ run.() };
+ )
+diff --git a/sc/voice-load.scd b/sc/voice-load.scd
+new file mode 100644
+index 0000000..d08c0a0
+--- /dev/null
++++ b/sc/voice-load.scd
+@@ -0,0 +1,22 @@
++// Loads an instrument program's voice (keyboard-instrument.md §2.6): for
++// the live voice host, at start and on each reload (§14), and for the
++// offline render of a take (§12.3). Its value is a function of the
++// program's path that answers [voiceDef, nil], or [nil, why] when the
++// program does not compile, fails, or answers something other than a
++// SynthDef. The caller's environment carries FIELD_MODE=voice.
++{ |path|
++	var name = PathName(path).fileName, compiled, value, error, saved;
++	compiled = thisProcess.interpreter.compileFile(path);
++	if (compiled.isNil) {
++		[nil, name ++ " does not compile"]
++	} {
++		// As executeFile runs it, so a program can find its own directory.
++		saved = thisProcess.nowExecutingPath;
++		thisProcess.nowExecutingPath = path;
++		value = protect { try { compiled.value } { |e| error = e.errorString; nil } } { thisProcess.nowExecutingPath = saved };
++		case
++		{ error.notNil } { [nil, name ++ " does not answer FIELD_MODE=voice: running it in voice mode failed with " ++ error] }
++		{ value.isKindOf(SynthDef).not } { [nil, name ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef"] }
++		{ [value, nil] }
++	}
++}
+diff --git a/sc/voice-render.scd b/sc/voice-render.scd
+index c773e1b..900f3cd 100644
+--- a/sc/voice-render.scd
++++ b/sc/voice-render.scd
+@@ -16,35 +16,30 @@ var out = "FIELD_OUTPUT".getenv;
+ var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
+ var chans = "FIELD_CHANNELS".getenv.asInteger;
+ var dur = "FIELD_DURATION".getenv.asFloat;
+-var voiceDef, loadError, take, score, voicer, now = 0.0, nextNode = 1000;
++var here = PathName(thisProcess.nowExecutingPath).pathOnly;
++var voiceDef, problem, take, score, voicer, now = 0.0, nextNode = 1000;
+ 
+ // Read above, and gone before the instrument loads: in voice mode the
+ // render variables are absent, here as live (keys.md).
+ ["FIELD_OUTPUT", "FIELD_SEED", "FIELD_DURATION", "FIELD_SAMPLE_RATE", "FIELD_CHANNELS"].do(_.unsetenv);
+ 
+-voiceDef = try { thisProcess.interpreter.executeFile(instrument) } { |error| loadError = error.errorString; nil };
+-case
+-{ loadError.notNil } {
+-	("ERROR: " ++ PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: " ++ loadError).postln;
++# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument);
++if (problem.notNil) {
++	("ERROR: " ++ problem).postln;
+ 	1.exit;
+-}
+-{ voiceDef.isKindOf(SynthDef).not } {
+-	("ERROR: " ++ PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef").postln;
+-	1.exit;
+-}
+-{
++} {
+ 	take = File.readAllString(eventsPath).parseJSON;
+ 	score = Score.new;
+ 	score.add([0.0, ['/d_recv', voiceDef.asBytes]]);
+ 
+-	voicer = thisProcess.interpreter.executeFile(PathName(thisProcess.nowExecutingPath).pathOnly +/+ "voicer.scd").(
+-		{ |note, velocity, freq|
++	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
++		{ |note, velocity, freq, mod|
+ 			var node = nextNode;
+ 			nextNode = nextNode + 1;
+-			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0]]);
++			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod]]);
+ 			node
+ 		},
+-		{ |node, freq| score.add([now, [\n_set, node, \freq, freq]]) },
++		{ |node, control, value| score.add([now, [\n_set, node, control, value]]) },
+ 		{ |node| score.add([now, [\n_set, node, \gate, 0]]) }
+ 	);
+ 
+diff --git a/sc/voicer.scd b/sc/voicer.scd
+index a9c4544..71f436d 100644
+--- a/sc/voicer.scd
++++ b/sc/voicer.scd
+@@ -2,18 +2,20 @@
+ // offline render of a recorded take (keyboard-instrument.md §2.6, §12), so
+ // a take renders with exactly the voicing it was played with: one voice
+ // per sounding note, the sustain pedal (CC 64), All Notes Off (CC 123),
+-// and pitch bend of up to two semitones on every sounding voice.
++// pitch bend of up to two semitones on every sounding voice, and the
++// modulation wheel (CC 1) as `mod`, from 0 to 1, on every voice
++// (keyboard-instrument.md §14).
+ //
+ // Its value is a function of three callbacks and an optional fourth:
+-//   start.(note, velocity, freq) -> a voice
+-//   setFreq.(voice, freq)
++//   start.(note, velocity, freq, mod) -> a voice
++//   set.(voice, control, value), for \freq and \mod
+ //   release.(voice)
+ //   onVoice.(note, sounding), told as each voice starts and ends
+ // and returns an Event that takes noteOn, noteOff, cc, bend, and
+ // forgetVoices. No entry may share a name with a method Event already has,
+ // such as clear (Set.clear): the method runs instead, and empties the Event.
+-{ |start, setFreq, release, onVoice|
+-	var voices = Dictionary.new, sustained = Set.new, sustainDown = false, bend = 0;
++{ |start, set, release, onVoice|
++	var voices = Dictionary.new, sustained = Set.new, sustainDown = false, bend = 0, mod = 0;
+ 	var releaseKey, freqOf;
+ 	freqOf = { |note| (note + bend).midicps };
+ 	releaseKey = { |key|
+@@ -28,7 +30,7 @@
+ 			if (velocity == 0) { self.noteOff(chan, note) } {
+ 				voices[key] !? { |old| release.(old) };
+ 				sustained.remove(key);
+-				voices[key] = start.(note, velocity, freqOf.(note));
++				voices[key] = start.(note, velocity, freqOf.(note), mod);
+ 				onVoice !? { onVoice.(note, true) };
+ 			};
+ 		},
+@@ -38,6 +40,10 @@
+ 		},
+ 		cc: { |self, chan, number, value|
+ 			case
++			{ number == 1 } {
++				mod = value / 127;
++				voices.do { |voice| set.(voice, \mod, mod) };
++			}
+ 			{ number == 64 } {
+ 				if (value >= 64) { sustainDown = true } {
+ 					sustainDown = false;
+@@ -52,7 +58,7 @@
+ 		},
+ 		bend: { |self, chan, value|
+ 			bend = (value - 8192) / 8192 * 2;
+-			voices.keysValuesDo { |key, voice| setFreq.(voice, freqOf.(key % 128)) };
++			voices.keysValuesDo { |key, voice| set.(voice, \freq, freqOf.(key % 128)) };
+ 		},
+ 		forgetVoices: { |self|
+ 			voices.clear;
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index 9e0f139..b95646a 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -7,6 +7,7 @@ import { printKeymap, signed } from '../keys/print.js';
+ import { KeysSession, type MidiMessage } from '../keys/session.js';
+ import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+ import { instrumentPath, VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
++import { watchText } from '../keys/watch.js';
+ import { findProjectRoot } from '../model/project.js';
+ import type { Keymap } from '../schema/keymap.js';
+ 
+@@ -121,7 +122,12 @@ interface PlayOptions {
+   device: string | undefined;
+ }
+ 
+-type InstrumentState = { name: string; status: VoiceHostStatus | { state: 'starting' } };
++type InstrumentState = {
++  name: string;
++  status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
++  // What the last save of the program did (keyboard-instrument.md §14).
++  reload?: { loaded: true } | { failed: string };
++};
+ 
+ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
+   const { source, program } = options;
+@@ -178,7 +184,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+           ...(device !== undefined ? { device } : {}),
+           onStatus: (status) => {
+             if (status.state === 'voice') return;
+-            instrument!.status = status;
++            if (status.state === 'reloaded') instrument!.reload = { loaded: true };
++            else if (status.state === 'reload-failed') instrument!.reload = { failed: status.reason };
++            else instrument!.status = status;
+             draw();
+           },
+           onExit: (reason) => stop(new Error(`the voice host stopped: ${reason}`)),
+@@ -186,6 +194,8 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+       : undefined;
+   host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
+ 
++  // Saving the program loads it again, as saving a keymap does (§14).
++  const stopWatchingProgram = program !== undefined && host !== undefined ? watchText(program, () => void host.reload()) : undefined;
+   const stopWatching =
+     source.kind === 'file'
+       ? watchKeymap(source.path, (result) => {
+@@ -229,6 +239,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+   tty.stdin.removeListener('data', onData);
+   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
+   stopWatching?.();
++  stopWatchingProgram?.();
+   send(session.quit());
+   // A host still booting closes too: quitting never waits for it.
+   await host?.close();
+@@ -237,10 +248,17 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+   if (error !== undefined) throw error;
+ }
+ 
+-function instrumentText({ name, status }: InstrumentState): string {
+-  if (status.state === 'live') return `${name} live at ${status.sampleRate} Hz on ${status.device}`;
+-  if (status.state === 'restarting') return `${name} restarting for a new sample rate`;
+-  return `${name} starting`;
++// A save that did not load leads with why, so a narrow terminal keeps the
++// error rather than the device; the voice that loaded last still plays.
++function instrumentText({ name, status, reload }: InstrumentState): string {
++  if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
++  const state =
++    status.state === 'live'
++      ? `${name} live at ${status.sampleRate} Hz on ${status.device}`
++      : status.state === 'restarting'
++        ? `${name} restarting for a new sample rate`
++        : `${name} starting`;
++  return reload === undefined ? state : `${state} · reloaded`;
+ }
+ 
+ // The sounding notes come last, so playing changes only the end of the
+diff --git a/src/generators/voice-render.test.ts b/src/generators/voice-render.test.ts
+index e898a15..912926d 100644
+--- a/src/generators/voice-render.test.ts
++++ b/src/generators/voice-render.test.ts
+@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+-import { readWavHeader } from '../audio/wav.js';
++import { readWav, readWavHeader } from '../audio/wav.js';
+ import type { MidiTake } from '../audiod/protocol.js';
+ import { buildLabels, explainLabel } from '../commands/build.js';
+ import { createSong, createTrack } from '../commands/create.js';
+@@ -39,14 +39,15 @@ afterEach(() => {
+ 
+ // Half a second of take at 48 kHz: an A held for a quarter second, then
+ // a C still held when the take stopped.
+-function midiTransaction(id = 'take-20261010-120000', placed: Partial<MidiTake> = {}): MidiTake {
++const HELD = [
++  { at: 0, midi: [144, 69, 100] },
++  { at: 12000, midi: [128, 69, 0] },
++  { at: 12000, midi: [144, 72, 80] },
++];
++
++function midiTransaction(id = 'take-20261010-120000', placed: Partial<MidiTake> = {}, lines = HELD): MidiTake {
+   const dir = join(root, '.field', 'recording', id);
+   mkdirSync(dir, { recursive: true });
+-  const lines = [
+-    { at: 0, midi: [144, 69, 100] },
+-    { at: 12000, midi: [128, 69, 0] },
+-    { at: 12000, midi: [144, 72, 80] },
+-  ];
+   writeFileSync(join(dir, 'take.midi.ndjson'), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
+   const take: MidiTake = {
+     id,
+@@ -87,6 +88,7 @@ describe('voice-render in the graph', () => {
+       '//songs/creek/asset:take-20261010-120000',
+       'shared/instruments/pad.scd',
+       'sc/voice-render.scd',
++      'sc/voice-load.scd',
+       'sc/voicer.scd',
+     ]);
+   });
+@@ -147,6 +149,31 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
+     expect(existsSync(track.outputPath!)).toBe(true);
+   });
+ 
++  it('passes a take\'s mod wheel to a voice that has the control', { timeout: 120_000 }, async () => {
++    // A voice whose level is the mod wheel: silent at 0, sounding at 1.
++    writeFileSync(
++      join(root, 'shared/instruments/pad.scd'),
++      VOICE.replace('|freq = 440, amp = 0.5, gate = 1, out = 0|', '|freq = 440, amp = 0.5, gate = 1, out = 0, mod = 0|').replace(
++        '* amp * 0.2 * env',
++        '* amp * 0.2 * mod * env',
++      ),
++    );
++    const peak = async (): Promise<number> => {
++      const wav = readWav(built(await buildLabels(root, [GEN]), GEN).outputPath!);
++      return wav.channels[0]!.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
++    };
++    expect(await peak()).toBe(0); // the take beforeEach landed sends no CC 1
++    await landMidiTake(
++      root,
++      midiTransaction('take-20261010-120300', {}, [
++        { at: 0, midi: [176, 1, 127] },
++        { at: 100, midi: [144, 69, 100] },
++        { at: 12000, midi: [128, 69, 0] },
++      ]),
++    );
++    expect(await peak()).toBeGreaterThan(0.05);
++  });
++
+   it('loads the instrument without the render variables, as voice mode is live', { timeout: 120_000 }, async () => {
+     const strict = VOICE.replace(
+       '(\n',
+diff --git a/src/generators/voice-render.ts b/src/generators/voice-render.ts
+index 6485816..8eb70f9 100644
+--- a/src/generators/voice-render.ts
++++ b/src/generators/voice-render.ts
+@@ -24,7 +24,7 @@ export interface VoiceRenderSpec {
+ // release time.
+ export const RELEASE_TAIL_SECONDS = 4;
+ 
+-const HARNESS = ['voice-render.scd', 'voicer.scd'];
++const HARNESS = ['voice-render.scd', 'voice-load.scd', 'voicer.scd'];
+ 
+ export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
+   version: 2, // 2: a zero-length note releases after its own on
+diff --git a/src/keys/keymap.ts b/src/keys/keymap.ts
+index dff9434..7229efc 100644
+--- a/src/keys/keymap.ts
++++ b/src/keys/keymap.ts
+@@ -1,9 +1,10 @@
+-import { existsSync, readdirSync, readFileSync, watch } from 'node:fs';
++import { existsSync, readdirSync, readFileSync } from 'node:fs';
+ import { homedir } from 'node:os';
+-import { basename, dirname, join, resolve } from 'node:path';
++import { dirname, join, resolve } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { parseDocument } from 'yaml';
+ import { keymapSchema, toKeymap, type Keymap } from '../schema/keymap.js';
++import { watchText } from './watch.js';
+ 
+ export const KEYMAP_ENV = 'FIELD_KEYMAP';
+ export const DEFAULT_KEYMAP = 'musical-typing';
+@@ -81,41 +82,19 @@ export function loadKeymap(path: string): Keymap {
+ 
+ export type ReloadResult = { keymap: Keymap } | { error: KeymapError };
+ 
+-// Watches the keymap's directory, not the file: many editors save by
+-// renaming a temporary file over the original, and fs.watch on a file
+-// keeps following the original inode, so the watch would end at the
+-// first such save (keyboard-instrument.md §2.4).
+-// Reloads only when the text changes: macOS can deliver an event for a
+-// write made just before the watch began, or one with no filename.
++// Reloads the keymap at `path` each time a save changes it (watch.ts says
++// how the watch survives an editor's rename-on-save), with the keymap or
++// why it did not load (keyboard-instrument.md §2.4).
+ export function watchKeymap(path: string, onReload: (result: ReloadResult) => void, settleMs = 50): () => void {
+-  const name = basename(path);
+-  const read = (): string | undefined => {
+-    try {
+-      return readFileSync(path, 'utf8');
+-    } catch {
+-      return undefined;
+-    }
+-  };
+-  let loaded = read();
+-  let timer: NodeJS.Timeout | undefined;
+-  const watcher = watch(dirname(path), (_event, filename) => {
+-    if (filename !== null && filename !== name) return;
+-    clearTimeout(timer);
+-    timer = setTimeout(() => {
+-      // A rename-on-save can fire between the unlink and the rename; the
+-      // event that follows reloads the finished file.
+-      const text = read();
+-      if (text === undefined || text === loaded) return;
+-      loaded = text;
++  return watchText(
++    path,
++    (text) => {
+       try {
+         onReload({ keymap: parseKeymap(text, path) });
+       } catch (err) {
+         onReload({ error: err instanceof KeymapError ? err : new KeymapError(path, [(err as Error).message]) });
+       }
+-    }, settleMs);
+-  });
+-  return () => {
+-    clearTimeout(timer);
+-    watcher.close();
+-  };
++    },
++    settleMs,
++  );
+ }
+diff --git a/src/keys/voice-host.test.ts b/src/keys/voice-host.test.ts
+index 3bdf141..2c3b670 100644
+--- a/src/keys/voice-host.test.ts
++++ b/src/keys/voice-host.test.ts
+@@ -7,7 +7,9 @@ import { freeUdpPort, instrumentPath, oscMessage, parseHostLine, VoiceHost, type
+ 
+ // A stand-in for sclang running the voice host: it records its
+ // environment, listens on the scsynth port it was given, records an OSC
+-// /quit there, and behaves as STUB_MODE says.
++// /quit there, and behaves as STUB_MODE says. On its own port (-u) it
++// answers each /field/reload with the next of STUB_RELOADS: ok, or fail
++// with sclang's ERROR line first, as a program that does not compile does.
+ const STUB = `#!/usr/bin/env node
+ const { appendFileSync, writeFileSync } = require('node:fs');
+ const log = process.env.STUB_LOG;
+@@ -55,6 +57,18 @@ socket.bind(Number(process.env.FIELD_SC_PORT), '127.0.0.1', () => {
+       break;
+   }
+ });
++const args = process.argv.slice(2);
++const lang = require('node:dgram').createSocket('udp4');
++const reloads = (process.env.STUB_RELOADS ?? '').split(',').filter(Boolean);
++lang.on('message', (msg) => {
++  appendFileSync(log + '.lang', msg.toString('latin1').split('\\0')[0] + '\\n');
++  if (reloads.shift() === 'ok') console.log('@field {"reloaded":true}');
++  else {
++    console.log("ERROR: syntax error, unexpected end of file, expecting '}'");
++    console.log('@field {"reload_error":"pad.scd does not compile"}');
++  }
++});
++lang.bind(Number(args[args.indexOf('-u') + 1]), '127.0.0.1');
+ // A datagram that arrived just before the signal is still logged.
+ process.on('SIGTERM', () => setTimeout(() => process.exit(0), 100));
+ `;
+@@ -163,14 +177,40 @@ describe('the voice host process', () => {
+     await host.ready;
+     expect(statuses).toEqual([{ state: 'live', device: 'Test Out', sampleRate: 48000 }]);
+     const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
+-    expect(seen.args[0]).toBe('-D');
+-    expect(seen.args[1]).toMatch(/sc\/voice-host\.scd$/);
+-    expect(existsSync(seen.args[1])).toBe(true);
++    // sclang's own port first, where a reload reaches it.
++    expect(seen.args[0]).toBe('-u');
++    expect(Number(seen.args[1])).toBeGreaterThan(0);
++    expect(seen.args[2]).toBe('-D');
++    expect(seen.args[3]).toMatch(/sc\/voice-host\.scd$/);
++    expect(existsSync(seen.args[3])).toBe(true);
+     expect(seen).toMatchObject({ mode: 'voice', instrument: '/p/pad.scd', device: 'Test Out', parent: String(process.pid) });
+     await host.close();
+     expect(readFileSync(log, 'latin1')).toContain('/quit');
+   });
+ 
++  it('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
++    const statuses: VoiceHostStatus[] = [];
++    const host = await VoiceHost.start({
++      instrument: '/p/pad.scd',
++      env: { ...env('ready'), STUB_RELOADS: 'ok,fail' },
++      onStatus: (s) => statuses.push(s),
++    });
++    await host.ready;
++    const settle = async (count: number): Promise<void> => {
++      for (let i = 0; i < 100 && statuses.length < count; i++) await new Promise((r) => setTimeout(r, 20));
++    };
++    await host.reload();
++    await settle(2);
++    await host.reload();
++    await settle(3);
++    expect(statuses.slice(1)).toEqual([
++      { state: 'reloaded' },
++      { state: 'reload-failed', reason: "pad.scd does not compile: syntax error, unexpected end of file, expecting '}'" },
++    ]);
++    expect(readFileSync(`${log}.lang`, 'latin1')).toBe('/field/reload\n/field/reload\n');
++    await host.close();
++  });
++
+   it('rejects ready with the host error and what sclang printed after its banner', async () => {
+     const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('error') });
+     await expect(host.ready).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
+diff --git a/src/keys/voice-host.ts b/src/keys/voice-host.ts
+index 86413a0..d2a146b 100644
+--- a/src/keys/voice-host.ts
++++ b/src/keys/voice-host.ts
+@@ -40,10 +40,10 @@ export function oscMessage(address: string): Buffer {
+   return Buffer.concat([pad(address), pad(',')]);
+ }
+ 
+-function sendQuit(port: number): Promise<void> {
++function sendOsc(address: string, port: number): Promise<void> {
+   return new Promise((done) => {
+     const socket = createSocket('udp4');
+-    socket.send(oscMessage('/quit'), port, '127.0.0.1', () => socket.close(() => done()));
++    socket.send(oscMessage(address), port, '127.0.0.1', () => socket.close(() => done()));
+   });
+ }
+ 
+@@ -72,12 +72,18 @@ const hostLine = z.union([
+   z.object({ error: z.string() }),
+   z.object({ voice_on: z.number() }),
+   z.object({ voice_off: z.number() }),
++  z.object({ reloaded: z.literal(true) }),
++  z.object({ reload_error: z.string() }),
+ ]);
+ 
+ export type VoiceHostStatus =
+   | { state: 'live'; device: string; sampleRate: number }
+   | { state: 'restarting' }
+-  | { state: 'voice'; note: number; on: boolean };
++  | { state: 'voice'; note: number; on: boolean }
++  // The program was loaded again after its file changed (§14): the next
++  // note plays the new voice, or, when it failed, still the last good one.
++  | { state: 'reloaded' }
++  | { state: 'reload-failed'; reason: string };
+ 
+ export function parseHostLine(line: string): z.infer<typeof hostLine> | undefined {
+   if (!line.startsWith('@field ')) return undefined;
+@@ -105,12 +111,16 @@ export class VoiceHost {
+   // The scsynth the host launched last, which `close` stops by process:
+   // one that is still booting has not bound its port, so /quit misses it.
+   private serverPid: number | undefined;
++  // sclang's ERROR lines since the last reload: a program that does not
++  // compile says why only there.
++  private reloadErrors: string[] = [];
+   // Settles when the host first goes live, or rejects with why it did not.
+   readonly ready: Promise<void>;
+ 
+   private constructor(
+     private readonly child: ChildProcessWithoutNullStreams,
+     private readonly port: number,
++    private readonly langPort: number,
+     options: VoiceHostOptions,
+   ) {
+     // sclang reports compile and runtime errors on stdout, so the tail of
+@@ -141,6 +151,7 @@ export class VoiceHost {
+       child.stderr.on('data', () => {});
+       createInterface({ input: child.stdout }).on('line', (line) => {
+         tail.push(line);
++        if (line.startsWith('ERROR:')) this.reloadErrors.push(line.slice('ERROR:'.length).trim());
+         if (tail.length > OUTPUT_TAIL * 4) tail.splice(0, tail.length - OUTPUT_TAIL * 4);
+         const parsed = parseHostLine(line);
+         if (parsed === undefined) return;
+@@ -154,7 +165,12 @@ export class VoiceHost {
+           }
+         } else if ('restarting' in parsed) options.onStatus?.({ state: 'restarting' });
+         else if ('voice_on' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_on, on: true });
+-        else options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
++        else if ('voice_off' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
++        else if ('reloaded' in parsed) options.onStatus?.({ state: 'reloaded' });
++        else {
++          const detail = this.reloadErrors[0];
++          options.onStatus?.({ state: 'reload-failed', reason: detail === undefined ? parsed.reload_error : `${parsed.reload_error}: ${detail}` });
++        }
+       });
+     });
+     // Whoever starts a host awaits `ready`; until then a rejection is
+@@ -167,7 +183,9 @@ export class VoiceHost {
+   static async start(options: VoiceHostOptions): Promise<VoiceHost> {
+     const env = options.env ?? process.env;
+     const port = await freeUdpPort();
+-    const child = spawn(sclangCommand(env), ['-D', voiceHostScript()], {
++    // sclang's own port, where `reload` reaches it.
++    const langPort = await freeUdpPort();
++    const child = spawn(sclangCommand(env), ['-u', String(langPort), '-D', voiceHostScript()], {
+       stdio: ['pipe', 'pipe', 'pipe'],
+       env: {
+         ...env,
+@@ -179,7 +197,14 @@ export class VoiceHost {
+         ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
+       },
+     });
+-    return new VoiceHost(child, port, options);
++    return new VoiceHost(child, port, langPort, options);
++  }
++
++  // Asks the host to load the instrument's program again, as its file has
++  // changed; the result arrives as a `reloaded` or `reload-failed` status.
++  reload(): Promise<void> {
++    this.reloadErrors = [];
++    return sendOsc('/field/reload', this.langPort);
+   }
+ 
+   // /quit, then the server's process if it lingers, then sclang: SIGTERM,
+@@ -199,7 +224,7 @@ export class VoiceHost {
+   }
+ 
+   private async stopServer(): Promise<void> {
+-    await sendQuit(this.port);
++    await sendOsc('/quit', this.port);
+     const pid = this.serverPid;
+     if (pid === undefined || (await exited(pid, 500))) return;
+     try {
+diff --git a/src/keys/voicer.test.ts b/src/keys/voicer.test.ts
+index e2e30b8..b55b954 100644
+--- a/src/keys/voicer.test.ts
++++ b/src/keys/voicer.test.ts
+@@ -29,8 +29,8 @@ function runVoicer(body: string): string[] {
+       [
+         '(',
+         `var voicer = thisProcess.interpreter.executeFile(${JSON.stringify(scScript('voicer.scd'))}).(`,
+-        '\t{ |note, velocity, freq| ("start " ++ note).postln; note },',
+-        '\t{ |voice, freq| ("freq " ++ voice).postln },',
++        '\t{ |note, velocity, freq, mod| ("start " ++ note ++ " mod " ++ mod.round(0.01)).postln; note },',
++        '\t{ |voice, control, value| (control ++ " " ++ voice ++ " " ++ value.round(0.01)).postln },',
+         '\t{ |voice| ("release " ++ voice).postln }',
+         ');',
+         body,
+@@ -41,7 +41,7 @@ function runVoicer(body: string): string[] {
+       ].join('\n'),
+     );
+     const run = spawnSync(sclang!, [script], { encoding: 'utf8', timeout: 60_000 });
+-    return run.stdout.split('\n').filter((line) => /^(start|freq|release|done)\b/.test(line));
++    return run.stdout.split('\n').filter((line) => /^(start|freq|mod|release|done)\b/.test(line));
+   } finally {
+     rmSync(dir, { recursive: true, force: true });
+   }
+@@ -51,6 +51,12 @@ describe.skipIf(sclang === undefined)('the voicer through real sclang', () => {
+   it('still plays after forgetVoices, which the host calls when its server restarts', { timeout: 60_000 }, () => {
+     expect(
+       runVoicer(['voicer.noteOn(0, 60, 100);', 'voicer.forgetVoices;', 'voicer.noteOn(0, 62, 100);', 'voicer.noteOff(0, 62);'].join('\n')),
+-    ).toEqual(['start 60', 'start 62', 'release 62', 'done']);
++    ).toEqual(['start 60 mod 0.0', 'start 62 mod 0.0', 'release 62', 'done']);
++  });
++
++  it('sets mod from CC 1 on every sounding voice, and starts new voices with it', { timeout: 60_000 }, () => {
++    expect(
++      runVoicer(['voicer.noteOn(0, 60, 100);', 'voicer.cc(0, 1, 127);', 'voicer.noteOn(0, 64, 100);', 'voicer.cc(0, 1, 0);'].join('\n')),
++    ).toEqual(['start 60 mod 0.0', 'mod 60 1.0', 'start 64 mod 1.0', 'mod 60 0.0', 'mod 64 0.0', 'done']);
+   });
+ });
+diff --git a/src/keys/watch.ts b/src/keys/watch.ts
+new file mode 100644
+index 0000000..97163ac
+--- /dev/null
++++ b/src/keys/watch.ts
+@@ -0,0 +1,41 @@
++import { readFileSync, watch } from 'node:fs';
++import { basename, dirname } from 'node:path';
++
++// Calls `onChange` with a file's text each time a save changes it: a
++// keymap given by path (keyboard-instrument.md §2.4) and an instrument's
++// program (§14) both reload this way.
++//
++// Watches the file's directory, not the file: many editors save by
++// renaming a temporary file over the original, and fs.watch on a file
++// keeps following the original inode, so the watch would end at the
++// first such save. Calls only when the text changes: macOS can deliver an
++// event for a write made just before the watch began, or one with no
++// filename.
++export function watchText(path: string, onChange: (text: string) => void, settleMs = 50): () => void {
++  const name = basename(path);
++  const read = (): string | undefined => {
++    try {
++      return readFileSync(path, 'utf8');
++    } catch {
++      return undefined;
++    }
++  };
++  let loaded = read();
++  let timer: NodeJS.Timeout | undefined;
++  const watcher = watch(dirname(path), (_event, filename) => {
++    if (filename !== null && filename !== name) return;
++    clearTimeout(timer);
++    timer = setTimeout(() => {
++      // A rename-on-save can fire between the unlink and the rename; the
++      // event that follows reads the finished file.
++      const text = read();
++      if (text === undefined || text === loaded) return;
++      loaded = text;
++      onChange(text);
++    }, settleMs);
++  });
++  return () => {
++    clearTimeout(timer);
++    watcher.close();
++  };
++}
