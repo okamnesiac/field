@@ -1,0 +1,618 @@
+diff --git a/README.md b/README.md
+index d3eecc06..bf405748 100644
+--- a/README.md
++++ b/README.md
+@@ -142,7 +142,7 @@ needs `field-audiod` and a terminal that reports key releases through
+ the kitty keyboard protocol: Ghostty, iTerm2 3.5 or later, kitty, or
+ WezTerm. Keys are read by physical position, so Dvorak, AZERTY, and
+ other layouts play the same notes, and a keymap of your own is a YAML
+-file away. Name an instrument, as in `field keys still-water-pad` inside
++file away. Name an instrument, as in `field keys pad` inside
+ `examples/bloom`, and it plays that SuperCollider instrument live too.
+ See [docs/keys.md](docs/keys.md).
+ 
+diff --git a/docs/keys.md b/docs/keys.md
+index 3dfeb043..41581271 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -18,9 +18,9 @@ from every other MIDI source:
+ 
+ ```console
+ $ cd examples/bloom
+-$ field keys still-water-pad
++$ field keys pad
+ Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
+-Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · still-water-pad live at 48000 Hz on MacBook Pro Speakers
++Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · pad live at 48000 Hz on MacBook Pro Speakers
+ ```
+ 
+ To keep what you play, record it into a track; see
+@@ -107,7 +107,18 @@ the new rate, and notes sounding at the switch stop. Without that
+ restart every note would play sharp or flat.
+ 
+ An instrument that cannot play stops `field keys` with the reason, such
+-as `creek-kit.scd does not answer FIELD_MODE=voice`.
++as `creek-kit.scd does not answer FIELD_MODE=voice`. A name that is not
++on the shelf lists what is, split into the instruments that play from
++notes and those that only render, by whether each program reads
++`FIELD_MODE`:
++
++```console
++$ field keys organ
++field keys organ: no instrument program at …/examples/bloom/shared/instruments/organ.scd
++In shared/instruments/:
++  plays from notes: bass, juno, pad
++  renders only:     creek-kit, seven-eight-loop (no FIELD_MODE=voice branch; see docs/keys.md)
++```
+ 
+ ### Make an instrument playable
+ 
+@@ -143,9 +154,20 @@ if ("FIELD_MODE".getenv == "voice") {
+ The host owns everything between MIDI and voices: one voice per
+ sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
+ pitch bend, which it applies to `freq` on every sounding voice, up to
+-two semitones either way. It ignores modulation (CC 1) for now. In
+-`examples/bloom`, `still-water-pad` answers voice mode; its render
+-branch is unchanged and renders the same bytes as before.
++two semitones either way. It ignores modulation (CC 1) for now.
++
++`examples/bloom` has three instruments that answer voice mode:
++
++- **`pad`** — the song's sine pad; its render branch is
++  unchanged and renders the same bytes as before.
++- **`juno`** — the JU-06A, a model of the Roland Juno's chain from
++  [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
++  classic Juno pad: saw and pulse with the width swept, a slow attack,
++  and the chorus on.
++- **`bass`** — the same JU-06A set as offset's bass: a saw with a square
++  sub an octave down, a short envelope that opens the filter on each
++  note, and no chorus. It plays at true pitch, so press `Z` to drop an
++  octave.
+ 
+ ## Record what you play
+ 
+@@ -161,11 +183,11 @@ changes every take recorded for it.
+    name: keys
+    inputs:
+      - record:
+-         instrument: still-water-pad
++         instrument: pad
+    ```
+ 
+ 2. In one terminal, play the instrument so you hear it while you
+-   record: `field keys still-water-pad`.
++   record: `field keys pad`.
+ 3. In another, record against the song. With nothing playing, `field
+    record` loads the song as the bed. Press Ctrl-C to stop.
+ 
+diff --git a/docs/project-model.md b/docs/project-model.md
+index ed19b885..e8df2dfa 100644
+--- a/docs/project-model.md
++++ b/docs/project-model.md
+@@ -359,7 +359,7 @@ without `.scd` gets it, and a name without a `/` is under
+ name: keys
+ inputs:
+   - record:
+-      instrument: still-water-pad
++      instrument: pad
+ ```
+ 
+ A MIDI take is a notes file, `audio/<name>/<take>.notes.yaml`, pinned
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index 15813df1..31b1c755 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -61,7 +61,7 @@ Three words carry the design, and each names one thing:
+ 
+ ### 2.1 What happens when you play
+ 
+-1. You run `field keys still-water-pad` in Ghostty or iTerm2, inside a
++1. You run `field keys pad` in Ghostty or iTerm2, inside a
+    project.
+ 2. `field keys` checks that the terminal speaks the kitty keyboard
+    protocol (§2.2). If it does not, the command exits with a message
+@@ -74,7 +74,7 @@ Three words carry the design, and each names one thing:
+    the keyboard layout, and prints a ready line (§2.5).
+ 5. It adds `.scd` to an instrument name that has no extension, and
+    resolves the result exactly as a `supercollider:` entry resolves
+-   `source:`, to `shared/instruments/still-water-pad.scd`. Then it
++   `source:`, to `shared/instruments/pad.scd`. Then it
+    spawns `sclang` on the voice host, `sc/voice-host.scd`, with the
+    instrument path, the output device, and an `scsynth` port in the
+    environment.
+@@ -385,7 +385,7 @@ voice mode, so a program checks `FIELD_MODE` before it reads them:
+ ```supercollider
+ (
+ if ("FIELD_MODE".getenv == "voice") {
+-	SynthDef(\stillWaterKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
++	SynthDef(\padKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+ 		var env = EnvGen.kr(Env.asr(1.5, 1, 2.5, \sine), gate, doneAction: 2);
+ 		var sig = SinOsc.ar(freq) + (0.35 * SinOsc.ar(freq * 2));
+ 		Out.ar(out, Pan2.ar(sig * amp * 0.2 * env));
+@@ -484,7 +484,7 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
+ | `native/audiod/src/keys.cpp`, `keys.h` (new), `main.cpp` | The `--keys` and `--midi-monitor` modes. |
+ | `native/audiod/src/keyboard-layout.cpp`, `keyboard-layout.h` (new) | Reads the keyboard layout and watches for input-source changes, on macOS. Elsewhere it reports nothing. |
+ | `native/audiod/CMakeLists.txt` | Links the Carbon framework on macOS, for the Text Input Sources API. |
+-| `examples/bloom/shared/instruments/still-water-pad.scd` | Answers voice mode with a gated version of its voice. The render branch keeps its code. |
++| `examples/bloom/shared/instruments/pad.scd` | Answers voice mode with a gated version of its voice. The render branch keeps its code. |
+ | `docs/keys.md` (new) | How to play with `field keys`, the supported terminals, the built-in keymaps, and the keymap format as a reference for writing your own. `docs/README.md` links it. |
+ | `docs/build-graph.md` | The `supercollider` section gains voice mode beside the render contract. |
+ | `docs/architecture.md` | The daemon's modes gain `--keys` and `--midi-monitor`. The SuperCollider section's live mode describes the voice host and where its sound goes. |
+@@ -650,13 +650,13 @@ Chunk 2, the voice host:
+ 
+ | # | Do | Expect |
+ | --- | --- | --- |
+-| 21 | In `examples/bloom`, run `field keys still-water-pad --device "<Apollo>"`. Play a chord, then hold `Tab` and release the keys. | You hear the chord. The notes ring until you release `Tab`. |
++| 21 | In `examples/bloom`, run `field keys pad --device "<Apollo>"`. Play a chord, then hold `Tab` and release the keys. | You hear the chord. The notes ring until you release `Tab`. |
+ | 22 | With criterion 21 running, play a USB controller. | It plays the same voice. |
+ | 23 | With criterion 21 running, hold `Digit2` over a sounding note, then release it. | The note bends up two semitones and returns. |
+ | 24 | Run `field keys creek-kit`. | Exit 1. The message says `creek-kit.scd` does not answer `FIELD_MODE=voice`. |
+ | 25 | Run `field play creek --device "<Apollo>"`, then criterion 21 in another terminal. Stop both, set the Apollo to 44.1 kHz in Audio MIDI Setup, and run them again in the other order. Press `KeyA` before and after `field play` starts. | In the first order you hear both, and starting criterion 21 leaves the Apollo's sample rate alone. In the second, `field play` moves the Apollo to 48 kHz, the status line shows the instrument restarting and then live at 48 kHz, and `KeyA` sounds at the same pitch before and after. A `KeyA` about a semitone and a half sharp after the switch means the host missed the rate change. |
+ | 26 | With criterion 21 running, `kill -9` the `field keys` process. | Within two seconds, `pgrep scsynth` finds no host server, and `Field Keys` is gone. |
+-| 27 | In `examples/bloom`, run `field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
++| 27 | In `examples/bloom`, run `field sc render shared/instruments/pad.scd --seed 90210 --duration 10 --output <file>` before and after the edit, and compare the two files with `cmp`. | Identical. A difference means the edit changed the render branch. |
+ 
+ Chunk 3, the other built-in keymaps:
+ 
+@@ -729,7 +729,7 @@ estimate until criterion 21 is played:
+ | `scsynth`'s hardware buffer | 128 frames, 2.7 ms at 48 kHz, plus the device's output latency |
+ 
+ If playing feels late, the hardware buffer is the first thing to
+-reduce. The one build cost is the `still-water-pad` edit. Its content
++reduce. The one build cost is the `pad` edit. Its content
+ hash is a cache input, so every song that places it renders the pad
+ once more.
+ 
+@@ -743,7 +743,7 @@ Each chunk is one pull request, in order:
+    helper and its monitor mode, and `docs/keys.md`. It is useful alone,
+    with Logic, and with a keymap of your own.
+ 2. **The voice host.** `field keys <instrument>`, the voice contract,
+-   `still-water-pad` in voice mode, and the docs.
++   `pad` in voice mode, and the docs.
+ 3. **The other built-in keymaps.** `tracker` and `fourths` move from
+    chunk 1's test fixtures into `keymaps/`, with their criteria and
+    their entries in `docs/keys.md`.
+@@ -836,7 +836,7 @@ Each chunk is one pull request, in order:
+   "keymap" for the keyboard layout itself, which Field meets only in §7
+   question 8.
+ - **The instruments today.** The three in `examples/bloom` are NRT
+-  programs that render whole passages. `still-water-pad.scd` builds a
++  programs that render whole passages. `pad.scd` builds a
+   D-minor chord from twelve sine voices under `Env.linen`, a fixed-length
+   envelope. Its voice is already one SynthDef, and a gated envelope
+   makes it playable.
+@@ -903,7 +903,7 @@ Keys`, through any keymap, built-in or yours. The built-in is
+ ## 10 Chunk 2 as built (2026-10-10)
+ 
+ `field keys <instrument>` plays a SuperCollider instrument through the
+-voice host in `sc/voice-host.scd`, and `still-water-pad` answers voice
++voice host in `sc/voice-host.scd`, and `pad` answers voice
+ mode.
+ 
+ ### 10.1 scsynth opens the microphone unless told otherwise
+@@ -1071,7 +1071,7 @@ Logic as notes. Until then a take reaches Logic as audio:
+ name: keys
+ inputs:
+   - record:
+-      instrument: still-water-pad
++      instrument: pad
+ ```
+ 
+ A `record:` entry with `instrument:` records MIDI takes, and one
+@@ -1146,7 +1146,7 @@ the last partial line, which recovery drops. Loop takes stay audio only.
+ 
+ ### 12.5 The flow
+ 
+-1. In one terminal, run `field keys still-water-pad`, which plays the
++1. In one terminal, run `field keys pad`, which plays the
+    voice you hear and publishes `Field Keys`.
+ 2. In another, run `field record creek/track:keys --at 17`, as for
+    audio. The entry's instrument makes it arm for MIDI, so `--input`
+@@ -1182,14 +1182,14 @@ chunk 4 would append, and what building it settled and proved.
+ ### 13.1 Acceptance criteria
+ 
+ Each runs in a project whose song builds, with a track `keys` whose
+-record entry has `instrument: still-water-pad`.
++record entry has `instrument: pad`.
+ 
+ | # | Do | Expect |
+ | --- | --- | --- |
+-| 30 | Run `field keys still-water-pad` in one terminal and `field record creek/track:keys --at 17` in another. Play a few notes, then press Ctrl-C. | The armed line lists `Field Keys` among its sources, the position line counts events, and the take lands as `audio/keys/<take>.notes.yaml`, chosen. `field check` says ok. |
++| 30 | Run `field keys pad` in one terminal and `field record creek/track:keys --at 17` in another. Play a few notes, then press Ctrl-C. | The armed line lists `Field Keys` among its sources, the position line counts events, and the take lands as `audio/keys/<take>.notes.yaml`, chosen. `field check` says ok. |
+ | 31 | `field build creek`, then `field play creek`. | You hear what you played, through the pad, where you played it against the song. |
+-| 32 | Run criterion 30's `field record` with `--input 2`, then with `--device <name>`, then with `--loop --until 19`. | Each is refused before anything arms: `keys records MIDI for still-water-pad: --input, --device, and --loop are for audio takes`. |
+-| 33 | Edit `still-water-pad.scd` and build again; then build once more without an edit. | The first build renders `creek/gen:keys` again; the second is a cache hit. |
++| 32 | Run criterion 30's `field record` with `--input 2`, then with `--device <name>`, then with `--loop --until 19`. | Each is refused before anything arms: `keys records MIDI for pad: --input, --device, and --loop are for audio takes`. |
++| 33 | Edit `pad.scd` and build again; then build once more without an edit. | The first build renders `creek/gen:keys` again; the second is a cache hit. |
+ | 34 | Change the instrument to `ghost`, which has no program, and run `field check`. Then remove `instrument:` while a MIDI take is chosen, and run it again. | `input 1 ("record") instrument file not found: shared/instruments/ghost.scd`, then `take "<take>" is a MIDI take, and input 1 ("record") names no instrument to play it`. |
+ | 35 | Hold a note through the stop. | The notes file has it last to the take's end, and its render rings on through the 4-second tail. |
+ | 36 | Hold sustain (`Tab` in `musical-typing`, `Space` in `tracker` and `fourths`) across a few note releases while you record. | The render holds them as the live voice did. |
+@@ -1235,6 +1235,8 @@ record entry has `instrument: still-water-pad`.
+   suggestions, a MIDI stop waits two callback blocks before it detaches,
+   so a message that arrived before the stop is never skipped, and the
+   docs say a take hears only the sources that exist when it arms.
++- **`still-water-pad` is `pad` now** (#183). The rows in §10.3 and
++  §13.3 keep the old name, because that is the name the runs used.
+ - **CoreMIDI can refuse a new source for a moment.** Run whole,
+   `src/commands/record-midi-daemon.test.ts` saw its last
+   `field-audiod --keys` refused every time, right after earlier tests
+diff --git a/examples/bloom/README.md b/examples/bloom/README.md
+index 1b259413..644a2acb 100644
+--- a/examples/bloom/README.md
++++ b/examples/bloom/README.md
+@@ -287,7 +287,7 @@ changing *level* — boosting stops being a free loudness win. Set
+ 
+ ## Recipes
+ 
+-`shared/instruments/still-water-pad.scd` is the D-minor pad as **code**:
++`shared/instruments/pad.scd` is the D-minor pad as **code**:
+ twelve detuned sine voices whose detunes and pans are drawn from a seeded
+ random stream. The track pins the seed — `songs/creek/tracks/pad-sc.yaml`
+ in full:
+@@ -297,7 +297,7 @@ in full:
+ name: pad-sc
+ inputs:
+   - supercollider:
+-      source: still-water-pad.scd
++      source: pad.scd
+       seed: 90210
+       duration: 10
+       channels: 2
+@@ -313,7 +313,7 @@ recipe.
+ To iterate on a program before pinning it in a track:
+ 
+ ```bash
+-field sc render shared/instruments/still-water-pad.scd --seed 90210 --duration 10
++field sc render shared/instruments/pad.scd --seed 90210 --duration 10
+ ```
+ 
+ And to hear the committed recipe exactly as pinned:
+diff --git a/examples/bloom/shared/instruments/bass.scd b/examples/bloom/shared/instruments/bass.scd
+new file mode 100644
+index 00000000..f5d296dd
+--- /dev/null
++++ b/examples/bloom/shared/instruments/bass.scd
+@@ -0,0 +1,87 @@
++// bass — the JU-06A from okamnesiac/offset (patches/ju06a.scd) set as the
++// bass that patch's factory makes: one saw with the square sub an octave
++// below, a resonant filter the envelope opens on each note, a short
++// envelope, and no chorus. The chain is the same as juno.scd's: DCO → HPF
++// → resonant VCF → VCA. Each program carries its own copy of the graph,
++// because a program's own bytes are the cache key for what it renders.
++//
++// Under FIELD_MODE=voice its value is one voice, gated, which `field keys
++// bass` plays and a record entry with `instrument: bass` renders
++// (keyboard-instrument.md §2.6). It plays at true pitch, so press Z in
++// musical-typing to drop an octave. Otherwise it runs under Field's
++// sc-render contract and renders offset's sequence from sessions/juno.scd,
++// a note every quarter second as offset plays it, for FIELD_DURATION.
++(
++var bass = (
++	lfoRate: 0.5, lfoDelay: 0, dcoLfo: 0,
++	range: 8, sawLevel: 1, pulseLevel: 0, subLevel: 0.5, noiseLevel: 0,
++	pwm: 0.5, pwmMode: 0, pwmLfo: 0,
++	hpfFreq: 20,
++	vcfFreq: 1200, vcfRes: 0.4, vcfEnv: 0.6, vcfLfo: 0, vcfKeyFollow: 0,
++	atk: 0.005, dec: 0.2, sus: 0.3, rel: 0.15,
++	chorusOn: 0, chorusRate: 0.5, chorusDepth: 0.005
++);
++var level = 0.3; // a voice's gain: a bass line rarely stacks notes
++
++// One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
++// ends after the gate closes. The knobs are fixed per instrument, so they
++// shape the graph rather than arriving as controls.
++var ju06a = { |freq, gate, k|
++	var lfo, pw, sig, env, cutoff;
++	lfo = SinOsc.kr(k[\lfoRate]) * EnvGen.kr(Env([0, 0, 1], [k[\lfoDelay], 0.01]));
++	freq = freq * (8 / k[\range]) * (2 ** (lfo * k[\dcoLfo] / 12));
++	pw = if (k[\pwmMode] == 1) { SinOsc.kr(k[\lfoRate]).range(0.1, 0.9) } { k[\pwm] };
++	pw = (pw + (lfo * k[\pwmLfo])).clip(0.05, 0.95);
++	sig = (Saw.ar(freq) * k[\sawLevel]) + (Pulse.ar(freq, pw) * k[\pulseLevel]);
++	if (k[\subLevel] > 0) { sig = sig + (Pulse.ar(freq * 0.5, 0.5) * k[\subLevel]) };
++	if (k[\noiseLevel] > 0) { sig = sig + (WhiteNoise.ar * k[\noiseLevel]) };
++	sig = HPF.ar(sig, k[\hpfFreq].clip(20, 20000));
++	env = EnvGen.kr(Env.adsr(k[\atk], k[\dec], k[\sus], k[\rel]), gate, doneAction: 2);
++	cutoff = k[\vcfFreq] * (1 + (env * k[\vcfEnv]) + (lfo * k[\vcfLfo])) + (freq * k[\vcfKeyFollow]);
++	sig = RLPF.ar(sig, cutoff.clip(20, 20000), 1 - k[\vcfRes].clip(0, 0.95)) * env;
++	if (k[\chorusOn] == 1) {
++		[0, pi].collect { |phase|
++			sig + DelayC.ar(sig, 0.05, SinOsc.kr(k[\chorusRate], phase).range(0.001, 0.001 + k[\chorusDepth]))
++		} * 0.7
++	} {
++		sig ! 2
++	}
++};
++
++if ("FIELD_MODE".getenv == "voice") {
++	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
++		Out.ar(out, ju06a.(freq, gate, bass) * amp * level);
++	})
++} {
++	var seed = "FIELD_SEED".getenv.asInteger;
++	var dur = "FIELD_DURATION".getenv.asFloat;
++	var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
++	var out = "FIELD_OUTPUT".getenv;
++	var chans = "FIELD_CHANNELS".getenv.asInteger;
++	var line = [48, 48, 60, 48, 55, 48, 53, 51]; // C3 C3 C4 C3 G3 C3 F3 Eb3
++	var step = 0.25; // offset's \dur, at the default clock's one beat a second
++	var events = [];
++	thisThread.randSeed = seed; // nothing here is random; kept for the contract
++
++	SynthDef(\bassRender, { |freq = 220, amp = 0.5, gate = 1|
++		var sig = ju06a.(freq, gate, bass) * amp * level;
++		Out.ar(0, if (chans == 1) { sig.sum * 0.5 } { sig });
++	}).store;
++
++	(dur / step).floor.asInteger.do { |i|
++		var node = 1000 + i;
++		var at = i * step;
++		events = events.add([at, [\s_new, \bassRender, node, 0, 0, \freq, line.wrapAt(i).midicps, \amp, 0.8]]);
++		events = events.add([at + (step * 0.8), [\n_set, node, \gate, 0]]);
++	};
++	Score(events ++ [[dur, [0]]]).recordNRT(
++		outputFilePath: out,
++		sampleRate: rate,
++		headerFormat: "WAV",
++		sampleFormat: "int24",
++		options: ServerOptions.new.numOutputBusChannels_(chans),
++		duration: dur,
++		action: { 0.exit }
++	);
++}
++)
+diff --git a/examples/bloom/shared/instruments/juno.scd b/examples/bloom/shared/instruments/juno.scd
+new file mode 100644
+index 00000000..165f8a1f
+--- /dev/null
++++ b/examples/bloom/shared/instruments/juno.scd
+@@ -0,0 +1,82 @@
++// juno — the JU-06A from okamnesiac/offset (patches/ju06a.scd), a model of
++// the Roland Juno's chain: DCO (saw, pulse, sub, noise) → HPF → resonant
++// VCF → VCA → BBD-style chorus, all under one ADSR. Set to the classic
++// Juno pad from offset's sessions/juno.scd: saw and pulse, the pulse width
++// swept by the LFO, a slow attack, a long release, and the chorus on.
++//
++// Under FIELD_MODE=voice its value is one voice, gated, which `field keys
++// juno` plays and a record entry with `instrument: juno` renders
++// (keyboard-instrument.md §2.6). Otherwise it runs under Field's sc-render
++// contract and renders a held C minor ninth chord for FIELD_DURATION.
++(
++var pad = (
++	lfoRate: 0.3, lfoDelay: 0, dcoLfo: 0,
++	range: 8, sawLevel: 1, pulseLevel: 1, subLevel: 0, noiseLevel: 0,
++	pwm: 0.4, pwmMode: 1, pwmLfo: 0,
++	hpfFreq: 20,
++	vcfFreq: 2000, vcfRes: 0.3, vcfEnv: 0.3, vcfLfo: 0.1, vcfKeyFollow: 0,
++	atk: 0.8, dec: 0.5, sus: 0.7, rel: 1.5,
++	chorusOn: 1, chorusRate: 0.5, chorusDepth: 0.005
++);
++var level = 0.12; // a voice's gain: room for chords under 0 dBFS
++
++// One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
++// ends after the gate closes. The knobs are fixed per instrument, so they
++// shape the graph rather than arriving as controls.
++var ju06a = { |freq, gate, k|
++	var lfo, pw, sig, env, cutoff;
++	lfo = SinOsc.kr(k[\lfoRate]) * EnvGen.kr(Env([0, 0, 1], [k[\lfoDelay], 0.01]));
++	freq = freq * (8 / k[\range]) * (2 ** (lfo * k[\dcoLfo] / 12));
++	pw = if (k[\pwmMode] == 1) { SinOsc.kr(k[\lfoRate]).range(0.1, 0.9) } { k[\pwm] };
++	pw = (pw + (lfo * k[\pwmLfo])).clip(0.05, 0.95);
++	sig = (Saw.ar(freq) * k[\sawLevel]) + (Pulse.ar(freq, pw) * k[\pulseLevel]);
++	if (k[\subLevel] > 0) { sig = sig + (Pulse.ar(freq * 0.5, 0.5) * k[\subLevel]) };
++	if (k[\noiseLevel] > 0) { sig = sig + (WhiteNoise.ar * k[\noiseLevel]) };
++	sig = HPF.ar(sig, k[\hpfFreq].clip(20, 20000));
++	env = EnvGen.kr(Env.adsr(k[\atk], k[\dec], k[\sus], k[\rel]), gate, doneAction: 2);
++	cutoff = k[\vcfFreq] * (1 + (env * k[\vcfEnv]) + (lfo * k[\vcfLfo])) + (freq * k[\vcfKeyFollow]);
++	sig = RLPF.ar(sig, cutoff.clip(20, 20000), 1 - k[\vcfRes].clip(0, 0.95)) * env;
++	if (k[\chorusOn] == 1) {
++		[0, pi].collect { |phase|
++			sig + DelayC.ar(sig, 0.05, SinOsc.kr(k[\chorusRate], phase).range(0.001, 0.001 + k[\chorusDepth]))
++		} * 0.7
++	} {
++		sig ! 2
++	}
++};
++
++if ("FIELD_MODE".getenv == "voice") {
++	SynthDef(\junoKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
++		Out.ar(out, ju06a.(freq, gate, pad) * amp * level);
++	})
++} {
++	var seed = "FIELD_SEED".getenv.asInteger;
++	var dur = "FIELD_DURATION".getenv.asFloat;
++	var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
++	var out = "FIELD_OUTPUT".getenv;
++	var chans = "FIELD_CHANNELS".getenv.asInteger;
++	var release = (dur - pad[\rel]).max(0);
++	var events = [];
++	thisThread.randSeed = seed; // nothing here is random; kept for the contract
++
++	SynthDef(\junoRender, { |freq = 220, amp = 0.5, gate = 1|
++		var sig = ju06a.(freq, gate, pad) * amp * level;
++		Out.ar(0, if (chans == 1) { sig.sum * 0.5 } { sig });
++	}).store;
++
++	[48, 51, 55, 58, 62].do { |note, i| // C3 Eb3 G3 Bb3 D4
++		var node = 1000 + i;
++		events = events.add([0.0, [\s_new, \junoRender, node, 0, 0, \freq, note.midicps, \amp, 0.8]]);
++		events = events.add([release, [\n_set, node, \gate, 0]]);
++	};
++	Score(events ++ [[dur, [0]]]).recordNRT(
++		outputFilePath: out,
++		sampleRate: rate,
++		headerFormat: "WAV",
++		sampleFormat: "int24",
++		options: ServerOptions.new.numOutputBusChannels_(chans),
++		duration: dur,
++		action: { 0.exit }
++	);
++}
++)
+diff --git a/examples/bloom/shared/instruments/still-water-pad.scd b/examples/bloom/shared/instruments/pad.scd
+similarity index 82%
+rename from examples/bloom/shared/instruments/still-water-pad.scd
+rename to examples/bloom/shared/instruments/pad.scd
+index a754a2b8..5d85a92f 100644
+--- a/examples/bloom/shared/instruments/still-water-pad.scd
++++ b/examples/bloom/shared/instruments/pad.scd
+@@ -1,15 +1,15 @@
+-// still water pad — the D-minor pad as a recipe instead of a rendered file.
++// pad — creek's D-minor pad as a recipe instead of a rendered file.
+ // Twelve detuned sine voices (three per chord tone), panned and drifting
+ // slightly, under a slow sine envelope. Runs under Field's sc-render
+ // contract: parameters arrive in the environment, output goes to
+ // FIELD_OUTPUT, and the render is deterministic for a given FIELD_SEED.
+ //
+ // Under FIELD_MODE=voice it renders nothing: its value is one voice of the
+-// pad, gated, which `field keys still-water-pad` plays from the keyboard
++// pad, gated, which `field keys pad` plays from the keyboard
+ // (keyboard-instrument.md §2.6).
+ (
+ if ("FIELD_MODE".getenv == "voice") {
+-	SynthDef(\stillWaterKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
++	SynthDef(\padKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+ 		var env = EnvGen.kr(Env.asr(1.5, 1, 2.5, \sine), gate, doneAction: 2);
+ 		var voices = [[-0.0012, -0.5], [0, 0], [0.0012, 0.5]].collect { |detunePan|
+ 			var f = freq * (1 + detunePan[0]);
+@@ -26,7 +26,7 @@ if ("FIELD_MODE".getenv == "voice") {
+ 	var events, score;
+ 	thisThread.randSeed = seed;
+ 
+-	SynthDef(\stillWaterVoice, { |freq = 220, amp = 0.05, detune = 0, pan = 0, atk = 2.5, sus = 5, rel = 2.5|
++	SynthDef(\padVoice, { |freq = 220, amp = 0.05, detune = 0, pan = 0, atk = 2.5, sus = 5, rel = 2.5|
+ 		var env = EnvGen.kr(Env.linen(atk, sus, rel, curve: \sine), doneAction: 2);
+ 		var f = freq * (1 + detune);
+ 		var sig = SinOsc.ar(f) + (0.35 * SinOsc.ar(f * 2));
+@@ -37,7 +37,7 @@ if ("FIELD_MODE".getenv == "voice") {
+ 	[146.83, 174.61, 220.0, 293.66].do { |freq| // D3 F3 A3 D4
+ 		3.do {
+ 			events = events.add([0.0,
+-				Synth.basicNew(\stillWaterVoice).newMsg(args: [
++				Synth.basicNew(\padVoice).newMsg(args: [
+ 					\freq, freq,
+ 					\amp, 0.045,
+ 					\detune, rrand(-0.0015, 0.0015),
+diff --git a/examples/bloom/songs/creek/tracks/pad-sc.yaml b/examples/bloom/songs/creek/tracks/pad-sc.yaml
+index 84659c23..b7850c97 100644
+--- a/examples/bloom/songs/creek/tracks/pad-sc.yaml
++++ b/examples/bloom/songs/creek/tracks/pad-sc.yaml
+@@ -2,7 +2,7 @@
+ name: pad-sc
+ inputs:
+   - supercollider:
+-      source: still-water-pad.scd
++      source: pad.scd
+       seed: 90210
+       duration: 10
+       channels: 2
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index 75b72bc4..662c41f7 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -1,5 +1,5 @@
+-import { existsSync } from 'node:fs';
+-import { basename } from 'node:path';
++import { existsSync, readdirSync, readFileSync } from 'node:fs';
++import { basename, join } from 'node:path';
+ import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
+ import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
+ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+@@ -32,10 +32,43 @@ export function resolveInstrument(spec: string, cwd = process.cwd()): string {
+     );
+   }
+   const path = instrumentPath(spec, root ?? cwd);
+-  if (!existsSync(path)) throw new Error(`field keys ${spec}: no instrument program at ${path}`);
++  if (!existsSync(path)) {
++    const shelf = root !== undefined ? `\n${describeShelf(root)}` : '';
++    throw new Error(`field keys ${spec}: no instrument program at ${path}${shelf}`);
++  }
+   return path;
+ }
+ 
++// The programs on a project's instruments shelf, by name, split by whether
++// they can play from notes. A program that never reads FIELD_MODE cannot
++// answer voice mode, so its text is enough to tell, without starting
++// sclang for each one (keys.md "Make an instrument playable").
++export function shelfInstruments(root: string): { playable: string[]; renderOnly: string[] } {
++  const dir = join(root, 'shared', 'instruments');
++  const playable: string[] = [];
++  const renderOnly: string[] = [];
++  if (!existsSync(dir)) return { playable, renderOnly };
++  const files = readdirSync(dir, { withFileTypes: true })
++    .filter((entry) => entry.isFile() && entry.name.endsWith('.scd'))
++    .map((entry) => entry.name)
++    .sort();
++  for (const file of files) {
++    const name = file.slice(0, -'.scd'.length);
++    (readFileSync(join(dir, file), 'utf8').includes('FIELD_MODE') ? playable : renderOnly).push(name);
++  }
++  return { playable, renderOnly };
++}
++
++function describeShelf(root: string): string {
++  const { playable, renderOnly } = shelfInstruments(root);
++  if (playable.length + renderOnly.length === 0) return 'shared/instruments/ has no programs yet.';
++  const lines = ['In shared/instruments/:', `  plays from notes: ${playable.length > 0 ? playable.join(', ') : 'none'}`];
++  if (renderOnly.length > 0) {
++    lines.push(`  renders only:     ${renderOnly.join(', ')} (no FIELD_MODE=voice branch; see docs/keys.md)`);
++  }
++  return lines.join('\n');
++}
++
+ export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {
+   const source = resolveKeymapSource(options.keymap);
+   const keymap = loadKeymap(source.path);
+diff --git a/src/keys/keymap.test.ts b/src/keys/keymap.test.ts
+index 2b7bcf53..f5749415 100644
+--- a/src/keys/keymap.test.ts
++++ b/src/keys/keymap.test.ts
+@@ -117,7 +117,10 @@ describe('reloading a keymap on save', () => {
+     renameSync(temp, path);
+   }
+ 
+-  it('applies two rename-on-save edits in a row, and keeps the keymap through an invalid one', async () => {
++  // Three reloads in a row, each allowed nextReload's 5 s: file events can
++  // arrive a second or more late on a loaded machine, so the test's budget
++  // covers all three rather than vitest's default 5 s for the whole test.
++  it('applies two rename-on-save edits in a row, and keeps the keymap through an invalid one', { timeout: 20_000 }, async () => {
+     const path = join(dir, 'mine.yaml');
+     writeFileSync(path, 'name: mine\nnotes: { KeyA: 0 }\n');
+     const results: ReloadResult[] = [];
+diff --git a/src/keys/voice-host.test.ts b/src/keys/voice-host.test.ts
+index 064017f2..c881476c 100644
+--- a/src/keys/voice-host.test.ts
++++ b/src/keys/voice-host.test.ts
+@@ -81,8 +81,8 @@ function env(mode: string): NodeJS.ProcessEnv {
+ 
+ describe('resolving an instrument', () => {
+   it('adds .scd and resolves a bare name on the instruments shelf', () => {
+-    expect(instrumentPath('still-water-pad', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
+-    expect(instrumentPath('still-water-pad.scd', '/p')).toBe('/p/shared/instruments/still-water-pad.scd');
++    expect(instrumentPath('pad', '/p')).toBe('/p/shared/instruments/pad.scd');
++    expect(instrumentPath('pad.scd', '/p')).toBe('/p/shared/instruments/pad.scd');
+   });
+ 
+   it('resolves a slashed path from the root, and leaves an absolute path alone', () => {
+@@ -98,6 +98,22 @@ describe('resolving an instrument', () => {
+     writeFileSync(join(dir, 'shared/instruments/pad.scd'), '');
+     expect(resolveInstrument('pad', dir)).toBe(join(dir, 'shared/instruments/pad.scd'));
+   });
++
++  it('lists the shelf when a name is not on it, split by whether each plays from notes', () => {
++    writeFileSync(join(dir, 'field.yaml'), 'name: t\n');
++    mkdirSync(join(dir, 'shared/instruments'), { recursive: true });
++    expect(() => resolveInstrument('bass', dir)).toThrow(/shared\/instruments\/ has no programs yet\.$/);
++    writeFileSync(join(dir, 'shared/instruments/pad.scd'), '(\nif ("FIELD_MODE".getenv == "voice") { SynthDef(\\pad, {}) } { 0.exit }\n)\n');
++    writeFileSync(join(dir, 'shared/instruments/kit.scd'), '// renders only\n');
++    writeFileSync(join(dir, 'shared/instruments/notes.txt'), 'FIELD_MODE\n');
++    mkdirSync(join(dir, 'shared/instruments/folder.scd'));
++    expect(() => resolveInstrument('bass', dir)).toThrow(
++      `field keys bass: no instrument program at ${join(dir, 'shared/instruments/bass.scd')}\n` +
++        'In shared/instruments/:\n' +
++        '  plays from notes: pad\n' +
++        '  renders only:     kit (no FIELD_MODE=voice branch; see docs/keys.md)',
++    );
++  });
+ });
+ 
+ describe('the voice host protocol', () => {

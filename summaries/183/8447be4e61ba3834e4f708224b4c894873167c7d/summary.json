@@ -1,0 +1,218 @@
+{
+ "version": 1,
+ "name": "field keys follow-up: shelf listing, JU-06A instruments, pad rename",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 183,
+  "title": "Follow up on field keys: list the instruments on a miss, add juno and bass, and rename still-water-pad to pad",
+  "head": "8447be4e61ba3834e4f708224b4c894873167c7d",
+  "headRef": "keys/follow-up",
+  "base": "f80efb60d262a000ad521fdbb8f880a571cf76fb",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI source. Given an instrument name, it also plays a SuperCollider program live. A bare name such as <code>pad</code> resolves to <code>shared/instruments/pad.scd</code>, the project's <em>instruments shelf</em>, by the same rule a <code>supercollider:</code> track entry uses. This pull request collects the fixes from the first hands-on testing after the keyboard-instrument work merged in #178 to #182.",
+   "<ul><li><b>A missing name lists the shelf.</b> Before, <code>field keys bass</code> printed only that the file did not exist. Now the error lists every program on the shelf, split into those that play from notes and those that only render.</li><li><b>Two more playable instruments.</b> <code>examples/bloom</code> gains <code>juno</code> and <code>bass</code>, ports of the JU-06A synth from the <code>okamnesiac/offset</code> repository.</li><li><b><code>still-water-pad</code> becomes <code>pad</code>.</b> The example's sine pad gets a shorter name in the example, the docs, and the plan.</li><li><b>A longer budget for a flaky test.</b> The keymap reload test gets 20 s instead of vitest's default 5 s.</li></ul>",
+   "The review at this head found one blocking problem: the listing prints a program named <code>pad.v2.scd</code> as <code>pad.v2</code>, a name <code>field keys</code> cannot resolve. It also found that the reload test still fails under load, because the first file event is sometimes lost rather than late, and a longer budget cannot bring a lost event back. Both are flagged at their lines below."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms this page uses",
+    "html": "<ul class=\"tight\"><li><b>Shelf</b>: <code>shared/instruments/</code>, where a bare instrument name resolves.</li><li><b>Bare name</b>: a name with no <code>/</code>. <code>instrumentProgram</code> adds <code>.scd</code> to it only when it has no extension at all.</li><li><b>Voice mode</b>: a program run with <code>FIELD_MODE=voice</code>. Its value must be a SynthDef that the voice host plays once per note.</li><li><b>Render mode</b>: the same program run by a build, writing a WAV file offline.</li><li><b>Voice host</b>: the <code>sclang</code> process running <code>sc/voice-host.scd</code>, which plays an instrument live.</li><li><b>JU-06A</b>: a SuperCollider model of the Roland Juno's signal chain, from <code>okamnesiac/offset</code>.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review at this head",
+    "html": "<ul class=\"tight\"><li>Verdict: changes requested, with 1 open thread (P2) on the listing.</li><li>5 suggestions in the review body, none blocking.</li><li><code>pnpm typecheck</code> passes. The two key test files pass 25 of 25 in sequential runs, and the reload test failed 3 of 8 concurrent runs.</li><li><code>field check</code> in <code>examples/bloom</code>, the step CI runs, prints <code>ok</code>.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "listing",
+   "title": "A missing instrument name lists the shelf",
+   "kicker": "The error from resolveInstrument now names every program on the shelf, split by whether it plays from notes",
+   "intro": [
+    "When you name an instrument that is not on the shelf, <code>resolveInstrument</code> still throws, and the CLI still prints the message and exits 1. The message now ends with the shelf's contents. <code>shelfInstruments</code> reads <code>shared/instruments/</code>, keeps regular files whose names end in <code>.scd</code>, and sorts them. It puts a program under <b>plays from notes</b> when its text contains <code>FIELD_MODE</code>, and under <b>renders only</b> otherwise.",
+    "The text test is a shortcut that holds because <code>voice</code> is the only value <code>FIELD_MODE</code> takes. A program that never mentions the variable cannot answer voice mode, so reading the text is enough, and the error does not start <code>sclang</code> once per program.",
+    "Outside a project, a bare name still fails before any listing, because there is no shelf to list. Inside a project, a path that does not exist lists the shelf too."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The <em>shelf</em> is <code>shared/instruments/</code>. A <em>bare name</em> has no <code>/</code>, and <code>instrumentProgram</code> adds <code>.scd</code> to it only when it has no extension at all. That rule is what the open thread turns on."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "<code>resolveInstrument</code> appends the listing. <code>shelfInstruments</code> builds it, and <code>describeShelf</code> formats it.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 56,
+       "text": "The open review thread (P2). This line strips <code>.scd</code> from every file name, but <code>instrumentProgram</code> adds it back only to a name with no extension. So a shelf program <code>pad.v2.scd</code> lists as <code>pad.v2</code>, and <code>field keys pad.v2</code> then fails and prints the same list. Keep <code>.scd</code> when the stripped name still has an extension."
+      },
+      {
+       "kind": "context",
+       "line": 52,
+       "text": "<code>entry.isFile()</code> is false for a directory named <code>*.scd</code> and for the dangling <code>.#name.scd</code> link Emacs leaves while a buffer is unsaved, so the listing never tries to read either."
+      },
+      {
+       "kind": "context",
+       "line": 67,
+       "text": "<code>see docs/keys.md</code> is a path in Field's checkout, but the message prints in the user's project, which has no such file. The review suggests naming Field's doc and its section instead."
+      },
+      {
+       "kind": "verify",
+       "text": "Ran <code>field keys organ</code> in <code>examples/bloom</code> at this head with no terminal attached. It exits 1 and prints exactly the listing <code>docs/keys.md</code> shows, before any terminal, MIDI, or <code>sclang</code> work starts."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.test.ts",
+     "note": "A new case lists an empty shelf, then a shelf with one playable program, one render-only program, a text file, and a directory named <code>folder.scd</code>. The <code>instrumentPath</code> cases follow the rename to <code>pad</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Ran <code>pnpm exec vitest run src/keys/voice-host.test.ts src/keys/keymap.test.ts</code> at this head three times. Every case in this file passed each time."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "instruments",
+   "title": "Two JU-06A instruments in examples/bloom",
+   "kicker": "juno and bass port offset's Juno model, and each both plays from notes and renders",
+   "intro": [
+    "Before this change, the sine pad was the only example instrument you could play from the keyboard. <code>juno.scd</code> and <code>bass.scd</code> port the JU-06A from the <code>okamnesiac/offset</code> repository. It models the Roland Juno's chain: oscillators (saw, pulse, sub, and noise), a high-pass filter, a resonant low-pass filter, and an amplifier under one ADSR envelope, then a chorus.",
+    "Each program answers both modes. In voice mode, its last expression is a SynthDef with the <code>freq</code>, <code>amp</code>, <code>gate</code>, and <code>out</code> controls the voice host sets. The SynthDef writes two channels and frees itself when its envelope ends. In render mode, the program renders a short demo offline: <code>juno</code> holds a C minor ninth chord, and <code>bass</code> plays offset's eight-note line.",
+    "The two files repeat the same <code>ju06a</code> function on purpose. A program's own bytes are the cache key for what it renders. A shared file loaded at run time could change the sound without invalidating the renders that used it."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "This review did not start <code>sclang</code>, so nothing here was rendered or played. The pull request body reports that both renders peak below 0 dBFS and repeat byte for byte with a fixed seed."
+    }
+   ],
+   "files": [
+    {
+     "path": "examples/bloom/shared/instruments/juno.scd",
+     "note": "The classic Juno pad: saw and pulse with the pulse width swept, a slow attack, a long release, and the chorus on.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 12,
+       "text": "Compared every knob with the \"Classic Juno pad\" in offset's <code>sessions/juno.scd</code>, and the <code>ju06a</code> graph with offset's <code>patches/ju06a.scd</code>, by reading both. They match."
+      },
+      {
+       "kind": "context",
+       "line": 70,
+       "text": "The chord's note-offs are added between its note-ons, out of time order. <code>Score</code> sorts its events when it is built, so the order does not matter."
+      }
+     ]
+    },
+    {
+     "path": "examples/bloom/shared/instruments/bass.scd",
+     "note": "offset's bass: one saw, a square sub an octave down, a filter the envelope opens on each note, and no chorus. It plays at true pitch.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 15,
+       "text": "Compared every knob with the <code>~ju06a</code> factory defaults in offset's <code>patches/ju06a.scd</code>, by reading both. They match."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "rename",
+   "title": "still-water-pad becomes pad",
+   "kicker": "The example's sine pad gets a shorter name everywhere except the plan's records of past runs",
+   "intro": [
+    "<code>shared/instruments/still-water-pad.scd</code> moves to <code>pad.scd</code>, and its two SynthDefs become <code>padKey</code> and <code>padVoice</code>. The creek track <code>pad-sc</code> now names <code>source: pad.scd</code>, and the docs, the example's README, the repository README, and the keyboard-instrument plan use the new name.",
+    "The plan's verification tables in §10.3 and §13.3 keep the old name, because those rows record runs made under it. A new note in §13.2 says so.",
+    "A render's cache key includes the program's bytes, and the rename changes them, so <code>pad-sc</code> renders once more on its next build."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "<code>git grep still-water-pad</code> at this head finds only the plan's §10.3 and §13.3 rows and the note about them. <code>field check</code> in <code>examples/bloom</code>, the step CI runs, prints <code>ok</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "examples/bloom/shared/instruments/pad.scd",
+     "note": "Renamed from <code>still-water-pad.scd</code>. Only the header comment and the two SynthDef names change."
+    },
+    {
+     "path": "examples/bloom/songs/creek/tracks/pad-sc.yaml",
+     "note": "The render entry names the renamed program."
+    },
+    {
+     "path": "examples/bloom/README.md"
+    },
+    {
+     "path": "README.md"
+    },
+    {
+     "path": "docs/project-model.md"
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "The plan is <code>in-progress</code>, so its design text and acceptance criteria follow the current name. §13.2 gains the note about the rows that keep the old one."
+    }
+   ]
+  },
+  {
+   "id": "reload-test",
+   "title": "A longer budget for the keymap reload test",
+   "kicker": "The test gets 20 s, but its failure under load is a lost file event, not a slow one",
+   "intro": [
+    "<code>watchKeymap</code> reloads a keymap file when you save it, by watching the file's directory. Its test saves three times and waits up to 5 s for each reload, all inside vitest's default 5 s budget for the whole test. The test timed out twice in full-suite runs, and this change raises its budget to 20 s.",
+    "Under load at this head the test still fails, with <code>no reload 1 within 5 s</code>. That message comes from the per-reload deadline, not from the test's budget. The first save's event is sometimes lost: the test saves right after it starts the watch, and the macOS directory watch is not yet live. Re-saving the first edit until its reload arrives recovered every lost event in the review's runs. The same race exists before this change."
+   ],
+   "files": [
+    {
+     "path": "src/keys/keymap.test.ts",
+     "note": "Only the test's budget changes, with a comment giving the reason.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 120,
+       "text": "From the review's suggestions: in eight concurrent runs at this head, three failed with <code>no reload 1 within 5 s</code>. In 60 timed runs under load, 4 first reloads never arrived within 30 s, and the rest arrived within 85 ms, so the runs showed no event \"a second or more late\". Re-save the first edit every 500 ms until reload 1 arrives."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The keys guide",
+   "kicker": "docs/keys.md shows the new listing and names the three playable instruments",
+   "intro": [
+    "<code>docs/keys.md</code> is the user guide for <code>field keys</code>. Under \"Play an instrument\" it now shows the listing that a missing name prints, and it lists the three instruments in <code>examples/bloom</code> that answer voice mode. Its examples use the new name <code>pad</code>."
+   ],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 119,
+       "text": "The listing block matches what <code>field keys organ</code> prints at this head, apart from the path's prefix."
+      },
+      {
+       "kind": "flag",
+       "line": 169,
+       "text": "<code>Z</code> drops an octave only in the default <code>musical-typing</code> keymap. <code>tracker</code> and <code>fourths</code> bind it to a note. The review suggests saying \"in <code>musical-typing</code>\", as <code>bass.scd</code>'s own comment does."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
