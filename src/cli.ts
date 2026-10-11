@@ -271,11 +271,12 @@ program
       fail(err);
     }
   });
-// Installing belongs to install.sh; this runs the one beside the package it
-// was built from, so an upgrade works from any directory (install.md §2.5).
+// Installing belongs to install.sh: a checkout runs its own, and a release
+// install downloads the newest release's, so an upgrade works from any
+// directory (install.md §2.5, §3.2).
 program
   .command('upgrade [target]')
-  .description("run this field's install.sh from anywhere: all (the default), cli, audiod, workers, or status")
+  .description("run the installer from anywhere, a checkout's own install.sh or the newest release's: all (the default), cli, audiod, workers, or status")
   .action(async (target: string | undefined) => {
     try {
       const { upgrade } = await import('./commands/upgrade.js');
