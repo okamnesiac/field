@@ -30,8 +30,9 @@ pnpm add -g .
 
 ## Before you install
 
-The installer checks for each of these and stops with a message naming
-the one that is missing:
+Before it changes anything, the installer checks for each of these that
+the target needs, and stops with a message naming the one that is
+missing:
 
 - **Node 24 or newer.** The version in `.nvmrc`.
 - **pnpm.** `corepack enable pnpm` installs the version `package.json`

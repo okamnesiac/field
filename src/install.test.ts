@@ -195,6 +195,12 @@ function rows(stdout: string): Map<string, string> {
   return map;
 }
 
+// The commands a run made that change something: everything but pnpm's
+// queries.
+function changes(run: Run): string[] {
+  return run.log.filter((line) => !/^pnpm (ls|bin|--version)/.test(line));
+}
+
 function linkTo(target: string): void {
   mkdirSync(join(pnpmHome, 'global'), { recursive: true });
   mkdirSync(join(pnpmHome, 'bin'), { recursive: true });
@@ -206,7 +212,7 @@ posix('install.sh cli', () => {
     const run = install('cli');
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
-    expect(run.log.filter((line) => !/^pnpm (ls|bin|--version)/.test(line))).toEqual([
+    expect(changes(run)).toEqual([
       `pnpm --dir ${repo} install --frozen-lockfile`,
       `pnpm --dir ${repo} run build`,
       `pnpm add -g ${repo}`,
@@ -233,18 +239,25 @@ posix('install.sh cli', () => {
     expect(rows(run.stdout).get('moved')).toBe('field ~/other -> ~/checkout');
   });
 
-  it('stops before linking when pnpm has no global bin directory', () => {
+  it('stops before installing anything when pnpm has no global bin directory', () => {
     const run = install('cli', { FAKE_NO_GLOBAL_BIN: '1' });
     expect(run.status).toBe(69);
     expect(run.stderr).toContain('run pnpm setup');
-    expect(run.log.some((line) => line.startsWith('pnpm add'))).toBe(false);
+    expect(changes(run)).toEqual([]);
   });
 
-  it('stops before linking when that directory is not on PATH', () => {
+  it('stops before installing anything when that directory is not on PATH', () => {
     const run = install('cli', { PATH: bin });
     expect(run.status).toBe(69);
     expect(run.stderr).toContain(`pnpm's global bin directory ${pnpmHome}/bin is not on PATH`);
-    expect(run.log.some((line) => line.startsWith('pnpm add'))).toBe(false);
+    expect(changes(run)).toEqual([]);
+  });
+
+  it('needs no global bin directory on PATH when the link already points here', () => {
+    linkTo(repo);
+    const run = install('cli', { PATH: bin });
+    expect(run.status).toBe(0);
+    expect(run.log).toContain(`pnpm --dir ${repo} run build`);
   });
 
   it('refuses a Node older than 24 before touching anything', () => {
@@ -281,6 +294,14 @@ posix('install.sh audiod and workers', () => {
     expect(run.status).toBe(69);
     expect(run.stderr).toContain('CMake 3.24 or newer');
     expect(run.log).not.toContain(`pnpm --dir ${repo} run build:native`);
+  });
+
+  it('stops before installing anything when everything is asked for without CMake', () => {
+    rmSync(join(bin, 'cmake'));
+    const run = install();
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('CMake 3.24 or newer');
+    expect(changes(run)).toEqual([]);
   });
 
   it('fails when the daemon does not build', () => {

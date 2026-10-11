@@ -103,9 +103,26 @@ require_pnpm() {
     die "Field builds with pnpm, which is not on PATH — run corepack enable pnpm, or see https://pnpm.io/installation" 69
 }
 
+# pnpm refuses to link into a global bin directory that is not on PATH, so
+# the installer checks first and its message names the command to run again.
+GLOBAL_BIN=""
+require_global_bin() {
+  GLOBAL_BIN="$(pnpm bin -g 2>/dev/null)" ||
+    die "pnpm has no global bin directory — run pnpm setup, open a new shell, and run $(rerun "$TARGET") again" 69
+  if [ "$LINKED" != "$REPO" ]; then
+    case ":$PATH:" in
+      *":$GLOBAL_BIN:"*) ;;
+      *) die "pnpm's global bin directory $GLOBAL_BIN is not on PATH — run pnpm setup, open a new shell, and run $(rerun "$TARGET") again" 69 ;;
+    esac
+  fi
+}
+
+require_cmake() {
+  command -v cmake >/dev/null 2>&1 ||
+    die "building field-audiod needs CMake 3.24 or newer — brew install cmake on macOS" 69
+}
+
 install_cli() {
-  require_node
-  require_pnpm
   # --frozen-lockfile, because an installer has no business rewriting the
   # checkout's lockfile; a checkout whose package.json moved ahead of it
   # gets pnpm's own error saying so.
@@ -121,30 +138,21 @@ install_cli() {
 # effect with no relinking. A link that already points here is left alone,
 # and one that points at another checkout moves, with a row saying so.
 link_cli() {
-  local bin found
-  bin="$(pnpm bin -g 2>/dev/null)" ||
-    die "pnpm has no global bin directory — run pnpm setup, open a new shell, and run $(rerun cli) again" 69
+  local found
   if [ "$LINKED" != "$REPO" ]; then
-    case ":$PATH:" in
-      *":$bin:"*) ;;
-      *) die "pnpm's global bin directory $bin is not on PATH — run pnpm setup, open a new shell, and run $(rerun cli) again" 69 ;;
-    esac
     pnpm add -g "$REPO"
     [ -z "$LINKED" ] || row moved "field $(tilde "$LINKED") -> $(tilde "$REPO")"
     refresh_linked
   fi
-  row linked "$(tilde "$bin/field") -> $(tilde "$REPO")"
+  row linked "$(tilde "$GLOBAL_BIN/field") -> $(tilde "$REPO")"
   hash -r
   found="$(command -v field 2>/dev/null)" || found=""
-  if [ -n "$found" ] && [ "$found" != "$bin/field" ]; then
-    warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of pnpm's $(tilde "$bin/field")"
+  if [ -n "$found" ] && [ "$found" != "$GLOBAL_BIN/field" ]; then
+    warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of pnpm's $(tilde "$GLOBAL_BIN/field")"
   fi
 }
 
 install_audiod() {
-  require_pnpm
-  command -v cmake >/dev/null 2>&1 ||
-    die "building field-audiod needs CMake 3.24 or newer — brew install cmake on macOS" 69
   [ -x "$REPO/$AUDIOD_RELATIVE" ] ||
     row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
   if ! pnpm --dir "$REPO" run build:native; then
@@ -160,7 +168,6 @@ install_audiod() {
 # generate after it downloads gigabytes of weights. The CLI decides which
 # are set up, since it owns the list of workers.
 install_workers() {
-  require_node
   [ -f "$REPO/dist/cli.js" ] ||
     die "the field CLI sets up worker environments, and it is not built — run $(rerun cli) first" 69
   node "$REPO/dist/cli.js" setup --existing
@@ -342,18 +349,25 @@ if [ -z "$REPO" ]; then
   die "run this from a Field checkout: git clone https://github.com/okamnesiac/field, then ./install.sh in it" 69
 fi
 [ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status]" 64
+TARGET="${1:-all}"
 refresh_linked
 
-case "${1:-all}" in
+# Each target checks every prerequisite it needs before its first command,
+# so a missing one stops it with nothing changed.
+case "$TARGET" in
   all)
+    require_node
+    require_pnpm
+    require_global_bin
+    require_cmake
     install_cli
     install_audiod
     install_workers
     report_checkout
     ;;
-  cli) install_cli; report_checkout ;;
-  audiod) install_audiod; report_checkout ;;
-  workers) install_workers; report_checkout ;;
+  cli) require_node; require_pnpm; require_global_bin; install_cli; report_checkout ;;
+  audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
+  workers) require_node; install_workers; report_checkout ;;
   status) show_status ;;
   *) die "usage: install.sh [all|cli|audiod|workers|status]" 64 ;;
 esac

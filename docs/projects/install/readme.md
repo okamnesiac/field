@@ -77,8 +77,8 @@ and warning when the checkout is behind it. The installer never pulls.
 Each prerequisite is checked before anything changes, and a missing one
 stops the installer with exit status 69 and a message that names the
 fix: Node 24 or newer, pnpm (`corepack enable pnpm`), a pnpm global bin
-directory on PATH (`pnpm setup`), and CMake for `audiod`. An unknown
-target exits 64.
+directory on PATH (`pnpm setup`), and CMake for `audiod` and `all`. An
+unknown target exits 64.
 
 ### 2.3 The CLI is a link to the checkout
 
