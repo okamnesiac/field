@@ -4,6 +4,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUILD_DAEMON } from '../remedies.js';
 import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
@@ -126,7 +127,7 @@ export class AudiodClient extends EventEmitter {
       }
       const binary = daemonBinary();
       if (!binary) {
-        throw new Error('field-audiod is not built (pnpm build:native, or set FIELD_AUDIOD)');
+        throw new Error(`field-audiod is not built (${BUILD_DAEMON}, or set FIELD_AUDIOD)`);
       }
       // POSIX gets the relative path (the daemon binds it against its
       // cwd, staying inside sun_path); Windows gets the full pipe name,

@@ -254,10 +254,32 @@ sc.command('render <program>')
 program
   .command('setup [worker]')
   .description('set up generation worker environments (uv; explicit, never automatic)')
-  .action(async (worker: string | undefined) => {
+  .option('--existing', 're-sync only the environments already set up, and set up no new one')
+  .option('--check', 'report whether each environment is set up and current, changing nothing')
+  .action(async (worker: string | undefined, options: { existing?: boolean; check?: boolean }) => {
     try {
-      const { setupWorker } = await import('./commands/generate.js');
-      await setupWorker((line) => process.stdout.write(`${line}\n`), worker);
+      const { checkWorkers, selectWorkers, setupWorker } = await import('./commands/generate.js');
+      if (options.check === true) {
+        if (options.existing === true) throw new Error('--check changes nothing, so it takes no --existing');
+        const { lines, ok } = checkWorkers(selectWorkers(worker));
+        for (const line of lines) process.stdout.write(`${line}\n`);
+        if (!ok) process.exitCode = 1;
+        return;
+      }
+      await setupWorker((line) => process.stdout.write(`${line}\n`), worker, { existing: options.existing });
+    } catch (err) {
+      fail(err);
+    }
+  });
+// Installing belongs to install.sh; this runs the one beside the package it
+// was built from, so an upgrade works from any directory (install.md §2.5).
+program
+  .command('upgrade [target]')
+  .description("run this field's install.sh from anywhere: all (the default), cli, audiod, workers, or status")
+  .action(async (target: string | undefined) => {
+    try {
+      const { upgrade } = await import('./commands/upgrade.js');
+      process.exitCode = upgrade(target);
     } catch (err) {
       fail(err);
     }
@@ -732,17 +754,18 @@ program
       }
       let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
+      const { BUILD_DAEMON } = await import('./remedies.js');
       if (!daemonBinary()) {
         if (process.platform !== 'darwin') {
           // afplay is a macOS binary: anywhere else the fallback could only
           // die with ENOENT naming a tool this machine never had, so the
           // build hint is the whole answer.
-          throw new Error('field-audiod is not built, and the afplay fallback is macOS-only — run `pnpm build:native`');
+          throw new Error(`field-audiod is not built, and the afplay fallback is macOS-only — run ${BUILD_DAEMON}`);
         }
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
-          throw new Error('--from, --device, --loop, --click, and --watch need field-audiod (pnpm build:native)');
+          throw new Error(`--from, --device, --loop, --click, and --watch need field-audiod (${BUILD_DAEMON})`);
         }
-        process.stderr.write('field-audiod is not built; using afplay (pnpm build:native)\n');
+        process.stderr.write(`field-audiod is not built; using afplay (${BUILD_DAEMON})\n`);
         await playWithAfplay(items);
         return;
       }

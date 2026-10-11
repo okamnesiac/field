@@ -69,8 +69,7 @@ the CLI displays them. The comments in the YAML files survive
 
 ```bash
 git clone https://github.com/okamnesiac/field
-cd field && nvm use && pnpm install && npm link
-pnpm build:native   # optional: the playback daemon (needs CMake + Xcode CLT)
+cd field && nvm use && ./install.sh   # the field command and its daemon (needs CMake + Xcode CLT)
 
 cd examples/bloom
 field status
@@ -201,7 +200,7 @@ playable, because a song's output is just another track:
 field play creek     # the bare song name is its output track
 ```
 
-With the native daemon built (`pnpm build:native` in the field repo),
+With the native daemon built (`field upgrade audiod` builds it),
 playback runs through `field-audiod` — Field's own Core Audio process,
 spawned on demand, one per project — and the terminal shows a live
 position readout in musical time (`5.2.1 (0:12.3)`). That unlocks the

@@ -8,6 +8,7 @@ import { parseDocument } from 'yaml';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
 import { AudiodClient } from '../audiod/client.js';
+import { BUILD_UI, INSTALL_UI } from '../remedies.js';
 import type { CompiledSession } from '../graph/live.js';
 import { compileSession } from '../graph/live.js';
 import { readWavHeader } from '../audio/wav.js';
@@ -209,7 +210,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   });
   if (!existsSync(join(distDir, 'index.html'))) {
     http.close();
-    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
+    throw new Error(`the UI is not built — run ${BUILD_UI}`);
   }
 
   // From here a failure must not leave the port bound behind it.
@@ -895,7 +896,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         });
       } else {
         process.stderr.write(
-          'field ui: the app shell is not installed (pnpm --dir ui install); opening a browser\n',
+          `field ui: the app shell is not installed (${INSTALL_UI}); opening a browser\n`,
         );
         openInBrowser();
       }

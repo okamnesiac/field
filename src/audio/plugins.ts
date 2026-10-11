@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 import { daemonBinary } from '../audiod/client.js';
+import { BUILD_DAEMON } from '../remedies.js';
 import { PPQ } from '../constants.js';
 import { sha256FileSync } from '../hash.js';
 import type { PluginInsert } from '../schema/effects.js';
@@ -106,7 +107,7 @@ export function readInventory(root: string): PluginInventory | undefined {
 export function scanPlugins(root: string): PluginInventory {
   const binary = daemonBinary();
   if (binary === undefined) {
-    throw new Error('field-audiod is not built — run `pnpm build:native`; the daemon owns scanning');
+    throw new Error(`field-audiod is not built — run ${BUILD_DAEMON}; the daemon owns scanning`);
   }
   const formats = process.platform === 'darwin' ? ['au', 'vst3'] : ['vst3'];
   const plugins: PluginInfo[] = [];

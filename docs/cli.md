@@ -18,21 +18,23 @@ against, use [`examples/bloom`](../examples/bloom/README.md).
 
 ## Install
 
-Field needs Node 24 (the version in [`.nvmrc`](../.nvmrc)) and pnpm —
-never npm or yarn. From the checkout:
+Field needs Node 24 (the version in [`.nvmrc`](../.nvmrc)), pnpm —
+never npm or yarn — and CMake. From the checkout:
 
 ```sh
-pnpm install
-pnpm build
-pnpm build:native    # field-audiod, the playback and render daemon
 pnpm setup           # once, if pnpm has never linked a global binary
-pnpm add -g .        # links `field` onto your PATH
+./install.sh         # builds the checkout, links `field`, builds field-audiod
 ```
 
-`pnpm add -g .` links this checkout rather than copying it, so a later
-`pnpm build` takes effect with no re-linking. To run from source without
-installing, use `pnpm field <args>`. To remove it, `pnpm remove -g
-field`.
+The installer links this checkout onto your PATH rather than copying
+it, so `field` runs whatever the checkout last built. After a `git
+pull`, `field upgrade` runs the same installer from any directory, and
+`field upgrade status` says what is out of date.
+[install.md](install.md) describes each step and each status row. On
+Windows the installer does not run yet: run `pnpm install`, `pnpm
+build`, `pnpm build:ui`, `pnpm build:native`, and `pnpm add -g .` in the
+checkout. To run from source without installing, use `pnpm field
+<args>`. To remove it, `pnpm remove -g field`.
 
 Build the daemon before you build, play or record anything.
 `field-audiod` is the renderer as well as the player: every track's
@@ -69,7 +71,7 @@ so when the checkout has moved on or carries uncommitted changes. The
 came from, and whether you are logged in to it (see [Share a project
 through a remote](#share-a-project-through-a-remote)). The rest reports
 which daemons run for *this* project and which build each one is on — a
-daemon started before your last `pnpm build:native` still runs the old
+daemon started before your last daemon build still runs the old
 code, and `field transport quit` is how you retire it.
 
 ## Address things with labels
@@ -331,13 +333,10 @@ as it picks up an edit you make in an editor. Solo is the exception: it
 changes what you hear and writes nothing. Ctrl-c, or closing the window,
 stops the transport and ends the session.
 
-The window is a web client served by `field` itself, so build it once
-first. `field ui` refuses with that command when the build is missing:
-
-```sh
-pnpm --dir ui build
-field ui tall-grass
-```
+The window is a web client served by `field` itself from `ui/dist`,
+which `./install.sh` and `field upgrade cli` build with the CLI. When the
+build is missing, `field ui` refuses and names `field upgrade cli`, or on
+Windows `pnpm build:ui` in the checkout.
 
 `field ui` prints the URL it serves on, then opens the app window. The
 URL carries a token that the server checks, and it serves only
@@ -543,8 +542,11 @@ $ field choose creek/still-water-keys --variant 2
 ```
 
 `field setup [worker]` prepares the worker environments with `uv`; with
-no argument it sets up all of them. `field generate <song>/<name>` fills
-a generative entry — a new name scaffolds a leaf track — and writes
+no argument it sets up all of them. `--check` reports whether each one
+is set up and current, changing nothing, and `--existing` re-syncs only
+the ones already set up, which is what `field upgrade` runs. `field
+generate <song>/<name>` fills a generative entry — a new name scaffolds
+a leaf track — and writes
 variants into `songs/<song>/audio/<name>/` with a recipe recording the
 model, the seed and the hash of every take. A missing `--seed` draws one
 and the output says what it drew, because a seed here is provenance
@@ -611,6 +613,7 @@ somewhere other than `<program>.wav` in the current directory.
 | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
 | `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
 | `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
+| `FIELD_OFFLINE` | `install.sh` and `field upgrade` skip fetching the checkout's upstream, and compare against the last fetch |
 
 `FIELD_SCLANG` and `FIELD_AUDIOD` point at a binary the default search
 does not find. `FIELD_AUDIOD` is resolved to an absolute path
@@ -633,12 +636,10 @@ unaffected.
 
 `field play` needs `field-audiod`. On macOS, a machine without the built
 daemon falls back to `afplay` for plain artifact playback, with no
-transport and no options. The fallback is attempted everywhere and only
-exists on macOS: today, off macOS, an unbuilt daemon fails with
-`afplay failed: spawn afplay ENOENT` after a stderr line pointing at
-`pnpm build:native`. The Windows port (#161, in review) replaces that
-with a plain refusal naming the build command on every non-macOS
-platform — the decision is recorded in
+transport and no options. Off macOS there is no `afplay`, so an unbuilt
+daemon is a plain refusal that names the build command: `field upgrade
+audiod`, or on Windows `pnpm build:native` in the checkout. The decision
+is recorded in
 [windows-portability.md](projects/windows-portability/readme.md) §2.2 as
 amended. Porting the rest is tracked there and in
 [linux-portability.md](projects/linux-portability/readme.md).
@@ -673,7 +674,8 @@ amended. Porting the rest is tracked there and in
 | `field import <file> --song <name>` | import audio and record it |
 | `field insert add <track> [plugin]` | add an insert to a track |
 | `field plugins scan\|list\|pin` | the hosted plugin inventory |
-| `field setup [worker]` | set up generation worker environments |
+| `field setup [worker]` | set up generation worker environments; `--check` reports, `--existing` re-syncs |
+| `field upgrade [target]` | run this checkout's `install.sh` from anywhere: `all`, `cli`, `audiod`, `workers`, or `status` |
 | `field generate <song>/<name>` | run a deliberate generator |
 | `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
 | `field choose <song>/<name> --take <name>` | repoint which recorded take plays |

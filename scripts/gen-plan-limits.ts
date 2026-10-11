@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -113,5 +113,13 @@ ${lines.join('\n')}
 `;
 
 const out = join(root, 'native/audiod/src/plan-limits.h');
-writeFileSync(out, header);
-process.stdout.write(`wrote ${out}\n`);
+// Written only when it changes. src/schema/plan-limits.test.ts runs this
+// on every `pnpm test`, and rewriting identical bytes moved the header's
+// mtime, so the next daemon build recompiled every file that includes it
+// and `install.sh status` reported the daemon stale (install.md §8.1).
+if (existsSync(out) && readFileSync(out, 'utf8') === header) {
+  process.stdout.write(`${out} is current\n`);
+} else {
+  writeFileSync(out, header);
+  process.stdout.write(`wrote ${out}\n`);
+}
