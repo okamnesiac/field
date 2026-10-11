@@ -1,0 +1,335 @@
+{
+ "version": 1,
+ "name": "Recording the keys",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 182,
+  "title": "Record the keys: MIDI takes rendered through their instrument (keyboard-instrument.md chunk 4)",
+  "head": "98ca869ecd1af6dbdf8de990df6c2d9961972c74",
+  "headRef": "keys/chunk-4",
+  "base": "07e720867e718bd72878ed35abb4738f676718c8",
+  "baseRef": "keys/chunk-3",
+  "basePr": 181
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI instrument, and <code>field keys &lt;instrument&gt;</code> plays a SuperCollider instrument from it live. Until this pull request nothing you played could be kept. <code>field record</code> already records <em>audio</em> takes against a song: it arms <code>field-audiod</code>, Field's audio daemon, captures the take into a transaction directory under <code>.field/recording/</code>, and then <em>lands</em> it. Landing moves the bytes into the song, pins them in the song's ledger, and adds a row to <code>audio/&lt;track&gt;/takes.yaml</code> with the new take marked <code>chosen</code>.",
+   "This pull request records MIDI the same way, and it is the last chunk of the keyboard-instrument plan. A track's <code>record:</code> entry that names an <code>instrument:</code> records MIDI instead of audio. The take lands as a small text file of notes, <code>audio/&lt;track&gt;/&lt;take&gt;.notes.yaml</code>, and the build renders the chosen take through the instrument, placed where you played it. A take reaches the song in four steps:",
+   "<ol><li><b>Arm.</b> <code>field record</code> sees the instrument and asks the daemon to arm for MIDI. The daemon opens every MIDI source on the machine and no audio input, so it never asks for the microphone.</li><li><b>Capture.</b> The daemon stamps each message on the audio callback's sample clock, so a MIDI take lines up with the song exactly as an audio take does, and appends it to <code>take.midi.ndjson</code>.</li><li><b>Land.</b> On stop, <code>field record</code> pairs each note-on with its note-off into the notes file, pins the file in the ledger, and writes its <code>takes.yaml</code> row. That row carries <code>sources</code>, the MIDI inputs it heard, where an audio row carries <code>device</code> and <code>input</code>.</li><li><b>Render.</b> The build mints a <code>voice-render</code> node for the chosen take. It runs <code>sc/voice-render.scd</code>, which plays the instrument's voice from the notes with <code>sc/voicer.scd</code>. The live voice host now uses the same voicer, so a take renders the way it sounded while you played.</li></ol>",
+   "The plan settles its three open questions about this chunk in a new §12: the take is a text list of notes, the entry is <code>record:</code> with an instrument, and Field's own script builds the score. §13 records the chunk as built. The criteria that need a real speaker and ears are still owed, so the plan stays <code>in-progress</code>.",
+   "The first review, at <code>8a11f14</code>, found eight problems. The most serious was that <code>field keys</code> went silent after the output device changed sample rate, because the voicer's <code>clear</code> entry was shadowed by a built-in SuperCollider method. Five later commits fix all eight and take most of that review's smaller suggestions. The second review, at <code>98ca869</code>, is clean, and the notes below say what each fix does and how it was checked."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Take.</b> One recorded performance on a track. Audio takes are WAV files; MIDI takes are notes files.</li><li><b>Transaction.</b> The directory <code>.field/recording/&lt;take&gt;/</code> where the daemon writes a take in progress: its data file, <code>manifest.json</code>, and <code>journal.json</code>.</li><li><b>Landing.</b> Turning a finished transaction into part of the song: the file, its ledger pin, and its <code>takes.yaml</code> row.</li><li><b>Ledger.</b> The song's <code>assets.yaml</code>, which pins each committed file by its SHA-256.</li><li><b>Record entry.</b> A <code>- record:</code> item in a track's <code>inputs</code>. It plays the chosen take where it was recorded.</li><li><b>Voice mode.</b> An instrument program run with <code>FIELD_MODE=voice</code> returns a SynthDef with <code>freq</code>, <code>amp</code>, <code>gate</code>, and <code>out</code> instead of rendering.</li><li><b>Voicer.</b> <code>sc/voicer.scd</code>: the rules that turn MIDI into voices, such as one voice per note, the sustain pedal, All Notes Off, and pitch bend.</li><li><b>Device samples and bed samples.</b> The daemon's clock counts samples at the output device's rate. The <em>bed</em>, the song a take records against, counts at the song's rate. When the two differ, the daemon resamples the song on its way out, which the code calls converted delivery.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li><b>First review, <code>8a11f14</code>:</b> changes requested, with one P1 and seven P2 threads. The P1 was the live voice host going silent after a rate change. The P2s were a zero-length note ringing to the end of a render, a MIDI punch-out across rates, crash buffering, the instrument path check, render variables in voice mode, a CI comment, and the plan's MIDI export.</li><li><b>Fixes:</b> five commits fixed all eight findings, and the author resolved each thread with a reply naming its fix. They also took twelve of the fifteen suggestions.</li><li><b>Second review, <code>98ca869</code>:</b> clean, with all eight threads verified fixed. The voicer, zero-length-note, and crash reproductions were rerun at this head. Three suggestions still apply: field-level messages for a broken audio takes row, refusing <code>--console-preset</code> and <code>--monitoring</code> on a MIDI take, and an <code>until</code> test that sends a message the filter must drop.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "shapes",
+   "title": "A notes file, a MIDI takes row, and the protocol that carries them",
+   "kicker": "The data shapes every other group reads and writes",
+   "intro": [
+    "Three shapes are new, and every later group reads or writes them. The <b>notes file</b> is what a MIDI take becomes in the song. The <b>MIDI takes row</b> in <code>takes.yaml</code> says where the take was played. The daemon's <b>protocol</b> gains a MIDI arm, MIDI status fields, and a MIDI take manifest.",
+    "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Field of the notes file</th><th>Meaning</th></tr></thead><tbody><tr><td><code>sample_rate</code></td><td>The output device's rate during the take. Every time in the file counts in it.</td></tr><tr><td><code>length</code></td><td>The take's length in samples, from its start to the stop.</td></tr><tr><td><code>notes</code></td><td>One row per note: <code>at</code>, <code>length</code>, <code>note</code>, <code>velocity</code>, and <code>channel</code> when it is not 1.</td></tr><tr><td><code>controls</code>, <code>bends</code></td><td>Controller changes and pitch bends, each with its <code>at</code>.</td></tr></tbody></table></div>",
+    "<code>notesFromMessages</code> pairs captured messages into notes. A velocity-0 note-on counts as a note-off, a second note-on for a sounding note ends the first, and a note still held at the stop lasts to the end. <code>renderEvents</code> turns the notes back into on, off, controller, and bend events in seconds for the renderer. At one instant it orders offs first, then controllers and bends, then ons."
+   ],
+   "files": [
+    {
+     "path": "src/schema/notes.ts",
+     "note": "The notes file schema, its only writer, the pairing of messages into notes, and the ordered events the renderer plays.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "A note whose on and off share a sample releases. <code>renderEvents</code> ranks a zero-length note's off with the ons, so the off sorts directly after its own on rather than before every on at that instant. A same-instant retrigger still ends the first voice before the second starts. Checked by the new case in <code>notes.test.ts</code>, and by a review reproduction through real <code>sclang</code> whose render is silent after the note."
+      },
+      {
+       "kind": "context",
+       "text": "A blanket minimum length of one sample would not have been a safe fix. Two note-ons for the same note at one instant would then release the second note's voice one sample later. That is why the fix sits in the render order."
+      }
+     ]
+    },
+    {
+     "path": "src/schema/notes.test.ts",
+     "note": "Pairing, the file text, and the render order, including a pad's on and off at one sample beside another note's on."
+    },
+    {
+     "path": "src/schema/record.ts",
+     "note": "The record entry gains an optional <code>instrument</code>. A takes row is either the audio shape or the MIDI shape, and <code>isMidiTakeRow</code> tells them apart by <code>sources</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Both row shapes are strict, so a broken audio row now fails both branches. <code>field check</code> then reports <code>Invalid input at takes.0</code> rather than naming the missing field. The review lists this as a suggestion."
+      }
+     ]
+    },
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "The MIDI arm response, the MIDI take manifest, one <code>take.midi.ndjson</code> line, and <code>anyTakeSchema</code>, which tries the MIDI manifest first. An audio manifest has no <code>kind</code>."
+    },
+    {
+     "path": "src/audiod/client.ts",
+     "note": "<code>armMidi</code> sends <code>arm</code> with <code>kind: \"midi\"</code>."
+    }
+   ]
+  },
+  {
+   "id": "daemon",
+   "title": "The daemon captures MIDI on the audio clock",
+   "kicker": "field-audiod arms for MIDI, stamps each message in the audio callback, and writes a transaction",
+   "intro": [
+    "<code>field-audiod</code> is the C++ daemon, built on JUCE, that owns the audio device. Arming for MIDI opens every MIDI input the system lists at that moment. A message then travels through three threads:",
+    "<ol><li><b>JUCE's MIDI thread</b> reads the clock when the message arrives and pushes the bytes and that time into a lock-free queue. It drops system messages such as clock and SysEx.</li><li><b>The audio callback</b> drains the queue at the start of each block. It stamps each message as the block's take position plus the time between the block's start and the arrival, in device samples, never earlier than the previous message.</li><li><b>A writer thread</b> appends the stamped messages to <code>take.midi.ndjson</code> every 20 ms and syncs the file and the journal once a second.</li></ol>",
+    "<code>capture.cpp</code> moves what every recording transaction shares into a <code>Transaction</code> base class: the directory, the manifest, the journal, the writer thread, and the <code>list</code> and <code>recover</code> commands. <code>Capture</code> adds the WAV file and <code>MidiCapture</code> adds the NDJSON file. A take with <code>until</code> ends at the first block that begins at or past it, and <code>stop</code> waits for one more block so late messages are stamped."
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "Arming for MIDI, the arrival queue, stamping in <code>recordMidiBlock</code>, the <code>until</code> check, and the two blocks <code>stopRecording</code> waits for.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>until</code> ends on time when the song's rate is not the device's. <code>recordMidiBlock</code> converts the span from the bed's samples to the device's with <code>take.timelineRate()</code>, which is the live session's rate or the loaded file's. The daemon test's 24 kHz bed on the 48 kHz null output ends at 24000 frames. It passed in review against a build of this head."
+      },
+      {
+       "kind": "verify",
+       "text": "A stop waits two callback epochs before it detaches the MIDI take. The epoch advances before a block drains MIDI, and the callback runs one block at a time, so the block that drains the last messages has finished before the detach. Checked by reading the callback order."
+      },
+      {
+       "kind": "context",
+       "text": "<code>maybeMatchDeviceRate</code> moves the device to a song's rate when the song loads. It holds the device still during a take and converts delivery instead, which is when the two clocks differ."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "The MIDI arrival ring, the state <code>recordMidiBlock</code> keeps between blocks, and the opened inputs."
+    },
+    {
+     "path": "native/audiod/src/capture.cpp",
+     "note": "The <code>Transaction</code> base, the MIDI writer, and <code>list</code> and <code>recover</code> for both kinds of take.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "A crash keeps every whole line written. <code>MidiCapture::drain</code> flushes to the kernel after each 20 ms tick, not only at the once-a-second sync. A review reproduction killed the daemon 200 ms after a note-on, and the line was on disk. The daemon test now requires the note-on in the file within 500 ms."
+      },
+      {
+       "kind": "verify",
+       "text": "<code>recover</code> for a MIDI transaction counts whole lines, truncates a partial last one, and sets <code>frames</code> to the larger of the journal's count and one past the last <code>at</code>."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/capture.h",
+     "note": "The class split: <code>Transaction</code>, <code>Capture</code>, and <code>MidiCapture</code>, with the threading rules. <code>timelineRate()</code> exposes the bed's rate for the <code>until</code> conversion."
+    },
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "Routes <code>arm</code> with <code>kind: \"midi\"</code> and advertises <code>record-midi</code>."
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "The startup log names a recoverable MIDI take by its message count, where an audio take shows frames."
+    },
+    {
+     "path": "src/commands/record-midi-daemon.test.ts",
+     "note": "The daemon against a source published by <code>field-audiod --keys</code>: capture, <code>until</code> on a bed at the device's rate and at half of it, a crash and recovery, and <code>field record</code> end to end. The note it sends comes from the run's pid, so two runs on one machine stay apart."
+    }
+   ]
+  },
+  {
+   "id": "landing",
+   "title": "field record arms by the entry, and lands either kind of take",
+   "kicker": "Choosing the kind, refusing audio-only flags, landing a notes file, and checking the entry",
+   "intro": [
+    "<code>recordTake</code> reads the track's record entry before it connects. With an <code>instrument</code>, it refuses <code>--input</code>, <code>--device</code>, and <code>--loop</code>, then arms for MIDI and shows an event count where an audio take shows a level meter.",
+    "<code>land.ts</code> now splits landing in three. <code>beginLanding</code> runs the checks every take needs and computes its placement. A per-kind step writes the file: <code>landTake</code> copies the WAV, and <code>landMidiTake</code> pairs the lines into a notes file. <code>finishLanding</code> pins the file, writes the <code>takes.yaml</code> row, and removes the transaction. A MIDI take's <code>latency</code> is the output latency alone, because you press a key in time with what you hear.",
+    "<code>field check</code> gains two errors: an entry whose instrument has no program, and a take of the other kind from the one its entry records."
+   ],
+   "files": [
+    {
+     "path": "src/commands/record.ts",
+     "note": "Arming by the entry's kind, the refusal of audio-only flags, the event count, and <code>describeTake</code> for MIDI transactions."
+    },
+    {
+     "path": "src/commands/land.ts",
+     "note": "<code>beginLanding</code> and <code>finishLanding</code>, which both kinds share; <code>placeFile</code> and <code>sharedRow</code>, which write the file and the row's common fields; then <code>landMidiTake</code> and <code>landAnyTake</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Placement matches the audio path. <code>started_at_samples</code> converts from the bed's rate to the track's, and latency converts from device samples to track samples. The helpers write the same paths and row fields the two paths wrote before. The MIDI cases in <code>land.test.ts</code> passed in review."
+      }
+     ]
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "The help text marks the audio-only flags, and the landed line counts events. A dropped-messages warning explains what a lost note-on or note-off means."
+    },
+    {
+     "path": "src/model/project.ts",
+     "note": "<code>field check</code> errors for an instrument whose program is missing or outside the project, and for a take of the wrong kind.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The instrument resolves by the <code>supercollider:</code> path rule. <code>field check</code> builds the <code>voice-render</code> spec and calls its <code>validate</code> with <code>resolveAssetFile</code>, as the <code>supercollider:</code> branch does. A missing program, a path that escapes the project, and a directory each get that rule's message, which <code>land.test.ts</code> checks."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/land.test.ts",
+     "note": "MIDI landing: placement, latency, the exact notes file, the ledger pin, both refusals between kinds, and the instrument path rule."
+    },
+    {
+     "path": "src/commands/record-daemon.test.ts",
+     "note": "<code>describeTake</code> for a MIDI transaction."
+    },
+    {
+     "path": "src/commands/punch-daemon.test.ts",
+     "note": "A type rename from <code>Take</code> to <code>AnyTake</code>."
+    }
+   ]
+  },
+  {
+   "id": "render",
+   "title": "The build renders the chosen take through its instrument",
+   "kicker": "A voice-render node, Field's renderer script, and the voicer it shares with the live host",
+   "intro": [
+    "In the build graph, an audio record entry is replaced by a window over its chosen take's WAV. For an entry with an instrument whose chosen take is a notes file, <code>buildGraph</code> mints a generator node named like the record node, <code>//songs/&lt;song&gt;/gen:&lt;name&gt;</code>. <code>withTakes</code> then places that node's output where the take started, less its latency.",
+    "The node's generator, <code>voice-render</code>, writes <code>renderEvents</code> to a JSON file and runs <code>sc/voice-render.scd</code> with <code>runScProgram</code>, the same runner the <code>supercollider:</code> generator uses. The script loads the instrument in voice mode, drives it with the voicer to build a score, and renders in SuperCollider's non-realtime mode: stereo, at the track's rate, for the take's length plus a 4-second release tail.",
+    "<code>sc/voicer.scd</code> is the voicing that used to live inside <code>sc/voice-host.scd</code>, the live host, moved to its own file so the host and the render share it."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "The cache key covers the rule version, the notes file's hash, the instrument's content hash, the hashes of both scripts, the spec, and the track's rate. Choosing another take changes the key, and choosing back is a cache hit. Checked in <code>actionKey</code> in <code>src/graph/build.ts</code> and by <code>voice-render.test.ts</code>, which passed in review."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/graph/graph.ts",
+     "note": "Mints the <code>voice-render</code> node for a chosen MIDI take, and places its output in <code>withTakes</code>."
+    },
+    {
+     "path": "src/generators/voice-render.ts",
+     "note": "The generator: its inputs, its path check, its render, and the fixed 4-second tail. Its <code>version</code> is 2, so renders cached before the zero-length fix are redone.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This <code>validate</code> is what <code>field check</code> calls for a record entry with an instrument. It adds the normalized-form check the <code>supercollider:</code> rule makes."
+      }
+     ]
+    },
+    {
+     "path": "src/generators/voice-render.test.ts",
+     "note": "The node's inputs, caching, and the render's placement at its start less the output latency. Through real <code>sclang</code>: a render that is the same bytes from a cold cache, and one through an instrument that throws if a render variable is set. The <code>sclang</code> cases skip on CI."
+    },
+    {
+     "path": "src/generators/index.ts",
+     "note": "Registers <code>voice-render</code>."
+    },
+    {
+     "path": "src/generators/types.ts",
+     "note": "Adds <code>VoiceRenderSpec</code> to the generator spec union."
+    },
+    {
+     "path": "src/generators/supercollider.ts",
+     "note": "<code>instrumentProgram</code> and <code>scScript</code> move here to be shared. <code>runScProgram</code> takes extra environment and allows <code>sclang</code> 64 MiB of output, because scsynth prints a line per score bundle in NRT."
+    },
+    {
+     "path": "sc/voice-render.scd",
+     "note": "Loads the instrument in voice mode, plays the events through the voicer into a score, and renders it.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Voice mode looks the same in a render as live. The script reads the render variables, then unsets them before it loads the instrument, which keeps the contract in <code>docs/build-graph.md</code> and <code>docs/keys.md</code>. Checked by the real-<code>sclang</code> case in <code>voice-render.test.ts</code>."
+      }
+     ]
+    },
+    {
+     "path": "sc/voicer.scd",
+     "note": "The voicing rules, as a function of the callbacks that start, retune, and release a voice, plus an optional one told as voices start and end. It returns an Event with <code>noteOn</code>, <code>noteOff</code>, <code>cc</code>, <code>bend</code>, and <code>forgetVoices</code>. No entry may share a name with a method <code>Event</code> already has."
+    },
+    {
+     "path": "sc/voice-host.scd",
+     "note": "The live host now routes every MIDI message through the voicer.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The live host keeps playing after a rate change. <code>restart</code> calls <code>voicer.forgetVoices</code>, a name no class in <code>Event</code>'s chain defines. The earlier name, <code>clear</code>, ran <code>Set.clear</code> and emptied the voicer. A review reproduction in <code>sclang</code> found none of the voicer's entry names to be a real method, and a note played after the reset. <code>src/keys/voicer.test.ts</code> covers this."
+      },
+      {
+       "kind": "verify",
+       "text": "Apart from the reset, the host's behavior is unchanged. The <code>MIDIdef</code> argument orders are right, and the voicer acts only on CC 64 and CC 123, as the base host did. Checked by reading both versions side by side."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voicer.test.ts",
+     "note": "The voicer through real <code>sclang</code>: a note plays after <code>forgetVoices</code>, the reset the host calls on restart. It skips where <code>sclangCommand()</code> finds no <code>sclang</code>."
+    },
+    {
+     "path": "src/keys/voice-host.ts",
+     "note": "Uses the shared <code>instrumentProgram</code> and <code>scScript</code>."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The docs describe recording the keys, and the plan records chunk 4",
+   "kicker": "User docs, reference docs, the plan's §12 and §13, and a CI comment",
+   "intro": [
+    "<code>docs/keys.md</code> gains <b>Record what you play</b>, a short walkthrough. <code>tracks.md</code> and <code>project-model.md</code> describe the record entry with an instrument and the notes file. <code>build-graph.md</code> describes the <code>voice-render</code> node, <code>audio-engine.md</code> describes MIDI capture, and <code>architecture.md</code> mentions both.",
+    "The keyboard-instrument plan answers §7 questions 1 to 3 in §12, each a decision with the alternative it beat. §13 records the chunk as built: criteria 30 to 36, what implementation settled, what was verified, and what is still owed."
+   ],
+   "files": [
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "§7 points questions 1 to 3 at their answers. §12 holds the design and §13 records the chunk as built, including what the first review settled.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Question 1 is answered in full. §12.1 defers <code>field export</code> writing a Standard MIDI File, says what would bring it, and names <code>field export creek/gen:keys</code> as the way a take reaches Logic until then. That label resolves the way <code>field play</code> resolves one. §13.4 lists the export as still owed."
+      }
+     ]
+    },
+    {
+     "path": "docs/keys.md",
+     "note": "A new section, Record what you play. A take hears only the sources that exist when <code>field record</code> arms."
+    },
+    {
+     "path": "docs/project-model.md",
+     "note": "The entry may name an instrument, resolved by the <code>supercollider:</code> path rule, and a new MIDI takes section covers the notes file, the row, and the render."
+    },
+    {
+     "path": "docs/tracks.md",
+     "note": "The <code>record:</code> entry kind with <code>instrument:</code>."
+    },
+    {
+     "path": "docs/build-graph.md",
+     "note": "The <code>voice-render</code> node."
+    },
+    {
+     "path": "docs/audio-engine.md",
+     "note": "MIDI capture: the arm and the sources it opens at that moment, stamping, the transaction, status, and recovery."
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "The daemon records MIDI, and a MIDI take renders offline like a <code>supercollider:</code> program."
+    },
+    {
+     "path": ".github/workflows/ci.yml",
+     "note": "The comment names every test that runs real <code>sclang</code> and so skips on the Linux runner, and the MIDI take cases that skip there.",
+     "checks": []
+    }
+   ]
+  }
+ ]
+}
