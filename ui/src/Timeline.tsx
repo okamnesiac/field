@@ -285,6 +285,31 @@ export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMov
   );
 }
 
+// A lane's waveform as an SVG path, built once per envelope. Every row
+// re-renders on each frame while playing, because the playhead moves,
+// and rebuilding a 1,200-bucket path string per row per frame is most of
+// that frame's work. The envelope array is the same object until a
+// snapshot replaces it, so a WeakMap keyed on it hands back the same
+// string, and React leaves the DOM attribute alone.
+const wavePaths = new WeakMap<number[], string>();
+function wavePath(peaks: number[]): string {
+  let d = wavePaths.get(peaks);
+  if (d === undefined) {
+    d =
+      `M0,50 ` +
+      peaks.map((p, i) => `L${i},${50 - p * 46}`).join(' ') +
+      peaks
+        .map((_, i) => {
+          const j = peaks.length - 1 - i;
+          return `L${j},${50 + (peaks[j] ?? 0) * 46}`;
+        })
+        .join(' ') +
+      ' Z';
+    wavePaths.set(peaks, d);
+  }
+  return d;
+}
+
 function Row({
   lane, open, onToggle, width, x, playSample, selected, drag,
   onGrab, onDragMove, onDrop, onDragCancel, onDeselect, locateAt, controls,
@@ -372,17 +397,7 @@ function Row({
             <svg className="tl-wave" viewBox={`0 0 ${peaks.length} 100`} preserveAspectRatio="none">
               {/* Mirrored envelope: the shape of the render, not a claim
                   about individual samples. */}
-              <path
-                d={
-                  `M0,50 ` +
-                  peaks.map((p, i) => `L${i},${50 - p * 46}`).join(' ') +
-                  peaks.map((_, i) => {
-                    const j = peaks.length - 1 - i;
-                    return `L${j},${50 + (peaks[j] ?? 0) * 46}`;
-                  }).join(' ') +
-                  ' Z'
-                }
-              />
+              <path d={wavePath(peaks)} />
             </svg>
           )}
         </div>
