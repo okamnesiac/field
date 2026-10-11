@@ -75,6 +75,8 @@ public:
     // first captured block and tells the capture once, before pushing.
     void setStartedAt (juce::int64 positionSamples) noexcept;
     juce::int64 startedAt() const { return startedAtSamples.load(); }
+    // The bed's rate, which startedAt() and `until` count in (0 = no bed).
+    double timelineRate() const { return facts.timelineRate; }
 
     // Message thread: the take's own fields in status.record.
     virtual void describeProgress (juce::DynamicObject& record) const = 0;

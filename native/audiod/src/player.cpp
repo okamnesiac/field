@@ -1081,15 +1081,18 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
     }
     // The take's clock counts the device's samples from its start, as an
     // audio take's frames do, so `at` stays in sample_rate's units and
-    // runs on through a bed that wraps. `until` is on the bed's timeline,
-    // read through the same equal-rates assumption the audio punch-out
-    // makes.
+    // runs on through a bed that wraps. `until` and the start are on the
+    // bed's timeline, in the bed's samples, so the span between them
+    // changes rate when the two differ, as a 44.1 kHz song on a 48 kHz
+    // device does.
+    const double rate = currentDeviceRate();
+    const double bedRate = take.timelineRate() > 0.0 ? take.timelineRate() : rate;
     const juce::int64 untilAt = captureUntil.load();
-    const juce::int64 untilFrames =
-        untilAt >= 0 ? untilAt - take.startedAt() : std::numeric_limits<juce::int64>::max();
+    const juce::int64 untilFrames = untilAt >= 0
+        ? std::llround ((double) (untilAt - take.startedAt()) * rate / bedRate)
+        : std::numeric_limits<juce::int64>::max();
     const juce::int64 blockStart = midiTakeClock;
     const juce::int64 blockEnd = blockStart + n;
-    const double rate = currentDeviceRate();
     if (const int lost = midiArrivalsLost.exchange (0); lost > 0)
         take.addDropped (lost);
     drainMidiArrivals ([&] (const MidiArrival& arrival)

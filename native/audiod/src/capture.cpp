@@ -551,6 +551,9 @@ void MidiCapture::drain()
     fifo.finishedRead (size1 + size2);
     if (std::fwrite (lines.data(), 1, lines.size(), data) == lines.size())
         writtenEvents.fetch_add (size1 + size2);
+    // To the kernel now, not at the once-a-second sync, so a daemon that
+    // dies loses at most a partial last line, as recover promises.
+    std::fflush (data);
 }
 
 void MidiCapture::describeProgress (juce::DynamicObject& record) const

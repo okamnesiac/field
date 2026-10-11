@@ -346,6 +346,23 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
         expect(lines.every((line) => line.at < 24000)).toBe(true);
         expect((await client.status()).state).toBe('playing'); // the bed played on
         await client.stop();
+
+        // A bed at half the device's rate: `until` is half a second of the
+        // bed's samples, which is 24000 of the device's, not 12000.
+        const slow = join(root, 'bed-24k.wav');
+        writeWavFloat32(slow, 24000, [new Float32Array(24000 * 5)]);
+        await client.load(slow);
+        await armListing(client, name);
+        const second = await client.record(0, undefined, 12000);
+        await waitFor(() => events.filter((e) => e.event === 'take').length === 2, 3000, 'the second take to end at until');
+        const ended = events.filter((e) => e.event === 'take').at(-1);
+        expect(midiTakeSchema.parse(ended?.event === 'take' ? ended.take : undefined)).toMatchObject({
+          id: second.transaction,
+          sample_rate: NULL_RATE,
+          timeline_rate: 24000,
+          frames: 24000,
+        });
+        await client.stop();
       } finally {
         client.close();
       }
@@ -365,6 +382,9 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
         const started = await client.record();
         file = started.file;
         send(keys, NOTE_ON);
+        // A message reaches the kernel on the writer's next 20 ms tick, not
+        // at the once-a-second sync, so a crash right after it keeps it.
+        await waitFor(() => readLines(root, file).filter(isMine).length === 1, 500, 'the note-on to reach the file');
         // Past at least one journal sync (the writer syncs once a second).
         await sleep(1200);
         send(keys, NOTE_OFF);
