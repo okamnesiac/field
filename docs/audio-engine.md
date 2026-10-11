@@ -69,7 +69,7 @@ travels the same way a [live input](#live-inputs) does: through the
 track's inserts, each bus above it, and `main`, beside the rendered
 song, playing or stopped. The capture tap still takes the dry channel.
 Disarming closes the capture inputs, and `field record` loads the song
-again without them. The bypass-and-report latency policy below is not
+again without them, while the daemon still plays it. The bypass-and-report latency policy below is not
 built: what you hear is late by the input and output buffers and the
 limiters and hosted plugins on the path.
 

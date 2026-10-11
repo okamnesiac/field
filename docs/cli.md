@@ -418,9 +418,11 @@ dry input; the effects are only what you hear:
 field record tall-grass/track:vocal --monitoring host --at 2 --count-in 1
 ```
 
-Host monitoring needs the song as a live bed at the device's rate: it
-refuses a file bed, another song, and a device the daemon converts the
-song for. Use headphones, or a microphone the speakers cannot reach.
+Host monitoring needs the song as a live bed at the device's rate, with
+each track it hears reaching `main`: it refuses a file bed, another
+song, a device the daemon converts the song for, and a track that a
+solo, a muted placement, or the arrangement keeps from `main`. Use
+headphones, or a microphone the speakers cannot reach.
 With the default, `apollo-direct`, Field plays nothing of the input,
 and you monitor in your interface's mixer.
 

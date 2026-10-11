@@ -366,7 +366,15 @@ must sit under `main`.
   `field record --monitoring host` and finds the input read while the
   take records, the take dry and gapless with `monitoring: host` on its
   row, and the song loaded again without the input, and refuses a file
-  bed before arming. Criterion 6 by ear is still owed.
+  bed before arming. Criterion 6 by ear is still owed. Its first review
+  found three gaps, each now closed with a test: a track the loaded
+  solo or the arrangement kept from `main` failed only at the reload
+  after arming and left the input armed, and is now refused before
+  arming; a separate input device could open the pair at a rate the song
+  is not, silencing monitoring, and is now refused after the arm, which
+  is released; and the reload after the take put the song back over one
+  another terminal had loaded, as `field keys` did on quit, and now
+  happens only while the daemon still plays it.
 
 ## 11 FieldOut's license (DECIDED, 2026-10-11)
 
@@ -397,15 +405,22 @@ the song.
    --count-in 1`. `field record` loads the bed as before.
 2. Before arming, it refuses when no named track records audio, when
    the daemon lacks `live-monitor`, when the bed is a file, which can
-   carry no input window, when the daemon plays another song, and when
-   the daemon converts the song to the device's rate.
+   carry no input window, when the daemon plays another song, when the
+   daemon converts the song to the device's rate, and when the song,
+   compiled as the reload will compile it, under the loaded loop and
+   solo and with the capture inputs, cannot hear a track, which a solo,
+   a muted placement, or the arrangement can keep from `main`.
 3. It arms with `monitor: "capture:tall-grass/vocal"` on each audio
    entry, always in the `tracks` form. The daemon opens a capture input
    under that name for each, reading that entry's channel of the
    callback's input, owned by the connection that armed.
-4. It loads the song again with every open input, `field keys`' rings
-   and the capture inputs, keeping the loaded session's loop, region,
-   and solo, as `field keys` does (`reloadWithInputs`).
+4. It refuses, and releases the arm, when arming opened the device at
+   a rate the song is not, which a separate input device can do, because
+   the pair opens only at rates both devices share. Otherwise it loads
+   the song again with every open input, `field keys`' rings and the
+   capture inputs, keeping the loaded session's loop, region, and solo,
+   as `field keys` does (`reloadWithInputs`). Whatever throws after the
+   arm, `field record` releases it.
 5. Each callback, the daemon presents its input block before the
    session renders, and each capture input reads its channel from it, on
    both sides, from a cursor that starts again each block, because the
@@ -413,9 +428,11 @@ the song.
    carries it up the track's path, playing or stopped. The capture tap
    still takes the dry channel after the render.
 6. When the take ends, `field record` disarms, which closes the capture
-   inputs, and loads the song again without them. A `field record` that
-   dies drops its connection, which closes them too; the arm itself
-   stays, as it always has.
+   inputs, and loads the song again without them while the daemon still
+   plays it (`reloadIfPlaying`), so a song another terminal loaded during
+   the take plays on; `field keys` closes the same way. A
+   `field record` that dies drops its connection, which closes them
+   too; the arm itself stays, as it always has.
 
 ### 12.2 Shapes
 
@@ -426,7 +443,7 @@ the song.
 | `status.inputs[]` | a ring's counters | adds capture inputs, `{name, kind: "capture", read, peak}`; the ring's own fields become optional in `src/audiod/protocol.ts` |
 | Feature | — | `live-monitor` |
 | Daemon flag | — | `--capture-selftest` |
-| `src/audiod/live-inputs.ts` | `keysInputsFor` in `src/keys/routing.ts` | `liveInputsFor`, which lists both kinds, `captureInputName`, and `reloadWithInputs`, which `field keys` and `field record` share |
+| `src/audiod/live-inputs.ts` | `keysInputsFor` in `src/keys/routing.ts` | `liveInputsFor`, which lists both kinds, `captureInputName`, `compileWithInputs`, `reloadWithInputs`, and `reloadIfPlaying`, which `field keys` and `field record` share |
 
 ### 12.3 Decisions (DECIDED, 2026-10-11, for Justin's review)
 
@@ -465,8 +482,8 @@ the song.
 | `native/audiod/src/capture_input.h`, `capture_input.cpp` (new) | `CaptureBlock`, `CaptureInput`, and `runCaptureSelfTest`. |
 | `native/audiod/src/player.h`, `player.cpp` | `captures` beside `rings`; `armSet` parses `monitor` and opens them; `disarm` and a dropped connection close them; `pullAudio` presents the input block; `status` lists them. |
 | `native/audiod/src/server.cpp`, `main.cpp` | The connection passed to `armSet`; `live-monitor`; `--capture-selftest`. |
-| `src/audiod/live-inputs.ts` (new) | `liveInputsFor`, `captureInputName`, `reloadWithInputs`. |
-| `src/commands/record.ts` | The refusals, `monitor` on the arm, and the two reloads. |
+| `src/audiod/live-inputs.ts` (new) | `liveInputsFor`, `captureInputName`, `compileWithInputs`, `reloadWithInputs`, `reloadIfPlaying`. |
+| `src/commands/record.ts` | The refusals, `monitor` on the arm, the two reloads, and releasing the arm whatever throws after it. |
 | `src/keys/routing.ts`, `src/commands/play.ts`, `src/commands/ui.ts` | Use `liveInputsFor` and `reloadWithInputs`. |
 | `src/audiod/protocol.ts` | `monitor` on `ArmTrack` and `armed[]`; capture inputs in `status.inputs`. |
 | `docs/cli.md`, `docs/audio-engine.md`, `docs/architecture.md`, `docs/projects/recording/readme.md` | Host monitoring as built, with dated amendments in recording.md §8 and §13.6. |

@@ -1,5 +1,5 @@
 import type { AudiodClient } from './client.js';
-import { compileSession, type SessionInput } from '../graph/live.js';
+import { compileSession, type CompiledSession, type SessionInput } from '../graph/live.js';
 
 // The inputs a song's input windows read (live-supercollider.md): a
 // `field keys` voice's ring, `keys:<song>/<track>` (chunk 3), and an armed
@@ -24,19 +24,41 @@ export async function liveInputsFor(client: AudiodClient, song: string): Promise
   });
 }
 
-// Loads `song` again with whatever inputs are open now, and whatever the
-// session loaded now was compiled and set with: its loop, its region, and
-// its solo. Opening or closing an input changes only the inputs.
-export async function reloadWithInputs(client: AudiodClient, root: string, song: string): Promise<void> {
+// `song` as a reload would compile it now: with whatever inputs are open,
+// plus `extra`, and whatever the session loaded now was compiled and set
+// with: its loop, its region, and its solo. Throws as compileSession does,
+// so a caller can learn before it opens an input that the song cannot
+// hear it.
+export async function compileWithInputs(
+  client: AudiodClient,
+  root: string,
+  song: string,
+  extra: SessionInput[] = [],
+): Promise<{ compiled: CompiledSession; region: [number, number] | undefined }> {
   const status = await client.status();
   const same = status.live === true && status.song === song;
-  const { session } = await compileSession(root, song, {
+  const compiled = await compileSession(root, song, {
     ...(same && status.looping === true ? { loop: true } : {}),
     ...(same && status.solo !== undefined ? { solo: status.solo } : {}),
-    inputs: await liveInputsFor(client, song),
+    inputs: [...(await liveInputsFor(client, song)), ...extra],
   });
-  await client.session(session);
-  if (same && status.loop_from !== undefined && status.loop_to !== undefined) {
-    await client.loop(status.loop_from, status.loop_to);
-  }
+  const region: [number, number] | undefined =
+    same && status.loop_from !== undefined && status.loop_to !== undefined ? [status.loop_from, status.loop_to] : undefined;
+  return { compiled, region };
+}
+
+// Loads `song` again as compileWithInputs compiles it. Opening or closing
+// an input changes only the inputs.
+export async function reloadWithInputs(client: AudiodClient, root: string, song: string): Promise<void> {
+  const { compiled, region } = await compileWithInputs(client, root, song);
+  await client.session(compiled.session);
+  if (region !== undefined) await client.loop(region[0], region[1]);
+}
+
+// After closing inputs: loads `song` again without them only while the
+// daemon still plays it, so a song another terminal loaded meanwhile
+// plays on.
+export async function reloadIfPlaying(client: AudiodClient, root: string, song: string): Promise<void> {
+  const status = await client.status();
+  if (status.live === true && status.song === song) await reloadWithInputs(client, root, song);
 }

@@ -1,5 +1,5 @@
 import { AudiodClient } from '../audiod/client.js';
-import { reloadWithInputs } from '../audiod/live-inputs.js';
+import { reloadIfPlaying, reloadWithInputs } from '../audiod/live-inputs.js';
 import { BUILD_DAEMON } from '../remedies.js';
 import type { ArmedInstrument } from './targets.js';
 import { fieldOutPluginDir } from './voice-host.js';
@@ -73,7 +73,7 @@ export async function routeArmed(
   const unrouted = async (reason: string): Promise<Unrouted> => {
     if (opened.length > 0) {
       await closeOpened();
-      await reload().catch(() => {});
+      await reloadIfPlaying(client, root, song).catch(() => {});
     }
     client.close();
     return { reason };
@@ -130,10 +130,11 @@ export async function routeArmed(
       close: async () => {
         try {
           await closeOpened();
-          // The song as it is now: without these inputs, with any others.
-          // A song that no longer compiles keeps the session it has, and
-          // so does one under a take, whose closed input reads silence.
-          if ((await client.status()).record?.state !== 'recording') await reload();
+          // The song as it is now: without these inputs, with any others,
+          // while the daemon still plays it. A song that no longer compiles
+          // keeps the session it has, and so does one under a take, whose
+          // closed input reads silence.
+          if ((await client.status()).record?.state !== 'recording') await reloadIfPlaying(client, root, song);
         } catch {
           // the daemon or the project went away; nothing is left to restore
         } finally {

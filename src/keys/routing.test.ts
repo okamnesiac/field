@@ -158,6 +158,18 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
     }
   });
 
+  it('leaves a song another terminal loaded meanwhile when it closes', async () => {
+    const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
+    const client = await AudiodClient.connect(root);
+    try {
+      await client.session((await compileSession(root, 'tall-grass')).session);
+      await routed.close();
+      expect(await client.status()).toMatchObject({ live: true, song: 'tall-grass' });
+    } finally {
+      client.close();
+    }
+  });
+
   it('says whether FieldOut is writing the ring', async () => {
     const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
     try {

@@ -10,6 +10,7 @@ import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { buildLabels } from './build.js';
+import { compileSession } from '../graph/live.js';
 import { describeTake, meterLine, recordTake, resolveRecordTarget } from './record.js';
 import { transportCommand, transportStatusLines } from './transport.js';
 import { check } from './check.js';
@@ -529,7 +530,7 @@ describe.skipIf(!binary)('recording through the daemon', () => {
       expect(lines).toEqual([
         'live    creek',
         expect.stringMatching(/^armed {3}lead-vocal: null input 1 {2}\(48000 Hz, latency in 0 \/ out 0 samples\)$/),
-        'monitor lead-vocal through creek (host monitoring)',
+        'monitor lead-vocal through creek (host monitoring — use headphones)',
       ]);
       // The take is the dry input, and its row says how it was heard.
       const { take, landed } = takes[0]!;
@@ -543,6 +544,56 @@ describe.skipIf(!binary)('recording through the daemon', () => {
       watcher.close();
     },
   );
+
+  it('field record --monitoring host refuses a track the solo or the arrangement keeps from main, before arming', { timeout: 15_000 }, async () => {
+    await importTone('tone', NULL_RATE * 2);
+    createTrack(root, 'creek', 'bed');
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(join(root, 'songs/creek/tracks/bed.yaml'), ['name: bed', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'));
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    const client = await AudiodClient.connect(root);
+    try {
+      // Placed in main, but another terminal solos the bed.
+      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: bed', '  - track: lead-vocal', ''].join('\n'));
+      await client.session((await compileSession(root, 'creek', { solo: 'bed' })).session);
+      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+        /^host monitoring cannot play the input through creek: .*lead-vocal/,
+      );
+      expect((await client.status()).record?.state).toBe('idle');
+      // Not placed in main at all.
+      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: bed', ''].join('\n'));
+      await client.session((await compileSession(root, 'creek')).session);
+      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+        /^host monitoring cannot play the input through creek: .*lead-vocal/,
+      );
+      expect((await client.status()).record?.state).toBe('idle');
+    } finally {
+      client.close();
+    }
+  });
+
+  it('a song another terminal loads during a monitored take plays on after it', { timeout: 30_000 }, async () => {
+    await importTone('tone', NULL_RATE * 6);
+    createSong(root, 'tall-grass');
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    let interrupted = false;
+    const recording = recordTake(root, loadProject(root), 'creek/track:lead-vocal', { input: 1, monitoring: 'host' }, {
+      interrupted: () => interrupted,
+    });
+    const other = await waitForClientOf(root);
+    await waitFor(async () => (await other.status()).record?.state === 'recording', 10_000, 'the take to start');
+    // Another terminal, field ui tall-grass say, loads its song under the take.
+    await other.session((await compileSession(root, 'tall-grass')).session);
+    interrupted = true;
+    await recording;
+    expect(await other.status()).toMatchObject({ live: true, song: 'tall-grass', record: { state: 'idle' } });
+    other.close();
+  });
 
   it('field record --monitoring host refuses a file bed before arming', { timeout: 15_000 }, async () => {
     const tone = await importTone('tone', NULL_RATE * 2);

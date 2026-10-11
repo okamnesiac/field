@@ -1,5 +1,5 @@
 import { AudiodClient } from '../audiod/client.js';
-import { captureInputName, liveInputsFor, reloadWithInputs } from '../audiod/live-inputs.js';
+import { captureInputName, compileWithInputs, reloadIfPlaying, reloadWithInputs } from '../audiod/live-inputs.js';
 import { anyTakeSchema, type AnyTake, type AudiodEvent, type RecordingEntry } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { expandPattern } from '../graph/graph.js';
@@ -227,7 +227,12 @@ async function captureTakes(
   // Every track is in one song (planArm), whose session is the bed.
   const resolved = tracks[0]!.resolved;
   const client = await AudiodClient.connect(root);
-  let monitored: ArmedTrack[] = [];
+  // Host monitoring (live-supercollider.md §12): each audio track's input
+  // feeds an input window on that track, so you hear it through its
+  // inserts, its buses, and main, while the take stays dry.
+  const monitored = options.monitoring === 'host' ? tracks.filter((t) => t.kind === 'audio') : [];
+  // Whether this call armed, so whatever throws after the arm releases it.
+  let armedHere = false;
   try {
     if (!client.supports('record')) {
       throw new Error(
@@ -241,12 +246,9 @@ async function captureTakes(
     // loaded here so one terminal is enough.
     let status = await client.status();
     if (status.live !== true && status.path === null) {
-      const { compileSession } = await import('../graph/live.js');
       // A `field keys` routed into this song keeps its inputs through
       // the bed's load (live-supercollider.md chunk 3).
-      const liveInputs = await liveInputsFor(client, resolved.song);
-      const compiled = await compileSession(root, resolved.song, liveInputs.length > 0 ? { inputs: liveInputs } : {});
-      await client.session(compiled.session);
+      await reloadWithInputs(client, root, resolved.song);
       hooks.onBed?.(`live    ${resolved.song}`);
       status = await client.status();
     }
@@ -272,10 +274,6 @@ async function captureTakes(
     if (options.countIn !== undefined && (options.at === undefined || ctx === undefined)) {
       throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
     }
-    // Host monitoring (live-supercollider.md §12): each audio track's
-    // input feeds an input window on that track, so you hear it through
-    // its inserts, its buses, and main, while the take stays dry.
-    monitored = options.monitoring === 'host' ? tracks.filter((t) => t.kind === 'audio') : [];
     if (monitored.length > 0) {
       if (!client.supports('live-monitor')) {
         throw new Error(
@@ -298,6 +296,19 @@ async function captureTakes(
           `host monitoring needs the device at ${resolved.song}'s ${rate} Hz, and the daemon converts the song to the device's rate`,
         );
       }
+      // The song as the reload after arming will compile it, before
+      // anything arms: a track the loaded solo, a muted placement, or the
+      // arrangement keeps from main cannot be heard.
+      try {
+        await compileWithInputs(
+          client,
+          root,
+          resolved.song,
+          monitored.map((t) => ({ track: t.node.trackName, input: captureInputName(t.resolved.song, t.node.trackName) })),
+        );
+      } catch (err) {
+        throw new Error(`host monitoring cannot play the input through ${resolved.song}: ${(err as Error).message}`);
+      }
     }
     let armedRate: number;
     if (tracks.length > 1 || monitored.length > 0) {
@@ -306,6 +317,7 @@ async function captureTakes(
           `field-audiod ${client.daemonVersion} predates recording several tracks — field transport quit, then record again`,
         );
       }
+      armedHere = true;
       const armed = await client.armTracks(
         tracks.map((t) =>
           t.kind === 'midi'
@@ -337,12 +349,14 @@ async function captureTakes(
           `field-audiod ${client.daemonVersion} predates MIDI recording — field transport quit, then record again`,
         );
       }
+      armedHere = true;
       const armed = await client.armMidi(resolved.label);
       armedRate = armed.sample_rate;
       hooks.onArmed?.(
         `armed   MIDI from ${armed.sources.join(', ')}  (${armed.sample_rate} Hz, latency out ${armed.output_latency} samples)`,
       );
     } else {
+      armedHere = true;
       const armed = await client.arm(resolved.label, tracks[0]!.input!, options.device);
       armedRate = armed.sample_rate;
       hooks.onArmed?.(
@@ -351,10 +365,21 @@ async function captureTakes(
       );
     }
 
-    // The song again, now with each monitored input on its track.
+    // The song again, now with each monitored input on its track. A
+    // separate input device can open the pair at a rate the song is not,
+    // which the daemon then converts, and converted delivery hears no
+    // input: refused here, after the arm, which the finally releases.
     if (monitored.length > 0) {
+      if (armedRate !== rate) {
+        throw new Error(
+          `host monitoring needs the device at ${resolved.song}'s ${rate} Hz, and arming ` +
+            `${options.device ?? 'the input'} opened it at ${armedRate} Hz`,
+        );
+      }
       await reloadWithInputs(client, root, resolved.song);
-      hooks.onArmed?.(`monitor ${monitored.map((t) => t.node.trackName).join(', ')} through ${resolved.song} (host monitoring)`);
+      hooks.onArmed?.(
+        `monitor ${monitored.map((t) => t.node.trackName).join(', ')} through ${resolved.song} (host monitoring — use headphones)`,
+      );
     }
 
     let at: number | undefined;
@@ -465,10 +490,6 @@ async function captureTakes(
       // between takes — and the click, which belongs to this take, not
       // to whatever plays the bed next.
       if (clicking) await client.click({ rate, ticks: [] }).catch(() => {});
-      await client.disarm().catch(() => {});
-      // Disarming closed the monitored inputs; the song plays on without
-      // them, as it was.
-      if (monitored.length > 0) await reloadWithInputs(client, root, resolved.song).catch(() => {});
     }
     if (!landedAny) {
       throw new Error(`the take ended but its manifest never arrived (${transaction ?? 'no transaction'})`);
@@ -549,6 +570,14 @@ async function captureTakes(
       }
     }
   } finally {
+    // Release the input whatever happened after the arm, the take or a
+    // refusal before it; the microphone is not ours between takes.
+    // Disarming closes the monitored inputs, and the song plays on
+    // without them, unless another terminal loaded another meanwhile.
+    if (armedHere) {
+      await client.disarm().catch(() => {});
+      if (monitored.length > 0) await reloadIfPlaying(client, root, resolved.song).catch(() => {});
+    }
     client.close();
   }
 }
