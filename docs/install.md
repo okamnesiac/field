@@ -1,11 +1,20 @@
 # Install and upgrade
 
-You install Field from a checkout with `./install.sh`, and you keep it
-current with `field upgrade`, which runs the same installer from any
-directory. The installer builds the checkout, links it onto your PATH as
-`field`, builds the audio daemon `field-audiod`, and re-syncs any model
-worker environment you have set up. `./install.sh status` and
-`field upgrade status` report what is installed and what is out of date.
+You install Field one of two ways: as a release, with no clone, or from
+a checkout you build yourself. Either way, one installer, `install.sh`,
+does the work: it builds Field, puts `field` on your PATH, builds the
+audio daemon `field-audiod`, and keeps any model worker environment you
+have set up. `field upgrade` runs the installer again from any
+directory, and `field upgrade status` reports what is installed and what
+is out of date.
+
+To install the newest release, pipe the installer to bash:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+```
+
+To install a checkout, clone it and run the installer in it:
 
 ```sh
 git clone https://github.com/okamnesiac/field
@@ -13,13 +22,25 @@ cd field
 ./install.sh
 ```
 
-Installing a release without a checkout, and the one-line `curl`
-install from the website, are planned in
-[install.md](projects/install/readme.md) §3.
+The installer tells the two apart by where it runs. In a git work tree
+with Field's source beside it, it installs that checkout. Anywhere else,
+piped from curl or downloaded by `field upgrade`, it installs a release.
+
+`okamnesiac/field` is private until the one-line install from the
+website ships ([install.md](projects/install/readme.md) §3.3), and
+GitHub answers 404 for a private repository's files. While it is
+private, a maintainer installs a release with a GitHub token, which the
+installer sends to GitHub:
+
+```sh
+export GITHUB_TOKEN="$(gh auth token)"
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+```
 
 The installer is bash and does not support Windows yet, and
-`field upgrade` refuses there. On Windows, run the steps by hand in the
-checkout:
+`field upgrade` refuses there. On Windows, install from a checkout and
+run the steps by hand in it:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -31,26 +52,169 @@ pnpm add -g .
 
 ## Before you install
 
-Before it changes anything, the installer checks for the Node, pnpm,
-and CMake that the target needs, and stops with a message naming the one
+Before it changes anything, the installer checks for the tools the
+target needs, and stops with exit status 69 and a message naming the one
 that is missing or too old. It does not look for a C++ compiler or the
 Linux development headers. When either is missing, the daemon build
-fails and says so, after `all` has already installed the CLI.
+fails and says so. A checkout's `all` has installed the CLI by then; a
+release install has changed nothing.
 
 - **Node 24 or newer.** The version in `.nvmrc`.
 - **pnpm.** `corepack enable pnpm` installs the version `package.json`
-  names. Run `pnpm setup` once, then open a new shell, so pnpm has a
-  global bin directory on your PATH to link `field` into.
+  names. A release builds with pnpm too. For a checkout, also run
+  `pnpm setup` once, then open a new shell, so pnpm has a global bin
+  directory on your PATH to link `field` into.
 - **CMake 3.24 or newer and a C++20 compiler**, for `field-audiod`. On
   macOS, `brew install cmake` and Xcode's command line tools. On Linux,
   JUCE also needs the ALSA, X11, and freetype development headers;
   `.github/workflows/ci.yml` installs the packages it needs on Ubuntu.
+- **curl and tar**, for a release install, which downloads the release's
+  source.
 
 `field build` also needs [SuperCollider](https://supercollider.github.io/),
 and `field generate` needs [uv](https://docs.astral.sh/uv/). The
 installer installs neither.
 
-## What each target does
+## Install a release
+
+A Field release is a version tag, `vX.Y.Z`, and a major tag, `v0`, that
+moves to each new release ([release.md](release.md)). Field publishes no
+binaries, so the installer builds the release on your machine, the same
+way it builds a checkout. It runs these steps, and stops at the first
+one that fails:
+
+1. It reads the version from `package.json` at `v0`.
+2. It downloads GitHub's source archive of that version's tag, such as
+   `v0.2.0`, and unpacks it into `~/.local/share/field/0.2.0/`.
+3. It runs `pnpm install --frozen-lockfile`, `pnpm run build`,
+   `pnpm run build:ui`, and `pnpm run build:native` in that directory.
+4. It sets up again, in the new version, each model worker you had set
+   up in the version it replaces.
+5. It switches `~/.local/share/field/current` to the new version, writes
+   the `field` shim, and removes older versions.
+
+Until step 5, nothing touches the version you have installed, so a
+failed download, build, or worker setup leaves it current and working,
+and the error says so:
+
+```console
+install.sh: 0.3.0 did not install, so 0.2.0 stays current and field still runs it
+```
+
+The first install compiles JUCE, which takes a few minutes. Every later
+version compiles it again, but none downloads it again: the download
+stays in `~/.local/share/field/cache/fetchcontent`, which
+`native/audiod/CMakeLists.txt` reads from `FIELD_FETCHCONTENT_BASE_DIR`.
+
+### Where a release install lives
+
+```text
+~/.local/share/field/
+  0.3.0/                  the installed version, built where it unpacked
+  0.2.0/                  the version 0.3.0 replaced, kept so you can switch back
+  current -> 0.3.0        the version field runs
+  cache/fetchcontent/     JUCE's download, which every version shares
+  release.conf            the repository, ref, and bin directory this install follows
+~/.local/bin/field        the shim, which runs current/dist/cli.js
+```
+
+`XDG_DATA_HOME` moves `~/.local/share`, and `FIELD_DATA_DIR` and
+`FIELD_BIN_DIR` name either directory outright. The installer records
+the bin directory in `release.conf`, so `field upgrade` rewrites the
+same shim.
+
+The shim is a two-line script that runs
+`node ~/.local/share/field/current/dist/cli.js`. Switching `current`
+moves `field` to the new version with nothing to relink, and a release
+install needs no pnpm global bin directory. It does need
+`~/.local/bin` on your PATH. If it is not there, the install ends with a
+`not-on-path` row that names the line to add to your shell's profile:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The installer replaces only its own shim. If `~/.local/bin/field` is
+something else, it stops before changing anything.
+
+### Upgrade a release
+
+`field upgrade` downloads the newest installer, `install.sh` at the ref
+the install recorded, and runs it. When `v0` names a newer version, that
+installs it as above. When it names the version you have, nothing
+downloads or builds: the installer builds any piece that is missing,
+re-syncs your workers, and rewrites the shim.
+
+```console
+$ field upgrade
++ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+release        okamnesiac/field v0 is at 0.3.0
+downloading    https://github.com/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz
+...
+setting-up     field-aced in 0.3.0, as it was in 0.2.0
+switched       ~/.local/share/field/current -> 0.3.0
+linked         ~/.local/bin/field -> ~/.local/share/field/current
+removed        0.1.0
+cli            ~/.local/bin/field -> ~/.local/share/field/current
+```
+
+The installer keeps the version an upgrade replaced and removes every
+older one. To go back to it, switch `current` by hand:
+
+```sh
+ln -sfn 0.2.0 ~/.local/share/field/current
+```
+
+A kept version runs as it was built. The next `field upgrade` installs
+the release `v0` names again.
+
+### Worker environments in a release install
+
+Each version keeps its worker environments in its own
+`python/<worker>/.venv`, so an upgrade sets up again, in the new version,
+each worker you set up in the old one, before it switches. The model
+weights live in the Hugging Face cache and the packages in uv's cache,
+so nothing large downloads again. A worker whose uv is gone is skipped
+with a `worker-skipped` row that names the fix, because it could not run
+in the old version either.
+
+### What each target does in a release install
+
+| Target | What it does |
+| --- | --- |
+| `all` | Installs the release `v0` names, as above, or, when that version is installed, builds any missing piece, re-syncs its workers, and rewrites the shim. |
+| `cli` | Rebuilds the CLI and the UI of the installed version where it is. |
+| `audiod` | Rebuilds `field-audiod` and FieldOut of the installed version where it is. |
+| `workers` | Runs the installed version's `field setup --existing`. |
+| `status` | Reports what is installed, changing nothing. |
+
+`cli`, `audiod`, and `workers` repair the installed version rather than
+move it, as they rebuild a checkout without pulling, so a command the
+CLI names, such as `field upgrade audiod`, works in either kind of
+install. Each ends by saying whether a newer release is out.
+
+### Follow a fork or another ref
+
+`FIELD_REPO` and `FIELD_REF` choose where a release comes from, and the
+installer records both in `release.conf`, so `field upgrade` keeps
+following them:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/you/field/main/install.sh | FIELD_REPO=you/field FIELD_REF=main bash
+```
+
+The installer reads the version from `package.json` at `FIELD_REF` and
+downloads the archive of that version's tag, so the ref can be a branch,
+`v0`, or an exact tag such as `v0.2.0`, which pins the install to that
+release. To follow `v0` again, run `FIELD_REF=v0 field upgrade`.
+
+### Remove a release install
+
+```sh
+rm -rf ~/.local/share/field ~/.local/bin/field
+```
+
+## Install from a checkout
 
 `./install.sh [target]` and `field upgrade [target]` take one target.
 With none, they run `all`.
