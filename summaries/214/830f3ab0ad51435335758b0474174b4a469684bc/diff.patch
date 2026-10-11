@@ -1,0 +1,2486 @@
+diff --git a/README.md b/README.md
+index 0f13161..9a8acfe 100644
+--- a/README.md
++++ b/README.md
+@@ -84,35 +84,44 @@ build, and audition a project with no DAW in the loop.
+ ## Try it
+ 
+ You need Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm
+-or yarn — with `pnpm setup` run once, CMake 3.24 or newer with a C++
+-compiler (Xcode's command line tools on macOS), and
+-[SuperCollider](https://supercollider.github.io/): every render in the
+-example project is an SC recipe, and `field build` runs `sclang` from
+-your PATH, the macOS app bundle, or `FIELD_SCLANG`.
++or yarn — CMake 3.24 or newer with a C++ compiler (Xcode's command line
++tools on macOS), and [SuperCollider](https://supercollider.github.io/):
++every render in the example project is an SC recipe, and `field build`
++runs `sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`.
++
++Install the newest release:
+ 
+ ```sh
+-git clone https://github.com/okamnesiac/field
+-cd field
+-./install.sh             # the field command and field-audiod
++curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+ ```
+ 
+-The installer builds the checkout, links it onto your PATH as `field`,
+-and builds `field-audiod`, the playback and render daemon. The first
+-daemon build compiles JUCE, which takes a few minutes. Because `field`
+-is a link to the checkout rather than a copy, it works from any
+-directory and runs whatever the checkout last built. To pick up new
+-commits, pull in the checkout, then upgrade from anywhere:
++The installer downloads the release's source, builds it in
++`~/.local/share/field/<version>/`, builds `field-audiod`, the playback
++and render daemon, and puts a `field` command in `~/.local/bin`. Field
++publishes no binaries, so every install builds from source; the first
++compiles JUCE, which takes a few minutes. To move to the next release,
++from anywhere:
+ 
+ ```sh
+-git pull                 # in the checkout
+-field upgrade            # runs the checkout's ./install.sh
++field upgrade            # installs the newest release
+ field upgrade status     # what is installed, and what is out of date
+ ```
+ 
+-[docs/install.md](docs/install.md) describes each step and each status
+-row, and gives the steps by hand for Windows, where the installer does
+-not run yet. To run from source without installing: `pnpm field
+-<args>`. To remove: `pnpm remove -g field`.
++To work on Field itself, install a checkout instead. Run `pnpm setup`
++once, then:
++
++```sh
++git clone https://github.com/okamnesiac/field
++cd field
++./install.sh             # links this checkout onto your PATH as field
++```
++
++A checkout install is a link, not a copy: `field` runs whatever the
++checkout last built, and `field upgrade` rebuilds the checkout as it
++stands after you pull. [docs/install.md](docs/install.md) describes
++both kinds of install, each step, and each status row, and gives the
++steps by hand for Windows, where the installer does not run yet. To run
++from source without installing: `pnpm field <args>`.
+ 
+ Then open the example project — two songs that exercise most of the
+ system, checked by CI on every change:
+diff --git a/docs/cli.md b/docs/cli.md
+index 9340cbc..a53e91d 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -19,22 +19,24 @@ against, use [`examples/bloom`](../examples/bloom/README.md).
+ ## Install
+ 
+ Field needs Node 24 (the version in [`.nvmrc`](../.nvmrc)), pnpm —
+-never npm or yarn — and CMake. From the checkout:
++never npm or yarn — and CMake with a C++ compiler. Install the newest
++release:
+ 
+ ```sh
+-pnpm setup           # once, if pnpm has never linked a global binary
+-./install.sh         # builds the checkout, links `field`, builds field-audiod
++curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+ ```
+ 
+-The installer links this checkout onto your PATH rather than copying
+-it, so `field` runs whatever the checkout last built. After a `git
+-pull`, `field upgrade` runs the same installer from any directory, and
+-`field upgrade status` says what is out of date.
+-[install.md](install.md) describes each step and each status row. On
+-Windows the installer does not run yet: run `pnpm install`, `pnpm
+-build`, `pnpm build:ui`, `pnpm build:native`, and `pnpm add -g .` in the
+-checkout. To run from source without installing, use `pnpm field
+-<args>`. To remove it, `pnpm remove -g field`.
++The installer builds the release from source in
++`~/.local/share/field/<version>/` and puts `field` in `~/.local/bin`.
++`field upgrade` installs the next release from any directory, and
++`field upgrade status` says what is out of date. To work on Field
++itself, run `pnpm setup` once and then `./install.sh` in a clone, which
++links that checkout onto your PATH instead.
++[install.md](install.md) describes both kinds of install, each step,
++and each status row. On Windows the installer does not run yet: run
++`pnpm install`, `pnpm build`, `pnpm build:ui`, `pnpm build:native`, and
++`pnpm add -g .` in a checkout. To run from source without installing,
++use `pnpm field <args>`.
+ 
+ Build the daemon before you build, play or record anything.
+ `field-audiod` is the renderer as well as the player: every track's
+@@ -613,7 +615,9 @@ somewhere other than `<program>.wav` in the current directory.
+ | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
+ | `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
+ | `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
+-| `FIELD_OFFLINE` | `install.sh` and `field upgrade` skip fetching the checkout's upstream, and compare against the last fetch |
++| `FIELD_OFFLINE` | `install.sh` and `field upgrade` download nothing: a checkout compares against the last fetch of its upstream, and a release install's `status` compares nothing |
++| `FIELD_REPO`, `FIELD_REF` | the repository and ref a release install follows, `okamnesiac/field` and `v0` unless set |
++| `FIELD_DATA_DIR`, `FIELD_BIN_DIR` | where a release install keeps its versions and its `field` shim; see [install.md](install.md#environment-variables) |
+ 
+ `FIELD_SCLANG` and `FIELD_AUDIOD` point at a binary the default search
+ does not find. `FIELD_AUDIOD` is resolved to an absolute path
+@@ -675,7 +679,7 @@ amended. Porting the rest is tracked there and in
+ | `field insert add <track> [plugin]` | add an insert to a track |
+ | `field plugins scan\|list\|pin` | the hosted plugin inventory |
+ | `field setup [worker]` | set up generation worker environments; `--check` reports, `--existing` re-syncs |
+-| `field upgrade [target]` | run this checkout's `install.sh` from anywhere: `all`, `cli`, `audiod`, `workers`, or `status` |
++| `field upgrade [target]` | run the installer from anywhere: a checkout's own `install.sh`, or the newest release's, with `all`, `cli`, `audiod`, `workers`, or `status` |
+ | `field generate <song>/<name>` | run a deliberate generator |
+ | `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
+ | `field choose <song>/<name> --take <name>` | repoint which recorded take plays |
+diff --git a/docs/install.md b/docs/install.md
+index 286c860..9c7240d 100644
+--- a/docs/install.md
++++ b/docs/install.md
+@@ -1,11 +1,20 @@
+ # Install and upgrade
+ 
+-You install Field from a checkout with `./install.sh`, and you keep it
+-current with `field upgrade`, which runs the same installer from any
+-directory. The installer builds the checkout, links it onto your PATH as
+-`field`, builds the audio daemon `field-audiod`, and re-syncs any model
+-worker environment you have set up. `./install.sh status` and
+-`field upgrade status` report what is installed and what is out of date.
++You install Field one of two ways: as a release, with no clone, or from
++a checkout you build yourself. Either way, one installer, `install.sh`,
++does the work: it builds Field, puts `field` on your PATH, builds the
++audio daemon `field-audiod`, and keeps any model worker environment you
++have set up. `field upgrade` runs the installer again from any
++directory, and `field upgrade status` reports what is installed and what
++is out of date.
++
++To install the newest release, pipe the installer to bash:
++
++```sh
++curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++```
++
++To install a checkout, clone it and run the installer in it:
+ 
+ ```sh
+ git clone https://github.com/okamnesiac/field
+@@ -13,13 +22,13 @@ cd field
+ ./install.sh
+ ```
+ 
+-Installing a release without a checkout, and the one-line `curl`
+-install from the website, are planned in
+-[install.md](projects/install/readme.md) §3.
++The installer tells the two apart by where it runs. In a git work tree
++with Field's source beside it, it installs that checkout. Anywhere else,
++piped from curl or downloaded by `field upgrade`, it installs a release.
+ 
+ The installer is bash and does not support Windows yet, and
+-`field upgrade` refuses there. On Windows, run the steps by hand in the
+-checkout:
++`field upgrade` refuses there. On Windows, install from a checkout and
++run the steps by hand in it:
+ 
+ ```sh
+ pnpm install --frozen-lockfile
+@@ -31,26 +40,172 @@ pnpm add -g .
+ 
+ ## Before you install
+ 
+-Before it changes anything, the installer checks for the Node, pnpm,
+-and CMake that the target needs, and stops with a message naming the one
++Before it changes anything, the installer checks for the tools the
++target needs, and stops with exit status 69 and a message naming the one
+ that is missing or too old. It does not look for a C++ compiler or the
+ Linux development headers. When either is missing, the daemon build
+-fails and says so, after `all` has already installed the CLI.
++fails and says so. A checkout's `all` has installed the CLI by then; a
++release install has changed nothing.
+ 
+ - **Node 24 or newer.** The version in `.nvmrc`.
+ - **pnpm.** `corepack enable pnpm` installs the version `package.json`
+-  names. Run `pnpm setup` once, then open a new shell, so pnpm has a
+-  global bin directory on your PATH to link `field` into.
++  names. A release builds with pnpm too. For a checkout, also run
++  `pnpm setup` once, then open a new shell, so pnpm has a global bin
++  directory on your PATH to link `field` into.
+ - **CMake 3.24 or newer and a C++20 compiler**, for `field-audiod`. On
+   macOS, `brew install cmake` and Xcode's command line tools. On Linux,
+   JUCE also needs the ALSA, X11, and freetype development headers;
+   `.github/workflows/ci.yml` installs the packages it needs on Ubuntu.
++- **curl and tar**, for a release install, which downloads the release's
++  source.
+ 
+ `field build` also needs [SuperCollider](https://supercollider.github.io/),
+ and `field generate` needs [uv](https://docs.astral.sh/uv/). The
+ installer installs neither.
+ 
+-## What each target does
++## Install a release
++
++A Field release is a version tag, `vX.Y.Z`, and a major tag, `v0`, that
++moves to each new release ([release.md](release.md)). Field publishes no
++binaries, so the installer builds the release on your machine, the same
++way it builds a checkout. It runs these steps, and stops at the first
++one that fails:
++
++1. It reads the version from `package.json` at `v0`.
++2. It downloads GitHub's source archive of that version's tag, such as
++   `v0.2.0`, and unpacks it into `~/.local/share/field/0.2.0/`.
++3. It runs `pnpm install --frozen-lockfile`, `pnpm run build`,
++   `pnpm run build:ui`, and `pnpm run build:native` in that directory.
++4. It sets up again, in the new version, each model worker you had set
++   up in the version it replaces.
++5. It switches `~/.local/share/field/current` to the new version, writes
++   the `field` shim, and removes older versions.
++
++Until step 5, nothing touches the version you have installed, so a
++failed download, build, or worker setup leaves it current and working,
++and the error says so:
++
++```console
++install.sh: 0.3.0 did not install, so 0.2.0 stays current and field still runs it
++```
++
++The first install downloads and compiles JUCE, which takes a few
++minutes. Every later version compiles JUCE's modules again, but none
++downloads JUCE again: the download stays in
++`~/.local/share/field/cache/fetchcontent`, which
++`native/audiod/CMakeLists.txt` reads from `FIELD_FETCHCONTENT_BASE_DIR`.
++On a Mac, an upgrade took about a minute, against about four minutes
++for the first install.
++
++### Where a release install lives
++
++```text
++~/.local/share/field/
++  0.3.0/                  the installed version, built where it unpacked
++  0.2.0/                  the version 0.3.0 replaced, kept so you can switch back
++  current -> 0.3.0        the version field runs
++  cache/fetchcontent/     JUCE's download, which every version shares
++  release.conf            the repository, ref, and bin directory this install follows
++~/.local/bin/field        the shim, which runs current/dist/cli.js
++```
++
++`XDG_DATA_HOME` moves `~/.local/share`, and `FIELD_DATA_DIR` and
++`FIELD_BIN_DIR` name either directory outright. The installer records
++the bin directory in `release.conf`, so `field upgrade` rewrites the
++same shim.
++
++The shim is a two-line script that runs
++`node ~/.local/share/field/current/dist/cli.js`. Switching `current`
++moves `field` to the new version with nothing to relink, and a release
++install needs no pnpm global bin directory. It does need
++`~/.local/bin` on your PATH. If it is not there, the install ends with a
++`not-on-path` row that names the line to add to your shell's profile:
++
++```sh
++export PATH="$HOME/.local/bin:$PATH"
++```
++
++The installer replaces only its own shim. If `~/.local/bin/field` is
++something else, it stops before changing anything.
++
++### Upgrade a release
++
++`field upgrade` downloads the newest installer, `install.sh` at the ref
++the install recorded, and runs it. When `v0` names a newer version, that
++installs it as above. When it names the version you have, nothing
++downloads or builds: the installer builds any piece that is missing,
++re-syncs your workers, and rewrites the shim.
++
++```console
++$ field upgrade
+++ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++release        okamnesiac/field v0 is at 0.3.0
++downloading    https://github.com/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz
++...
++setting-up     field-aced in 0.3.0, as it was in 0.2.0
++switched       ~/.local/share/field/current -> 0.3.0
++linked         ~/.local/bin/field -> ~/.local/share/field/current
++removed        0.1.0
++cli            ~/.local/bin/field -> ~/.local/share/field/current
++```
++
++The installer keeps the version an upgrade replaced and removes every
++older one. To go back to it, switch `current` by hand:
++
++```sh
++ln -sfn 0.2.0 ~/.local/share/field/current
++```
++
++A kept version runs as it was built. The next `field upgrade` installs
++the release `v0` names again.
++
++### Worker environments in a release install
++
++Each version keeps its worker environments in its own
++`python/<worker>/.venv`, so an upgrade sets up again, in the new version,
++each worker you set up in the old one, before it switches. The model
++weights live in the Hugging Face cache and the packages in uv's cache,
++so nothing large downloads again. A worker whose uv is gone is skipped
++with a `worker-skipped` row that names the fix, because it could not run
++in the old version either.
++
++### What each target does in a release install
++
++| Target | What it does |
++| --- | --- |
++| `all` | Installs the release `v0` names, as above, or, when that version is installed, builds any missing piece, re-syncs its workers, and rewrites the shim. |
++| `cli` | Rebuilds the CLI and the UI of the installed version where it is. |
++| `audiod` | Rebuilds `field-audiod` and FieldOut of the installed version where it is. |
++| `workers` | Runs the installed version's `field setup --existing`. |
++| `status` | Reports what is installed, changing nothing. |
++
++`cli`, `audiod`, and `workers` repair the installed version rather than
++move it, as they rebuild a checkout without pulling, so a command the
++CLI names, such as `field upgrade audiod`, works in either kind of
++install. Each ends by saying whether a newer release is out.
++
++### Follow a fork or another ref
++
++`FIELD_REPO` and `FIELD_REF` choose where a release comes from, and the
++installer records both in `release.conf`, so `field upgrade` keeps
++following them:
++
++```sh
++curl -fsSL https://raw.githubusercontent.com/you/field/main/install.sh | FIELD_REPO=you/field FIELD_REF=main bash
++```
++
++The installer reads the version from `package.json` at `FIELD_REF` and
++downloads the archive of that version's tag, so the ref can be a branch,
++`v0`, or an exact tag such as `v0.2.0`, which pins the install to that
++release. To follow `v0` again, run `FIELD_REF=v0 field upgrade`.
++
++### Remove a release install
++
++```sh
++rm -rf ~/.local/share/field ~/.local/bin/field
++```
++
++## Install from a checkout
+ 
+ `./install.sh [target]` and `field upgrade [target]` take one target.
+ With none, they run `all`.
+@@ -142,10 +297,50 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
+ | `audiod-override` | `FIELD_AUDIOD` is set, so `field` runs that binary instead of this build. |
+ | `worker-current`, `worker-stale`, `worker-absent`, `worker-no-uv` | Each worker environment, from `field setup --check`. |
+ 
++### In a release install
++
++A release install has no checkout to compare, so its status compares
++the installed version with the release its ref names, and checks that
++each piece of the installed version is built:
++
++```console
++$ field upgrade status
+++ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash -s -- status
++installed      0.3.0 in ~/.local/share/field/0.3.0
++release        okamnesiac/field v0 is at 0.3.0
++release-latest 0.3.0 is installed
++previous       0.2.0 in ~/.local/share/field/0.2.0, kept to switch back to by hand
++node           24.19.0
++pnpm           11.15.1
++cmake          4.4.0
++cli            ~/.local/bin/field -> ~/.local/share/field/current
++ui-current     ~/.local/share/field/0.3.0/ui/dist
++audiod-current ~/.local/share/field/0.3.0/native/audiod/build/field-audiod_artefacts/Release/field-audiod
++worker-absent  field-aced is not set up — field setup aced sets it up
++```
++
++| Row | Meaning |
++| --- | --- |
++| `installed`, `not-installed` | The version `current` names, or that no release is installed in the data directory. |
++| `release` | The repository and ref this install follows, and the version `package.json` names there. |
++| `release-latest`, `release-behind`, `release-ahead` | Whether the installed version is that version, older, or newer, as after following a branch and switching back. Run `field upgrade` for `release-behind`. |
++| `previous` | A version an upgrade replaced, kept so you can switch `current` back to it. |
++| `node`, `pnpm`, `cmake` | As in a checkout. |
++| `cli`, `cli-missing` | Whether the shim in the bin directory is the installer's. |
++| `cli-shadowed` | Another `field` comes before the shim on your PATH, so that one runs. |
++| `not-on-path` | The bin directory is not on your PATH. The row names the line to add to your shell's profile. |
++| `cli-unbuilt`, `ui-current`, `ui-missing`, `audiod-current`, `audiod-missing` | Whether the installed version's CLI, UI, and daemon are built. A release never changes in place, so there is no stale row. `field upgrade cli` or `field upgrade audiod` rebuilds a missing piece. |
++| `worker-…` | Each worker environment in the installed version, as in a checkout. |
++
+ ## Environment variables
+ 
+ | Variable | Effect |
+ | --- | --- |
+-| `FIELD_OFFLINE=1` | Skips the fetch, and compares the checkout against the last fetch of its upstream. |
++| `FIELD_OFFLINE=1` | In a checkout, skips the fetch and compares the checkout against the last fetch of its upstream. In a release install, `status` compares nothing, and `all` refuses, because it has nothing to download from. |
++| `FIELD_REPO`, `FIELD_REF` | The repository and ref a release install follows: `okamnesiac/field` and `v0` unless set. The installer records both in `release.conf`. |
++| `FIELD_DATA_DIR` | Where release installs live. The default is `$XDG_DATA_HOME/field` when `XDG_DATA_HOME` is an absolute path, and `~/.local/share/field` otherwise. |
++| `FIELD_BIN_DIR` | Where the release install's shim goes: `~/.local/bin` unless set. The installer records it in `release.conf`. |
++| `GITHUB_TOKEN` | Sent to GitHub's own hosts, and only over HTTPS, so a release install can follow a private fork. The installer passes it in curl's configuration on standard input, never on a command line. |
++| `FIELD_RAW_URL`, `FIELD_ARCHIVE_URL` | The bases the installer downloads `package.json`, `install.sh`, and the source archive from: `https://raw.githubusercontent.com` and `https://github.com` unless set. Tests point them at local files. |
+ | `NO_COLOR` | Prints warning rows without color. The ⚠️ marker stays. |
+ | `FIELD_AUDIOD` | Not read by the installer. `status` reports it, because `field` runs that binary instead of the one the installer builds. |
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 974c2e6..f45c0e4 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -49,16 +49,19 @@ for Projector.
+ ### 2.1 One installer, two modes
+ 
+ `install.sh` at the root of the repository is the only installer. It is
+-a checkout's installer when `src/cli.ts` sits beside it, and a release
+-installer otherwise: piped from curl, bash reads it from stdin with
+-nothing beside it, and the copy `field upgrade` downloads sits alone in a
+-temporary directory. Chunk 1 builds the checkout mode. Until chunk 3, the
+-release mode says to clone and stops:
+-
+-```console
+-$ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/main/install.sh | bash
+-install.sh: run this from a Field checkout: git clone https://github.com/okamnesiac/field, then ./install.sh in it
+-```
++a checkout's installer when `src/cli.ts` and a `.git` sit beside it, and
++a release installer otherwise: piped from curl, bash reads it from stdin
++with nothing beside it, the copy `field upgrade` downloads sits alone in
++a temporary directory, and a release version's own copy has the source
++beside it but no `.git`. Chunk 1 built the checkout mode, and chunk 3
++the release mode (§3.2). Until chunk 3, the release mode said to clone
++and stopped.
++
++The test asks for `.git` beside the installer, a directory or a
++worktree's file, rather than asking `git rev-parse`, which needs git
++installed and answers yes for a directory inside some other repository.
++The whole script defines functions and calls `main "$@"` on its last
++line, so a `curl | bash` cut short by a dropped connection runs nothing.
+ 
+ ### 2.2 The targets
+ 
+@@ -216,37 +219,83 @@ move with what each process does, so a release leaves them alone.
+ 
+ ### 3.2 The release installer (chunk 3)
+ 
+-Without a checkout, `install.sh` installs a release by building it:
++Without a checkout, `install.sh` installs a release by building it.
++`docs/install.md` describes it for users; this is the design.
+ 
+ 1. It reads the version from `package.json` at `FIELD_REF` (default
+    `v0`) in `FIELD_REPO` (default `okamnesiac/field`), which is how
+-   Projector's installer learns the version it is installing.
++   Projector's installer learns the version it is installing, and
++   accepts only `X.Y.Z`.
+ 2. It downloads GitHub's source archive of the immutable tag for that
+-   version, `vX.Y.Z` rather than `v0`, and unpacks it into
+-   `~/.local/share/field/<version>/`.
++   version, `vX.Y.Z` rather than `v0`, checks that the archive holds one
++   top-level directory whatever its name and that its `package.json`
++   names the version, and moves it to `<data>/<version>/`. A version
++   directory that is not current is never trusted: it is deleted and
++   downloaded again.
+ 3. It runs the same steps a checkout install runs, with the same
+-   prerequisite checks: `pnpm install --frozen-lockfile`, the CLI and UI
+-   builds, and the daemon build.
+-4. It switches `~/.local/share/field/current` to the new version and
+-   links `field` to it. The previous version stays until the switch
+-   succeeds, so a failed download or build leaves the old install
+-   working.
+-5. It sets up again each worker that was set up in the previous version
+-   (§7.5).
+-
+-It needs what `./install.sh` needs, plus curl and tar: Node 24, pnpm,
+-CMake 3.24 or newer, and a C++ compiler. The first install compiles
+-JUCE, which takes a few minutes. Each version unpacks into a directory
+-of its own, so chunk 3 keeps JUCE's download outside it, for example
+-with CMake's `FETCHCONTENT_BASE_DIR`, so that an upgrade does not fetch
+-JUCE again. Whether `field` is linked by `pnpm add -g`, as a checkout
+-is, or through `~/.local/bin`, is chunk 3's to settle (§4).
+-
+-`field upgrade` in a release install finds no checkout beside its
+-package, so it downloads the newest installer, from
+-`https://field.one/install.sh` or from `install.sh` at `FIELD_REF` in
+-the fork it was installed from, and runs that. `status` compares the
+-installed version with the release's.
++   prerequisite checks, plus curl and tar: `pnpm install
++   --frozen-lockfile`, the CLI and UI builds, and the daemon build. It
++   never runs `pnpm add -g`.
++4. It sets up, in the new version, each worker set up in the version it
++   replaces (§7.5).
++5. It switches `<data>/current`, a relative symlink, to the new version
++   atomically, writes the `field` shim, records `release.conf`, and
++   removes every version but the new one and the one it replaced.
++
++Steps 1 to 4 leave the installed version alone, so a failed download,
++build, or worker setup leaves it current, and an exit trap says so. This
++moves the worker setup ahead of the switch, where the first draft of
++this section put it after.
++
++The data directory is `FIELD_DATA_DIR`, then `$XDG_DATA_HOME/field` when
++that is an absolute path, then `~/.local/share/field`. A version's own
++`install.sh` infers it from the `current` link beside it.
++
++**The shim.** `field` is a two-line script in `FIELD_BIN_DIR` (default
++`~/.local/bin`) that runs `exec node '<data>/current/dist/cli.js' "$@"`,
++with a marker comment that identifies it. Switching `current` moves
++`field` with nothing to relink, and a release install needs no pnpm
++global bin directory. The installer refuses, with exit status 69, to
++replace a `field` there that is not its shim. A bin directory missing
++from PATH is a `not-on-path` warning that names the line to add, not a
++stop, and `cli-shadowed` reports a `field` that comes first on PATH in
++either direction.
++
++**JUCE's download.** `native/audiod/CMakeLists.txt` reads
++`$ENV{FIELD_FETCHCONTENT_BASE_DIR}` into CMake's cache as
++`FETCHCONTENT_BASE_DIR` before `include(FetchContent)`, and the
++installer exports it, in release mode only, as
++`<data>/cache/fetchcontent`. An environment variable, because
++`pnpm build:native` passes no `-D` and a `${VAR:+-D…}` in the script
++would break under Windows' `cmd.exe`. JUCE's helper build lands in that
++directory too, so an upgrade skips the download and the helper, and
++compiles JUCE's modules again as part of `field-audiod` (§10.1).
++
++**`field upgrade`.** `src/commands/upgrade.ts` tells the two installs
++apart by the same test as the installer. In a release install it reads
++`release.conf` beside the real path of its package root, with
++`FIELD_REPO` and `FIELD_REF` ahead of the record and the defaults last.
++It downloads `install.sh` at that ref from
++`raw.githubusercontent.com`, prints `+ curl -fsSL <url> | bash -s --
++<target>`, and runs it with `FIELD_DATA_DIR` set. It never asks
++`field.one`, which serves only the upstream's `v0`, and a fork must
++upgrade from the fork.
++
++**The targets in a release install.** `all` installs the release the ref
++names, or, when that version is installed, builds any missing piece,
++runs `field setup --existing`, and rewrites the shim. `cli`, `audiod`,
++and `workers` rebuild that piece of the installed version in place, as
++they rebuild a checkout without pulling, so a command the CLI names,
++such as `field upgrade audiod`, works in either install. `status`
++compares the installed version with the release and checks each piece
++is built. `FIELD_OFFLINE` makes `all` refuse and `status` compare
++nothing.
++
++**Tokens.** `GITHUB_TOKEN` goes only to `github.com`,
++`raw.githubusercontent.com`, `api.github.com`, and
++`codeload.github.com`, over HTTPS, in curl's configuration on standard
++input, never on a command line where any process could read it. With
++the repository public, it matters only for a private fork.
+ 
+ ### 3.3 The one-line install (chunk 4)
+ 
+@@ -284,9 +333,11 @@ a private one. The website and the README then lead with this command.
+     It would spare newcomers `pnpm setup`, but every existing install is
+     a pnpm link and moving them means migrating each one. Release
+     installs (chunk 3) were to use `~/.local/bin` because they would not
+-    need pnpm. Since §7.1 they build with pnpm too, so chunk 3 settles
+-    how they link `field`. `status` reports `cli-shadowed` when two
+-    `field` commands exist and the wrong one is first on PATH.
++    need pnpm. Since §7.1 they build with pnpm too, and chunk 3 settled
++    it the original way for another reason: the shim moves with
++    `current` (the release-install bullet at the end of this list).
++    `status` reports `cli-shadowed` when two `field` commands exist and
++    the wrong one is first on PATH.
+ - **Never pull, never switch branches.** The checkout may hold work in
+   progress. `status` reports how far behind it is, which is Projector's
+   choice too.
+@@ -323,6 +374,22 @@ a private one. The website and the README then lead with this command.
+   `field ui` stale or refusing. The `cli` target builds both rather than
+   growing a `ui` target, because `field upgrade cli` is then the one
+   remedy for either.
++- **A release install links `field` through a shim, not `pnpm add -g`**
++  (§3.2). A shim in `~/.local/bin` that runs `current/dist/cli.js` moves
++  with `current`, so an upgrade relinks nothing, and it needs no pnpm
++  global bin directory on PATH. `pnpm add -g` lost because each version
++  is a directory of its own, so every upgrade would relink, and because
++  it would compete with a checkout's link for the one global `field`.
++- **Everything the new version needs happens before the switch** (§3.2).
++  Download, build, and worker setup all run while the old version is
++  still current, so the only step that changes what `field` runs is one
++  atomic rename. Switching first and setting workers up after, as the
++  first draft of §3.2 had it, could leave a current version whose
++  workers did not set up.
++- **The release installer keeps two versions.** The new one, and the one
++  it replaced, so going back is one `ln -sfn`. Keeping every version
++  lost to disk use: each holds its own `node_modules`, JUCE build, and
++  worker environments.
+ 
+ ## 5 Acceptance criteria
+ 
+@@ -351,21 +418,33 @@ Chunk 2:
+   alone releases nothing.
+ - A release publishes no files.
+ 
+-Chunks 3 and 4:
++Chunk 3:
+ 
+ - On a machine with the checkout installer's prerequisites and no
+-  checkout, `curl -fsSL https://field.one/install.sh | bash` installs
+-  `field` and builds `field-audiod`, and `field upgrade` later moves both
+-  to the next release.
++  checkout, piping `install.sh` at `v0` to bash installs the release
++  `v0` names: `field` on PATH through the shim, `field-audiod` built, and
++  `field --version` reporting that version.
++- Run again for a newer release, it installs that one beside the old,
++  switches `current`, keeps the version it replaced, and removes older
++  ones, without downloading JUCE again.
++- A failed download, build, or worker setup leaves the installed version
++  current and working, and says so.
++- `field upgrade [target]` in a release install downloads the newest
++  installer and runs it with the same target and exit status, and
++  `field upgrade status` reports the rows in `docs/install.md`.
++
++Chunk 4:
++
++- `curl -fsSL https://field.one/install.sh | bash` does what chunk 3's
++  first criterion says, and field.one leads with that command.
+ 
+ ## 6 Chunks
+ 
+ 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
+-2. **Releases.** §3.1. This change.
+-3. **The release installer.** §3.2. Needs chunk 2, and decides whether
+-   Windows gets an `install.ps1` (§7.6).
++2. **Releases.** §3.1. Shipped in #205.
++3. **The release installer.** §3.2. This change.
+ 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
+-   chunk 3 and a public repository.
++   chunk 3 released and a public repository.
+ 
+ ## 7 Open questions
+ 
+@@ -443,28 +522,41 @@ to pay only once binaries exist.
+ repository's GitHub homepage says `field.amnes.ac`. This plan assumes
+ `field.one`, where the waitlist for source access already lives.
+ 
+-### 7.5 Worker environments across release versions
++### 7.5 Worker environments across release versions (DECIDED, 2026-10-11)
+ 
+ In a checkout, a worker's venv lives in `python/<worker>/.venv` and
+ survives every upgrade. In a release install, each version unpacks into
+ a directory of its own, so the venv would be left behind with the old
+-version. Chunk 3 either sets each worker up again in the new version,
+-which re-downloads no weights because they live in the Hugging Face
+-cache, or points `UV_PROJECT_ENVIRONMENT` at a directory outside the
+ version.
+ 
+-### 7.6 Windows
++**Decided: an upgrade sets each worker up again in the new version,
++before it switches to it.** The old version's `field setup --check`
++says which workers are set up; the new version's `field setup <name>`
++sets up each one. Nothing large downloads again: the model weights live
++in the Hugging Face cache and the packages in uv's cache. A worker whose
++uv is gone is skipped with a `worker-skipped` row, because it could not
++run in the old version either, and any other failure stops the upgrade
++with the old version still current. The alternative, pointing
++`UV_PROJECT_ENVIRONMENT` at a directory outside the version, lost
++because `workerScriptInstalled` in `src/workers/client.ts` looks for
++each worker's console script in `python/<worker>/.venv`, and one
++environment shared across versions would hold the old version's
++packages while the new one ran.
++
++### 7.6 Windows (DECIDED, 2026-10-11)
+ 
+ `install.sh` is bash, and Field's Windows support is
+ [windows-portability.md](../windows-portability/readme.md). Windows
+ installs from a checkout by hand for now, `field upgrade` refuses there
+ with the steps, and the installer's tests skip there.
+ 
+-Chunk 3 decides whether Windows gets an `install.ps1` of its own. A
+-checkout on Windows installs with the four commands in
+-`docs/install.md`, but a release install has no checkout to run them
+-in, and the release installer is bash too. Since §7.1 a Windows release
+-install would build the daemon with MSVC, as a Windows checkout does.
++**Decided: this plan builds no `install.ps1`.** A checkout on Windows
++installs with the four commands in `docs/install.md`, but a release
++install has no checkout to run them in, and the release installer is
++bash. An `install.ps1` that downloads and builds a release, with the
++daemon under MSVC, is a design that wants a Windows machine to try it
++on, so this change hands it to windows-portability.md §7.2, "Installing
++and upgrading on Windows", which owns it from here.
+ 
+ ## 8 Chunk 1 as built (2026-10-11)
+ 
+@@ -593,14 +685,84 @@ install would build the daemon with MSVC, as a Windows checkout does.
+   release naming the command that finishes it, `released`'s exit codes,
+   `released --since` releasing nothing unless the version went up, and
+   plain `node` running the file.
+-- The workflow itself has not run. Its first run is the first release.
+-  Its publish step was run verbatim against a local bare remote, with
+-  `tag --no-release` in place of `tag`. After a push that changed only
+-  a script in `package.json`, it released nothing, and after one that
+-  raised the version to 0.2.0, it tagged `v0.2.0` and created `v0`.
++- Before the merge, the publish step ran verbatim against a local bare
++  remote, with `tag --no-release` in place of `tag`. After a push that
++  changed only a script in `package.json`, it released nothing, and
++  after one that raised the version to 0.2.0, it tagged `v0.2.0` and
++  created `v0`.
++- After the merge, on GitHub: a push to `main` that changed
++  `package.json` without raising the version (878cdbc) released nothing,
++  printing "v0.1.0 is not above v0.1.0". The first release, 0.2.0, went
++  out through the workflow: #207, opened by the propose job, merged as
++  5f7cd66, and publish run 38167947880 tagged `v0.2.0`, created `v0`, and
++  published the GitHub release on 2026-10-11.
+ 
+ ### 9.3 What is still owed
+ 
+-- The first release. Run the Release workflow with `minor` to release
+-  0.2.0, which tags `v0.2.0` and creates `v0`.
+ - Chunks 3 and 4.
++
++## 10 Chunk 3 as built (2026-10-11)
++
++### 10.1 What implementation settled
++
++§3.2 records the design as built. What this section adds is what
++building it found.
++
++- **A version directory that is not current is never trusted.** A
++  half-unpacked or half-built directory from an interrupted install is
++  deleted and downloaded again, rather than resumed, because nothing
++  records how far it got.
++- **The archive's top-level directory is taken whatever its name.**
++  GitHub names it `<repo>-<version>`, and a fork's differs, so the
++  installer checks that there is exactly one and that its
++  `package.json` names the version, and moves it into place. macOS `tar`
++  adds `._` entries unless `COPYFILE_DISABLE=1` is set, which that check
++  rejects, so a stand-in archive made on a Mac needs it.
++- **The shared directory holds JUCE's helper build too.**
++  `FETCHCONTENT_BASE_DIR` holds `juce-build` beside `juce-src`, so
++  CMake builds JUCE's helper tool once. JUCE's modules compile as part
++  of `field-audiod`, in each version's own build directory, so an
++  upgrade compiles them again. Together, the skipped clone and helper
++  build took an upgrade to 58 seconds here, against 258 for the first
++  install (§10.2).
++- **The first install's clone of JUCE is the slow step.** CMake clones
++  JUCE with `--depth 1 --no-single-branch`, which fetches every branch's
++  tip, and it took minutes here.
++
++### 10.2 What was verified, and how
++
++- `src/install.test.ts` runs the real `install.sh` under real bash with
++  stand-ins for pnpm, cmake, curl's targets, and the CLI, for both
++  modes: the release version read from `package.json`, the archive's
++  checks, the switch, the shim and its refusal to replace another
++  `field`, `release.conf`, pruning, the workers set up again, a failure
++  at each step leaving the old version current, and every status row.
++  `src/commands/upgrade.test.ts` covers `field upgrade` downloading the
++  installer at the recorded ref, `FIELD_REPO` and `FIELD_REF` ahead of
++  the record, and `GITHUB_TOKEN` going only to GitHub in curl's
++  configuration.
++- By hand, on macOS with stand-in releases cut from this branch and
++  served from `file://` URLs through `FIELD_RAW_URL` and
++  `FIELD_ARCHIVE_URL`, into throwaway data and bin directories:
++  - A first install of 0.90.0 took 258 seconds, cloning and compiling
++    JUCE, and left `current -> 0.90.0`, the shim, and `release.conf`.
++    `field --version` through the shim printed `field 0.90.0`.
++  - `field upgrade`, run through that shim, downloaded the newest
++    installer, installed 0.91.0 beside 0.90.0 in 58 seconds with no
++    clone of JUCE, switched `current`, and kept 0.90.0.
++  - Run again with 0.91.0 current, it finished in a second: workers
++    re-synced and the shim rewritten.
++  - With `v0` naming a 0.92.0 that had no archive, it exited 1 with
++    "0.92.0 did not install, so 0.91.0 stays current and field still
++    runs it", and `field --version` still printed 0.91.0.
++  - `field upgrade status` reported `release-behind` against 0.92.0 and
++    `previous` for 0.90.0.
++- Not verified: Linux, a real install from GitHub, and pruning a third
++  version by hand. The first real one is the release that carries this
++  change.
++
++### 10.3 What is still owed
++
++- Release this change, then install it for real with `curl` from
++  `raw.githubusercontent.com` on a machine that has no checkout.
++- Chunk 4.
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index e6a0d4d..e57c806 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -676,6 +676,15 @@ land as its own diff whenever.
+   loopback driver such as loopMIDI, Windows MIDI Services, or feeding
+   the voice host without a MIDI port at all. **Standalone**, and a
+   design question before it is a port.
++- **Installing and upgrading on Windows** (`install.sh`,
++  `src/commands/upgrade.ts`): the installer is bash, so on Windows
++  `field upgrade` refuses and names the four commands to run in a
++  checkout ([install.md](../install/readme.md) §7.6). A release install
++  there needs an installer Windows runs, most likely an `install.ps1`
++  that downloads the release's source archive and builds it as
++  `install.sh` does, with the daemon under MSVC. install.md handed this
++  item here rather than design it without a Windows machine to try it
++  on. **Standalone**, and a design question before it is a port.
+ 
+ ### 7.3 The workers chunk, when it opens (§4 stands)
+ 
+diff --git a/docs/release.md b/docs/release.md
+index d61587b..f67171c 100644
+--- a/docs/release.md
++++ b/docs/release.md
+@@ -6,8 +6,8 @@ It publishes no files: whoever installs a release builds it, the
+ which `field --version` prints. Each release pushes an immutable tag such
+ as `v0.2.0`, moves the major tag (`v0`) to the same commit, and creates
+ the GitHub release with notes generated from the merged pull requests.
+-`v0` is the channel that the release installer will follow
+-([install.md](projects/install/readme.md) §3.2).
++`v0` is the channel that the release installer follows
++([install.md](install.md#install-a-release)).
+ 
+ ## Cut a release
+ 
+diff --git a/install.sh b/install.sh
+index ba8de7d..2fad6f2 100755
+--- a/install.sh
++++ b/install.sh
+@@ -1,15 +1,20 @@
+ #!/usr/bin/env bash
+ #
+-# Install Field from this checkout: the `field` command, the audio daemon
+-# field-audiod, and the model-worker environments you have already set up.
++# Install Field: the `field` command, the audio daemon field-audiod, and
++# the model-worker environments you have already set up.
+ #
+-#   ./install.sh [all|cli|audiod|workers|status]
+-#   field upgrade [all|cli|audiod|workers|status]   the same, from anywhere
++#   curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++#   ./install.sh [all|cli|audiod|workers|status]      from a checkout
++#   field upgrade [all|cli|audiod|workers|status]     the same, from anywhere
+ #
+-# It installs the checkout it sits in, as that checkout is. It never pulls;
++# Run from a checkout, it installs that checkout as it is. It never pulls;
+ # `status` says how far the checkout is behind its upstream instead.
+-# Installing a release without a checkout is install.md chunk 3, and until
+-# then a copy of this script outside a checkout says so and stops.
++# Without one -- piped from curl, or downloaded by `field upgrade` -- it
++# installs a release: the version package.json names at FIELD_REF (default
++# v0) in FIELD_REPO (default okamnesiac/field), from the source archive of
++# that version's tag, built in a directory of its own under
++# ~/.local/share/field and run through a shim in ~/.local/bin
++# (install.md §3.2).
+ 
+ set -euo pipefail
+ 
+@@ -18,12 +23,20 @@ SCRIPT_DIR=""
+ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+   SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+ fi
+-# A checkout is this script with the CLI's source beside it. pwd -P, so the
+-# path compares equal to the realpath of the checkout pnpm links.
+-REPO=""
+-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/src/cli.ts" ]; then
+-  REPO="$SCRIPT_DIR"
++# A checkout is this script in a git work tree, with the CLI's source beside
++# it. A source archive has the source and no .git, so a release version's
++# own copy of this script is a release installer, like the copy
++# `field upgrade` downloads and the one bash reads from curl (install.md
++# §2.1, amended 2026-10-11). `.git` is a directory in a clone and a file in
++# a worktree. pwd -P, so the path compares equal to the realpath of the
++# checkout pnpm links.
++CHECKOUT=""
++if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/src/cli.ts" ] && [ -e "$SCRIPT_DIR/.git" ]; then
++  CHECKOUT="$SCRIPT_DIR"
+ fi
++# The tree the build steps run in: the checkout, or the release version
++# being built or reported on.
++REPO="$CHECKOUT"
+ 
+ NODE_MAJOR=24
+ # native/audiod/CMakeLists.txt's cmake_minimum_required.
+@@ -87,12 +100,20 @@ refresh_linked() { LINKED="$(linked_checkout)"; }
+ 
+ # The command that runs a target again: `field upgrade` when the `field`
+ # pnpm links is this checkout, because that is the installer it runs, and
+-# this script's own path otherwise.
++# this script's own path otherwise. A release install names `field upgrade`
++# once there is one to upgrade, and the download that installs one before.
+ rerun() {
+-  if [ -n "$LINKED" ] && [ "$LINKED" = "$REPO" ]; then
++  if [ -z "$CHECKOUT" ]; then
++    if [ -n "$(current_version)" ] && is_release_shim "$BIN_DIR/field"; then
++      printf 'field upgrade %s' "$1"
++    else
++      printf 'curl -fsSL %s | bash' "$RAW_URL/$RELEASE_REPO/$RELEASE_REF/install.sh"
++      [ "$1" = all ] || printf ' -s -- %s' "$1"
++    fi
++  elif [ -n "$LINKED" ] && [ "$LINKED" = "$CHECKOUT" ]; then
+     printf 'field upgrade %s' "$1"
+   else
+-    printf '%s/install.sh %s' "$(tilde "$REPO")" "$1"
++    printf '%s/install.sh %s' "$(tilde "$CHECKOUT")" "$1"
+   fi
+ }
+ 
+@@ -142,6 +163,13 @@ require_cmake() {
+ }
+ 
+ install_cli() {
++  build_cli
++  link_cli
++}
++
++# The same steps for a checkout and for a release version, in whichever
++# tree REPO names.
++build_cli() {
+   # --frozen-lockfile, because an installer has no business rewriting the
+   # checkout's lockfile; a checkout whose package.json moved ahead of it
+   # gets pnpm's own error saying so.
+@@ -152,7 +180,6 @@ install_cli() {
+   # CLI because it bundles code from src/.
+   pnpm --dir "$REPO" run build
+   pnpm --dir "$REPO" run build:ui
+-  link_cli
+ }
+ 
+ # pnpm links the checkout rather than copying it, so a later build takes
+@@ -169,13 +196,33 @@ link_cli() {
+   hash -r
+   found="$(command -v field 2>/dev/null)" || found=""
+   if [ -n "$found" ] && [ "$found" != "$GLOBAL_BIN/field" ]; then
+-    warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of pnpm's $(tilde "$GLOBAL_BIN/field")"
++    warn_row cli-shadowed "field on PATH is $(describe_field "$found"), ahead of pnpm's $(tilde "$GLOBAL_BIN/field")"
++  fi
++}
++
++# A `field` found on PATH, for a cli-shadowed row: its path, and what it is
++# when it is a release install's shim, which is the other `field` a machine
++# with a checkout is likely to have.
++describe_field() {
++  if is_release_shim "$1"; then
++    printf "%s, a release install's shim" "$(tilde "$1")"
++  else
++    tilde "$1"
+   fi
+ }
+ 
++# A release install builds each version in a directory of its own, and
++# FIELD_FETCHCONTENT_BASE_DIR, which native/audiod/CMakeLists.txt reads,
++# keeps JUCE's download outside all of them, so only the first version
++# downloads it (install.md §3.2).
+ install_audiod() {
+-  [ -x "$REPO/$AUDIOD_RELATIVE" ] ||
+-    row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
++  if [ ! -x "$REPO/$AUDIOD_RELATIVE" ]; then
++    if [ -d "${FIELD_FETCHCONTENT_BASE_DIR:-/nonexistent}/juce-src" ]; then
++      row building "field-audiod for this version: CMake compiles JUCE from its download in $(tilde "$FIELD_FETCHCONTENT_BASE_DIR"), which takes a few minutes"
++    else
++      row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
++    fi
++  fi
+   if ! pnpm --dir "$REPO" run build:native; then
+     [ "$(uname -s)" != Linux ] ||
+       echo "install.sh: on Linux, JUCE needs the ALSA, X11, and freetype development headers; .github/workflows/ci.yml installs the packages it needs on Ubuntu" >&2
+@@ -286,7 +333,7 @@ report_cli() {
+     row cli "$(tilde "$bin/field") -> $(tilde "$REPO")"
+   fi
+   if [ -n "$found" ] && [ "$found" != "$bin/field" ]; then
+-    warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of pnpm's $(tilde "$bin/field")"
++    warn_row cli-shadowed "field on PATH is $(describe_field "$found"), ahead of pnpm's $(tilde "$bin/field")"
+   elif [ -z "$found" ] && [ -n "$LINKED" ]; then
+     warn_row not-on-path "pnpm's global bin directory $(tilde "$bin") is not on PATH — run pnpm setup"
+   fi
+@@ -396,29 +443,505 @@ show_status() {
+   report_workers
+ }
+ 
+-if [ -z "$REPO" ]; then
+-  die "run this from a Field checkout: git clone https://github.com/okamnesiac/field, then ./install.sh in it" 69
+-fi
+-[ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status]" 64
+-TARGET="${1:-all}"
+-refresh_linked
+-
+-# Each target checks every prerequisite it needs before its first command,
+-# so a missing one stops it with nothing changed.
+-case "$TARGET" in
+-  all)
+-    require_node
+-    require_pnpm
+-    require_global_bin
+-    require_cmake
+-    install_cli
+-    install_audiod
++# --- Release installs (install.md §3.2) ---
++#
++# ~/.local/share/field/        DATA_DIR: FIELD_DATA_DIR, or under XDG_DATA_HOME
++#   0.3.0/                     one built source tree per version
++#   0.2.0/                     the version it replaced, kept to switch back to
++#   current -> 0.3.0           the version `field` runs, switched last
++#   cache/fetchcontent/        JUCE's download, shared by every version
++#   release.conf               the repository, ref, and bin directory followed
++# ~/.local/bin/field           BIN_DIR: the shim, which runs current
++
++DEFAULT_REPO=okamnesiac/field
++DEFAULT_REF=v0
++RAW_URL="${FIELD_RAW_URL:-https://raw.githubusercontent.com}"
++ARCHIVE_URL="${FIELD_ARCHIVE_URL:-https://github.com}"
++SHIM_MARKER="# Field's release shim, written by install.sh."
++DATA_DIR=""
++RECORD=""
++RELEASE_REPO=""
++RELEASE_REF=""
++BIN_DIR=""
++FETCH_CACHE=""
++INSTALLING=""
++REPLACING=""
++
++# What release.conf records for a key, or nothing.
++recorded() {
++  local value=""
++  [ ! -f "$RECORD" ] || value="$(sed -n "s/^$1=//p" "$RECORD")"
++  printf '%s' "${value%%$'\n'*}"
++}
++
++# Where release installs live, and what they follow. FIELD_DATA_DIR names
++# the directory; without it, a version's own copy of this script finds the
++# directory it was unpacked into, and anything else uses the XDG data
++# directory. FIELD_REPO, FIELD_REF, and FIELD_BIN_DIR come ahead of what
++# release.conf recorded, which comes ahead of the defaults, so an install
++# from a fork keeps upgrading from that fork.
++release_init() {
++  if [ -n "${FIELD_DATA_DIR:-}" ]; then
++    DATA_DIR="$FIELD_DATA_DIR"
++  elif [ -n "$SCRIPT_DIR" ] && [ -L "$(dirname -- "$SCRIPT_DIR")/current" ]; then
++    DATA_DIR="$(dirname -- "$SCRIPT_DIR")"
++  else
++    case "${XDG_DATA_HOME:-}" in
++      /*) DATA_DIR="$XDG_DATA_HOME/field" ;;
++      *) DATA_DIR="$HOME/.local/share/field" ;;
++    esac
++  fi
++  case "$DATA_DIR" in /*) ;; *) DATA_DIR="$PWD/$DATA_DIR" ;; esac
++  DATA_DIR="${DATA_DIR%/}"
++  RECORD="$DATA_DIR/release.conf"
++  FETCH_CACHE="$DATA_DIR/cache/fetchcontent"
++  RELEASE_REPO="${FIELD_REPO:-$(recorded repo)}"
++  RELEASE_REPO="${RELEASE_REPO:-$DEFAULT_REPO}"
++  RELEASE_REF="${FIELD_REF:-$(recorded ref)}"
++  RELEASE_REF="${RELEASE_REF:-$DEFAULT_REF}"
++  BIN_DIR="${FIELD_BIN_DIR:-$(recorded bin)}"
++  BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
++  case "$BIN_DIR" in /*) ;; *) BIN_DIR="$PWD/$BIN_DIR" ;; esac
++  BIN_DIR="${BIN_DIR%/}"
++  # Both go into URLs, so each is held to the characters GitHub allows.
++  case "$RELEASE_REPO" in
++    *[!A-Za-z0-9._/-]* | *..* | /* | */ | */*/*) die "FIELD_REPO is owner/repository, and is $RELEASE_REPO" 64 ;;
++    */*) ;;
++    *) die "FIELD_REPO is owner/repository, and is $RELEASE_REPO" 64 ;;
++  esac
++  case "$RELEASE_REF" in
++    "" | *[!A-Za-z0-9._/-]* | *..* | /* | */) die "FIELD_REF is a tag or branch name, and is $RELEASE_REF" 64 ;;
++  esac
++}
++
++# curl, sending GITHUB_TOKEN to GitHub's hosts when it is set, so a
++# maintainer can install from the repository while it is private. The
++# token travels in curl's config on stdin rather than on its command line,
++# where any process on the machine could read it, and never to a host
++# FIELD_RAW_URL or FIELD_ARCHIVE_URL names.
++fetch() {
++  local url="$1"
++  shift
++  case "$url" in
++    https://github.com/* | https://raw.githubusercontent.com/* | https://api.github.com/* | https://codeload.github.com/*)
++      if [ -n "${GITHUB_TOKEN:-}" ]; then
++        printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" |
++          curl -fsSL --retry 2 --config - "$@" "$url"
++        return
++      fi
++      ;;
++  esac
++  curl -fsSL --retry 2 "$@" "$url"
++}
++
++# What to try when GitHub will not answer: the repository is private until
++# chunk 4, and a private one answers 404 without a token.
++token_hint() {
++  [ -n "${GITHUB_TOKEN:-}" ] || printf ' — for a private repository, set GITHUB_TOKEN'
++}
++
++# The "version" field of a package.json, read with sed, as Projector's
++# installer reads its manifest, so nothing runs that the download wrote.
++package_version() {
++  local version
++  version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
++  printf '%s' "${version%%$'\n'*}"
++}
++
++# The version FIELD_REF names, from package.json there, which is how
++# Projector's installer learns the version it installs. The version becomes
++# a directory name, so anything but X.Y.Z is refused.
++release_version() {
++  local text version semver='^[0-9]+\.[0-9]+\.[0-9]+$'
++  text="$(fetch "$RAW_URL/$RELEASE_REPO/$RELEASE_REF/package.json")" || return 1
++  version="$(printf '%s\n' "$text" | package_version)"
++  if ! [[ $version =~ $semver ]]; then
++    echo "install.sh: $RELEASE_REPO at $RELEASE_REF names version '$version', which is not X.Y.Z" >&2
++    return 1
++  fi
++  printf '%s\n' "$version"
++}
++
++# The version `current` names, or nothing when there is none.
++current_version() {
++  local target
++  target="$(readlink "$DATA_DIR/current" 2>/dev/null)" || return 0
++  target="${target%/}"
++  target="${target##*/}"
++  if [ -n "$target" ] && [ -d "$DATA_DIR/$target" ]; then printf '%s\n' "$target"; fi
++}
++
++# The versions installed beside current, which prune has kept.
++kept_versions() {
++  local entry name current="$1"
++  for entry in "$DATA_DIR"/*; do
++    name="${entry##*/}"
++    [ -d "$entry" ] && [ ! -L "$entry" ] || continue
++    case "$name" in
++      "$current") ;;
++      [0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$name" ;;
++    esac
++  done
++}
++
++# True when dotted version $1 is older than $2, by each number in turn.
++version_older() {
++  local a="$1" b="$2" x y
++  while [ -n "$a" ] || [ -n "$b" ]; do
++    x="${a%%.*}"
++    y="${b%%.*}"
++    [ "${x:-0}" -ge "${y:-0}" ] || return 0
++    [ "${x:-0}" -le "${y:-0}" ] || return 1
++    case "$a" in *.*) a="${a#*.}" ;; *) a="" ;; esac
++    case "$b" in *.*) b="${b#*.}" ;; *) b="" ;; esac
++  done
++  return 1
++}
++
++is_release_shim() { [ -f "$1" ] && grep -qF "$SHIM_MARKER" "$1" 2>/dev/null; }
++
++require_fetch_tools() {
++  command -v curl >/dev/null 2>&1 || die "installing a release needs curl, which is not on PATH" 69
++  command -v tar >/dev/null 2>&1 || die "installing a release needs tar, which is not on PATH" 69
++}
++
++# The shim replaces only itself: a `field` someone else put in the bin
++# directory stops the installer before anything changes.
++require_shim_free() {
++  local shim="$BIN_DIR/field"
++  if [ -e "$shim" ] || [ -L "$shim" ]; then
++    is_release_shim "$shim" ||
++      die "$(tilde "$shim") exists and is not Field's release shim — move it aside, or set FIELD_BIN_DIR to install the shim somewhere else" 69
++  fi
++}
++
++require_installed() {
++  [ -n "$(current_version)" ] ||
++    die "no release of Field is installed in $(tilde "$DATA_DIR") — run $(rerun all)" 69
++  REPO="$DATA_DIR/$(current_version)"
++}
++
++# GitHub's source archive of the version's immutable tag, unpacked into
++# DATA_DIR/<version>. GitHub names the archive's one top-level directory
++# <repository>-<version>, and its API names it <owner>-<repository>-<sha>,
++# so whichever single directory is there is the source. It unpacks beside
++# the versions and moves into place whole, so a version directory never
++# holds half an archive.
++download_release() {
++  local version="$1" url staging entry top="" count=0
++  url="$ARCHIVE_URL/$RELEASE_REPO/archive/refs/tags/v$version.tar.gz"
++  staging="$DATA_DIR/.download-$version"
++  rm -rf "$staging" "${DATA_DIR:?}/$version"
++  mkdir -p "$staging/unpacked"
++  row downloading "$url"
++  fetch "$url" -o "$staging/source.tar.gz" || die "could not download $url$(token_hint)"
++  tar -xzf "$staging/source.tar.gz" -C "$staging/unpacked" || die "could not unpack $url"
++  for entry in "$staging/unpacked"/* "$staging/unpacked"/.[!.]*; do
++    [ -e "$entry" ] || continue
++    count=$((count + 1))
++    top="$entry"
++  done
++  if [ "$count" -ne 1 ] || [ ! -f "$top/package.json" ] || [ ! -f "$top/install.sh" ]; then
++    die "$url does not hold a single directory of Field's source"
++  fi
++  [ "$(package_version < "$top/package.json")" = "$version" ] ||
++    die "$url holds version $(package_version < "$top/package.json"), not $version"
++  mv "$top" "$DATA_DIR/$version"
++  rm -rf "$staging"
++}
++
++# The workers set up in a version, by the names `field setup` takes: each
++# row of that version's `field setup --check` but worker-absent, from the
++# version's own CLI, which owns the list of workers (install.md §2.4).
++workers_set_up_in() {
++  local label name rest
++  [ -f "$1/dist/cli.js" ] || return 0
++  { node "$1/dist/cli.js" setup --check 2>/dev/null </dev/null || true; } |
++    while read -r label name rest; do
++      case "$label" in worker-current | worker-stale | worker-no-uv) printf '%s %s\n' "$label" "$name" ;; esac
++    done
++}
++
++# A worker's environment lives in python/<worker>/.venv inside the version,
++# so each worker set up in the version being replaced is set up again in
++# the new one, with the new one's CLI, before the switch (install.md §7.5).
++# Its weights are in the Hugging Face cache and its packages in uv's, so
++# nothing large downloads again. One whose uv is gone could not run in the
++# old version either, so it is skipped with a row rather than failing the
++# upgrade.
++setup_workers_again() {
++  local old="$1" list label name
++  list="$(workers_set_up_in "$DATA_DIR/$old")"
++  [ -n "$list" ] || return 0
++  while read -r label name; do
++    [ -n "$name" ] || continue
++    if [ "$label" = worker-no-uv ]; then
++      warn_row worker-skipped "$name was set up in $old, and uv is not installed, so $INSTALLING does not set it up — brew install uv, then field setup $name"
++      continue
++    fi
++    row setting-up "$name in $INSTALLING, as it was in $old"
++    node "$REPO/dist/cli.js" setup "$name" </dev/null
++  done <<EOF
++$list
++EOF
++}
++
++# rename(2) swaps the link in one step: `ln -sfn` removes the old one first,
++# and `mv` would move the new link into the directory the old one names.
++switch_to() {
++  rm -f "$DATA_DIR/.current.new"
++  ln -s "$1" "$DATA_DIR/.current.new"
++  node -e 'require("fs").renameSync(process.argv[1], process.argv[2])' "$DATA_DIR/.current.new" "$DATA_DIR/current"
++  row switched "$(tilde "$DATA_DIR/current") -> $1"
++}
++
++# A path as a single-quoted word for the shim.
++shell_quote() {
++  local quote="'\\''"
++  printf "'%s'" "${1//\'/$quote}"
++}
++
++# The shim runs whatever `current` names, so a switch moves `field` with no
++# relinking, and it needs no pnpm global bin directory on PATH.
++write_shim() {
++  local shim="$BIN_DIR/field"
++  mkdir -p "$BIN_DIR"
++  {
++    printf '#!/bin/sh\n'
++    printf '%s It runs the version that\n' "$SHIM_MARKER"
++    printf '# %s names, so an upgrade moves it (docs/install.md).\n' "$(tilde "$DATA_DIR/current")"
++    printf 'exec node %s "$@"\n' "$(shell_quote "$DATA_DIR/current/dist/cli.js")"
++  } >"$shim.new"
++  chmod 755 "$shim.new"
++  mv -f "$shim.new" "$shim"
++  row linked "$(tilde "$shim") -> $(tilde "$DATA_DIR/current")"
++}
++
++write_record() {
++  printf 'repo=%s\nref=%s\nbin=%s\n' "$RELEASE_REPO" "$RELEASE_REF" "$BIN_DIR" >"$RECORD.new"
++  mv -f "$RECORD.new" "$RECORD"
++}
++
++# Keeps the version just installed and the one it replaced, so a broken
++# release can be switched back from by hand, and removes every other
++# version and any download a failed run left behind.
++prune() {
++  local entry name
++  for entry in "$DATA_DIR"/* "$DATA_DIR"/.download-*; do
++    [ -d "$entry" ] && [ ! -L "$entry" ] || continue
++    name="${entry##*/}"
++    case "$name" in
++      "$1" | "${2:-$1}") ;;
++      .download-*) rm -rf "$entry" ;;
++      [0-9]*.[0-9]*.[0-9]*)
++        rm -rf "$entry"
++        row removed "$name"
++        ;;
++    esac
++  done
++}
++
++# Where to add the bin directory, for the shell this is likely to be.
++profile_hint() {
++  case "${SHELL:-}" in
++    */zsh) printf '~/.zshrc' ;;
++    */bash) if [ "$(uname -s)" = Darwin ]; then printf '~/.bash_profile'; else printf '~/.bashrc'; fi ;;
++    *) printf "your shell's profile" ;;
++  esac
++}
++
++# The shim works from anywhere once its directory is on PATH. Nothing
++# refuses to install it when the directory is not, as pnpm refuses to
++# link, so this is a row after the install rather than a stop before it.
++report_shim() {
++  local shim="$BIN_DIR/field" found entry
++  hash -r
++  found="$(command -v field 2>/dev/null)" || found=""
++  if is_release_shim "$shim"; then
++    row cli "$(tilde "$shim") -> $(tilde "$DATA_DIR/current")"
++  else
++    warn_row cli-missing "no field shim in $(tilde "$BIN_DIR") — run $(rerun all)"
++  fi
++  case ":$PATH:" in
++    *":$BIN_DIR:"*)
++      if [ -n "$found" ] && [ "$found" != "$shim" ]; then
++        warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of the release's $(tilde "$shim")"
++      fi
++      ;;
++    *)
++      entry="$BIN_DIR"
++      case "$entry" in "$HOME"/*) entry="\$HOME${entry#"$HOME"}" ;; esac
++      warn_row not-on-path "$(tilde "$BIN_DIR") is not on PATH, so your shell does not find the shim — add export PATH=\"$entry:\$PATH\" to $(profile_hint), then open a new shell"
++      ;;
++  esac
++}
++
++# The installed version against the one FIELD_REF names now.
++report_release() {
++  local installed="$1" latest
++  if [ -n "${FIELD_OFFLINE:-}" ]; then
++    row release "$RELEASE_REPO $RELEASE_REF (offline; not compared)"
++    return 0
++  fi
++  if ! latest="$(release_version 2>/dev/null)"; then
++    row release "$RELEASE_REPO $RELEASE_REF (could not read its version from $RAW_URL$(token_hint))"
++    return 0
++  fi
++  row release "$RELEASE_REPO $RELEASE_REF is at $latest"
++  [ -n "$installed" ] || return 0
++  if [ "$installed" = "$latest" ]; then
++    row release-latest "$installed is installed"
++  elif version_older "$installed" "$latest"; then
++    warn_row release-behind "$installed is installed, and $RELEASE_REF is at $latest — run $(rerun all)"
++  else
++    row release-ahead "$installed is installed, newer than $latest at $RELEASE_REF"
++  fi
++}
++
++show_release_status() {
++  local current kept
++  current="$(current_version)"
++  if [ -n "$current" ]; then
++    row installed "$current in $(tilde "$DATA_DIR/$current")"
++  else
++    warn_row not-installed "no release of Field is installed in $(tilde "$DATA_DIR") — run $(rerun all)"
++  fi
++  report_release "$current"
++  for kept in $(kept_versions "$current"); do
++    row previous "$kept in $(tilde "$DATA_DIR/$kept"), kept to switch back to by hand"
++  done
++  report_tools
++  [ -n "$current" ] || return 0
++  REPO="$DATA_DIR/$current"
++  report_shim
++  if [ ! -f "$REPO/dist/cli.js" ]; then
++    warn_row cli-unbuilt "$(tilde "$REPO/dist") holds no build — run $(rerun cli)"
++  fi
++  if [ -f "$REPO/ui/dist/index.html" ]; then
++    row ui-current "$(tilde "$REPO/ui/dist")"
++  else
++    warn_row ui-missing "ui/dist holds no build, so field ui cannot open — run $(rerun cli)"
++  fi
++  [ -z "${FIELD_AUDIOD:-}" ] ||
++    row audiod-override "FIELD_AUDIOD is set, so field runs $(tilde "$FIELD_AUDIOD") instead of this build"
++  if [ -x "$REPO/$AUDIOD_RELATIVE" ]; then
++    row audiod-current "$(tilde "$REPO/$AUDIOD_RELATIVE")"
++  else
++    warn_row audiod-missing "field-audiod is not built — run $(rerun audiod)"
++  fi
++  report_workers
++}
++
++# Why a run that started installing a version stopped, and what still runs.
++release_failed() {
++  [ "$1" -ne 0 ] || return 0
++  if [ -n "$REPLACING" ]; then
++    echo "install.sh: $INSTALLING did not install, so $REPLACING stays current and field still runs it" >&2
++  else
++    echo "install.sh: $INSTALLING did not install, and nothing was switched to it" >&2
++  fi
++}
++
++# The release FIELD_REF names. A new version downloads, builds, and sets up
++# again each worker the current one has, all in a directory of its own,
++# and only then becomes current, so a failure at any step leaves the
++# installed version as it was. The version that is already current gets
++# whatever piece is missing built, its workers re-synced, and its shim
++# rewritten.
++install_release() {
++  local current version
++  [ -z "${FIELD_OFFLINE:-}" ] || die "FIELD_OFFLINE is set, and installing a release downloads it" 69
++  current="$(current_version)"
++  version="$(release_version)" ||
++    die "could not read the version of $RELEASE_REPO at $RELEASE_REF from $RAW_URL$(token_hint)"
++  row release "$RELEASE_REPO $RELEASE_REF is at $version"
++  export FIELD_FETCHCONTENT_BASE_DIR="$FETCH_CACHE"
++  if [ "$version" = "$current" ]; then
++    REPO="$DATA_DIR/$version"
++    row installed "$version is installed"
++    if [ ! -f "$REPO/dist/cli.js" ] || [ ! -f "$REPO/ui/dist/index.html" ]; then build_cli; fi
++    [ -x "$REPO/$AUDIOD_RELATIVE" ] || install_audiod
+     install_workers
+-    report_checkout
+-    ;;
+-  cli) require_node; require_pnpm; require_global_bin; install_cli; report_checkout ;;
+-  audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
+-  workers) require_node; install_workers; report_checkout ;;
+-  status) show_status ;;
+-  *) die "usage: install.sh [all|cli|audiod|workers|status]" 64 ;;
+-esac
++  else
++    INSTALLING="$version"
++    REPLACING="$current"
++    mkdir -p "$DATA_DIR"
++    trap 'release_failed $?' EXIT
++    download_release "$version"
++    REPO="$DATA_DIR/$version"
++    build_cli
++    install_audiod
++    [ -z "$current" ] || setup_workers_again "$current"
++    switch_to "$version"
++    trap - EXIT
++  fi
++  write_shim
++  write_record
++  [ "$version" = "$current" ] || prune "$version" "$current"
++  report_shim
++}
++
++release_main() {
++  release_init
++  case "$TARGET" in
++    all)
++      require_node
++      require_pnpm
++      require_cmake
++      require_fetch_tools
++      require_shim_free
++      install_release
++      ;;
++    # The other targets rebuild a piece of the installed version where it
++    # is, as they rebuild a checkout, and say whether a newer release is out.
++    cli) require_node; require_pnpm; require_installed; build_cli; report_release "$(current_version)" ;;
++    audiod)
++      require_pnpm
++      require_cmake
++      require_installed
++      export FIELD_FETCHCONTENT_BASE_DIR="$FETCH_CACHE"
++      install_audiod
++      report_release "$(current_version)"
++      ;;
++    workers) require_node; require_installed; install_workers; report_release "$(current_version)" ;;
++    status) show_release_status ;;
++  esac
++}
++
++checkout_main() {
++  refresh_linked
++  # Each target checks every prerequisite it needs before its first command,
++  # so a missing one stops it with nothing changed.
++  case "$TARGET" in
++    all)
++      require_node
++      require_pnpm
++      require_global_bin
++      require_cmake
++      install_cli
++      install_audiod
++      install_workers
++      report_checkout
++      ;;
++    cli) require_node; require_pnpm; require_global_bin; install_cli; report_checkout ;;
++    audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
++    workers) require_node; install_workers; report_checkout ;;
++    status) show_status ;;
++  esac
++}
++
++# Everything runs from here, on the last line, so bash has read the whole
++# script before the first command runs: piped from curl, a download cut
++# short runs nothing, and no command can read the rest of the script as
++# its input.
++main() {
++  [ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status]" 64
++  TARGET="${1:-all}"
++  case "$TARGET" in
++    all | cli | audiod | workers | status) ;;
++    *) die "usage: install.sh [all|cli|audiod|workers|status]" 64 ;;
++  esac
++  if [ -n "$CHECKOUT" ]; then checkout_main; else release_main; fi
++}
++
++main "$@"
+diff --git a/native/audiod/CMakeLists.txt b/native/audiod/CMakeLists.txt
+index 418ada7..f042115 100644
+--- a/native/audiod/CMakeLists.txt
++++ b/native/audiod/CMakeLists.txt
+@@ -10,6 +10,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ # So clangd sees the real flags rather than guessing an older standard.
+ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+ 
++# A release install builds each version in a directory of its own and
++# sets FIELD_FETCHCONTENT_BASE_DIR to a cache outside all of them, so an
++# upgrade does not download JUCE again (install.md §3.2). CMake reads no
++# environment variable for FETCHCONTENT_BASE_DIR, and `pnpm build:native`
++# passes no -D, so this reads one into the cache, where a later
++# reconfigure without it keeps it. A checkout leaves it unset, and JUCE
++# stays under build/_deps.
++if(NOT "$ENV{FIELD_FETCHCONTENT_BASE_DIR}" STREQUAL "")
++  set(FETCHCONTENT_BASE_DIR "$ENV{FIELD_FETCHCONTENT_BASE_DIR}" CACHE PATH
++    "Directory under which FetchContent downloads JUCE" FORCE)
++endif()
++
+ include(FetchContent)
+ FetchContent_Declare(
+   JUCE
+diff --git a/src/commands/upgrade.test.ts b/src/commands/upgrade.test.ts
+index 9ecd4aa..6fc76fd 100644
+--- a/src/commands/upgrade.test.ts
++++ b/src/commands/upgrade.test.ts
+@@ -1,9 +1,9 @@
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+-import { installerPath, upgrade } from './upgrade.js';
++import { curlRequest, installerPath, upgrade } from './upgrade.js';
+ 
+ // `field upgrade` is a doorway to install.sh and nothing else
+ // (install.md §2.5): it has to find the right installer, hand it the
+@@ -80,3 +80,103 @@ describe.skipIf(process.platform === 'win32')('field upgrade runs the installer'
+     expect(lines).toEqual([`+ '${scratch}/a checkout'\\''s home/install.sh' all`]);
+   });
+ });
++
++// A release install has no checkout beside its package, so `field upgrade`
++// downloads the newest installer from the repository and ref the install
++// recorded, and runs that (install.md §3.2). These serve the installer
++// from a file:// URL, which curl fetches as it would GitHub's.
++describe.skipIf(process.platform === 'win32')('field upgrade in a release install', () => {
++  let data: string;
++  let raw: string;
++  let argsFile: string;
++
++  // A version directory beside `current` and release.conf, as install.sh
++  // leaves them, and a stand-in installer served at the recorded ref that
++  // records its target and the data directory it was handed.
++  beforeEach(() => {
++    data = join(scratch, 'data');
++    mkdirSync(join(data, '0.2.0'), { recursive: true });
++    symlinkSync('0.2.0', join(data, 'current'));
++    writeFileSync(join(data, 'release.conf'), 'repo=someone/field\nref=v9\nbin=/unused\n');
++    raw = join(scratch, 'raw');
++    argsFile = join(scratch, 'args');
++    serveInstaller('someone/field', 'v9', 4);
++  });
++
++  function serveInstaller(repo: string, ref: string, status: number): void {
++    mkdirSync(join(raw, repo, ref), { recursive: true });
++    writeFileSync(
++      join(raw, repo, ref, 'install.sh'),
++      `printf '%s\\n' "$#:$*" "\${FIELD_DATA_DIR:-}" > "$UPGRADE_ARGS"\nexit ${status}\n`,
++    );
++  }
++
++  function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
++    return { PATH: process.env['PATH'], FIELD_RAW_URL: `file://${raw}`, UPGRADE_ARGS: argsFile, ...extra };
++  }
++
++  it('downloads the installer at the recorded ref and runs it with the same target', () => {
++    const lines: string[] = [];
++    const status = upgrade('status', { root: join(data, '0.2.0'), env: env(), err: (line) => lines.push(line) });
++    expect(status).toBe(4);
++    expect(readFileSync(argsFile, 'utf8')).toBe(`1:status\n${realpathSync(data)}\n`);
++    expect(lines).toEqual([`+ curl -fsSL file://${raw}/someone/field/v9/install.sh | bash -s -- status`]);
++  });
++
++  it('runs from the version current links to, as the shim runs it', () => {
++    const lines: string[] = [];
++    expect(upgrade(undefined, { root: join(data, 'current'), env: env(), err: (line) => lines.push(line) })).toBe(4);
++    expect(readFileSync(argsFile, 'utf8')).toBe(`0:\n${realpathSync(data)}\n`);
++    expect(lines).toEqual([`+ curl -fsSL file://${raw}/someone/field/v9/install.sh | bash`]);
++  });
++
++  it('takes FIELD_REPO and FIELD_REF ahead of the record', () => {
++    serveInstaller('other/field', 'main', 0);
++    expect(upgrade('all', { root: join(data, '0.2.0'), env: env({ FIELD_REPO: 'other/field', FIELD_REF: 'main' }), err: () => {} })).toBe(0);
++    expect(readFileSync(argsFile, 'utf8')).toBe(`1:all\n${realpathSync(data)}\n`);
++  });
++
++  it('follows okamnesiac/field at v0 when nothing is recorded', () => {
++    const loose = join(scratch, 'loose', '0.1.0');
++    mkdirSync(loose, { recursive: true });
++    serveInstaller('okamnesiac/field', 'v0', 0);
++    expect(upgrade('status', { root: loose, env: env(), err: () => {} })).toBe(0);
++    // Not a data directory, so the installer chooses its own.
++    expect(readFileSync(argsFile, 'utf8')).toBe('1:status\n\n');
++  });
++
++  it('refuses with the URL when the installer does not download', () => {
++    rmSync(raw, { recursive: true });
++    expect(() => upgrade('status', { root: join(data, '0.2.0'), env: env(), err: () => {} })).toThrow(
++      `cannot upgrade: could not download the installer from file://${raw}/someone/field/v9/install.sh — for a private repository, set GITHUB_TOKEN`,
++    );
++  });
++
++  it("runs a checkout's own installer, and downloads nothing", () => {
++    const checkout = join(scratch, 'checkout');
++    mkdirSync(join(checkout, '.git'), { recursive: true });
++    mkdirSync(join(checkout, 'src'));
++    writeFileSync(join(checkout, 'src', 'cli.ts'), '');
++    writeFileSync(join(checkout, 'install.sh'), `printf '%s\\n' "$#:$*" > "$UPGRADE_ARGS"\n`);
++    const lines: string[] = [];
++    expect(upgrade('cli', { root: checkout, env: env(), err: (line) => lines.push(line) })).toBe(0);
++    expect(readFileSync(argsFile, 'utf8')).toBe('1:cli\n');
++    expect(lines).toEqual([`+ ${realpathSync(checkout)}/install.sh cli`]);
++  });
++});
++
++describe('the installer download', () => {
++  it("sends GITHUB_TOKEN to GitHub in curl's config, never on its command line", () => {
++    const url = 'https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh';
++    const request = curlRequest(url, '/tmp/install.sh', { GITHUB_TOKEN: 'secret-token' });
++    expect(request.args).toEqual(['-fsSL', '--retry', '2', '-o', '/tmp/install.sh', '--config', '-', url]);
++    expect(request.input).toBe('header = "Authorization: Bearer secret-token"\n');
++  });
++
++  it('sends no token to any other host, or without one', () => {
++    for (const url of ['https://example.com/install.sh', 'http://raw.githubusercontent.com/x', 'file:///tmp/install.sh']) {
++      expect(curlRequest(url, '/tmp/install.sh', { GITHUB_TOKEN: 'secret-token' }).input).toBeUndefined();
++    }
++    expect(curlRequest('https://github.com/x', '/tmp/install.sh', {}).input).toBeUndefined();
++  });
++});
+diff --git a/src/commands/upgrade.ts b/src/commands/upgrade.ts
+index c259a55..6a178ae 100644
+--- a/src/commands/upgrade.ts
++++ b/src/commands/upgrade.ts
+@@ -1,24 +1,131 @@
+ import { spawnSync } from 'node:child_process';
+-import { existsSync } from 'node:fs';
+-import { constants } from 'node:os';
++import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
++import { constants, tmpdir } from 'node:os';
++import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ 
+-// `field upgrade [target]`: run the installer of the checkout this command
+-// was built from, with the same target, output, and exit status
+-// (install.md §2.5). Installing belongs to install.sh, which knows how to
+-// build and link each piece, so nothing here decides what an upgrade is.
+-// It finds the installer the way the daemon and the keymaps are found:
+-// beside the package this file was loaded from, which for a linked
+-// checkout is the checkout itself.
++// `field upgrade [target]`: run an installer with the same target, output,
++// and exit status (install.md §2.5). Installing belongs to install.sh,
++// which knows how to build and link each piece, so nothing here decides
++// what an upgrade is. Which installer depends on the install:
++//
++// - A checkout runs the install.sh beside the package this file was loaded
++//   from, which for a linked checkout is the checkout itself.
++// - A release install downloads the newest installer, install.sh at the ref
++//   its install recorded in the repository it recorded, and runs that
++//   (install.md §3.2), as Projector's `project upgrade` does. The copy
++//   inside the installed version is as old as the version.
++
++export const DEFAULT_REPO = 'okamnesiac/field';
++export const DEFAULT_REF = 'v0';
++const RAW_URL = 'https://raw.githubusercontent.com';
+ 
+ // Two levels up from src/commands/ and from dist/commands/ alike.
++export function packageRoot(): string {
++  return fileURLToPath(new URL('../..', import.meta.url));
++}
++
+ export function installerPath(): string {
+-  return fileURLToPath(new URL('../../install.sh', import.meta.url));
++  return join(packageRoot(), 'install.sh');
++}
++
++// The test install.sh makes (install.md §2.1, as amended): a git work tree
++// with the CLI's source beside the installer. A release version has the
++// source and no .git.
++export function isCheckout(root: string): boolean {
++  return existsSync(join(root, '.git')) && existsSync(join(root, 'src', 'cli.ts'));
++}
++
++export interface ReleaseSource {
++  repo: string;
++  ref: string;
++  // The directory holding the installed versions, when this package is one
++  // of them: the parent with a `current` link in it.
++  dataDir?: string | undefined;
++}
++
++// What release.conf in the data directory records, key by key.
++function readRecord(path: string): Map<string, string> {
++  const record = new Map<string, string>();
++  if (!existsSync(path)) return record;
++  for (const line of readFileSync(path, 'utf8').split('\n')) {
++    const at = line.indexOf('=');
++    if (at > 0 && !record.has(line.slice(0, at))) record.set(line.slice(0, at), line.slice(at + 1));
++  }
++  return record;
++}
++
++function isSymlink(path: string): boolean {
++  try {
++    return lstatSync(path).isSymbolicLink();
++  } catch {
++    return false;
++  }
++}
++
++// Where a release install came from: FIELD_REPO and FIELD_REF, then what
++// the install recorded, then the defaults, the order install.sh reads them
++// in. So an install from a fork upgrades from the fork.
++export function releaseSource(root: string, env: NodeJS.ProcessEnv): ReleaseSource {
++  const parent = dirname(root);
++  const dataDir = isSymlink(join(parent, 'current')) ? parent : undefined;
++  const record = dataDir === undefined ? new Map<string, string>() : readRecord(join(dataDir, 'release.conf'));
++  return {
++    repo: env['FIELD_REPO'] || record.get('repo') || DEFAULT_REPO,
++    ref: env['FIELD_REF'] || record.get('ref') || DEFAULT_REF,
++    dataDir,
++  };
++}
++
++export function installerUrl(source: ReleaseSource, env: NodeJS.ProcessEnv): string {
++  const base = (env['FIELD_RAW_URL'] || RAW_URL).replace(/\/+$/, '');
++  return `${base}/${source.repo}/${source.ref}/install.sh`;
++}
++
++const GITHUB_HOSTS = new Set(['github.com', 'raw.githubusercontent.com', 'api.github.com', 'codeload.github.com']);
++
++// curl's arguments for a download, and the config it reads on stdin. As in
++// install.sh, GITHUB_TOKEN goes only to GitHub's own hosts over https, and
++// in the config rather than on the command line, where any process on the
++// machine could read it.
++export function curlRequest(
++  url: string,
++  dest: string,
++  env: NodeJS.ProcessEnv,
++): { args: string[]; input?: string | undefined } {
++  const args = ['-fsSL', '--retry', '2', '-o', dest];
++  const token = env['GITHUB_TOKEN'];
++  let host = '';
++  try {
++    const parsed = new URL(url);
++    if (parsed.protocol === 'https:') host = parsed.hostname;
++  } catch {
++    // not a URL curl can use either; curl says so
++  }
++  if (token && GITHUB_HOSTS.has(host)) {
++    return { args: [...args, '--config', '-', url], input: `header = "Authorization: Bearer ${token}"\n` };
++  }
++  return { args: [...args, url] };
++}
++
++function curlDownload(url: string, dest: string, env: NodeJS.ProcessEnv): void {
++  const { args, input } = curlRequest(url, dest, env);
++  const result = spawnSync('curl', args, { input, stdio: ['pipe', 'inherit', 'inherit'], env });
++  if (result.error) throw new Error(`cannot upgrade: could not run curl: ${result.error.message}`);
++  if (result.status !== 0) {
++    const hint = env['GITHUB_TOKEN'] ? '' : ' — for a private repository, set GITHUB_TOKEN';
++    throw new Error(`cannot upgrade: could not download the installer from ${url}${hint}`);
++  }
+ }
+ 
+ export interface UpgradeDeps {
++  // The package this field runs from; the installed version's directory
++  // in a release install.
++  root?: string | undefined;
+   installer?: string | undefined;
+-  run?: ((script: string, args: string[]) => number) | undefined;
++  env?: NodeJS.ProcessEnv | undefined;
++  download?: ((url: string, dest: string, env: NodeJS.ProcessEnv) => void) | undefined;
++  run?: ((script: string, args: string[], env: NodeJS.ProcessEnv) => number) | undefined;
+   err?: ((line: string) => void) | undefined;
+   platform?: NodeJS.Platform | undefined;
+ }
+@@ -33,22 +140,48 @@ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): num
+         'pnpm install --frozen-lockfile, pnpm build, pnpm build:ui, and pnpm build:native',
+     );
+   }
+-  const installer = deps.installer ?? installerPath();
+-  if (!existsSync(installer)) {
+-    throw new Error(`cannot upgrade: ${installer} does not exist, so this field was not installed from a checkout`);
+-  }
+-  const args = target === undefined ? [] : [target];
++  const env = deps.env ?? process.env;
+   const err = deps.err ?? ((line: string) => process.stderr.write(`${line}\n`));
+-  // The command it runs, as you would type it, so the output that follows
+-  // has a name and the step can be repeated by hand.
+-  err(`+ ${[installer, ...args].map(displayQuote).join(' ')}`);
+-  return (deps.run ?? runInstaller)(installer, args);
++  const run = deps.run ?? runInstaller;
++  const args = target === undefined ? [] : [target];
++  // The real path: node runs the shim's target through the `current` link,
++  // and the data directory is the parent of the version, not of the link.
++  let root = deps.root ?? packageRoot();
++  try {
++    root = realpathSync(root);
++  } catch {
++    // a root that does not exist fails below with the path it was given
++  }
++  if (deps.installer !== undefined || isCheckout(root)) {
++    const installer = deps.installer ?? join(root, 'install.sh');
++    if (!existsSync(installer)) throw new Error(`cannot upgrade: ${installer} does not exist`);
++    // The command it runs, as you would type it, so the output that follows
++    // has a name and the step can be repeated by hand.
++    err(`+ ${[installer, ...args].map(displayQuote).join(' ')}`);
++    return run(installer, args, env);
++  }
++  const source = releaseSource(root, env);
++  const url = installerUrl(source, env);
++  // The installer reads the data directory from FIELD_DATA_DIR, so one
++  // installed somewhere other than the default upgrades in place.
++  const childEnv: NodeJS.ProcessEnv = { ...env };
++  if (source.dataDir !== undefined && !env['FIELD_DATA_DIR']) childEnv['FIELD_DATA_DIR'] = source.dataDir;
++  const scratch = mkdtempSync(join(tmpdir(), 'field-upgrade-'));
++  try {
++    const script = join(scratch, 'install.sh');
++    (deps.download ?? curlDownload)(url, script, env);
++    err(`+ curl -fsSL ${displayQuote(url)} | bash${args.length > 0 ? ` -s -- ${args.map(displayQuote).join(' ')}` : ''}`);
++    return run(script, args, childEnv);
++  } finally {
++    rmSync(scratch, { recursive: true, force: true });
++  }
+ }
+ 
+ // Through bash rather than the script's own execute bit, which a checkout
+-// with core.fileMode off, or one copied without modes, does not keep.
+-function runInstaller(script: string, args: string[]): number {
+-  const result = spawnSync('bash', [script, ...args], { stdio: 'inherit' });
++// with core.fileMode off, a copy made without modes, or a download, does
++// not keep.
++function runInstaller(script: string, args: string[], env: NodeJS.ProcessEnv): number {
++  const result = spawnSync('bash', [script, ...args], { stdio: 'inherit', env });
+   if (result.error) throw result.error;
+   if (result.signal !== null) return 128 + (constants.signals[result.signal] ?? 0);
+   return result.status ?? 1;
+diff --git a/src/install.test.ts b/src/install.test.ts
+index 3d3af7f..5a485b3 100644
+--- a/src/install.test.ts
++++ b/src/install.test.ts
+@@ -18,7 +18,12 @@ import {
+ import { tmpdir } from 'node:os';
+ import { delimiter, dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++// A test here runs install.sh one or more times, each a few dozen processes.
++// Under a full parallel suite one took longer than vitest's 5-second
++// default, so the file gets thirty.
++vi.setConfig({ testTimeout: 30_000 });
+ 
+ // install.sh, run by real bash against a clone of its own in a temporary
+ // directory (install.md §2). pnpm, cmake, and the field CLI are stand-ins
+@@ -47,7 +52,26 @@ function which(tool: string): string | undefined {
+ }
+ 
+ const BASH = which('bash')!;
+-const TOOLS = ['bash', 'git', 'node', 'dirname', 'uname', 'sed', 'grep', 'cat', 'mkdir', 'ln', 'rm', 'chmod', 'touch'];
++// curl is a stand-in too; tar and gzip unpack the stand-in releases.
++const TOOLS = [
++  'bash',
++  'git',
++  'node',
++  'dirname',
++  'uname',
++  'sed',
++  'grep',
++  'cat',
++  'mkdir',
++  'ln',
++  'rm',
++  'chmod',
++  'touch',
++  'mv',
++  'readlink',
++  'tar',
++  'gzip',
++];
+ 
+ let root: string;
+ let upstream: string;
+@@ -55,6 +79,12 @@ let repo: string;
+ let bin: string;
+ let pnpmHome: string;
+ let log: string;
++// A release install's directories, under the temporary HOME, and where the
++// stand-in curl serves GitHub from.
++let data: string;
++let shim: string;
++let serve: string;
++let downloaded: string;
+ 
+ function git(cwd: string, ...args: string[]): string {
+   const result = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
+@@ -104,6 +134,9 @@ case "$1 \${2:-}" in
+     printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
+   "run build:native")
+     [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
++    # Where native/audiod/CMakeLists.txt would have FetchContent put JUCE.
++    mkdir -p "$dir/native/audiod/build"
++    printf '%s\\n' "\${FIELD_FETCHCONTENT_BASE_DIR:-unset}" > "$dir/native/audiod/build/fetchcontent"
+     # A daemon already built is left alone, as CMake leaves field-audiod
+     # when the edit was to another target's source.
+     [ ! -e "$dir/${AUDIOD}" ] || exit 0
+@@ -123,6 +156,60 @@ if (process.argv.includes('--check')) {
+ }
+ `;
+ 
++// A stand-in curl, which serves GitHub's two hosts from FAKE_SERVE and a
++// file:// URL from the disk, and records each request with the config it
++// read on stdin, which is where a token travels.
++const CURL = `#!${BASH}
++url="" out="" config=""
++while [ $# -gt 0 ]; do
++  case "$1" in
++    -o) out="$2"; shift 2 ;;
++    --config) [ "$2" != - ] || config="$(cat)"; shift 2 ;;
++    --retry) shift 2 ;;
++    -*) shift ;;
++    *) url="$1"; shift ;;
++  esac
++done
++echo "curl $url\${config:+ [$config]}" >> "$FAKE_LOG"
++case "$url" in
++  https://raw.githubusercontent.com/*) path="$FAKE_SERVE/raw/\${url#https://raw.githubusercontent.com/}" ;;
++  https://github.com/*) path="$FAKE_SERVE/github/\${url#https://github.com/}" ;;
++  file://*) path="\${url#file://}" ;;
++  *) echo "curl: (6) Could not resolve host" >&2; exit 6 ;;
++esac
++[ -f "$path" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
++if [ -n "$out" ]; then cat "$path" > "$out"; else cat "$path"; fi
++`;
++
++// The CLI a stand-in release builds. It logs which version ran it, and
++// keeps its worker environments in its own version directory, as the real
++// one keeps python/<worker>/.venv.
++const RELEASE_CLI = `const fs = require('fs');
++const path = require('path');
++const root = path.join(__dirname, '..');
++const { version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
++const args = process.argv.slice(2);
++fs.appendFileSync(process.env.FAKE_LOG, 'field@' + version + ' ' + args.join(' ') + '\\n');
++const marker = (name) => path.join(root, 'python', name.replace(/^field-/, ''), '.venv', 'set-up');
++if (args[0] === '--version') console.log(version);
++if (args[0] === 'setup' && args.includes('--check')) {
++  for (const name of ['field-aced', 'field-voiced']) {
++    if (!fs.existsSync(marker(name))) {
++      console.log('worker-absent  ' + name + ' is not set up — field setup ' + name.slice(6) + ' sets it up');
++    } else if (process.env.FAKE_NO_UV) {
++      console.log('worker-no-uv   ' + name + ' is set up, and uv is not installed (brew install uv)');
++      process.exitCode = 1;
++    } else {
++      console.log('worker-current ' + name);
++    }
++  }
++} else if (args[0] === 'setup' && args[1] !== undefined && !args[1].startsWith('--')) {
++  if (process.env.FAKE_SETUP_FAILS) process.exit(3);
++  fs.mkdirSync(path.dirname(marker(args[1])), { recursive: true });
++  fs.writeFileSync(marker(args[1]), '');
++}
++`;
++
+ beforeEach(() => {
+   // Resolved, because the installer compares paths it resolves with
+   // pwd -P, and macOS's temporary directory sits behind /var -> /private/var.
+@@ -157,12 +244,28 @@ beforeEach(() => {
+   }
+   write(join(bin, 'pnpm'), PNPM, 0o755);
+   write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
++  write(join(bin, 'curl'), CURL, 0o755);
+   write(join(root, 'cli.js'), CLI);
++  write(join(root, 'release-cli.js'), RELEASE_CLI);
+   writeFileSync(log, '');
++
++  data = join(root, '.local', 'share', 'field');
++  shim = join(root, '.local', 'bin', 'field');
++  serve = join(root, 'serve');
++  // The installer on its own, as `field upgrade` downloads it.
++  downloaded = join(root, 'download', 'install.sh');
++  write(downloaded, readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
+ });
+ 
+-afterEach(() => {
++// Every test here is synchronous, spawnSync from start to finish, so between
++// tests the worker drains only microtasks and never reads a message. Vitest's
++// worker sends its task updates to the main thread and waits for the reply,
++// which sat unread across the whole file, more than a minute, until the call
++// timed out as an unhandled "Timeout calling onTaskUpdate" with every test
++// passed. One turn of the event loop after each test lets the reply in.
++afterEach(async () => {
+   rmSync(root, { recursive: true, force: true });
++  await new Promise((resolve) => setImmediate(resolve));
+ });
+ 
+ interface Run {
+@@ -216,6 +319,58 @@ function linkTo(target: string): void {
+   symlinkSync(target, join(pnpmHome, 'global', 'field'));
+ }
+ 
++interface Publish {
++  repo?: string;
++  ref?: string;
++  // The archive's top-level directory, which GitHub names <repo>-<version>.
++  prefix?: string;
++  archive?: boolean;
++}
++
++// Releases a version as the Release workflow does: package.json raised on
++// upstream's main and tagged vX.Y.Z, and the ref (v0) moved to it. The
++// stand-in curl serves the ref's package.json and installer from "raw",
++// and the tag's source archive, made as GitHub makes one, from "github".
++function publish(version: string, options: Publish = {}): void {
++  const slug = options.repo ?? 'okamnesiac/field';
++  const ref = options.ref ?? 'v0';
++  const manifest = `{\n  "name": "field",\n  "version": "${version}"\n}\n`;
++  write(join(upstream, 'package.json'), manifest);
++  git(upstream, 'commit', '--quiet', '-am', `release ${version}`);
++  git(upstream, 'tag', `v${version}`);
++  write(join(serve, 'raw', slug, ref, 'package.json'), manifest);
++  write(join(serve, 'raw', slug, ref, 'install.sh'), readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
++  if (options.archive === false) return;
++  const archive = join(serve, 'github', slug, 'archive', 'refs', 'tags', `v${version}.tar.gz`);
++  mkdirSync(dirname(archive), { recursive: true });
++  git(upstream, 'archive', '--format=tar.gz', `--prefix=${options.prefix ?? `field-${version}`}/`, '-o', archive, `v${version}`);
++}
++
++// The downloaded installer, which is a release installer, with the release
++// CLI and the bin directory on PATH.
++function release(target?: string, env: Record<string, string> = {}): Run {
++  return install(
++    target,
++    {
++      FAKE_SERVE: serve,
++      FAKE_CLI: join(root, 'release-cli.js'),
++      PATH: [join(pnpmHome, 'bin'), join(root, '.local', 'bin'), bin].join(delimiter),
++      ...env,
++    },
++    downloaded,
++  );
++}
++
++// The shim, run as a shell runs `field`.
++function field(...args: string[]): { status: number | null; stdout: string } {
++  const result = spawnSync(shim, args, { encoding: 'utf8', env: { PATH: bin, FAKE_LOG: log } });
++  return { status: result.status, stdout: result.stdout };
++}
++
++function current(dir = data): string {
++  return readlinkSync(join(dir, 'current'));
++}
++
+ posix('install.sh cli', () => {
+   it('installs, builds the CLI and the UI, and links the checkout, in that order', () => {
+     const run = install('cli');
+@@ -334,6 +489,11 @@ posix('install.sh audiod and workers', () => {
+     expect(install('audiod').status).toBe(0);
+   });
+ 
++  it("leaves JUCE's download in the checkout's own build directory", () => {
++    expect(install('audiod').status).toBe(0);
++    expect(readFileSync(join(repo, 'native/audiod/build/fetchcontent'), 'utf8')).toBe('unset\n');
++  });
++
+   it('fails when the daemon does not build', () => {
+     const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
+     expect(run.status).toBe(1);
+@@ -494,6 +654,15 @@ posix('install.sh status', () => {
+     );
+   });
+ 
++  it("names a release install's shim when it is ahead of pnpm's field on PATH", () => {
++    install('cli');
++    write(shim, "#!/bin/sh\n# Field's release shim, written by install.sh. It runs the version that\n", 0o755);
++    const run = install('status', { PATH: [join(root, '.local', 'bin'), join(pnpmHome, 'bin'), bin].join(delimiter) });
++    expect(rows(run.stdout).get('cli-shadowed')).toBe(
++      "field on PATH is ~/.local/bin/field, a release install's shim, ahead of pnpm's ~/pnpm/bin/field",
++    );
++  });
++
+   it('says how far the checkout is behind its upstream', () => {
+     write(join(upstream, 'src/new.ts'), '');
+     git(upstream, 'add', '.');
+@@ -540,16 +709,388 @@ describe('install.sh constants', () => {
+     expect(/^CMAKE_MAJOR=(\d+)$/m.exec(script)?.[1]).toBe(required![1]);
+     expect(/^CMAKE_MINOR=(\d+)$/m.exec(script)?.[1]).toBe(required![2]);
+   });
++
++  it('sets the JUCE download directory that native/audiod/CMakeLists.txt reads before it fetches JUCE', () => {
++    const cmake = readFileSync(join(packageRoot, 'native/audiod/CMakeLists.txt'), 'utf8');
++    const script = readFileSync(join(packageRoot, 'install.sh'), 'utf8');
++    const reads = cmake.indexOf('$ENV{FIELD_FETCHCONTENT_BASE_DIR}');
++    expect(reads).toBeGreaterThan(-1);
++    expect(reads).toBeLessThan(cmake.indexOf('include(FetchContent)'));
++    expect(script).toContain('export FIELD_FETCHCONTENT_BASE_DIR="$FETCH_CACHE"');
++  });
+ });
+ 
+-posix('install.sh refuses', () => {
+-  it('outside a checkout, and says to clone', () => {
+-    const run = install(undefined, {}, join(root, 'install.sh'));
++// install.md §2.1, as amended: a checkout is the script in a git work tree
++// with the CLI's source beside it, and anything else is a release.
++posix('install.sh tells a checkout from a release', () => {
++  it('installs a checkout as a checkout', () => {
++    const status = rows(install('status').stdout);
++    expect(status.has('checkout')).toBe(true);
++    expect(status.has('release')).toBe(false);
++  });
++
++  it('installs a release from a copy of the source without .git, as a source archive is', () => {
++    publish('0.2.0');
++    const unpacked = join(root, 'unpacked');
++    write(join(unpacked, 'install.sh'), readFileSync(join(repo, 'install.sh'), 'utf8'));
++    write(join(unpacked, 'src/cli.ts'), '');
++    const run = install('status', { FAKE_SERVE: serve }, join(unpacked, 'install.sh'));
++    const status = rows(run.stdout);
++    expect(status.has('checkout')).toBe(false);
++    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.2.0');
++    expect(status.get('not-installed')).toContain('no release of Field is installed in ~/.local/share/field');
++  });
++
++  it('installs a release when bash reads it from curl', () => {
++    publish('0.2.0');
++    const result = spawnSync(BASH, ['-s', '--', 'status'], {
++      input: readFileSync(downloaded, 'utf8'),
++      encoding: 'utf8',
++      env: { PATH: bin, HOME: root, FAKE_LOG: log, FAKE_SERVE: serve },
++    });
++    expect(result.status).toBe(0);
++    expect(rows(result.stdout).get('not-installed')).toBe(
++      'no release of Field is installed in ~/.local/share/field — run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash',
++    );
++  });
++});
++
++posix('install.sh installs a release', () => {
++  it('builds the version v0 names in a directory of its own, switches current to it, and links the shim', () => {
++    publish('0.2.0');
++    const run = release();
++    expect(run.stderr).toBe('');
++    expect(run.status).toBe(0);
++    const version = join(data, '0.2.0');
++    expect(changes(run)).toEqual([
++      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
++      'curl https://github.com/okamnesiac/field/archive/refs/tags/v0.2.0.tar.gz',
++      `pnpm --dir ${version} install --frozen-lockfile`,
++      `pnpm --dir ${version} run build`,
++      `pnpm --dir ${version} run build:ui`,
++      `pnpm --dir ${version} run build:native`,
++    ]);
++    expect(current()).toBe('0.2.0');
++    expect(readFileSync(join(data, 'release.conf'), 'utf8')).toBe(
++      `repo=okamnesiac/field\nref=v0\nbin=${join(root, '.local', 'bin')}\n`,
++    );
++    // JUCE's download goes to a cache beside the versions, not into this one.
++    expect(readFileSync(join(version, 'native/audiod/build/fetchcontent'), 'utf8')).toBe(
++      `${join(data, 'cache', 'fetchcontent')}\n`,
++    );
++    const status = rows(run.stdout);
++    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.2.0');
++    expect(status.get('switched')).toBe('~/.local/share/field/current -> 0.2.0');
++    expect(status.get('linked')).toBe('~/.local/bin/field -> ~/.local/share/field/current');
++    expect(status.get('cli')).toBe('~/.local/bin/field -> ~/.local/share/field/current');
++    expect(field('--version')).toEqual({ status: 0, stdout: '0.2.0\n' });
++  });
++
++  it('upgrades to the next release, keeps the version it replaced, and removes the one before that', () => {
++    publish('0.2.0');
++    expect(release().status).toBe(0);
++    publish('0.3.0');
++    expect(release().status).toBe(0);
++    expect(current()).toBe('0.3.0');
++    expect(field('--version').stdout).toBe('0.3.0\n');
++    expect(existsSync(join(data, '0.2.0'))).toBe(true);
++    publish('0.4.0');
++    const run = release();
++    expect(run.status).toBe(0);
++    expect(current()).toBe('0.4.0');
++    expect(existsSync(join(data, '0.3.0'))).toBe(true);
++    expect(existsSync(join(data, '0.2.0'))).toBe(false);
++    expect(rows(run.stdout).get('removed')).toBe('0.2.0');
++  });
++
++  it('leaves the installed version current when the download fails', () => {
++    publish('0.2.0');
++    release();
++    publish('0.3.0', { archive: false });
++    const run = release();
++    expect(run.status).toBe(1);
++    expect(run.stderr).toContain('could not download https://github.com/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz');
++    expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current and field still runs it');
++    expect(current()).toBe('0.2.0');
++    expect(field('--version').stdout).toBe('0.2.0\n');
++  });
++
++  it('leaves the installed version current when the new one does not build, and installs it on the next run', () => {
++    publish('0.2.0');
++    release();
++    publish('0.3.0');
++    const run = release(undefined, { FAKE_NATIVE_FAILS: '1' });
++    expect(run.status).toBe(1);
++    expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current');
++    expect(current()).toBe('0.2.0');
++    expect(field('--version').stdout).toBe('0.2.0\n');
++    expect(release().status).toBe(0);
++    expect(current()).toBe('0.3.0');
++  });
++
++  it('says nothing was switched when the first install fails', () => {
++    publish('0.2.0');
++    const run = release(undefined, { FAKE_UI_FAILS: '1' });
++    expect(run.status).toBe(2);
++    expect(run.stderr).toContain('0.2.0 did not install, and nothing was switched to it');
++    expect(existsSync(join(data, 'current'))).toBe(false);
++    expect(existsSync(shim)).toBe(false);
++  });
++
++  it('sets up again in the new version each worker set up in the version it replaces, before switching', () => {
++    publish('0.2.0');
++    release();
++    field('setup', 'aced');
++    publish('0.3.0');
++    const run = release();
++    expect(run.status).toBe(0);
++    expect(run.log).toContain('field@0.2.0 setup --check');
++    expect(run.log).toContain('field@0.3.0 setup field-aced');
++    expect(run.log).not.toContain('field@0.3.0 setup field-voiced');
++    expect(existsSync(join(data, '0.3.0', 'python', 'aced', '.venv', 'set-up'))).toBe(true);
++    expect(rows(run.stdout).get('setting-up')).toBe('field-aced in 0.3.0, as it was in 0.2.0');
++  });
++
++  it('leaves the installed version current when a worker does not set up in the new one', () => {
++    publish('0.2.0');
++    release();
++    field('setup', 'aced');
++    publish('0.3.0');
++    const run = release(undefined, { FAKE_SETUP_FAILS: '1' });
++    expect(run.status).toBe(3);
++    expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current');
++    expect(current()).toBe('0.2.0');
++  });
++
++  it('skips a worker whose uv is gone, which could not run in the old version either', () => {
++    publish('0.2.0');
++    release();
++    field('setup', 'aced');
++    publish('0.3.0');
++    const run = release(undefined, { FAKE_NO_UV: '1' });
++    expect(run.status).toBe(0);
++    expect(current()).toBe('0.3.0');
++    expect(run.log).not.toContain('field@0.3.0 setup field-aced');
++    expect(rows(run.stdout).get('worker-skipped')).toBe(
++      'field-aced was set up in 0.2.0, and uv is not installed, so 0.3.0 does not set it up — brew install uv, then field setup field-aced',
++    );
++  });
++
++  it('downloads and builds nothing when the newest release is installed, and re-syncs its workers', () => {
++    publish('0.2.0');
++    release();
++    const run = release();
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual([
++      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
++      'field@0.2.0 setup --existing',
++    ]);
++    expect(rows(run.stdout).get('installed')).toBe('0.2.0 is installed');
++  });
++
++  it('builds only the missing piece of the installed version', () => {
++    publish('0.2.0');
++    release();
++    rmSync(join(data, '0.2.0', AUDIOD));
++    const run = release();
++    expect(run.status).toBe(0);
++    expect(run.log).toContain(`pnpm --dir ${join(data, '0.2.0')} run build:native`);
++    expect(run.log).not.toContain(`pnpm --dir ${join(data, '0.2.0')} run build`);
++  });
++
++  it('takes the archive\'s single top-level directory whatever it is called', () => {
++    publish('0.2.0', { prefix: 'okamnesiac-field-1a2b3c4' });
++    expect(release().status).toBe(0);
++    expect(field('--version').stdout).toBe('0.2.0\n');
++  });
++
++  it('refuses a version that is not X.Y.Z, since it names a directory', () => {
++    write(join(serve, 'raw/okamnesiac/field/v0/package.json'), '{\n  "version": "../../x"\n}\n');
++    const run = release();
++    expect(run.status).toBe(1);
++    expect(run.stderr).toContain("names version '../../x', which is not X.Y.Z");
++    expect(existsSync(data)).toBe(false);
++  });
++
++  it('follows the repository and ref it was installed from', () => {
++    publish('0.2.0', { repo: 'someone/field', ref: 'main' });
++    expect(release(undefined, { FIELD_REPO: 'someone/field', FIELD_REF: 'main' }).status).toBe(0);
++    expect(readFileSync(join(data, 'release.conf'), 'utf8')).toContain('repo=someone/field\nref=main\n');
++    publish('0.3.0', { repo: 'someone/field', ref: 'main' });
++    const run = release();
++    expect(run.status).toBe(0);
++    expect(run.log).toContain('curl https://raw.githubusercontent.com/someone/field/main/package.json');
++    expect(current()).toBe('0.3.0');
++  });
++
++  it('refuses a FIELD_REPO that is not owner/repository', () => {
++    const run = release(undefined, { FIELD_REPO: 'someone/../field' });
++    expect(run.status).toBe(64);
++    expect(run.stderr).toContain('FIELD_REPO is owner/repository');
++  });
++
++  it('sends GITHUB_TOKEN to GitHub in curl config, and never to a URL FIELD_RAW_URL names', () => {
++    publish('0.2.0');
++    const run = release(undefined, { GITHUB_TOKEN: 'secret-token' });
++    expect(run.status).toBe(0);
++    const header = '[header = "Authorization: Bearer secret-token"]';
++    expect(run.log).toContain(`curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json ${header}`);
++    expect(run.log).toContain(`curl https://github.com/okamnesiac/field/archive/refs/tags/v0.2.0.tar.gz ${header}`);
++    publish('0.3.0');
++    const elsewhere = release(undefined, {
++      GITHUB_TOKEN: 'secret-token',
++      FIELD_RAW_URL: `file://${serve}/raw`,
++      FIELD_ARCHIVE_URL: `file://${serve}/github`,
++    });
++    expect(elsewhere.status).toBe(0);
++    expect(elsewhere.log).toContain(`curl file://${serve}/raw/okamnesiac/field/v0/package.json`);
++    expect(elsewhere.log).toContain(`curl file://${serve}/github/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz`);
++    expect(current()).toBe('0.3.0');
++  });
++
++  it('installs where FIELD_DATA_DIR and FIELD_BIN_DIR say, quoting a path that needs it', () => {
++    publish('0.2.0');
++    const dataDir = join(root, "a user's data");
++    const binDir = join(root, 'my bin');
++    const run = release(undefined, { FIELD_DATA_DIR: dataDir, FIELD_BIN_DIR: binDir });
++    expect(run.status).toBe(0);
++    expect(current(dataDir)).toBe('0.2.0');
++    const result = spawnSync(join(binDir, 'field'), ['--version'], { encoding: 'utf8', env: { PATH: bin, FAKE_LOG: log } });
++    expect(result.stdout).toBe('0.2.0\n');
++    expect(readFileSync(join(dataDir, 'release.conf'), 'utf8')).toContain(`bin=${binDir}\n`);
++  });
++
++  it('refuses to replace a field in the bin directory that is not its shim', () => {
++    publish('0.2.0');
++    write(shim, '#!/bin/sh\necho mine\n', 0o755);
++    const run = release();
+     expect(run.status).toBe(69);
+-    expect(run.stderr).toContain('run this from a Field checkout');
++    expect(run.stderr).toContain("~/.local/bin/field exists and is not Field's release shim");
+     expect(run.log).toEqual([]);
++    expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho mine\n');
+   });
+ 
++  it('refuses to install offline', () => {
++    const run = release(undefined, { FIELD_OFFLINE: '1' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('FIELD_OFFLINE is set');
++  });
++
++  it('says how to put the bin directory on PATH when it is not', () => {
++    publish('0.2.0');
++    const run = release(undefined, { PATH: [join(pnpmHome, 'bin'), bin].join(delimiter), SHELL: '/bin/zsh' });
++    expect(run.status).toBe(0);
++    expect(rows(run.stdout).get('not-on-path')).toBe(
++      '~/.local/bin is not on PATH, so your shell does not find the shim — add export PATH="$HOME/.local/bin:$PATH" to ~/.zshrc, then open a new shell',
++    );
++    expect(rows(release('status').stdout).has('not-on-path')).toBe(false);
++  });
++
++  it("says when a checkout's field is ahead of the release's on PATH", () => {
++    publish('0.2.0');
++    write(join(pnpmHome, 'bin', 'field'), '#!/bin/sh\n', 0o755);
++    const run = release();
++    expect(rows(run.stdout).get('cli-shadowed')).toBe(
++      "field on PATH is ~/pnpm/bin/field, ahead of the release's ~/.local/bin/field",
++    );
++  });
++
++  it("finds the data directory beside a version's own installer", () => {
++    publish('0.2.0');
++    const dataDir = join(root, 'elsewhere');
++    release(undefined, { FIELD_DATA_DIR: dataDir });
++    const run = install('status', { FAKE_SERVE: serve, FAKE_CLI: join(root, 'release-cli.js') }, join(dataDir, '0.2.0', 'install.sh'));
++    expect(rows(run.stdout).get('installed')).toBe('0.2.0 in ~/elsewhere/0.2.0');
++  });
++});
++
++posix('install.sh release targets', () => {
++  it('rebuild a piece of the installed version where it is', () => {
++    publish('0.2.0');
++    release();
++    const version = join(data, '0.2.0');
++    rmSync(join(version, AUDIOD));
++    const audiod = release('audiod');
++    expect(audiod.status).toBe(0);
++    expect(changes(audiod)).toEqual([
++      `pnpm --dir ${version} run build:native`,
++      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
++    ]);
++    expect(readFileSync(join(version, 'native/audiod/build/fetchcontent'), 'utf8')).toBe(
++      `${join(data, 'cache', 'fetchcontent')}\n`,
++    );
++    expect(rows(audiod.stdout).get('release-latest')).toBe('0.2.0 is installed');
++    const cli = release('cli');
++    expect(cli.status).toBe(0);
++    expect(cli.log).toContain(`pnpm --dir ${version} run build`);
++    expect(cli.log).toContain(`pnpm --dir ${version} run build:ui`);
++    const workers = release('workers');
++    expect(workers.status).toBe(0);
++    expect(workers.log).toContain('field@0.2.0 setup --existing');
++  });
++
++  it('say there is nothing to rebuild before a release is installed', () => {
++    for (const target of ['cli', 'audiod', 'workers']) {
++      const run = release(target);
++      expect(run.status).toBe(69);
++      expect(run.stderr).toContain('no release of Field is installed in ~/.local/share/field');
++    }
++  });
++});
++
++posix('install.sh status in a release install', () => {
++  it('reports the newest release as current, and every piece of it', () => {
++    publish('0.2.0');
++    release();
++    const run = release('status');
++    expect(run.status).toBe(0);
++    const status = rows(run.stdout);
++    expect(status.get('installed')).toBe('0.2.0 in ~/.local/share/field/0.2.0');
++    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.2.0');
++    expect(status.get('release-latest')).toBe('0.2.0 is installed');
++    expect(status.get('cli')).toBe('~/.local/bin/field -> ~/.local/share/field/current');
++    expect(status.get('ui-current')).toBe('~/.local/share/field/0.2.0/ui/dist');
++    expect(status.get('audiod-current')).toBe(`~/.local/share/field/0.2.0/${AUDIOD}`);
++    expect(status.get('worker-absent')).toBe('field-voiced is not set up — field setup voiced sets it up');
++    expect(status.has('previous')).toBe(false);
++  });
++
++  it('says when a newer release is out, and names field upgrade', () => {
++    publish('0.2.0');
++    release();
++    publish('0.3.0');
++    const status = rows(release('status').stdout);
++    expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.3.0');
++    expect(status.get('release-behind')).toBe('0.2.0 is installed, and v0 is at 0.3.0 — run field upgrade all');
++  });
++
++  it('names the version kept after an upgrade', () => {
++    publish('0.2.0');
++    release();
++    publish('0.3.0');
++    release();
++    expect(rows(release('status').stdout).get('previous')).toBe(
++      '0.2.0 in ~/.local/share/field/0.2.0, kept to switch back to by hand',
++    );
++  });
++
++  it('compares nothing offline', () => {
++    publish('0.2.0');
++    release();
++    const run = release('status', { FIELD_OFFLINE: '1' });
++    expect(rows(run.stdout).get('release')).toBe('okamnesiac/field v0 (offline; not compared)');
++    expect(run.log.some((line) => line.startsWith('curl'))).toBe(false);
++  });
++
++  it('names the token when GitHub does not answer', () => {
++    const status = rows(release('status').stdout);
++    expect(status.get('release')).toBe(
++      'okamnesiac/field v0 (could not read its version from https://raw.githubusercontent.com — for a private repository, set GITHUB_TOKEN)',
++    );
++  });
++});
++
++posix('install.sh refuses', () => {
+   it('an unknown target, as a usage error', () => {
+     const run = install('everything');
+     expect(run.status).toBe(64);
