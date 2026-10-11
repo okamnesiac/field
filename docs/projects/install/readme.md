@@ -179,12 +179,13 @@ CMake, a C++ compiler, and three minutes of compiling JUCE. So a Field
 release publishes built artifacts:
 
 - **`field-<version>.tgz`.** The CLI, platform-independent: `dist/`,
-  `package.json`, production `node_modules/` (commander, yaml, and zod,
-  all plain JavaScript), and the directories the CLI reads from its
-  package root, which are `keymaps/`, `sc/`, and `python/`. It needs
-  only Node 24 to run.
+  `package.json`, `LICENSE`, production `node_modules/` (commander,
+  yaml, and zod, all plain JavaScript), and the directories the CLI
+  reads from its package root, which are `keymaps/`, `sc/`, and
+  `python/`. It needs only Node 24 to run.
 - **`field-audiod-<version>-<platform>.tgz`.** The daemon, one per
-  platform: `darwin-arm64` and `linux-x64` first (§7.2).
+  platform: `darwin-arm64` and `linux-x64` first (§7.2), under the
+  terms §7.1 settles.
 - **`SHA256SUMS`**, which the installer verifies.
 
 The version is `package.json`'s. A release script, like Projector's
@@ -316,15 +317,25 @@ Chunks 2 to 4:
 
 ## 7 Open questions
 
-### 7.1 The license, and the daemon binary
+### 7.1 The daemon binary's license
 
-The repository has no `LICENSE` yet. As of 2026-10-11 the leaning is
-MIT. Whatever it is, `field-audiod` links JUCE, which is AGPLv3 or
-commercial ([architecture.md](../../architecture.md) "Licensing"), and
-a published daemon binary is a distribution of JUCE. Either the daemon
-ships under AGPLv3 with its source, which a public repository at the
-release tag provides, or a JUCE commercial license covers it. Decide
-this, and check JUCE's current terms, before chunk 2 publishes a binary.
+Field's code is under the MIT License (#184). The daemon carries more
+than Field's code: `field-audiod` links JUCE, which is AGPLv3 or
+commercial, and compiles in Steinberg's VST3 SDK, which JUCE 8.0.4
+bundles under GPLv3 or Steinberg's proprietary VST3 license. A
+commercial JUCE license does not cover the SDK.
+[README.md](../../../README.md) "License" and
+[architecture.md](../../architecture.md) "Licensing" record these terms.
+
+So a daemon binary that chunk 2 publishes is a distribution under AGPLv3
+and GPLv3, unless the publisher holds both commercial licenses. Decide
+which before chunk 2 publishes one:
+
+- **Publish under the copyleft terms.** The daemon's archive carries the
+  license notices, and the repository at the release tag is its source,
+  which needs the repository to be public by then.
+- **Hold both commercial licenses**: a commercial JUCE license and
+  Steinberg's proprietary VST3 license.
 
 ### 7.2 Platforms
 
