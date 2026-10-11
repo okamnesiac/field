@@ -352,6 +352,19 @@ which before chunk 2 publishes one:
 - **Hold both commercial licenses**: a commercial JUCE license and
   Steinberg's proprietary VST3 license.
 
+A newer JUCE narrows the choice. Steinberg released VST3 SDK 3.8.0
+under the MIT License
+([announcement](https://forums.steinberg.net/t/vst-3-8-0-sdk-released/1011988),
+and `LICENSE.txt` at the SDK's `v3.8.0_build_66` tag), and JUCE 8.0.11
+is the first JUCE release that bundles it: its
+[change list](https://github.com/juce-framework/JUCE/blob/master/CHANGE_LIST.md)
+reads "Updated the VST3 SDK to 3.8.0 (MIT license)", and every
+`LICENSE.txt` in its `VST3_SDK` directory is MIT. With JUCE 8.0.11 or
+later, the SDK asks only that its notice ship with the binary, and the
+choice left is JUCE's own: AGPLv3, or a commercial JUCE license. JUCE
+8.0.11 also bundles the ASIO SDK under GPLv3, which the daemon does not
+enable. Moving the daemon's pin off 8.0.4 is a change of its own.
+
 ### 7.2 Platforms
 
 `darwin-arm64` and `linux-x64` first. Intel Macs (`darwin-x64`) and
