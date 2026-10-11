@@ -124,11 +124,10 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
 
   // The host starts after the helper, so `Field Keys` exists when sclang
   // connects its MIDI inputs; the keyboard plays while it boots.
-  let host: VoiceHost | undefined;
   const device = options.device ?? helper.defaultOutput;
-  const hostStarted =
+  const host =
     program !== undefined
-      ? VoiceHost.start({
+      ? await VoiceHost.start({
           instrument: program,
           ...(device !== undefined ? { device } : {}),
           onStatus: (status) => {
@@ -137,13 +136,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
             draw();
           },
           onExit: (reason) => stop(new Error(`the voice host stopped: ${reason}`)),
-        }).then(
-          (started) => {
-            host = started;
-          },
-          (err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)),
-        )
-      : Promise.resolve();
+        })
+      : undefined;
+  host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
 
   const stopWatching =
     source.kind === 'file'
@@ -189,7 +184,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
   stopWatching?.();
   send(session.quit());
-  await hostStarted;
+  // A host still booting closes too: quitting never waits for it.
   await host?.close();
   await helper.close();
   tty.stdout.write('\n');

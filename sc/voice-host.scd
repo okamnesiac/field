@@ -15,7 +15,7 @@ var parentPid = "FIELD_PARENT_PID".getenv;
 var device = "FIELD_DEVICE".getenv;
 var trace = "FIELD_VOICE_TRACE".getenv.notNil;
 var server, voiceDef, loadError, voices, sustained, sustainDown = false, bend = 0, restarting = false;
-var jsonValue, emit, fail, run, boot, startVoice, releaseVoice, releaseAll, restart;
+var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, startVoice, releaseVoice, releaseAll, restart;
 
 jsonValue = { |value|
 	if (value.isString or: { value.isKindOf(Symbol) }) {
@@ -26,11 +26,30 @@ emit = { |pairs|
 	var body = pairs.clump(2).collect { |kv| jsonValue.(kv[0]) ++ ":" ++ jsonValue.(kv[1]) }.join(",");
 	("@field {" ++ body ++ "}").postln;
 };
+// A server that is still booting has not bound its port, so a /quit would
+// miss it: the host stops its server by process.
+stopServer = {
+	server !? { |s| s.pid !? { |pid| ("kill " ++ pid ++ " 2>/dev/null").systemCmd } };
+};
 // exit does not stop the code that called it, so a failure is the last
 // thing its branch does.
 fail = { |message|
 	emit.(["error", message]);
+	stopServer.();
 	1.exit;
+};
+// scsynth falls back to the default input and output for a name it does
+// not find, which opens the microphone (§10.1), and SuperCollider passes
+// the name to the shell that starts scsynth between bare double quotes.
+deviceProblem = { |name|
+	case
+	{ name.any { |char| "\"`$\\".includes(char) } } {
+		"the device name " ++ name ++ " has a character (\" ` $ \\) that would reach the shell that starts scsynth"
+	}
+	{ ServerOptions.outDevices.includesEqual(name).not } {
+		"no output device named " ++ name ++ " (field devices lists them)"
+	}
+	{ nil };
 };
 
 startVoice = { |key, note, velocity|
@@ -50,15 +69,40 @@ releaseAll = {
 	sustained.clear;
 };
 
+// Watched here rather than through waitForBoot, whose onFailure never runs
+// in SuperCollider 3.14: a server that exits while it boots, as one does
+// when the device will not start, would otherwise leave the host waiting
+// forever. Each server's process is reported, so `field keys` can stop it
+// even while it boots.
 boot = {
-	server.waitForBoot({
-		voiceDef.add;
-		server.sync;
-		restarting = false;
-		emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
-	}, onFailure: {
-		fail.("scsynth did not boot on " ++ (device ? "the system output"));
-	});
+	var started = Main.elapsedTime, launched;
+	server.boot;
+	Routine {
+		var waiting = true;
+		while { waiting } {
+			0.1.wait;
+			if (launched.isNil and: { server.pid.notNil }) {
+				launched = server.pid;
+				emit.(["server_pid", launched]);
+			};
+			case
+			{ server.serverRunning } {
+				waiting = false;
+				voiceDef.add;
+				server.sync;
+				restarting = false;
+				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
+			}
+			{ launched.notNil and: { server.pid.isNil } } {
+				waiting = false;
+				fail.("scsynth exited while it booted on " ++ (device ? "the system output") ++ ": the device did not start");
+			}
+			{ Main.elapsedTime - started > 20 } {
+				waiting = false;
+				fail.("scsynth did not boot on " ++ (device ? "the system output") ++ " within 20 seconds");
+			};
+		};
+	}.play(AppClock);
 };
 
 // scsynth keeps computing at the rate it booted at when the device moves
@@ -135,7 +179,7 @@ run = {
 		loop {
 			1.wait;
 			if (("kill -0 " ++ parentPid ++ " 2>/dev/null").systemCmd != 0) {
-				server.quit;
+				stopServer.();
 				0.exit;
 			};
 		};
@@ -152,5 +196,6 @@ case
 	{ voiceDef.isKindOf(SynthDef).not } {
 		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef");
 	}
+	{ device.notNil and: { deviceProblem.(device).notNil } } { fail.(deviceProblem.(device)) }
 	{ run.() };
 )

@@ -953,6 +953,23 @@ corrected to match.
 - **`sclangCommand()`** in `src/generators/supercollider.ts` resolves
   `FIELD_SCLANG`, then `PATH`, then the app bundle, for renders and the
   host alike.
+- **The host watches its own boot.** `waitForBoot`'s `onFailure` never
+  runs in SuperCollider 3.14.1, so a server that exits while it boots
+  would leave the host waiting forever. The host fails when the server's
+  process exits before the server answers, or after 20 seconds, naming
+  the device.
+- **A server is stopped by its process too.** The host reports each
+  server's process on a `server_pid` line. A server still booting has not
+  bound its port and misses `/quit`, so `field keys` signals the process
+  after `/quit`, and the host does the same before it exits.
+- **The device name is checked before boot.** `scsynth` falls back to
+  the default input and output for a name it does not find, which opens
+  the microphone, and SuperCollider passes the name to a shell between
+  bare double quotes. The host refuses a name `ServerOptions.outDevices`
+  does not list, and one that contains `"`, `` ` ``, `$`, or `\`.
+- **Quitting never waits for the host.** `VoiceHost.start` resolves once
+  `sclang` runs, and `ready` says when the host goes live, so `Esc`
+  closes a host that is still booting.
 
 ### 10.3 What was verified, and how
 

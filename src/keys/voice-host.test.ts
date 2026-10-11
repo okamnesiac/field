@@ -21,9 +21,21 @@ writeFileSync(log + '.env', JSON.stringify({
 const socket = require('node:dgram').createSocket('udp4');
 socket.on('message', (msg) => appendFileSync(log, msg.toString('latin1') + '\\n'));
 socket.bind(Number(process.env.FIELD_SC_PORT), '127.0.0.1', () => {
+  // The log exists from the moment the port is bound.
+  appendFileSync(log, '');
   console.log('compiling class library...');
   console.log('*** Welcome to SuperCollider 3.14.1. *** For help type cmd-d.');
+  if (process.env.STUB_SERVER) {
+    // A server that ignores /quit, as a booting scsynth does, and outlives
+    // the stub unless something stops it by process.
+    const server = require('node:child_process').spawn('sleep', ['30'], { stdio: 'ignore', detached: true });
+    server.unref();
+    writeFileSync(log + '.server', String(server.pid));
+    console.log('@field {"server_pid":' + server.pid + '}');
+  }
   switch (process.env.STUB_MODE) {
+    case 'hang':
+      break;
     case 'ready':
       console.log('@field {"ready":true,"device":"Test Out","sample_rate":48000}');
       break;
@@ -43,7 +55,8 @@ socket.bind(Number(process.env.FIELD_SC_PORT), '127.0.0.1', () => {
       break;
   }
 });
-process.on('SIGTERM', () => process.exit(0));
+// A datagram that arrived just before the signal is still logged.
+process.on('SIGTERM', () => setTimeout(() => process.exit(0), 100));
 `;
 
 let dir: string;
@@ -112,7 +125,15 @@ describe('the voice host protocol', () => {
 });
 
 describe('the voice host process', () => {
-  it('starts sclang on the host script in voice mode and resolves when it is ready', async () => {
+  function stopStrayServer(): void {
+    try {
+      process.kill(Number(readFileSync(`${log}.server`, 'utf8')), 'SIGKILL');
+    } catch {
+      // never started, or already stopped
+    }
+  }
+
+  it('starts sclang on the host script in voice mode and is ready when the host says so', async () => {
     const statuses: VoiceHostStatus[] = [];
     const host = await VoiceHost.start({
       instrument: '/p/pad.scd',
@@ -120,6 +141,7 @@ describe('the voice host process', () => {
       env: env('ready'),
       onStatus: (s) => statuses.push(s),
     });
+    await host.ready;
     expect(statuses).toEqual([{ state: 'live', device: 'Test Out', sampleRate: 48000 }]);
     const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
     expect(seen.args[0]).toBe('-D');
@@ -130,27 +152,51 @@ describe('the voice host process', () => {
     expect(readFileSync(log, 'latin1')).toContain('/quit');
   });
 
-  it('rejects with the host error and what sclang printed after its banner', async () => {
-    const start = VoiceHost.start({ instrument: '/p/x.scd', env: env('error') });
-    await expect(start).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
-    await expect(start).rejects.not.toThrow(/compiling class library/);
+  it('rejects ready with the host error and what sclang printed after its banner', async () => {
+    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('error') });
+    await expect(host.ready).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
+    await expect(host.ready).rejects.not.toThrow(/compiling class library/);
   });
 
-  it('rejects when sclang exits before it is ready', async () => {
-    await expect(VoiceHost.start({ instrument: '/p/x.scd', env: env('silent') })).rejects.toThrow(
-      /exited with code 0 before the voice host was ready/,
-    );
+  it('rejects ready when sclang exits before it is ready', async () => {
+    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('silent') });
+    await expect(host.ready).rejects.toThrow(/exited with code 0 before the voice host was ready/);
+  });
+
+  it('closes a host that is still booting, without waiting for it to be ready', async () => {
+    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('hang') });
+    const deadline = Date.now() + 5000;
+    while (!existsSync(log) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    await host.close();
+    await expect(host.ready).rejects.toThrow(/closed before it was ready/);
+    expect(readFileSync(log, 'latin1')).toContain('/quit');
+  });
+
+  it('stops the server the host launched by process, when /quit cannot reach it', async () => {
+    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: { ...env('hang'), STUB_SERVER: '1' } });
+    try {
+      const deadline = Date.now() + 5000;
+      while (!existsSync(`${log}.server`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+      const server = Number(readFileSync(`${log}.server`, 'utf8'));
+      await new Promise((r) => setTimeout(r, 100));
+      await host.close();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(() => process.kill(server, 0)).toThrow();
+    } finally {
+      stopStrayServer();
+    }
   });
 
   it('reports a restart, then a host that dies on its own, with its error', async () => {
     const statuses: VoiceHostStatus[] = [];
     const reasons: string[] = [];
-    await VoiceHost.start({
+    const host = await VoiceHost.start({
       instrument: '/p/x.scd',
       env: env('ready-then-die'),
       onStatus: (s) => statuses.push(s),
       onExit: (reason) => reasons.push(reason),
     });
+    await host.ready;
     await new Promise((r) => setTimeout(r, 500));
     expect(statuses.at(-1)).toEqual({ state: 'restarting' });
     expect(reasons).toHaveLength(1);

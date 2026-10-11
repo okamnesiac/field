@@ -49,9 +49,28 @@ function sendQuit(port: number): Promise<void> {
   });
 }
 
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function exited(pid: number, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (running(pid)) {
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return true;
+}
+
 const hostLine = z.union([
   z.object({ ready: z.literal(true), device: z.string(), sample_rate: z.number() }),
   z.object({ restarting: z.literal(true) }),
+  z.object({ server_pid: z.number().int().positive() }),
   z.object({ error: z.string() }),
   z.object({ voice_on: z.number() }),
   z.object({ voice_off: z.number() }),
@@ -85,33 +104,21 @@ const OUTPUT_TAIL = 15;
 
 export class VoiceHost {
   private closing = false;
+  // The scsynth the host launched last, which `close` stops by process:
+  // one that is still booting has not bound its port, so /quit misses it.
+  private serverPid: number | undefined;
+  // Settles when the host first goes live, or rejects with why it did not.
+  readonly ready: Promise<void>;
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly port: number,
-  ) {}
-
-  static async start(options: VoiceHostOptions): Promise<VoiceHost> {
-    const env = options.env ?? process.env;
-    const port = await freeUdpPort();
-    const child = spawn(sclangCommand(env), ['-D', voiceHostScript()], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...env,
-        FIELD_MODE: 'voice',
-        FIELD_INSTRUMENT: options.instrument,
-        FIELD_SC_PORT: String(port),
-        FIELD_PARENT_PID: String(process.pid),
-        ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
-        ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
-      },
-    });
-    const host = new VoiceHost(child, port);
+    options: VoiceHostOptions,
+  ) {
     // sclang reports compile and runtime errors on stdout, so the tail of
     // it is what explains a host that never became ready.
     const tail: string[] = [];
-
-    return new Promise((resolveHost, reject) => {
+    this.ready = new Promise((resolveReady, reject) => {
       let ready = false;
       let lastError: string | undefined;
       const why = (code: number | null): string => {
@@ -129,13 +136,9 @@ export class VoiceHost {
 
       child.on('error', (err) => reject(new Error(`could not start sclang: ${err.message}`)));
       child.on('exit', (code) => {
-        if (!ready) {
-          void sendQuit(port);
-          reject(new Error(why(code)));
-        } else if (!host.closing) {
-          void sendQuit(port);
-          options.onExit?.(why(code));
-        }
+        void this.stopServer();
+        if (!ready) reject(new Error(this.closing ? 'the voice host was closed before it was ready' : why(code)));
+        else if (!this.closing) options.onExit?.(why(code));
       });
       child.stderr.on('data', () => {});
       createInterface({ input: child.stdout }).on('line', (line) => {
@@ -144,24 +147,48 @@ export class VoiceHost {
         const parsed = parseHostLine(line);
         if (parsed === undefined) return;
         if ('error' in parsed) lastError = parsed.error;
+        else if ('server_pid' in parsed) this.serverPid = parsed.server_pid;
         else if ('ready' in parsed) {
           options.onStatus?.({ state: 'live', device: parsed.device, sampleRate: parsed.sample_rate });
           if (!ready) {
             ready = true;
-            resolveHost(host);
+            resolveReady();
           }
         } else if ('restarting' in parsed) options.onStatus?.({ state: 'restarting' });
         else if ('voice_on' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_on, on: true });
         else options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
       });
     });
+    // Whoever starts a host awaits `ready`; until then a rejection is
+    // reported there, not as an unhandled one.
+    this.ready.catch(() => {});
   }
 
-  // /quit goes to scsynth directly, so the server stops even when sclang
-  // is wedged; sclang then gets SIGTERM, and SIGKILL if it lingers.
+  // Resolves once sclang is running, so a host can be closed while it is
+  // still booting; `ready` says when it goes live.
+  static async start(options: VoiceHostOptions): Promise<VoiceHost> {
+    const env = options.env ?? process.env;
+    const port = await freeUdpPort();
+    const child = spawn(sclangCommand(env), ['-D', voiceHostScript()], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...env,
+        FIELD_MODE: 'voice',
+        FIELD_INSTRUMENT: options.instrument,
+        FIELD_SC_PORT: String(port),
+        FIELD_PARENT_PID: String(process.pid),
+        ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
+        ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
+      },
+    });
+    return new VoiceHost(child, port, options);
+  }
+
+  // /quit, then the server's process if it lingers, then sclang: SIGTERM,
+  // and SIGKILL if it lingers too.
   async close(timeoutMs = 3000): Promise<void> {
     this.closing = true;
-    await sendQuit(this.port);
+    await this.stopServer();
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
     await new Promise<void>((done) => {
       const timer = setTimeout(() => this.child.kill('SIGKILL'), timeoutMs);
@@ -171,5 +198,16 @@ export class VoiceHost {
       });
       this.child.kill('SIGTERM');
     });
+  }
+
+  private async stopServer(): Promise<void> {
+    await sendQuit(this.port);
+    const pid = this.serverPid;
+    if (pid === undefined || (await exited(pid, 500))) return;
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // gone between the check and the signal
+    }
   }
 }
