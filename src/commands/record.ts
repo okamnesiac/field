@@ -454,8 +454,16 @@ export async function landRecording(
 // One line per transaction for --list and for the report after a take.
 export function describeTake(take: AnyTake | RecordingEntry, sampleRate?: number): string {
   const rate = take.sample_rate ?? sampleRate ?? DEFAULT_SAMPLE_RATE;
-  const frames = 'frames' in take && take.frames !== undefined ? take.frames : (take as RecordingEntry).frames_on_disk;
-  const seconds = frames !== undefined ? ` (${frames} frames, ${(frames / rate).toFixed(1)} s)` : '';
+  // A MIDI take writes lines, not frames, so it counts those, and its
+  // length is known once it is complete.
+  const midi = 'kind' in take && take.kind === 'midi';
+  const frames = take.frames ?? (midi ? undefined : (take as RecordingEntry).frames_on_disk);
+  const events = midi ? (take.events ?? ('events_on_disk' in take ? take.events_on_disk : undefined)) : undefined;
+  const parts = [
+    ...(events !== undefined ? [`${events} event${events === 1 ? '' : 's'}`] : []),
+    ...(frames !== undefined ? [`${frames} frames, ${(frames / rate).toFixed(1)} s`] : []),
+  ];
+  const seconds = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   const placed =
     take.started_at_samples !== undefined && take.started_at_samples >= 0
       ? `, started at sample ${take.started_at_samples}`
