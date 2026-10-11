@@ -1,0 +1,241 @@
+{
+ "version": 1,
+ "name": "Instrument knobs",
+ "project": "instrument-knobs",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 212,
+  "title": "Start a MIDI take where the knobs are: field keys publishes what it sent, and the daemon chases it to the take's first sample (instrument-knobs.md chunk 3)",
+  "head": "cd59565a363b75945e963f9569091e6f7a3df12f",
+  "headRef": "knobs/chase",
+  "base": "78525efcd71599a2e2ee6060ec68f12072f4b3b5",
+  "baseRef": "knobs/type",
+  "basePr": 210
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> plays the computer keyboard as a MIDI source named <code>Field Keys</code>, and its knobs, from chunks 1 and 2 of the instrument-knobs plan (#209 and #210 beneath this pull request), turn an instrument by sending MIDI control changes (CCs). <code>field record</code> records a MIDI take through <code>field-audiod</code>, the audio daemon, which opens every MIDI source when it arms and stamps each message with the sample it arrived on.",
+   "A take records only the messages that arrive once it has started. So a knob you turned before pressing record, such as <code>juno</code>'s cutoff dialed down for a darker pad, played live but rendered at its default in the take. The modulation wheel had the same gap. This pull request, chunk 3, closes it with MIDI alone, in three steps:",
+   "<ol><li><b><code>field keys</code> publishes what it sent.</b> Inside a project, it writes every controller from 0 to 119 it has sent, by channel, to <code>.field/keys.json</code> on each control change, with its own <code>pid</code>, and removes the file when it quits.</li><li><b><code>field record</code> passes them in <code>arm</code>.</b> When it arms a MIDI take and the publishing process is still running, it adds the list as <code>controllers</code> to the <code>arm</code> request, only for a daemon that lists the new <code>midi-chase</code> feature.</li><li><b>The daemon chases controllers.</b> From the arm, the audio callback keeps the latest value of each controller on each channel: first the seeds <code>arm</code> passed, then every control change that arrives before the take starts, from any source, a count-in included. At the take's first sample it writes one line per controller at <code>at: 0</code>, ahead of every other line, in the order the values last arrived.</li></ol>",
+   "The landed notes file needs nothing new: the chased values become ordinary <code>controls</code> rows at <code>at: 0</code>, and the render already applies control changes before note-ons at one instant. With this layer every chunk of the plan is built. Criteria 20 and 21, which need a kitty terminal and ears, are still owed by hand."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>CC.</b> A MIDI control change: a channel, a controller number from 0 to 127, and a value from 0 to 127. A knob in <code>field keys</code> is one CC.</li><li><b>Chase.</b> Carrying each controller's latest value into a take that starts later, as a DAW chases controllers when you start playback mid-song.</li><li><b>Seed.</b> A controller value <code>field record</code> passes in <code>arm</code>, taken from <code>.field/keys.json</code>; the daemon treats seeds as arriving at the arm.</li><li><b>Channel mode messages.</b> CCs 120 to 127, such as All Notes Off. They act once rather than setting a value, so the chase skips them.</li><li><b>MIDI primary and companions.</b> With several tracks armed, one take is the primary and the rest are companions on the same clock; a MIDI companion records exactly what the primary hears.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review of this head",
+    "html": "<ul class=\"tight\"><li>Reviewed by reading only: the commit names a co-author login without write access, so no code from the head was run on the review machine.</li><li>CI passed on linux and windows, including the native build and <code>pnpm test</code>, but skipped the five daemon tests that need a MIDI source, the chase test among them.</li><li>Three open findings, each a small documentation or comment fix: a doc comment detached from <code>Player</code>, one unwrapped line in <code>docs/project-model.md</code>, and a stale still-owed item in keyboard-instrument.md §14.5.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "The arm request carries controllers",
+   "kicker": "The protocol field, its client, and the daemon's check",
+   "intro": [
+    "<code>arm</code> gains an optional <code>controllers</code> list of <code>{channel, cc, value}</code>, with <code>channel</code> from 1 to 16, <code>cc</code> from 0 to 119, and <code>value</code> from 0 to 127. A daemon that understands it lists <code>midi-chase</code> in <code>hello.features</code>.",
+    "The client names the field only when the list is non-empty, and <code>field record</code> fills it only for a daemon with <code>midi-chase</code>, so an older daemon never sees it. The daemon refuses a list that is out of range rather than dropping entries, as it refuses a bad input channel."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "The <code>chasedControllerSchema</code> zod schema, shared by the client and by the reader of <code>.field/keys.json</code>."
+    },
+    {
+     "path": "src/audiod/client.ts",
+     "note": "<code>armMidi</code> and <code>armTracks</code> take an optional controller list; <code>chase()</code> leaves the field out when the list is empty."
+    },
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "<code>readChaseSeeds</code> validates <code>controllers</code> and converts channels to 0 to 15; <code>arm</code> passes the seeds to <code>armMidi</code> or <code>armSet</code>, and <code>hello</code> lists <code>midi-chase</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The list is checked before any arm work, so a bad list returns an error without opening inputs or resetting the chase. Traced by reading <code>dispatch</code>'s <code>arm</code> branch.",
+       "line": 284
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "chase",
+   "title": "The daemon chases controllers to the take's first sample",
+   "kicker": "A fixed table in the audio callback, seeded at the arm and written once",
+   "intro": [
+    "The audio callback owns a table of 16 channels by 120 controllers. Each slot holds a value and an order number, the time it last arrived. <code>armSet</code> hands the seeds to the callback under a spin lock that the callback only ever tries, so the callback never blocks; it takes them at the top of a block and starts the table over. Every MIDI message that arrives before the take starts, which the callback used to discard, now goes through <code>chaseArrival</code> instead.",
+    "When a take's clock starts, <code>chasePending</code> is set, and <code>stampMidiBlock</code> writes the table's lines at <code>at: 0</code> just before the take's first stamped message, or at the end of the start block if nothing else arrived. An arrival inside the start block that falls before the start sample is chased first, so the lines are complete and still lead the file. The same <code>push</code> goes to the MIDI primary and every MIDI companion, so each MIDI take of a pass gets the same lines."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Every path that drained MIDI before a take's start now chases instead: armed but not recording, a count-in or punch-in still short of its position, and arrivals inside the start block that map before sample 0. Loop takes for MIDI, and loop takes with companions, are still refused, so the loop handoff is untouched."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "<code>ChaseSeed</code>, the new <code>seeds</code> parameters, and the chase's fixed-size members.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "Open finding: <code>ChaseSeed</code> was inserted between <code>Player</code>'s 20-line doc comment and <code>class Player</code>, so that comment now reads as part of <code>ChaseSeed</code>'s. Move <code>ChaseSeed</code> above it.",
+       "line": 39
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "<code>takeChaseSeeds</code>, <code>chaseArrival</code>, and <code>writeChase</code>, and the calls that replace each discarding drain.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The seeds are taken at the top of every block, before any drain, so an arm's seeds always order ahead of the arrivals that follow it. Traced by reading <code>processBlock</code>.",
+       "line": 1070
+      },
+      {
+       "kind": "verify",
+       "text": "The callback only tries the lock; a failed try leaves the seeds for the next block. <code>arm</code> is refused while recording, so seeds never change under a running take. Traced by reading <code>armSet</code> and <code>record</code>.",
+       "line": 1408
+      },
+      {
+       "kind": "verify",
+       "text": "The sort runs in place over a fixed array, and the MIDI take's 16,384-message fifo holds a full table of 1,920 lines, so the write neither allocates nor drops lines. Checked by reading <code>MidiCapture</code> in <code>capture.cpp</code>.",
+       "line": 1439
+      },
+      {
+       "kind": "context",
+       "text": "Arrivals stamped into a take are not chased. A second <code>record</code> on one arm would start a controller turned during the first take at its older value. <code>field record</code> arms once per take, so nothing does this yet; arming.md chunk 3's lasting arm would.",
+       "line": 1393
+      }
+     ]
+    },
+    {
+     "path": "src/commands/record-midi-daemon.test.ts",
+     "note": "A chase test through a real daemon and CoreMIDI, a refusal test for bad <code>controllers</code>, and a seeded line in the <code>field record</code> end-to-end test.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "CI on linux and windows ran the feature and refusal tests and skipped the chase test and the end-to-end test, which need a MIDI source. Only the author's macOS run exercised the chase."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "publish",
+   "title": "field keys publishes what it has sent",
+   "kicker": "A session's controllers by channel, written to .field/keys.json",
+   "intro": [
+    "<code>KeysSession</code> already kept each controller's last value by number, for the knob line. It now also keeps them by channel, in the order each value was last sent, and <code>sentControllers()</code> lists those below 120, least recently sent first. That order becomes the seeds' order, so it matches the plan's \"in the order their values last arrived\".",
+    "<code>field keys</code> writes the list to <code>.field/keys.json</code> after each batch of messages that holds a control change, by writing a temporary file and renaming it over the last, so a reader never sees half a file. The file carries the writer's <code>pid</code>. On quit, a <code>field keys</code> removes the file only if its own <code>pid</code> is in it, so it leaves a second session's file alone."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/published.ts",
+     "note": "New: <code>publishControllers</code>, <code>unpublishControllers</code>, and <code>controllersToChase</code>, which ignores the file when its process has exited or the daemon cannot chase.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Several <code>field keys</code> in one project publish last-writer-wins, and a crashed one leaves a file whose dead <code>pid</code> makes readers ignore it. The state is tied to a process, not to a daemon connection.",
+       "line": 50
+      }
+     ]
+    },
+    {
+     "path": "src/keys/session.ts",
+     "note": "The <code>sent</code> map, updated in <code>cc()</code>, which every control change goes through, and <code>sentControllers()</code>."
+    },
+    {
+     "path": "src/commands/keys.ts",
+     "note": "<code>send</code> publishes after any batch with a CC, and the session unpublishes at the end.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "A failed write here throws out of the stdin handler or the turn timer, and nothing catches it, so it ends the session. The review lists catching it as a suggestion.",
+       "line": 288
+      }
+     ]
+    },
+    {
+     "path": "src/keys/session.test.ts",
+     "note": "Checks the least-recently-sent order and that a panic's CC 123 is left out."
+    }
+   ]
+  },
+  {
+   "id": "record",
+   "title": "field record passes the controllers in arm",
+   "kicker": "One read of .field/keys.json, just before the arm",
+   "intro": [
+    "When any armed track is MIDI, <code>field record</code> reads <code>.field/keys.json</code> right before it arms and passes the list in either form of <code>arm</code>. An audio-only arm passes nothing. With no <code>field keys</code> running, the list is empty and the daemon still chases hardware controllers from the arm."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/record.ts",
+     "note": "Reads the published controllers and passes them to <code>armTracks</code> and <code>armMidi</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "A knob turned in the moment between this read and the daemon opening its MIDI inputs reaches neither the seeds nor the chase. The window is one <code>arm</code> round trip, and the plan's design accepts it.",
+       "line": 273
+      }
+     ]
+    },
+    {
+     "path": "src/commands/record-plan.test.ts",
+     "note": "Tests that <code>controllersToChase</code> reads the file only for a daemon that chases and a running publisher, ignores a corrupt file, and that a quitting session leaves another one's file."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Docs and the plan",
+   "kicker": "How a take starts, described where readers look for it",
+   "intro": [
+    "<code>docs/audio-engine.md</code> describes the chase and the <code>midi-chase</code> feature, <code>docs/keys.md</code> tells a player that a take now starts where the knobs are, and <code>docs/project-model.md</code> says what the first <code>controls</code> rows of a take mean. The plan gains §11, chunk 3 as built: what implementation settled, what was verified, and what is still owed."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/audio-engine.md",
+     "note": "The chase, under \"MIDI capture\"."
+    },
+    {
+     "path": "docs/keys.md",
+     "note": "\"Record what you play\" now says a take starts where your knobs are.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "Open finding: keyboard-instrument.md §14.5 still lists the wheel gap as owed and says this file advises setting the wheel after the take starts. Add an <code>*Amended*</code> note there, as chunks 1 and 2 did.",
+       "line": 514
+      }
+     ]
+    },
+    {
+     "path": "docs/project-model.md",
+     "note": "A take's first <code>controls</code> rows are the chased values.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "Open finding: this line runs to 101 characters in a paragraph wrapped at about 70. Rewrap the paragraph.",
+       "line": 386
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/instrument-knobs/readme.md",
+     "note": "§11, chunk 3 as built. The plan stays <code>in-progress</code> until criteria 20 and 21 are checked by hand and <code>finish</code> runs."
+    }
+   ]
+  }
+ ]
+}
