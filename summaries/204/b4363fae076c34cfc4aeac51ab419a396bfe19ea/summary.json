@@ -1,0 +1,313 @@
+{
+ "version": 1,
+ "name": "Loop take handoff races",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 204,
+  "title": "Keep a loop take running when the heartbeat falls behind its wraps (recording.md §15.4)",
+  "head": "b4363fae076c34cfc4aeac51ab419a396bfe19ea",
+  "headRef": "recording/loop-take-race",
+  "base": "d94b73442152d8d017cf8b8b07704e52f45d179b",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "A <b>loop take</b> is <code>field record --loop</code>: the daemon, <code>field-audiod</code>, loops a region of the song, <code>[at, until)</code>, and records one take per pass. Two threads share the work. The <b>audio callback</b> runs every block on the audio thread, writes samples into the current take, and at each <b>wrap</b>, the sample where the region loops back to <code>at</code>, switches to the next pass's take. The <b>heartbeat</b> is a 250 ms timer on the message thread that finalizes each finished take, which writes its manifest and fires the <code>take</code> event, and opens the next pass's take ahead of the next wrap. That next take is the <b>standby</b>.",
+   "Issue #203 read two races from the code, both hit when the heartbeat falls behind the wraps, which the slow Windows CI runner did often. A wrap before the heartbeat serviced the last pass stopped the loop for good. A wrap while the heartbeat was finalizing found no standby, the callback took a late one over in the middle of a pass, and the heartbeat then lost track of which take was recording and dereferenced null at the next pass, crashing the daemon.",
+   "The fix makes the callback count what it did instead of leaving the heartbeat to guess. <code>capturesEnded</code> counts the takes the callback has ended, and takes end in the order the heartbeat opened them, so the heartbeat moves each ended take out and the next one up. The callback takes a standby over only at a wrap, so a pass that begins with none ready is skipped whole and counted in <code>record.missed</code>, and every take is a whole pass. The heartbeat opens the next standby before it finalizes. Stop discards a take still waiting for its wrap and finalizes a standby a wrap began just before it.",
+   "Since the first review, a <code>session</code> swap during a loop take carries the take's region onto the incoming session, as it carries the transport. Without the region, the clock ran past <code>until</code> and the new skip path landed a one-block take on every heartbeat tick, which <code>field play --watch</code> triggered by itself when the first take landed. The daemon now refuses a session the region does not fit, and the take goes on against the session already playing.",
+   "Five review rounds followed, and this head answers all of them. A block that ends exactly on <code>until</code> now ends the pass. <code>record</code> opens a take's transactions first, then jumps to <code>at</code> and arms the start under one hold of <code>liveLock</code>, and a block latches the start only if its pull saw the arming under that lock, so a take starts at <code>at</code> even on a bed already rolling. A refused <code>record</code> discards its transactions and, for a loop, clears the region it set. The review of this head found it clean."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Pass</b>: one trip through the loop region, from <code>at</code> to <code>until</code>.</li><li><b>Wrap</b>: the sample where a pass ends and the next begins, inside one audio block.</li><li><b>Heartbeat</b>: the daemon's 250 ms timer on the message thread; <code>Player::serviceCapture</code> is its recording step.</li><li><b>Standby</b>: the next pass's take, opened by the heartbeat and published to the callback through <code>standbyCapture</code>.</li><li><b><code>capture</code></b>: the oldest loop take not yet handed to finalize, owned by the message thread.</li><li><b>Skipped pass</b>: a pass that begins with no standby ready. It records nothing and adds one to <code>record.missed</code>.</li><li><b>Pending</b>: what <code>status</code> reports for a take that exists but has not begun, now including a loop take waiting for its wrap.</li><li><b>Session swap</b>: the <code>session</code> op replacing the playing live session with a fresh compile, which <code>field play --watch</code> sends after an edit.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review history",
+    "html": "<ul class=\"tight\"><li><b>786e25d: changes requested.</b> A session swap mid-loop landed a one-block take every tick. Fixed in <code>afc828f</code>, which carries the region across the swap.</li><li><b>cb48e36: changes requested.</b> A block ending exactly on <code>until</code> hid the wrap, so takes spanned two passes. Fixed in <code>e37062f</code> with <code>here + n &gt;= untilAt</code>.</li><li><b>85b6da2: clean</b>, with one suggestion: the first take on a rolling bed could begin after <code>at</code>. Addressed in <code>f381bde</code>.</li><li><b>f381bde: changes requested.</b> A refused <code>at</code> left an incomplete transaction that <code>recordings</code> lists. Fixed in <code>ffa3fe5</code>, whose <code>abandon</code> discards every transaction it holds.</li><li><b>ffa3fe5: changes requested.</b> Fixed in <code>b4363fa</code>. A block read its position inside <code>pullAudio</code>'s try-lock but checks the arming outside it, and a file bed reads and pulls outside it entirely, so a block that straddles the hold latches its pre-jump position. The late-start test failed once in about 60 runs, at 24099; a probe build with a wider gap failed it half the time. CI passed on windows and linux.</li><li><b>b4363fa: clean.</b> Both latches wait for a block that saw the arming under the lock, and a file bed pulls under it. Across 30 runs of the late-start test and a stress of 40 takes with an 8 ms latch stall, every take began at 24000. CI passed on windows and linux.</li><li><b>Not run.</b> The MIDI daemon tests, which open every MIDI source, because a live <code>field keys</code> session runs on the review machine.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "handoff",
+   "title": "How the callback and the heartbeat hand takes over",
+   "kicker": "A count of ended takes replaces the done flag, a standby starts only at a wrap, and a swap keeps the region",
+   "intro": [
+    "The callback cannot allocate, lock, or touch files, so it never owns a take. It only reads two pointers the message thread publishes: <code>activeCapture</code>, the take it writes into, and <code>standbyCapture</code>, the take it switches to at the next wrap. The message thread owns the takes themselves in <code>capture</code> and <code>standby</code>, and the heartbeat has to work out after the fact what the callback did with them.",
+    "Before this change the heartbeat worked that out from a done flag and from whether <code>standbyCapture</code> was still set. Both went wrong once two wraps fell between ticks or a wrap fell inside a finalize. Now the callback adds one to <code>capturesEnded</code> for every take it ends, and the heartbeat moves that many takes out of <code>capture</code>, pulling <code>standby</code> up each time. Because takes begin and end in the order they were opened, the count alone says who owns what.",
+    "<h4>What a pass looks like when the heartbeat is late</h4>",
+    "<ol><li><b>The standby is ready at the wrap.</b> The callback switches to it on the wrap sample and the passes meet on consecutive samples, as before. The wrap is the block that reaches <code>until</code>, including one that ends exactly on it, because the block after that one already starts at <code>at</code>.</li><li><b>No standby is ready.</b> The callback keeps running in a <b>skipping</b> state with no take, counts the pass in <code>record.missed</code>, and switches to the next standby only at a later wrap, never mid-pass.</li><li><b>Stop arrives.</b> Stop finalizes the take recording, finalizes a standby a wrap began just before it, discards a take still waiting for its wrap, and detaches twice, because the block in flight can take a standby over between the first detach and its own store.</li></ol>",
+    "<h4>A session swap keeps the take's region</h4>",
+    "The region a loop take records is set on the live session, and a <code>session</code> swap installs a new session object. <code>carryTakeRegion</code> sets the take's region on the incoming session twice: once before the pre-roll, so the chain warms inside the region, and again under the message thread's lock, which decides, because a take can start or stop in between. A session too short for the region is refused with an error, and the session already playing keeps the take. With a region carried, the swap locates the new session at the old one's unwrapped position, and the region wraps it to the same place."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Every new callback step is an atomic load, store, exchange, or increment, so the audio thread still takes no lock and allocates nothing. The <code>std::vector</code> of ended takes lives in <code>serviceCapture</code>, on the message thread."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "Replaces <code>captureDone</code> with <code>capturesEnded</code>, drops the <code>finished</code> slot, documents which take <code>capture</code> and <code>standby</code> hold under a loop, and declares <code>carryTakeRegion</code>, <code>seek</code>, <code>blockSawRequest</code>, and the three test seams.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 398,
+       "text": "The counter is the whole protocol. The callback increments it once per ended take, and the heartbeat reads and zeroes it with one <code>exchange</code>, so an end that lands mid-service is counted on the next tick rather than lost."
+      },
+      {
+       "kind": "context",
+       "line": 272,
+       "text": "Read once in the constructor from <code>FIELD_AUDIOD_SERVICE_STALL_MS</code>, and only with null output, so a real device never stalls."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "The callback's skip state and wrap (<code>recordAudioBlock</code>), the heartbeat's count-driven handoff (<code>serviceCapture</code>), stop's handling of a waiting or just-begun standby (<code>stopRecording</code>), the region carry in <code>loadSession</code>, <code>record</code>'s jump and arming under one lock, the latch that waits for a block that saw the arming, and <code>pending</code> in status.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 902,
+       "text": "<code>blockSawRequest</code> is read under the try-lock, beside the position the pull returns, so it says whether this block's position is from after <code>record</code>'s jump. Only the audio thread touches it."
+      },
+      {
+       "kind": "context",
+       "line": 986,
+       "text": "A file bed's position read and pull now run under the try-lock as the live branch's do. With a file bed, the message thread holds <code>liveLock</code> only to load, to jump for <code>record</code>, and on a device start, so a file bed misses a block only then."
+      },
+      {
+       "kind": "context",
+       "line": 1069,
+       "text": "A block armed after its pull skips the latch, and the next block, which saw the request, starts the take. The MIDI latch has the same guard and discards that block's arrivals, as it does before any start."
+      },
+      {
+       "kind": "verify",
+       "line": 1852,
+       "text": "A loop take refused at the jump clears the region <code>record</code> set. Probed: a pre-rolled loop with <code>start</code> at -1 left <code>loop_from</code> unset and no transaction."
+      },
+      {
+       "kind": "verify",
+       "line": 1861,
+       "text": "<code>abandon</code> discards each transaction before dropping it. Probed at this head: <code>record</code> at sample 4800000, live and from a file, and a pre-rolled loop with <code>start</code> at -1 were refused with \"locate out of range\" and left no transaction; at <code>f381bde</code> they left four. A refused <code>play</code> cannot happen with a bed loaded."
+      },
+      {
+       "kind": "verify",
+       "line": 1928,
+       "text": "The jump to <code>at</code> and the arming share one hold of <code>liveLock</code>, which the callback only tries. Against <code>ffa3fe5</code> with a 3 ms gap built in, the late-start test latched 160896 for an <code>at</code> of 24000; at this head it passed 30 runs of eight takes each, and 40 more takes under an 8 ms latch stall all began at 24000."
+      },
+      {
+       "kind": "context",
+       "line": 631,
+       "text": "<code>seek</code> is <code>locate</code> without the refusal a running take raises, because <code>record</code> now jumps after its transactions exist. Its live branch takes <code>liveLock</code> again, which is safe because <code>juce::CriticalSection</code> is reentrant."
+      },
+      {
+       "kind": "context",
+       "line": 84,
+       "text": "A second null-output seam, <code>FIELD_AUDIOD_OPEN_STALL_MS</code>, stalls <code>record</code> after the transactions open, so a test can make the open outlast the blocks a rolling bed plays."
+      },
+      {
+       "kind": "verify",
+       "line": 1125,
+       "text": "<code>&gt;=</code> ends a pass in a block that ends exactly on <code>until</code>, which <code>&gt;</code> missed because the next block already starts at <code>at</code>. Probed against a build of this head: <code>[96000, 192000)</code> landed four 96000-frame takes, <code>[96000, 288000)</code> two 192000-frame takes, and <code>[96000, 144000)</code> six 48000-frame takes. At <code>cb48e36</code> they merged passes. A punch-out over exactly 48 blocks landed 24576 frames at both heads."
+      },
+      {
+       "kind": "context",
+       "line": 1154,
+       "text": "The only place a standby is taken over: at a wrap, whether or not the heartbeat has finalized the last pass. With none ready, the pass that begins here is counted and skipped."
+      },
+      {
+       "kind": "verify",
+       "line": 1175,
+       "text": "A skipped pass ends no take, so it adds nothing to <code>capturesEnded</code>. Traced two and three wraps between ticks: the heartbeat moves out exactly the takes that ended and opens one standby per tick, so <code>record.missed</code> counts each skipped pass once."
+      },
+      {
+       "kind": "context",
+       "line": 776,
+       "text": "A loop take waiting for its wrap has <code>startedAt() &lt; 0</code>, so status reports it as <code>pending</code>. <code>field record</code> already keys its start line on <code>pending</code>, so a waiting take is not announced as begun."
+      },
+      {
+       "kind": "verify",
+       "line": 418,
+       "text": "Probed at this head: a <code>session</code> sent mid-loop kept <code>loop_from</code> and <code>loop_to</code> and landed seven whole passes, and <code>field record --loop</code> beside <code>field play --watch</code> landed no one-block take."
+      },
+      {
+       "kind": "verify",
+       "line": 436,
+       "text": "Probed: an edit that ended the song before the region made <code>field play --watch</code> print <code>watch   audiod session: a loop take is recording, and its region does not fit this session (stop first): …</code>, and the take went on landing whole passes against the session already playing."
+      },
+      {
+       "kind": "context",
+       "line": 512,
+       "text": "With a region carried, the old session's unwrapped position goes to the new one as it is, and the region wraps it. Clamping or wrapping it at the song's length would move the take's bed."
+      },
+      {
+       "kind": "context",
+       "line": 2083,
+       "text": "A swap during the take cached <code>liveLoop</code> as true, because the carried region makes the session loop. Converted delivery reads that flag to decide when the song ends, so stop recomputes it once the region clears."
+      },
+      {
+       "kind": "verify",
+       "line": 2036,
+       "text": "Traced a stop racing a wrap: the block in flight can exchange <code>standbyCapture</code> before the first detach and store <code>activeCapture</code> after it. The <code>exchange</code> here catches that take, and the second two-epoch wait lets the block finish before finalize. No later block takes a standby over, because <code>captureLoop</code> is already false."
+      },
+      {
+       "kind": "context",
+       "line": 2054,
+       "text": "A take with no start is discarded only once a loop take has finalized. The loop's first take is <code>capture</code> until it finalizes, so a stop during a count-in still lands it, as a stop always did."
+      },
+      {
+       "kind": "context",
+       "line": 2070,
+       "text": "A standby with a start is the pass a wrap began just before the stop, so it lands as the stop's partial pass. The base discarded it with its samples."
+      },
+      {
+       "kind": "verify",
+       "line": 2124,
+       "text": "Ran <code>punch-daemon.test.ts</code> at this head 10 times in a row and 16 times four at a time, all 12 tests passing each time. The two race tests, which drive two wraps per tick and a wrap inside every finalize, fail at the base."
+      },
+      {
+       "kind": "context",
+       "line": 2134,
+       "text": "The next standby opens before any finalize, so a slow disk delays a take's manifest but costs no pass. When every take has ended, the new take goes straight into <code>capture</code> so status keeps reporting the loop."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests that hold the heartbeat behind the wraps, swap mid-loop, and align the wrap with a block",
+   "kicker": "A region shorter than a tick, a stalled heartbeat, a swap during the take, and a region a whole number of blocks long",
+   "intro": [
+    "Both races needed a heartbeat that falls behind, which a fast machine rarely produces. The tests force it two ways. A loop a tenth of a second long puts two or three wraps between 250 ms ticks. The stall seam holds the heartbeat 600 ms between moving a finished take out and finalizing it, longer than the 500 ms region, so a wrap lands inside every finalize.",
+    "Both tests poll <code>status</code> every 50 ms through <code>followLoop</code> and require each poll to report a recording loop with its take count, which is what the crash and the lost take broke. Both then require every landed pass to start at <code>at</code> and be exactly the region long, and every recording on disk to be complete.",
+    "A third test swaps the session mid-loop. A session whose bed ends before the region is refused with \"does not fit\", and the same song swapped in keeps the region and goes on landing whole passes. Passes near the swap may run a block long, because a block the callback misses while the swap holds the session's lock still records input, so the test holds only the passes clear of the swap to the region's exact length.",
+    "A fourth test loops a region exactly 48 blocks long. Blocks start on the grid the locate to <code>at</code> sets, so every pass ends exactly on a block boundary, the case the old wrap test missed.",
+    "A fifth test starts takes on a bed already playing while the open is stalled and each block waits between its pull and its latch, live and from a file, and requires each to start exactly at <code>at</code>. A sixth refuses a loop take at its jump and requires the session to stop looping."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/punch-daemon.test.ts",
+     "note": "Adds <code>followLoop</code>, the late-start and refused-loop tests, the two race tests, the swap test, and the block-aligned region test, and clears all three stall seams after each test.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The tests use a null device and their own temporary project and socket, and arm only audio input 1, so they open no real device and no MIDI source."
+      },
+      {
+       "kind": "verify",
+       "line": 342,
+       "text": "Against <code>cd088df</code>, the base handoff with only the seam added, this test failed in 3 of 3 runs with \"timed out waiting for 4 passes to land\"."
+      },
+      {
+       "kind": "context",
+       "line": 345,
+       "text": "<code>missed &gt; 0</code> holds by construction: the heartbeat opens at most one standby per tick, and two or more wraps fall between ticks."
+      },
+      {
+       "kind": "verify",
+       "line": 366,
+       "text": "Against <code>cd088df</code> this test failed in 3 of 3 runs with \"field-audiod connection closed\", the crash #203 describes."
+      },
+      {
+       "kind": "context",
+       "line": 419,
+       "text": "The refusal leaves the take running against the session already playing, which the next swap then replaces."
+      },
+      {
+       "kind": "verify",
+       "line": 311,
+       "text": "A region exactly 48 null-clock blocks long, so every pass ends on a block boundary. Against the <code>cb48e36</code> build this test failed with \"timed out waiting for 3 passes to land\", because no pass ever ended."
+      },
+      {
+       "kind": "verify",
+       "line": 125,
+       "text": "With the open stalled 200 ms and each block waiting 4 ms between its pull and its latch, four takes each on a live and a file bed rolling from three seconds in must start at <code>at</code>. Against <code>ffa3fe5</code> with a 3 ms gap built in it failed with \"expected 160896 to be 24000\"; at this head it passed 30 of 30 runs."
+      },
+      {
+       "kind": "context",
+       "line": 145,
+       "text": "An <code>at</code> past the bed's end must be refused without changing the number of recordings, live and from a file."
+      },
+      {
+       "kind": "verify",
+       "line": 161,
+       "text": "A loop take refused at its jump must leave the session unlooped. Against <code>ffa3fe5</code> it failed with the session still looping; at this head it passes."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "What the docs, the plan, and the protocol say",
+   "kicker": "The skipped pass, the pending take, and the swap in audio-engine.md, an amendment to recording §15.4, and the status schema comment",
+   "intro": [
+    "<code>docs/audio-engine.md</code> describes the daemon as it runs today. It now says the heartbeat finalizes every take that ended since its last tick, opens the next transaction first, skips a pass with none ready, reports a waiting take as <code>pending</code>, and carries the take's region across a session swap. The recording plan is <code>completed</code>, so it keeps its as-built record and gains a dated amendment under §15.4, the decision about loop takes, saying what the first build got wrong and what replaced it. The status schema's comment on <code>pending</code> names the loop case."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "Comment only: <code>pending</code> also marks a loop's next take waiting for its wrap.",
+     "checks": []
+    },
+    {
+     "path": "docs/audio-engine.md",
+     "note": "Rewrites the paragraph on missed passes in \"Punch-out and loop takes\", adds one on session swaps, and gives <code>record</code>'s new order.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 198,
+       "text": "\"Every take is a whole pass that starts at <code>at</code>\" holds at this head, block-aligned regions included."
+      },
+      {
+       "kind": "context",
+       "line": 202,
+       "text": "Matches the code and the probe: the swap keeps the region, and a session the region does not fit is refused while the take goes on."
+      },
+      {
+       "kind": "context",
+       "line": 95,
+       "text": "\"Opens the take's transactions, locates the bed to <code>at</code> ... with no block between the jump and the start\" matches the code at this head."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/recording/readme.md",
+     "note": "Adds the 2026-10-11 amendment to §15.4, item 4, the loop-take decision.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 586,
+       "text": "The amendment follows the plan's existing <code>*Amended</code> pattern instead of rewriting the as-built text, as <code>docs/projects/README.md</code> asks of a finished plan."
+      },
+      {
+       "kind": "context",
+       "line": 602,
+       "text": "The amendment's last addition records the block-aligned wrap and the change to the test."
+      },
+      {
+       "kind": "context",
+       "line": 605,
+       "text": "The amendment now also records the late first take on a rolling bed and the reorder that fixed it."
+      },
+      {
+       "kind": "context",
+       "line": 610,
+       "text": "The amendment's last lines record the latch that waits for a block that saw the arming, and the refused loop clearing its region."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "recording"
+}
