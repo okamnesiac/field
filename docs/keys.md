@@ -23,8 +23,8 @@ Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
 Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · still-water-pad live at 48000 Hz on MacBook Pro Speakers
 ```
 
-Recording what you play is the last chunk of
-[the keyboard-instrument plan](projects/keyboard-instrument/readme.md).
+To keep what you play, record it into a track; see
+[Record what you play](#record-what-you-play).
 
 ## Before you start
 
@@ -146,6 +146,50 @@ pitch bend, which it applies to `freq` on every sounding voice, up to
 two semitones either way. It ignores modulation (CC 1) for now. In
 `examples/bloom`, `still-water-pad` answers voice mode; its render
 branch is unchanged and renders the same bytes as before.
+
+## Record what you play
+
+A track records what you play when its `record:` entry names an
+instrument. The take keeps the notes, not the sound, and the build
+renders them through the instrument, so changing the instrument
+changes every take recorded for it.
+
+1. Give the track a record entry with the instrument:
+
+   ```yaml
+   # songs/creek/tracks/keys.yaml
+   name: keys
+   inputs:
+     - record:
+         instrument: still-water-pad
+   ```
+
+2. In one terminal, play the instrument so you hear it while you
+   record: `field keys still-water-pad`.
+3. In another, record against the song. With nothing playing, `field
+   record` loads the song as the bed. Press Ctrl-C to stop.
+
+   ```console
+   $ field record creek/track:keys --at 17
+   live    creek
+   armed   MIDI from Field Keys  (48000 Hz, latency out 512 samples)
+   recording take-20261010-143012 from 17.1.1 (0:32.0)
+     17.3.2 (0:33.2)  14 events 1.2s
+   take    creek/keys ← take-20261010-143012 at bar 17, chosen (audio/keys/take-20261010-143012.notes.yaml, 4.2 s, 31 events)
+   ```
+
+4. `field build creek` renders the take through the instrument, and
+   `field play creek` plays it in the mix.
+
+A MIDI take listens to every MIDI source on the machine when
+`field record` arms, so a controller records too. Start `field keys`
+and connect controllers first: a source that appears after the arm is
+not heard. `--at`, `--until`, `--click`, and `--count-in`
+work as they do for audio; `--input`, `--device`, and `--loop` are for
+audio takes only. The take is placed by the output latency alone,
+because you play in time with what you hear. `field choose` picks
+among takes as it does for audio. For the files a take leaves, see
+[project-model.md](project-model.md) "MIDI takes".
 
 ## Keys are read by position
 

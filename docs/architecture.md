@@ -106,7 +106,10 @@ spawns `field-audiod --keys`, a short-lived mode separate from the
 daemon that owns the `Field Keys` virtual MIDI source and, on macOS,
 reports the active keyboard layout. `--midi-monitor` prints what a
 named MIDI source sends. Neither touches the transport or the control
-socket.
+socket. The daemon itself records MIDI: armed for a MIDI take, it
+listens to every MIDI source and stamps each message on the clock the
+audio callback keeps, so a MIDI take lines up with the song as an
+audio take does.
 
 The real-time audio callback never depends on TypeScript or Python: GC
 pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives
@@ -149,7 +152,9 @@ OSC over UDP, which TypeScript handles fine. Two modes:
 
 - **Offline (NRT)** — the default: an SC program plus an explicit seed
   renders an asset via scsynth's non-realtime mode. Deterministic,
-  cacheable, and the first real build rule.
+  cacheable, and the first real build rule. A recorded MIDI take renders
+  the same way, through its instrument's voice
+  ([build-graph.md](build-graph.md) "`voice-render`").
 - **Live** — `field keys <instrument>` runs a voice host: `sclang` on
   `sc/voice-host.scd`, which boots its own scsynth on the output device
   and plays the instrument's voice from every MIDI source

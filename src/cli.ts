@@ -834,14 +834,14 @@ for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
 
 program
   .command('record [target]')
-  .description('record a take on a track through field-audiod: arms an input, takes against what is playing, ctrl-c stops and finalizes')
-  .option('--input <n>', 'input channel on the device, counting from 1 (default 1)', parseInputChannel)
-  .option('--device <name>', 'input device (field devices lists them; default: the system input)')
+  .description('record a take on a track through field-audiod: arms an input, or MIDI when the record entry names an instrument, takes against what is playing, ctrl-c stops and finalizes')
+  .option('--input <n>', 'input channel on the device, counting from 1 (default 1); audio takes only', parseInputChannel)
+  .option('--device <name>', 'input device (field devices lists them; default: the system input); audio takes only')
   .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
   .option('--click', 'a metronome through the take, synthesized in the engine against the song\'s map')
   .option('--count-in <bars>', 'pre-roll this many bars before --at, clicking; the take begins exactly at --at', parseCountIn)
   .option('--until <position>', 'punch out at bar[.beat[.tick]]: the take ends there exactly and lands while the mix plays on')
-  .option('--loop', 'loop --at to --until, landing a take every pass until ctrl-c (needs a live song as the bed)')
+  .option('--loop', 'loop --at to --until, landing a take every pass until ctrl-c (needs a live song as the bed); audio takes only')
   .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
   .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
   .option('--list', 'list the transactions under .field/recording/ instead of recording')
@@ -881,11 +881,12 @@ program
               ? `bar ${landed.row.musical_position.join('.')}`
               : `sample ${landed.placedAt}`;
           const seconds = (landed.frames / landed.sampleRate).toFixed(1);
+          const events = landed.events !== undefined ? `, ${landed.events} event${landed.events === 1 ? '' : 's'}` : '';
           const note =
             landed.placements > 1
               ? `  (${landed.track} is placed ${landed.placements} times; the take counts from the first)`
               : '';
-          return `take    ${landed.song}/${landed.node} ← ${landed.asset} at ${where}, chosen (${landed.file}, ${seconds} s)${note}`;
+          return `take    ${landed.song}/${landed.node} ← ${landed.asset} at ${where}, chosen (${landed.file}, ${seconds} s${events})${note}`;
         };
         if (opts.list === true) {
           const entries = await listRecordings(root);
@@ -964,7 +965,11 @@ program
         }
         for (const { take } of takes) {
           if (take.dropped !== undefined && take.dropped > 0) {
-            say(`warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
+            say(
+              'kind' in take
+                ? `warning: ${take.id}: ${take.dropped} MIDI messages were lost before they reached the take; notes may be missing, or held to the take's end`
+                : `warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`,
+            );
           }
         }
       } catch (err) {

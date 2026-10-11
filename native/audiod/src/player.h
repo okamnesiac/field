@@ -10,12 +10,12 @@
 #include <thread>
 #include <vector>
 
+#include "capture.h"
 #include "click.h"
 #include "dsp/resample.h"
 
 namespace field
 {
-class Capture;
 class LiveSession;
 }
 
@@ -31,7 +31,7 @@ class LiveSession;
 // adds no locking of its own beyond the transport's internal locks. The
 // audio callback and the null clock only touch the transport, which is
 // safe by JUCE's design.
-class Player : private juce::AudioIODeviceCallback
+class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallback
 {
 public:
     explicit Player (bool useNullOutput);
@@ -116,6 +116,11 @@ public:
     // output_latency}. Re-arming while armed moves the input; arming
     // while recording is refused.
     juce::var arm (const juce::String& track, const juce::String& device, int input);
+    // Arming for MIDI (keyboard-instrument.md §12.4) opens every MIDI
+    // input the system lists and no audio input, so it never asks for
+    // the microphone. Returns {error} or {kind, sources, sample_rate,
+    // output_latency}. Like arm, it moves an existing arm of either kind.
+    juce::var armMidi (const juce::String& track);
     // Closes the input side again. Empty string on success.
     juce::String disarm();
     // Start a take: locate to `at` when given (a source must be loaded
@@ -137,6 +142,9 @@ public:
     // region [at, until) and every pass is a take: the next transaction
     // is opened ahead of the wrap, so the pass that ends and the pass
     // that begins hand off inside one block with no sample lost.
+    //
+    // Armed for MIDI, the take is a MidiCapture and the same latch starts
+    // it; loop takes stay audio only.
     juce::var record (const juce::var& at, const juce::var& start, const juce::var& until, bool loop);
     // Heartbeat: finalize a take the callback ended at its `until`, hand
     // it to onTake, and open the next standby when looping.
@@ -179,6 +187,8 @@ private:
                                            const juce::AudioIODeviceCallbackContext& context) override;
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
+    // JUCE's MIDI thread: queue the message for the callback to stamp.
+    void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
 
     juce::int64 positionSamples() const;
     void maybeMatchDeviceRate (double fileRate);
@@ -197,6 +207,17 @@ private:
     // block then, which keeps the latch and the first pushed samples
     // describing the same instant.
     juce::int64 pullAudio (float* const* out, int numChannels, int n);
+    // The MIDI take's share of a block (keyboard-instrument.md §12.4):
+    // the start latch, stamping each queued arrival against the instant
+    // the block began, the samples elapsed, and the end at `until`.
+    void recordMidiBlock (field::MidiCapture& take, juce::int64 position, juce::int64 freeBefore, int n,
+                          double blockStartMs);
+    // Hands each queued arrival to `handle` in arrival order and empties
+    // the queue; audio thread only.
+    template <typename Handle>
+    void drainMidiArrivals (Handle&& handle);
+    juce::String closeAudioInput(); // empty on success
+    void closeMidiInputs();
 
 
     void registerHardwareListeners();
@@ -278,11 +299,15 @@ private:
     // dies (the same discipline as the live session's try-lock, in the
     // other direction).
     std::atomic<bool> armed { false }; // read by the null clock to present its input
+    // Armed for MIDI rather than audio: the null clock presents no input
+    // then, and a take is a MidiCapture.
+    std::atomic<bool> armedMidi { false };
     juce::String armedTrack;
     juce::String armedDevice;
     int armedInput = 0;
-    std::unique_ptr<field::Capture> capture;
+    std::unique_ptr<field::Transaction> capture;
     std::atomic<field::Capture*> activeCapture { nullptr };
+    std::atomic<field::MidiCapture*> activeMidiCapture { nullptr };
     // Which of the callback's input channels to capture. A real device
     // is opened with exactly one input channel active, and the callback
     // array holds only active channels, so this is 0 there; the null
@@ -308,10 +333,11 @@ private:
     std::atomic<field::Capture*> standbyCapture { nullptr };
     std::atomic<int> captureMissed { 0 };
     std::unique_ptr<field::Capture> standby;
-    std::unique_ptr<field::Capture> finished; // ended by the callback, awaiting finalize
+    std::unique_ptr<field::Transaction> finished; // ended by the callback, awaiting finalize
     int loopTakes = 0; // takes finalized in the current loop
     // Everything a new transaction needs, kept for the standbys a loop
     // opens after the first.
+    field::Transaction::Facts takeFacts() const;
     std::unique_ptr<field::Capture> openCapture();
     field::Click click;
     std::atomic<juce::uint64> callbackEpoch { 0 };
@@ -327,4 +353,31 @@ private:
     // the take stays gapless and its placement stays right. Sized for
     // the device's block on start.
     std::vector<float> silence;
+
+    // MIDI capture (keyboard-instrument.md §12.4). The inputs and their
+    // names belong to the message thread. Arrivals cross from JUCE's MIDI
+    // thread to the callback through a FIFO of fixed-size records, each
+    // stamped with its arrival on getMillisecondCounterHiRes()'s clock;
+    // the write lock serializes MIDI threads only (JUCE does not promise
+    // one thread for every input), and the callback never takes it.
+    struct MidiArrival
+    {
+        double ms = 0.0;
+        int size = 0;
+        juce::uint8 bytes[field::MidiCapture::maxMessageBytes] {};
+    };
+    static constexpr int midiArrivalCapacity = 4096;
+    std::vector<std::unique_ptr<juce::MidiInput>> midiInputs;
+    juce::StringArray midiSources;
+    juce::AbstractFifo midiArrivals { midiArrivalCapacity };
+    std::vector<MidiArrival> midiArrivalRing = std::vector<MidiArrival> ((size_t) midiArrivalCapacity);
+    juce::SpinLock midiArrivalWrite;
+    std::atomic<int> midiArrivalsLost { 0 }; // the queue was full
+    // Audio thread only: the MIDI take's position at the start of the
+    // current block and of the one before it, in samples from its start,
+    // and the last `at` it wrote, which keeps the take's messages in
+    // order.
+    juce::int64 midiTakeClock = 0;
+    juce::int64 midiFloor = 0;
+    juce::int64 midiLastAt = 0;
 };

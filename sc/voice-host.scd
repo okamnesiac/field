@@ -16,8 +16,8 @@ var device = "FIELD_DEVICE".getenv;
 var trace = "FIELD_VOICE_TRACE".getenv.notNil;
 // True until the server answers, at the first boot and at each restart:
 // a note then has no server to sound on, so it is ignored.
-var server, voiceDef, loadError, voices, sustained, sustainDown = false, bend = 0, booting = true;
-var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, startVoice, releaseVoice, releaseAll, restart;
+var server, voiceDef, loadError, voicer, booting = true;
+var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, restart;
 
 jsonValue = { |value|
 	if (value.isString or: { value.isKindOf(Symbol) }) {
@@ -52,23 +52,6 @@ deviceProblem = { |name|
 		"no output device named " ++ name ++ " (field devices lists them)"
 	}
 	{ nil };
-};
-
-startVoice = { |key, note, velocity|
-	voices[key] !? { |old| old.set(\gate, 0) };
-	sustained.remove(key);
-	voices[key] = Synth(voiceDef.name, [\freq, (note + bend).midicps, \amp, velocity / 127, \gate, 1, \out, 0], server);
-	if (trace) { emit.(["voice_on", note]) };
-};
-releaseVoice = { |key|
-	voices.removeAt(key) !? { |synth|
-		synth.set(\gate, 0);
-		if (trace) { emit.(["voice_off", key % 128]) };
-	};
-};
-releaseAll = {
-	voices.keys.copy.do(releaseVoice);
-	sustained.clear;
 };
 
 // Watched here rather than through waitForBoot, whose onFailure never runs
@@ -112,8 +95,7 @@ boot = {
 // carries the booted rate and the rate measured from the device clock.
 restart = {
 	booting = true;
-	voices.clear;
-	sustained.clear;
+	voicer.forgetVoices;
 	emit.(["restarting", true]);
 	server.quit(onComplete: boot);
 };
@@ -133,36 +115,22 @@ run = {
 	};
 	Server.default = server;
 
-	voices = Dictionary.new;
-	sustained = Set.new;
+	voicer = thisProcess.interpreter.executeFile(PathName(thisProcess.nowExecutingPath).pathOnly +/+ "voicer.scd").(
+		{ |note, velocity, freq| Synth(voiceDef.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0], server) },
+		{ |synth, freq| synth.set(\freq, freq) },
+		{ |synth| synth.set(\gate, 0) },
+		if (trace) { { |note, on| emit.([if (on) { "voice_on" } { "voice_off" }, note]) } }
+	);
 
 	MIDIClient.init(verbose: false);
 	MIDIIn.connectAll(verbose: false);
 
 	MIDIdef.noteOn(\fieldNoteOn, { |velocity, note, chan|
-		var key = chan * 128 + note;
-		if (velocity == 0) {
-			if (sustainDown) { sustained.add(key) } { releaseVoice.(key) };
-		} {
-			if (booting.not) { startVoice.(key, note, velocity) };
-		};
+		if (booting.not) { voicer.noteOn(chan, note, velocity) };
 	});
-	MIDIdef.noteOff(\fieldNoteOff, { |velocity, note, chan|
-		var key = chan * 128 + note;
-		if (sustainDown) { sustained.add(key) } { releaseVoice.(key) };
-	});
-	MIDIdef.cc(\fieldSustain, { |value|
-		if (value >= 64) { sustainDown = true } {
-			sustainDown = false;
-			sustained.copy.do(releaseVoice);
-			sustained.clear;
-		};
-	}, 64);
-	MIDIdef.cc(\fieldAllNotesOff, { releaseAll.() }, 123);
-	MIDIdef.bend(\fieldBend, { |value|
-		bend = (value - 8192) / 8192 * 2;
-		voices.keysValuesDo { |key, synth| synth.set(\freq, ((key % 128) + bend).midicps) };
-	});
+	MIDIdef.noteOff(\fieldNoteOff, { |velocity, note, chan| voicer.noteOff(chan, note) });
+	MIDIdef.cc(\fieldControl, { |value, number, chan| voicer.cc(chan, number, value) });
+	MIDIdef.bend(\fieldBend, { |value, chan| voicer.bend(chan, value) });
 
 	Routine {
 		loop {
