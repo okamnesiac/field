@@ -192,16 +192,16 @@ entry kinds, placement, nesting, levels, local time and rate, sends — is
 
 The stem places its entries through the tempo map (`at`, source offset,
 slip, entry gain and pan, linear fades) and sums them into a pre-fader
-Float32 stereo stem in the render daemon. A muted entry (`mute: true`)
-is left out before planning, so it is absent from the stem's spec, its
-action key, and its dependencies, and a cable whose every sender
-placement is muted carries nothing (`src/model/cables.ts`)
-([projects/mix-assembly/readme.md](projects/mix-assembly/readme.md) §1). A
-placed track is one more source in the same list, so a track→track edge
-is an ordinary graph edge, and a track placed three times is one render
-placed three times. The song's output track additionally renders the
-song's declared `length`, with `loop:` folding the overhang back onto
-the start.
+Float32 stereo stem in the render daemon
+([projects/mix-assembly/readme.md](projects/mix-assembly/readme.md) §1).
+A muted entry (`mute: true`) is left out before planning, so it is
+absent from the stem's spec, its action key, and its dependencies, and a
+cable whose every sender placement is muted carries nothing
+(`src/model/cables.ts`). A placed track is one more source in the same
+list, so a track→track edge is an ordinary graph edge, and a track
+placed three times is one render placed three times. The song's output
+track additionally renders the song's declared `length`, with `loop:`
+folding the overhang back onto the start.
 
 The action key hashes the *resolved placement plan* in samples, not the
 raw YAML:

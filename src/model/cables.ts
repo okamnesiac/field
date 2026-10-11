@@ -510,14 +510,19 @@ export function checkCables(
 // shows in full.
 export function formatCable(cable: Cable, from: string): string {
   const level = `${fmtDb(cable.gainDb)} dB (tap ${cable.tap})`;
+  // A joined cable with no arrivals has every sender placement muted:
+  // checkCables only keeps a cable that joins, and the audible pass drops
+  // muted placements. Said in words, because "0 arrivals" reads as a bug.
+  const silent = cable.arrivals.length === 0;
   if (cable.sender === from) {
-    return `send "${cable.label}" → track:${cable.receiver}, ${level}`;
+    return `send "${cable.label}" → track:${cable.receiver}, ${level}${silent ? ', silent: every placement of this track is muted' : ''}`;
   }
   // A count above one marks identical placements landing together —
   // rendered as one clip at +20·log₁₀(count) dB.
   const spellArrival = (a: CableArrival): string => `${a.at}${a.count > 1 ? `×${a.count}` : ''}`;
-  const arrivals =
-    cable.arrivals.length === 1
+  const arrivals = silent
+    ? `silent: every placement of track:${cable.sender} that reaches here is muted`
+    : cable.arrivals.length === 1
       ? `arrives at sample ${spellArrival(cable.arrivals[0]!)}`
       : `${cable.arrivals.length} arrivals at samples ${cable.arrivals.map(spellArrival).join(', ')}`;
   return `receive "${cable.label}" ← track:${cable.sender}, ${level}, ${arrivals}`;

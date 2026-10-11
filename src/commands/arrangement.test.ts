@@ -70,6 +70,18 @@ describe('field arrangement', () => {
     ]);
   });
 
+  it('says which placements are muted, since they are placed but silent', () => {
+    threePasses();
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      readFileSync(join(root, 'songs/creek/tracks/main.yaml'), 'utf8').replace(
+        '    gain_db: 3\n',
+        '    gain_db: 3\n    mute: true\n',
+      ),
+    );
+    expect(arrangement(root, 'creek')).toContain('  5.1.1 0:08.0  vox  (muted, +3 dB, pan 0.2)');
+  });
+
   it('reports the song length as a span, not the downbeat after it', () => {
     // `length: [12]` is twelve bars. Formatting it as bar.beat.tick gives
     // "13.1.1" — the position *after* the song — which is exactly the

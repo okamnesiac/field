@@ -81,6 +81,19 @@ describe('effective levels', () => {
     ]);
   });
 
+  it('marks a path through a muted placement, and only that path', () => {
+    creek();
+    // phrase is placed in main and in bed; mute it in main only.
+    track(
+      'main',
+      ['name: main', 'inputs:', '  - track: phrase', '    at: [1]', '    mute: true', ''].join('\n'),
+    );
+    expect(reaches(song(), 'keys').map((r) => [r.to, r.muted])).toEqual([
+      ['bed', false],
+      ['main', true],
+    ]);
+  });
+
   it('sums every hop, not just the nearest one', () => {
     creek();
     // creek itself cannot catch this: `phrase` is placed at 0 dB, so
@@ -216,6 +229,7 @@ describe('formatting a reach', () => {
     pans: [],
     via: [],
     paths: 1,
+    muted: false,
     ...over,
   });
 
@@ -225,6 +239,12 @@ describe('formatting a reach', () => {
     // Levels are authored in tenths; -0.0 dB is a rounding artifact that
     // reads as an attenuation nobody wrote.
     expect(formatReach(reach({ gainDb: -0.04 }))).toBe('track:main 0.0 dB');
+  });
+
+  it('says a muted path is silent, ahead of the other notes', () => {
+    expect(formatReach(reach({ gainDb: -4, via: ['phrase'], muted: true }))).toBe(
+      'track:main -4.0 dB (via track:phrase) — muted on this path, so it is silent here',
+    );
   });
 
   it('says the route only when there is one', () => {

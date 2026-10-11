@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readWav, readWavHeader } from '../audio/wav.js';
-import { placedWindow } from '../generators/stem.js';
+import { generatorName, placedWindow } from '../generators/stem.js';
 import type { LoadedSong } from '../model/project.js';
 import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
 import { sha256Text } from '../hash.js';
@@ -131,6 +131,21 @@ function placements(inputs: InputEntry[]): Array<[InputEntry, number]> {
   return inputs.flatMap((entry, i): Array<[InputEntry, number]> => (entry.receive === undefined ? [[entry, i]] : []));
 }
 
+// An owner track's clock, for the view and for the edits made through
+// it: the track's own tempo and meter, else the song's (nested-tracks.md
+// §13), built at the session rate because every position the view draws
+// and every offset an edit carries is in session samples.
+export function ownerClock(
+  owner: { data: { time?: TrackTime | undefined } },
+  song: Pick<LoadedSong, 'time'>,
+  rate: number,
+): { tempo: TempoMap; meter: MeterMap } {
+  return {
+    tempo: new TempoMap(owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }], rate),
+    meter: new MeterMap(owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }]),
+  };
+}
+
 export function projectTimeline(
   root: string,
   song: LoadedSong,
@@ -167,9 +182,7 @@ export function projectTimeline(
   ): UiTimelineLane => {
     // Everything in a track file is in that track's own time
     // (nested-tracks.md §13), falling back to the song's.
-    const localTempo = owner.data.time?.tempo
-      ? new TempoMap(owner.data.time.tempo, sessionRate)
-      : songTempo;
+    const localTempo = ownerClock(owner, song, sessionRate).tempo;
     const w = placedWindow(entry, localTempo);
     const startSample = originSample + w.start;
 
@@ -211,8 +224,13 @@ export function projectTimeline(
       entry: index,
       file: owner.path,
       sha256: sha256Text(owner.raw),
+      // A generator entry (record, supercollider, generative) is named as
+      // the graph names it, by its generator name: the track's own name,
+      // or `<track>-<id>` when it has an id, so two in one track differ.
       name: placedName ?? entry.audio ?? entry.receive ??
-        (entry.supercollider ? 'supercollider' : entry.generative ? 'generative' : `input ${index + 1}`),
+        (entry.record !== undefined || entry.supercollider !== undefined || entry.generative !== undefined
+          ? generatorName(entry, owner.data.name)
+          : `input ${index + 1}`),
       start: startSample,
       duration,
       depth,
@@ -222,6 +240,9 @@ export function projectTimeline(
       canSolo: placedName !== undefined,
       trackFile: placed?.path ?? null,
       trackSha256: placed ? sha256Text(placed.raw) : null,
+      // A track renders at its own rate, or the song's (graph.ts
+      // trackRate), and its filters are designed at that rate.
+      trackRate: placed ? (placed.data.rate ?? song.song?.data.rate ?? sessionRate) : null,
       inserts: placed
         ? placed.data.inserts.map(
             (ins, i): UiInsert => ({

@@ -724,6 +724,19 @@ describe('cables render (nested-tracks.md §19 chunk 4)', () => {
       'receive "verb" ← track:keys, -6.0 dB (tap post), arrives at sample 0',
     );
   });
+
+  it('explain says a cable is silent when every sender placement is muted', async () => {
+    track('keys', ['sends:', '  verb:', '    gain_db: -6']);
+    track('space', ['inputs:', '  - receive: verb']);
+    track('main', ['inputs:', '  - track: keys', '    mute: true', '  - track: space']);
+    const cable = (await explainLabel(root, '//songs/opener/track:space')).levels!.cables[0]!;
+    expect(formatCable(cable, 'space')).toBe(
+      'receive "verb" ← track:keys, -6.0 dB (tap post), silent: every placement of track:keys that reaches here is muted',
+    );
+    expect(formatCable(cable, 'keys')).toBe(
+      'send "verb" → track:space, -6.0 dB (tap post), silent: every placement of this track is muted',
+    );
+  });
 });
 
 describe('warnings hold no gate', () => {

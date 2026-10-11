@@ -60,6 +60,51 @@ describe('timeline lanes', () => {
     expect(keys?.children?.map((l) => [l.name, l.entry])).toEqual([['pad', 1]]);
   });
 
+  it('names a record entry by its generator name, not by its position', () => {
+    createTrack(root, 'creek', 'vocal');
+    writeFileSync(
+      join(root, 'songs/creek/tracks/vocal.yaml'),
+      ['name: vocal', 'inputs:', '  - id: lead', '    record:', '  - id: dub', '    record:', ''].join('\n'),
+    );
+    createTrack(root, 'creek', 'harmony');
+    writeFileSync(join(root, 'songs/creek/tracks/harmony.yaml'), ['name: harmony', 'inputs:', '  - record:', ''].join('\n'));
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - track: vocal', '  - track: harmony', ''].join('\n'),
+    );
+    const [vocal, harmony] = lanesOf();
+    expect(vocal?.children?.map((l) => l.name)).toEqual(['vocal-lead', 'vocal-dub']);
+    expect(harmony?.children?.map((l) => l.name)).toEqual(['harmony']);
+  });
+
+  it("carries each placed track's own rate, which its EQ designs at", () => {
+    createTrack(root, 'creek', 'hi');
+    writeFileSync(join(root, 'songs/creek/tracks/hi.yaml'), ['name: hi', 'rate: 96000', 'inputs: []', ''].join('\n'));
+    createTrack(root, 'creek', 'plain');
+    writeFileSync(join(root, 'songs/creek/tracks/plain.yaml'), ['name: plain', 'inputs: []', ''].join('\n'));
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - track: hi', '  - track: plain', '  - audio: riff', ''].join('\n'),
+    );
+    expect(lanesOf().map((l) => [l.name, l.trackRate])).toEqual([
+      ['hi', 96000],
+      ['plain', 48000],
+      ['riff', null],
+    ]);
+  });
+
+  it('names supercollider entries by their generator name too', () => {
+    createTrack(root, 'creek', 'synth');
+    const sc = (id: string) => [`  - id: ${id}`, '    supercollider:', '      source: pad', '      seed: 1', '      duration: 1'];
+    writeFileSync(
+      join(root, 'songs/creek/tracks/synth.yaml'),
+      ['name: synth', 'inputs:', ...sc('low'), ...sc('high'), ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: synth', ''].join('\n'));
+    const [synth] = lanesOf();
+    expect(synth?.children?.map((l) => l.name)).toEqual(['synth-low', 'synth-high']);
+  });
+
   it('draws an open window as long as its source plays, not to the song end', () => {
     // riff is 4800 frames; the song here is 96000 samples long. An open
     // window plays the source from its read offset to its end.

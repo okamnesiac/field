@@ -332,7 +332,7 @@ export function App() {
       {selLane && selLane.trackFile !== null ? (
         <Inserts
           lane={selLane}
-          sampleRate={snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
+          sampleRate={selLane.trackRate ?? snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
           send={send}
         />
       ) : null}

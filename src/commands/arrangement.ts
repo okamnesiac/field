@@ -28,6 +28,7 @@ export interface Placement {
   absolute: boolean; // pinned to time rather than to the grid
   gainDb: number;
   pan: number;
+  muted: boolean; // `mute: true`: placed, and left out of the mix
 }
 
 export interface ArrangementView {
@@ -69,6 +70,7 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
       absolute,
       gainDb: entry.gain_db,
       pan: entry.pan,
+      muted: entry.mute,
     });
   }
   // Reading order is time order — the file's order is authoring order, and
@@ -115,7 +117,7 @@ export function formatArrangement(view: ArrangementView, project: LoadedProject)
       .join(', ');
     // An absolute placement is pinned to time, so its bar reading moves if
     // the tempo map does. Saying which it is costs four characters.
-    const note = [p.absolute ? 'absolute' : '', level].filter(Boolean).join(', ');
+    const note = [p.muted ? 'muted' : '', p.absolute ? 'absolute' : '', level].filter(Boolean).join(', ');
     lines.push(`  ${p.bars.padEnd(width)}${seconds}  ${p.track}${note ? `  (${note})` : ''}`);
   }
   return lines.join('\n');

@@ -91,7 +91,9 @@ every other field, in the file: the stem plans as though the entry were
 absent, so its sends go silent too, and `mute: false` brings it back
 exactly as it was. It lives on the placement rather than on the track,
 so a track placed twice can be muted in one home and heard in the
-other.
+other. `field explain` keeps a path through a muted placement and marks
+it "muted on this path", and `field arrangement` labels a muted
+placement `muted`, so both still show where the track is placed.
 
 Time fields take two spellings — a scalar is ticks, an array is musical
 (`at: [9, 2]` is bar 9, beat 2) — described in

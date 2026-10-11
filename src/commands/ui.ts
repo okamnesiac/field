@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,10 +23,9 @@ import {
   applySplit,
   applyStretch,
 } from './ui-edits.js';
-import type { UiLane, UiSnapshot } from './ui-protocol.js';
-import { projectTimeline } from './ui-timeline.js';
+import type { UiSnapshot } from './ui-protocol.js';
+import { ownerClock, projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
-import { MeterMap, TempoMap } from '../time/tempo.js';
 import { watchLiveSession } from './watch-live.js';
 
 // `field ui <song>` (ui.md): a local web face over what already exists —
@@ -187,13 +187,50 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         `(field play ${songName} fails the same way, for the same reason.)`,
     );
   }
-  const client = await AudiodClient.connect(root);
-  if (!client.supports('session') || !client.supports('swap')) {
-    throw new Error(
-      `field-audiod ${client.daemonVersion} predates live sessions — field transport quit, then retry`,
-    );
+  // Everything that can refuse without touching the daemon refuses
+  // first: the client build, and the port. Loading the session replaces
+  // whatever the daemon is playing, so a taken --port found after that
+  // would cost the playing session and then crash.
+  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const distDir = join(packageRoot, 'ui', 'dist');
+  const http = createServer();
+  await new Promise<void>((resolve, reject) => {
+    const refuse = (err: NodeJS.ErrnoException) =>
+      reject(
+        err.code === 'EADDRINUSE'
+          ? new Error(`field ui: port ${options.port} is already in use — pick another with --port, or omit it`)
+          : err,
+      );
+    http.once('error', refuse);
+    http.listen(options.port ?? 0, '127.0.0.1', () => {
+      http.off('error', refuse);
+      resolve();
+    });
+  });
+  if (!existsSync(join(distDir, 'index.html'))) {
+    http.close();
+    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
   }
-  const loaded = await client.session(compiled.session);
+
+  // From here a failure must not leave the port bound behind it.
+  const connectAndLoad = async () => {
+    const connected = await AudiodClient.connect(root);
+    if (!connected.supports('session') || !connected.supports('swap')) {
+      connected.close();
+      throw new Error(
+        `field-audiod ${connected.daemonVersion} predates live sessions — field transport quit, then retry`,
+      );
+    }
+    return { client: connected, loaded: await connected.session(compiled.session) };
+  };
+  let client: AudiodClient;
+  let loaded: Awaited<ReturnType<AudiodClient['session']>>;
+  try {
+    ({ client, loaded } = await connectAndLoad());
+  } catch (err) {
+    http.close();
+    throw err;
+  }
   ctx = musicalContext(loadProject(root), `songs/${songName}`, loaded.sample_rate);
 
   const mainFile = () => {
@@ -206,29 +243,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
 
   const snapshot = async (): Promise<UiSnapshot> => {
     const { song, main } = mainFile();
-    const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
-    const lanes: UiLane[] = main.data.inputs.map((entry, i) => {
-      const kind = entry.track !== undefined ? 'track' : entry.audio !== undefined ? 'audio' : 'other';
-      const placed = entry.track !== undefined ? byName.get(entry.track) : undefined;
-      return {
-        entry: i,
-        kind,
-        name: entry.track ?? entry.audio ?? entry.receive ?? `input ${i + 1}`,
-        gain_db: entry.gain_db,
-        pan: entry.pan,
-        mute: entry.mute,
-        canSolo: kind === 'track',
-        empty: placed !== undefined && placed.inputs.length === 0,
-        inserts: placed?.inserts.map((ins) => ('effect' in ins ? String(ins.effect) : 'plugin')) ?? [],
-      };
-    });
-    const raw = readFileSync(join(root, main.path), 'utf8');
     const status = await client.status();
     return {
       type: 'snapshot' as const,
       song: songName,
-      lanes,
-      file: { path: main.path, sha256: sha256Text(raw) },
+      file: { path: main.path },
       soloed,
       devices: await client.devices(),
       status: {
@@ -440,15 +459,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // The owner's own time, falling back to the song's — the same rule the
   // timeline renders by (nested-tracks.md §13), so a clip lands exactly
   // where the drag showed it.
-  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) => ({
-    tempo: new TempoMap(
-      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
-      loaded.sample_rate,
-    ),
-    meter: new MeterMap(
-      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
-    ),
-  });
+  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) =>
+    ownerClock(owner, song, loaded.sample_rate);
 
   // `source_offset` addresses the source's own samples, and both the
   // split and the front-trim advance it by a distance measured in
@@ -742,9 +754,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     }
   };
 
-  // Static assets: the client's build output, shipped with the package.
-  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const distDir = join(packageRoot, 'ui', 'dist');
+  // Static assets: the client's build output in distDir, shipped with
+  // the package.
   const MIME: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript',
@@ -762,11 +773,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     res.end(readFileSync(file));
   };
 
-  if (!existsSync(join(distDir, 'index.html'))) {
-    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
-  }
-
-  const http = createServer(serveStatic);
+  http.on('request', serveStatic);
   const wss = new WebSocketServer({ noServer: true });
   http.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -822,7 +829,6 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     });
   });
 
-  await new Promise<void>((resolve) => http.listen(options.port ?? 0, '127.0.0.1', resolve));
   const address = http.address();
   const port = typeof address === 'object' && address !== null ? address.port : 0;
   const url = `http://127.0.0.1:${port}/?t=${token}`;
@@ -859,8 +865,29 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         // stderr inherited on purpose: the shell mirrors the page's
         // console here, which is the only place a blank window can
         // explain itself.
-        shell = spawn(process.execPath, [electron, shellEntry, url], {
+        // The URL rides in the environment: it carries the session
+        // token, and argv is readable by other users on a shared machine.
+        //
+        // The shell's profile is made here, fresh by mkdtemp so no other
+        // user can have made it first, and removed here once the shell
+        // has exited. The shell cannot remove it itself: Electron's quit
+        // fires while Chromium still holds the profile's files open, and
+        // Windows refuses to delete an open file.
+        const profile = mkdtempSync(join(tmpdir(), 'field-ui-profile-'));
+        const launched = spawn(process.execPath, [electron, shellEntry], {
           stdio: ['ignore', 'ignore', 'inherit'],
+          env: { ...process.env, FIELD_UI_URL: url, FIELD_UI_PROFILE: profile },
+        });
+        shell = launched;
+        launched.once('exit', () => {
+          try {
+            // Retried, because on Windows a Chromium helper can still be
+            // letting go of the profile's files as the shell exits.
+            rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+          } catch {
+            // An orphaned Electron can still hold it on Windows after a
+            // kill; the temp directory is the OS's to clear then.
+          }
         });
         shell.on('error', () => {
           process.stderr.write('field ui: could not start the app shell; opening a browser\n');
@@ -896,6 +923,9 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       resolve();
     });
   });
+  // The profile goes in the shell's exit handler. A shell still running
+  // keeps this process alive until that handler has run, so nothing here
+  // waits for it.
   if (shell !== undefined && shell.exitCode === null) shell.kill();
   watchAbort.abort();
   // Ending the session ends the playback it started: the daemon stops

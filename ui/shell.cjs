@@ -10,22 +10,30 @@
 // in a shell has no devtools to open, so the diagnosis has to come out
 // somewhere a person is already looking.
 const { app, BrowserWindow, shell } = require('electron');
-const { join } = require('node:path');
-const { tmpdir } = require('node:os');
 
 // Its own profile directory, so Chromium's caches land somewhere
 // writable instead of failing noisily against a default path this
 // process may not own — the "Unable to move the cache" spew is the
 // symptom, and it drowns the page console this shell exists to surface.
-// Per-user, because tmpdir() is shared on Linux: a fixed name there
-// belongs to whoever launches first, and the second user's failure
-// arrives as exactly the cache noise this line exists to remove.
-app.setPath('userData', join(tmpdir(), `field-ui-profile-${process.getuid?.() ?? 'win'}`));
+// `field ui` makes it fresh with mkdtemp, hands it over as
+// FIELD_UI_PROFILE, and removes it after this process exits: removing it
+// here, on quit, would race Chromium, which still holds its files open
+// then, and Windows refuses to delete an open file.
+const profile = process.env.FIELD_UI_PROFILE;
+if (!profile) {
+  process.stderr.write('field ui shell: FIELD_UI_PROFILE is not set\n');
+  app.exit(1);
+} else {
+  app.setPath('userData', profile);
+}
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
-const url = process.argv[2];
+// The session URL arrives in the environment, not on the command line:
+// it carries the session token, and a process's arguments are readable
+// by other users on a shared machine (/proc on Linux, ps everywhere).
+const url = process.env.FIELD_UI_URL;
 if (!url) {
-  process.stderr.write('field ui shell: no URL argument\n');
+  process.stderr.write('field ui shell: FIELD_UI_URL is not set\n');
   app.exit(1);
 }
 
