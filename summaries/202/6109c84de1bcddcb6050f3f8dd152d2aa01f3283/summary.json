@@ -1,0 +1,179 @@
+{
+ "version": 1,
+ "name": "Instrument knobs plan",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 202,
+  "title": "Plan instrument knobs: choose with the arrows, turn with up and down, and record every turn",
+  "head": "6109c84de1bcddcb6050f3f8dd152d2aa01f3283",
+  "headRef": "spec/instrument-knobs",
+  "base": "4467d6f0cc80ce4ba8d102429195287331ee493a",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI instrument. It publishes a virtual MIDI source, <code>Field Keys</code>, and, given an instrument such as <code>juno</code>, starts a <b>voice host</b>: a SuperCollider process that turns each note into a voice of that instrument. Today the only part of the sound you can change while you play is the modulation wheel, in six fixed steps on keys <code>3</code> to <code>8</code>. Everything else, such as <code>juno</code>'s filter cutoff, is a constant in the instrument's program, so changing it means editing the file and saving.",
+   "This pull request adds a plan, <code>docs/projects/instrument-knobs/readme.md</code>, at <code>status: ready</code> and <code>priority: next</code>. It changes no code. After Justin's review, the plan makes <code>field keys</code> a MIDI controller with knobs. A small YAML <b>knob file</b> beside each instrument, or one you name with <code>--knobs</code>, lists the knobs: each one's name, MIDI controller number, range, curve, and default. <code>field keys</code> checks the file, shows the knobs on a line of their own, and sends every change as an ordinary control change, so Logic or a hardware synth can answer it as well as <code>juno</code>.",
+   "A SuperCollider voice answers through the voicer, which hands each controller to the voice as a control named for its number, <code>cc74</code>, from 0 to 1. The voice maps that control to its own parameter, reading the same knob file. A new default keymap, <code>musical</code>, puts choosing and turning on the arrows, typing a value on the number row, and the pitch bend on <code>B</code> and <code>N</code>. <code>Esc</code> cancels a typed value and no longer quits; <code>Ctrl-C</code> quits.",
+   "The first review's two findings are fixed at this head. The second review requested changes for one new finding: the voice and a take's render read the knob file without the checks <code>field keys</code> applies. It is flagged on line 148."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Knob file</b>: <code>&lt;program&gt;.knobs.yaml</code> beside an instrument, or a file named with <code>--knobs</code>. It lists each knob's <code>name</code>, <code>cc</code>, <code>min</code>, <code>max</code>, <code>curve</code>, <code>step</code>, <code>units</code>, and <code>default</code>.</li><li><b>Controller (CC)</b>: a MIDI control-change number from 0 to 127. CC 1 is the modulation wheel, shown as the knob <code>mod</code>, and CC 64 is the sustain pedal.</li><li><b><code>cc&lt;n&gt;</code></b>: the control the voicer sets on every voice for controller n, from 0 to 1, as it sets <code>mod</code> for the wheel today.</li><li><b>Voicer</b>: <code>sc/voicer.scd</code>, the MIDI-to-voice rules that the live voice host and a take's offline render share.</li><li><b><code>musical</code></b>: the new default keymap, Field's adaptation of Logic's Musical Typing, which replaces <code>musical-typing</code>.</li><li><b>Entry and glide</b>: a value you type on the number row, and the run of control changes that moves the knob to it at the keymap's <code>glide</code> speed.</li><li><b>Chase</b>: the daemon remembering each controller's last value before a take starts, so the take can start with it.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review history",
+    "html": "<ul class=\"tight\"><li><b>First review (19ff3ed), fixed.</b> Two open questions waited on Justin in a <code>ready</code> plan, and criterion 1's <code>res</code> width contradicted §2.5. Both are fixed, and their threads are resolved.</li><li><b>Second review (6109c84), open.</b> The voice and a take's render read the knob file unchecked, so a file <code>field keys</code> rejects still shapes the sound.</li><li><b>Suggestions.</b> Say that <code>type</code> takes a number for a digit, since YAML reads <code>type: 1</code> as one. Pad §2.1's entry example. Make criterion 20 turn rather than type, or name chunk 2 before chunk 3.</li></ul>"
+   },
+   {
+    "id": "rollout",
+    "title": "Three chunks",
+    "html": "<ol><li><b>Knobs, live and in takes.</b> Knob files and <code>--knobs</code>, choosing and turning, the knob line, <code>musical</code> with the bend on <code>B</code> and <code>N</code>, the voicer's <code>cc&lt;n&gt;</code>, and <code>juno</code> and <code>bass</code> with their knob files.</li><li><b>Typing and the glide.</b> The number row, <code>Enter</code>, <code>Backspace</code>, <code>Esc</code> cancelling instead of quitting, and the keymap's <code>glide</code>.</li><li><b>Where a take starts.</b> <code>.field/keys.json</code>, <code>controllers</code> in the daemon's <code>arm</code> request, and the daemon's chase.</li></ol>"
+   },
+   {
+    "id": "later",
+    "title": "Deferred out of the plan",
+    "html": "<ul class=\"tight\"><li>Knobs in the Electron UI, until the UI plays instruments (arming.md chunk 3).</li><li>Knob keys in <code>tracker</code> and <code>fourths</code>, until <code>musical</code> has been played with.</li><li>Finer than 128 steps, until a knob's steps are audible.</li><li>Saving a dialed-in sound, until someone wants to keep one.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "plan",
+   "title": "The instrument knobs plan",
+   "kicker": "One new plan: knob files, a knob line in field keys, typing and gliding values, and takes that keep every change",
+   "intro": [
+    "The plan follows the repository's plan layout. §1 states the problem, §2 the design, §3 the decisions with the alternatives they beat, §4 the acceptance criteria and tests, §5 the cost, §6 the three chunks, §7 the questions deferred out of the plan, and §8 the facts about today's code the design rests on.",
+    "The design keeps knob logic in one place. <code>field keys</code> reads and checks the knob files in TypeScript, keeps each knob's value, and sends only MIDI control changes. Everything downstream already handles control changes: the daemon records them into a take, the take's render replays them through the voicer, and the voicer, which sets <code>mod</code> from the wheel today, sets <code>cc&lt;n&gt;</code> for every other controller. A SuperCollider voice maps <code>cc&lt;n&gt;</code> to its parameter itself, as a hardware synth maps a controller to its own.",
+    "Read §2.2 for the knob file, §2.3 for the <code>musical</code> keymap, §2.4 for how an instrument answers, §2.5 for what you see, §2.7 for typing and gliding, and §3.1 for the calls Justin made in review."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Every section the plan cites exists and says what the plan cites it for: keyboard-instrument.md §2.2, §2.3, §2.4, §2.6, §3, §5, §14, and §14.5, and arming.md chunk 3. Checked by reading each section at the base."
+    },
+    {
+     "kind": "verify",
+     "text": "Every reference to <code>musical-typing</code> outside the plans sits in a file §2.9 lists or a test §4 names: <code>docs/keys.md</code>, <code>bass.scd</code>'s comment, <code>src/cli.ts</code>, <code>DEFAULT_KEYMAP</code> in <code>src/keys/keymap.ts</code>, and five test files. Checked with <code>git grep</code> at the head."
+    },
+    {
+     "kind": "context",
+     "text": "Three open pull requests, #196, #198, and #201, touch files this plan will change, such as <code>sc/voice-host.scd</code>, <code>src/commands/keys.ts</code>, and the daemon's <code>player.cpp</code>. They overlap in text only. #201 gives each instrument's synths their own output bus and leaves the voices' controls alone."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/instrument-knobs/readme.md",
+     "note": "The new plan, at <code>status: ready</code> and <code>priority: next</code>, rewritten after Justin's review.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 6,
+       "text": "The heading has no <code>Plan: </code> prefix, which matches every plan on <code>main</code> since #200 merged. Checked with <code>git grep</code> on <code>main</code>."
+      },
+      {
+       "kind": "context",
+       "line": 99,
+       "text": "Suggestion from the review, not blocking: §2.5 pads an entry to the value's width, eight characters for <code>cutoff</code>, so this example reads <code>cutoff  800_ Hz</code> with two spaces, as §2.5 shows."
+      },
+      {
+       "kind": "verify",
+       "line": 121,
+       "text": "<code>juno</code>'s defaults here (2000, 0.3, 0.8, 1.5) are the constants in <code>juno.scd</code>'s settings Event, and each sits inside its range. <code>bass</code>'s attack default, 0.005, is the bottom of its range, which the rule on line 163 now allows."
+      },
+      {
+       "kind": "verify",
+       "line": 140,
+       "text": "These formulas are SuperCollider's <code>ControlSpec.map</code>: it clips to 0 to 1, applies the warp, and rounds to <code>step</code>. Checked in SuperCollider 3.14.1's <code>Spec.sc</code>."
+      },
+      {
+       "kind": "flag",
+       "line": 148,
+       "text": "Only <code>field keys</code> checks a knob file against this schema. The voice reads the same file with <code>parseYAMLFile</code> and no checks, and §2.1 step 7 reloads the voice on every save. After criterion 11's second save, <code>res</code> reads <code>cc1</code>, which the voicer never sets, so turning <code>res</code> moves the line but not the sound. A take's render reads the file unchecked too, so an <code>exp</code> range at 0 renders a <code>nan</code> cutoff. Check the file before every voice load and render, keeping the last good voice live and failing the render."
+      },
+      {
+       "kind": "verify",
+       "line": 161,
+       "text": "SuperCollider's <code>ExponentialWarp</code> maps with <code>(max / min) ** x * min</code>, so a range with <code>min</code> 0 gives <code>nan</code> for every value above 0. That is why this rule exists. Checked in <code>Spec.sc</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 206,
+       "text": "<code>musical-typing.yaml</code> plays notes on the home row and <code>W E T Y U O P</code>, so <code>B</code>, <code>N</code>, the arrows, <code>Period</code>, and <code>Minus</code> are free for these bindings, and <code>Period</code> and <code>Minus</code> are positions <code>src/keys/position.ts</code> already knows."
+      },
+      {
+       "kind": "context",
+       "line": 221,
+       "text": "Suggestion from the review, not blocking: the repository's YAML library reads <code>type: 1</code> as the number 1 and <code>type: \".\"</code> as a string. So the schema must take a digit as a number, or the digits need quotes."
+      },
+      {
+       "kind": "verify",
+       "line": 260,
+       "text": "The voicer today turns CC 1 into <code>mod</code>, handles CC 64 and CC 123, and ignores every other controller. Its <code>start</code> callback takes four arguments, so passing each <code>cc&lt;n&gt;</code> to a new voice is new. Checked in <code>sc/voicer.scd</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 274,
+       "text": "This helper works in SuperCollider 3.14.1. A scratch program built a SynthDef with it and got controls <code>cc74</code> and <code>cc71</code> at the unmapped defaults, 0.647 and 0.316. <code>parseYAMLFile</code> returned the numbers as strings, as the text says."
+      },
+      {
+       "kind": "verify",
+       "line": 299,
+       "text": "Recomputed from §2.5's rules over all 128 controller values: <code>mod</code> pads to 3, <code>cutoff</code> to 8, <code>res</code> to 5 (<code>0.000</code> to <code>0.950</code>), and <code>attack</code> and <code>release</code> to 7. That gives this line exactly, and criterion 1's."
+      },
+      {
+       "kind": "verify",
+       "line": 357,
+       "text": "From 0, one step at the press, then 18, 24, and 84 steps through §2.6's bands, reach 127 at 2.30 s, at no more than 25 control changes a second."
+      },
+      {
+       "kind": "verify",
+       "line": 381,
+       "text": "Recomputed: 800 Hz is nearest controller value 62 (809.6 Hz, shown as <code>810 Hz</code>), 99999 clamps to 127, and 20 clamps to 0. <code>ControlSpec(50, 15000, \\exp).map(62 / 127)</code> is 809.6 in <code>sclang</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 389,
+       "text": "At <code>glide: 1</code>, 127 steps a second is about 5 steps a 40 ms tick, so 127 to 62 takes 13 ticks, 520 ms, which matches \"half a second\" and the session test."
+      },
+      {
+       "kind": "verify",
+       "line": 418,
+       "text": "Today <code>isQuit</code> in <code>src/keys/terminal.ts</code> quits on <code>Esc</code> and on <code>Ctrl-C</code>, and the keymap schema refuses <code>Escape</code> because \"it always quits\". This plan changes both and amends keyboard-instrument.md §2.4, where that rule lives."
+      },
+      {
+       "kind": "context",
+       "line": 448,
+       "text": "Rows in arrival order answer the first review's suggestion. The voicer keeps one value per controller for every channel, so the render ends on whichever value arrived last, as the live voice did."
+      },
+      {
+       "kind": "verify",
+       "line": 643,
+       "text": "Criterion 1's knob line now matches §2.5's rules, recomputed. This was the first review's second finding, fixed at this head."
+      },
+      {
+       "kind": "context",
+       "line": 762,
+       "text": "Suggestion from the review, not blocking: criterion 20 types a low <code>cutoff</code>, which needs chunk 2's typing, but this chunk names only chunk 1 as its prerequisite."
+      },
+      {
+       "kind": "verify",
+       "line": 766,
+       "text": "Every question below is now deferred out of the plan, with what reopens it, so the <code>ready</code> status holds. This was the first review's first finding, fixed at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 809,
+       "text": "<code>positionOf</code> in <code>src/keys/position.ts</code> maps only codes 9 (<code>Tab</code>) and 32 (<code>Space</code>) among functional keys, so <code>Enter</code> and <code>Backspace</code> resolve to nothing today, as stated."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "instrument-knobs"
+}
