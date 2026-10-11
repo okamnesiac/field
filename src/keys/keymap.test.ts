@@ -97,18 +97,6 @@ describe('loading a keymap', () => {
 });
 
 describe('reloading a keymap on save', () => {
-  function nextReload(results: ReloadResult[], count: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const deadline = Date.now() + 5000;
-      const poll = (): void => {
-        if (results.length >= count) resolve();
-        else if (Date.now() > deadline) reject(new Error(`no reload ${count} within 5 s`));
-        else setTimeout(poll, 20);
-      };
-      poll();
-    });
-  }
-
   // Many editors write a temporary file and rename it over the keymap;
   // a watch on the file itself would end at the first such save.
   function saveByRename(path: string, text: string): void {
@@ -117,27 +105,45 @@ describe('reloading a keymap on save', () => {
     renameSync(temp, path);
   }
 
-  // Three reloads in a row, each allowed nextReload's 5 s: file events can
-  // arrive a second or more late on a loaded machine, so the test's budget
-  // covers all three rather than vitest's default 5 s for the whole test.
+  // Saves `text` until reload `count` arrives. A watch just started can lose
+  // a directory event outright on a loaded machine, not only see it late, so
+  // the save repeats every 500 ms; a save of the text already loaded reloads
+  // nothing, so a repeat never adds a reload.
+  function saveUntilReload(path: string, text: string, results: ReloadResult[], count: number): Promise<void> {
+    saveByRename(path, text);
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + 5000;
+      let resaveAt = Date.now() + 500;
+      const poll = (): void => {
+        if (results.length >= count) return resolve();
+        if (Date.now() > deadline) return reject(new Error(`no reload ${count} within 5 s`));
+        if (Date.now() >= resaveAt) {
+          saveByRename(path, text);
+          resaveAt = Date.now() + 500;
+        }
+        setTimeout(poll, 20);
+      };
+      poll();
+    });
+  }
+
+  // Three reloads in a row, each allowed 5 s, so the test's budget covers
+  // all three rather than vitest's default 5 s for the whole test.
   it('applies two rename-on-save edits in a row, and keeps the keymap through an invalid one', { timeout: 20_000 }, async () => {
     const path = join(dir, 'mine.yaml');
     writeFileSync(path, 'name: mine\nnotes: { KeyA: 0 }\n');
     const results: ReloadResult[] = [];
     const stop = watchKeymap(path, (r) => results.push(r), 20);
     try {
-      saveByRename(path, 'name: mine\nnotes: { KeyA: 2 }\n');
-      await nextReload(results, 1);
+      await saveUntilReload(path, 'name: mine\nnotes: { KeyA: 2 }\n', results, 1);
       const first = results.at(-1)!;
       expect('keymap' in first && first.keymap.notes.get('KeyA')).toEqual([2]);
 
-      saveByRename(path, 'name: mine\nnotes: { KeyA: 4 }\n');
-      await nextReload(results, 2);
+      await saveUntilReload(path, 'name: mine\nnotes: { KeyA: 4 }\n', results, 2);
       const second = results.at(-1)!;
       expect('keymap' in second && second.keymap.notes.get('KeyA')).toEqual([4]);
 
-      saveByRename(path, 'name: mine\nnotes: { KeyA: 0 }\ncontrols: { KeyA: { transpose: 12 } }\n');
-      await nextReload(results, 3);
+      await saveUntilReload(path, 'name: mine\nnotes: { KeyA: 0 }\ncontrols: { KeyA: { transpose: 12 } }\n', results, 3);
       const third = results.at(-1)!;
       expect('error' in third && third.error.problems.join('\n')).toMatch(/KeyA is both a note and a control/);
     } finally {

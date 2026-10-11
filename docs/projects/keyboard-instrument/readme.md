@@ -80,9 +80,9 @@ Three words carry the design, and each names one thing:
    environment.
 6. The voice host boots `scsynth`, runs the instrument program with
    `FIELD_MODE=voice`, adds the SynthDef the program returns, connects
-   every MIDI source, and prints a ready line. The status line in
-   `field keys` shows the instrument as live, with the device and its
-   sample rate.
+   every MIDI source, and prints a ready line. The instrument's line in
+   `field keys`, above the status line, shows it as live, with the
+   device and its sample rate.
 7. You press `KeyA`, the key a US keyboard labels `A`. The terminal
    reports the press, and `field keys` finds its position (§2.3),
    whatever your keyboard layout types there. Musical Typing maps
@@ -330,9 +330,10 @@ off, which reads as a toggle. The keymap holds sustain only while `Tab`
 is down, as a pedal does. A keymap of your own can choose `toggle`.
 
 One status line shows the keymap's name, the transpose, the velocity,
-the held notes, and the instrument's state. It is drawn with raw ANSI
-codes the way `src/commands/picker.ts` draws, so it needs no new
-dependency.
+and last the held notes, so playing changes only the end of the line.
+An instrument's state has a line of its own above it, redrawn only when
+the state changes. Both are drawn with raw ANSI codes the way
+`src/commands/picker.ts` draws, so they need no new dependency.
 
 ### 2.5 The helper is the native half of `field keys`
 

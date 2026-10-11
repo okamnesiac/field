@@ -9,7 +9,6 @@ the default keymap, and you can write your own.
 
 ```console
 $ field keys
-Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
 Field Keys · musical-typing · transpose 0 · velocity 100 · C4 E4 G4
 ```
 
@@ -19,8 +18,8 @@ from every other MIDI source:
 ```console
 $ cd examples/bloom
 $ field keys pad
-Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
-Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · pad live at 48000 Hz on MacBook Pro Speakers
+pad live at 48000 Hz on MacBook Pro Speakers
+Field Keys · musical-typing · transpose 0 · velocity 100 · D4
 ```
 
 To keep what you play, record it into a track; see
@@ -54,7 +53,9 @@ for, once, and a new process gets a new MIDI client.
 2. In the application you want to play, choose `Field Keys` as the MIDI
    input. In Logic, `Field Keys` appears with your other MIDI inputs.
 3. Play. The status line shows the keymap, the transpose, the velocity,
-   and the notes sounding.
+   and last the notes sounding, so playing changes only the end of the
+   line. On a narrow terminal the text before the notes is shortened,
+   never the notes.
 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
    every held note and then All Notes Off, so nothing is left sounding,
    and `Field Keys` disappears.
@@ -82,22 +83,22 @@ also checks a USB controller: give it the controller's name.
 
 `field keys <instrument>` plays a SuperCollider instrument from the
 project's `shared/instruments/` shelf, by the name a `supercollider:`
-entry gives it, with or without `.scd`. A path works too. Inside a
-project it resolves from the project root, as a `supercollider:` entry's
-`source:` does, so give it from the root even in a subdirectory; outside
-a project a path is the only way to name an instrument, and it resolves
-from where you are.
+entry gives it; `.scd` is added to a name with no extension. A path
+works too. Inside a project it resolves from the project root, as a
+`supercollider:` entry's `source:` does, so give it from the root even
+in a subdirectory; outside a project a path is the only way to name an
+instrument, and it resolves from where you are.
 
 1. `field keys` publishes `Field Keys`, then starts a *voice host*:
-   `sclang` running Field's `sc/voice-host.scd`. The status line says
-   the instrument is starting.
+   `sclang` running Field's `sc/voice-host.scd`. The instrument's line,
+   above the status line, says it is starting.
 2. The host boots its own `scsynth` on the output device: the one you
    give with `--device` (`field devices` lists them), or the system
    output. It runs at the device's current sample rate and never
    changes it, so `field play` and `field keys` can share a device.
 3. The host loads the instrument's voice and plays it from every MIDI
-   source, so a USB controller plays it too. The status line shows the
-   instrument live, with its device and rate.
+   source, so a USB controller plays it too. The instrument's line
+   shows it live, with its device and rate.
 
 The voice's sound goes straight to the device, beside `field play`'s
 rather than through the song's inserts and master chain. If something
@@ -117,7 +118,7 @@ $ field keys organ
 field keys organ: no instrument program at …/examples/bloom/shared/instruments/organ.scd
 In shared/instruments/:
   plays from notes: bass, juno, pad
-  renders only:     creek-kit, seven-eight-loop (no FIELD_MODE=voice branch; see docs/keys.md)
+  renders only:     creek-kit, seven-eight-loop (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)
 ```
 
 ### Make an instrument playable
@@ -166,8 +167,8 @@ two semitones either way. It ignores modulation (CC 1) for now.
   and the chorus on.
 - **`bass`** — the same JU-06A set as offset's bass: a saw with a square
   sub an octave down, a short envelope that opens the filter on each
-  note, and no chorus. It plays at true pitch, so press `Z` to drop an
-  octave.
+  note, and no chorus. It plays at true pitch, so in `musical-typing`
+  press `Z` to drop an octave.
 
 ## Record what you play
 

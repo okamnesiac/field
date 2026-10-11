@@ -105,14 +105,17 @@ describe('resolving an instrument', () => {
     expect(() => resolveInstrument('bass', dir)).toThrow(/shared\/instruments\/ has no programs yet\.$/);
     writeFileSync(join(dir, 'shared/instruments/pad.scd'), '(\nif ("FIELD_MODE".getenv == "voice") { SynthDef(\\pad, {}) } { 0.exit }\n)\n');
     writeFileSync(join(dir, 'shared/instruments/kit.scd'), '// renders only\n');
+    writeFileSync(join(dir, 'shared/instruments/pad.v2.scd'), '// FIELD_MODE, a later pad\n');
     writeFileSync(join(dir, 'shared/instruments/notes.txt'), 'FIELD_MODE\n');
     mkdirSync(join(dir, 'shared/instruments/folder.scd'));
     expect(() => resolveInstrument('bass', dir)).toThrow(
       `field keys bass: no instrument program at ${join(dir, 'shared/instruments/bass.scd')}\n` +
         'In shared/instruments/:\n' +
-        '  plays from notes: pad\n' +
-        '  renders only:     kit (no FIELD_MODE=voice branch; see docs/keys.md)',
+        '  plays from notes: pad, pad.v2.scd\n' +
+        "  renders only:     kit (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)",
     );
+    // Every listed name resolves.
+    expect(resolveInstrument('pad.v2.scd', dir)).toBe(join(dir, 'shared/instruments/pad.v2.scd'));
   });
 });
 
