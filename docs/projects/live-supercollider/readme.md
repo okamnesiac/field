@@ -285,7 +285,16 @@ must sit under `main`.
   so a FieldOut left running crashes scsynth on its way out, and the
   voice host must free FieldOut before it quits. Criteria 4 and 5, the
   added latency and an hour without a dropout, need the real device and
-  wait for chunk 3.
+  wait for chunk 3. The review of the chunk found the reader's margin
+  shrinking with each piece of a split block, which a song past its
+  content made one frame long; the margin now rests on the largest block
+  asked for, and past the content a block renders whole. It also found
+  rings left behind when a daemon that hosted a plugin exits without its
+  destructors, so the daemon retires them first, and the reader now
+  starts at the present after a gap longer than the ring. The ring's
+  stated rate is the device's when the input opens, and a session that
+  moves the device leaves it stale; chunk 3 checks the rates before it
+  routes a voice.
 
 ## 11 FieldOut's license (DECIDED, 2026-10-11)
 

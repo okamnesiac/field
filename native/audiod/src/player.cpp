@@ -711,6 +711,14 @@ juce::var Player::openInput (const juce::String& name)
     return juce::var (result.get());
 }
 
+void Player::closeInputs()
+{
+    std::lock_guard<std::mutex> hold (inputsLock);
+    for (auto& [name, ring] : rings)
+        ring->retire();
+    rings.clear();
+}
+
 juce::String Player::closeInput (const juce::String& name)
 {
     std::lock_guard<std::mutex> hold (inputsLock);

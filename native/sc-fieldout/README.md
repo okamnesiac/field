@@ -10,8 +10,10 @@ the effects on a track and the tracks above it process what you play
 FieldOut.ar(ring, left, right)
 ```
 
-`ring` is the number the daemon's `input` op answers. FieldOut has no
-outputs. When the ring does not exist, or its layout is not the one
+`ring` is the number the daemon's `input` op answers, and `left` and
+`right` are audio-rate signals. Run one FieldOut per ring: the ring has
+one writer, and two would append their blocks one after the other.
+FieldOut has no outputs. When the ring does not exist, or its layout is not the one
 this build reads, FieldOut says why once on the server's console and
 writes nothing. Free a FieldOut synth before the server quits: at
 shutdown scsynth unloads its plugins before it frees the synths still

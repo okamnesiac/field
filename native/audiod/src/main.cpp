@@ -444,6 +444,9 @@ int main (int argc, char* argv[])
         server.sweepClosedConnections();
     }
     server.sweepClosedConnections();
+    // Rings outlive the process unless unlinked, and the exit below skips
+    // the destructors that would unlink them.
+    player.closeInputs();
     // A daemon that hosted a plugin (a live session's chain) has the
     // same static-teardown hazard the render subprocess measured: a
     // loaded plugin module's memory in the DeletedAtShutdown list. The

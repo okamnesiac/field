@@ -95,8 +95,19 @@ void RingInput::read (float* left, float* right, int n)
 #if ! defined(_WIN32)
     auto* header = static_cast<ring::Header*> (mapped);
     const uint64_t written = header->written.load (std::memory_order_acquire);
+    const uint64_t dropped = header->dropped.load (std::memory_order_relaxed);
+    if (dropped != droppedSeen)
+    {
+        // The writer ran into a full ring: nothing read for longer than
+        // it holds, and what it holds is the past. Start at the present.
+        droppedSeen = dropped;
+        skipped.fetch_add (written - at, std::memory_order_relaxed);
+        at = written;
+        primed = false;
+    }
     uint64_t held = written - at;
-    const uint64_t target = (uint64_t) n + writerBurst;
+    block = std::max (block, (uint64_t) n);
+    const uint64_t target = block + writerBurst;
     if (! primed && held >= target)
         primed = true;
     if (primed)
@@ -171,7 +182,8 @@ std::string runRingSelfTest()
                 left[i] = (float) (next + (uint64_t) i);
                 right[i] = -left[i];
             }
-            next += (uint64_t) ring::write (mapping.header, left, right, n);
+            ring::write (mapping.header, left, right, n);
+            next += (uint64_t) n;
         }
         ring::Mapping mapping;
         uint64_t next = 0;
@@ -182,11 +194,17 @@ std::string runRingSelfTest()
     struct Reader
     {
         explicit Reader (RingInput& input) : input (input) {}
-        void block()
+        void block() { take (512, 0); }
+        // One 512-frame block read in two calls, as a session reads one
+        // it splits.
+        void split (int first) { take (first, 512 - first); }
+        void take (int first, int second)
         {
             float left[512], right[512];
-            input.read (left, right, 512);
-            for (int i = 0; i < 512; ++i)
+            input.read (left, right, first);
+            if (second > 0)
+                input.read (left + first, right + first, second);
+            for (int i = 0; i < first + second; ++i)
             {
                 if (right[i] != -left[i])
                     mirrored = false;
@@ -201,7 +219,8 @@ std::string runRingSelfTest()
                 {
                     if (left[i] < last)
                         backwards = true;
-                    ++jumps;
+                    if (jumps++ == 0)
+                        firstAfterJump = left[i];
                 }
                 started = true;
                 last = left[i];
@@ -210,7 +229,7 @@ std::string runRingSelfTest()
         }
         RingInput& input;
         bool started = false, mirrored = true, backwards = false;
-        float last = -1.0f;
+        float last = -1.0f, firstAfterJump = -1.0f;
         uint64_t heard = 0, silent = 0, jumps = 0;
     };
     const auto check = [] (bool holds, const std::string& what) -> std::string { return holds ? "" : what; };
@@ -271,6 +290,58 @@ std::string runRingSelfTest()
             if (auto e = check ((juce::int64) stats["skipped"] > 0 && (juce::int64) stats["underruns"] == 0
                                     && reader.silent == 0 && ! reader.backwards,
                                 "drift: the reader did not hold the ring level");
+                ! e.empty())
+                return e;
+        }
+        {
+            // A block split the way a session splits one at a loop wrap,
+            // 300 frames and then 212, reads against the whole block's
+            // margin: nothing skipped, nothing run dry.
+            RingInput input (48000);
+            Writer writer (input.id());
+            Reader reader (input);
+            for (int cycle = 0; cycle < 200; ++cycle)
+            {
+                for (int b = 0; b < 4; ++b)
+                    writer.burst (128);
+                if (cycle % 2 == 0)
+                    reader.block();
+                else
+                    reader.split (300);
+            }
+            const auto stats = input.stats();
+            if (auto e = check ((juce::int64) stats["skipped"] == 0 && (juce::int64) stats["underruns"] == 0
+                                    && reader.jumps == 0 && reader.silent == 0,
+                                "split: a split block shrank the margin");
+                ! e.empty())
+                return e;
+        }
+        {
+            // A gap longer than the ring: the writer drops its newest
+            // frames, and the reader skips everything it held to start at
+            // the present rather than play the past.
+            RingInput input (48000);
+            Writer writer (input.id());
+            Reader reader (input);
+            for (int cycle = 0; cycle < 20; ++cycle)
+            {
+                for (int b = 0; b < 4; ++b)
+                    writer.burst (128);
+                reader.block();
+            }
+            const float before = reader.last;
+            for (int b = 0; b < 80; ++b)
+                writer.burst (128);
+            const uint64_t present = writer.next;
+            for (int cycle = 0; cycle < 20; ++cycle)
+            {
+                for (int b = 0; b < 4; ++b)
+                    writer.burst (128);
+                reader.block();
+            }
+            if (auto e = check (reader.jumps == 1 && ! reader.backwards && reader.last > before
+                                    && (uint64_t) reader.firstAfterJump >= present,
+                                "gap: the reader played frames from before it stopped reading");
                 ! e.empty())
                 return e;
         }

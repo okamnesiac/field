@@ -159,8 +159,9 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
       const filled = (await client.status()).inputs![0]!;
       expect(filled).toMatchObject({ written: capacity, dropped: 48000 - capacity, read: 0 });
 
-      // Played, the session's input window reads it: the reader skips the
-      // stale excess down to its level, then plays what remains.
+      // Played, the session's input window reads it. The ring filled and
+      // FieldOut dropped what did not fit, so what it holds is the past:
+      // the reader skips all of it and starts at the present.
       const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'mic' }] });
       await client.session(session);
       await client.play();
@@ -170,8 +171,8 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
         read = (await client.status()).inputs![0]!;
       }
       expect(read.read).toBe(capacity);
-      expect(read.skipped).toBeGreaterThan(0);
-      expect(read.underruns).toBe(1);
+      expect(read.skipped).toBe(capacity);
+      expect(read.underruns).toBe(0);
     },
   );
 });

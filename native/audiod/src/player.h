@@ -96,6 +96,10 @@ public:
     // closing one it still plays only frees the name.
     juce::var openInput (const juce::String& name);
     juce::String closeInput (const juce::String& name);
+    // Retires every ring: they are system-wide objects that outlive the
+    // process unless unlinked, and an exit that skips destructors would
+    // leave them behind.
+    void closeInputs();
     bool liveMode() const { return liveSession != nullptr; }
 
     juce::String play();

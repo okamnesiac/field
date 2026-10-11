@@ -106,11 +106,15 @@ name and answers its number, which FieldOut takes:
 { "ok": true, "name": "keys-voice", "ring": 4213871, "capacity": 8192, "channels": 2, "sample_rate": 48000 }
 ```
 
-A session whose input window names an open input reads it every block;
-one that names no open input is refused. The reader keeps a block plus
-256 frames in hand, drops the oldest frames when the writer runs fast
-enough to hold twice that, and when the writer stops, plays what it
-holds and waits to fill again. `status` lists each open input with its
+A session whose input window names an open input reads it every block
+while the transport plays; one that names no open input is refused. The
+reader keeps a block plus 256 frames in hand, the block being the
+largest it has been asked for, drops the oldest frames when the writer
+runs fast enough to hold twice that, and when the writer stops, plays
+what it holds and waits to fill again. When nothing read for longer than
+the ring holds, about 170 ms at 48 kHz, the writer drops what does not
+fit, and the reader starts again at the present rather than play the
+past. `status` lists each open input with its
 counters: frames `written`, `read`, and `dropped` for want of room, and
 the reader's `underruns` and `skipped` frames. `input_close` frees the
 name; a session still reading the ring keeps it until the session goes.

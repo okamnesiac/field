@@ -9,7 +9,7 @@
 // outputs. When the ring does not exist, or is not a layout this build
 // reads, it says why once and writes nothing.
 //
-// Copyright (C) 2026 the Field authors.
+// Copyright (C) 2026 Amnesiac, LLC.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the
@@ -46,7 +46,9 @@ static void FieldOut_Ctor (FieldOut* unit)
     unit->mapping = {};
     const auto id = (uint32_t) IN0 (0);
     const char* error = nullptr;
-    if (id == 0 || id >= field::ring::maxId)
+    if (unit->mNumInputs != 3 || INRATE (1) != calc_FullRate || INRATE (2) != calc_FullRate)
+        error = "FieldOut takes a ring and two audio-rate inputs";
+    else if (id == 0 || id >= field::ring::maxId)
         error = "ring numbers run from 1 to 2^24";
     else
         unit->mapping = field::ring::open (id, error);

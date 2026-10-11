@@ -54,7 +54,9 @@ class Writer {
   pstring(s: string) {
     const bytes = Buffer.from(s, 'ascii');
     if (bytes.length > 255) throw new Error(`"${s}" is too long for a SynthDef name`);
-    this.int8(bytes.length);
+    const length = Buffer.alloc(1);
+    length.writeUInt8(bytes.length);
+    this.chunks.push(length);
     this.chunks.push(bytes);
   }
   bytes(): Buffer {

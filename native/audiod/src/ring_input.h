@@ -34,9 +34,13 @@ public:
     void retire();
 
     // The jitter buffer: it waits until it holds a block plus one writer
-    // burst before it plays, then plays one block a call. When the writer
-    // runs fast enough to hold twice that, the oldest frames go; when it
-    // runs dry, the reader plays what it has, then waits to fill again.
+    // burst before it plays, the block being the largest any call has
+    // asked for, so a block the session splits at a loop wrap reads
+    // against the same margin as a whole one. When the writer runs fast
+    // enough to hold twice that, the oldest frames go; when it runs dry,
+    // the reader plays what it has, then waits to fill again. When the
+    // writer dropped frames because nothing read for longer than the ring
+    // holds, what is held is stale, and the reader starts at the present.
     void read (float* left, float* right, int n) override;
 
     // For `status`: frames written, read, and dropped by the writer, how
@@ -55,6 +59,8 @@ private:
     size_t bytes = 0;
     bool linked = false;
     uint64_t at = 0; // frames read, the reader's own copy of the header's
+    uint64_t block = 0; // the largest call so far
+    uint64_t droppedSeen = 0; // the writer's dropped count at the last read
     bool primed = false;
     std::atomic<uint64_t> underruns { 0 };
     std::atomic<uint64_t> skipped { 0 };

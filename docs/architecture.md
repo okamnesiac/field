@@ -174,7 +174,13 @@ stay **quarantined inside `native/audiod/`**: the daemon, and
 hosting tests, whose VST3 build carries both and whose AU build carries
 JUCE. They never leak into the CLI, the workers, or the UI, so licensing
 exposure stays in that one directory and the hosting layer stays
-swappable.
+swappable. The one other copyleft component is FieldOut, in
+`native/sc-fieldout/`: a SuperCollider server plugin under
+GPL-3.0-or-later, because it builds against SuperCollider's plugin
+interface, vendored beside it from SuperCollider 3.14.1. It loads into
+`scsynth`, not into any Field process, and shares only the ring's layout
+in `native/ring/field_ring.h`, which is MIT, with the daemon
+([live-supercollider.md](projects/live-supercollider/readme.md) §11).
 
 ## SuperCollider
 
@@ -220,7 +226,11 @@ Python.
 
 Boring by design: versioned NDJSON over flock-owned Unix domain sockets
 — `field-audiod` on the daemon protocol, `field-aced` and `field-voiced`
-on the worker protocol with a `hello` handshake — and OSC to scsynth. On
+on the worker protocol with a `hello` handshake — and OSC to scsynth.
+Audio crosses processes once: a voice `field keys` plays reaches the
+daemon through a POSIX shared-memory ring that FieldOut writes inside
+`scsynth` and the daemon reads, one writer and one reader, the daemon
+owning the object ([audio-engine.md](audio-engine.md) "Live inputs"). On
 Windows, `field-audiod` listens on a named pipe instead, whose first
 instance (`FILE_FLAG_FIRST_PIPE_INSTANCE`) is the single-owner guarantee
 and whose DACL admits only the user running it

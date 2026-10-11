@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import { instrumentProgram, sclangCommand, scScript } from '../generators/supercollider.js';
+import { oscMessage } from './synthdef.js';
 
 export function voiceHostScript(): string {
   return scScript('voice-host.scd');
@@ -30,15 +31,7 @@ export function freeUdpPort(): Promise<number> {
   });
 }
 
-// An OSC message with an address and no arguments: the address, then the
-// type tag string ",", each NUL-terminated and padded to four bytes.
-export function oscMessage(address: string): Buffer {
-  const pad = (text: string): Buffer => {
-    const bytes = Buffer.from(`${text}\0`, 'ascii');
-    return Buffer.concat([bytes, Buffer.alloc((4 - (bytes.length % 4)) % 4)]);
-  };
-  return Buffer.concat([pad(address), pad(',')]);
-}
+export { oscMessage };
 
 function sendOsc(address: string, port: number): Promise<void> {
   return new Promise((done) => {
