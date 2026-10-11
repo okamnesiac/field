@@ -1,0 +1,476 @@
+{
+ "version": 1,
+ "name": "Live SuperCollider input",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 198,
+  "title": "Carry the voice host's audio into the daemon through FieldOut and a shared-memory ring (live-supercollider.md chunk 2)",
+  "head": "2e6843836378eb13fceaa32400c53a34b576d57b",
+  "headRef": "live/ring",
+  "base": "b887b681a476ce18db3d636536da11aa97c1a65e",
+  "baseRef": "live/input-window",
+  "basePr": 196
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> plays an instrument in its own <code>scsynth</code>, SuperCollider's synthesis server, which writes straight to the output device. A track's inserts run inside <code>field-audiod</code>, the audio daemon, so they never hear the instrument. Chunk 1 (#196) gave a live session an <em>input window</em>, a source the session reads every block from outside itself, but nothing in the daemon could feed one except a file in tests. This pull request builds the path that carries the voice host's audio into the daemon, so chunk 3 can point <code>field keys</code> at it.",
+   "The audio crosses processes through a <em>ring</em>: one POSIX shared-memory object holding a small header and 8,192 stereo frames, with one writer and one reader. A client sends the new <code>input</code> op with a name, and the daemon makes a ring and answers its number. <code>FieldOut</code>, a new <code>scsynth</code> UGen, writes its two audio inputs into the ring with that number. The daemon's <code>RingInput</code> reads the ring once per block on the audio thread, as a small jitter buffer, for the session's input window of the same name.",
+   "FieldOut builds against SuperCollider's plugin interface, which is GPL, so FieldOut is GPL-3.0-or-later with its own <code>LICENSE</code>, a decision the plan records as §11. The rest of Field stays MIT. The daemon and FieldOut share only <code>native/ring/field_ring.h</code>, an MIT header with the ring's layout and the writer's code."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>UGen</b>: a unit generator, one building block of a SuperCollider synth, loaded by <code>scsynth</code> from a plugin file.</li><li><b>Ring</b>: the shared-memory object, <code>/field-ring-&lt;n&gt;</code>, holding a header and 8,192 interleaved stereo frames.</li><li><b>FieldOut</b>: the GPL UGen that writes the ring, built in <code>native/sc-fieldout</code>.</li><li><b>RingInput</b>: the daemon class that makes, reads, and unlinks a ring.</li><li><b>Target</b>: what the reader keeps in hand, one block plus 256 frames.</li><li><b>Dropped, skipped, underruns</b>: frames the writer could not fit, frames the reader discarded because the writer ran ahead, and times the reader ran dry.</li><li><b>NRT</b>: <code>scsynth</code>'s non-realtime mode, which renders a score to a file with no audio device.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<p>The first review of this head opened three findings:</p><ul class=\"tight\"><li><b>Jitter margin per sub-step:</b> the reader sizes its margin from each read, and the session reads split blocks in pieces, so a song played past its content, or a loop wrap early in a block, skips and runs dry. Reproduced.</li><li><b>Rings leak at quit after hosting:</b> a daemon that hosted a plugin exits through <code>std::_Exit</code>, which skips the code that unlinks each open ring. Reproduced.</li><li><b>License docs:</b> the README's License section and <code>docs/architecture.md</code>'s Licensing paragraph do not name FieldOut's GPL terms.</li></ul><p class=\"note\">The vendored headers and the GPL text were checked byte for byte against SuperCollider 3.14.1. The focused tests pass at this head.</p>"
+   },
+   {
+    "id": "later",
+    "title": "What this leaves for chunk 3",
+    "html": "<ul class=\"tight\"><li><b>Wiring <code>field keys</code>:</b> the voice host still plays to the device.</li><li><b>Criteria 4 and 5:</b> the added latency and an hour without a dropout need the real device.</li><li><b>Freeing FieldOut first:</b> <code>scsynth</code> unloads plugins before it frees running synths, so the voice host must free FieldOut before it quits.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "The ring layout and the protocol",
+   "kicker": "What the daemon, FieldOut, and clients agree on",
+   "intro": [
+    "Three parties share a ring: the daemon creates it, FieldOut writes it, and a client learns its number. <code>field_ring.h</code> is the one definition of the shared-memory layout, of the writer's code, and of how a writer opens a ring by number. Both the daemon and the GPL plugin include it, so it is MIT and contains nothing from SuperCollider.",
+    "The header holds two counters: frames ever <code>written</code> and frames ever <code>read</code>. Each side stores only its own counter, and the difference is how many frames the ring holds. That makes the ring single-producer, single-consumer with no lock: the writer copies frames and then publishes <code>written</code>, and the reader copies frames and then publishes <code>read</code>."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Traced the memory ordering: the writer's acquire load of <code>read</code> pairs with the reader's release store, and the reader's acquire load of <code>written</code> pairs with the writer's release store. The reader indexes with its own capacity mask, so a garbled counter cannot index outside the data."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/ring/field_ring.h",
+     "note": "The shared layout, the writer FieldOut runs, and <code>open</code>, which maps a ring by number and checks its layout.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 34,
+       "text": "A ring number reaches FieldOut as a UGen input, which <code>scsynth</code> carries as a 32-bit float, so numbers stay below 2^24, where every integer is exact."
+      },
+      {
+       "kind": "context",
+       "line": 79,
+       "text": "When the ring is full, <code>write</code> drops the newest frames and counts them in <code>dropped</code>. It never overwrites frames the reader has not taken."
+      }
+     ]
+    },
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "Schemas for the <code>input</code> answer and for the <code>inputs</code> list that <code>status</code> gains."
+    },
+    {
+     "path": "src/audiod/client.ts",
+     "note": "<code>openInput</code> and <code>closeInput</code>, for a daemon that lists <code>live-input</code>."
+    }
+   ]
+  },
+  {
+   "id": "daemon",
+   "title": "The daemon makes each ring and reads it every block",
+   "kicker": "RingInput, the input ops, and how a session finds its rings",
+   "intro": [
+    "<code>RingInput</code> is the daemon's side of a ring. Its constructor picks a random number below 2^24, creates <code>/field-ring-&lt;n&gt;</code> with <code>O_EXCL</code> and mode 0600, maps it, and writes the header. <code>O_EXCL</code> means it never adopts an object that already exists, and mode 0600 means no other user can open it. Its destructor unlinks the name and unmaps the memory.",
+    "<code>read</code> is the jitter buffer, called once per block on the audio thread. It waits until it holds the <em>target</em>, one block plus 256 frames, and then plays one block per call. When the writer gets ahead by twice the target, it skips the oldest frames back down to the target. When the writer stops, it plays what it has, counts an underrun, and waits to fill again. It takes no lock and allocates nothing.",
+    "<code>Player</code> keeps the open rings by name under their own mutex, because the <code>session</code> op reads them outside the message-thread lock. A session copies the rings its input windows name when it loads, and holds them. So <code>input_close</code> frees the name, and a playing session keeps reading until it is replaced."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Ran <code>field-audiod --ring-selftest</code> at this head. It prints <code>{\"ok\":true}</code> for its four scenarios: steady, a writer that stops, a writer that runs fast, and no reader."
+    },
+    {
+     "kind": "verify",
+     "text": "Checked that only the installed session reads a ring. A swap retires the old session under <code>liveLock</code>, and the pre-roll warmup reads no input, because <code>discardUntil</code> turns <code>overlayReadsInputs</code> off. So <code>read</code> never runs on two threads."
+    },
+    {
+     "kind": "context",
+     "text": "Latency against the plan: the reader holds a block plus 256 frames, 16 ms at a 512-frame block and 48 kHz, and corrects drift only past twice that. Criterion 4 allows one daemon block plus one device buffer. The plan's progress entry defers the measurement to chunk 3."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/ring_input.h",
+     "note": "The <code>RingInput</code> interface and the 256-frame margin, with its reason."
+    },
+    {
+     "path": "native/audiod/src/ring_input.cpp",
+     "note": "Making, reading, and unlinking a ring, plus the self-test that runs the reader against the shared writer.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 99,
+       "text": "Open finding: the target is <code>n</code> plus 256, and <code>renderBlock</code> reads one piece of a split block at a time: at each loop wrap, and one frame at a time once a non-looping song passes its output track's content. The margin then shrinks to the piece while the callback still drains a whole block. Against a steady writer, playing past the content gave 311 underruns in five seconds, and loop wraps that land early in a block underran with a 512-frame skip."
+      },
+      {
+       "kind": "flag",
+       "line": 74,
+       "text": "Open finding: this destructor is the only place a ring is unlinked. Once a live session has hosted a plugin, <code>main</code> exits through <code>field::exitSubprocess</code>, whose <code>std::_Exit</code> skips <code>~Player</code>, so every open ring stays in shared memory until reboot. The review reproduced it with the fixture VST3."
+      },
+      {
+       "kind": "context",
+       "line": 33,
+       "text": "<code>O_EXCL</code> and mode 0600: another local user can neither open the ring nor plant an object the daemon would reuse."
+      },
+      {
+       "kind": "context",
+       "line": 104,
+       "text": "After a gap in reading longer than the ring, about 170 ms, the writer has dropped the newest frames. This skip then keeps frames written when the ring filled and jumps to the present. The review lists this as a suggestion for criterion 5."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "Declares <code>openInput</code> and <code>closeInput</code>, and the rings by name under <code>inputsLock</code>."
+    },
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "The session copies the open rings at load; <code>openInput</code>, <code>closeInput</code>, and <code>inputs</code> in <code>status</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 699,
+       "text": "The ring's <code>sampleRate</code> and the answered <code>sample_rate</code> are the device rate before any <code>session</code> loads. A load that switches the device leaves both stale. The review lists this as a suggestion for chunk 3."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "Dispatches <code>input</code> and <code>input_close</code>, and lists <code>live-input</code> in <code>hello</code>."
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "Adds <code>--ring-selftest</code>."
+    },
+    {
+     "path": "native/audiod/CMakeLists.txt",
+     "note": "Builds <code>ring_input.cpp</code> and adds the shared <code>native/ring</code> include directory."
+    }
+   ]
+  },
+  {
+   "id": "fieldout",
+   "title": "FieldOut, the GPL plugin that writes the ring",
+   "kicker": "An scsynth UGen and its build, README, and license",
+   "intro": [
+    "<code>FieldOut.ar(ring, left, right)</code> opens the ring in its constructor, writes each block's two inputs with the shared <code>write</code>, and unmaps the ring in its destructor. When the ring is missing or its layout differs, it prints why once and writes nothing. Its block function only copies frames and updates atomics. The constructor's <code>shm_open</code> and <code>mmap</code> run on <code>scsynth</code>'s audio thread, once per synth.",
+    "At shutdown <code>scsynth</code> unloads its plugins before it frees the synths still running. A FieldOut left running would then call a destructor that is gone, so the voice host must free FieldOut first. The README and the plan record that for chunk 3."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Built FieldOut at this head, and ran the FieldOut case of <code>live-ring.test.ts</code>: <code>scsynth</code> 3.14.1's non-realtime mode loaded it and wrote 8,192 frames into a ring the daemon made, with 39,808 counted as dropped."
+    },
+    {
+     "kind": "verify",
+     "text": "Read <code>World_Cleanup</code> in SuperCollider 3.14.1's <code>server/scsynth/SC_World.cpp</code>: <code>deinitialize_library()</code> runs before <code>Group_DeleteAll</code>, so the shutdown constraint is real."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/sc-fieldout/FieldOut.cpp",
+     "note": "The UGen: open in the constructor, write per block, unmap in the destructor.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 36,
+       "text": "Two FieldOuts on one ring append their blocks rather than summing, and a scalar or control-rate input would be read as a full block. The review suggests saying one FieldOut per ring with audio-rate inputs, or checking <code>INRATE</code>."
+      },
+      {
+       "kind": "context",
+       "line": 12,
+       "text": "This notice names \"the Field authors\", while the root <code>LICENSE</code> names Amnesiac, LLC. The review suggests naming the same holder."
+      }
+     ]
+    },
+    {
+     "path": "native/sc-fieldout/CMakeLists.txt",
+     "note": "Builds <code>FieldOut.scx</code> on macOS and <code>FieldOut.so</code> on Linux into <code>build/plugins</code>, and skips Windows."
+    },
+    {
+     "path": "native/sc-fieldout/README.md",
+     "note": "How to build and load FieldOut, the shutdown constraint, and its license."
+    },
+    {
+     "path": "native/sc-fieldout/LICENSE",
+     "note": "The GPLv3 text.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Byte-identical to SuperCollider 3.14.1's <code>COPYING</code>, the standard GPLv3 text. The current gnu.org copy differs only in its links, which now use <code>https</code>."
+      }
+     ],
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "vendor",
+   "title": "SuperCollider's plugin headers, vendored",
+   "kicker": "36 headers copied from SuperCollider Version-3.14.1",
+   "intro": [
+    "FieldOut compiles against these headers, so the build needs no network and pins the plugin interface. They are SuperCollider's own files and carry its GPL terms. There is nothing to review in them beyond where they came from."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Fetched each of the 36 files from SuperCollider's <code>Version-3.14.1</code> tag and compared them byte for byte: all identical. That tag's plugin API version is 3, the same as 3.12 and 3.13."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_Alloca.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_BoundsMacros.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_Endian.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_Export.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_Reply.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_StringBuffer.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_Types.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/SC_fftlib.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/clz.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/function_attributes.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/common/wintime.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/FFT_UGens.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/Hash.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SCComplex.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_BelaScope.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_BufGen.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Complex.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Constants.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_DemandUnit.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_FifoMsg.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Graph.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_InlineBinaryOp.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_InlineUnaryOp.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_InterfaceTable.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Node.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_PlugIn.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_PlugIn.hpp",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_RGen.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Rate.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_SndBuf.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Unit.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_Wire.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_World.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/SC_sndfile_stub.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/Unroll.h",
+     "collapsed": true
+    },
+    {
+     "path": "native/sc-fieldout/vendor/supercollider/include/plugin_interface/sc_msg_iter.h",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "synthdef",
+   "title": "SynthDefs and OSC written without sclang",
+   "kicker": "Binary SuperCollider formats, written from TypeScript",
+   "intro": [
+    "sclang, SuperCollider's language, has no <code>FieldOut</code> class, and adding one would mean installing it into every user's class library. So Field writes the few SynthDefs it needs, compiled synth graphs, and the OSC messages that carry them, in SuperCollider's own binary formats. The tests use this now, and chunk 3's voice host will use it for its routing synth."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Checked <code>synthDefFile</code> field by field against SuperCollider's version-2 SynthDef format: <code>SCgf</code>, version 2, a 16-bit count, then name, constants, parameters, parameter names, UGen specs, and a 16-bit variant count, all big-endian. <code>scsynth</code> loaded the test's SynthDef through <code>/d_recv</code> and ran it. No test round-trips a SynthDef through sclang."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/keys/synthdef.ts",
+     "note": "Writes a version-2 SynthDef, OSC messages and bundles, and a non-realtime score.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 57,
+       "text": "<code>writeInt8</code> throws for lengths from 128 to 255, which SuperCollider's unsigned length byte allows. The review suggests <code>writeUInt8</code>."
+      },
+      {
+       "kind": "context",
+       "line": 122,
+       "text": "<code>src/keys/voice-host.ts</code> already exports an <code>oscMessage</code>, this function's no-argument case."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "The ring tests",
+   "kicker": "The input ops, a session reading a ring, and FieldOut in scsynth",
+   "intro": [
+    "<code>live-ring.test.ts</code> runs the daemon's self-test, the <code>input</code> and <code>input_close</code> ops and their refusals, a session that names an open input and one that names none, and FieldOut itself. The FieldOut case runs only where <code>scsynth</code> and the built plugin are present, so CI skips it."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Ran <code>live-ring.test.ts</code> and <code>live-input.test.ts</code> at this head with the built daemon and plugin: 9 of 9 passed, the FieldOut case included. Every ring the tests opened was unlinked once its daemon exited, checked by name with <code>shm_open</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/audiod/live-ring.test.ts",
+     "note": "Covers the ops, a session that reads a ring, and FieldOut writing into one."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Build script and documentation",
+   "kicker": "build:native, the engine docs, and the plan",
+   "intro": [
+    "<code>pnpm build:native</code> now builds FieldOut after the daemon. The engine docs describe the <code>input</code> op and the reader, and the plan gains an amendment, a progress entry, and §11, the license decision."
+   ],
+   "files": [
+    {
+     "path": "package.json",
+     "note": "<code>build:native</code> also configures and builds <code>native/sc-fieldout</code>. The <code>license</code> field stays MIT, which is right for the CLI it describes."
+    },
+    {
+     "path": ".gitignore",
+     "note": "Ignores FieldOut's build directory."
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "The SuperCollider section names the ring and FieldOut.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 198,
+       "text": "Open finding: the Licensing paragraph (line 164) still says copyleft code stays inside <code>native/audiod/</code>, the README's License section still says Field's code is MIT with only JUCE and the VST3 SDK as exceptions, and the IPC section (line 218) still omits the ring. FieldOut's GPL terms belong in both license statements."
+      }
+     ]
+    },
+    {
+     "path": "docs/audio-engine.md",
+     "note": "\"Live inputs\" now describes the <code>input</code> op, the reader, the <code>status</code> counters, and <code>--ring-selftest</code>."
+    },
+    {
+     "path": "docs/projects/live-supercollider/readme.md",
+     "note": "Amends §2.2 with the built op, logs chunk 2, and records §11.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The plan stays <code>in-progress</code>. This change opens no question: the progress entry defers the 256-frame margin and criteria 4 and 5 to chunk 3, and §7's three questions were already taken or decided."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "live-supercollider"
+}
