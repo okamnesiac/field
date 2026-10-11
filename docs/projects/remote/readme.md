@@ -308,10 +308,16 @@ export const REMOTE_API_VERSION = 1;
 Two things the contract deliberately does not carry: musical time
 (the action key already covers the resolved placement plan, and the
 site derives `bar.beat` from its own copy of Field's tempo map,
-audiofield-io.md §13.9), and any request to render. The remote never asks the CLI for anything; every conversation
-starts here. The request and response shapes are zod schemas in
-`src/remote/protocol.ts`, the way `helloResponseSchema` is, so the
-site's tests can import the same file (§7).
+audiofield-io.md §13.9), and any request to render. The remote never
+asks the CLI for anything; every conversation starts here. The request
+and response shapes are zod schemas in `src/remote/protocol.ts`, the
+way `helloResponseSchema` is, so the site's tests can import the same
+file (§7).
+
+*Amended (2026-10-11, review of #193):* this said the site derives
+`bar.beat` "from `arrangement --json`", which §9.1 had already
+overtaken on 2026-10-10: the site computes it from its own copy of the
+tempo map.
 
 Paths, as the CLI speaks them since chunk 2 shipped (`paths` in
 `src/remote/protocol.ts`; the site is built to these, and either side
@@ -600,11 +606,19 @@ explain //songs/creek/track:main --json` and `field arrangement creek
 ticks and as bar.beat.tick, with seconds left to a reader that brings
 the song's tempo map, as the site does (audiofield-io.md §13.9). A
 `license: not a license` line fails `field check` with the file and the
-key, and a missing `license` passes. `field clone` on a machine without `git-lfs` stops
-before cloning and names the package to install. And real music has
-been cloned and built through it: a HOWLO project on the site, on a
-second machine, playing from fetched artifacts with nothing rendered
-locally.
+key, and a missing `license` passes. `field clone` on a machine without
+`git-lfs` stops before cloning and names the package to install. And
+real music has been cloned and built through it: a HOWLO project on
+the site, on a second machine, playing from fetched artifacts with
+nothing rendered locally.
+
+*Amended (2026-10-11, review of #193):* the two JSON commands were to
+"print the values their text forms show", but the text forms derive
+seconds and a bar span that `Explanation` and `ArrangementView` do not
+hold, and carrying those would give the JSON a second vocabulary
+(§3.6). A malformed license was to fail `field check` "with the file
+and line", but a diagnostic carries no line, so it names the file and
+the key.
 
 ## 9 Open questions
 
