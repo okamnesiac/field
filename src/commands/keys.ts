@@ -242,6 +242,7 @@ export function statusText(
   width: number,
 ): string {
   const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
+  if (session.setsMod() || session.mod !== 0) parts.push(`mod ${session.mod}`);
   const unplayable = unplayablePositions(layout, session.keymap);
   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);

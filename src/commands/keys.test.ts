@@ -16,13 +16,24 @@ describe('the status line', () => {
   it('ends with the sounding notes, after anything else it has to say', () => {
     const session = musicalTyping();
     expect(statusText(session, undefined, undefined, 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · –',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · –',
     );
     session.press('KeyA');
     session.press('KeyD');
     expect(statusText(session, undefined, 'KeyA is both a note and a control', 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
     );
+  });
+
+  it('shows the modulation wheel where the keymap can set it', () => {
+    const session = musicalTyping();
+    session.press('Digit6');
+    session.release('Digit6');
+    expect(statusText(session, undefined, undefined, 200)).toBe(
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · mod 76 · –',
+    );
+    const tracker = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')));
+    expect(statusText(tracker, undefined, undefined, 200)).not.toContain('mod');
   });
 
   it('shortens the text before the notes to fit, never the notes', () => {
