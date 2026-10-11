@@ -617,12 +617,21 @@ land as its own diff whenever.
   OneDrive-redirected profile is not the Desktop the user sees (the
   real one lives under `OneDrive\Desktop`); the export still lands and
   prints its path, so this is a wart rather than a break. **Standalone.**
-- **`sclang`'s app fallback is an .app path**
-  (`generators/supercollider.ts:21`): PATH and `FIELD_SCLANG` both work
-  on Windows already; the only gap is the convenience fallback probing
-  `/Applications/…` — its Windows spelling is
-  `C:\Program Files\SuperCollider-<v>\sclang.exe`. **Standalone**, and
-  §4 already scopes SuperCollider itself to "whenever it is wanted".
+- **`sclangCommand` cannot find `sclang` on Windows**
+  (`sclangCommand` in `generators/supercollider.ts`, re-checked
+  2026-10-10 after #179). Since the keyboard instrument's voice host
+  (#179), the lookup finds `sclang` itself rather than leaving the
+  search to `execFile`, and SuperCollider renders and the `field keys`
+  voice host both go through it. Three parts of it are POSIX-shaped:
+  its PATH search tries only `sclang`, never `sclang.exe`; a
+  `FIELD_SCLANG` with no `/`, such as
+  `C:\Program Files\SuperCollider-3.13.0\sclang.exe`, goes through that
+  same PATH search and is reported missing; and the fallback probes
+  `/Applications/SuperCollider.app/…`, whose Windows spelling is
+  `C:\Program Files\SuperCollider-<v>\sclang.exe`. Porting it means
+  trying `.exe` on PATH and accepting a native absolute `FIELD_SCLANG`,
+  as well as the fallback. **Standalone**, and §4 already scopes
+  SuperCollider itself to "whenever it is wanted".
 - **`git lfs install --local` failure advice** (`commands/init.ts:71`):
   the catch prints a warning and moves on, which is right; unverified
   whether the probe succeeds under a Windows CI shell where `git`
