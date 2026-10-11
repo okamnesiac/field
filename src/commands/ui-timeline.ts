@@ -131,6 +131,21 @@ function placements(inputs: InputEntry[]): Array<[InputEntry, number]> {
   return inputs.flatMap((entry, i): Array<[InputEntry, number]> => (entry.receive === undefined ? [[entry, i]] : []));
 }
 
+// An owner track's clock, for the view and for the edits made through
+// it: the track's own tempo and meter, else the song's (nested-tracks.md
+// §13), built at the session rate because every position the view draws
+// and every offset an edit carries is in session samples.
+export function ownerClock(
+  owner: { data: { time?: TrackTime | undefined } },
+  song: Pick<LoadedSong, 'time'>,
+  rate: number,
+): { tempo: TempoMap; meter: MeterMap } {
+  return {
+    tempo: new TempoMap(owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }], rate),
+    meter: new MeterMap(owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }]),
+  };
+}
+
 export function projectTimeline(
   root: string,
   song: LoadedSong,
@@ -167,9 +182,7 @@ export function projectTimeline(
   ): UiTimelineLane => {
     // Everything in a track file is in that track's own time
     // (nested-tracks.md §13), falling back to the song's.
-    const localTempo = owner.data.time?.tempo
-      ? new TempoMap(owner.data.time.tempo, sessionRate)
-      : songTempo;
+    const localTempo = ownerClock(owner, song, sessionRate).tempo;
     const w = placedWindow(entry, localTempo);
     const startSample = originSample + w.start;
 

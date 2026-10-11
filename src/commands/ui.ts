@@ -23,9 +23,8 @@ import {
   applyStretch,
 } from './ui-edits.js';
 import type { UiSnapshot } from './ui-protocol.js';
-import { projectTimeline } from './ui-timeline.js';
+import { ownerClock, projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
-import { MeterMap, TempoMap } from '../time/tempo.js';
 import { watchLiveSession } from './watch-live.js';
 
 // `field ui <song>` (ui.md): a local web face over what already exists —
@@ -459,15 +458,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // The owner's own time, falling back to the song's — the same rule the
   // timeline renders by (nested-tracks.md §13), so a clip lands exactly
   // where the drag showed it.
-  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) => ({
-    tempo: new TempoMap(
-      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
-      loaded.sample_rate,
-    ),
-    meter: new MeterMap(
-      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
-    ),
-  });
+  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) =>
+    ownerClock(owner, song, loaded.sample_rate);
 
   // `source_offset` addresses the source's own samples, and both the
   // split and the front-trim advance it by a distance measured in
