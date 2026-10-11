@@ -10,22 +10,23 @@
 // in a shell has no devtools to open, so the diagnosis has to come out
 // somewhere a person is already looking.
 const { app, BrowserWindow, shell } = require('electron');
-const { mkdtempSync, rmSync } = require('node:fs');
-const { join } = require('node:path');
-const { tmpdir } = require('node:os');
 
 // Its own profile directory, so Chromium's caches land somewhere
 // writable instead of failing noisily against a default path this
 // process may not own — the "Unable to move the cache" spew is the
 // symptom, and it drowns the page console this shell exists to surface.
-// A fresh directory per launch, made by mkdtemp: a fixed name under the
-// shared temp directory could be created first by another user, who
-// would then own this window's profile. The window keeps nothing worth
-// a second launch, so the directory goes when the app quits.
-const profile = mkdtempSync(join(tmpdir(), 'field-ui-profile-'));
-app.setPath('userData', profile);
+// `field ui` makes it fresh with mkdtemp, hands it over as
+// FIELD_UI_PROFILE, and removes it after this process exits: removing it
+// here, on quit, would race Chromium, which still holds its files open
+// then, and Windows refuses to delete an open file.
+const profile = process.env.FIELD_UI_PROFILE;
+if (!profile) {
+  process.stderr.write('field ui shell: FIELD_UI_PROFILE is not set\n');
+  app.exit(1);
+} else {
+  app.setPath('userData', profile);
+}
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-app.on('quit', () => rmSync(profile, { recursive: true, force: true }));
 
 // The session URL arrives in the environment, not on the command line:
 // it carries the session token, and a process's arguments are readable
