@@ -96,6 +96,11 @@ public:
     // chains stay where they are.
     void renderIdle (float* const* out, int numChannels, int n);
     bool hasInputs() const { return ! inputSources.empty(); }
+    // Clears renderIdle's chain and its delay, so playing over silence
+    // after a stop or a pause carries nothing from before play. Message
+    // thread, under the player's lock: it rebuilds stages, which
+    // allocates.
+    void resetIdle();
 
     void locate (juce::int64 sample);
     // What has been delivered to the device — the honest transport

@@ -107,6 +107,10 @@ describe('the instrument line', () => {
         status: live,
       }),
     ).toBe('bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry (FieldOut is not built: run pnpm build:native)');
+    // Routed, but scsynth never ran the route: nothing is heard at all.
+    expect(instrumentText({ ...instrumentState(armed, true)!, silent: 'FieldOut did not load', status: live })).toBe(
+      'keys (juno) + bass (bass) is silent: FieldOut did not load',
+    );
     // Routed through the daemon, the voices pass through every effect.
     expect(instrumentText({ ...instrumentState(armed, true, 'unused')!, status: live })).toBe(
       'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers',

@@ -106,6 +106,13 @@ export async function routeArmed(
     return { reason };
   };
   try {
+    // Loading a session under a take swaps the bed it is recording
+    // against, and a loop take's region cannot be set again while it
+    // records.
+    if ((await client.status()).record?.state === 'recording') {
+      client.close();
+      return { reason: 'a take is recording: start field keys again once it stops' };
+    }
     if (!client.supports('live-input')) {
       return await unrouted(`field-audiod ${client.daemonVersion} predates live inputs: run field transport quit, then play again`);
     }
@@ -151,8 +158,9 @@ export async function routeArmed(
         try {
           await closeOpened();
           // The song as it is now: without these inputs, with any others.
-          // A song that no longer compiles keeps the session it has.
-          await reload();
+          // A song that no longer compiles keeps the session it has, and
+          // so does one under a take, whose closed input reads silence.
+          if ((await client.status()).record?.state !== 'recording') await reload();
         } catch {
           // the daemon or the project went away; nothing is left to restore
         } finally {

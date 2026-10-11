@@ -79,6 +79,8 @@ export type InstrumentState = {
   // Why the voices do not pass through them (live-supercollider.md
   // chunk 3), when routing them was not possible.
   dryReason?: string;
+  // Why nothing is heard at all: routed, but scsynth never ran the route.
+  silent?: string;
   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
   // What the last save of the program did (keyboard-instrument.md §14).
   reload?: { loaded: true } | { failed: string };
@@ -89,10 +91,28 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   // their voices (live-supercollider.md chunk 3): each track then gets a
   // voice of its own, writing into its own input. Otherwise each program
   // plays once, straight to the device, and the line says why.
-  const routed =
+  // Ctrl-C quits while the daemon is still answering: the key handler
+  // that would see it does not exist yet, and a daemon starting cold can
+  // take seconds.
+  let onQuit: ((chunk: Buffer) => void) | undefined;
+  const quit = new Promise<'quit'>((resolve) => {
+    onQuit = (chunk) => {
+      if (decodeTerminal(chunk.toString('utf8')).events.some(isQuit)) resolve('quit');
+    };
+    tty.stdin.on('data', onQuit);
+  });
+  const routing0 =
     options.root !== undefined
-      ? await routeArmed(options.armed, options.root, options.device !== undefined ? { device: options.device } : {})
-      : undefined;
+      ? routeArmed(options.armed, options.root, options.device !== undefined ? { device: options.device } : {})
+      : Promise.resolve(undefined);
+  const first = await Promise.race([routing0, quit]);
+  tty.stdin.removeListener('data', onQuit!);
+  if (first === 'quit') {
+    // Whatever routing still finishes is undone.
+    void routing0.then((late) => (late !== undefined && 'programs' in late ? late.close() : undefined));
+    return;
+  }
+  const routed = first;
   const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
   try {
     await playRouted(tty, options, carried, routed, routing);
@@ -183,8 +203,8 @@ async function playRouted(
       .then(() => routing.flowing())
       .then((flowing) => {
         if (flowing || instrument === undefined) return;
-        instrument.dry = [...new Set(armed.flatMap((a) => a.unheardEffects))];
-        instrument.dryReason = 'scsynth is not writing the voice into the daemon: FieldOut did not load';
+        // The voices play into a bus nothing reads: not dry, silent.
+        instrument.silent = 'scsynth is not writing the voice into the daemon, so FieldOut did not load';
         draw();
       })
       .catch(() => {});
@@ -264,8 +284,9 @@ export function instrumentState(armed: ArmedInstrument[], heard = false, dryReas
 
 // A save that did not load leads with why, so a narrow terminal keeps the
 // error rather than the device; the voice that loaded last still plays.
-export function instrumentText({ name, dry, dryReason, status, reload }: InstrumentState): string {
+export function instrumentText({ name, dry, dryReason, silent, status, reload }: InstrumentState): string {
   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
+  if (silent !== undefined) return `${name} is silent: ${silent}`;
   const state =
     status.state === 'live'
       ? `${name} live at ${status.sampleRate} Hz on ${status.device}`

@@ -496,6 +496,16 @@ void LiveSession::buildOverlay()
     }
 }
 
+void LiveSession::resetIdle()
+{
+    if (overlay.empty() || overlayIndex[(size_t) outputTrack] < 0)
+        return;
+    const Track& output = tracks[(size_t) outputTrack];
+    buildStages (idleChain, output.chainSpecs, output.rate, 0);
+    for (auto& delayed : idleDelayed)
+        std::fill (delayed.begin(), delayed.end(), 0.0f);
+}
+
 void LiveSession::renderIdle (float* const* out, int numChannels, int n)
 {
     const int slot = overlay.empty() ? -1 : overlayIndex[(size_t) outputTrack];
@@ -621,7 +631,8 @@ void LiveSession::renderOverlay (int n)
             post.assign (delayed.begin(), delayed.begin() + n);
             delayed.erase (delayed.begin(), delayed.begin() + n);
         }
-    }    overlayClock += n;
+    }
+    overlayClock += n;
 }
 
 void LiveSession::primeOutput()

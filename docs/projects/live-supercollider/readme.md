@@ -240,10 +240,9 @@ decides there whether that gap is acceptable or the overlay's state
 should carry across. Glides on the overlay run on a clock of its own,
 which keeps moving while the transport is stopped, so a fader moved
 while stopped finishes its glide. The idle path's second instance of
-the output's chain keeps its state across play and stop, so the first
-blocks after a stop can carry a tail from before play; resetting it
-would rebuild stages inside the audio callback, which allocates, so it
-is left as is.
+the output's chain is rebuilt when the transport stops or pauses, on the
+message thread beside the output chain's own rebuild, so playing over
+silence after a stop carries no tail from before play.
 
 **Why not evaluate the path in place.** A track's content sits on a
 timeline its placement offsets, and a track placed more than once would

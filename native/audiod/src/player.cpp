@@ -580,6 +580,9 @@ void Player::pause()
     if (liveSession != nullptr)
     {
         livePlaying = false;
+        // What you play next over silence starts clean.
+        const juce::ScopedLock guard (liveLock);
+        liveSession->resetIdle();
         return;
     }
     transport.stop();
@@ -595,6 +598,7 @@ void Player::stop()
         liveEverStarted = false;
         const juce::ScopedLock guard (liveLock);
         liveSession->locate (0);
+        liveSession->resetIdle();
         // A transport discontinuity resets delivery conversion to its
         // primed starting state and drops queued output — pre-seek
         // audio never leaks (cross-rate-live.md decision 3).
