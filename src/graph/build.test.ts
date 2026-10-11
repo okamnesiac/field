@@ -7,7 +7,7 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
-import { runScProgram } from '../generators/supercollider.js';
+import { runScProgram, sclangCommand } from '../generators/supercollider.js';
 import type { GeneratorRunner } from './build.js';
 
 let root: string;
@@ -535,10 +535,9 @@ describe('runScProgram edges (no sclang needed)', () => {
   // The next two fake sclang with #!/bin/sh scripts. The code path they
   // exercise (execFile, the timeout, stdout capture) is platform-
   // independent; the *stub* is not — Windows has no shebang — so they
-  // skip there rather than growing a second stub dialect. A real sclang
-  // does not reach this spawn on Windows yet either: sclangCommand looks
-  // for `sclang` without `.exe` and reads a native FIELD_SCLANG path as a
-  // name to search for (windows-portability.md §7.2).
+  // skip there rather than growing a second stub dialect. A real
+  // sclang.exe goes through the same spawn untouched; sclangCommand's
+  // Windows lookup is covered in generators/supercollider.test.ts.
   it.skipIf(process.platform === 'win32')('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
     const hang = join(root, 'hang.sh');
     writeFileSync(hang, '#!/bin/sh\nsleep 5\n');
@@ -579,9 +578,16 @@ describe('runScProgram edges (no sclang needed)', () => {
   });
 });
 
-const sclangPresent =
-  existsSync('/Applications/SuperCollider.app/Contents/MacOS/sclang') ||
-  (process.env['PATH'] ?? '').split(':').some((p) => p !== '' && existsSync(join(p, 'sclang')));
+// Probed with the lookup the renders use, so the test runs wherever a real
+// sclang is found, Windows included.
+const sclangPresent = (() => {
+  try {
+    sclangCommand();
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 describe.skipIf(!sclangPresent)('sc-render integration (requires sclang)', () => {
   const SC_PROGRAM = `(

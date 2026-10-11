@@ -632,6 +632,16 @@ land as its own diff whenever.
   trying `.exe` on PATH and accepting a native absolute `FIELD_SCLANG`,
   as well as the fallback. **Standalone**, and §4 already scopes
   SuperCollider itself to "whenever it is wanted".
+
+  **Ported (2026-10-11).** On Windows the PATH search tries `.com` and
+  `.exe` and never a bare name — not the rest of PATHEXT, because Node
+  refuses to spawn a `.bat` or `.cmd` without a shell, and a
+  `FIELD_SCLANG` naming one is refused with that reason. A
+  `FIELD_SCLANG` holding a backslash, slash, or drive is read as a path,
+  the fallback takes the newest `SuperCollider-<version>` under Program
+  Files, and `PATH` and `ProgramFiles` are read without regard to case,
+  as a copied environment spells them. `generators/supercollider.test.ts`
+  covers each rule with the platform passed in, so it runs everywhere.
 - **`git lfs install --local` failure advice** (`commands/init.ts:71`):
   the catch prints a warning and moves on, which is right; unverified
   whether the probe succeeds under a Windows CI shell where `git`
