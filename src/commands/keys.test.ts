@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { builtinKeymapDir, loadKeymap, parseKeymap } from '../keys/keymap.js';
 import { KeysSession } from '../keys/session.js';
+import { BUILD_DAEMON } from '../remedies.js';
 import { instrumentState, instrumentText, statusText } from './keys.js';
 
 // field keys' status line: the sounding notes come last, so playing
@@ -76,6 +77,9 @@ describe('the status line', () => {
 
 describe('the instrument line', () => {
   const live = { state: 'live' as const, device: 'MacBook Pro Speakers', sampleRate: 48000 };
+  // The reason routeArmed gives without FieldOut: field keys runs in a
+  // song project, so it names the command that builds it from there.
+  const notBuilt = `FieldOut is not built: run ${BUILD_DAEMON}`;
 
   it('names each armed track and its instrument, and an instrument given by program alone', () => {
     const state = instrumentState([
@@ -97,16 +101,16 @@ describe('the instrument line', () => {
     expect(instrumentText({ ...state, status: live })).toBe(
       'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard',
     );
-    expect(instrumentText({ ...instrumentState(armed, false, 'FieldOut is not built: run pnpm build:native')!, status: live })).toBe(
-      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard (FieldOut is not built: run pnpm build:native)',
+    expect(instrumentText({ ...instrumentState(armed, false, notBuilt)!, status: live })).toBe(
+      `keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard (${notBuilt})`,
     );
     // A route that failed says why even with no effects to name.
     expect(
       instrumentText({
-        ...instrumentState([{ program: '/p/bass.scd', track: 'creek/bass', unheardEffects: [] }], false, 'FieldOut is not built: run pnpm build:native')!,
+        ...instrumentState([{ program: '/p/bass.scd', track: 'creek/bass', unheardEffects: [] }], false, notBuilt)!,
         status: live,
       }),
-    ).toBe('bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry (FieldOut is not built: run pnpm build:native)');
+    ).toBe(`bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry (${notBuilt})`);
     // Routed, but scsynth never ran the route: nothing is heard at all.
     expect(instrumentText({ ...instrumentState(armed, true)!, silent: 'FieldOut did not load', status: live })).toBe(
       'keys (juno) + bass (bass) is silent: FieldOut did not load',

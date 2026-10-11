@@ -1,5 +1,6 @@
 import { AudiodClient } from '../audiod/client.js';
 import { compileSession, type SessionInput } from '../graph/live.js';
+import { BUILD_DAEMON } from '../remedies.js';
 import type { ArmedInstrument } from './targets.js';
 import { fieldOutPluginDir } from './voice-host.js';
 
@@ -66,7 +67,7 @@ export async function routeArmed(
       reason:
         named !== undefined && named !== ''
           ? `FIELD_FIELDOUT names ${named}, which holds no FieldOut plugin`
-          : 'FieldOut is not built: run pnpm build:native',
+          : `FieldOut is not built: run ${BUILD_DAEMON}`,
     };
   }
 

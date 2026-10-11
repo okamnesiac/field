@@ -244,7 +244,7 @@ the device, and the instrument's line says why, and which effects on its
 way to the speakers, from `main` down, you are not hearing:
 
 ```console
-keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on main, keys-bus are not heard (FieldOut is not built: run pnpm build:native)
+keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on main, keys-bus are not heard (FieldOut is not built: run field upgrade audiod)
 ```
 
 With no effects on its way, the line ends `· dry (<why>)`.
