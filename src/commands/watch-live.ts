@@ -1,7 +1,7 @@
 import { watch as fsWatch, type FSWatcher } from 'node:fs';
 import { sep } from 'node:path';
 import type { Session } from '../audiod/session.js';
-import { compileSession, diffSessions, type CompiledSession, type SessionEdit } from '../graph/live.js';
+import { compileSession, diffSessions, type CompiledSession, type SessionEdit, type SessionInput } from '../graph/live.js';
 import { buildLabels } from './build.js';
 
 // The live half of watching (realtime.md chunk 3): recompile the song's
@@ -39,7 +39,15 @@ export async function watchLiveSession(
   root: string,
   song: string,
   baseline: CompiledSession,
-  options: { debounceMs?: number; loop?: boolean; signal?: AbortSignal } = {},
+  options: {
+    debounceMs?: number;
+    loop?: boolean;
+    signal?: AbortSignal;
+    // The open `field keys` inputs for the song, asked again at each
+    // compile (live-supercollider.md chunk 3), so a reload keeps a routed
+    // voice heard.
+    inputs?: () => Promise<SessionInput[]>;
+  } = {},
   hooks: WatchLiveHooks = {},
 ): Promise<void> {
   const debounceMs = options.debounceMs ?? 300;
@@ -93,8 +101,10 @@ export async function watchLiveSession(
         stale = false;
         let compiled: CompiledSession;
         try {
+          const inputs = (await options.inputs?.()) ?? [];
           compiled = await compileSession(root, song, {
             ...(options.loop === true ? { loop: true } : {}),
+            ...(inputs.length > 0 ? { inputs } : {}),
           });
         } catch (err) {
           hooks.onError?.(err instanceof Error ? err : new Error(String(err)));

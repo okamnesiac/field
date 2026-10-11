@@ -376,7 +376,7 @@ must be a SynthDef with these controls:
 | `freq` | The note's frequency in Hz (`note.midicps`) |
 | `amp` | `velocity / 127` |
 | `gate` | 1 at note-on, 0 at note-off |
-| `out` | The output bus, 0 |
+| `out` | The output bus, 0. *Amended (2026-10-11, live-supercollider.md chunk 3):* the bus to write to, 0 straight to the device or a private bus through a track's effects; a voice must write to `out`, never to bus 0 itself |
 | `mod` | Optional, added in §14: the modulation wheel (CC 1), from 0 to 1 |
 
 The voice writes two channels to `out` and frees itself after `gate`

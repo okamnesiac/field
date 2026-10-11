@@ -125,7 +125,7 @@ public:
         // Armed or recording pins the daemon open (recording.md §5): an
         // idle exit under a take would be the take dying to a timeout.
         auto idle = server.connectionCount() == 0 && state != "playing"
-                    && ! player.recordingPinned() && ! player.inputsOpen()
+                    && ! player.recordingPinned()
                     && juce::Time::currentTimeMillis() - server.lastActivityMs() > idleMs;
         if (server.quitRequested || idle)
             wantExit = true;

@@ -265,8 +265,9 @@ must sit under `main`.
   meeting offset, which step 3 now aligns; a second golden holds an
   input reaching `main` three ways, at 0, 145, and 290 samples, to the
   offline render late by 290, with the tone loud enough that all three
-  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2 holds in the compiled
-  session: the input's track and the bus above it keep their chains,
+  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2
+  holds in the compiled session: the input's track and the bus above it
+  keep their chains,
   and a sibling fed by a file is served from its stem. The daemon's
   `session` op refuses an input window until chunk 2 gives it a source,
   so nothing outside the tests can attach one yet.
@@ -311,7 +312,18 @@ must sit under `main`.
   ring as FieldOut would. `src/keys/routing-voice.test.ts` runs the whole
   path through real sclang and scsynth: a note from a published MIDI
   source reaches the track's input in the daemon. When routing is not
-  possible, the line keeps the dry note and says why. Criterion 3 by ear,
+  possible, the line keeps the dry note and says why. The review of the
+  chunk found five gaps, now closed: an input closes with the connection
+  that opened it, in place of pinning the daemon open, and `field keys`
+  closes its routing in a `finally`; `field play`, its watch,
+  `field ui`, and `field record` compile in the open `keys:` inputs for
+  their song, so their loads keep a routed voice heard; the voice host
+  boots on the daemon's device and plays dry when `--device` names
+  another or the daemon converts the song's rate, and each ring carries
+  the device's rate once a session has settled it; FieldOut reaches
+  scsynth through `SC_PLUGIN_PATH`, beside its own plugins, which on
+  Linux the replaced plugin path had lost; and the voice contract says
+  a voice writes to `out`, a private bus when routed. Criterion 3 by ear,
   and criteria 4 and 5 on the real device, are still owed; a swap under
   a playing input, which §9 leaves to this chunk, rebuilds the overlay
   cold, a gap of the path's latency, accepted for now.

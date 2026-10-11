@@ -98,6 +98,22 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
     await expect(client.closeInput('mic')).rejects.toThrow('no input named "mic"');
   });
 
+  it('closes an input when the connection that opened it drops', async () => {
+    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    // A second connection opens it, as `field keys` does, and goes away
+    // without closing it, as a killed `field keys` would.
+    const owner = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+    await owner.openInput('keys:creek/bass');
+    expect((await client.status()).inputs).toHaveLength(1);
+    owner.close();
+    let inputs = (await client.status()).inputs;
+    for (let i = 0; i < 40 && inputs !== undefined; i++) {
+      await sleep(100);
+      inputs = (await client.status()).inputs;
+    }
+    expect(inputs).toBeUndefined();
+  });
+
   it('loads a session whose input window names an open input, and refuses one that names none', async () => {
     scaffold(root);
     const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'mic' }] });

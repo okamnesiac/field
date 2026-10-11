@@ -69,7 +69,9 @@ private:
     void readLoop (std::shared_ptr<Connection> connection);
     void handleLine (Connection& connection, const juce::String& line);
     void send (Connection& connection, const juce::String& line);
-    juce::String dispatch (const juce::var& request); // returns response JSON line
+    // Returns the response JSON line. `owner` is the connection the
+    // request arrived on: an input it opens closes when it drops.
+    juce::String dispatch (const juce::var& request, const void* owner = nullptr);
 
     Player& player;
     const juce::String socketPath;

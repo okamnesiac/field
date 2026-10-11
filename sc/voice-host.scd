@@ -12,10 +12,10 @@
 // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
 // To play through the effects (live-supercollider.md chunk 3):
 // FIELD_RINGS (a JSON list beside FIELD_INSTRUMENTS, each the daemon ring
-// that instrument's voices go to, or null for the device), FIELD_FIELDOUT
-// (the directory holding the FieldOut plugin), and FIELD_ROUTE_DEF (the
-// route's SynthDef file, which Field writes because sclang has no
-// FieldOut class).
+// that instrument's voices go to, or null for the device) and
+// FIELD_ROUTE_DEF (the route's SynthDef file, which Field writes because
+// sclang has no FieldOut class). Field puts FieldOut's directory on
+// SC_PLUGIN_PATH, which scsynth searches beside its own plugins.
 // sclang's own port, which Field also chooses (-u), takes /field/reload:
 // load every program again, as one has changed (§14), keeping them all as
 // they were if one does not load.
@@ -28,7 +28,6 @@ var parentPid = "FIELD_PARENT_PID".getenv;
 var device = "FIELD_DEVICE".getenv;
 var trace = "FIELD_VOICE_TRACE".getenv.notNil;
 var rings = "FIELD_RINGS".getenv !? (_.parseJSON);
-var fieldOut = "FIELD_FIELDOUT".getenv;
 var routeDef = "FIELD_ROUTE_DEF".getenv;
 // Each routed instrument's private bus and its route, made at each boot.
 var buses = [], routes = [], startRoutes, stopRoutes;
@@ -168,13 +167,6 @@ run = {
 	server.options.numOutputBusChannels = 2;
 	server.options.hardwareBufferSize = 128;
 	server.options.sampleRate = nil;
-	// FieldOut beside every plugin scsynth would load anyway: naming any
-	// path replaces the defaults, so they are named too.
-	fieldOut !? { |dir|
-		server.options.ugenPluginsPath = [
-			Platform.resourceDir +/+ "plugins", Platform.systemExtensionDir, Platform.userExtensionDir, dir
-		].select { |path| File.exists(path) };
-	};
 	// Named for both directions: given no input device, scsynth on macOS
 	// opens the default one even with no input channels, and blocks on the
 	// microphone permission (keyboard-instrument.md §10.1).

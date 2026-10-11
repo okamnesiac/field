@@ -81,6 +81,15 @@ RingInput::~RingInput()
 #endif
 }
 
+void RingInput::setSampleRate (uint32_t sampleRate)
+{
+#if ! defined(_WIN32)
+    static_cast<ring::Header*> (mapped)->sampleRate = sampleRate;
+#else
+    juce::ignoreUnused (sampleRate);
+#endif
+}
+
 void RingInput::retire()
 {
 #if ! defined(_WIN32)

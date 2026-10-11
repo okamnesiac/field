@@ -143,7 +143,7 @@ these controls, and it must not render or exit.
 | `freq` | The note's frequency in Hz |
 | `amp` | The velocity divided by 127 |
 | `gate` | 1 at note-on, 0 at note-off |
-| `out` | The output bus, 0 |
+| `out` | The bus to write to: 0 when the voice plays straight to the device, a private bus when it plays through a track's effects. A voice must write to `out`, never to bus 0 itself |
 | `mod` | Optional: the modulation wheel (CC 1), from 0 to 1, at note-on and whenever it moves |
 
 A voice may leave `mod` out, and then the wheel does nothing to it. In
@@ -230,9 +230,12 @@ stopped, you play over silence; press play in another terminal
 
 Each track gets a voice of its own, even when two share an instrument.
 An instrument you name without a track still plays straight to the
-device. The voice reaches the speakers late by the latency of the
-limiters and hosted plugins on its way up, a few milliseconds for the
-built-in limiter.
+device. The voice plays on the daemon's device, so the two share a
+clock, and reaches the speakers late by the latency of the limiters and
+hosted plugins on its way up, a few milliseconds for the built-in
+limiter. `field play`, its `--watch`, `field ui`, and `field record`
+keep the voice routed when they load the song again, and the inputs
+close with `field keys`, even when it is killed.
 
 When a track's voice cannot go through the daemon, it plays straight to
 the device, and the instrument's line says which effects you are not
@@ -243,8 +246,10 @@ keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys
 ```
 
 That happens when FieldOut is not built, on Windows, which has no
-POSIX shared memory, when the daemon predates live inputs, or when the
-tracks you name are in two songs, because one session plays one song.
+POSIX shared memory, when the daemon predates live inputs, when the
+tracks you name are in two songs, because one session plays one song,
+when `--device` names a device other than the daemon's, or when the
+device cannot run at the song's rate and the daemon converts it.
 
 ## Record what you play
 

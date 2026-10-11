@@ -123,7 +123,8 @@ input with its counters: frames `written`, `read`, and `dropped` for
 want of room, the reader's `underruns` and `skipped` frames, and the
 `peak` it read since a client last asked. `input_close` frees the name;
 a session still reading the ring keeps it until the session goes, and an
-open input keeps the daemon from exiting idle.
+input closes on its own when the connection that opened it drops, so a
+`field keys` killed outright leaves nothing open.
 A daemon that does this lists `live-input` in `hello.features`. The ring
 is POSIX shared memory, so Windows has no live inputs yet.
 

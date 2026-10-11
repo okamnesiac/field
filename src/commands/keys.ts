@@ -5,7 +5,7 @@ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardL
 import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
-import { routeArmed } from '../keys/routing.js';
+import { routeArmed, type Routing, type Unrouted } from '../keys/routing.js';
 import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
 import { findProjectRoot } from '../model/project.js';
 import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
@@ -85,13 +85,33 @@ export type InstrumentState = {
 };
 
 async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
-  const { source, armed } = options;
   // Armed tracks play through their effects when the daemon can take
   // their voices (live-supercollider.md chunk 3): each track then gets a
   // voice of its own, writing into its own input. Otherwise each program
   // plays once, straight to the device, and the line says why.
-  const routed = options.root !== undefined ? await routeArmed(armed, options.root) : undefined;
+  const routed =
+    options.root !== undefined
+      ? await routeArmed(options.armed, options.root, options.device !== undefined ? { device: options.device } : {})
+      : undefined;
   const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
+  try {
+    await playRouted(tty, options, carried, routed, routing);
+  } finally {
+    // However the session ends, a throw included, its inputs close; a
+    // process killed outright has the daemon close them with its
+    // connection.
+    await routing?.close();
+  }
+}
+
+async function playRouted(
+  tty: Tty,
+  options: PlayOptions,
+  carried: string,
+  routed: Routing | Unrouted | undefined,
+  routing: Routing | undefined,
+): Promise<void> {
+  const { source, armed } = options;
   const programs = routing?.programs ?? [...new Set(armed.map((a) => a.program))];
   const session = new KeysSession(options.keymap);
   let layout: KeyboardLayout | undefined;
@@ -137,7 +157,8 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
 
   // The host starts after the helper, so `Field Keys` exists when sclang
   // connects its MIDI inputs; the keyboard plays while it boots.
-  const device = options.device ?? helper.defaultOutput;
+  // A routed voice is heard on the daemon's device, so it is made there.
+  const device = routing !== undefined ? routing.device : (options.device ?? helper.defaultOutput);
   const host =
     programs.length > 0
       ? await VoiceHost.start({
@@ -205,9 +226,8 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
   send(session.quit());
   // A host still booting closes too: quitting never waits for it. The
-  // inputs close after it, once nothing writes them.
+  // inputs close after it, in play, once nothing writes them.
   await host?.close();
-  await routing?.close();
   await helper.close();
   tty.stdout.write('\n');
   if (error !== undefined) throw error;

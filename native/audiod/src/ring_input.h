@@ -28,6 +28,9 @@ public:
 
     uint32_t id() const { return ringId; }
     uint32_t capacity() const { return frames; }
+    // The rate the ring is read at, for FieldOut to check its server's
+    // against: the device's, set again once a session has settled it.
+    void setSampleRate (uint32_t sampleRate);
 
     // Unlinks the name, so a later ring may take the number; a session
     // still holding this one keeps reading what it maps until it lets go.

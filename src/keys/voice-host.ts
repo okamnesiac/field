@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createSocket } from 'node:dgram';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
@@ -207,10 +207,14 @@ export class VoiceHost {
         ? (() => {
             const routeDef = join(mkdtempSync(join(tmpdir(), 'field-route-')), 'field-route.scsyndef');
             writeFileSync(routeDef, routeSynthDef());
+            // scsynth searches SC_PLUGIN_PATH beside its own plugins;
+            // naming a plugin path any other way replaces them, which on
+            // Linux loses the core UGens.
+            const pluginPath = [env['SC_PLUGIN_PATH'], options.fieldOut!].filter((p) => p !== undefined && p !== '').join(delimiter);
             return {
               FIELD_RINGS: JSON.stringify(options.rings),
-              FIELD_FIELDOUT: options.fieldOut!,
               FIELD_ROUTE_DEF: routeDef,
+              SC_PLUGIN_PATH: pluginPath,
             };
           })()
         : {};

@@ -1,5 +1,5 @@
 import { AudiodClient } from '../audiod/client.js';
-import { compileSession } from '../graph/live.js';
+import { compileSession, type SessionInput } from '../graph/live.js';
 import type { ArmedInstrument } from './targets.js';
 import { fieldOutPluginDir } from './voice-host.js';
 
@@ -16,8 +16,12 @@ export interface Routing {
   // Each entry's ring, or null for one that plays straight to the device.
   rings: (number | null)[];
   fieldOut: string;
-  // Closes every input and loads the song again without them, so the
-  // daemon is not left reading rings nobody writes.
+  // The daemon's output device, which the voice host must boot on so the
+  // two share a clock; undefined when the daemon names none (null output).
+  device: string | undefined;
+  // Closes every input this routing opened and loads the song again with
+  // whatever inputs others still hold, so the daemon is not left reading
+  // rings nobody writes.
   close(): Promise<void>;
 }
 
@@ -26,32 +30,64 @@ export interface Unrouted {
   reason: string;
 }
 
+const KEYS_INPUT = /^keys:([^/]+)\/(.+)$/;
+
+// The open `field keys` inputs for `song`, as `compileSession` takes them:
+// every command that loads that song's session compiles them in, so a
+// reload from `field play`, its watch, `field ui`, or `field record` keeps
+// a routed voice heard.
+export async function keysInputsFor(client: AudiodClient, song: string): Promise<SessionInput[]> {
+  if (!client.supports('live-input')) return [];
+  const { inputs } = await client.status();
+  return (inputs ?? []).flatMap(({ name }) => {
+    const match = KEYS_INPUT.exec(name);
+    return match !== null && match[1] === song ? [{ track: match[2]!, input: name }] : [];
+  });
+}
+
 export async function routeArmed(
   armed: ArmedInstrument[],
   root: string,
-  env: NodeJS.ProcessEnv = process.env,
+  options: { device?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<Routing | Unrouted | undefined> {
   const tracks = armed.filter((a) => a.track !== undefined);
   if (tracks.length === 0) return undefined;
   const songs = [...new Set(tracks.map((a) => a.track!.split('/')[0]!))];
   if (songs.length > 1) return { reason: `the tracks are in ${songs.join(' and ')}, and one session plays one song` };
   if (process.platform === 'win32') return { reason: 'live inputs need POSIX shared memory, which Windows does not have yet' };
-  const fieldOut = fieldOutPluginDir(env);
+  const fieldOut = fieldOutPluginDir(options.env);
   if (fieldOut === undefined) return { reason: 'FieldOut is not built: run pnpm build:native' };
 
   const client = await AudiodClient.connect(root);
   const opened: string[] = [];
-  const closeAll = async (): Promise<void> => {
-    for (const name of opened) await client.closeInput(name).catch(() => {});
+  const song = songs[0]!;
+  const closeOpened = async (): Promise<void> => {
+    for (const name of opened.splice(0)) await client.closeInput(name).catch(() => {});
+  };
+  // The song with whatever inputs are open now, others' included.
+  const reload = async (): Promise<void> => {
+    const { session } = await compileSession(root, song, { inputs: await keysInputsFor(client, song) });
+    await client.session(session);
+  };
+  const unrouted = async (reason: string): Promise<Unrouted> => {
+    if (opened.length > 0) {
+      await closeOpened();
+      await reload().catch(() => {});
+    }
+    client.close();
+    return { reason };
   };
   try {
     if (!client.supports('live-input')) {
-      client.close();
-      return { reason: `field-audiod ${client.daemonVersion} predates live inputs: run field transport quit, then play again` };
+      return await unrouted(`field-audiod ${client.daemonVersion} predates live inputs: run field transport quit, then play again`);
     }
-    const song = songs[0]!;
+    // The voice is heard on the daemon's device, so it must be made on
+    // that device's clock too.
+    const daemonDevice = (await client.status()).device?.name;
+    if (options.device !== undefined && daemonDevice !== undefined && options.device !== daemonDevice) {
+      return await unrouted(`--device names ${options.device}, but the daemon plays on ${daemonDevice}`);
+    }
     const rings: (number | null)[] = [];
-    const inputs: { track: string; input: string }[] = [];
     for (const entry of armed) {
       if (entry.track === undefined) {
         rings.push(null);
@@ -61,21 +97,25 @@ export async function routeArmed(
       const { ring } = await client.openInput(name);
       opened.push(name);
       rings.push(ring);
-      inputs.push({ track: entry.track.split('/')[1]!, input: name });
     }
-    const { session } = await compileSession(root, song, { inputs });
-    await client.session(session);
+    await reload();
+    // A device that cannot run at the song's rate makes the daemon
+    // convert, and an input is written at the device's rate.
+    const status = await client.status();
+    if (status.resampling) {
+      return await unrouted(`the device does not run at the song's ${status.sample_rate} Hz, so the daemon converts it`);
+    }
     return {
       programs: armed.map((a) => a.program),
       rings,
       fieldOut,
+      device: daemonDevice,
       close: async () => {
         try {
-          await closeAll();
-          // The song as it was, without the inputs; a song that no longer
-          // compiles keeps the session it has, which reads silence.
-          const { session: plain } = await compileSession(root, song);
-          await client.session(plain);
+          await closeOpened();
+          // The song as it is now: without these inputs, with any others.
+          // A song that no longer compiles keeps the session it has.
+          await reload();
         } catch {
           // the daemon or the project went away; nothing is left to restore
         } finally {
@@ -84,8 +124,6 @@ export async function routeArmed(
       },
     };
   } catch (err) {
-    await closeAll();
-    client.close();
-    return { reason: (err as Error).message.split('\n')[0]! };
+    return await unrouted((err as Error).message.split('\n')[0]!);
   }
 }

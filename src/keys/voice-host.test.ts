@@ -20,7 +20,7 @@ writeFileSync(log + '.env', JSON.stringify({
   device: process.env.FIELD_DEVICE ?? null,
   parent: process.env.FIELD_PARENT_PID,
   rings: process.env.FIELD_RINGS ?? null,
-  fieldOut: process.env.FIELD_FIELDOUT ?? null,
+  pluginPath: process.env.SC_PLUGIN_PATH ?? null,
   routeDef: process.env.FIELD_ROUTE_DEF ?? null,
 }));
 const socket = require('node:dgram').createSocket('udp4');
@@ -218,7 +218,8 @@ describe('the voice host process', () => {
     });
     await host.ready;
     const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
-    expect(seen).toMatchObject({ rings: '[4213871,null]', fieldOut: '/opt/fieldout' });
+    // FieldOut beside scsynth's own plugins, not in place of them.
+    expect(seen).toMatchObject({ rings: '[4213871,null]', pluginPath: '/opt/fieldout' });
     // The route's SynthDef, which Field writes because sclang has no
     // FieldOut class.
     expect(readFileSync(seen.routeDef).subarray(0, 4).toString('latin1')).toBe('SCgf');
@@ -232,7 +233,7 @@ describe('the voice host process', () => {
   itStartsTheStub('routes nothing when no instrument has a ring', async () => {
     const host = await VoiceHost.start({ instruments: ['/p/pad.scd'], rings: [null], fieldOut: '/opt/fieldout', env: env('ready') });
     await host.ready;
-    expect(JSON.parse(readFileSync(`${log}.env`, 'utf8'))).toMatchObject({ rings: null, fieldOut: null, routeDef: null });
+    expect(JSON.parse(readFileSync(`${log}.env`, 'utf8'))).toMatchObject({ rings: null, routeDef: null });
     await host.close();
   });
 
