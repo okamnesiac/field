@@ -1,0 +1,1062 @@
+diff --git a/README.md b/README.md
+index 8ccd23d..effb5c1 100644
+--- a/README.md
++++ b/README.md
+@@ -160,7 +160,8 @@ other layouts play the same notes, and a keymap of your own is a YAML
+ file away. Name an instrument, as in `field keys juno` inside
+ `examples/bloom`, and it plays that SuperCollider instrument live too.
+ The arrows choose and turn its knobs, such as `juno`'s filter cutoff,
+-each one a MIDI controller, so a take you record keeps every turn. See
++and the number row types a value they glide to. Each knob is a MIDI
++controller, so a take you record keeps every turn. See
+ [docs/keys.md](docs/keys.md).
+ 
+ ## Status
+diff --git a/docs/keys.md b/docs/keys.md
+index 63dab51..cdc829f 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -74,9 +74,11 @@ for, once, and a new process gets a new MIDI client.
+    sent; a USB controller's bender and knobs do not change them. On a
+    narrow terminal the text before the notes is shortened, and the notes
+    only when they alone are wider than the terminal.
+-4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
+-   every held note and then All Notes Off, so nothing is left sounding,
+-   and `Field Keys` disappears.
++4. Press `Ctrl-C` to quit. `field keys` sends a note-off for every held
++   note and then All Notes Off, so nothing is left sounding, and
++   `Field Keys` disappears. `Esc` does not quit: it cancels a value
++   you are typing ([Type a value](#type-a-value)), and with none open
++   it puts `Ctrl-C quits` on the status line.
+ 
+ Holding a key holds its note; the terminal's key repeat does nothing.
+ When the terminal loses focus, `field keys` releases every held note,
+@@ -125,13 +127,58 @@ Each value keeps its width as it changes, so turning a knob never moves
+ the knobs after it or the notes. On a terminal too narrow for every
+ knob, the line shows the knobs around the chosen one, with `‹` or `›`
+ where knobs are hidden; the window moves only when the choice leaves
+-it. The knob line appears whenever the keymap binds `knob` or `turn`
+-([Actions](#actions)), which `musical` does.
++it. The knob line appears whenever the keymap binds `knob`, `turn`, or
++`type` ([Actions](#actions)), which `musical` does.
+ 
+ The knobs are MIDI, so they turn whatever listens to `Field Keys`: an
+ instrument `field keys` plays, Logic, or a hardware synth. A take you
+ record keeps every turn ([Record what you play](#record-what-you-play)).
+ 
++### Type a value
++
++To move a knob far, type where you want it. In `musical` the number row
++types; it plays no notes.
++
++1. Choose the knob, then type its value in the units its knob file
++   names: `800` for 800 Hz on `cutoff`, or `0.8` for 800 ms on
++   `attack`. `mod` takes 0 to 127. The knob shows what you have typed in
++   place of its value, as in `cutoff  800_ Hz`, and nothing is sent yet.
++2. Press `Enter`. `field keys` clamps the number to the knob's range and
++   takes the controller value whose value is nearest it, because a
++   controller carries only 128 values: `800` on `cutoff` lands on
++   `810 Hz`, `99999` on `15.0 kHz`, and `20` on `50.0 Hz`.
++3. The knob glides there. `musical` crosses a knob's whole range in one
++   second, so 15.0 kHz to 810 Hz takes about half a second, sending one
++   control change every 40 ms. A keymap with `glide: 0` sets the value
++   at once.
++
++While you type:
++
++- **`.` types the decimal point.** With no value open, `.` does what
++  the keymap binds there, which in `musical` is the bend up, so a value
++  cannot start with it: type `0.5`, not `.5`. `-` types a minus sign,
++  only first. A key that would make the number malformed, such as a
++  second `.`, does nothing.
++- **`Backspace` deletes the last character**, and closes an empty value.
++- **`Esc` cancels the value** and leaves the knob as it was.
++- **A knob key completes the value first.** `ArrowLeft` or `ArrowRight`
++  completes it, and then moves the choice while the knob glides on.
++  `ArrowUp` or `ArrowDown` completes it and then turns, which stops the
++  glide it started.
++- **Every other key plays as usual.** Notes sound and the octave,
++  velocity, sustain, and bend keys work, so you can type over a held
++  chord. A value stays open until you close it.
++
++A glide runs on its own, one per knob, so you can type a value on
++another knob while the first glides. Turning the gliding knob stops its
++glide where it is and turns from there, and a new value on it glides
++from where it is. A panic, a keymap reload, and quitting stop every
++glide.
++
++Typing keys are positions, as every key in a keymap is, so `.` and `-`
++are where QWERTY has them whatever your layout prints there. The
++numeric keypad does not type.
++
+ ### Knob files
+ 
+ A *knob file* describes an instrument's knobs. `field keys` reads it
+@@ -508,9 +555,9 @@ same note C3.
+ 
+ ```console
+ $ field keys --print
+-musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
++musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.
+ 
+-·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·
++·     1     2     3     4     5     6     7     8     9     0     -     ·
+    cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·
+           C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5
+              T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·
+@@ -528,17 +575,19 @@ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row,
+ | `Tab` | Sustain (CC 64) while held |
+ | `←`, `→` | Choose a knob |
+ | `↑`, `↓` | Turn the chosen knob, faster while held |
+-| `Esc`, `Ctrl-C` | Quit |
++| `1` to `0`, `-` | Type the chosen knob's value; `.` types the decimal point while you type |
++| `Enter`, `Backspace`, `Esc` | Complete, edit, or cancel the value you are typing |
++| `Ctrl-C` | Quit |
+ 
+ `musical` plays every note where Musical Typing does, and keeps its
+ octave, velocity, and sustain keys. Logic's guide describes `Tab` as
+ turning sustain on or off; this keymap holds sustain only while `Tab` is
+ down, as a pedal does. The bend moves to `,` and `.`, the keys that show
+-`<` and `>`, and the modulation wheel is the knob `mod`, which the
+-arrows turn. To bend on `1` and `2` and set the wheel in steps on `3` to
+-`8`, as Logic does, copy `musical` into a keymap of your own
+-([Write a keymap](#write-a-keymap)) with these controls in place of the
+-bend's:
++`<` and `>`, the modulation wheel is the knob `mod`, which the arrows
++turn, and the number row types a knob's value. To bend on `1` and `2`
++and set the wheel in steps on `3` to `8`, as Logic does, copy `musical`
++into a keymap of your own ([Write a keymap](#write-a-keymap)) with these
++controls in place of the bend's and the typing keys:
+ 
+ ```yaml
+   Digit1: { bend: -1 }
+@@ -619,6 +668,7 @@ supported terminal, which helps while you design one.
+ | `base` | 60 | The MIDI note that offset 0 plays before any transpose. |
+ | `velocity` | 100 | The starting velocity. |
+ | `channel` | 1 | The MIDI channel, 1 to 16. |
++| `glide` | 0 | The seconds a typed value takes to cross a knob's whole range; a shorter move takes its share. 0 sets a typed value at once. |
+ | `notes` | None | Each position to an offset in semitones from `base`, or to a list of offsets, which plays a chord. |
+ | `grid` | None | Offsets for whole rows by a rule. An entry in `notes` or `controls` overrides the grid at that position. |
+ | `controls` | None | Each position to an action. |
+@@ -657,11 +707,12 @@ times its row's index. In the example, `KeyZ` plays 48, `KeyA` 53,
+ | `{ bend: <x> }` | Pitch bend to x, from -1 to 1, while held; back to center on release. |
+ | `{ knob: <n> }` | Moves the knob choice n knobs to the right, or to the left when n is negative, wrapping past either end. |
+ | `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning faster while held ([Turn knobs](#turn-knobs)). Pressing a second turn key turns with it and stops the first. |
++| `{ type: <c> }` | Types c into the chosen knob's value ([Type a value](#type-a-value)): a digit, written as a number from 0 to 9 as in `type: 1`, or `"-"`. The decimal point is no action: `Period` types it while a value is open, in every keymap. |
+ | `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0, and goes back to 0 when you quit, press `panic`, or reload the keymap. `value` defaults to 127. |
+-| `panic` | Releases every note, stops a held turn, and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
++| `panic` | Releases every note, stops a held turn and every glide, and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
+ 
+ `knob` and `turn` take a whole number other than 0. A keymap that binds
+-either one shows the knob line.
++`knob`, `turn`, or `type` shows the knob line.
+ 
+ ### Rules
+ 
+@@ -672,8 +723,9 @@ and the rule each error breaks:
+   rows, `Backquote`, `Backslash`, `IntlBackslash`, `Space`, `Tab`, and
+   the four arrows.
+ - **A position is a note or a control, never both.**
+-- **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so no
+-  keymap can trap you.
++- **`Escape` is reserved.** It cancels a typed value, and `Ctrl-C`
++  always quits, so no keymap can trap you. `Enter` and `Backspace` act
++  only on a typed value and are not positions a keymap binds either.
+ - **Every note is in MIDI's range** at `base`, and the keymap plays at
+   least one note.
+ - **Modifiers do not bind.** A key pressed with `Ctrl`, `Alt`, or `Cmd`
+diff --git a/docs/projects/instrument-knobs/readme.md b/docs/projects/instrument-knobs/readme.md
+index 01296d2..836473c 100644
+--- a/docs/projects/instrument-knobs/readme.md
++++ b/docs/projects/instrument-knobs/readme.md
+@@ -977,3 +977,49 @@ and the glide wait for chunk 2, and the starting positions for chunk 3.
+   session already running on the machine, so it saw none of the run's
+   control changes. `src/keys/session.test.ts` pins what a turn sends
+   and when.
++
++## 10 Chunk 2 as built (2026-10-11)
++
++The number row types a knob's value in `musical`, `Enter` completes it,
++and the knob glides there at the keymap's `glide`. `Period` types the
++decimal point while an entry is open and bends otherwise, `Backspace`
++edits, and `Esc` cancels an entry or, with none open, puts `Ctrl-C
++quits` on the status line; `Ctrl-C` alone quits. The starting positions
++wait for chunk 3.
++
++### 10.1 What implementation settled
++
++- **The session handles `Enter`, `Backspace`, and `Escape` as
++  positions.** `positionOf` names them, from `CSI 13 u`, `CSI 127 u`,
++  and `CSI 27 u`, and `KeysSession.press` acts on them before the
++  keymap, so no keymap binds them and `src/commands/keys.ts` needs no
++  case of its own for `Esc`.
++- **A glide is kept per controller,** since two knobs on one controller
++  share its value, and moves by the time since it started, so a late
++  tick catches up rather than slowing the glide. Each tick sends at most
++  one control change per gliding controller.
++- **The 40 ms timer runs while a turn key is held or a glide moves,**
++  as `tickWhileMoving` in `src/commands/keys.ts`, so a session with
++  neither keeps no interval. §9.1's turn timer becomes this one.
++- **A completed value that lands where the knob already is sends one
++  control change** rather than nothing, so a receiver still at its own
++  default takes the value the line shows.
++- **A `type`-only keymap shows the knob line,** as one with `knob` or
++  `turn` does: typing a value means nothing without the line.
++- **Focus-out leaves glides running.** §2.6 stops a held turn on
++  focus-out, and §2.7 names only a panic, a keymap reload, and quitting
++  as what stops a glide.
++
++### 10.2 What was verified, and how
++
++| Check | Result |
++| --- | --- |
++| The vitest tests §4 lists for chunk 2 | Pass, in `src/schema/keymap.test.ts`, `src/keys/terminal.test.ts`, `src/keys/position.test.ts`, `src/keys/knobs.test.ts`, `src/keys/session.test.ts`, `src/commands/keys.test.ts`, and `src/keys/print.test.ts` with `musical`'s stored copy. A value from 127 to 62 glides in 13 ticks and lands on 62. |
++| The full suite, against a `field-audiod` and FieldOut built from this branch | 90 files: 1187 tests pass, and 1 skips. |
++| `field keys --knobs` in a pseudo-terminal, against a stub helper that logs what it is sent | Criterion 4: `800` read `cutoff  800_ Hz` and glided CC 74 from 82 down to 62, five values a tick, to `810 Hz`. Criterion 6: `12`, `Backspace`, `5` read `15_ Hz`; the first `Esc` closed it at `810 Hz`, the second put `Ctrl-C quits` on the status line, and `Ctrl-C` quit with All Notes Off. Criterion 7: `300` and `ArrowRight` glided to `301 Hz` and moved the choice. Criterion 23: `0`, `.`, `8` read `0.8_ s` and landed `attack` on `782 ms`, and `.` with the entry closed sent a bend up and its release. At most 5 control changes went out in any second. |
++
++### 10.3 What is still owed
++
++- **Criteria 4 to 8, 12, 14, 18, and 23 by hand,** in Ghostty or
++  iTerm2 and by ear. The pseudo-terminal run sent the protocol's bytes
++  and heard nothing.
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index 2648e25..d57b9be 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -309,7 +309,12 @@ the rule it breaks:
+   `IntlBackslash`, `Space`, `Tab`, and the four arrows.
+ - **A position is a note or a control, never both.**
+ - **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so
+-  no keymap can trap you.
++  no keymap can trap you. *Amended (2026-10-11, instrument-knobs.md
++  chunk 2):* `Escape` cancels a typed knob value and no longer quits;
++  with no value open it says that `Ctrl-C` quits. `Ctrl-C` always
++  quits, and no keymap binds `Escape` or a `Ctrl` chord, so no keymap
++  can trap you still ([instrument-knobs.md](../instrument-knobs/readme.md)
++  §2.7, §3.1).
+ - **Modifiers do not bind.** A key pressed while `Ctrl`, `Alt`, or
+   `Cmd` is held does nothing, and a key pressed with `Shift` plays as
+   it does without it. Caps Lock and Num Lock change nothing: under
+diff --git a/keymaps/musical.yaml b/keymaps/musical.yaml
+index 7c84726..c1f19ea 100644
+--- a/keymaps/musical.yaml
++++ b/keymaps/musical.yaml
+@@ -1,6 +1,7 @@
+ name: musical
+-description: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
++description: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.
+ base: 60
++glide: 1
+ notes:
+   KeyA: 0
+   KeyW: 1
+@@ -32,3 +33,14 @@ controls:
+   ArrowRight: { knob: 1 }
+   ArrowUp: { turn: 1 }
+   ArrowDown: { turn: -1 }
++  Digit1: { type: 1 }
++  Digit2: { type: 2 }
++  Digit3: { type: 3 }
++  Digit4: { type: 4 }
++  Digit5: { type: 5 }
++  Digit6: { type: 6 }
++  Digit7: { type: 7 }
++  Digit8: { type: 8 }
++  Digit9: { type: 9 }
++  Digit0: { type: 0 }
++  Minus: { type: "-" }
+diff --git a/src/cli.ts b/src/cli.ts
+index ae6dff8..b59ca30 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1069,7 +1069,7 @@ program
+   .description(
+     'play the computer keyboard as the MIDI source "Field Keys", and SuperCollider instruments from it: name instruments, ' +
+       'or tracks (creek/track:keys) to play the instrument each MIDI track names, all at once ' +
+-      '(needs a terminal with the kitty keyboard protocol; Esc quits)',
++      '(needs a terminal with the kitty keyboard protocol; Ctrl-C quits)',
+   )
+   .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical)')
+   .option(
+diff --git a/src/commands/keys.test.ts b/src/commands/keys.test.ts
+index 7a7cd36..9aeaef4 100644
+--- a/src/commands/keys.test.ts
++++ b/src/commands/keys.test.ts
+@@ -208,6 +208,57 @@ describe('the knob line', () => {
+   });
+ });
+ 
++describe('typing on the knob line', () => {
++  const onCutoff = (): KeysSession => {
++    const session = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
++    tap(session, 'ArrowRight');
++    return session;
++  };
++
++  it('shows an entry in the value’s place, in the knob’s units, at the value’s width', () => {
++    const session = onCutoff();
++    const knobLine = new KnobLine();
++    const rest = plain(knobLine.text(session, 200));
++    tap(session, 'Digit8');
++    tap(session, 'Digit0');
++    tap(session, 'Digit0');
++    const typing = knobLine.text(session, 200);
++    expect(typing).toBe('mod   0  \x1b[7mcutoff  800_ Hz\x1b[27m  res 0.300  attack  800 ms  release  1.50 s');
++    expect(plain(typing)).toHaveLength(rest.length);
++  });
++
++  it('widens the knob only while an entry outgrows its value', () => {
++    const session = onCutoff();
++    for (let i = 0; i < 6; i++) tap(session, 'Digit1');
++    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  cutoff 111111_ Hz  res 0.300  attack  800 ms  release  1.50 s');
++    tap(session, 'Escape');
++    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s');
++  });
++
++  it('keeps its length through a glide', () => {
++    const session = onCutoff();
++    const knobLine = new KnobLine();
++    const rest = plain(knobLine.text(session, 200));
++    tap(session, 'Digit5');
++    tap(session, 'Digit0');
++    tap(session, 'Enter');
++    const lengths = new Set<number>();
++    let now = performance.now();
++    while (session.ticking()) {
++      session.tick((now += 40));
++      lengths.add(plain(knobLine.text(session, 200)).length);
++    }
++    expect([...lengths]).toEqual([rest.length]);
++    expect(plain(knobLine.text(session, 200))).toBe('mod   0  cutoff  50.0 Hz  res 0.300  attack  800 ms  release  1.50 s');
++  });
++
++  it('says Ctrl-C quits on Escape with no entry open', () => {
++    const session = onCutoff();
++    tap(session, 'Escape');
++    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · musical · transpose 0 · velocity 100 · bend +0 · Ctrl-C quits · –');
++  });
++});
++
+ describe('redrawing the lines above the status line', () => {
+   it('draws them all the first time, then only from the first that changed', () => {
+     expect(redrawAbove([], ['juno starting', 'mod   0'])).toBe('\r\x1b[Kjuno starting\n\r\x1b[Kmod   0\n');
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index 7108914..2037814 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -280,14 +280,15 @@ async function playRouted(
+   });
+   const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
+ 
+-  // A held turn key turns on a timer of its own, which runs only while
+-  // one is held (instrument-knobs.md §2.6).
++  // A held turn key and a glide move a knob on a timer of their own, which
++  // runs only while a turn key is held or a glide moves
++  // (instrument-knobs.md §2.6 and §2.7).
+   let ticker: NodeJS.Timeout | undefined;
+-  const tickWhileTurning = (): void => {
++  const tickWhileMoving = (): void => {
+     if (session.ticking() && ticker === undefined) {
+       ticker = setInterval(() => {
+         send(session.tick(performance.now()));
+-        tickWhileTurning();
++        tickWhileMoving();
+         draw();
+       }, TICK_MS);
+     } else if (!session.ticking() && ticker !== undefined) {
+@@ -377,7 +378,7 @@ async function playRouted(
+         if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
+       }
+     }
+-    tickWhileTurning();
++    tickWhileMoving();
+     draw();
+   };
+   const onSignal = (): void => stop();
+@@ -394,7 +395,7 @@ async function playRouted(
+   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
+   stopWatchingKnobs.forEach((stopWatchingKnob) => stopWatchingKnob());
+   send(session.quit());
+-  tickWhileTurning();
++  tickWhileMoving();
+   // A host still booting closes too: quitting never waits for it. The
+   // inputs close after it, in play, once nothing writes them.
+   await host?.close();
+@@ -524,12 +525,19 @@ export class KnobLine {
+   private readonly widths = new WeakMap<Knob, number>();
+ 
+   text(session: KeysSession, width: number): string {
+-    const cells = session.knobs.map(({ label, knob }) => {
++    const chosen = session.chosen;
++    const cells = session.knobs.map(({ label, knob }, i) => {
+       let valueWidth = this.widths.get(knob);
+       if (valueWidth === undefined) this.widths.set(knob, (valueWidth = knobValueWidth(knob)));
+-      return `${label} ${formatKnobValue(knob, session.knobValue(knob)).padStart(valueWidth)}`;
++      // An entry takes the value's place, in the units it is typed in,
++      // and widens the knob only once it outgrows the value.
++      const entry = i === chosen ? session.entry : undefined;
++      const value =
++        entry !== undefined
++          ? `${entry.text}_${knob.units !== undefined ? ` ${knob.units}` : ''}`
++          : formatKnobValue(knob, session.knobValue(knob));
++      return `${label} ${value.padStart(valueWidth)}`;
+     });
+-    const chosen = session.chosen;
+     const span = (from: number, to: number): number =>
+       cells.slice(from, to + 1).reduce((sum, cell) => sum + cell.length, 0) +
+       KNOB_GAP.length * (to - from) +
+diff --git a/src/keys/knobs.test.ts b/src/keys/knobs.test.ts
+index eed332f..16bffe3 100644
+--- a/src/keys/knobs.test.ts
++++ b/src/keys/knobs.test.ts
+@@ -18,6 +18,7 @@ import {
+   MOD_KNOB,
+   parseKnobs,
+   resolveKnobsPath,
++  nearestController,
+   stepFrom,
+ } from './knobs.js';
+ 
+@@ -110,6 +111,15 @@ describe('controller values', () => {
+     expect(controllerOf(MOD_KNOB, 0)).toBe(0);
+   });
+ 
++  it('lands a typed value on the nearest controller value, clamped to the range', () => {
++    // 62 maps to 809.6 Hz and 61 to 774.0 Hz.
++    expect(nearestController(knob('cutoff'), 800)).toBe(62);
++    expect(nearestController(knob('cutoff'), 99999)).toBe(127);
++    expect(nearestController(knob('cutoff'), 20)).toBe(0);
++    expect(formatKnobValue(knob('attack'), knobValue(knob('attack'), nearestController(knob('attack'), 0.8)))).toBe('782 ms');
++    expect(nearestController(MOD_KNOB, 64)).toBe(64);
++  });
++
+   it('steps one controller value, and stops at either end', () => {
+     expect(stepFrom(knob('cutoff'), 82, 1)).toBe(83);
+     expect(stepFrom(knob('cutoff'), 82, -1)).toBe(81);
+diff --git a/src/keys/knobs.ts b/src/keys/knobs.ts
+index e36e873..747a8fc 100644
+--- a/src/keys/knobs.ts
++++ b/src/keys/knobs.ts
+@@ -136,6 +136,18 @@ export function controllerOf(knob: Knob, value: number): number {
+   return Math.min(CC_MAX, Math.max(0, Math.round(x * CC_MAX)));
+ }
+ 
++// Where a typed value lands (§2.7): clamped to the knob's range, ends
++// included, then the controller value whose value is nearest it, since a
++// controller carries only 128 values.
++export function nearestController(knob: Knob, value: number): number {
++  const target = Math.min(Math.max(knob.min, knob.max), Math.max(Math.min(knob.min, knob.max), value));
++  let nearest = 0;
++  for (let cc = 1; cc <= CC_MAX; cc++) {
++    if (Math.abs(knobValue(knob, cc) - target) < Math.abs(knobValue(knob, nearest) - target)) nearest = cc;
++  }
++  return nearest;
++}
++
+ // One step up or down from controller value `cc`: the next value, or on a
+ // knob with a step, the next that maps to a different value, so a knob
+ // with two positions moves in one press. Stays at `cc` at either end.
+diff --git a/src/keys/position.test.ts b/src/keys/position.test.ts
+index ffe737f..53d9e3d 100644
+--- a/src/keys/position.test.ts
++++ b/src/keys/position.test.ts
+@@ -50,6 +50,12 @@ describe('finding a key event position', () => {
+     expect(positionOf({ kind: 'key', key: 'ArrowUp', mods: 0, type: 'press' })).toBe('ArrowUp');
+   });
+ 
++  it('names Enter, Backspace, and Escape, which the protocol reports as CSI 13 u, CSI 127 u, and CSI 27 u', () => {
++    expect(positionOf(press(13), charactersToPositions(DVORAK))).toBe('Enter');
++    expect(positionOf(press(127))).toBe('Backspace');
++    expect(positionOf(press(27))).toBe('Escape');
++  });
++
+   it('applies a new layout report to the next event', () => {
+     let positions = charactersToPositions(DVORAK);
+     expect(positionOf(press(code('a')), positions)).toBe('KeyA');
+diff --git a/src/keys/position.ts b/src/keys/position.ts
+index 7f8c56d..6362ace 100644
+--- a/src/keys/position.ts
++++ b/src/keys/position.ts
+@@ -29,7 +29,9 @@ const US_POSITIONS: Record<string, string> = {
+ for (const digit of '0123456789') US_POSITIONS[digit] = `Digit${digit}`;
+ for (const letter of 'abcdefghijklmnopqrstuvwxyz') US_POSITIONS[letter] = `Key${letter.toUpperCase()}`;
+ 
+-const FUNCTIONAL_KEYS: Record<number, string> = { 9: 'Tab', 32: 'Space' };
++// Enter, Backspace, and Escape act only on a typed value or say how to
++// quit, so no keymap binds them (instrument-knobs.md §2.7).
++const FUNCTIONAL_KEYS: Record<number, string> = { 9: 'Tab', 13: 'Enter', 27: 'Escape', 32: 'Space', 127: 'Backspace' };
+ 
+ // Inverts a layout report once, keeping the first position for a
+ // character two positions type.
+diff --git a/src/keys/print.test.ts b/src/keys/print.test.ts
+index 8339a1b..387b1aa 100644
+--- a/src/keys/print.test.ts
++++ b/src/keys/print.test.ts
+@@ -15,9 +15,9 @@ describe('printing a keymap', () => {
+     const keymap = loadKeymap(join(builtinKeymapDir(), 'musical.yaml'));
+     expect(printKeymap(keymap)).toBe(
+       [
+-        "musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.",
++        "musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.",
+         '',
+-        '·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·',
++        '·     1     2     3     4     5     6     7     8     9     0     -     ·',
+         '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·',
+         '          C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5',
+         '             T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·',
+@@ -35,6 +35,17 @@ describe('printing a keymap', () => {
+         'ArrowRight  move the choice 1 knob to the right',
+         'ArrowUp     turn the chosen knob 1 step up, faster while held',
+         'ArrowDown   turn the chosen knob 1 step down, faster while held',
++        "Digit1      type 1 into the chosen knob's value",
++        "Digit2      type 2 into the chosen knob's value",
++        "Digit3      type 3 into the chosen knob's value",
++        "Digit4      type 4 into the chosen knob's value",
++        "Digit5      type 5 into the chosen knob's value",
++        "Digit6      type 6 into the chosen knob's value",
++        "Digit7      type 7 into the chosen knob's value",
++        "Digit8      type 8 into the chosen knob's value",
++        "Digit9      type 9 into the chosen knob's value",
++        "Digit0      type 0 into the chosen knob's value",
++        "Minus       type - into the chosen knob's value",
+         '',
+         'Notes are in scientific pitch notation: MIDI note 60 is C4. Channel 1, velocity 100.',
+         '',
+diff --git a/src/keys/print.ts b/src/keys/print.ts
+index 1202dcd..ed82b88 100644
+--- a/src/keys/print.ts
++++ b/src/keys/print.ts
+@@ -46,6 +46,7 @@ function actionTag(action: KeymapAction): string {
+   if ('bend' in action) return `B${signed(action.bend)}`;
+   if ('knob' in action) return `K${signed(action.knob)}`;
+   if ('turn' in action) return `R${signed(action.turn)}`;
++  if ('type' in action) return String(action.type);
+   return `cc${action.cc}`;
+ }
+ 
+@@ -62,6 +63,7 @@ export function describeAction(action: KeymapAction): string {
+     const steps = Math.abs(action.turn);
+     return `turn the chosen knob ${steps} step${steps === 1 ? '' : 's'} ${action.turn > 0 ? 'up' : 'down'}, faster while held`;
+   }
++  if ('type' in action) return `type ${action.type} into the chosen knob's value`;
+   const how = { set: '', hold: ' while held', toggle: ', toggled' }[action.mode];
+   return `cc ${action.cc} = ${action.value}${how}`;
+ }
+diff --git a/src/keys/session.test.ts b/src/keys/session.test.ts
+index d8dbd0d..658d759 100644
+--- a/src/keys/session.test.ts
++++ b/src/keys/session.test.ts
+@@ -2,7 +2,7 @@ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+ import { builtinKeymapDir, loadKeymap, parseKeymap } from './keymap.js';
+ import { knobList, loadKnobs } from './knobs.js';
+-import { bendValue, KeysSession } from './session.js';
++import { bendValue, KeysSession, type MidiMessage } from './session.js';
+ import { MOD_ALT, MOD_CAPS_LOCK, MOD_CTRL, MOD_NUM_LOCK, MOD_SHIFT, MOD_SUPER } from './terminal.js';
+ 
+ const ON = 0x90;
+@@ -385,5 +385,152 @@ describe('knobs', () => {
+   it('binds the knobs only in a keymap with a knob action', () => {
+     expect(musical().bindsKnobs()).toBe(true);
+     expect(new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml'))).bindsKnobs()).toBe(false);
++    expect(new KeysSession(parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { type: 1 } }\n', 't.yaml')).bindsKnobs()).toBe(true);
+   });
+ });
++
++describe('typing a knob\'s value', () => {
++  const juno = loadKnobs(join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments', 'juno.knobs.yaml'));
++  const onCutoff = (): KeysSession => {
++    const session = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
++    session.press('ArrowRight');
++    session.release('ArrowRight');
++    return session;
++  };
++  const type = (session: KeysSession, keys: string[], now = 0): MidiMessage[] =>
++    keys.flatMap((key) => {
++      const sent = session.press(key, 0, now);
++      session.release(key);
++      return sent;
++    });
++
++  it('opens an entry on the first typing key and sends nothing until it completes', () => {
++    const session = onCutoff();
++    expect(type(session, ['Digit8', 'Digit0', 'Digit0'])).toEqual([]);
++    expect(session.entry).toEqual({ text: '800' });
++    expect(session.ticking()).toBe(false);
++  });
++
++  it('types the decimal point on Period only while an entry is open, and bends otherwise', () => {
++    const session = onCutoff();
++    expect(session.press('Period')).toEqual([[BEND, 0x7f, 0x7f]]);
++    session.release('Period');
++    type(session, ['Digit0']);
++    expect(session.press('Period')).toEqual([]);
++    expect(session.bend).toBe(0);
++    session.release('Period');
++    expect(session.entry?.text).toBe('0.');
++  });
++
++  it('ends a bend Period began on its release, even after an entry opened', () => {
++    const session = onCutoff();
++    session.press('Period');
++    type(session, ['Digit1']);
++    expect(session.release('Period')).toEqual([[BEND, 0, 64]]);
++    expect(session.entry?.text).toBe('1');
++  });
++
++  it('ignores a second decimal point and a minus sign after the first character, and cannot open on a point', () => {
++    const session = onCutoff();
++    session.press('Period');
++    session.release('Period');
++    expect(session.entry).toBeUndefined();
++    type(session, ['Minus', 'Digit1', 'Period', 'Digit5', 'Period', 'Minus', 'Digit2']);
++    expect(session.entry?.text).toBe('-1.52');
++  });
++
++  it('deletes on Backspace and closes an empty entry', () => {
++    const session = onCutoff();
++    type(session, ['Digit1', 'Digit2', 'Backspace', 'Digit5']);
++    expect(session.entry?.text).toBe('15');
++    type(session, ['Backspace', 'Backspace']);
++    expect(session.entry).toBeUndefined();
++    expect(type(session, ['Backspace', 'Enter'])).toEqual([]);
++  });
++
++  it('cancels on Escape, and says Ctrl-C quits when no entry is open', () => {
++    const session = onCutoff();
++    type(session, ['Digit1', 'Digit2', 'Escape']);
++    expect(session.entry).toBeUndefined();
++    expect(session.message).toBeUndefined();
++    expect(session.controllers.has(74)).toBe(false);
++    type(session, ['Escape']);
++    expect(session.message).toBe('Ctrl-C quits');
++  });
++
++  it('lets a note play while an entry is open', () => {
++    const session = onCutoff();
++    type(session, ['Digit8']);
++    expect(session.press('KeyA')).toEqual([[ON, 60, 100]]);
++    expect(session.entry?.text).toBe('8');
++  });
++
++  it('glides a completed value to its nearest controller value, one control change a tick', () => {
++    const session = onCutoff();
++    type(session, ['Digit9', 'Digit9', 'Digit9', 'Digit9', 'Digit9', 'Enter']);
++    let now = 0;
++    while (session.ticking()) session.tick((now += 40));
++    expect(session.controllers.get(74)).toBe(127);
++    expect(type(session, ['Digit8', 'Digit0', 'Digit0', 'Enter'], now)).toEqual([]);
++    const sent: MidiMessage[][] = [];
++    while (session.ticking()) sent.push(session.tick((now += 40)));
++    expect(sent).toHaveLength(13);
++    expect(sent.every((tick) => tick.length === 1)).toBe(true);
++    expect(sent.at(-1)).toEqual([[CC, 74, 62]]);
++  });
++
++  it('sets a value at once with glide 0', () => {
++    const session = new KeysSession(
++      parseKeymap('name: g\nnotes: { KeyA: 0 }\ncontrols: { Digit6: { type: 6 }, Digit4: { type: 4 } }\n', 'g.yaml'),
++    );
++    expect(type(session, ['Digit6', 'Digit4', 'Enter'])).toEqual([[CC, 1, 64]]);
++    expect(session.ticking()).toBe(false);
++  });
++
++  it('completes before a knob action: a move glides on, and a turn stops the glide it started', () => {
++    const session = onCutoff();
++    type(session, ['Digit3', 'Digit0', 'Digit0']);
++    expect(session.press('ArrowRight', 0, 0)).toEqual([]);
++    session.release('ArrowRight');
++    expect(session.knobs[session.chosen]!.label).toBe('res');
++    expect(session.ticking()).toBe(true);
++    let now = 0;
++    while (session.ticking()) session.tick((now += 40));
++    expect(session.controllers.get(74)).toBe(nearestTo300);
++    session.press('ArrowLeft');
++    session.release('ArrowLeft');
++    type(session, ['Digit1', 'Digit5', 'Digit0', 'Digit0', 'Digit0', 'Enter'], now);
++    session.tick(now + 120);
++    const stoppedAt = session.controllers.get(74)!;
++    type(session, ['Digit8']);
++    expect(session.press('ArrowUp', 0, now + 130)).toEqual([[CC, 74, stoppedAt + 1]]);
++    session.release('ArrowUp');
++    expect(session.ticking()).toBe(false);
++  });
++
++  it('stops every glide on panic and on a keymap reload, which also closes the entry', () => {
++    const panicking = new KeysSession(
++      parseKeymap('name: p\nglide: 1\nnotes: { KeyA: 0 }\ncontrols: { Digit9: { type: 9 }, KeyN: panic }\n', 'p.yaml'),
++    );
++    type(panicking, ['Digit9', 'Digit9', 'Enter']);
++    expect(panicking.ticking()).toBe(true);
++    panicking.press('KeyN');
++    expect(panicking.ticking()).toBe(false);
++    const reloaded = onCutoff();
++    type(reloaded, ['Digit9', 'Digit9', 'Enter', 'Digit5']);
++    reloaded.setKeymap(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')));
++    expect(reloaded.ticking()).toBe(false);
++    expect(reloaded.entry).toBeUndefined();
++  });
++
++  it('closes an entry whose knob a knob file reload removes, without completing it', () => {
++    const session = onCutoff();
++    type(session, ['Digit8']);
++    session.setKnobs(knobList([{ name: 'juno', knobs: juno.slice(1) }]));
++    expect(session.entry).toBeUndefined();
++    expect(session.controllers.has(74)).toBe(false);
++  });
++});
++
++// cutoff's controller value nearest 300 Hz, which maps to 301 Hz.
++const nearestTo300 = 40;
+diff --git a/src/keys/session.ts b/src/keys/session.ts
+index 4a45819..2744207 100644
+--- a/src/keys/session.ts
++++ b/src/keys/session.ts
+@@ -1,6 +1,6 @@
+ import type { Knob } from '../schema/knobs.js';
+ import type { Keymap, KeymapAction } from '../schema/keymap.js';
+-import { controllerOf, knobList, knobValue, stepFrom, type ShownKnob } from './knobs.js';
++import { CC_MAX, controllerOf, knobList, knobValue, nearestController, stepFrom, type ShownKnob } from './knobs.js';
+ import { noteName, signed } from './print.js';
+ import { MOD_ALT, MOD_CTRL, MOD_HYPER, MOD_META, MOD_SUPER, type KeyEventType } from './terminal.js';
+ 
+@@ -67,8 +67,14 @@ export class KeysSession {
+   knobs: ShownKnob[];
+   chosen = 0;
+   message: string | undefined;
++  // The value being typed for the chosen knob, while an entry is open
++  // (instrument-knobs.md §2.7).
++  entry: { text: string } | undefined;
+   // The turn key held now, if any: the one pressed last.
+   private turning: { position: string; steps: number; since: number } | undefined;
++  // Each controller gliding to a typed value: one glide per controller,
++  // moving `perMs` controller values a millisecond from `from` at `since`.
++  private readonly glides = new Map<number, { channel: number; from: number; to: number; since: number; perMs: number }>();
+   private readonly held = new Map<string, { channel: number; notes: number[] }>();
+   private readonly holders = new Map<number, number>();
+   private readonly heldControls = new Map<string, { channel: number; action: KeymapAction }>();
+@@ -95,6 +101,23 @@ export class KeysSession {
+     if ((mods & BLOCKING_MODS) !== 0) return [];
+     if (this.held.has(position) || this.heldControls.has(position)) return [];
+     this.message = undefined;
++    if (position === 'Enter') return this.complete(now);
++    if (position === 'Backspace') {
++      if (this.entry !== undefined) this.entry.text = this.entry.text.slice(0, -1);
++      if (this.entry?.text === '') this.entry = undefined;
++      return [];
++    }
++    if (position === 'Escape') {
++      if (this.entry !== undefined) this.entry = undefined;
++      else this.message = 'Ctrl-C quits';
++      return [];
++    }
++    // The decimal point is Period's only while an entry is open; otherwise
++    // the key does what the keymap binds there.
++    if (position === 'Period' && this.entry !== undefined) {
++      this.type('.');
++      return [];
++    }
+     const action = this.keymap.controls.get(position);
+     if (action !== undefined) return this.control(position, action, now);
+     const offsets = this.keymap.notes.get(position);
+@@ -152,6 +175,7 @@ export class KeysSession {
+   }
+ 
+   quit(): MidiMessage[] {
++    this.glides.clear();
+     return [...this.releaseAll(), ...this.untoggleAll(), this.cc(this.keymap.channel, ALL_NOTES_OFF, 0)];
+   }
+ 
+@@ -160,6 +184,8 @@ export class KeysSession {
+   // go back to 0, because the keymap that could toggle them off is gone.
+   setKeymap(keymap: Keymap): MidiMessage[] {
+     if (keymap.velocity !== this.keymap.velocity) this.velocity = keymap.velocity;
++    this.entry = undefined;
++    this.glides.clear();
+     this.keymap = keymap;
+     if (!this.transposeFits(this.transpose)) {
+       this.transpose = 0;
+@@ -176,16 +202,28 @@ export class KeysSession {
+     return messages;
+   }
+ 
+-  // A held turn key turns again on each tick, faster the longer it is held.
++  // A held turn key turns again on each tick, faster the longer it is
++  // held, and each glide moves on: one control change per controller a
++  // tick at most.
+   tick(now: number): MidiMessage[] {
+-    if (this.turning === undefined) return [];
+-    const held = now - this.turning.since;
+-    const rate = TURN_RATES.find(({ from }) => held >= from);
+-    return rate === undefined ? [] : this.turn(this.turning.steps * rate.steps);
++    const messages: MidiMessage[] = [];
++    if (this.turning !== undefined) {
++      const held = now - this.turning.since;
++      const rate = TURN_RATES.find(({ from }) => held >= from);
++      if (rate !== undefined) messages.push(...this.turn(this.turning.steps * rate.steps));
++    }
++    for (const [cc, glide] of this.glides) {
++      const distance = Math.abs(glide.to - glide.from);
++      const moved = Math.min(distance, Math.floor((now - glide.since) * glide.perMs));
++      const at = glide.from + Math.sign(glide.to - glide.from) * moved;
++      if (at === glide.to) this.glides.delete(cc);
++      if (at !== this.controllers.get(cc)) messages.push(this.cc(glide.channel, cc, at));
++    }
++    return messages;
+   }
+ 
+   ticking(): boolean {
+-    return this.turning !== undefined;
++    return this.turning !== undefined || this.glides.size > 0;
+   }
+ 
+   // A new knob list, from a knob file saved: each knob keeps the value its
+@@ -195,6 +233,8 @@ export class KeysSession {
+     const same = knobs.findIndex((k) => k.label === label);
+     this.knobs = knobs;
+     this.chosen = same >= 0 ? same : Math.min(this.chosen, knobs.length - 1);
++    // An entry for a knob that is gone closes without completing.
++    if (same < 0) this.entry = undefined;
+   }
+ 
+   // A knob's value: what its controller was last sent as, or its default.
+@@ -215,7 +255,7 @@ export class KeysSession {
+   }
+ 
+   bindsKnobs(): boolean {
+-    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a));
++    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a || 'type' in a));
+   }
+ 
+   soundingNotes(): string[] {
+@@ -237,19 +277,58 @@ export class KeysSession {
+     return controlChange(channel, cc, value);
+   }
+ 
+-  // Turns the chosen knob `steps` steps, from where its controller was
+-  // last sent, or from its default before that, and sends the result once.
++  // Where a knob's controller is: where it was last sent, or before that,
++  // its default's controller value.
++  private controllerAt(knob: Knob): number {
++    return this.controllers.get(knob.cc) ?? controllerOf(knob, knob.default);
++  }
++
++  // Turns the chosen knob `steps` steps and sends the result once. A turn
++  // stops the knob's glide where it is.
+   private turn(steps: number): MidiMessage[] {
+     const { knob } = this.knobs[this.chosen]!;
+-    const from = this.controllers.get(knob.cc) ?? controllerOf(knob, knob.default);
++    this.glides.delete(knob.cc);
++    const from = this.controllerAt(knob);
+     let to = from;
+     for (let i = 0; i < Math.abs(steps); i++) to = stepFrom(knob, to, steps > 0 ? 1 : -1);
+     return to === from ? [] : [this.cc(this.keymap.channel, knob.cc, to)];
+   }
+ 
++  // Types one character of the chosen knob's value, opening an entry for
++  // it: digits, one decimal point, and a minus sign only first. A
++  // character that breaks that does nothing, and a decimal point cannot
++  // open an entry.
++  private type(character: string): void {
++    if (this.entry === undefined) {
++      if (character === '.') return;
++      this.entry = { text: '' };
++    }
++    const { text } = this.entry;
++    if ((character === '-' && text !== '') || (character === '.' && text.includes('.'))) return;
++    this.entry.text = text + character;
++  }
++
++  // Completes the entry: the knob glides to the controller value nearest
++  // the typed number, at the keymap's speed, or with `glide: 0` goes there
++  // at once. An entry with no digit completes nothing.
++  private complete(now: number): MidiMessage[] {
++    const entry = this.entry;
++    this.entry = undefined;
++    if (entry === undefined || !/\d/.test(entry.text)) return [];
++    const { knob } = this.knobs[this.chosen]!;
++    const channel = this.keymap.channel;
++    const from = this.controllerAt(knob);
++    const to = nearestController(knob, Number(entry.text));
++    this.glides.delete(knob.cc);
++    if (this.keymap.glide === 0 || to === from) return [this.cc(channel, knob.cc, to)];
++    this.glides.set(knob.cc, { channel, from, to, since: now, perMs: CC_MAX / (this.keymap.glide * 1000) });
++    return [];
++  }
++
+   private control(position: string, action: KeymapAction, now: number): MidiMessage[] {
+     const channel = this.keymap.channel;
+     if (action === 'panic') {
++      this.glides.clear();
+       return [...this.releaseAll(), ...this.untoggleAll(), this.cc(channel, ALL_NOTES_OFF, 0)];
+     }
+     if ('transpose' in action) {
+@@ -267,15 +346,23 @@ export class KeysSession {
+       this.bend = action.bend;
+       return [pitchBend(channel, bendValue(action.bend))];
+     }
++    if ('type' in action) {
++      this.type(String(action.type));
++      return [];
++    }
++    // A knob action completes an open entry first, as moving off a cell
++    // completes it in a spreadsheet.
+     if ('knob' in action) {
++      const completed = this.complete(now);
+       const count = this.knobs.length;
+       this.chosen = (((this.chosen + action.knob) % count) + count) % count;
+-      return [];
++      return completed;
+     }
+     if ('turn' in action) {
++      const completed = this.complete(now);
+       this.heldControls.set(position, { channel, action });
+       this.turning = { position, steps: action.turn, since: now };
+-      return this.turn(action.turn);
++      return [...completed, ...this.turn(action.turn)];
+     }
+     if (action.mode === 'hold') {
+       this.heldControls.set(position, { channel, action });
+diff --git a/src/keys/terminal.test.ts b/src/keys/terminal.test.ts
+index b27fc8d..ce104f2 100644
+--- a/src/keys/terminal.test.ts
++++ b/src/keys/terminal.test.ts
+@@ -74,11 +74,13 @@ describe('decoding kitty key events', () => {
+ });
+ 
+ describe('quitting', () => {
+-  it('quits on Escape, on Ctrl-C, and on a raw Ctrl-C byte', () => {
+-    for (const input of [`${CSI}27u`, `${CSI}99;${1 + MOD_CTRL}u`, '\x03']) {
++  it('quits on Ctrl-C and on a raw Ctrl-C byte, and not on Escape, which cancels a typed value', () => {
++    for (const input of [`${CSI}99;${1 + MOD_CTRL}u`, '\x03']) {
+       const [event] = decodeTerminal(input).events;
+       expect(isQuit(event!)).toBe(true);
+     }
++    const [escape] = decodeTerminal(`${CSI}27u`).events;
++    expect(isQuit(escape!)).toBe(false);
+   });
+ 
+   it('quits on Ctrl at the c position under a layout with no c', () => {
+diff --git a/src/keys/terminal.ts b/src/keys/terminal.ts
+index 3666303..23900a7 100644
+--- a/src/keys/terminal.ts
++++ b/src/keys/terminal.ts
+@@ -100,19 +100,20 @@ export function decodeTerminal(input: string): { events: TerminalEvent[]; rest:
+   return { events, rest: '' };
+ }
+ 
+-const QUIT_KEYS = { escape: 27, c: 99 };
++// The key that types `c`.
++const C_KEY = 99;
+ 
+-// Escape always quits, and so does Ctrl-C, so no keymap can trap you
+-// (keyboard-instrument.md §2.4). Ctrl-C is the key that types `c`; on a
+-// layout with no `c`, such as Russian or Greek, it is the key at the US
+-// `c` position, which the base layout key names. A layout that does type
+-// ASCII there, such as Dvorak's `j`, keeps its own Ctrl-C.
++// Ctrl-C always quits, so no keymap can trap you: no keymap binds a Ctrl
++// chord (keyboard-instrument.md §2.4). Escape cancels a typed value
++// instead (instrument-knobs.md §2.7). Ctrl-C is the key that types `c`;
++// on a layout with no `c`, such as Russian or Greek, it is the key at the
++// US `c` position, which the base layout key names. A layout that does
++// type ASCII there, such as Dvorak's `j`, keeps its own Ctrl-C.
+ export function isQuit(event: TerminalEvent): boolean {
+   if (event.kind === 'interrupt') return true;
+   if (event.kind !== 'key' || event.type !== 'press') return false;
+-  if (event.key === QUIT_KEYS.escape) return true;
+   if ((event.mods & MOD_CTRL) === 0 || typeof event.key !== 'number') return false;
+-  return event.key === QUIT_KEYS.c || (event.key > 127 && event.base === QUIT_KEYS.c);
++  return event.key === C_KEY || (event.key > 127 && event.base === C_KEY);
+ }
+ 
+ export interface Tty {
+diff --git a/src/schema/keymap.test.ts b/src/schema/keymap.test.ts
+index 40c9a7e..d241892 100644
+--- a/src/schema/keymap.test.ts
++++ b/src/schema/keymap.test.ts
+@@ -41,7 +41,7 @@ describe('keymap schema', () => {
+     expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
+   });
+ 
+-  it('binds the arrows to the knobs and the bend to Comma and Period in musical, and leaves the number row free', () => {
++  it('binds the arrows to the knobs, the bend to Comma and Period, and the number row to typing in musical', () => {
+     const map = keymap(builtin('musical'));
+     expect(map.controls.get('ArrowLeft')).toEqual({ knob: -1 });
+     expect(map.controls.get('ArrowRight')).toEqual({ knob: 1 });
+@@ -49,7 +49,26 @@ describe('keymap schema', () => {
+     expect(map.controls.get('ArrowDown')).toEqual({ turn: -1 });
+     expect(map.controls.get('Comma')).toEqual({ bend: -1 });
+     expect(map.controls.get('Period')).toEqual({ bend: 1 });
+-    for (let digit = 0; digit <= 9; digit++) expect(map.controls.has(`Digit${digit}`)).toBe(false);
++    for (let digit = 0; digit <= 9; digit++) expect(map.controls.get(`Digit${digit}`)).toEqual({ type: digit });
++    expect(map.controls.get('Minus')).toEqual({ type: '-' });
++    expect(map.glide).toBe(1);
++  });
++
++  it('accepts type with a digit or a minus sign, and glide defaults to 0', () => {
++    const map = keymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { type: 1 }, Minus: { type: "-" } }\n');
++    expect(map.controls.get('Digit1')).toEqual({ type: 1 });
++    expect(map.controls.get('Minus')).toEqual({ type: '-' });
++    expect(map.glide).toBe(0);
++    for (const bad of ['{ type: "." }', '{ type: 10 }', '{ type: "a" }', '{ type: "1" }', '{ type: -1 }']) {
++      expect(parse(`name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: ${bad} }\n`).success, bad).toBe(false);
++    }
++    expect(parse('name: t\nglide: -1\nnotes: { KeyA: 0 }\n').success).toBe(false);
++  });
++
++  it('reserves Escape, which cancels a typed value', () => {
++    expect(messages('name: t\nnotes: { KeyA: 0 }\ncontrols: { Escape: panic }\n')).toEqual([
++      'Escape is reserved: it cancels a typed value, and Ctrl-C quits',
++    ]);
+   });
+ 
+   it('accepts knob and turn by any whole number but 0', () => {
+diff --git a/src/schema/keymap.ts b/src/schema/keymap.ts
+index 0bc36b7..3005238 100644
+--- a/src/schema/keymap.ts
++++ b/src/schema/keymap.ts
+@@ -61,6 +61,9 @@ const action = z.union([
+   z.object({ bend: z.number().min(-1).max(1) }).strict(),
+   z.object({ knob: knobSteps }).strict(),
+   z.object({ turn: knobSteps }).strict(),
++  // A digit, as YAML reads `type: 1`, or a minus sign. The decimal point
++  // is no action: Period types it while an entry is open (§2.7).
++  z.object({ type: z.union([z.number().int().min(0).max(9), z.literal('-')]) }).strict(),
+   ccAction,
+   z.literal('panic'),
+ ]);
+@@ -86,6 +89,9 @@ export const keymapSchema = z
+     base: midiNote.default(60),
+     velocity: z.number().int().min(1).max(127).default(100),
+     channel: z.number().int().min(1).max(16).default(1),
++    // The seconds a typed value takes to cross a knob's whole range; 0
++    // sets it at once (instrument-knobs.md §2.3).
++    glide: z.number().min(0).default(0),
+     notes: z.record(z.string(), z.union([offset, z.array(offset).min(1)])).optional(),
+     grid: grid.optional(),
+     controls: z.record(z.string(), action).optional(),
+@@ -94,7 +100,7 @@ export const keymapSchema = z
+   .superRefine((keymap, ctx) => {
+     const checkPosition = (position: string, path: (string | number)[]): void => {
+       if (position === 'Escape') {
+-        ctx.addIssue({ code: 'custom', path, message: 'Escape is reserved: it always quits' });
++        ctx.addIssue({ code: 'custom', path, message: 'Escape is reserved: it cancels a typed value, and Ctrl-C quits' });
+       } else if (!BINDABLE_POSITIONS.has(position)) {
+         ctx.addIssue({
+           code: 'custom',
+@@ -175,6 +181,7 @@ export interface Keymap {
+   base: number;
+   velocity: number;
+   channel: number;
++  glide: number;
+   notes: ReadonlyMap<string, readonly number[]>;
+   controls: ReadonlyMap<string, KeymapAction>;
+ }
+@@ -186,6 +193,7 @@ export function toKeymap(file: KeymapFile): Keymap {
+     base: file.base,
+     velocity: file.velocity,
+     channel: file.channel,
++    glide: file.glide,
+     notes: expandNotes(file),
+     controls: new Map(Object.entries(file.controls ?? {})),
+   };
