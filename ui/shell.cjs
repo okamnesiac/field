@@ -10,6 +10,7 @@
 // in a shell has no devtools to open, so the diagnosis has to come out
 // somewhere a person is already looking.
 const { app, BrowserWindow, shell } = require('electron');
+const { mkdtempSync, rmSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
@@ -17,15 +18,21 @@ const { tmpdir } = require('node:os');
 // writable instead of failing noisily against a default path this
 // process may not own — the "Unable to move the cache" spew is the
 // symptom, and it drowns the page console this shell exists to surface.
-// Per-user, because tmpdir() is shared on Linux: a fixed name there
-// belongs to whoever launches first, and the second user's failure
-// arrives as exactly the cache noise this line exists to remove.
-app.setPath('userData', join(tmpdir(), `field-ui-profile-${process.getuid?.() ?? 'win'}`));
+// A fresh directory per launch, made by mkdtemp: a fixed name under the
+// shared temp directory could be created first by another user, who
+// would then own this window's profile. The window keeps nothing worth
+// a second launch, so the directory goes when the app quits.
+const profile = mkdtempSync(join(tmpdir(), 'field-ui-profile-'));
+app.setPath('userData', profile);
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.on('quit', () => rmSync(profile, { recursive: true, force: true }));
 
-const url = process.argv[2];
+// The session URL arrives in the environment, not on the command line:
+// it carries the session token, and a process's arguments are readable
+// by other users on a shared machine (/proc on Linux, ps everywhere).
+const url = process.env.FIELD_UI_URL;
 if (!url) {
-  process.stderr.write('field ui shell: no URL argument\n');
+  process.stderr.write('field ui shell: FIELD_UI_URL is not set\n');
   app.exit(1);
 }
 

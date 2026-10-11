@@ -859,8 +859,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         // stderr inherited on purpose: the shell mirrors the page's
         // console here, which is the only place a blank window can
         // explain itself.
-        shell = spawn(process.execPath, [electron, shellEntry, url], {
+        // The URL rides in the environment: it carries the session
+        // token, and argv is readable by other users on a shared machine.
+        shell = spawn(process.execPath, [electron, shellEntry], {
           stdio: ['ignore', 'ignore', 'inherit'],
+          env: { ...process.env, FIELD_UI_URL: url },
         });
         shell.on('error', () => {
           process.stderr.write('field ui: could not start the app shell; opening a browser\n');
