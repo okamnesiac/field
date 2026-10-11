@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: Offline mix assembly
+# Offline mix assembly
 
 **Status:** Shipped (#9–#11, merged 2026-08-05). Follows
 [sc-render.md](../sc-render/readme.md) — the phase order was re-decided after #8: mix

@@ -3,7 +3,7 @@ status: in-progress
 priority: now
 ---
 
-# Plan: the UI, first version
+# The UI, first version
 
 **Goal:** a graphical face for a playing project — transport and
 position, the song's tracks with their levels, edits landing as YAML

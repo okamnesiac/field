@@ -7,7 +7,7 @@ its amendments record. Negative local positions, which §1.6 decided are
 how a pickup works and §9 deferred, never landed and carry over to
 [pickups](../pickups/readme.md).
 
-# Plan: Nested tracks — one primitive for structure, time and mix
+# Nested tracks — one primitive for structure, time and mix
 
 **Status:** Shipped (2026-08-10): every chunk is live. Chunk 4 landed
 last, in two slices — the schema, the warning severity and the whole

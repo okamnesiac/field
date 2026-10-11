@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: SuperCollider offline rendering
+# SuperCollider offline rendering
 
 **Status:** Shipped (#7, merged 2026-08-04); demonstrated publicly by
 bloom's committed pad recipe. The `sc-render` rule and `field sc render` are

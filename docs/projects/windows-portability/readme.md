@@ -3,7 +3,7 @@ status: in-progress
 priority: now
 ---
 
-# Plan: Windows portability — the checkout, the socket, and the last bits
+# Windows portability — the checkout, the socket, and the last bits
 
 **Goal:** field builds, checks, plays and **live-renders** on Windows, so
 that the realtime engine — which has no platform-bound code in it at all —

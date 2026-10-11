@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Getting imported material into key
+# Getting imported material into key
 
 **Goal:** imported material moves into the song's key in one step, with
 a model as the default path for transposition and time-stretch rather

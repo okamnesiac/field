@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: ACE generation
+# ACE generation
 
 **Status:** Complete (2026-08-05, #17 + #18). Both chunks shipped; bloom
 demonstrates the full loop — generate, audition variants in the mix,

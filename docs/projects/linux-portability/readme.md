@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: Linux portability — the daemon, and CI that runs anywhere
+# Linux portability — the daemon, and CI that runs anywhere
 
 **Status:** Complete. Chunk 1 shipped (#49), chunk 4 shipped (#52);
 chunks 2–3 **withdrawn** to

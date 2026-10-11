@@ -8,7 +8,7 @@ the live comparison. §5's live A/B ran on hardware under `--watch` in
 #146. The decision it enables, which room creek ships with, has not
 been made, so `space` still uses `reverb`.
 
-# Plan: Two reverbs that beat Freeverb
+# Two reverbs that beat Freeverb
 
 **Goal:** two new insert effects — `plate`, a Dattorro figure-8 tank,
 and `hall`, a feedback delay network with per-band decay — that make

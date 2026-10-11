@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Analysis workers
+# Analysis workers
 
 **Goal:** separation, transcription, loudness, take ranking on the worker
 protocol [ace-generation.md](../ace-generation/readme.md) establishes.

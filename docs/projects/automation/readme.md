@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Automation
+# Automation
 
 **Status:** Design only (2026-08-05). The shape below was settled in a
 design discussion; no implementation is started or committed. The doc

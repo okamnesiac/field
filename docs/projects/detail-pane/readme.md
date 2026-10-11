@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: One detail pane that follows the selection
+# One detail pane that follows the selection
 
 **Goal:** the `field ui` window has one detail region, driven entirely by
 the current selection. Clicking a clip brings up its editing surface

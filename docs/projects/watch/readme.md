@@ -10,7 +10,7 @@ engine instead.
 `field build --watch` stands as built. §5's status-visibility question
 went moot with the looped file hash it asked about.
 
-# Plan: Watch mode — the loop follows the project
+# Watch mode — the loop follows the project
 
 **Status:** Implemented (2026-08-06). Chunk 1 — the daemon `reload` op
 (takeover at the wrap, daemon 0.4) and `field build --watch` — landed

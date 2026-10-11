@@ -5,7 +5,7 @@ status: completed
 **Outcome:** Shipped: all three steps (#107, #108, #112), with every §5
 clause discharged as that section records.
 
-# Plan: Sample rate is a property of the track, converted at the edge
+# Sample rate is a property of the track, converted at the edge
 
 **Status:** Complete (2026-08-09), all three steps. Step 1 (import
 reads headers, decision 5): the ledger records `sample_rate` /

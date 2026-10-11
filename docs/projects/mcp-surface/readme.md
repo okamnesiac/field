@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: MCP surface
+# MCP surface
 
 **Goal:** expose the CLI's verbs as MCP tools; agents are a first-class user,
 but not until everything else actually works (moved down from next

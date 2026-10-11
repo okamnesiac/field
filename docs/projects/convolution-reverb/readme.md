@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Convolution reverb
+# Convolution reverb
 
 **Goal:** impulse responses as committed assets (a real place in the repo,
 hash-pinned and action-keyed like any asset) through partitioned

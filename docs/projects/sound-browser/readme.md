@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: A sound browser that spans projects and libraries
+# A sound browser that spans projects and libraries
 
 **Goal:** one browser finds and auditions sounds across the open
 project, other Field projects, and a personal library, not only the

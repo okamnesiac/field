@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: Clip looping
+# Clip looping
 
 **Status:** Complete. Clip looping shipped in #21; #23 extended looping
 to the song layer (`length` + `loop: true` in song.yaml — the mix folds

@@ -14,7 +14,7 @@ schema §11 deferred all wait on a take recorded on the Apollo, which
 has not happened. They carry over to
 [apollo-session](../apollo-session/readme.md).
 
-# Plan: Recording
+# Recording
 
 Waited behind [realtime.md](../realtime/readme.md), whose live graph makes
 capture an input node rather than a second transport (realtime.md §6);

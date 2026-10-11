@@ -9,7 +9,7 @@ a session costs the engine one live chain, but sources preload whole
 rather than streaming. Streaming rings, owed before large sessions
 (§7), carry over to [streaming-rings](../streaming-rings/readme.md).
 
-# Plan: Realtime
+# Realtime
 
 **Goal:** the graph runs live — edit YAML while the song plays and hear
 it next block — while `field build` stays exactly what it is: stems,
