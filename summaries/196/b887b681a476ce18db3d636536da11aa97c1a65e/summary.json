@@ -1,0 +1,225 @@
+{
+ "version": 1,
+ "name": "Live input overlay",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 196,
+  "title": "Carry a live input up through every chain above its track (live-supercollider.md chunk 1)",
+  "head": "b887b681a476ce18db3d636536da11aa97c1a65e",
+  "headRef": "live/input-window",
+  "base": "4467d6f0cc80ce4ba8d102429195287331ee493a",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field plays a song in a long-running daemon, <code>field-audiod</code>. The daemon's <em>live session</em> renders every track but <code>main</code> in full when the session loads, then mixes <code>main</code> and runs its effects (its <em>chain</em> of inserts) block by block in the audio callback. <code>field keys</code> plays an instrument in a separate SuperCollider process that writes straight to the device, so the effects on the instrument's track never touch what you play. The live-supercollider plan fixes that in three chunks: an input in the live session, a shared-memory ring that carries SuperCollider's audio to it, and <code>field keys</code> routed through both.",
+   "This pull request is chunk 1. A session can carry an <em>input window</em>, <code>{input: &lt;name&gt;, gain_db, pan?}</code>, naming a source outside the session that the daemon reads every block. The compiler keeps the input's track, and every track above it, out of the <em>freeze</em> (serving a track as its cached stem file), so each keeps the chain the engine needs. The engine runs what the plan calls the <em>overlay</em>: the song renders exactly as before, and the input travels beside it through a second instance of each chain on its path, into <code>main</code>'s mix ahead of <code>main</code>'s own chain. Where an input reaches a track along paths of unequal latency, such as through a bus with a limiter and through a reverb send, the shorter feeds wait in delay lines for the longest, so the input never meets itself offset and reaches <code>main</code> late by its longest path.",
+   "Nothing outside the tests can attach an input yet. The daemon's <code>session</code> op refuses a session with an input window, and only <code>field-audiod --render-live --input name=file.wav</code> feeds one, from a file. The tests use that to show an input sounds exactly like the offline render of the same signal through the same chains: 145 samples late through one path, and 290 samples late through three paths of unequal latency. The plan moves from <code>draft</code> to <code>in-progress</code>."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Window</b>: one entry in a session track's <code>inputs</code>, such as a file clip or a placed child track.</li><li><b>Input window</b>: the new kind, a live source with a gain and a pan but no place on the timeline.</li><li><b>Chain</b>: a track's inserts (eq, limit, reverb, plate, hall, hosted plugin).</li><li><b>Latency</b>: how many samples a chain holds back; only limiters and hosted plugins have any.</li><li><b>Freeze</b>: serving a track whose stem is cached as one file window with no chain.</li><li><b>Overlay</b>: the per-block path an input takes beside the song.</li><li><b>Pre-tap</b>: a send that reads a track before its chain.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review status",
+    "html": "<ul class=\"tight\"><li>The first review found paths of unequal latency meeting offset. The fix aligns every feed into a track to its longest path, and that finding is resolved.</li><li>The two later reviews are clean. The latest head rebases onto <code>main</code> and makes <code>crush</code>'s limiter in the two-path golden reduce gain, so all three of that golden's limiters act.</li><li>Two small suggestions remain: the PR body says every limiter in both goldens reduces gain, which <code>main</code>'s does not in the first golden, and one edited line in §10 overruns the paragraph's wrapping.</li><li>The readiness gate passes: §7 questions 1 and 2 are answered, and question 3 is deferred to arming.md chunk 3.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "The input window joins the session contract",
+   "kicker": "The session schema, its version, and the engine's view of an input source.",
+   "intro": [
+    "The session JSON is the contract between the TypeScript compiler and the C++ daemon. This group adds the input window to both sides and bumps the session version to 4, so an older daemon refuses a newer session before it meets a window shape it cannot read.",
+    "On the engine side, <code>LiveInput</code> is the interface any source implements: one <code>read</code> per block that must not block, lock, or allocate. Chunk 2's ring will implement it. Here only a file does."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/audiod/session.ts",
+     "note": "Adds <code>inputWindowSchema</code> to the window union, bumps <code>SESSION_VERSION</code>, and corrects <code>insertLatency</code> for a limiter.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 225,
+       "text": "This now mirrors <code>dsp/limiter.cpp</code> operation for operation: the window unrounded, then <code>ceil(horizon / (60 / window)) + 1</code>. The old formula was one sample short. Only the session's reported <code>latency</code> reads this number; the engine computes its own. Checked by reading both and by the test's <code>expect(late).toBe(145)</code>, which passes against the engine's real output."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/live.h",
+     "note": "Declares <code>LiveInput</code>, the <code>input</code> window kind, and the overlay's per-track state: its inputs and edges, each with a delay line, its second chain, and its incoming and outgoing latencies.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 290,
+       "text": "A <code>DelayLine</code> holds a feed back by a fixed number of samples: <code>line</code> is what is in flight, and <code>out</code> is the block leaving it now. Each input and each edge into an overlay track has one, sized so every feed arrives as late as the track's longest path."
+      },
+      {
+       "kind": "context",
+       "line": 316,
+       "text": "<code>inLatency</code> is how late everything reaching this track is, against the moment the input was read; <code>outLatency</code> adds this track's own chain. A pre-tap reads at the first, a post edge at the second."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "engine",
+   "title": "The engine carries an input beside the song",
+   "kicker": "How the daemon builds the overlay at load and runs it each block.",
+   "intro": [
+    "At load, <code>buildOverlay</code> finds every track an input reaches, its own and each one that places it or receives it through a send, and orders them children first. Each gets a second instance of its chain. A track that reads the same child through several windows, because the arrangement places it more than once, takes the input once, through the first window.",
+    "Each block, <code>renderOverlay</code> reads each source and then builds each overlay track in turn. It passes each feed, an input or a child's overlay block, through that feed's delay line, so every feed lines up with the track's longest incoming path. It mixes the feeds with each window's gain and pan, gliding through any ramp exactly as the song's windows do, runs the second chain, and delays the result by the chain's latency. <code>renderBlock</code> then adds what reaches <code>main</code> to the song's mix, before <code>main</code>'s chain, so <code>main</code>'s inserts hear the true sum.",
+    "The song's own render does not change, which is why the existing byte-identical live golden still passes. What the design gives up, by the plan's account: a limiter or plugin on a bus between the input and <code>main</code> hears the input apart from that bus's own content."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Nothing here runs in the daemon's real callback yet, because the <code>session</code> op passes no sources and the constructor refuses an input nothing feeds. Real-time questions such as allocation and swaps matter from chunk 2 on."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/live.cpp",
+     "note": "Parses input windows, builds the overlay and its delay lines at load, runs it per block, keeps it from reading sources during a locate's warmup, keeps a limiter stage off the heap, and feeds <code>--render-live</code> inputs from files.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 456,
+       "text": "Every feed into a track is delayed to the track's longest incoming path: an input by the track's <code>inLatency</code>, an edge by that minus its arrival, which is the child's <code>inLatency</code> for a pre-tap and its <code>outLatency</code> for a post edge. Checked with <code>--render-live</code> at this head: a post send into a bus with a 3 ms limiter, and a pre-tap send under a limiter, each equal the offline stem sample for sample, 145 samples late."
+      },
+      {
+       "kind": "verify",
+       "line": 575,
+       "text": "The chain's delay line always yields exactly one block. A limiter holds at most its latency in flight, so the line holds the latency, plus what the chain emitted, minus what it handed on, which is never less than the block. Checked by walking the limiter's <code>push</code> and <code>emitOldest</code> and by the goldens' zero difference."
+      },
+      {
+       "kind": "verify",
+       "line": 885,
+       "text": "A limiter stage now writes into <code>scratch</code>, reserved at build, and copies back into the working block, so neither the overlay nor <code>main</code>'s chain allocates for a limiter in the callback. The delay lines insert, copy, and erase within their own reserves. Checked by reading every buffer the callback touches against its reserve, for blocks up to 16,384 samples."
+      },
+      {
+       "kind": "context",
+       "line": 958,
+       "text": "The overlay runs once per step of <code>renderBlock</code>'s inner loop, reading the source in step with the song clock and taking that clock for ramps, which is why <code>--render-live</code> output lines up sample for sample with the offline render."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "Parses <code>--input name=file.wav</code>, repeatable, for <code>--render-live</code>."
+    }
+   ]
+  },
+  {
+   "id": "compiler",
+   "title": "The compiler keeps an input's path live",
+   "kicker": "compileSession takes inputs, refuses bad ones, and exempts their paths from the freeze.",
+   "intro": [
+    "<code>compileSession</code> turns a song into the session JSON. It now takes <code>inputs</code>, each a track and a name. It walks up from each input's track through every track that places it, or receives it through a send, and marks that path <em>live-bound</em>, so the freeze never replaces one of those tracks with its stem. A sibling fed only by files still freezes.",
+    "It refuses an input on a track the song lacks, a name used twice, a path that never reaches <code>main</code>, and a path that crosses sample rates, because the overlay has no converter yet. The engine checks the same things, so a hand-written session fails the same way."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/graph/live.ts",
+     "note": "Builds the reader map, walks each input's path, exempts it from the freeze, and appends the input window after a track's clip windows.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 481,
+       "text": "The input window goes after every clip window, so the window indices that <code>ramp</code> uses for the existing clips do not move."
+      },
+      {
+       "kind": "context",
+       "line": 279,
+       "text": "Muted placements never reach this walk, because the graph drops them before it records a track's dependencies, so an input whose only path is muted is refused as not under <code>main</code>."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "A golden holds the input to the offline render",
+   "kicker": "The acceptance tests for criteria 1 and 2, and the refusals.",
+   "intro": [
+    "The first golden builds two songs with the same chains. In <code>opener</code>, <code>voice</code> plays a tone from a file through an EQ and a limiter into <code>main</code>, which has its own limiter, and builds offline. In <code>monitor</code>, <code>voice</code> has no clips, <code>main</code> places it twice, and <code>--render-live</code> feeds the same tone as an input. The live output is silent for 145 samples, then equals the offline stem sample for sample for the tone's length.",
+    "The second golden sends the input to <code>main</code> three ways: directly through <code>voice</code>'s limiter (145 samples), through a post send into <code>crush</code>, a second limiter (290), and through a pre-tap send into <code>wash</code>, a reverb (0). The live output equals the offline stem 290 samples late, so no path meets another offset. In this golden all three limiters reduce gain, and the test checks the offline stems' levels to prove <code>crush</code>'s does."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/audiod/live-input.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 152,
+       "text": "<code>crush</code> receives <code>voice</code> at 0 dB into its own −6 dB ceiling, so its limiter reduces gain. The test asserts that <code>voice</code>'s stem peaks above 0.6 and <code>crush</code>'s stays under 0.50, which together mean that limiter acted."
+      },
+      {
+       "kind": "verify",
+       "line": 287,
+       "text": "Reproduced outside the suite at this head: a replica of this golden matches the offline <code>main</code> stem exactly at 290 samples, and on the offline stems <code>crush</code>'s limiter changes its input by up to 0.29 and <code>main</code>'s by up to 0.58."
+      },
+      {
+       "kind": "context",
+       "line": 251,
+       "text": "In this first golden only <code>voice</code>'s limiter reduces gain: <code>main</code>'s −1 dB ceiling sits above the 0.79 that <code>voice</code>'s limiter lets through."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The docs and the plan describe the overlay",
+   "kicker": "audio-engine.md gains a section, two docs follow, and the plan records the redesign.",
+   "intro": [
+    "<code>docs/audio-engine.md</code> gains \"Live inputs\", which says what an input window is and how to feed one today. <code>docs/build-graph.md</code> notes the freeze exception, and <code>docs/architecture.md</code> says the engine's half has landed.",
+    "The plan amends §2 and §2.2, which first had every track on an input's path evaluate per block instead of pre-rendering. That cannot work when a track is placed more than once, since its chain would need to be at several timeline positions at once, so §9 records the overlay that replaced it, how it aligns paths of unequal latency, and what it gives up. §9 also says a session swap builds the overlay afresh and leaves to chunk 3 whether that gap is acceptable. §7 answers the transport and stopped-transport questions and defers the third to the arming plan."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/audio-engine.md",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 95,
+       "text": "The input reaches <code>main</code> late by its longest path's limiters and hosted plugins, because the shorter paths are delayed to match it."
+      }
+     ]
+    },
+    {
+     "path": "docs/build-graph.md"
+    },
+    {
+     "path": "docs/architecture.md"
+    },
+    {
+     "path": "docs/projects/live-supercollider/readme.md",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 163,
+       "text": "§7: the status flip to <code>in-progress</code> owns every open question. Questions 1 and 2 are answered as the plan recommended, on Justin starting the work, and question 3 is deferred to arming.md chunk 3, so the readiness gate passes."
+      },
+      {
+       "kind": "context",
+       "line": 219,
+       "text": "§9 defers one new question to chunk 3: whether the silence a session swap leaves in the input, as long as its path's latency, is acceptable or the overlay's state should carry across. An explicit deferral to implementation does not block the gate."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "live-supercollider"
+}
