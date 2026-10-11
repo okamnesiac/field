@@ -350,8 +350,8 @@ is on disk only; the loader merges them.
 A record entry that names an instrument records what you play on
 `field keys` or a controller, and you hear it through that instrument
 ([projects/keyboard-instrument/readme.md](projects/keyboard-instrument/readme.md)
-§12). The instrument resolves as `field keys` resolves one: a name
-without `.scd` gets it, and a name without a `/` is under
+§12). The instrument resolves as `field keys` resolves one: `.scd` is
+added to a name with no extension, and a name without a `/` is under
 `shared/instruments/`. Its program must answer `FIELD_MODE=voice`.
 
 ```yaml
@@ -359,7 +359,7 @@ without `.scd` gets it, and a name without a `/` is under
 name: keys
 inputs:
   - record:
-      instrument: still-water-pad
+      instrument: pad
 ```
 
 A MIDI take is a notes file, `audio/<name>/<take>.notes.yaml`, pinned

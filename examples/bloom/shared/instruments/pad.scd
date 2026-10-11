@@ -1,15 +1,15 @@
-// still water pad — the D-minor pad as a recipe instead of a rendered file.
+// pad — creek's D-minor pad as a recipe instead of a rendered file.
 // Twelve detuned sine voices (three per chord tone), panned and drifting
 // slightly, under a slow sine envelope. Runs under Field's sc-render
 // contract: parameters arrive in the environment, output goes to
 // FIELD_OUTPUT, and the render is deterministic for a given FIELD_SEED.
 //
 // Under FIELD_MODE=voice it renders nothing: its value is one voice of the
-// pad, gated, which `field keys still-water-pad` plays from the keyboard
+// pad, gated, which `field keys pad` plays from the keyboard
 // (keyboard-instrument.md §2.6).
 (
 if ("FIELD_MODE".getenv == "voice") {
-	SynthDef(\stillWaterKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+	SynthDef(\padKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
 		var env = EnvGen.kr(Env.asr(1.5, 1, 2.5, \sine), gate, doneAction: 2);
 		var voices = [[-0.0012, -0.5], [0, 0], [0.0012, 0.5]].collect { |detunePan|
 			var f = freq * (1 + detunePan[0]);
@@ -26,7 +26,7 @@ if ("FIELD_MODE".getenv == "voice") {
 	var events, score;
 	thisThread.randSeed = seed;
 
-	SynthDef(\stillWaterVoice, { |freq = 220, amp = 0.05, detune = 0, pan = 0, atk = 2.5, sus = 5, rel = 2.5|
+	SynthDef(\padVoice, { |freq = 220, amp = 0.05, detune = 0, pan = 0, atk = 2.5, sus = 5, rel = 2.5|
 		var env = EnvGen.kr(Env.linen(atk, sus, rel, curve: \sine), doneAction: 2);
 		var f = freq * (1 + detune);
 		var sig = SinOsc.ar(f) + (0.35 * SinOsc.ar(f * 2));
@@ -37,7 +37,7 @@ if ("FIELD_MODE".getenv == "voice") {
 	[146.83, 174.61, 220.0, 293.66].do { |freq| // D3 F3 A3 D4
 		3.do {
 			events = events.add([0.0,
-				Synth.basicNew(\stillWaterVoice).newMsg(args: [
+				Synth.basicNew(\padVoice).newMsg(args: [
 					\freq, freq,
 					\amp, 0.045,
 					\detune, rrand(-0.0015, 0.0015),

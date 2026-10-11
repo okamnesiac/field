@@ -16,7 +16,7 @@ Use the `project` command rather than reading the tree by hand — `project
 list` groups by priority, `project show <name>` prints one plan, and
 `project check` validates every plan before you hand work over.
 
-The docs are [overview](docs/README.md),
+The docs are [overview](docs/README.md), [CLI](docs/cli.md),
 [architecture](docs/architecture.md), [tracks](docs/tracks.md),
 [project model](docs/project-model.md), [build graph](docs/build-graph.md),
 [audio engine](docs/audio-engine.md), [remote](docs/remote.md),
