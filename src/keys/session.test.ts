@@ -115,6 +115,33 @@ describe('controls', () => {
     expect(session.press('Digit3')).toEqual([[CC, 1, 0]]);
   });
 
+  it('remembers the bend while its key is held', () => {
+    const session = musicalTyping();
+    session.press('Digit1');
+    expect(session.bend).toBe(-1);
+    session.release('Digit1');
+    expect(session.bend).toBe(0);
+    session.press('Digit2');
+    expect(session.bend).toBe(1);
+    session.releaseAll();
+    expect(session.bend).toBe(0);
+  });
+
+  it('remembers the modulation wheel it last set', () => {
+    const session = musicalTyping();
+    expect(session.mod).toBe(0);
+    expect(session.press('Digit6')).toEqual([[CC, 1, 76]]);
+    session.release('Digit6');
+    expect(session.mod).toBe(76);
+    session.press('Digit3');
+    expect(session.mod).toBe(0);
+    const held = new KeysSession(parseKeymap('name: held\nnotes: { KeyA: 0 }\ncontrols:\n  KeyM: { cc: 1, value: 90, mode: hold }\n', 'held.yaml'));
+    held.press('KeyM');
+    expect(held.mod).toBe(90);
+    held.release('KeyM');
+    expect(held.mod).toBe(0);
+  });
+
   it('holds a controller in hold mode', () => {
     const session = musicalTyping();
     expect(session.press('Tab')).toEqual([[CC, 64, 127]]);

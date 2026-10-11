@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { builtinKeymapDir, loadKeymap } from '../keys/keymap.js';
+import { builtinKeymapDir, loadKeymap, parseKeymap } from '../keys/keymap.js';
 import { KeysSession } from '../keys/session.js';
 import { instrumentState, instrumentText, statusText } from './keys.js';
 
@@ -16,13 +16,52 @@ describe('the status line', () => {
   it('ends with the sounding notes, after anything else it has to say', () => {
     const session = musicalTyping();
     expect(statusText(session, undefined, undefined, 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · –',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · –',
     );
     session.press('KeyA');
     session.press('KeyD');
     expect(statusText(session, undefined, 'KeyA is both a note and a control', 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
     );
+  });
+
+  it('shows the modulation wheel where the keymap can set it', () => {
+    const session = musicalTyping();
+    session.press('Digit6');
+    session.release('Digit6');
+    expect(statusText(session, undefined, undefined, 200)).toBe(
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 76 · –',
+    );
+    const tracker = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')));
+    expect(statusText(tracker, undefined, undefined, 200)).not.toMatch(/bend|mod/);
+  });
+
+  it('shows the pitch bend while a bend key is held, at the same width', () => {
+    const session = musicalTyping();
+    session.press('KeyA');
+    const rest = statusText(session, undefined, undefined, 200);
+    session.press('Digit1');
+    const bent = statusText(session, undefined, undefined, 200);
+    expect(bent).toBe('Field Keys · musical-typing · transpose 0 · velocity 100 · bend -1 · mod 0 · C4');
+    expect(bent).toHaveLength(rest.length);
+    session.release('Digit1');
+    expect(statusText(session, undefined, undefined, 200)).toBe(rest);
+  });
+
+  it('prints every bend with the decimal places of the finest bend in the keymap', () => {
+    const session = new KeysSession(
+      parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { bend: -1 }, Digit2: { bend: 0.25 } }\n', 't.yaml'),
+    );
+    session.press('KeyA');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.00 · C4');
+    session.press('Digit2');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.25 · C4');
+    session.release('Digit2');
+    session.press('Digit1');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend -1.00 · C4');
+    const third = new KeysSession(parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { bend: 0.333333 } }\n', 't.yaml'));
+    third.press('Digit1');
+    expect(statusText(third, undefined, undefined, 200)).toBe('Field Keys · t · transpose 0 · velocity 100 · bend +0.3333 · –');
   });
 
   it('shortens the text before the notes to fit, never the notes', () => {
