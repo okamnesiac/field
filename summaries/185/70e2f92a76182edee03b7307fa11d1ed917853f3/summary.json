@@ -1,0 +1,377 @@
+{
+ "version": 1,
+ "name": "Install and upgrade",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 185,
+  "title": "Add install.sh and field upgrade: install a checkout and keep it current (install.md chunk 1)",
+  "head": "70e2f92a76182edee03b7307fa11d1ed917853f3",
+  "headRef": "install-and-upgrade",
+  "base": "8472df55978ef137bc18ad7c89b4ca47bf942620",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is installed from a git checkout, and it has four pieces that each go stale on their own. The <code>field</code> command is TypeScript built into <code>dist/</code>. The <code>field ui</code> client is a React app built into <code>ui/dist</code>, and it bundles some of the CLI's code. The audio daemon <code>field-audiod</code> is a C++ binary built with CMake and JUCE. The model workers are Python environments that <code>uv</code> manages. Until this change, installing meant several pnpm commands run inside the checkout, and nothing said which piece was out of date after a <code>git pull</code>.",
+   "This pull request adds <code>install.sh</code> at the repository root. It installs the checkout it sits in: it builds the CLI and the UI and links <code>field</code> onto your PATH through pnpm, builds the daemon, and re-syncs the worker environments someone already set up. It never sets up a new worker, because that starts a download of several gigabytes. <code>field upgrade [target]</code> runs the same script from any directory, and <code>field upgrade status</code> compares each piece with its source and names the command that fixes it. The installer checks every prerequisite a target needs before it changes anything, and it never pulls or switches branches, because the checkout may hold work in progress.",
+   "Three smaller changes support it. <code>field setup</code> gains <code>--existing</code> and <code>--check</code>, so the CLI, which owns the list of workers, says which are set up. The CLI's error messages take their remedies from <code>src/remedies.ts</code>, which names <code>field upgrade cli</code> or <code>field upgrade audiod</code> rather than a pnpm script that does not exist inside a song project. And <code>pnpm gen:limits</code> stops rewriting an unchanged C++ header, which made the daemon look stale after every test run. On Windows the installer does not run, so <code>field upgrade</code> refuses there, and each remedy names the pnpm script to run in the checkout."
+  ],
+  "cards": [
+   {
+    "id": "targets",
+    "title": "What each target runs",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Target</th><th>Runs</th></tr></thead><tbody><tr><td><code>cli</code></td><td><code>pnpm install --frozen-lockfile</code>, <code>pnpm run build</code>, <code>pnpm run build:ui</code>, then <code>pnpm add -g &lt;checkout&gt;</code> unless pnpm's global <code>field</code> already links this checkout</td></tr><tr><td><code>audiod</code></td><td>a CMake 3.24 or newer check, <code>pnpm run build:native</code>, then <code>touch</code> the binary so <code>audiod-stale</code> clears</td></tr><tr><td><code>workers</code></td><td><code>field setup --existing</code> from the checkout's <code>dist/</code></td></tr><tr><td><code>all</code> (default)</td><td><code>cli</code>, <code>audiod</code>, then <code>workers</code></td></tr><tr><td><code>status</code></td><td>One row per fact, changing nothing</td></tr></tbody></table></div><p class=\"note\">Each target checks every prerequisite it needs before its first command. Every target except <code>status</code> ends by fetching the checkout's upstream and warning when the branch is behind it.</p>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms",
+    "html": "<ul class=\"tight\"><li><b>Checkout</b>: the git clone of Field that <code>install.sh</code> sits in, and the code that <code>field</code> runs.</li><li><b>The link</b>: pnpm's global <code>node_modules/field</code>, a symlink into the checkout that <code>pnpm add -g &lt;checkout&gt;</code> creates. A new build takes effect without relinking.</li><li><b>Build stamp</b>: <code>dist/build-info.json</code>, which <code>pnpm build</code> writes with the commit it built and the number of uncommitted files it saw.</li><li><b>Set up</b>: a worker whose console script is installed in <code>python/&lt;worker&gt;/.venv</code>, the test <code>field generate</code> applies before starting one.</li><li><b>Remedy</b>: the command an error message tells you to run. <code>src/remedies.ts</code> holds them.</li><li><b>Upstream</b>: the remote branch that the checkout's branch tracks, <code>@{upstream}</code> in git.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<p>Three Projector reviews so far.</p><ul class=\"tight\"><li><b>At <code>e333044</code></b>: changes requested, with three P2 threads. They covered prerequisites checked only after the installer had built and linked, an <code>audiod-stale</code> row that a rebuild could not clear, and an unowned <code>install.ps1</code> question in the plan. All three were fixed at <code>50611d8</code>.</li><li><b>At <code>50611d8</code></b>: changes requested, with one P2 thread. The installer checked that <code>cmake</code> was on PATH but not its version, so CMake 3.22 got past the check. This was fixed at <code>d517430</code>.</li><li><b>At <code>70e2f92</code></b>: clean. All four threads are resolved. The two suggestions are a test that keeps the installer's CMake minimum in step with <code>CMakeLists.txt</code>, and a note that Steinberg released VST3 SDK 3.8 under MIT, which bears on the license decision in §7.1.</li></ul>"
+   },
+   {
+    "id": "later",
+    "title": "What the plan leaves for later",
+    "html": "<ul class=\"tight\"><li><b>Chunk 2, releases</b>: prebuilt CLI and daemon archives with checksums, blocked on the license question, because the daemon links JUCE, which is AGPLv3 or commercial.</li><li><b>Chunk 3, the release installer</b>: the same <code>install.sh</code> installing a release with only Node 24, curl, and tar.</li><li><b>Chunk 4, the one-line install</b>: <code>curl -fsSL https://field.one/install.sh | bash</code>, once the repository is public.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "installer",
+   "title": "The installer: install.sh",
+   "kicker": "One bash script installs the checkout it sits in, one target at a time, and reports what is out of date.",
+   "intro": [
+    "<code>install.sh</code> treats itself as a checkout's installer when <code>src/cli.ts</code> sits beside it. Piped from <code>curl</code>, bash reads it from stdin with nothing beside it, and it says to clone instead. A later chunk adds release installs for that case. It is written for bash 3.2, the version macOS ships, and takes one target, <code>all</code> when given none.",
+    "Each target checks every prerequisite it needs before its first command: Node 24 or newer, pnpm, pnpm's global bin directory on PATH unless <code>field</code> already links this checkout, and CMake 3.24 or newer for <code>audiod</code> and <code>all</code>. A missing or old one stops the installer with exit status 69 and nothing changed. A C++ compiler and the Linux development headers are not checked. The daemon build reports them.",
+    "The <code>cli</code> target keeps the install shape the README already documented. <code>pnpm add -g &lt;checkout&gt;</code> makes pnpm's global <code>field</code> a symlink into the checkout. To tell which checkout pnpm links, <code>linked_checkout</code> reads <code>pnpm ls -g --json</code> and resolves the path it names. A link that already points here is left alone, and one that points at another checkout moves, with a <code>moved</code> row naming both. The <code>cli</code> target also builds the UI every time, because <code>field ui</code> serves <code>ui/dist</code> and that bundle imports code from <code>src/</code>.",
+    "<code>status</code> compares each piece with its source:",
+    "<ul><li><b>Checkout</b>: commits in <code>HEAD..@{upstream}</code> and <code>@{upstream}..HEAD</code> after a fetch, which <code>FIELD_OFFLINE=1</code> skips. A branch behind its upstream warns, and one only ahead reports <code>repo-ahead</code>.</li><li><b>CLI</b>: the build stamp's commit and dirty-file count against the checkout's, the comparison <code>field --version</code> already makes.</li><li><b>UI</b>: the modification time of <code>ui/dist/index.html</code>, which Vite rewrites on every build, against every tracked file under <code>ui/</code> and <code>src/</code> except tests, and <code>pnpm-lock.yaml</code>.</li><li><b>Daemon</b>: the binary's modification time against every tracked file under <code>native/audiod</code>. The installer touches the binary after each build, because CMake relinks it only when its own inputs change.</li><li><b>Workers</b>: the rows <code>field setup --check</code> prints, passed through.</li></ul>"
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Exit statuses: 69 for a missing prerequisite, 64 for an unknown target, and 1 when the daemon build fails. Messages name <code>field upgrade &lt;target&gt;</code> as the way back when pnpm's <code>field</code> links this checkout, and the script's own path otherwise (<code>rerun</code>)."
+    }
+   ],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "The whole installer: prerequisite checks, the four install targets, and the status rows.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 67,
+       "text": "The JSON shape <code>linked_checkout</code> reads matches pnpm 11.15.1: <code>pnpm ls -g --json</code> lists <code>dependencies.field.path</code> as a <code>node_modules/field</code> path in the global directory, which <code>pwd -P</code> resolves to the linked checkout. Checked against a real listing."
+      },
+      {
+       "kind": "verify",
+       "line": 136,
+       "text": "The version check, run in the test sandbox with a stand-in <code>cmake</code> for each version. 3.22.1 and 3.23.5 exit 69 from <code>all</code> and <code>audiod</code> with nothing changed, and 3.24.0, 3.24.0-rc1, 4.0.0, 10.1, and real <code>cmake --version</code> output pass. An unreadable version also exits 69, and a <code>cmake</code> that exits non-zero reads as missing."
+      },
+      {
+       "kind": "context",
+       "line": 154,
+       "text": "The UI builds after the CLI and before the link, so a UI that fails to build stops the target before <code>field</code> is linked. <code>pnpm run build:ui</code> took about two seconds in a scratch worktree and left the checkout clean, since <code>dist/</code> is ignored."
+      },
+      {
+       "kind": "verify",
+       "line": 164,
+       "text": "Moving the link works with the real pnpm 11.15.1. In a throwaway <code>PNPM_HOME</code>, <code>pnpm add -g</code> of a second package named <code>field</code> replaced the first, and <code>pnpm ls -g --json</code> then named the new path."
+      },
+      {
+       "kind": "verify",
+       "line": 187,
+       "text": "This <code>touch</code> is what clears <code>audiod-stale</code>. In the test sandbox with the real CMake on a two-target project, an edit to the other target's source left <code>field-audiod</code> unlinked by the rebuild. <code>status</code> then printed <code>audiod-current</code>, and with this line removed it still printed <code>audiod-stale</code>."
+      },
+      {
+       "kind": "context",
+       "line": 233,
+       "text": "<code>GIT_TERMINAL_PROMPT=0</code> and the 15-second low-speed limit bound a stalled HTTPS fetch. Neither applies to an SSH remote."
+      },
+      {
+       "kind": "context",
+       "line": 345,
+       "text": "The UI row needs no <code>touch</code>, unlike the daemon's: Vite rewrites <code>index.html</code> on every build, so <code>field upgrade cli</code> always clears <code>ui-stale</code>. The sandbox showed the row turn current after <code>install.sh cli</code>. It counts every file under <code>src/</code>, so an edit to code the UI does not import also reads as stale."
+      },
+      {
+       "kind": "verify",
+       "line": 406,
+       "text": "Every target checks before its first command. In the test sandbox, <code>all</code> without <code>cmake</code>, without the global bin directory on PATH, without a global bin directory, or with Node 22, and <code>audiod</code> without <code>cmake</code>, each exit 69 with nothing installed, built, or linked."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "workers",
+   "title": "Workers: field setup --existing and --check",
+   "kicker": "The CLI, which owns the list of workers, says which are set up and whether each is current.",
+   "intro": [
+    "Field's model workers are Python packages under <code>python/&lt;worker&gt;/</code>, each with an environment in <code>.venv</code> that <code>uv</code> manages. Setting one up is explicit, because the first <code>field generate</code> of each kind downloads that model's weights: about 10 GB for ACE-Step and 2 GB for Chatterbox. A worker counts as set up when its console script is installed in <code>.venv/bin</code>. A <code>.venv</code> alone does not count, because a dev-only <code>uv sync</code> creates one with no worker in it.",
+    "<code>--existing</code> re-syncs only the workers already set up, and prints a <code>skipping</code> line for each of the others. <code>--check</code> prints one row per worker in the installer's row format and changes nothing. It exits 1 only when a worker someone set up is out of date, or <code>uv</code> is missing, because a worker nobody set up is not a problem."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/generate.ts",
+     "note": "<code>selectWorkers</code>, <code>partitionExisting</code>, and <code>checkWorkers</code> are new, and <code>setupWorker</code> takes <code>existing</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 779,
+       "text": "<code>partitionExisting</code> decides with <code>workerScriptInstalled</code>, the same check <code>probeEnvironment</code> makes before <code>field generate</code> starts a worker. <code>src/workers/setup.test.ts</code> covers the installed and dev-only layouts and passed at this head."
+      },
+      {
+       "kind": "context",
+       "line": 829,
+       "text": "<code>checkWorkers</code> pads each label to 14 characters to match <code>row</code> in <code>install.sh</code>, which passes these rows through and marks <code>worker-stale</code> and <code>worker-no-uv</code> as warnings. The probe it calls runs only <code>uv --version</code> and <code>uv sync --check --locked</code>, which change nothing."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "upgrade",
+   "title": "field upgrade and the command surface",
+   "kicker": "A small command that finds the install.sh beside its own package and hands it the target.",
+   "intro": [
+    "Because <code>field</code> is a pnpm link, Node loads it from the checkout itself. So <code>installerPath()</code> finds <code>install.sh</code> two directories above <code>dist/commands/upgrade.js</code>, with no record of where Field was installed from. <code>upgrade</code> prints the command it runs, runs it through <code>bash</code> rather than the script's execute bit, and returns the script's exit status.",
+    "On Windows the installer does not run, so <code>field upgrade</code> refuses and names the steps to run in the checkout instead. <code>src/cli.ts</code> registers the command and the two new <code>field setup</code> options."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/upgrade.ts",
+     "note": "The whole command: refuse on Windows, find the installer, print the command, run it through bash, and return its status.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 30,
+       "text": "The Windows refusal comes first, so <code>field upgrade status</code> refuses there too."
+      }
+     ]
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "Registers <code>field upgrade</code> and the <code>--existing</code> and <code>--check</code> options on <code>field setup</code>, and takes <code>BUILD_DAEMON</code> from <code>src/remedies.ts</code> for three <code>field play</code> messages.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 263,
+       "text": "<code>--check</code> with <code>--existing</code> is refused, since one reports and the other syncs."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "messages",
+   "title": "Remedies name field upgrade",
+   "kicker": "src/remedies.ts gives every message that needs a fix one command to name.",
+   "intro": [
+    "Several messages tell you how to fix a missing or stale build: eight for the daemon, two in <code>field --version</code> for a stale CLI, and two in <code>field ui</code> for a missing client or app shell. They fire while you work in a song project, where the checkout's pnpm scripts do not exist. Each now takes its command from <code>src/remedies.ts</code>.",
+    "<ul><li><b><code>BUILD_DAEMON</code></b> is <code>field upgrade audiod</code>.</li><li><b><code>BUILD_CLI</code>, <code>BUILD_UI</code>, and <code>INSTALL_UI</code></b> are all <code>field upgrade cli</code>, because that target installs the workspace, builds the CLI, and builds the UI.</li><li><b>On Windows</b>, where <code>field upgrade</code> refuses, each names its pnpm script followed by \"in the field checkout\", outside a code span so the instruction does not read as part of the command.</li></ul>"
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/remedies.ts",
+     "note": "New. The four remedies, each <code>field upgrade &lt;target&gt;</code>, or on Windows the pnpm script to run in the checkout."
+    },
+    {
+     "path": "src/commands/ui.ts",
+     "note": "A missing client names <code>BUILD_UI</code>, and a missing app shell names <code>INSTALL_UI</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 213,
+       "text": "<code>field upgrade cli</code> fixes both cases. The root <code>pnpm install</code> put <code>ui/node_modules/electron/cli.js</code> in place, which is the file this command checks for before it starts the app shell, and <code>build:ui</code> writes <code>ui/dist/index.html</code>, which it checks here."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/version.ts",
+     "note": "A stale build names <code>BUILD_CLI</code>, and a daemon on the wrong protocol names <code>BUILD_DAEMON</code>."
+    },
+    {
+     "path": "src/audiod/client.ts",
+     "note": "The daemon's missing-binary message names <code>BUILD_DAEMON</code>."
+    },
+    {
+     "path": "src/audio/plugins.ts",
+     "note": "The plugin-scan message names <code>BUILD_DAEMON</code>."
+    },
+    {
+     "path": "src/audio/render-daemon.ts",
+     "note": "The render message names <code>BUILD_DAEMON</code>."
+    },
+    {
+     "path": "src/keys/helper.ts",
+     "note": "The <code>field keys</code> message names <code>BUILD_DAEMON</code>."
+    }
+   ]
+  },
+  {
+   "id": "header",
+   "title": "gen:limits writes the header only when it changes",
+   "kicker": "A generated header stops making the daemon look stale after every test run.",
+   "intro": [
+    "<code>native/audiod/src/plan-limits.h</code> carries the zod schemas' limits into the daemon's C++, and <code>src/schema/plan-limits.test.ts</code> regenerates it on every <code>pnpm test</code> to prove it is in step. Rewriting identical bytes moved the file's modification time. That made the next daemon build recompile every file that includes the header, and made the new <code>audiod-stale</code> row fire after every test run."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "scripts/gen-plan-limits.ts",
+     "note": "Compares the new header with the file on disk and writes only when they differ.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 120,
+       "text": "At this head, <code>pnpm gen:limits</code> printed <code>is current</code> and left the header's modification time unchanged, and <code>src/schema/plan-limits.test.ts</code> passed."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests run the real script in a sandbox",
+   "kicker": "The installer's tests run install.sh under real bash with stand-ins for pnpm, cmake, and the CLI.",
+   "intro": [
+    "<code>src/install.test.ts</code> runs the real <code>install.sh</code> with the machine's bash against a temporary clone that has its own upstream. pnpm and cmake are stand-ins that record their arguments, the CLI is a stand-in script, and <code>PATH</code> and <code>HOME</code> point only into the temporary directory, so the machine's real tools cannot answer in their place. <code>src/commands/upgrade.test.ts</code> runs bash against a stand-in installer. Both skip on Windows."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "At this head, <code>pnpm typecheck</code> was clean, and these files with the generate, plan-limits, and <code>field ui</code> tests passed: 7 files and 123 tests. On CI, <code>linux</code> passed. <code>windows</code> failed only in test files this pull request does not change, which also fail in <code>main</code>'s own Windows run at <code>8472df5</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/install.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 266,
+       "text": "The refusal tests assert that a failed check logs no install, build, or link at all, through <code>changes</code>."
+      },
+      {
+       "kind": "context",
+       "line": 324,
+       "text": "The CMake version tests cover 3.22.1 refused and 4.0.0 accepted. The review also ran 3.23.5, 3.24.0, 3.24.0-rc1, 10.1, and unreadable output in the same sandbox."
+      },
+      {
+       "kind": "context",
+       "line": 447,
+       "text": "The pnpm stand-in leaves an existing daemon alone, as CMake does after an edit to another target's source, so this test fails without the <code>touch</code> in <code>install_audiod</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/upgrade.test.ts"
+    },
+    {
+     "path": "src/workers/setup.test.ts"
+    },
+    {
+     "path": "src/commands/version.test.ts",
+     "note": "Expects <code>BUILD_CLI</code> in the drift messages."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Documentation",
+   "kicker": "A new install guide, and every install instruction now leads with ./install.sh.",
+   "intro": [
+    "<code>docs/install.md</code> is new. It describes the prerequisites, what each target runs, the link, worker environments, every status row, and the manual steps on Windows. The README, the CLI manual, the architecture notes, the keys guide, and the example project's README now lead with <code>./install.sh</code> and name <code>field upgrade</code> as the remedy."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "note": "The install guide: targets, the link, workers, and the status rows.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 34,
+       "text": "The prerequisites paragraph now names what the installer checks, Node, pnpm, and CMake, and says the daemon build reports a missing compiler or headers after <code>all</code> has installed the CLI."
+      },
+      {
+       "kind": "context",
+       "line": 140,
+       "text": "The UI row says outright that an edit to a <code>src/</code> file the UI does not import also reads as stale."
+      }
+     ]
+    },
+    {
+     "path": "docs/cli.md",
+     "note": "The install section, the <code>field setup</code> options, the reference table, and <code>FIELD_OFFLINE</code>."
+    },
+    {
+     "path": "README.md",
+     "note": "Leads with <code>./install.sh</code> and <code>field upgrade</code>."
+    },
+    {
+     "path": "examples/bloom/README.md"
+    },
+    {
+     "path": "docs/keys.md"
+    },
+    {
+     "path": "docs/README.md"
+    },
+    {
+     "path": "AGENTS.md"
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "The <code>field --version</code> drift messages now name <code>field upgrade cli</code>."
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The install plan",
+   "kicker": "The new plan records chunk 1 as built and designs releases and the one-line install.",
+   "intro": [
+    "<code>docs/projects/install/readme.md</code> is new at <code>status: in-progress</code>. §2 is the design this pull request builds, §3 sketches chunks 2 to 4, §4 records why each choice beat its alternatives, and §8 records what implementation settled and how it was verified.",
+    "§7 holds the open questions. Each must be answered or deferred to where it gets decided, because <code>in-progress</code> claims the plan is ready to execute. §7.1, now the daemon binary's license, is deferred to before chunk 2. §7.5 and the <code>install.ps1</code> question in §7.6 go to chunk 3, and §8.3 defers the rest that gate chunks 2 to 4."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "The plan, from the problem through chunk 1 as built.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 77,
+       "text": "§2.2 lists what the installer checks before anything changes, now with CMake 3.24 or newer, and says the compiler and headers are left to the daemon build."
+      },
+      {
+       "kind": "context",
+       "line": 291,
+       "text": "§4 records why the UI builds inside the <code>cli</code> target rather than a <code>ui</code> target of its own: one remedy, <code>field upgrade cli</code>, then covers both."
+      },
+      {
+       "kind": "context",
+       "line": 340,
+       "text": "§7.1 is right about the VST3 SDK that JUCE 8.0.4 bundles. Steinberg released VST3 SDK 3.8 under the MIT License on 2025-10-29, so a JUCE release that bundles 3.8 would leave only JUCE's terms for this decision. The review lists this as a suggestion and does not confirm which JUCE release first bundles it."
+      },
+      {
+       "kind": "verify",
+       "line": 393,
+       "text": "Chunk 3 owns the <code>install.ps1</code> question, here and in §6, so every question in the plan is answered or deferred to a named chunk. <code>project check</code> passes."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "install"
+}

@@ -1,0 +1,2477 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index de49bc0b..692a7f05 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -20,7 +20,7 @@ The docs are [overview](docs/README.md), [CLI](docs/cli.md),
+ [architecture](docs/architecture.md), [tracks](docs/tracks.md),
+ [project model](docs/project-model.md), [build graph](docs/build-graph.md),
+ [audio engine](docs/audio-engine.md), [remote](docs/remote.md),
+-[keys](docs/keys.md).
++[keys](docs/keys.md), [install](docs/install.md).
+ 
+ Where code does not exist yet these describe how the system is *designed* to
+ work and are the source of truth for it, which is less of the repo than it
+diff --git a/README.md b/README.md
+index c7111b6a..9099fb72 100644
+--- a/README.md
++++ b/README.md
+@@ -83,21 +83,35 @@ build, and audition a project with no DAW in the loop.
+ 
+ ## Try it
+ 
+-Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm or
+-yarn — and [SuperCollider](https://supercollider.github.io/): every
+-render in the example project is an SC recipe, and `field build` runs
+-`sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`:
++You need Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm
++or yarn — with `pnpm setup` run once, CMake 3.24 or newer with a C++
++compiler (Xcode's command line tools on macOS), and
++[SuperCollider](https://supercollider.github.io/): every render in the
++example project is an SC recipe, and `field build` runs `sclang` from
++your PATH, the macOS app bundle, or `FIELD_SCLANG`.
+ 
+ ```sh
+-pnpm install
+-pnpm build
+-pnpm add -g .        # links `field` onto your PATH (needs `pnpm setup` once)
+-pnpm build:native    # field-audiod, the playback and render daemon
++git clone https://github.com/okamnesiac/field
++cd field
++./install.sh             # the field command and field-audiod
+ ```
+ 
+-`pnpm add -g .` links this checkout rather than copying it, so a later
+-`pnpm build` takes effect with no re-linking, and `field` works from
+-any directory. To run from source without installing: `pnpm field
++The installer builds the checkout, links it onto your PATH as `field`,
++and builds `field-audiod`, the playback and render daemon. The first
++daemon build compiles JUCE, which takes a few minutes. Because `field`
++is a link to the checkout rather than a copy, it works from any
++directory and runs whatever the checkout last built. To pick up new
++commits, pull in the checkout, then upgrade from anywhere:
++
++```sh
++git pull                 # in the checkout
++field upgrade            # runs the checkout's ./install.sh
++field upgrade status     # what is installed, and what is out of date
++```
++
++[docs/install.md](docs/install.md) describes each step and each status
++row, and gives the steps by hand for Windows, where the installer does
++not run yet. To run from source without installing: `pnpm field
+ <args>`. To remove: `pnpm remove -g field`.
+ 
+ Then open the example project — two songs that exercise most of the
+@@ -121,7 +135,8 @@ from SuperCollider recipes alone. See the
+ ### The audio daemon
+ 
+ `field-audiod` is a separate native binary (CMake and JUCE), built by
+-`pnpm build:native`. Build it before playing **or building** anything:
++`./install.sh` or `field upgrade audiod`. Build it before playing **or
++building** anything:
+ the daemon is also the renderer — `eq`, `limit` and `reverb` targets
+ render by spawning it, so `field build` fails without it rather than
+ falling back to anything.
+diff --git a/docs/README.md b/docs/README.md
+index a381fc67..ba91df71 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -121,4 +121,5 @@ The current build order lives in [projects/](projects/README.md).
+ - [Audio engine](audio-engine.md) — the real-time daemon that plays, records, and hosts plugins
+ - [Remote](remote.md) — login, clone, push and pull, and the read-through cache against an audiofield remote
+ - [Keys](keys.md) — the computer keyboard as a MIDI instrument, and how to write a keymap
++- [Install](install.md) — `./install.sh` and `field upgrade`: what each step runs, and how to read the status
+ - [Projects](projects/README.md) — work in progress, next, and later
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 488bf87f..4033acfb 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -56,11 +56,12 @@ reads its stamp.
+ 
+ When the checkout has moved since the build, the report says so beside
+ the baked identity instead of impersonating it: a new HEAD prints
+-`checkout now at <sha> — pnpm build to update`, and edits without a
+-commit print `checkout has changed since the build — pnpm build to
+-update`. Running from source (tsx, vitest) keeps the live git read,
+-because there the checkout is the code; an unstamped dist falls back to
+-the live read.
++`checkout now at <sha> — field upgrade cli to update`, and edits without
++a commit print `checkout has changed since the build — field upgrade cli
++to update`. On Windows, where `field upgrade` does not run, both name
++`pnpm build` in the checkout instead. Running from source (tsx, vitest)
++keeps the live git read, because there the checkout is the code; an
++unstamped dist falls back to the live read.
+ 
+ **The remote is a second cache, reached over HTTPS with no new
+ dependency.** `field login`, `field clone`, and the read-through in
+diff --git a/docs/cli.md b/docs/cli.md
+index 78b83d2a..9340cbc6 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -18,21 +18,23 @@ against, use [`examples/bloom`](../examples/bloom/README.md).
+ 
+ ## Install
+ 
+-Field needs Node 24 (the version in [`.nvmrc`](../.nvmrc)) and pnpm —
+-never npm or yarn. From the checkout:
++Field needs Node 24 (the version in [`.nvmrc`](../.nvmrc)), pnpm —
++never npm or yarn — and CMake. From the checkout:
+ 
+ ```sh
+-pnpm install
+-pnpm build
+-pnpm build:native    # field-audiod, the playback and render daemon
+ pnpm setup           # once, if pnpm has never linked a global binary
+-pnpm add -g .        # links `field` onto your PATH
++./install.sh         # builds the checkout, links `field`, builds field-audiod
+ ```
+ 
+-`pnpm add -g .` links this checkout rather than copying it, so a later
+-`pnpm build` takes effect with no re-linking. To run from source without
+-installing, use `pnpm field <args>`. To remove it, `pnpm remove -g
+-field`.
++The installer links this checkout onto your PATH rather than copying
++it, so `field` runs whatever the checkout last built. After a `git
++pull`, `field upgrade` runs the same installer from any directory, and
++`field upgrade status` says what is out of date.
++[install.md](install.md) describes each step and each status row. On
++Windows the installer does not run yet: run `pnpm install`, `pnpm
++build`, `pnpm build:ui`, `pnpm build:native`, and `pnpm add -g .` in the
++checkout. To run from source without installing, use `pnpm field
++<args>`. To remove it, `pnpm remove -g field`.
+ 
+ Build the daemon before you build, play or record anything.
+ `field-audiod` is the renderer as well as the player: every track's
+@@ -69,7 +71,7 @@ so when the checkout has moved on or carries uncommitted changes. The
+ came from, and whether you are logged in to it (see [Share a project
+ through a remote](#share-a-project-through-a-remote)). The rest reports
+ which daemons run for *this* project and which build each one is on — a
+-daemon started before your last `pnpm build:native` still runs the old
++daemon started before your last daemon build still runs the old
+ code, and `field transport quit` is how you retire it.
+ 
+ ## Address things with labels
+@@ -331,13 +333,10 @@ as it picks up an edit you make in an editor. Solo is the exception: it
+ changes what you hear and writes nothing. Ctrl-c, or closing the window,
+ stops the transport and ends the session.
+ 
+-The window is a web client served by `field` itself, so build it once
+-first. `field ui` refuses with that command when the build is missing:
+-
+-```sh
+-pnpm --dir ui build
+-field ui tall-grass
+-```
++The window is a web client served by `field` itself from `ui/dist`,
++which `./install.sh` and `field upgrade cli` build with the CLI. When the
++build is missing, `field ui` refuses and names `field upgrade cli`, or on
++Windows `pnpm build:ui` in the checkout.
+ 
+ `field ui` prints the URL it serves on, then opens the app window. The
+ URL carries a token that the server checks, and it serves only
+@@ -543,8 +542,11 @@ $ field choose creek/still-water-keys --variant 2
+ ```
+ 
+ `field setup [worker]` prepares the worker environments with `uv`; with
+-no argument it sets up all of them. `field generate <song>/<name>` fills
+-a generative entry — a new name scaffolds a leaf track — and writes
++no argument it sets up all of them. `--check` reports whether each one
++is set up and current, changing nothing, and `--existing` re-syncs only
++the ones already set up, which is what `field upgrade` runs. `field
++generate <song>/<name>` fills a generative entry — a new name scaffolds
++a leaf track — and writes
+ variants into `songs/<song>/audio/<name>/` with a recipe recording the
+ model, the seed and the hash of every take. A missing `--seed` draws one
+ and the output says what it drew, because a seed here is provenance
+@@ -611,6 +613,7 @@ somewhere other than `<program>.wav` in the current directory.
+ | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
+ | `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
+ | `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
++| `FIELD_OFFLINE` | `install.sh` and `field upgrade` skip fetching the checkout's upstream, and compare against the last fetch |
+ 
+ `FIELD_SCLANG` and `FIELD_AUDIOD` point at a binary the default search
+ does not find. `FIELD_AUDIOD` is resolved to an absolute path
+@@ -633,12 +636,10 @@ unaffected.
+ 
+ `field play` needs `field-audiod`. On macOS, a machine without the built
+ daemon falls back to `afplay` for plain artifact playback, with no
+-transport and no options. The fallback is attempted everywhere and only
+-exists on macOS: today, off macOS, an unbuilt daemon fails with
+-`afplay failed: spawn afplay ENOENT` after a stderr line pointing at
+-`pnpm build:native`. The Windows port (#161, in review) replaces that
+-with a plain refusal naming the build command on every non-macOS
+-platform — the decision is recorded in
++transport and no options. Off macOS there is no `afplay`, so an unbuilt
++daemon is a plain refusal that names the build command: `field upgrade
++audiod`, or on Windows `pnpm build:native` in the checkout. The decision
++is recorded in
+ [windows-portability.md](projects/windows-portability/readme.md) §2.2 as
+ amended. Porting the rest is tracked there and in
+ [linux-portability.md](projects/linux-portability/readme.md).
+@@ -673,7 +674,8 @@ amended. Porting the rest is tracked there and in
+ | `field import <file> --song <name>` | import audio and record it |
+ | `field insert add <track> [plugin]` | add an insert to a track |
+ | `field plugins scan\|list\|pin` | the hosted plugin inventory |
+-| `field setup [worker]` | set up generation worker environments |
++| `field setup [worker]` | set up generation worker environments; `--check` reports, `--existing` re-syncs |
++| `field upgrade [target]` | run this checkout's `install.sh` from anywhere: `all`, `cli`, `audiod`, `workers`, or `status` |
+ | `field generate <song>/<name>` | run a deliberate generator |
+ | `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
+ | `field choose <song>/<name> --take <name>` | repoint which recorded take plays |
+diff --git a/docs/install.md b/docs/install.md
+new file mode 100644
+index 00000000..e22c44fe
+--- /dev/null
++++ b/docs/install.md
+@@ -0,0 +1,151 @@
++# Install and upgrade
++
++You install Field from a checkout with `./install.sh`, and you keep it
++current with `field upgrade`, which runs the same installer from any
++directory. The installer builds the checkout, links it onto your PATH as
++`field`, builds the audio daemon `field-audiod`, and re-syncs any model
++worker environment you have set up. `./install.sh status` and
++`field upgrade status` report what is installed and what is out of date.
++
++```sh
++git clone https://github.com/okamnesiac/field
++cd field
++./install.sh
++```
++
++Installing a release without a checkout, and the one-line `curl`
++install from the website, are planned in
++[install.md](projects/install/readme.md) §3.
++
++The installer is bash and does not support Windows yet, and
++`field upgrade` refuses there. On Windows, run the steps by hand in the
++checkout:
++
++```sh
++pnpm install --frozen-lockfile
++pnpm build
++pnpm build:ui
++pnpm build:native
++pnpm add -g .
++```
++
++## Before you install
++
++Before it changes anything, the installer checks for the Node, pnpm,
++and CMake that the target needs, and stops with a message naming the one
++that is missing or too old. It does not look for a C++ compiler or the
++Linux development headers. When either is missing, the daemon build
++fails and says so, after `all` has already installed the CLI.
++
++- **Node 24 or newer.** The version in `.nvmrc`.
++- **pnpm.** `corepack enable pnpm` installs the version `package.json`
++  names. Run `pnpm setup` once, then open a new shell, so pnpm has a
++  global bin directory on your PATH to link `field` into.
++- **CMake 3.24 or newer and a C++20 compiler**, for `field-audiod`. On
++  macOS, `brew install cmake` and Xcode's command line tools. On Linux,
++  JUCE also needs the ALSA, X11, and freetype development headers;
++  `.github/workflows/ci.yml` installs the packages it needs on Ubuntu.
++
++`field build` also needs [SuperCollider](https://supercollider.github.io/),
++and `field generate` needs [uv](https://docs.astral.sh/uv/). The
++installer installs neither.
++
++## What each target does
++
++`./install.sh [target]` and `field upgrade [target]` take one target.
++With none, they run `all`.
++
++| Target | What it runs |
++| --- | --- |
++| `cli` | `pnpm install --frozen-lockfile`, then `pnpm run build` and `pnpm run build:ui`, then `pnpm add -g <checkout>` unless pnpm's global `field` already links this checkout. The install covers the `ui/` workspace, the `electron` package included, and `build:ui` builds the client `field ui` serves, which takes about two seconds. |
++| `audiod` | `pnpm run build:native`. The first build fetches and compiles JUCE, which takes a few minutes; later builds compile only what changed. |
++| `workers` | `field setup --existing`, which re-syncs each worker environment you set up with `field setup` and sets up no new one. |
++| `all` | `cli`, then `audiod`, then `workers`. |
++| `status` | Reports what is installed, changing nothing. |
++
++Each target except `status` ends by fetching the checkout's upstream
++and warning if the checkout is behind it.
++
++The installer installs the checkout as it is. It never pulls, and it
++never switches branches, because the checkout may hold work in progress.
++To pick up new commits, pull first:
++
++```sh
++git pull                 # in the checkout
++field upgrade
++```
++
++### The link
++
++`field` is a link to the checkout, not a copy. pnpm's global
++`node_modules/field` is a symlink into the checkout, and `pnpm build`
++rewrites the `dist/` it points at, so a build takes effect without
++relinking. The link also decides which checkout `field upgrade` runs:
++`field upgrade` runs the `install.sh` beside the package it was loaded
++from.
++
++If pnpm's global `field` links a different checkout, `./install.sh cli`
++moves the link to this checkout and prints a `moved` row naming both.
++Run it in whichever checkout you want `field` to be.
++
++### Worker environments
++
++Setting up a worker is explicit, because the first `field generate` of
++each kind downloads that model's weights: about 10 GB for ACE-Step and
++2 GB for Chatterbox. The `workers` target therefore re-syncs only the
++environments that are already set up, so an upgrade keeps them current
++with the checkout's lockfiles and never starts a download you did not
++ask for. A worker counts as set up when its console script is installed
++in `python/<worker>/.venv`, which is the same test `field generate`
++applies before it starts one.
++
++```console
++$ field setup --existing
++skipping field-voiced: not set up (field setup voiced)
++syncing the field-aced environment (uv)…
++```
++
++## Read the status
++
++`field upgrade status` prints one row per fact. A row marked ⚠️ needs
++you to do something, and it names the command.
++
++```console
++$ field upgrade status
+++ /Users/you/field/install.sh status
++checkout       ~/field (main at f80efb6)
++repo-behind    ⚠️  main is 2 commits behind origin/main — run git pull in ~/field, then field upgrade all
++node           24.19.0
++pnpm           11.15.1
++cmake          4.4.0
++cli            ~/Library/pnpm/bin/field -> ~/field
++cli-current    built from f80efb6
++ui-current     ~/field/ui/dist
++audiod-stale   ⚠️  native/audiod/src/player.cpp changed since field-audiod was built — run field upgrade audiod
++worker-current field-aced
++worker-absent  field-voiced is not set up — field setup voiced sets it up
++```
++
++| Row | Meaning |
++| --- | --- |
++| `checkout` | The checkout this installer belongs to, its branch, and its commit. |
++| `repo-current`, `repo-ahead`, `repo-behind` | Whether the branch matches its upstream after a fetch, has commits the upstream lacks, or lacks commits the upstream has. A branch that is both ahead and behind reports `repo-behind`. |
++| `repo-untracked` | The branch has no upstream, or HEAD is detached, so there is nothing to compare against. |
++| `node`, `pnpm`, `cmake` | The versions found. `node-old`, `node-missing`, `pnpm-missing`, `cmake-old`, and `cmake-missing` say what to install. |
++| `cli` | pnpm's global `field` links this checkout. |
++| `cli-missing`, `cli-elsewhere` | pnpm links no `field`, or links another checkout. Run `./install.sh cli` here to link this one. |
++| `cli-shadowed` | Another `field` comes before pnpm's on your PATH, so that one runs. |
++| `not-on-path` | pnpm's global bin directory is not on your PATH. Run `pnpm setup`. |
++| `cli-current`, `cli-stale`, `cli-unbuilt` | Whether `dist/` was built from the checkout as it stands: the same commit, and the same number of uncommitted changes. `field --version` makes the same comparison. |
++| `ui-current`, `ui-stale`, `ui-missing` | Whether `ui/dist` holds a build, and whether any tracked file it may bundle is newer than that build: anything under `ui/` or `src/` other than a test, and `pnpm-lock.yaml`. The UI imports some of `src/`, and the check does not know which files, so an edit to a file it does not import also reads as stale. `field upgrade cli` rebuilds the UI and clears the row. |
++| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod` is newer than it. The installer touches `field-audiod` after each build, because CMake relinks it only when its own sources change, so `field upgrade audiod` clears `audiod-stale`. |
++| `audiod-override` | `FIELD_AUDIOD` is set, so `field` runs that binary instead of this build. |
++| `worker-current`, `worker-stale`, `worker-absent`, `worker-no-uv` | Each worker environment, from `field setup --check`. |
++
++## Environment variables
++
++| Variable | Effect |
++| --- | --- |
++| `FIELD_OFFLINE=1` | Skips the fetch, and compares the checkout against the last fetch of its upstream. |
++| `NO_COLOR` | Prints warning rows without color. The ⚠️ marker stays. |
++| `FIELD_AUDIOD` | Not read by the installer. `status` reports it, because `field` runs that binary instead of the one the installer builds. |
+diff --git a/docs/keys.md b/docs/keys.md
+index 98fceee8..88e00f5b 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -33,7 +33,7 @@ To keep what you play, record it into a track; see
+   kitty keyboard protocol. Apple's Terminal does not, and `field keys`
+   refuses to start there with a message that says so.
+ - **`field-audiod`.** The virtual MIDI source belongs to the native
+-  binary, so build it first with `pnpm build:native`.
++  binary, so build it first with `field upgrade audiod`.
+ - **macOS or Linux.** On Linux the virtual source needs the ALSA
+   sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
+   `field keys` reports that.
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+new file mode 100644
+index 00000000..6dc1dfbb
+--- /dev/null
++++ b/docs/projects/install/readme.md
+@@ -0,0 +1,460 @@
++---
++status: in-progress
++priority: now
++---
++
++# Plan: Install and upgrade
++
++**Goal:** one command installs Field and another keeps it current, the
++way Projector's `install.sh` and `project upgrade` do. `./install.sh`
++installs a checkout today, and `field upgrade` runs it from any
++directory. Once Field has releases, `curl -fsSL https://field.one/install.sh | bash`
++installs one with no clone, no pnpm, and no compiler, and `field upgrade`
++moves it to the next release.
++
++## 1 The problem
++
++Installing Field from a checkout is four commands from the README, each
++of which has to be run from the checkout:
++
++```sh
++pnpm install
++pnpm build
++pnpm add -g .
++pnpm build:native
++```
++
++Nothing tells you when the result goes stale. After a `git pull`, the
++linked `field` runs the old `dist/` until someone runs `pnpm build`, the
++daemon stays the old build until someone runs `pnpm build:native`, and a
++worker environment keeps the old packages until someone runs
++`field setup`. `field --version` catches the first of those, and only
++when someone thinks to ask. The second and third have each cost a
++debugging round: `src/commands/version.ts` records a `field-voiced`
++that silently dropped a flag it predated, and a venv that held a stale
++copy of `field_worker` while the CLI read the new source.
++
++The remedies are also in the wrong place. Eight error messages told you
++to run `pnpm build:native`, and every one of them fires while you are
++inside a song project, where `build:native` is not a script.
++
++And there is no way to install Field without a clone at all.
++`okamnesiac/field` is about to become public, and `field.one` should be
++able to offer the one-line install that <https://projector.bot> offers
++for Projector.
++
++## 2 The solution
++
++### 2.1 One installer, two modes
++
++`install.sh` at the root of the repository is the only installer. It is
++a checkout's installer when `src/cli.ts` sits beside it, and a release
++installer otherwise: piped from curl, bash reads it from stdin with
++nothing beside it, and the copy `field upgrade` downloads sits alone in a
++temporary directory. Chunk 1 builds the checkout mode. Until chunk 3, the
++release mode says to clone and stops:
++
++```console
++$ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/main/install.sh | bash
++install.sh: run this from a Field checkout: git clone https://github.com/okamnesiac/field, then ./install.sh in it
++```
++
++### 2.2 The targets
++
++`./install.sh [target]` takes one target, and `all` when given none:
++
++| Target | Runs |
++| --- | --- |
++| `cli` | `pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run build:ui`, and `pnpm add -g <checkout>` unless pnpm's global `field` already links this checkout. |
++| `audiod` | `pnpm run build:native`. |
++| `workers` | `field setup --existing` (§2.4). |
++| `all` | `cli`, `audiod`, `workers`. |
++| `status` | One row per fact, changing nothing (§2.6). |
++
++Every target except `status` ends by fetching the checkout's upstream
++and warning when the checkout is behind it. The installer never pulls.
++
++Each prerequisite is checked before anything changes, and a missing one
++stops the installer with exit status 69 and a message that names the
++fix: Node 24 or newer, pnpm (`corepack enable pnpm`), a pnpm global bin
++directory on PATH (`pnpm setup`), and CMake 3.24 or newer for `audiod`
++and `all`. A C++ compiler and the Linux development headers are not
++checked; the daemon build reports either one missing. An unknown target
++exits 64.
++
++### 2.3 The CLI is a link to the checkout
++
++`pnpm add -g <checkout>` makes pnpm's global `node_modules/field` a
++symlink into the checkout, and its bin directory gets a `field` shim
++that runs `dist/cli.js` through it. The installer keeps that, which is
++what the README already documented and what every existing install is.
++`pnpm ls -g --json` names the global package's path, and its realpath is
++the checkout it links, so the installer can tell an install of this
++checkout from one of another.
++
++A link that already points here is left alone. One that points at
++another checkout moves, with a `moved` row naming both, because running
++the installer in a checkout means "make `field` this one".
++
++### 2.4 Worker environments re-sync, and none is set up
++
++`field setup --existing` re-syncs each worker environment that is
++already set up and sets up no new one. Setting a worker up stays explicit
++([ace-generation.md](../ace-generation/readme.md) §3.4), because the
++first `field generate` after it downloads gigabytes of weights;
++re-syncing one that exists downloads none. Set up means the worker's
++console script is installed in `python/<worker>/.venv`, the same test
++`field generate` gates on, not that a `.venv` exists: a dev-only
++`uv sync` makes one with no worker in it (#61).
++
++`field setup --check` prints one row per worker in the installer's row
++format, from `probeEnvironment`, the side-effect-free probe
++`field generate` refuses on. `install.sh status` passes those rows
++through. The CLI answers both questions, rather than the installer
++listing `python/*/`, because `SETUP_SPECS` is the one list of workers
++(#67).
++
++### 2.5 `field upgrade` runs the installer
++
++`field upgrade [target]` runs the `install.sh` beside the package it was
++loaded from, with the same target, and returns its exit status. It
++prints the command first, as Projector's does:
++
++```console
++$ field upgrade status
+++ /Users/you/field/install.sh status
++checkout       ~/field (main at f80efb6)
++...
++```
++
++For a linked checkout, the package it was loaded from is the checkout,
++so `field upgrade` reaches the right installer from any directory with
++no record of where it was installed from. Projector reads pip's
++`direct_url.json` for the same answer; a link carries it. It runs the
++installer through `bash`, not through its execute bit, which a checkout
++with `core.fileMode` off does not keep.
++
++The installer's own messages name `field upgrade <target>` as the way
++back when pnpm's `field` links this checkout, and the script's path
++otherwise. The CLI's own remedies come from `src/remedies.ts`, so they
++name the upgrade rather than a pnpm script that is not a script inside a
++song project. The eight daemon error messages name `BUILD_DAEMON`, which
++is `field upgrade audiod`. `field --version` names `BUILD_CLI` for a
++stale build, and `field ui` names `BUILD_UI` for a missing client and
++`INSTALL_UI` for a missing app shell, each of which is
++`field upgrade cli`. On Windows each names its pnpm script in the
++checkout instead, because `field upgrade` refuses there (§7.6).
++
++### 2.6 `status` compares what is installed with its source
++
++| Piece | Current when | Compared by |
++| --- | --- | --- |
++| Checkout | it is not behind its upstream after a fetch | `git rev-list --count HEAD..@{upstream}`, as Projector's installer does, and `@{upstream}..HEAD` for `repo-ahead` |
++| CLI | `dist/` was built from `HEAD` with the same number of uncommitted changes | `dist/build-info.json`, which `pnpm build` stamps and `field --version` already reads |
++| UI | no tracked file it may bundle is newer than `ui/dist/index.html`: anything under `ui/` or `src/` but a test, and `pnpm-lock.yaml` | file mtimes, because Vite rewrites `index.html` on every build (§8.1) |
++| Daemon | no tracked file under `native/audiod` is newer than the binary | file mtimes, with the binary touched after each build (§8.1) |
++| Workers | each one set up passes `uv sync --check --locked` | `field setup --check` |
++
++`docs/install.md` lists every row.
++
++### 2.7 Files
++
++| File | Change |
++| --- | --- |
++| `install.sh` | New. The installer. |
++| `src/commands/upgrade.ts` | New. `field upgrade`. |
++| `src/commands/generate.ts` | `selectWorkers`, `partitionExisting`, and `checkWorkers`; `setupWorker` takes `existing`. |
++| `src/cli.ts` | `field upgrade`, and `--existing` and `--check` on `field setup`. |
++| `scripts/gen-plan-limits.ts` | Writes the header only when it changes (§8.1). |
++| `src/remedies.ts` | New. `BUILD_CLI`, `BUILD_UI`, `INSTALL_UI`, and `BUILD_DAEMON`, the commands the CLI's messages name (§2.5). |
++| `src/audiod/client.ts`, `src/audio/plugins.ts`, `src/audio/render-daemon.ts`, `src/keys/helper.ts` | The daemon error messages name `BUILD_DAEMON`. |
++| `src/commands/version.ts`, `src/commands/ui.ts` | A stale build, a missing client, and a missing app shell name `field upgrade cli`. |
++| `docs/install.md` | New. How install and upgrade work, and every status row. |
++| `docs/cli.md` | The install section, `field upgrade`, and the new `field setup` options. |
++| `README.md`, `examples/bloom/README.md` | Lead with `./install.sh`. |
++
++## 3 Releases and the one-line install
++
++These are chunks 2 to 4. They are designed far enough to show that
++chunk 1 does not paint them into a corner, and the open questions in §7
++decide the rest.
++
++### 3.1 Releases (chunk 2)
++
++Projector releases need no artifact: pip builds the package from
++GitHub's source archive of the `v0` tag. Field cannot do that cheaply,
++because turning its source into something that runs needs pnpm, `tsc`,
++CMake, a C++ compiler, and three minutes of compiling JUCE. So a Field
++release publishes built artifacts:
++
++- **`field-<version>.tgz`.** The CLI, platform-independent: `dist/`,
++  `package.json`, `LICENSE`, production `node_modules/` (commander,
++  yaml, and zod, all plain JavaScript), and the directories the CLI
++  reads from its package root, which are `keymaps/`, `sc/`, and
++  `python/`. It needs only Node 24 to run.
++- **`field-audiod-<version>-<platform>.tgz`.** The daemon, one per
++  platform: `darwin-arm64` and `linux-x64` first (§7.2), under the
++  terms §7.1 settles.
++- **`SHA256SUMS`**, which the installer verifies.
++
++The version is `package.json`'s. A release script, like Projector's
++`.github/scripts/release.py`, bumps it and, once the bump merges, pushes
++an immutable `v0.2.0` tag, moves `v0` to the same commit, and creates
++the GitHub release. `v0` is the channel the installer follows.
++
++### 3.2 The release installer (chunk 3)
++
++Without a checkout, `install.sh` installs a release:
++
++1. It reads the version from `package.json` at `FIELD_REF` (default
++   `v0`) in `FIELD_REPO` (default `okamnesiac/field`), which is how
++   Projector's installer learns the version it is installing.
++2. It downloads the CLI and the daemon for this platform from that
++   GitHub release, and verifies both against `SHA256SUMS`.
++3. It unpacks them into `~/.local/share/field/<version>/`, with the daemon
++   where `daemonBinary()` looks, switches
++   `~/.local/share/field/current` to it, and links `~/.local/bin/field`
++   to `current/dist/cli.js`. The previous version stays until the switch
++   succeeds, so a failed download leaves the old install working.
++4. It sets up again each worker that was set up in the previous version
++   (§7.5).
++
++It needs Node 24, curl, and tar, and no pnpm and no compiler. A platform
++with no prebuilt daemon stops and says to install from a checkout.
++
++`field upgrade` in a release install finds no checkout beside its
++package, so it downloads the newest installer, from
++`https://field.one/install.sh` or from `install.sh` at `FIELD_REF` in
++the fork it was installed from, and runs that. `status` compares the
++installed version with the release's.
++
++### 3.3 The one-line install (chunk 4)
++
++```sh
++curl -fsSL https://field.one/install.sh | bash
++```
++
++`apps/field-one` in `okamnesiac/audiofield` rewrites `/install.sh` to
++`https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh`, as
++`projector.bot` does for Projector, so the URL always serves the newest
++release's installer rather than `main`'s. The rewrite proxies rather
++than redirects, so the command is one request to `field.one`. It needs
++the repository to be public: `raw.githubusercontent.com` answers 404 for
++a private one. The website and the README then lead with this command.
++
++## 4 Why this design (DECIDED, 2026-10-11)
++
++- **A bash installer, as Projector has.** A Node script cannot run
++  before Node is installed, and a missing or old Node is the first thing
++  a fresh machine lacks, so checking for it is the installer's first
++  job. `curl | bash` needs bash anyway. Bash 3.2 is what macOS ships, so
++  the script uses nothing newer, and the tests run it under 3.2 locally
++  and bash 5 in CI.
++- **One installer, two modes**, from Projector. One file to maintain,
++  and `field upgrade` always runs an `install.sh`, whichever kind of
++  install it is.
++- **The checkout install stays a pnpm link**, over two alternatives:
++  - Copying the checkout into `~/.local/share`, as pipx does for
++    Projector. A checkout that moves on then leaves the command behind
++    with nothing saying so; Projector's installer diffs every installed
++    file against the checkout to notice. A link reduces staleness to
++    "is `dist/` built from `HEAD`", which `field --version` already
++    answers.
++  - A shim in `~/.local/bin` that runs `node <checkout>/dist/cli.js`.
++    It would spare newcomers `pnpm setup`, but every existing install is
++    a pnpm link and moving them means migrating each one. Release
++    installs (chunk 3) use `~/.local/bin` because they must not need
++    pnpm, and `status` reports `cli-shadowed` when both exist and the
++    wrong one is first on PATH.
++- **Never pull, never switch branches.** The checkout may hold work in
++  progress. `status` reports how far behind it is, which is Projector's
++  choice too.
++- **Build every time.** `pnpm install` builds through `prepare` only
++  when it installed a dependency, so a second run after a `git pull`
++  would build nothing. The CLI build takes about three seconds, and the
++  UI build about two.
++- **`--frozen-lockfile`.** An installer has no business rewriting the
++  checkout's lockfile, and pnpm's error says which `package.json` moved
++  ahead of it.
++- **Workers re-sync; none is set up.** Leaving them out keeps the stale
++  venv §1 describes. Setting every worker up starts a 12 GB download
++  nobody asked for.
++- **The daemon is compared by mtime, not by a stamp.** A commit stamped
++  into the binary, as `dist/` has, would need the daemon to report it,
++  and would miss uncommitted edits. Mtimes are the build's own test,
++  and the installer touches the binary after each build, so
++  `audiod-stale` means a source changed since the installer last built
++  the daemon, and the build it asks for clears it (§8.1).
++- **Releases ship built artifacts**, not a source archive (§3.1). The
++  source archive is what Projector installs from, and for Field it would
++  make every user install pnpm and a compiler and wait out a JUCE build.
++- **The UI builds with the CLI.** `field ui` serves `ui/dist`, which
++  bundles code from `src/`, so a CLI built without its UI leaves
++  `field ui` stale or refusing. The `cli` target builds both rather than
++  growing a `ui` target, because `field upgrade cli` is then the one
++  remedy for either.
++
++## 5 Acceptance criteria
++
++Chunk 1:
++
++- In a clone with Node 24, pnpm set up, and CMake, `./install.sh` puts
++  `field` on PATH and builds `field-audiod`, and `field --version` in
++  `examples/bloom` reports that build.
++- A second run does not relink, and the daemon build compiles only what
++  changed.
++- `field upgrade [target]`, from any directory, runs the linked
++  checkout's `install.sh` with the same output and exit status.
++- `field upgrade status` reports each state in `docs/install.md` with
++  the command that fixes it.
++- A missing prerequisite stops the installer before anything changes,
++  with exit status 69 and the fix.
++- `field upgrade workers` re-syncs the worker environments that are set
++  up and creates none.
++
++Chunks 2 to 4:
++
++- A release publishes the CLI, a daemon for each supported platform, and
++  checksums, and moves `v0`.
++- On a machine with Node 24 and no checkout,
++  `curl -fsSL https://field.one/install.sh | bash` installs `field` and
++  `field-audiod`, and `field upgrade` later moves both to the next
++  release.
++
++## 6 Chunks
++
++1. **The checkout installer and `field upgrade`.** §2. This change.
++2. **Releases.** §3.1. Blocked on §7.1.
++3. **The release installer.** §3.2. Needs chunk 2, and decides whether
++   Windows gets an `install.ps1` (§7.6).
++4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
++   chunk 3 and a public repository.
++
++## 7 Open questions
++
++### 7.1 The daemon binary's license
++
++Field's code is under the MIT License (#184). The daemon carries more
++than Field's code: `field-audiod` links JUCE, which is AGPLv3 or
++commercial, and compiles in Steinberg's VST3 SDK, which JUCE 8.0.4
++bundles under GPLv3 or Steinberg's proprietary VST3 license. A
++commercial JUCE license does not cover the SDK.
++[README.md](../../../README.md) "License" and
++[architecture.md](../../architecture.md) "Licensing" record these terms.
++
++So a daemon binary that chunk 2 publishes is a distribution under AGPLv3
++and GPLv3, unless the publisher holds both commercial licenses. Decide
++which before chunk 2 publishes one:
++
++- **Publish under the copyleft terms.** The daemon's archive carries the
++  license notices, and the repository at the release tag is its source,
++  which needs the repository to be public by then.
++- **Hold both commercial licenses**: a commercial JUCE license and
++  Steinberg's proprietary VST3 license.
++
++### 7.2 Platforms
++
++`darwin-arm64` and `linux-x64` first. Intel Macs (`darwin-x64`) and
++`linux-arm64` each cost one more build per release. A platform with no
++binary can still install from a checkout.
++
++### 7.3 Where the macOS daemon builds
++
++GitHub bills a macOS runner at ten times the Linux rate, a cold JUCE
++build takes minutes, and this account caps Actions spending at $40 a
++month. Either the release workflow builds the macOS daemon with a warm
++cache, or the release script builds it locally and uploads it with
++`gh release upload`. The second is cheaper, and makes a release depend
++on one machine.
++
++### 7.4 Which domain serves the installer
++
++`field.one` is the marketing site (`apps/field-one`), and the
++repository's GitHub homepage says `field.amnes.ac`. This plan assumes
++`field.one`, where the waitlist for source access already lives.
++
++### 7.5 Worker environments across release versions
++
++In a checkout, a worker's venv lives in `python/<worker>/.venv` and
++survives every upgrade. In a release install, each version unpacks into
++a directory of its own, so the venv would be left behind with the old
++version. Chunk 3 either sets each worker up again in the new version,
++which re-downloads no weights because they live in the Hugging Face
++cache, or points `UV_PROJECT_ENVIRONMENT` at a directory outside the
++version.
++
++### 7.6 Windows
++
++`install.sh` is bash, and Field's Windows support is
++[windows-portability.md](../windows-portability/readme.md). Windows
++installs from a checkout by hand for now, `field upgrade` refuses there
++with the steps, and the installer's tests skip there.
++
++Chunk 3 decides whether Windows gets an `install.ps1` of its own. A
++checkout on Windows installs with the four commands in
++`docs/install.md`, but a release install has no checkout to run them
++in, and the release installer is bash too. The answer goes with whether
++releases publish a Windows daemon at all, which §7.2 leaves out of the
++first platforms.
++
++## 8 Chunk 1 as built (2026-10-11)
++
++### 8.1 What implementation settled
++
++- **A generated header made the daemon look stale.**
++  `src/schema/plan-limits.test.ts` runs `pnpm gen:limits` on every
++  `pnpm test`, and the generator rewrote
++  `native/audiod/src/plan-limits.h` with identical bytes. The new mtime
++  made `audiod-stale` true after every test run, and it made the next
++  daemon build recompile every file that includes the header, which the
++  stale row was correctly reporting. `scripts/gen-plan-limits.ts` now
++  writes only when the content changes, which fixes both.
++- **CMake relinks `field-audiod` only when its own inputs change.**
++  `native/audiod` also builds `field-dsp-check` and `field-fixture`, and
++  an edit to `CMakeLists.txt` may only reconfigure. Comparing the sources
++  with the binary alone would leave `audiod-stale` standing after the
++  rebuild it asks for, so `install_audiod` touches the binary after each
++  successful build.
++- **`pnpm install` builds only when it installs.** Verified against pnpm
++  11.15.1: a repeat `pnpm install` prints "Already up to date" and skips
++  `prepare`. Hence §4's "build every time".
++- **The UI needs no install step of its own.** `ui/` is a pnpm
++  workspace member, so the root `pnpm install` already installs its
++  dependencies, the `electron` package included, and `build:ui` runs
++  `tsc --noEmit` and `vite build` in about two seconds. The installer
++  runs `build:ui` without checking for `ui/`: `package.json` names the
++  script and `pnpm-workspace.yaml` names the directory in the same commit
++  as the installer, so a checkout without `ui/` is broken, and the failed
++  build says so. The `status` row compares mtimes as the daemon's does,
++  over `ui/`, `src/`, and `pnpm-lock.yaml`, because the bundle imports
++  from `src/` and nothing cheaper names which files.
++- **pnpm refuses to link without its bin directory on PATH**, with
++  "Run pnpm setup". The installer checks first, so its own message names
++  the command to run again.
++- **Worker rows come from the CLI in the installer's format**, so the
++  installer passes them through and marks `worker-stale` and
++  `worker-no-uv` as warnings. A worker nobody set up is not a problem,
++  so `field setup --check` exits 1 only for those two.
++
++### 8.2 What was verified, and how
++
++- `src/install.test.ts` runs the real `install.sh` under real bash
++  against a temporary clone, with stand-ins for pnpm, cmake, and the CLI
++  and a PATH that holds nothing else. It covers each target, each
++  prerequisite failure, the link left alone and moved, and every status
++  row, including a checkout behind its upstream, online and offline.
++- `src/commands/upgrade.test.ts` runs real bash against a stand-in
++  installer: the target, the exit status, the printed command, and a
++  missing installer.
++- `src/workers/setup.test.ts` covers `--existing` and `--check` against
++  a temporary worker, asserting the probe asks uv nothing about a worker
++  nobody set up.
++- By hand, in a fresh worktree: `./install.sh audiod` built
++  `field-audiod` from cold in 3 minutes 8 seconds. With a throwaway
++  `PNPM_HOME`, `install.sh cli` run from `/tmp` linked the worktree, a
++  second run did not relink, and `field upgrade status` from `/tmp` ran
++  the worktree's installer.
++
++### 8.3 What is still owed
++
++- Chunks 2 to 4, and the decisions in §7 that gate them.
+diff --git a/examples/bloom/README.md b/examples/bloom/README.md
+index 644a2acb..371b9076 100644
+--- a/examples/bloom/README.md
++++ b/examples/bloom/README.md
+@@ -69,8 +69,7 @@ the CLI displays them. The comments in the YAML files survive
+ 
+ ```bash
+ git clone https://github.com/okamnesiac/field
+-cd field && nvm use && pnpm install && npm link
+-pnpm build:native   # optional: the playback daemon (needs CMake + Xcode CLT)
++cd field && nvm use && ./install.sh   # the field command and its daemon (needs CMake + Xcode CLT)
+ 
+ cd examples/bloom
+ field status
+@@ -201,7 +200,7 @@ playable, because a song's output is just another track:
+ field play creek     # the bare song name is its output track
+ ```
+ 
+-With the native daemon built (`pnpm build:native` in the field repo),
++With the native daemon built (`field upgrade audiod` builds it),
+ playback runs through `field-audiod` — Field's own Core Audio process,
+ spawned on demand, one per project — and the terminal shows a live
+ position readout in musical time (`5.2.1 (0:12.3)`). That unlocks the
+diff --git a/install.sh b/install.sh
+new file mode 100755
+index 00000000..3a2555c8
+--- /dev/null
++++ b/install.sh
+@@ -0,0 +1,422 @@
++#!/usr/bin/env bash
++#
++# Install Field from this checkout: the `field` command, the audio daemon
++# field-audiod, and the model-worker environments you have already set up.
++#
++#   ./install.sh [all|cli|audiod|workers|status]
++#   field upgrade [all|cli|audiod|workers|status]   the same, from anywhere
++#
++# It installs the checkout it sits in, as that checkout is. It never pulls;
++# `status` says how far the checkout is behind its upstream instead.
++# Installing a release without a checkout is install.md chunk 3, and until
++# then a copy of this script outside a checkout says so and stops.
++
++set -euo pipefail
++
++# The directory holding this script, or nothing when bash reads it from stdin.
++SCRIPT_DIR=""
++if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
++  SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
++fi
++# A checkout is this script with the CLI's source beside it. pwd -P, so the
++# path compares equal to the realpath of the checkout pnpm links.
++REPO=""
++if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/src/cli.ts" ]; then
++  REPO="$SCRIPT_DIR"
++fi
++
++NODE_MAJOR=24
++# native/audiod/CMakeLists.txt's cmake_minimum_required.
++CMAKE_MAJOR=3
++CMAKE_MINOR=24
++# Where src/audiod/client.ts looks for the daemon, under the package root.
++AUDIOD_RELATIVE="native/audiod/build/field-audiod_artefacts/Release/field-audiod"
++
++die() {
++  echo "install.sh: $1" >&2
++  exit "${2:-1}"
++}
++
++row() { printf '%-14s %s\n' "$1" "$2"; }
++
++# A row the reader must not scroll past: a marker always, because a captured
++# log has no color, and bold yellow when stdout is a terminal.
++warn_row() {
++  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
++    printf '\033[1;33m%-14s ⚠️  %s\033[0m\n' "$1" "$2"
++  else
++    printf '%-14s ⚠️  %s\n' "$1" "$2"
++  fi
++}
++
++commits() {
++  if [ "$1" -eq 1 ]; then printf '1 commit'; else printf '%s commits' "$1"; fi
++}
++
++# A path for a message, with the home directory as ~.
++tilde() {
++  case "$1" in
++    "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
++    *) printf '%s' "$1" ;;
++  esac
++}
++
++# The checkout pnpm's global `field` links, or nothing. pnpm keeps each
++# global package in a directory of its own and reports where; that path is a
++# symlink into the checkout `pnpm add -g` was given.
++linked_checkout() {
++  local path
++  command -v pnpm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 || return 0
++  path="$(pnpm ls -g --json 2>/dev/null | node -e '
++let text = "";
++process.stdin.on("data", (chunk) => (text += chunk)).on("end", () => {
++  try {
++    for (const entry of JSON.parse(text)) {
++      const field = entry.dependencies && entry.dependencies.field;
++      if (field && field.path) console.log(field.path);
++    }
++  } catch {}
++});' 2>/dev/null)" || return 0
++  path="${path%%$'\n'*}"
++  [ -n "$path" ] && [ -d "$path" ] || return 0
++  (CDPATH='' cd -- "$path" && pwd -P)
++}
++
++LINKED=""
++refresh_linked() { LINKED="$(linked_checkout)"; }
++
++# The command that runs a target again: `field upgrade` when the `field`
++# pnpm links is this checkout, because that is the installer it runs, and
++# this script's own path otherwise.
++rerun() {
++  if [ -n "$LINKED" ] && [ "$LINKED" = "$REPO" ]; then
++    printf 'field upgrade %s' "$1"
++  else
++    printf '%s/install.sh %s' "$(tilde "$REPO")" "$1"
++  fi
++}
++
++require_node() {
++  local version
++  version="$(node --version 2>/dev/null)" ||
++    die "Field needs Node $NODE_MAJOR or newer, and node is not on PATH" 69
++  version="${version#v}"
++  [ "${version%%.*}" -ge "$NODE_MAJOR" ] 2>/dev/null ||
++    die "Field needs Node $NODE_MAJOR or newer, and node is $version" 69
++}
++
++require_pnpm() {
++  command -v pnpm >/dev/null 2>&1 ||
++    die "Field builds with pnpm, which is not on PATH — run corepack enable pnpm, or see https://pnpm.io/installation" 69
++}
++
++# pnpm refuses to link into a global bin directory that is not on PATH, so
++# the installer checks first and its message names the command to run again.
++GLOBAL_BIN=""
++require_global_bin() {
++  GLOBAL_BIN="$(pnpm bin -g 2>/dev/null)" ||
++    die "pnpm has no global bin directory — run pnpm setup, open a new shell, and run $(rerun "$TARGET") again" 69
++  if [ "$LINKED" != "$REPO" ]; then
++    case ":$PATH:" in
++      *":$GLOBAL_BIN:"*) ;;
++      *) die "pnpm's global bin directory $GLOBAL_BIN is not on PATH — run pnpm setup, open a new shell, and run $(rerun "$TARGET") again" 69 ;;
++    esac
++  fi
++}
++
++cmake_version() { cmake --version 2>/dev/null | sed -n '1s/.* //p'; }
++
++cmake_new_enough() {
++  local major="${1%%.*}" minor="${1#*.}"
++  minor="${minor%%.*}"
++  [ "$major" -gt "$CMAKE_MAJOR" ] 2>/dev/null ||
++    { [ "$major" -eq "$CMAKE_MAJOR" ] && [ "$minor" -ge "$CMAKE_MINOR" ]; } 2>/dev/null
++}
++
++require_cmake() {
++  local version
++  version="$(cmake_version)" ||
++    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer — brew install cmake on macOS" 69
++  cmake_new_enough "$version" ||
++    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version — brew upgrade cmake on macOS, or see https://cmake.org/download/" 69
++}
++
++install_cli() {
++  # --frozen-lockfile, because an installer has no business rewriting the
++  # checkout's lockfile; a checkout whose package.json moved ahead of it
++  # gets pnpm's own error saying so.
++  pnpm --dir "$REPO" install --frozen-lockfile
++  # `pnpm install` builds the CLI through `prepare` only when it installed
++  # something, so both builds run here, every time: a checkout edited
++  # without a commit is as stale as one that moved. The UI builds with the
++  # CLI because it bundles code from src/.
++  pnpm --dir "$REPO" run build
++  pnpm --dir "$REPO" run build:ui
++  link_cli
++}
++
++# pnpm links the checkout rather than copying it, so a later build takes
++# effect with no relinking. A link that already points here is left alone,
++# and one that points at another checkout moves, with a row saying so.
++link_cli() {
++  local found
++  if [ "$LINKED" != "$REPO" ]; then
++    pnpm add -g "$REPO"
++    [ -z "$LINKED" ] || row moved "field $(tilde "$LINKED") -> $(tilde "$REPO")"
++    refresh_linked
++  fi
++  row linked "$(tilde "$GLOBAL_BIN/field") -> $(tilde "$REPO")"
++  hash -r
++  found="$(command -v field 2>/dev/null)" || found=""
++  if [ -n "$found" ] && [ "$found" != "$GLOBAL_BIN/field" ]; then
++    warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of pnpm's $(tilde "$GLOBAL_BIN/field")"
++  fi
++}
++
++install_audiod() {
++  [ -x "$REPO/$AUDIOD_RELATIVE" ] ||
++    row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
++  if ! pnpm --dir "$REPO" run build:native; then
++    [ "$(uname -s)" != Linux ] ||
++      echo "install.sh: on Linux, JUCE needs the ALSA, X11, and freetype development headers; .github/workflows/ci.yml installs the packages it needs on Ubuntu" >&2
++    exit 1
++  fi
++  # CMake relinks field-audiod only when its own inputs change, and this
++  # project builds other targets too. Dating the binary to this build lets
++  # audiod-stale clear once the build it asks for has run.
++  touch -c "$REPO/$AUDIOD_RELATIVE"
++  row built "$(tilde "$REPO/$AUDIOD_RELATIVE")"
++}
++
++# Re-syncs the worker environments already set up and sets up no new one,
++# because setting one up is explicit (ace-generation.md §3.4): the first
++# generate after it downloads gigabytes of weights. The CLI decides which
++# are set up, since it owns the list of workers.
++install_workers() {
++  [ -f "$REPO/dist/cli.js" ] ||
++    die "the field CLI sets up worker environments, and it is not built — run $(rerun cli) first" 69
++  node "$REPO/dist/cli.js" setup --existing
++}
++
++report_checkout_row() {
++  local branch head
++  head="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)" || {
++    row checkout "$(tilde "$REPO") (not a git checkout)"
++    return 0
++  }
++  if branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
++    row checkout "$(tilde "$REPO") ($branch at $head)"
++  else
++    row checkout "$(tilde "$REPO") (detached at $head)"
++  fi
++}
++
++# A checkout nobody pulled installs an old field, and nothing else says so.
++# Fetch the checkout's upstream and say how far behind it is. FIELD_OFFLINE=1
++# skips the fetch and compares against the last one. The fetch gives up
++# after fifteen seconds of a stalled HTTP transfer, so a bad network delays
++# the row rather than hanging the installer on it.
++report_checkout() {
++  local branch upstream remote behind ahead note=""
++  git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1 || return 0
++  if ! branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
++    row repo-untracked "detached HEAD has no upstream to compare against"
++    return 0
++  fi
++  if ! upstream="$(git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"; then
++    row repo-untracked "$branch has no upstream to compare against"
++    return 0
++  fi
++  remote="${upstream%%/*}"
++  if [ -n "${FIELD_OFFLINE:-}" ]; then
++    note=" (offline; compared against the last fetch of $remote)"
++  elif ! GIT_TERMINAL_PROMPT=0 git -C "$REPO" -c http.lowSpeedLimit=1 -c http.lowSpeedTime=15 \
++      fetch --quiet "$remote" 2>/dev/null; then
++    note=" (could not fetch $remote; compared against its last fetch)"
++  fi
++  if ! behind="$(git -C "$REPO" rev-list --count "HEAD..$upstream" 2>/dev/null)"; then
++    row repo-untracked "$branch tracks $upstream, which no longer exists$note"
++    return 0
++  fi
++  ahead="$(git -C "$REPO" rev-list --count "$upstream..HEAD" 2>/dev/null)" || ahead=0
++  if [ "$behind" -gt 0 ]; then
++    warn_row repo-behind "$branch is $(commits "$behind") behind $upstream — run git pull in $(tilde "$REPO"), then $(rerun all)$note"
++  elif [ "$ahead" -gt 0 ]; then
++    row repo-ahead "$branch is $(commits "$ahead") ahead of $upstream$note"
++  else
++    row repo-current "$branch matches $upstream$note"
++  fi
++}
++
++report_tools() {
++  local version
++  if version="$(node --version 2>/dev/null)"; then
++    version="${version#v}"
++    if [ "${version%%.*}" -ge "$NODE_MAJOR" ] 2>/dev/null; then
++      row node "$version"
++    else
++      warn_row node-old "$version — Field needs Node $NODE_MAJOR or newer"
++    fi
++  else
++    warn_row node-missing "Field needs Node $NODE_MAJOR or newer"
++  fi
++  if version="$(pnpm --version 2>/dev/null)"; then
++    row pnpm "$version"
++  else
++    warn_row pnpm-missing "run corepack enable pnpm, or see https://pnpm.io/installation"
++  fi
++  if ! version="$(cmake_version)"; then
++    row cmake-missing "needed to build field-audiod — brew install cmake on macOS"
++  elif cmake_new_enough "$version"; then
++    row cmake "$version"
++  else
++    row cmake-old "$version — building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer"
++  fi
++}
++
++report_cli() {
++  local bin found
++  bin="$(pnpm bin -g 2>/dev/null)" || bin=""
++  found="$(command -v field 2>/dev/null)" || found=""
++  if [ -z "$LINKED" ]; then
++    warn_row cli-missing "pnpm links no field — run $(rerun cli)"
++  elif [ "$LINKED" != "$REPO" ]; then
++    warn_row cli-elsewhere "field links $(tilde "$LINKED"), not this checkout — run $(rerun cli) to link this one"
++  else
++    row cli "$(tilde "$bin/field") -> $(tilde "$REPO")"
++  fi
++  if [ -n "$found" ] && [ "$found" != "$bin/field" ]; then
++    warn_row cli-shadowed "field on PATH is $(tilde "$found"), ahead of pnpm's $(tilde "$bin/field")"
++  elif [ -z "$found" ] && [ -n "$LINKED" ]; then
++    warn_row not-on-path "pnpm's global bin directory $(tilde "$bin") is not on PATH — run pnpm setup"
++  fi
++  report_build
++}
++
++# Whether dist/ is the checkout as it stands. `pnpm build` stamps the commit
++# it built and the number of uncommitted changes it saw
++# (scripts/stamp-build.mjs), and `field --version` makes the same comparison.
++report_build() {
++  local info built built_dirty head dirty
++  info="$REPO/dist/build-info.json"
++  if [ ! -f "$info" ]; then
++    warn_row cli-unbuilt "dist/ holds no build — run $(rerun cli)"
++    return 0
++  fi
++  read -r built built_dirty < <(INFO="$info" node -e '
++const info = JSON.parse(require("fs").readFileSync(process.env.INFO, "utf8"));
++console.log(`${info.commit ?? "-"} ${info.dirtyFiles ?? 0}`);' 2>/dev/null) || true
++  head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" || head=""
++  if [ -z "${built:-}" ] || [ "$built" = "-" ] || [ -z "$head" ]; then
++    row cli-built "dist/ has a build, and no commit to compare it against"
++    return 0
++  fi
++  if [ "$built" != "$head" ]; then
++    warn_row cli-stale "dist/ was built from ${built:0:7}, and the checkout is at ${head:0:7} — run $(rerun cli)"
++    return 0
++  fi
++  dirty="$(git -C "$REPO" status --porcelain 2>/dev/null | grep -c . || true)"
++  if [ "${dirty:-0}" -ne "${built_dirty:-0}" ]; then
++    warn_row cli-stale "dist/ was built with $built_dirty uncommitted changes, and the checkout has $dirty — run $(rerun cli)"
++    return 0
++  fi
++  row cli-current "built from ${head:0:7}"
++}
++
++# The first tracked file under the given paths that is newer than the
++# build output $1, leaving out tests, which no build reads.
++newer_than() {
++  local built="$1" file
++  shift
++  while IFS= read -r -d '' file; do
++    case "$file" in *.test.*) continue ;; esac
++    if [ "$REPO/$file" -nt "$built" ]; then
++      printf '%s\n' "$file"
++      return 0
++    fi
++  done < <(git -C "$REPO" ls-files -z -- "$@" 2>/dev/null)
++  return 1
++}
++
++# Vite rewrites ui/dist/index.html on every build. The UI bundles its own
++# sources, code it imports from src/, and the packages pnpm-lock.yaml
++# pins. Which files under src/ it imports is the bundler's to know, so
++# the comparison takes them all.
++report_ui() {
++  local index="$REPO/ui/dist/index.html" changed
++  if [ ! -f "$index" ]; then
++    warn_row ui-missing "ui/dist holds no build, so field ui cannot open — run $(rerun cli)"
++  elif changed="$(newer_than "$index" ui src pnpm-lock.yaml)"; then
++    warn_row ui-stale "$changed changed since the UI was built — run $(rerun cli)"
++  else
++    row ui-current "$(tilde "$REPO/ui/dist")"
++  fi
++}
++
++# install_audiod touches the binary after each build, so a daemon source
++# newer than it changed since the installer last built the daemon.
++report_audiod() {
++  local binary="$REPO/$AUDIOD_RELATIVE" changed
++  [ -z "${FIELD_AUDIOD:-}" ] ||
++    row audiod-override "FIELD_AUDIOD is set, so field runs $(tilde "$FIELD_AUDIOD") instead of this build"
++  if [ ! -x "$binary" ]; then
++    warn_row audiod-missing "field-audiod is not built — run $(rerun audiod)"
++  elif changed="$(newer_than "$binary" native/audiod)"; then
++    warn_row audiod-stale "$changed changed since field-audiod was built — run $(rerun audiod)"
++  else
++    row audiod-current "$(tilde "$binary")"
++  fi
++}
++
++# `field setup --check` prints one row per worker in this format. A worker
++# that is set up and out of date, or set up with uv gone, is a warning.
++report_workers() {
++  local label rest
++  if [ ! -f "$REPO/dist/cli.js" ] || ! command -v node >/dev/null 2>&1; then
++    row workers "unknown until the CLI is built"
++    return 0
++  fi
++  while read -r label rest; do
++    case "$label" in
++      worker-stale|worker-no-uv) warn_row "$label" "$rest" ;;
++      *) row "$label" "$rest" ;;
++    esac
++  done < <(node "$REPO/dist/cli.js" setup --check 2>&1 || true)
++}
++
++show_status() {
++  report_checkout_row
++  report_checkout
++  report_tools
++  report_cli
++  report_ui
++  report_audiod
++  report_workers
++}
++
++if [ -z "$REPO" ]; then
++  die "run this from a Field checkout: git clone https://github.com/okamnesiac/field, then ./install.sh in it" 69
++fi
++[ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status]" 64
++TARGET="${1:-all}"
++refresh_linked
++
++# Each target checks every prerequisite it needs before its first command,
++# so a missing one stops it with nothing changed.
++case "$TARGET" in
++  all)
++    require_node
++    require_pnpm
++    require_global_bin
++    require_cmake
++    install_cli
++    install_audiod
++    install_workers
++    report_checkout
++    ;;
++  cli) require_node; require_pnpm; require_global_bin; install_cli; report_checkout ;;
++  audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
++  workers) require_node; install_workers; report_checkout ;;
++  status) show_status ;;
++  *) die "usage: install.sh [all|cli|audiod|workers|status]" 64 ;;
++esac
+diff --git a/scripts/gen-plan-limits.ts b/scripts/gen-plan-limits.ts
+index bee006b7..884f4936 100644
+--- a/scripts/gen-plan-limits.ts
++++ b/scripts/gen-plan-limits.ts
+@@ -1,4 +1,4 @@
+-import { writeFileSync } from 'node:fs';
++import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+ import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { z } from 'zod';
+@@ -113,5 +113,13 @@ ${lines.join('\n')}
+ `;
+ 
+ const out = join(root, 'native/audiod/src/plan-limits.h');
+-writeFileSync(out, header);
+-process.stdout.write(`wrote ${out}\n`);
++// Written only when it changes. src/schema/plan-limits.test.ts runs this
++// on every `pnpm test`, and rewriting identical bytes moved the header's
++// mtime, so the next daemon build recompiled every file that includes it
++// and `install.sh status` reported the daemon stale (install.md §8.1).
++if (existsSync(out) && readFileSync(out, 'utf8') === header) {
++  process.stdout.write(`${out} is current\n`);
++} else {
++  writeFileSync(out, header);
++  process.stdout.write(`wrote ${out}\n`);
++}
+diff --git a/src/audio/plugins.ts b/src/audio/plugins.ts
+index e2b08305..1ea66c6e 100644
+--- a/src/audio/plugins.ts
++++ b/src/audio/plugins.ts
+@@ -15,6 +15,7 @@ import { join } from 'node:path';
+ import { z } from 'zod';
+ 
+ import { daemonBinary } from '../audiod/client.js';
++import { BUILD_DAEMON } from '../remedies.js';
+ import { PPQ } from '../constants.js';
+ import { sha256FileSync } from '../hash.js';
+ import type { PluginInsert } from '../schema/effects.js';
+@@ -106,7 +107,7 @@ export function readInventory(root: string): PluginInventory | undefined {
+ export function scanPlugins(root: string): PluginInventory {
+   const binary = daemonBinary();
+   if (binary === undefined) {
+-    throw new Error('field-audiod is not built — run `pnpm build:native`; the daemon owns scanning');
++    throw new Error(`field-audiod is not built — run ${BUILD_DAEMON}; the daemon owns scanning`);
+   }
+   const formats = process.platform === 'darwin' ? ['au', 'vst3'] : ['vst3'];
+   const plugins: PluginInfo[] = [];
+diff --git a/src/audio/render-daemon.ts b/src/audio/render-daemon.ts
+index 23877442..3eb5c407 100644
+--- a/src/audio/render-daemon.ts
++++ b/src/audio/render-daemon.ts
+@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { promisify } from 'node:util';
+ import { daemonBinary } from '../audiod/client.js';
++import { BUILD_DAEMON } from '../remedies.js';
+ import type { PluginWireInsert } from './plugins.js';
+ import type { EffectInsert } from '../schema/index.js';
+ import type { RenderedClip } from '../generators/stem.js';
+@@ -95,7 +96,7 @@ function requireBinary(): string {
+   const binary = daemonBinary();
+   if (binary === undefined) {
+     throw new RenderUnavailableError(
+-      'field-audiod is not built — run `pnpm build:native`. Effects render in the daemon ' +
++      `field-audiod is not built — run ${BUILD_DAEMON}. Effects render in the daemon ` +
+         'since render-pipeline.md chunk 2.',
+     );
+   }
+diff --git a/src/audiod/client.ts b/src/audiod/client.ts
+index 33f4e9e5..621a0a91 100644
+--- a/src/audiod/client.ts
++++ b/src/audiod/client.ts
+@@ -4,6 +4,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+ import { createConnection, type Socket } from 'node:net';
+ import { dirname, join, resolve } from 'node:path';
+ import { fileURLToPath } from 'node:url';
++import { BUILD_DAEMON } from '../remedies.js';
+ import { socketPathFor as sharedSocketPath } from '../socketPath.js';
+ import type { z } from 'zod';
+ import {
+@@ -126,7 +127,7 @@ export class AudiodClient extends EventEmitter {
+       }
+       const binary = daemonBinary();
+       if (!binary) {
+-        throw new Error('field-audiod is not built (pnpm build:native, or set FIELD_AUDIOD)');
++        throw new Error(`field-audiod is not built (${BUILD_DAEMON}, or set FIELD_AUDIOD)`);
+       }
+       // POSIX gets the relative path (the daemon binds it against its
+       // cwd, staying inside sun_path); Windows gets the full pipe name,
+diff --git a/src/cli.ts b/src/cli.ts
+index 837a93ef..a76c3f00 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -254,10 +254,32 @@ sc.command('render <program>')
+ program
+   .command('setup [worker]')
+   .description('set up generation worker environments (uv; explicit, never automatic)')
+-  .action(async (worker: string | undefined) => {
++  .option('--existing', 're-sync only the environments already set up, and set up no new one')
++  .option('--check', 'report whether each environment is set up and current, changing nothing')
++  .action(async (worker: string | undefined, options: { existing?: boolean; check?: boolean }) => {
+     try {
+-      const { setupWorker } = await import('./commands/generate.js');
+-      await setupWorker((line) => process.stdout.write(`${line}\n`), worker);
++      const { checkWorkers, selectWorkers, setupWorker } = await import('./commands/generate.js');
++      if (options.check === true) {
++        if (options.existing === true) throw new Error('--check changes nothing, so it takes no --existing');
++        const { lines, ok } = checkWorkers(selectWorkers(worker));
++        for (const line of lines) process.stdout.write(`${line}\n`);
++        if (!ok) process.exitCode = 1;
++        return;
++      }
++      await setupWorker((line) => process.stdout.write(`${line}\n`), worker, { existing: options.existing });
++    } catch (err) {
++      fail(err);
++    }
++  });
++// Installing belongs to install.sh; this runs the one beside the package it
++// was built from, so an upgrade works from any directory (install.md §2.5).
++program
++  .command('upgrade [target]')
++  .description("run this field's install.sh from anywhere: all (the default), cli, audiod, workers, or status")
++  .action(async (target: string | undefined) => {
++    try {
++      const { upgrade } = await import('./commands/upgrade.js');
++      process.exitCode = upgrade(target);
+     } catch (err) {
+       fail(err);
+     }
+@@ -732,17 +754,18 @@ program
+       }
+       let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
+       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
++      const { BUILD_DAEMON } = await import('./remedies.js');
+       if (!daemonBinary()) {
+         if (process.platform !== 'darwin') {
+           // afplay is a macOS binary: anywhere else the fallback could only
+           // die with ENOENT naming a tool this machine never had, so the
+           // build hint is the whole answer.
+-          throw new Error('field-audiod is not built, and the afplay fallback is macOS-only — run `pnpm build:native`');
++          throw new Error(`field-audiod is not built, and the afplay fallback is macOS-only — run ${BUILD_DAEMON}`);
+         }
+         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
+-          throw new Error('--from, --device, --loop, --click, and --watch need field-audiod (pnpm build:native)');
++          throw new Error(`--from, --device, --loop, --click, and --watch need field-audiod (${BUILD_DAEMON})`);
+         }
+-        process.stderr.write('field-audiod is not built; using afplay (pnpm build:native)\n');
++        process.stderr.write(`field-audiod is not built; using afplay (${BUILD_DAEMON})\n`);
+         await playWithAfplay(items);
+         return;
+       }
+diff --git a/src/commands/generate.ts b/src/commands/generate.ts
+index ea1dc80a..82995b95 100644
+--- a/src/commands/generate.ts
++++ b/src/commands/generate.ts
+@@ -17,7 +17,12 @@ import { promisify } from 'node:util';
+ import { Document, parseDocument } from 'yaml';
+ import { AcedClient, ACED_SPEC } from '../aced/client.js';
+ import { VoicedClient, VOICED_SPEC } from '../voiced/client.js';
+-import { workerPackagePresent } from '../workers/client.js';
++import {
++  probeEnvironment,
++  workerPackagePresent,
++  workerScriptInstalled,
++  type ProbeRun,
++} from '../workers/client.js';
+ import type { WorkerSpec } from '../workers/protocol.js';
+ import { sha256File } from '../hash.js';
+ import { isSlug } from '../ids.js';
+@@ -756,18 +761,40 @@ export async function chooseVariant(
+ // read it rather than keep a copy in step by hand (#67 review).
+ export const SETUP_SPECS: WorkerSpec[] = [ACED_SPEC, VOICED_SPEC];
+ 
++// Every worker, or the one named by its package directory or its daemon name.
++export function selectWorkers(which?: string | undefined): WorkerSpec[] {
++  if (which === undefined) return SETUP_SPECS;
++  const named = SETUP_SPECS.filter((s) => s.packageDir === which || s.name === which);
++  if (named.length === 0) {
++    throw new Error(
++      `unknown worker "${which}" — try ${SETUP_SPECS.map((s) => s.packageDir).join(' or ')}`,
++    );
++  }
++  return named;
++}
++
++// What `field setup --existing` syncs and skips. Set up means the worker's
++// console script is installed, the test `field generate` gates on, and
++// not that a `.venv` exists: a dev-only sync makes one with no worker in it.
++export function partitionExisting(specs: WorkerSpec[]): { sync: WorkerSpec[]; skip: WorkerSpec[] } {
++  const sync = specs.filter((spec) => workerScriptInstalled(spec));
++  return { sync, skip: specs.filter((spec) => !sync.includes(spec)) };
++}
++
++// `existing` re-syncs only the workers already set up and sets up none,
++// which is what an upgrade wants (install.md §2.4): keep current what
++// someone chose to install, and never choose for them.
+ export async function setupWorker(
+   onLine: (line: string) => void,
+   which?: string | undefined,
++  options: { existing?: boolean | undefined } = {},
+ ): Promise<void> {
+-  const specs =
+-    which === undefined
+-      ? SETUP_SPECS
+-      : SETUP_SPECS.filter((s) => s.packageDir === which || s.name === which);
+-  if (specs.length === 0) {
+-    throw new Error(
+-      `unknown worker "${which}" — try ${SETUP_SPECS.map((s) => s.packageDir).join(' or ')}`,
+-    );
++  let specs = selectWorkers(which);
++  if (options.existing === true) {
++    const { sync, skip } = partitionExisting(specs);
++    for (const spec of skip) onLine(`skipping ${spec.name}: not set up (field setup ${spec.packageDir})`);
++    if (sync.length === 0) return;
++    specs = sync;
+   }
+   for (const spec of specs) {
+     // The package, not the environment: creating the environment is what
+@@ -785,8 +812,40 @@ export async function setupWorker(
+     });
+     for (const line of stderr.split('\n').slice(-5)) if (line.trim()) onLine(line);
+   }
++  // A worker already set up has its weights, or downloaded them once.
++  if (options.existing === true) return;
+   onLine(
+     'ready — the first `field generate` of each kind downloads that model’s weights ' +
+       '(ACE-Step ~10 GB, Chatterbox ~2 GB)',
+   );
+ }
++
++// `field setup --check`: one row per worker, changing nothing, in the
++// format `install.sh status` prints (install.md §2.4), which reads these
++// rows and passes them through. The probe is the one `field generate`
++// gates on, so a row here and a refusal there cannot disagree. `ok` is
++// false when a worker someone set up cannot run as it stands; a worker
++// nobody set up is not a problem.
++export function checkWorkers(
++  specs: WorkerSpec[] = SETUP_SPECS,
++  run?: ProbeRun | undefined,
++): { lines: string[]; ok: boolean } {
++  const row = (label: string, text: string): string => `${label.padEnd(14)} ${text}`;
++  const lines: string[] = [];
++  let ok = true;
++  for (const spec of specs) {
++    const probe = probeEnvironment(spec, run);
++    if (!probe.scriptInstalled) {
++      lines.push(row('worker-absent', `${spec.name} is not set up — field setup ${spec.packageDir} sets it up`));
++    } else if (!probe.uvPresent) {
++      ok = false;
++      lines.push(row('worker-no-uv', `${spec.name} is set up, and uv is not installed (brew install uv)`));
++    } else if (probe.synced === true) {
++      lines.push(row('worker-current', spec.name));
++    } else {
++      ok = false;
++      lines.push(row('worker-stale', `${spec.name} is out of date — run field setup ${spec.packageDir}`));
++    }
++  }
++  return { lines, ok };
++}
+diff --git a/src/commands/ui.ts b/src/commands/ui.ts
+index 26c8b1b0..a85e8911 100644
+--- a/src/commands/ui.ts
++++ b/src/commands/ui.ts
+@@ -8,6 +8,7 @@ import { parseDocument } from 'yaml';
+ import { WebSocketServer, type WebSocket } from 'ws';
+ import { z } from 'zod';
+ import { AudiodClient } from '../audiod/client.js';
++import { BUILD_UI, INSTALL_UI } from '../remedies.js';
+ import type { CompiledSession } from '../graph/live.js';
+ import { compileSession } from '../graph/live.js';
+ import { readWavHeader } from '../audio/wav.js';
+@@ -209,7 +210,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+   });
+   if (!existsSync(join(distDir, 'index.html'))) {
+     http.close();
+-    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
++    throw new Error(`the UI is not built — run ${BUILD_UI}`);
+   }
+ 
+   // From here a failure must not leave the port bound behind it.
+@@ -895,7 +896,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+         });
+       } else {
+         process.stderr.write(
+-          'field ui: the app shell is not installed (pnpm --dir ui install); opening a browser\n',
++          `field ui: the app shell is not installed (${INSTALL_UI}); opening a browser\n`,
+         );
+         openInBrowser();
+       }
+diff --git a/src/commands/upgrade.test.ts b/src/commands/upgrade.test.ts
+new file mode 100644
+index 00000000..9ecd4aa2
+--- /dev/null
++++ b/src/commands/upgrade.test.ts
+@@ -0,0 +1,82 @@
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { dirname, join } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { installerPath, upgrade } from './upgrade.js';
++
++// `field upgrade` is a doorway to install.sh and nothing else
++// (install.md §2.5): it has to find the right installer, hand it the
++// target, and give back its exit status. These run real bash against a
++// stand-in installer, because the handoff is the whole command.
++
++const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
++
++let scratch: string;
++beforeEach(() => {
++  scratch = mkdtempSync(join(tmpdir(), 'field-upgrade-'));
++});
++afterEach(() => {
++  rmSync(scratch, { recursive: true, force: true });
++});
++
++// An installer that records its arguments and exits with a known status.
++function standIn(dir: string, status: number): { installer: string; argsFile: string } {
++  const installer = join(dir, 'install.sh');
++  const argsFile = join(dir, 'args');
++  writeFileSync(installer, `printf '%s\\n' "$#:$*" > "$(dirname "$0")/args"\nexit ${status}\n`);
++  return { installer, argsFile };
++}
++
++describe('field upgrade', () => {
++  it('finds the install.sh beside the package it runs from', () => {
++    expect(installerPath()).toBe(join(packageRoot, 'install.sh'));
++    expect(existsSync(installerPath())).toBe(true);
++  });
++
++  it('refuses on Windows, naming the build steps instead', () => {
++    const { installer } = standIn(scratch, 0);
++    expect(() => upgrade('cli', { installer, platform: 'win32', err: () => {} })).toThrow(
++      'install.sh, which does not support Windows yet',
++    );
++  });
++
++  it('refuses when there is no installer, rather than guessing at another', () => {
++    const installer = join(scratch, 'install.sh');
++    expect(() => upgrade(undefined, { installer, platform: 'darwin', err: () => {} })).toThrow(
++      `cannot upgrade: ${installer} does not exist`,
++    );
++  });
++});
++
++// These hand a real bash the stand-in, which Windows does not reliably have.
++describe.skipIf(process.platform === 'win32')('field upgrade runs the installer', () => {
++  it('hands the installer its target and returns its exit status', () => {
++    const { installer, argsFile } = standIn(scratch, 3);
++    const lines: string[] = [];
++    expect(upgrade('status', { installer, err: (line) => lines.push(line) })).toBe(3);
++    expect(readFileSync(argsFile, 'utf8')).toBe('1:status\n');
++    expect(lines).toEqual([`+ ${installer} status`]);
++  });
++
++  it('passes no target when given none, so the installer picks its default', () => {
++    const { installer, argsFile } = standIn(scratch, 0);
++    expect(upgrade(undefined, { installer, err: () => {} })).toBe(0);
++    expect(readFileSync(argsFile, 'utf8')).toBe('0:\n');
++  });
++
++  it('runs the installer through bash, so a checkout without the execute bit still upgrades', () => {
++    // writeFileSync leaves the stand-in at 0644.
++    const { installer } = standIn(scratch, 0);
++    expect(upgrade('cli', { installer, err: () => {} })).toBe(0);
++  });
++
++  it('quotes a path that needs it in the line it prints', () => {
++    const dir = join(scratch, "a checkout's home");
++    mkdirSync(dir);
++    const { installer } = standIn(dir, 0);
++    const lines: string[] = [];
++    upgrade('all', { installer, err: (line) => lines.push(line) });
++    expect(lines).toEqual([`+ '${scratch}/a checkout'\\''s home/install.sh' all`]);
++  });
++});
+diff --git a/src/commands/upgrade.ts b/src/commands/upgrade.ts
+new file mode 100644
+index 00000000..c259a553
+--- /dev/null
++++ b/src/commands/upgrade.ts
+@@ -0,0 +1,59 @@
++import { spawnSync } from 'node:child_process';
++import { existsSync } from 'node:fs';
++import { constants } from 'node:os';
++import { fileURLToPath } from 'node:url';
++
++// `field upgrade [target]`: run the installer of the checkout this command
++// was built from, with the same target, output, and exit status
++// (install.md §2.5). Installing belongs to install.sh, which knows how to
++// build and link each piece, so nothing here decides what an upgrade is.
++// It finds the installer the way the daemon and the keymaps are found:
++// beside the package this file was loaded from, which for a linked
++// checkout is the checkout itself.
++
++// Two levels up from src/commands/ and from dist/commands/ alike.
++export function installerPath(): string {
++  return fileURLToPath(new URL('../../install.sh', import.meta.url));
++}
++
++export interface UpgradeDeps {
++  installer?: string | undefined;
++  run?: ((script: string, args: string[]) => number) | undefined;
++  err?: ((line: string) => void) | undefined;
++  platform?: NodeJS.Platform | undefined;
++}
++
++export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): number {
++  // install.sh is bash and builds with the POSIX toolchain, so on Windows
++  // this would hand a script to whatever `bash` resolves to, which may be
++  // WSL's and not the Windows side at all (install.md §7.6).
++  if ((deps.platform ?? process.platform) === 'win32') {
++    throw new Error(
++      'field upgrade runs install.sh, which does not support Windows yet — in the field checkout, run ' +
++        'pnpm install --frozen-lockfile, pnpm build, pnpm build:ui, and pnpm build:native',
++    );
++  }
++  const installer = deps.installer ?? installerPath();
++  if (!existsSync(installer)) {
++    throw new Error(`cannot upgrade: ${installer} does not exist, so this field was not installed from a checkout`);
++  }
++  const args = target === undefined ? [] : [target];
++  const err = deps.err ?? ((line: string) => process.stderr.write(`${line}\n`));
++  // The command it runs, as you would type it, so the output that follows
++  // has a name and the step can be repeated by hand.
++  err(`+ ${[installer, ...args].map(displayQuote).join(' ')}`);
++  return (deps.run ?? runInstaller)(installer, args);
++}
++
++// Through bash rather than the script's own execute bit, which a checkout
++// with core.fileMode off, or one copied without modes, does not keep.
++function runInstaller(script: string, args: string[]): number {
++  const result = spawnSync('bash', [script, ...args], { stdio: 'inherit' });
++  if (result.error) throw result.error;
++  if (result.signal !== null) return 128 + (constants.signals[result.signal] ?? 0);
++  return result.status ?? 1;
++}
++
++function displayQuote(arg: string): string {
++  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
++}
+diff --git a/src/commands/version.test.ts b/src/commands/version.test.ts
+index e4272480..75a47613 100644
+--- a/src/commands/version.test.ts
++++ b/src/commands/version.test.ts
+@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
++import { BUILD_CLI } from '../remedies.js';
+ import { fileStore } from '../remote/credentials.js';
+ import { git } from '../git.js';
+ import { socketPathFor } from '../socketPath.js';
+@@ -260,7 +261,7 @@ describe('formatVersionReport with a drifted checkout', () => {
+       },
+       process.cwd(),
+     );
+-    expect(text).toContain('aaaa111 on feature/x; checkout now at bbbb222 — pnpm build to update');
++    expect(text).toContain(`aaaa111 on feature/x; checkout now at bbbb222 — ${BUILD_CLI} to update`);
+   });
+ });
+ 
+@@ -280,7 +281,7 @@ describe('formatVersionReport with post-build edits', () => {
+       process.cwd(),
+     );
+     expect(text).toContain(
+-      'aaaa111 on main; checkout has changed since the build — pnpm build to update',
++      `aaaa111 on main; checkout has changed since the build — ${BUILD_CLI} to update`,
+     );
+   });
+ 
+@@ -303,7 +304,7 @@ describe('formatVersionReport with post-build edits', () => {
+       process.cwd(),
+     );
+     expect(text).toContain(
+-      'aaaa111 on main, 1 file uncommitted; checkout has changed since the build — pnpm build to update',
++      `aaaa111 on main, 1 file uncommitted; checkout has changed since the build — ${BUILD_CLI} to update`,
+     );
+   });
+ });
+diff --git a/src/commands/version.ts b/src/commands/version.ts
+index 9b38c748..6ad8186c 100644
+--- a/src/commands/version.ts
++++ b/src/commands/version.ts
+@@ -10,6 +10,7 @@ import {
+   PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION,
+   SOCKET_RELATIVE as AUDIOD_SOCKET,
+ } from '../audiod/protocol.js';
++import { BUILD_CLI, BUILD_DAEMON } from '../remedies.js';
+ import { SETUP_SPECS } from './generate.js';
+ import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
+ import { defaultCredentialStore, resolveToken, type CredentialStore, type TokenSource } from '../remote/credentials.js';
+@@ -263,7 +264,7 @@ export async function versionReport(root: string, deps: VersionDeps = {}): Promi
+     note: daemonNote(audiod, {
+       name: AUDIOD_NAME,
+       protocol: AUDIOD_PROTOCOL_VERSION,
+-      remedy: 'rebuild the daemon (pnpm build:native)',
++      remedy: `rebuild the daemon (${BUILD_DAEMON})`,
+     }),
+   });
+ 
+@@ -319,7 +320,7 @@ export function formatVersionReport(report: VersionReport, root: string): string
+   const build = cli.commit
+     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
+       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
+-      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}` +
++      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — ${BUILD_CLI} to update` : ''}` +
+       // No count here: checkoutDirtyFiles is the checkout's absolute
+       // current state, but any number in this sentence reads as a delta
+       // since the build — and a stamp taken from a dirty tree makes
+@@ -328,7 +329,7 @@ export function formatVersionReport(report: VersionReport, root: string): string
+       // only needs the fact.
+       `${
+         cli.checkoutDirtyFiles !== undefined
+-          ? '; checkout has changed since the build — pnpm build to update'
++          ? `; checkout has changed since the build — ${BUILD_CLI} to update`
+           : ''
+       }`
+     : 'not a git checkout';
+diff --git a/src/install.test.ts b/src/install.test.ts
+new file mode 100644
+index 00000000..f76ba37e
+--- /dev/null
++++ b/src/install.test.ts
+@@ -0,0 +1,525 @@
++import { spawnSync } from 'node:child_process';
++import {
++  accessSync,
++  chmodSync,
++  constants,
++  copyFileSync,
++  existsSync,
++  mkdirSync,
++  mkdtempSync,
++  readFileSync,
++  readlinkSync,
++  realpathSync,
++  rmSync,
++  symlinkSync,
++  utimesSync,
++  writeFileSync,
++} from 'node:fs';
++import { tmpdir } from 'node:os';
++import { delimiter, dirname, join } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++
++// install.sh, run by real bash against a clone of its own in a temporary
++// directory (install.md §2). pnpm, cmake, and the field CLI are stand-ins
++// that record what they were asked, and PATH holds nothing else but links
++// to the ordinary tools the script needs, so whatever happens to be
++// installed on the machine running the suite cannot answer in their place.
++// Locally that is macOS's bash 3.2 and in CI bash 5, so both run it.
++// Windows skips them: the installer does not support it yet
++// (install.md §7.6), and `field upgrade` refuses there instead.
++const posix = describe.skipIf(process.platform === 'win32');
++
++const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
++const AUDIOD = 'native/audiod/build/field-audiod_artefacts/Release/field-audiod';
++
++function which(tool: string): string | undefined {
++  for (const dir of (process.env['PATH'] ?? '').split(delimiter)) {
++    const path = join(dir, tool);
++    try {
++      accessSync(path, constants.X_OK);
++      return path;
++    } catch {
++      // not here
++    }
++  }
++  return undefined;
++}
++
++const BASH = which('bash')!;
++const TOOLS = ['bash', 'git', 'node', 'dirname', 'uname', 'sed', 'grep', 'cat', 'mkdir', 'ln', 'rm', 'chmod', 'touch'];
++
++let root: string;
++let upstream: string;
++let repo: string;
++let bin: string;
++let pnpmHome: string;
++let log: string;
++
++function git(cwd: string, ...args: string[]): string {
++  const result = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
++    cwd,
++    encoding: 'utf8',
++    env: { ...process.env, HOME: root, GIT_CONFIG_NOSYSTEM: '1' },
++  });
++  if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
++  return result.stdout.trim();
++}
++
++function write(path: string, text: string, mode?: number): void {
++  mkdirSync(dirname(path), { recursive: true });
++  writeFileSync(path, text);
++  if (mode !== undefined) chmodSync(path, mode);
++}
++
++// A stand-in pnpm, which does what each command the installer runs would
++// do to the files the installer then reads, and nothing more.
++const PNPM = `#!${BASH}
++echo "pnpm $*" >> "$FAKE_LOG"
++dir=""
++if [ "$1" = --dir ]; then dir="$2"; shift 2; fi
++case "$1 \${2:-}" in
++  "--version ") echo 11.15.1 ;;
++  "bin -g") [ -z "\${FAKE_NO_GLOBAL_BIN:-}" ] || exit 1; echo "$FAKE_PNPM_HOME/bin" ;;
++  "ls -g")
++    if [ -L "$FAKE_PNPM_HOME/global/field" ]; then
++      printf '[{"path":"g","dependencies":{"field":{"path":"%s"}}}]\\n' "$FAKE_PNPM_HOME/global/field"
++    else
++      echo '[{"path":"g"}]'
++    fi ;;
++  "add -g")
++    mkdir -p "$FAKE_PNPM_HOME/global" "$FAKE_PNPM_HOME/bin"
++    rm -f "$FAKE_PNPM_HOME/global/field"
++    ln -s "$3" "$FAKE_PNPM_HOME/global/field"
++    printf '#!/bin/sh\\n' > "$FAKE_PNPM_HOME/bin/field"
++    chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
++  "install --frozen-lockfile") ;;
++  "run build")
++    mkdir -p "$dir/dist"
++    node "$dir/scripts/stamp-build.mjs" > /dev/null
++    cat "$FAKE_CLI" > "$dir/dist/cli.js" ;;
++  "run build:ui")
++    [ -z "\${FAKE_UI_FAILS:-}" ] || exit 2
++    mkdir -p "$dir/ui/dist"
++    printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
++  "run build:native")
++    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
++    # A daemon already built is left alone, as CMake leaves field-audiod
++    # when the edit was to another target's source.
++    [ ! -e "$dir/${AUDIOD}" ] || exit 0
++    mkdir -p "$dir/${dirname(AUDIOD)}"
++    printf '#!/bin/sh\\n' > "$dir/${AUDIOD}"
++    chmod +x "$dir/${AUDIOD}" ;;
++  *) echo "pnpm stand-in: unexpected $*" >&2; exit 99 ;;
++esac
++`;
++
++// The CLI's half of the workers target and of the status rows.
++const CLI = `require('fs').appendFileSync(process.env.FAKE_LOG, 'field ' + process.argv.slice(2).join(' ') + '\\n');
++if (process.argv.includes('--check')) {
++  console.log('worker-current field-aced');
++  console.log('worker-stale   field-voiced is out of date — run field setup voiced');
++  process.exitCode = 1;
++}
++`;
++
++beforeEach(() => {
++  // Resolved, because the installer compares paths it resolves with
++  // pwd -P, and macOS's temporary directory sits behind /var -> /private/var.
++  root = realpathSync(mkdtempSync(join(tmpdir(), 'field-install-')));
++  upstream = join(root, 'upstream');
++  repo = join(root, 'checkout');
++  bin = join(root, 'bin');
++  pnpmHome = join(root, 'pnpm');
++  log = join(root, 'log');
++
++  // Only what the installer reads: itself, the marker that makes a
++  // checkout, the real build stamp, and UI and daemon sources to be newer
++  // than.
++  copyFileSync(join(packageRoot, 'install.sh'), join(root, 'install.sh'));
++  write(join(upstream, 'install.sh'), readFileSync(join(root, 'install.sh'), 'utf8'), 0o755);
++  write(join(upstream, 'src/cli.ts'), '');
++  write(join(upstream, 'package.json'), '{ "name": "field" }\n');
++  write(join(upstream, 'scripts/stamp-build.mjs'), readFileSync(join(packageRoot, 'scripts/stamp-build.mjs'), 'utf8'));
++  write(join(upstream, 'ui/src/main.tsx'), '');
++  write(join(upstream, 'native/audiod/CMakeLists.txt'), '');
++  write(join(upstream, 'native/audiod/src/main.cpp'), '');
++  write(join(upstream, '.gitignore'), 'dist/\nnative/audiod/build/\n');
++  git(root, 'init', '--quiet', '-b', 'main', upstream);
++  git(upstream, 'add', '.');
++  git(upstream, 'commit', '--quiet', '-m', 'one');
++  git(root, 'clone', '--quiet', upstream, repo);
++
++  mkdirSync(bin);
++  for (const tool of TOOLS) {
++    const path = which(tool);
++    if (path !== undefined) symlinkSync(path, join(bin, tool));
++  }
++  write(join(bin, 'pnpm'), PNPM, 0o755);
++  write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
++  write(join(root, 'cli.js'), CLI);
++  writeFileSync(log, '');
++});
++
++afterEach(() => {
++  rmSync(root, { recursive: true, force: true });
++});
++
++interface Run {
++  status: number | null;
++  stdout: string;
++  stderr: string;
++  log: string[];
++}
++
++function install(target?: string, env: Record<string, string> = {}, script = join(repo, 'install.sh')): Run {
++  writeFileSync(log, '');
++  const result = spawnSync(BASH, target === undefined ? [script] : [script, target], {
++    encoding: 'utf8',
++    env: {
++      PATH: [join(pnpmHome, 'bin'), bin].join(delimiter),
++      HOME: root,
++      GIT_CONFIG_NOSYSTEM: '1',
++      FAKE_LOG: log,
++      FAKE_PNPM_HOME: pnpmHome,
++      FAKE_CLI: join(root, 'cli.js'),
++      ...env,
++    },
++  });
++  return {
++    status: result.status,
++    stdout: result.stdout,
++    stderr: result.stderr,
++    log: readFileSync(log, 'utf8').split('\n').filter(Boolean),
++  };
++}
++
++// The rows of a status, keyed by label, the warning marker dropped.
++function rows(stdout: string): Map<string, string> {
++  const map = new Map<string, string>();
++  for (const line of stdout.split('\n')) {
++    const match = /^(\S+)\s+(?:⚠️ {2})?(.*)$/.exec(line);
++    if (match) map.set(match[1]!, match[2]!);
++  }
++  return map;
++}
++
++// The commands a run made that change something: everything but pnpm's
++// queries.
++function changes(run: Run): string[] {
++  return run.log.filter((line) => !/^pnpm (ls|bin|--version)/.test(line));
++}
++
++function linkTo(target: string): void {
++  mkdirSync(join(pnpmHome, 'global'), { recursive: true });
++  mkdirSync(join(pnpmHome, 'bin'), { recursive: true });
++  symlinkSync(target, join(pnpmHome, 'global', 'field'));
++}
++
++posix('install.sh cli', () => {
++  it('installs, builds the CLI and the UI, and links the checkout, in that order', () => {
++    const run = install('cli');
++    expect(run.stderr).toBe('');
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual([
++      `pnpm --dir ${repo} install --frozen-lockfile`,
++      `pnpm --dir ${repo} run build`,
++      `pnpm --dir ${repo} run build:ui`,
++      `pnpm add -g ${repo}`,
++    ]);
++    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(repo);
++    expect(rows(run.stdout).get('linked')).toBe('~/pnpm/bin/field -> ~/checkout');
++  });
++
++  it('leaves a link that already points here alone, and builds anyway', () => {
++    linkTo(repo);
++    const run = install('cli');
++    expect(run.status).toBe(0);
++    expect(run.log).not.toContain(`pnpm add -g ${repo}`);
++    expect(run.log).toContain(`pnpm --dir ${repo} run build`);
++    expect(run.log).toContain(`pnpm --dir ${repo} run build:ui`);
++  });
++
++  it('stops before linking when the UI does not build', () => {
++    const run = install('cli', { FAKE_UI_FAILS: '1' });
++    expect(run.status).toBe(2);
++    expect(run.log.some((line) => line.startsWith('pnpm add'))).toBe(false);
++  });
++
++  it('moves a link from another checkout, and says so', () => {
++    const other = join(root, 'other');
++    mkdirSync(other);
++    linkTo(other);
++    const run = install('cli');
++    expect(run.status).toBe(0);
++    expect(run.log).toContain(`pnpm add -g ${repo}`);
++    expect(rows(run.stdout).get('moved')).toBe('field ~/other -> ~/checkout');
++  });
++
++  it('stops before installing anything when pnpm has no global bin directory', () => {
++    const run = install('cli', { FAKE_NO_GLOBAL_BIN: '1' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('run pnpm setup');
++    expect(changes(run)).toEqual([]);
++  });
++
++  it('stops before installing anything when that directory is not on PATH', () => {
++    const run = install('cli', { PATH: bin });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain(`pnpm's global bin directory ${pnpmHome}/bin is not on PATH`);
++    expect(changes(run)).toEqual([]);
++  });
++
++  it('needs no global bin directory on PATH when the link already points here', () => {
++    linkTo(repo);
++    const run = install('cli', { PATH: bin });
++    expect(run.status).toBe(0);
++    expect(run.log).toContain(`pnpm --dir ${repo} run build`);
++  });
++
++  it('refuses a Node older than 24 before touching anything', () => {
++    rmSync(join(bin, 'node'));
++    write(join(bin, 'node'), `#!${BASH}\necho v22.11.0\n`, 0o755);
++    const run = install('cli');
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('Field needs Node 24 or newer, and node is 22.11.0');
++    expect(run.log.some((line) => line.includes('install'))).toBe(false);
++  });
++
++  it('names corepack when pnpm is missing', () => {
++    rmSync(join(bin, 'pnpm'));
++    const run = install('cli');
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('corepack enable pnpm');
++  });
++});
++
++posix('install.sh audiod and workers', () => {
++  it('builds the daemon through pnpm build:native', () => {
++    const run = install('audiod');
++    expect(run.status).toBe(0);
++    expect(run.log).toContain(`pnpm --dir ${repo} run build:native`);
++    expect(rows(run.stdout).get('building')).toContain('the first time');
++    expect(rows(run.stdout).get('built')).toBe(`~/checkout/${AUDIOD}`);
++    // A rebuild is not announced as a first build.
++    expect(rows(install('audiod').stdout).has('building')).toBe(false);
++  });
++
++  it('refuses to build the daemon without CMake', () => {
++    rmSync(join(bin, 'cmake'));
++    const run = install('audiod');
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('CMake 3.24 or newer');
++    expect(run.log).not.toContain(`pnpm --dir ${repo} run build:native`);
++  });
++
++  it('stops before installing anything when everything is asked for without CMake', () => {
++    rmSync(join(bin, 'cmake'));
++    const run = install();
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('CMake 3.24 or newer');
++    expect(changes(run)).toEqual([]);
++  });
++
++  it('refuses a CMake older than 3.24 before installing anything', () => {
++    write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.22.1"\n`, 0o755);
++    const run = install();
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('needs CMake 3.24 or newer, and cmake is 3.22.1');
++    expect(changes(run)).toEqual([]);
++  });
++
++  it('takes a CMake of a newer major version', () => {
++    write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 4.0.0"\n`, 0o755);
++    expect(install('audiod').status).toBe(0);
++  });
++
++  it('fails when the daemon does not build', () => {
++    const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
++    expect(run.status).toBe(1);
++    expect(rows(run.stdout).has('built')).toBe(false);
++  });
++
++  it('re-syncs workers through the CLI, which knows which are set up', () => {
++    install('cli');
++    const run = install('workers');
++    expect(run.status).toBe(0);
++    expect(run.log).toContain('field setup --existing');
++  });
++
++  it('needs the CLI built before it can sync workers', () => {
++    const run = install('workers');
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('run ~/checkout/install.sh cli first');
++  });
++
++  it('installs everything with no target', () => {
++    const run = install();
++    expect(run.status).toBe(0);
++    expect(run.log).toEqual(
++      expect.arrayContaining([
++        `pnpm --dir ${repo} run build`,
++        `pnpm add -g ${repo}`,
++        `pnpm --dir ${repo} run build:native`,
++        'field setup --existing',
++      ]),
++    );
++  });
++});
++
++posix('install.sh status', () => {
++  it('reports a fresh checkout as installing nothing yet', () => {
++    const run = install('status');
++    expect(run.status).toBe(0);
++    const status = rows(run.stdout);
++    expect(status.get('checkout')).toMatch(/^~\/checkout \(main at [0-9a-f]{7}\)$/);
++    expect(status.get('repo-current')).toBe('main matches origin/main');
++    expect(status.get('cli-missing')).toBe('pnpm links no field — run ~/checkout/install.sh cli');
++    expect(status.get('cli-unbuilt')).toContain('dist/ holds no build');
++    expect(status.get('ui-missing')).toBe('ui/dist holds no build, so field ui cannot open — run ~/checkout/install.sh cli');
++    expect(status.get('audiod-missing')).toBe('field-audiod is not built — run ~/checkout/install.sh audiod');
++    expect(status.get('workers')).toBe('unknown until the CLI is built');
++    expect(status.get('cmake')).toBe('3.30.2');
++  });
++
++  it('reports an install of this checkout as current, and names field upgrade as the way back', () => {
++    install();
++    const status = rows(install('status').stdout);
++    expect(status.get('cli')).toBe('~/pnpm/bin/field -> ~/checkout');
++    expect(status.get('cli-current')).toMatch(/^built from [0-9a-f]{7}$/);
++    expect(status.get('ui-current')).toBe('~/checkout/ui/dist');
++    expect(status.get('audiod-current')).toBe(`~/checkout/${AUDIOD}`);
++    expect(status.get('worker-current')).toBe('field-aced');
++    expect(status.get('worker-stale')).toBe('field-voiced is out of date — run field setup voiced');
++    expect(install('status').stdout).toContain('worker-stale   ⚠️  field-voiced');
++  });
++
++  it('reports a build behind a new commit as stale', () => {
++    install();
++    const built = git(repo, 'rev-parse', '--short', 'HEAD');
++    write(join(repo, 'src/more.ts'), '');
++    git(repo, 'add', '.');
++    git(repo, 'commit', '--quiet', '-m', 'two');
++    const head = git(repo, 'rev-parse', '--short', 'HEAD');
++    expect(rows(install('status').stdout).get('cli-stale')).toBe(
++      `dist/ was built from ${built}, and the checkout is at ${head} — run field upgrade cli`,
++    );
++  });
++
++  it('reports a build behind an uncommitted edit as stale', () => {
++    install();
++    write(join(repo, 'src/cli.ts'), 'edited');
++    expect(rows(install('status').stdout).get('cli-stale')).toBe(
++      'dist/ was built with 0 uncommitted changes, and the checkout has 1 — run field upgrade cli',
++    );
++  });
++
++  it('names the file the UI bundles that changed since the UI was built', () => {
++    install();
++    const past = new Date(Date.now() - 60_000);
++    utimesSync(join(repo, 'ui/dist/index.html'), past, past);
++    expect(rows(install('status').stdout).get('ui-stale')).toBe(
++      'src/cli.ts changed since the UI was built — run field upgrade cli',
++    );
++  });
++
++  it('leaves tests out of the UI comparison, because no build reads them', () => {
++    install();
++    const built = new Date(Date.now() - 30_000);
++    const sources = new Date(Date.now() - 60_000);
++    utimesSync(join(repo, 'ui/dist/index.html'), built, built);
++    for (const file of ['src/cli.ts', 'ui/src/main.tsx']) utimesSync(join(repo, file), sources, sources);
++    write(join(repo, 'src/cli.test.ts'), '');
++    git(repo, 'add', '.');
++    git(repo, 'commit', '--quiet', '-m', 'a test');
++    expect(rows(install('status').stdout).get('ui-current')).toBe('~/checkout/ui/dist');
++  });
++
++  it('names the daemon source that changed since the daemon was built', () => {
++    install();
++    const past = new Date(Date.now() - 60_000);
++    utimesSync(join(repo, AUDIOD), past, past);
++    expect(rows(install('status').stdout).get('audiod-stale')).toBe(
++      'native/audiod/CMakeLists.txt changed since field-audiod was built — run field upgrade audiod',
++    );
++  });
++
++  it('reports the daemon current after the rebuild it names, though CMake relinked nothing', () => {
++    install();
++    const past = new Date(Date.now() - 60_000);
++    utimesSync(join(repo, AUDIOD), past, past);
++    expect(rows(install('status').stdout).has('audiod-stale')).toBe(true);
++    expect(install('audiod').status).toBe(0);
++    expect(rows(install('status').stdout).get('audiod-current')).toBe(`~/checkout/${AUDIOD}`);
++  });
++
++  it('says when field links another checkout', () => {
++    const other = join(root, 'other');
++    mkdirSync(other);
++    linkTo(other);
++    expect(rows(install('status').stdout).get('cli-elsewhere')).toBe(
++      'field links ~/other, not this checkout — run ~/checkout/install.sh cli to link this one',
++    );
++  });
++
++  it("says when another field is ahead of pnpm's on PATH", () => {
++    install('cli');
++    const elsewhere = join(root, 'elsewhere');
++    write(join(elsewhere, 'field'), '#!/bin/sh\n', 0o755);
++    const run = install('status', { PATH: [elsewhere, join(pnpmHome, 'bin'), bin].join(delimiter) });
++    expect(rows(run.stdout).get('cli-shadowed')).toBe(
++      "field on PATH is ~/elsewhere/field, ahead of pnpm's ~/pnpm/bin/field",
++    );
++  });
++
++  it('says how far the checkout is behind its upstream', () => {
++    write(join(upstream, 'src/new.ts'), '');
++    git(upstream, 'add', '.');
++    git(upstream, 'commit', '--quiet', '-m', 'two');
++    // Offline, it compares against the last fetch, which was the clone.
++    expect(rows(install('status', { FIELD_OFFLINE: '1' }).stdout).get('repo-current')).toBe(
++      'main matches origin/main (offline; compared against the last fetch of origin)',
++    );
++    expect(rows(install('status').stdout).get('repo-behind')).toBe(
++      'main is 1 commit behind origin/main — run git pull in ~/checkout, then ~/checkout/install.sh all',
++    );
++  });
++
++  it('says a branch with unpushed commits is ahead of its upstream, rather than that it matches', () => {
++    write(join(repo, 'src/local.ts'), '');
++    git(repo, 'add', '.');
++    git(repo, 'commit', '--quiet', '-m', 'local');
++    const status = rows(install('status').stdout);
++    expect(status.has('repo-current')).toBe(false);
++    expect(status.get('repo-ahead')).toBe('main is 1 commit ahead of origin/main');
++  });
++
++  it('says when CMake is too old to build the daemon', () => {
++    write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.22.1"\n`, 0o755);
++    expect(rows(install('status').stdout).get('cmake-old')).toBe(
++      '3.22.1 — building field-audiod needs CMake 3.24 or newer',
++    );
++  });
++
++  it('notes a FIELD_AUDIOD override', () => {
++    expect(rows(install('status', { FIELD_AUDIOD: '/opt/field-audiod' }).stdout).get('audiod-override')).toBe(
++      'FIELD_AUDIOD is set, so field runs /opt/field-audiod instead of this build',
++    );
++  });
++});
++
++posix('install.sh refuses', () => {
++  it('outside a checkout, and says to clone', () => {
++    const run = install(undefined, {}, join(root, 'install.sh'));
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('run this from a Field checkout');
++    expect(run.log).toEqual([]);
++  });
++
++  it('an unknown target, as a usage error', () => {
++    const run = install('everything');
++    expect(run.status).toBe(64);
++    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status]');
++    expect(existsSync(join(repo, 'dist'))).toBe(false);
++  });
++});
+diff --git a/src/keys/helper.ts b/src/keys/helper.ts
+index 0a60970f..d709c13e 100644
+--- a/src/keys/helper.ts
++++ b/src/keys/helper.ts
+@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+ import { createInterface } from 'node:readline';
+ import { z } from 'zod';
+ import { daemonBinary } from '../audiod/client.js';
++import { BUILD_DAEMON } from '../remedies.js';
+ import type { KeyboardLayout } from './position.js';
+ import type { MidiMessage } from './session.js';
+ 
+@@ -94,7 +95,7 @@ export class KeysHelper {
+ function requireDaemon(): string {
+   const binary = daemonBinary();
+   if (binary === undefined) {
+-    throw new Error('field keys needs field-audiod, which is not built (pnpm build:native, or set FIELD_AUDIOD)');
++    throw new Error(`field keys needs field-audiod, which is not built (${BUILD_DAEMON}, or set FIELD_AUDIOD)`);
+   }
+   return binary;
+ }
+diff --git a/src/remedies.ts b/src/remedies.ts
+new file mode 100644
+index 00000000..622398bd
+--- /dev/null
++++ b/src/remedies.ts
+@@ -0,0 +1,15 @@
++// The commands that bring part of an install up to date, for every message
++// that needs to name one. Those messages fire inside a song project, where
++// the checkout's pnpm scripts are not scripts, and `field upgrade <target>`
++// works from any directory (install.md §2.5). It runs install.sh, which is
++// bash, so Windows names the script to run in the checkout instead
++// (install.md §7.6).
++function upgrade(target: 'cli' | 'audiod', windows: string): string {
++  return process.platform === 'win32' ? `${windows} in the field checkout` : `field upgrade ${target}`;
++}
++
++export const BUILD_CLI = upgrade('cli', 'pnpm build');
++export const BUILD_UI = upgrade('cli', 'pnpm build:ui');
++// The root install installs the ui/ workspace member, electron included.
++export const INSTALL_UI = upgrade('cli', 'pnpm install');
++export const BUILD_DAEMON = upgrade('audiod', 'pnpm build:native');
+diff --git a/src/workers/setup.test.ts b/src/workers/setup.test.ts
+index e26921d1..8950a7bb 100644
+--- a/src/workers/setup.test.ts
++++ b/src/workers/setup.test.ts
+@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { afterEach, describe, expect, it } from 'vitest';
+ import { VOICED_SPEC } from '../voiced/client.js';
+-import { SETUP_SPECS } from '../commands/generate.js';
++import { checkWorkers, partitionExisting, selectWorkers, SETUP_SPECS } from '../commands/generate.js';
+ import {
+   environmentVerdict,
+   workerAvailable,
+@@ -307,3 +307,63 @@ describe('the shared lifecycle is edited in place, not copied', () => {
+     }
+   });
+ });
++
++// An upgrade keeps current what someone set up and sets up nothing new
++// (install.md §2.4), and `install.sh status` reports from the same probe
++// `field generate` gates on, so these hold the upgrade to the gate.
++describe('an upgrade re-syncs only what was set up', () => {
++  it('syncs an installed worker and skips a dev-only one', () => {
++    installedWorker();
++    const absent: WorkerSpec = { ...tempSpec, packageDir: `${tempDir}-absent` };
++    expect(partitionExisting([tempSpec, absent])).toEqual({ sync: [tempSpec], skip: [absent] });
++
++    devOnlyWorker();
++    expect(partitionExisting([tempSpec])).toEqual({ sync: [], skip: [tempSpec] });
++  });
++
++  it('names a worker by its package directory or its daemon name', () => {
++    expect(selectWorkers()).toBe(SETUP_SPECS);
++    expect(selectWorkers('voiced')).toEqual([VOICED_SPEC]);
++    expect(selectWorkers('field-voiced')).toEqual([VOICED_SPEC]);
++    expect(() => selectWorkers('nope')).toThrow('unknown worker "nope" — try aced or voiced');
++  });
++});
++
++describe('field setup --check', () => {
++  const label = (line: string): string => line.split(' ')[0]!;
++
++  it('reports a worker nobody set up without asking uv about it, and as no problem', () => {
++    devOnlyWorker();
++    const { calls, run } = recorder([{ status: 0 }]);
++    const { lines, ok } = checkWorkers([tempSpec], run);
++    expect(lines.map(label)).toEqual(['worker-absent']);
++    expect(lines[0]).toContain(`field setup ${tempDir}`);
++    expect(ok).toBe(true);
++    expect(calls).toEqual([['uv', '--version']]);
++  });
++
++  it('reports an installed, synced worker as current', () => {
++    installedWorker();
++    const { lines, ok } = checkWorkers([tempSpec], recorder([{ status: 0 }, { status: 0 }]).run);
++    expect(lines).toEqual([`${'worker-current'.padEnd(14)} ${tempSpec.name}`]);
++    expect(ok).toBe(true);
++  });
++
++  it('reports an installed worker that fails the check as stale, and fails', () => {
++    installedWorker();
++    const { lines, ok } = checkWorkers([tempSpec], recorder([{ status: 0 }, { status: 1 }]).run);
++    expect(lines.map(label)).toEqual(['worker-stale']);
++    expect(lines[0]).toContain(`run field setup ${tempDir}`);
++    expect(ok).toBe(false);
++  });
++
++  it('reports an installed worker with uv gone, and does not send anyone to setup', () => {
++    installedWorker();
++    const noUv = recorder([{ status: null, error: new Error('ENOENT') }]);
++    const { lines, ok } = checkWorkers([tempSpec], noUv.run);
++    expect(lines.map(label)).toEqual(['worker-no-uv']);
++    expect(lines[0]).toContain('brew install uv');
++    expect(lines[0]).not.toContain('field setup');
++    expect(ok).toBe(false);
++  });
++});
