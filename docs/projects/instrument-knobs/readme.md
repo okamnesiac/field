@@ -59,7 +59,7 @@ list. Three keymap actions choose a knob (`knob`), turn it (`turn`),
 and type a character of its value (`type`). `musical`, Field's
 adaptation of Logic's Musical Typing, replaces `musical-typing` as the
 default keymap: the arrows choose and turn, the number row types, and
-the pitch bend moves to `B` and `N`. Holding a turn key turns faster
+the pitch bend moves to `,` and `.`. Holding a turn key turns faster
 the longer you hold it, and a typed value glides to its target at a
 speed the keymap sets. Everything a knob does leaves `field keys` as
 control changes on `Field Keys`, so a take records it and any
@@ -196,7 +196,7 @@ assigned meaning and suit the rest.
 | --- | --- |
 | `{ knob: <n> }` | Moves the choice n knobs to the right, or to the left when n is negative, wrapping past either end. Sends nothing. |
 | `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning while the key is held (§2.6). |
-| `{ type: <c> }` | Types c into an entry for the chosen knob's value (§2.7). c is a digit written as a number from 0 to 9, as YAML reads `type: 1`, or the string `"."` or `"-"`. |
+| `{ type: <c> }` | Types c into an entry for the chosen knob's value (§2.7). c is a digit written as a number from 0 to 9, as YAML reads `type: 1`, or the string `"-"`. The decimal point is not an action: `Period` types it while an entry is open (§2.7). |
 
 The schema takes n as a non-zero integer. A step is one controller
 value. For a knob with a `step`, a step is the next controller value
@@ -220,8 +220,8 @@ controls:
   KeyX: { transpose: 12 }
   KeyC: { velocity: -20 }
   KeyV: { velocity: 20 }
-  KeyB: { bend: -1 }
-  KeyN: { bend: 1 }
+  Comma: { bend: -1 }
+  Period: { bend: 1 }
   Tab: { cc: 64, value: 127, mode: hold }
   ArrowLeft: { knob: -1 }
   ArrowRight: { knob: 1 }
@@ -230,7 +230,6 @@ controls:
   Digit1: { type: 1 }
   # Digit2 to Digit9 the same
   Digit0: { type: 0 }
-  Period: { type: "." }
   Minus: { type: "-" }
 ```
 
@@ -239,10 +238,11 @@ controls:
   does, with a message that lists the built-ins. `docs/keys.md` shows
   Logic's number row, the bend on `1` and `2` and the wheel's steps on
   `3` to `8`, as controls to copy into a keymap of your own.
-- **The bend moves to `B` and `N`,** on the bottom row beside the
-  octave and velocity keys, down on the left and up on the right, held
-  as before. Neither plays a note, and neither is an arrow or a typing
-  key.
+- **The bend moves to `,` and `.`,** the keys that show `<` and `>`:
+  down on `Comma` and up on `Period`, held as before. Neither plays a
+  note in Musical Typing, and neither is an arrow or a typing key.
+  While an entry is open, `Period` types the decimal point instead
+  (§2.7).
 - **The wheel's steps go.** The wheel is the knob `mod`, which the
   arrows turn and the number row types.
 - **`tracker` and `fourths` do not change** (§7 question 2).
@@ -388,8 +388,11 @@ until you complete an entry.
 
 1. **The first typing key opens an entry** on the chosen knob. The
    entry holds digits, at most one `.`, and a `-` only as its first
-   character; a key that would break that does nothing. Typing keys are
-   positions, as every key in a keymap is (keyboard-instrument.md
+   character; a key that would break that does nothing. `Period` types
+   the `.` while an entry is open, in every keymap; with no entry open
+   it does what the keymap binds there, which in `musical` is the bend
+   up. So `.` cannot open an entry: type `0.5`, not `.5`. Typing keys
+   are positions, as every key in a keymap is (keyboard-instrument.md
    §2.3): `.` and `-` are where QWERTY has them, whatever your layout
    prints there. The numeric keypad does not type, because its keys
    are not positions a keymap binds.
@@ -416,9 +419,10 @@ until you complete an entry.
    entry.
 7. **`Esc` cancels the entry** and leaves the knob as it was.
 8. **Every other key acts as it does without an entry,** and the entry
-   stays open: notes play, and the octave, velocity, bend, and sustain
-   keys work. An entry has no timeout. A keymap reload, or a knob file
-   reload that removes the knob, closes it without completing it.
+   stays open: notes play, and the octave, velocity, sustain, and bend
+   keys work, except that `Period` types. An entry has no timeout. A
+   keymap reload, or a knob file reload that removes the knob, closes
+   it without completing it.
 
 A glide runs on its own, and each knob can have one:
 
@@ -432,11 +436,16 @@ A glide runs on its own, and each knob can have one:
   is.
 
 `Enter` and `Backspace` act only on an entry and otherwise do nothing.
-Like `Esc`, they are not positions a keymap binds. With no entry open,
-`Esc` no longer quits: it puts `Ctrl-C quits` on the status line, and
-`Ctrl-C` is how you leave, in every keymap. `isQuit` in
-`src/keys/terminal.ts` quits on `Ctrl-C` alone, and a keymap still
-cannot bind `Esc`.
+Like `Esc`, they are not positions a keymap binds. `Period` is the one
+key with a meaning of each kind: the entry's decimal point while an
+entry is open, and the keymap's action otherwise. A `Period` press that
+began a bend still ends it on release, even if an entry opened while
+the key was held.
+
+With no entry open, `Esc` no longer quits: it puts `Ctrl-C quits` on
+the status line, and `Ctrl-C` is how you leave, in every keymap.
+`isQuit` in `src/keys/terminal.ts` quits on `Ctrl-C` alone, and a
+keymap still cannot bind `Esc`.
 
 ### 2.8 A take starts where your knobs are
 
@@ -580,7 +589,8 @@ with reads of one controller map, and `musical-typing` with `musical`.
   purpose holds: no keymap can trap you, because `Ctrl-C` always quits
   and no keymap binds `Esc` or a `Ctrl` chord.
 - **The instrument sets each knob's range,** in its knob file.
-- **The bend moves to the bottom row.**
+- **The bend moves to `,` and `.`,** down and up, because those keys
+  show `<` and `>`. This replaces this plan's earlier `B` and `N`.
 - **A typed value moves at a speed you set,** rather than jumping.
 
 ### 3.2 Calls made here (DECIDED, 2026-10-11, for Justin's review)
@@ -628,11 +638,20 @@ with reads of one controller map, and `musical-typing` with `musical`.
   already know it, and because it leaves the number row free for the
   bend and the wheel. `musical` keeps what those users know, the notes
   and the octave and velocity keys. It gives the number row to typing,
-  moves the bend to `B` and `N`, and makes the wheel a knob. Rejected:
+  moves the bend to `,` and `.`, and makes the wheel a knob. Rejected:
   keeping `musical-typing` beside it. When `tracker` and `fourths` are
   adapted, the proposed names are `tracked` and `quartal`.
-- **The bend sits on `B` and `N`.** They are the first free keys after
-  the bottom row's octave and velocity keys.
+- **`Period` types the decimal point only while an entry is open.**
+  The bend up now sits on `Period`, which the decimal point used. The
+  key prints `.`, and a decimal point means something only inside an
+  entry, so the key types it there, as `Enter` and `Backspace` act only
+  on an entry. The cost is that `.` cannot open an entry, so you type
+  `0.5`, and that the bend up waits while an entry is open. Rejected:
+  moving the decimal point to a free key such as `=` or `/`, which
+  prints no `.`, so every fraction would mean remembering where it went.
+  Rejected: a second, entry-only action for any position, such as an
+  `entry:` map in the keymap, which is a second way to bind a key for
+  the sake of one key.
 - **`glide` is a keymap field: seconds to cross a knob's whole range.**
   How a typed value moves is how you play, like the keymap's starting
   `velocity`, not a property of the instrument. A time for the whole
@@ -682,7 +701,7 @@ terminal.
 | 6 | On `cutoff`, type `12`, press `Backspace`, type `5`, and press `Esc`. Press `Esc` again, then `Ctrl-C`. | The entry reads `15_ Hz`. The first `Esc` closes it and leaves `cutoff` as it was. The second puts `Ctrl-C quits` on the status line, and `field keys` keeps running. `Ctrl-C` quits. |
 | 7 | On `cutoff`, type `300` and press `ArrowRight`. | `cutoff` glides to `301 Hz`, and `res` is chosen. |
 | 8 | Type `15000` on `cutoff` at `50.0 Hz`, press `Enter`, and press `ArrowUp` while it glides. | The glide stops, and `cutoff` turns one step up from where it stopped. |
-| 9 | Hold `N` over a held note, then release it. | The note bends up two semitones and returns, and the status line shows `bend +1`, then `bend +0`. |
+| 9 | Hold `.` over a held note, then release it; then hold `,`. | The note bends up two semitones and returns, and the status line shows `bend +1`, then `bend +0`; `,` bends it down to `bend -1`. |
 | 10 | Run `field keys --keymap musical-typing`. | Exit 1. The message lists `musical`, `tracker`, and `fourths`. |
 | 11 | With `cutoff` changed and chosen, delete the `attack` and `release` lines from `juno.knobs.yaml` and save. Then change `res`'s `cc` to 1 and save. | The line shows `mod`, `cutoff`, and `res`, and `cutoff` keeps its value and stays chosen. After the second save, the status line names the error, the knobs stay as they were, the voice is not reloaded, and turning `res` still changes the sound. |
 | 12 | Write `~/knobs/test.yaml` with juno's `cutoff` line alone. Start the monitor, run `field keys --knobs ~/knobs/test.yaml`, choose `cutoff`, hold `ArrowUp` for a second, then type `800` and press `Enter`. | The monitor shows CC 74 rising, never more than 25 in one second, then a run of CC 74 values that ends at 62. No instrument runs: this is what Logic or a hardware synth would receive. |
@@ -696,6 +715,7 @@ terminal.
 | 20 | In one terminal run `field keys juno` and turn `cutoff` down. In another run `field record creek/track:keys --at 17`. Play without touching a knob, stop, build, and play. | The take renders dark from its first note, and the notes file's first `controls` row is `{ at: 0, cc: 74, value: … }`. |
 | 21 | Run criterion 20's `field record` with `--count-in 1`, and turn `res` during the count-in. | The take starts with that `res`. |
 | 22 | With a take on `keys`, set `cutoff`'s `min` in `juno.knobs.yaml` to 0, then run `field check` and `field build creek`. | `field check` names the knob file's error, and the build fails the take's render with the same error instead of rendering it. Restoring the file renders the take again. |
+| 23 | With a note held, choose `attack`, type `0`, `.`, and `8`, and press `Enter`. Then press `.` again. | The entry reads `0.8_ s`, the note does not bend, and `attack` lands on `782 ms`. With the entry closed, `.` bends the note up. |
 
 These vitest tests fail before the change:
 
@@ -713,11 +733,11 @@ These vitest tests fail before the change:
   `0.950`, and whole numbers, at one width across each knob's values.
 - **`src/schema/keymap.test.ts` and `src/keys/keymap.test.ts`.** Accept
   `knob` and `turn` and reject a zero step and a fraction. Accept
-  `type` with a number from 0 to 9 or the string `"."` or `"-"`, as
-  `musical` writes them, and reject 10 and any other character.
-  `glide` defaults to 0. With no `--keymap` and no `FIELD_KEYMAP`, the
-  keymap is `musical`, which binds the arrows, `B` and `N`, and the
-  number row. `musical-typing` is not a built-in.
+  `type` with a number from 0 to 9 or the string `"-"`, as `musical`
+  writes them, and reject `"."`, 10, and any other character. `glide`
+  defaults to 0. With no `--keymap` and no `FIELD_KEYMAP`, the keymap
+  is `musical`, which binds the arrows, the bend on `Comma` and
+  `Period`, and the number row. `musical-typing` is not a built-in.
 - **`src/keys/terminal.test.ts` and `src/keys/position.test.ts`.**
   `Esc` is not a quit and `Ctrl-C` is. `CSI 13 u` resolves to `Enter`
   and `CSI 127 u` to `Backspace`.
@@ -725,7 +745,9 @@ These vitest tests fail before the change:
   the knob's controller on the keymap's channel from the default's
   unmapped value, and stops at 0 and 127. Driven by `tick(now)`, a held
   turn moves 1 step at the press, none before 300 ms, then 1, 2, and 4
-  steps a tick at the times in §2.6. An entry ignores a second `.` and
+  steps a tick at the times in §2.6. `Period` types `.` while an entry
+  is open and bends otherwise, and a bend it began ends on its release
+  even if an entry opened meanwhile. An entry ignores a second `.` and
   a later `-`, deletes on `Backspace`, completes on `Enter` and before
   a knob action, and lets a note play while it is open. With `glide: 1`
   a value from 127 to 62 glides in 13 ticks and lands on 62; a turn
@@ -793,17 +815,17 @@ either renders once more.
 
 1. **Knobs, live and in takes.** Knob files and `--knobs`; choosing,
    turning, and the knob line; `musical` as the default, with the
-   arrows and the bend on `B` and `N`; the voicer's `cc<n>` and
+   arrows and the bend on `,` and `.`; the voicer's `cc<n>` and
    `FIELD_KNOBS`; the checked copies a voice reads, the render's check,
    and `field check`; `juno` and `bass` with their knob files; the docs;
    and the note at keyboard-instrument.md §3. Criteria 1 to 3, 9 to 11,
    13, 15 to 17, 19, and 22, and criteria 12 and 18 up to their typed
    values.
 2. **Typing and the glide.** The `type` action and the number row,
-   `Enter` and `Backspace`, `Esc` cancelling and no longer quitting,
-   `glide`, and the entry and the glide on the knob line, with the note
-   at keyboard-instrument.md §2.4. It needs chunk 1's knobs. Criteria 4
-   to 8, 12, 14, and 18.
+   `Enter`, `Backspace`, and `Period` as the decimal point, `Esc`
+   cancelling and no longer quitting, `glide`, and the entry and the
+   glide on the knob line, with the note at keyboard-instrument.md
+   §2.4. It needs chunk 1's knobs. Criteria 4 to 8, 12, 14, 18, and 23.
 3. **Where a take starts.** `.field/keys.json`, `controllers` in `arm`,
    and the daemon's chase. It needs chunk 1's controller map. Criteria
    20 and 21.
