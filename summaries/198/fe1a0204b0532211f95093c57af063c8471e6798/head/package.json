@@ -1,0 +1,37 @@
+{
+  "name": "field",
+  "version": "0.1.0",
+  "description": "Git-native, agent-operable music production system",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "field": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "scripts": {
+    "build": "node scripts/stamp-build.mjs --clear && tsc -p tsconfig.build.json && node scripts/stamp-build.mjs",
+    "prepare": "pnpm build",
+    "field": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build --parallel 4 --config Release && cmake -S native/sc-fieldout -B native/sc-fieldout/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/sc-fieldout/build --config Release",
+    "gen:limits": "tsx scripts/gen-plan-limits.ts",
+    "build:ui": "pnpm --dir ui build"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "yaml": "^2.8.0",
+    "zod": "^4.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "@types/ws": "^8.5.0"
+  }
+}
