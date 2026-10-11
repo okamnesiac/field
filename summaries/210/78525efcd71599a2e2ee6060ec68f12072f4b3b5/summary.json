@@ -1,0 +1,253 @@
+{
+ "version": 1,
+ "name": "Instrument knobs",
+ "project": "instrument-knobs",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 210,
+  "title": "Type a knob's value on the number row and glide it there, and quit field keys on Ctrl-C alone (instrument-knobs.md chunk 2)",
+  "head": "78525efcd71599a2e2ee6060ec68f12072f4b3b5",
+  "headRef": "knobs/type",
+  "base": "6a7f2a299257ec425f723d61cd44debd0648071e",
+  "baseRef": "knobs/turn",
+  "basePr": 209
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> plays the computer keyboard as a MIDI source named <code>Field Keys</code>. Chunk 1 of the instrument-knobs plan, #209 beneath this pull request, gave it knobs: a line of named knobs, each a MIDI controller (CC), that you choose with the left and right arrows and turn with up and down. Turning a knob across its whole range takes about 2.3 seconds of holding an arrow, and landing on a particular value means letting go in time.",
+   "This pull request is chunk 2: you can type the value instead. In <code>musical</code>, the default keymap, the number row types the chosen knob's value in the units its knob file names, so <code>800</code> on <code>cutoff</code> means 800 Hz. <code>Enter</code> completes the value. The knob then glides to the nearest of the controller's 128 values, sending one control change every 40 ms, at a speed set by the keymap's new <code>glide</code> field. Because the glide is a run of MIDI messages, a recorded take keeps it and any instrument answers it.",
+   "Two keys change meaning. <code>Period</code> (<code>.</code>), which bends the pitch up in <code>musical</code>, types the decimal point while a value is open, and bends otherwise. <code>Esc</code> cancels a value instead of quitting, and with no value open it puts <code>Ctrl-C quits</code> on the status line. <code>Ctrl-C</code> is now the only key that quits."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Knob.</b> A named MIDI controller with a range, a curve, and units, read from a knob file such as <code>juno.knobs.yaml</code>.</li><li><b>Controller value.</b> One of the 128 values, 0 to 127, that a MIDI control change carries. A knob maps each one to a value in its range.</li><li><b>Entry.</b> The value you are typing, shown in the chosen knob's place until <code>Enter</code>, <code>Esc</code>, or a knob key closes it.</li><li><b>Glide.</b> The run of control changes that moves a knob to a completed value, one per 40 ms tick at most.</li><li><b>Tick.</b> One call of the session's <code>tick(now)</code>, which a 40 ms timer makes while a turn key is held or a glide moves.</li><li><b>Position.</b> A physical key, named as on a US keyboard (<code>Digit1</code>, <code>Period</code>), which is what a keymap binds.</li></ul>"
+   },
+   {
+    "id": "later",
+    "title": "What this leaves for later",
+    "html": "<ul class=\"tight\"><li><b>Chunk 3, #212.</b> A take that starts where your knobs are: <code>.field/keys.json</code>, the controllers passed in <code>arm</code>, and the daemon's chase. Criteria 20 and 21.</li><li><b>The criteria by hand.</b> Criteria 4 to 8, 12, 14, 18, and 23 need a kitty terminal and ears. Plan §10.3 records them as owed, and the pull request body gives the steps.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li><b>One open finding.</b> The comment on the 40 ms timer in <code>src/commands/keys.ts</code> still says it runs only while a turn key is held, though it now runs during glides too (flagged on <code>session.ts</code> line 226).</li><li><b>Reviewed by reading.</b> The commit's co-author trailer names the GitHub login <code>claude</code>, which has only read access, so the review ran none of the head's code. CI ran it instead.</li><li><b>CI passes at this head.</b> <code>linux</code> and <code>windows</code> both pass at <code>78525ef</code>. An earlier head with the same patch failed a timing-dependent voice-host test on linux, and two of #209&#39;s tests on windows.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "keymap",
+   "title": "A keymap can type and set a glide speed",
+   "kicker": "The <code>type</code> action, the <code>glide</code> field, and <code>musical</code>'s number row",
+   "intro": [
+    "A keymap is a YAML file that maps each key position to a note or an action. This group adds one action and one field to its schema, and uses both in <code>musical</code>.",
+    "<ul><li><b><code>{ type: &lt;c&gt; }</code></b> types one character into the chosen knob's value: a digit, written as a number from 0 to 9, or the string <code>\"-\"</code>. The decimal point is not an action, because <code>Period</code> types it only while a value is open, in every keymap (see the session group).</li><li><b><code>glide</code></b> is the seconds a typed value takes to cross a knob's whole range, so a shorter move takes its share. It defaults to 0, which sets a value at once, so a keymap that never mentions it types without a glide.</li></ul>",
+    "<code>musical</code> binds <code>1</code> to <code>0</code> and <code>-</code> to <code>type</code>, and sets <code>glide: 1</code>. <code>tracker</code> and <code>fourths</code> bind no <code>type</code>, so no value can open there and <code>.</code> keeps playing its note."
+   ],
+   "files": [
+    {
+     "path": "src/schema/keymap.ts",
+     "note": "The <code>type</code> action, the <code>glide</code> field, and the reserved <code>Escape</code>'s new message.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 66,
+       "text": "<code>type</code> accepts only a whole number from 0 to 9 or the literal <code>\"-\"</code>, and the schema test refuses <code>\".\"</code>, 10, <code>\"a\"</code>, <code>\"1\"</code>, and -1. Checked by reading the union and the test, which passes in CI on linux and windows."
+      }
+     ]
+    },
+    {
+     "path": "src/schema/keymap.test.ts"
+    },
+    {
+     "path": "keymaps/musical.yaml",
+     "note": "The number row and <code>-</code> type, and <code>glide: 1</code> crosses a knob's range in one second."
+    }
+   ]
+  },
+  {
+   "id": "keys",
+   "title": "Enter, Backspace, and Esc reach the session, and only Ctrl-C quits",
+   "kicker": "Key positions and the quit check",
+   "intro": [
+    "<code>field keys</code> reads the keyboard through the kitty keyboard protocol, under which the terminal reports every key as an escape sequence, such as <code>CSI 13 u</code> for <code>Enter</code>. <code>positionOf</code> turns each key event into a position, and <code>isQuit</code> decides, before the session sees a key, whether that key ends the program.",
+    "Before this change, <code>isQuit</code> matched both <code>Esc</code> and <code>Ctrl-C</code>, and <code>Enter</code> and <code>Backspace</code> resolved to no position. Now <code>positionOf</code> names <code>Enter</code>, <code>Escape</code>, and <code>Backspace</code>, from codes 13, 27, and 127, and <code>isQuit</code> matches only <code>Ctrl-C</code>. The session decides what the three keys do.",
+    "No keymap can bind the three keys. <code>Enter</code> and <code>Backspace</code> are not bindable positions, and <code>Escape</code> stays reserved. A key pressed with <code>Ctrl</code> does nothing in a keymap either, so no keymap can stop <code>Ctrl-C</code> from quitting."
+   ],
+   "files": [
+    {
+     "path": "src/keys/terminal.ts",
+     "note": "<code>isQuit</code> no longer matches <code>Esc</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 112,
+       "text": "A raw <code>\\x03</code> byte and <code>CSI 99;5u</code> still quit, and so does <code>Ctrl</code> at the US <code>c</code> position on a layout without a <code>c</code>, through the base layout key. A sequence cut off at the end of one read comes back as <code>rest</code> and is decoded with the next read, both while the daemon is still answering and in the play loop. Checked by reading <code>decodeTerminal</code> and both callers in <code>src/commands/keys.ts</code>."
+      },
+      {
+       "kind": "context",
+       "line": 116,
+       "text": "<code>Ctrl-D</code> quit neither before this change nor after it. Under the protocol it arrives as <code>CSI 100;5u</code>, which <code>isQuit</code> ignores and the session's modifier rule drops."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/terminal.test.ts"
+    },
+    {
+     "path": "src/keys/position.ts",
+     "note": "<code>FUNCTIONAL_KEYS</code> gains <code>Enter</code>, <code>Escape</code>, and <code>Backspace</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 34,
+       "text": "None of the three is in the schema's <code>BINDABLE_POSITIONS</code>, so a keymap that names <code>Enter</code> or <code>Backspace</code> fails with the error for an unknown position, and one that names <code>Escape</code> with its reserved message."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/position.test.ts"
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "The help text says <code>Ctrl-C</code> quits."
+    }
+   ]
+  },
+  {
+   "id": "session",
+   "title": "The session types, completes, and glides a value",
+   "kicker": "The entry, <code>Period</code>'s two meanings, and a glide per controller",
+   "intro": [
+    "<code>KeysSession</code> in <code>src/keys/session.ts</code> is the keyboard's state: it turns each press and release into MIDI messages and holds what the screen shows. Tests drive it without a terminal, and a 40 ms timer calls its <code>tick(now)</code> to move anything that changes over time.",
+    "An <i>entry</i> is the value being typed. The first <code>type</code> key opens one on the chosen knob. It holds digits, at most one <code>.</code>, and a <code>-</code> only as its first character, and a key that would break that does nothing. Every key not in the table below acts as usual, so notes keep playing while you type.",
+    "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Key</th><th>With an entry open</th><th>With none open</th></tr></thead><tbody><tr><td><code>Enter</code></td><td>Completes it</td><td>Nothing</td></tr><tr><td><code>Backspace</code></td><td>Deletes the last character, and closes an empty entry</td><td>Nothing</td></tr><tr><td><code>Esc</code></td><td>Cancels it</td><td>Shows <code>Ctrl-C quits</code></td></tr><tr><td><code>Period</code></td><td>Types <code>.</code></td><td>The keymap's action, the bend up in <code>musical</code></td></tr><tr><td>Left, right</td><td>Completes it, then moves the choice</td><td>Moves the choice</td></tr><tr><td>Up, down</td><td>Completes it, then turns, which stops the glide it started</td><td>Turns</td></tr></tbody></table></div>",
+    "Completing an entry clamps the number to the knob's range and takes the controller value whose mapped value is nearest. With <code>glide: 0</code> the session sends it at once. Otherwise it starts a <i>glide</i>: a record, kept per controller, of where the knob started, where it is going, and when. Each tick moves it by the time elapsed, so a late tick catches up, and sends at most one control change per controller. A turn of the gliding knob, a panic, a keymap reload, and quitting each stop it."
+   ],
+   "files": [
+    {
+     "path": "src/keys/session.ts",
+     "note": "The entry, <code>type()</code>, <code>complete()</code>, the glides in <code>tick()</code>, and the keys handled before the keymap.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 226,
+       "text": "Open finding. <code>ticking()</code> is now true while a glide moves, but the comment above the timer in <code>src/commands/keys.ts</code> line 283 still says the timer runs only while a turn key is held, and the function is still named <code>tickWhileTurning</code>. Reword the comment and rename the function."
+      },
+      {
+       "kind": "verify",
+       "line": 117,
+       "text": "<code>Period</code> with an entry open types <code>.</code> before the keymap is consulted and records nothing in <code>held</code> or <code>heldControls</code>, so its release sends nothing. A bend that <code>Period</code> began is in <code>heldControls</code>, so it ends on the release even if an entry opened while the key was held. Checked by tracing <code>press</code> and <code>release</code>. The session tests cover both cases."
+      },
+      {
+       "kind": "verify",
+       "line": 324,
+       "text": "With <code>glide: 1</code> a glide moves 0.127 controller values a millisecond, so 127 to 62, 65 values, lands on the 13th 40 ms tick: 520 ms gives 66, capped at 65. Checked by hand and by the session test, which passes in CI."
+      },
+      {
+       "kind": "context",
+       "line": 365,
+       "text": "Up or down completes the entry and then turns, and the turn deletes the glide that the completion just started. With <code>glide</code> above 0, the typed value is never sent, and the knob turns one step from where it was. Plan §2.7 step 5 asks for exactly this."
+      },
+      {
+       "kind": "context",
+       "line": 72,
+       "text": "<code>entry.label</code> is written in <code>type()</code> but read only by a test. The knob line and <code>complete()</code> both use the chosen knob."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/session.test.ts"
+    },
+    {
+     "path": "src/keys/knobs.ts",
+     "note": "<code>nearestController</code> clamps a typed number and finds the nearest controller value.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 142,
+       "text": "<code>800</code> on <code>cutoff</code>, 50 to 15000 Hz on the <code>exp</code> curve, lands on 62, which maps to 809.6 Hz, against 774.0 Hz for 61. <code>0.8</code> on <code>attack</code>, 0.005 to 4 s, lands on 96, which maps to 0.7824 s and prints <code>782 ms</code>, against 0.8247 s for 97. Checked by computing the curve separately."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/knobs.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "display",
+   "title": "The knob line shows the entry, and --print lists the typing keys",
+   "kicker": "<code>KnobLine</code> and the keymap printer",
+   "intro": [
+    "The knob line sits between the instrument's line and the status line. It prints each knob's name and value at a fixed width, so turning a knob never moves the knobs after it or the notes on the status line.",
+    "While an entry is open, the chosen knob shows what you have typed, then <code>_</code>, then the units, padded to the value's width: <code>cutoff  800_ Hz</code>. An entry wider than the value widens that knob until the entry closes. The status line shows <code>Ctrl-C quits</code> through the session's existing <code>message</code>. <code>field keys --print</code> draws each typing key as its character on the number row and describes it as typing into the chosen knob's value."
+   ],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "<code>KnobLine.text</code> puts the entry in the chosen knob's place.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 533,
+       "text": "The entry shows on the chosen knob, which is the knob <code>complete()</code> acts on. A knob key completes the entry before it moves the choice, and a knob file reload keeps the choice on the same name or closes the entry. Checked by reading <code>control</code> and <code>setKnobs</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/keys.test.ts"
+    },
+    {
+     "path": "src/keys/print.ts",
+     "note": "Tags a <code>type</code> key with its character, and describes it."
+    },
+    {
+     "path": "src/keys/print.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The guide and the plans",
+   "kicker": "How to type a value, the one quit key, and what chunk 2 settled",
+   "intro": [
+    "<code>docs/keys.md</code> is the user guide for <code>field keys</code>. It gains a \"Type a value\" section, the <code>type</code> action and the <code>glide</code> field in its keymap reference, and <code>Ctrl-C</code> as the one way to quit.",
+    "The instrument-knobs plan gains §10, which records what this chunk settled, what was verified and how, and what is still owed. keyboard-instrument.md §2.4 gets a dated note, because its rule was that <code>Escape</code> always quits."
+   ],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "The \"Type a value\" section, the <code>type</code> action and <code>glide</code> field, and <code>Ctrl-C</code> as the quit key.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 705,
+       "text": "The <code>panic</code> row does not say that a panic stops every glide. The \"Type a value\" section does."
+      }
+     ]
+    },
+    {
+     "path": "README.md"
+    },
+    {
+     "path": "docs/projects/instrument-knobs/readme.md",
+     "note": "§10, chunk 2 as built.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 1007,
+       "text": "§10.3 lists what is still owed: criteria 4 to 8, 12, 14, 18, and 23 by hand, in Ghostty or iTerm2 and by ear."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "A dated note at §2.4: <code>Escape</code> cancels a typed value, and <code>Ctrl-C</code> quits."
+    }
+   ]
+  }
+ ]
+}
