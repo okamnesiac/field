@@ -239,6 +239,34 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
     }
   });
 
+  // Blocks start on a grid the locate to `at` sets. A region a whole
+  // number of blocks long ends a block exactly on `until` every pass,
+  // and the block after it already begins at `at`, so that is the only
+  // block that can end the pass.
+  it('a region a whole number of blocks long ends every pass on its until', { timeout: 20_000 }, async () => {
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    const takes: AnyTake[] = [];
+    client.on('event', (e: AudiodEvent) => {
+      if (e.event === 'take') takes.push(e.take);
+    });
+    try {
+      const { session } = await compileSession(root, 'creek');
+      await client.session(session);
+      await client.arm('//songs/creek/track:main', 1);
+      await client.record(24000, undefined, 24000 + 48 * 512, true); // 48 null-clock blocks
+      await followLoop(client, takes, 3, 8000);
+      const passes = [...takes];
+      await client.stop();
+      for (const take of passes) {
+        expect(take.started_at_samples).toBe(24000);
+        expect(take.frames).toBe(48 * 512);
+        assertGapless(readWav(join(root, take.file)).channels[0]!);
+      }
+    } finally {
+      client.close();
+    }
+  });
+
   // A pass the heartbeat could not open a take for ahead of its wrap is
   // skipped whole and counted, and the loop goes on (recording.md §15.4).
   // These two hold that when the message thread falls behind the wraps:

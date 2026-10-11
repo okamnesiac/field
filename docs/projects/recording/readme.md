@@ -599,6 +599,9 @@ What landed, and the decisions it made:
    `session` swap also dropped the take's region, so the clock ran on
    past `until`. A swap now carries the region onto the incoming
    session, and the daemon refuses a session the region does not fit.
+   A block that ended exactly on `until` hid the wrap, because the next
+   block already began at `at`, so that pass ran on into the next one.
+   The callback now ends a pass in the block that reaches `until`.
 5. **`field record --loop` lands takes as they arrive**, each `take`
    event landing in order while the next pass records, the last one
    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs

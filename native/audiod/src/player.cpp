@@ -1091,12 +1091,14 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
     // mid-block. Under a loop take the same frame begins the next pass
     // — the wrap in pullAudio put the rest of this block at the region's
     // start — so the standby transaction takes over inside this block
-    // and not one sample is lost between passes.
+    // and not one sample is lost between passes. A block that ends
+    // exactly on `until` ends the pass too, with nothing left over: the
+    // next block already begins at the region's start, so it cannot.
     const juce::int64 untilAt = captureUntil.load();
     const juce::int64 here = position == -2 ? freeBefore : position;
     int cut = n;
     bool ending = false;
-    if (untilAt >= 0 && position >= 0 && here + n > untilAt)
+    if (untilAt >= 0 && position >= 0 && here + n >= untilAt)
     {
         cut = (int) std::max<juce::int64> (from, untilAt - here);
         ending = true;
