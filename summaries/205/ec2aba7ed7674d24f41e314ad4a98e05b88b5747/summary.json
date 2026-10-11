@@ -1,0 +1,235 @@
+{
+ "version": 1,
+ "name": "Release workflow",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 205,
+  "title": "Add the Release workflow: a version bump that merges tags the release (install.md chunk 2)",
+  "head": "ec2aba7ed7674d24f41e314ad4a98e05b88b5747",
+  "headRef": "release-workflow",
+  "base": "9e0fc792f2e6e9387580d414266bf6e3d284e228",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a command-line music production tool. Until this change it had no way to cut a release: <code>package.json</code> has said 0.1.0 since the start, and the repository has no tags and no GitHub releases. The install plan's one-line installer, a later chunk, needs a release channel to follow, so this pull request adds the release flow Projector uses.",
+   "<ol><li><b>Propose.</b> A maintainer starts the Release workflow by hand on GitHub and chooses <code>patch</code>, <code>minor</code>, or <code>major</code>. Its propose job raises the version in <code>package.json</code> on a <code>release/vX.Y.Z</code> branch and opens a pull request.</li><li><b>Merge.</b> Merging that pull request is the decision to ship.</li><li><b>Publish.</b> The merge changes <code>package.json</code> on <code>main</code>, which runs the publish job. It tags <code>vX.Y.Z</code>, force-moves the major tag <code>v0</code> to the same commit, and creates a GitHub release with generated notes.</li></ol>",
+   "A release publishes no files. The daemon, <code>field-audiod</code>, links JUCE and the VST3 SDK, whose terms are copyleft (AGPLv3 and GPLv3) unless you hold commercial licenses for both. Publishing a prebuilt daemon would distribute it under those terms, so the plan now decides that whoever installs Field builds it. The release installer, chunk 3, will build from the tag's source.",
+   "The review found two problems, flagged on their lines below. Before the first release exists, any <code>package.json</code> edit merged to <code>main</code> publishes v0.1.0 unasked. And under a common git setting, the tests push tags to the real repository."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Immutable tag</b>: <code>vX.Y.Z</code>, which names one release and never moves.</li><li><b>Major tag</b>: <code>v0</code>, which every 0.x release moves to its own commit. The future installer follows it.</li><li><b>Propose job</b>: the workflow job a maintainer starts by hand. It opens the release pull request.</li><li><b>Publish job</b>: the job that runs on a <code>package.json</code> change to <code>main</code>. It tags and creates the GitHub release.</li><li><b>Exit 3</b>: what <code>node scripts/release.ts released</code> returns when the version on <code>main</code> has no tag yet.</li></ul>"
+   },
+   {
+    "id": "settings",
+    "title": "Repository settings the flow depends on",
+    "html": "<ul class=\"tight\"><li><b>Actions cannot open pull requests.</b> <code>can_approve_pull_request_reviews</code> is <code>false</code>, so the propose job pushes its branch, fails, and prints the link that opens the pull request by hand.</li><li><b>One ruleset, on <code>main</code> only.</b> No force push, linear history, squash merges, resolved threads, and no required checks.</li><li><b>No tag rules.</b> Nothing stops the publish job from force-moving <code>v0</code>.</li><li><b>Private repository.</b> Releases and tags are visible only to collaborators for now.</li></ul>"
+   },
+   {
+    "id": "history",
+    "title": "Review history so far",
+    "html": "<ul class=\"tight\"><li><b><code>ec2aba7</code></b>: changes requested, with two open threads. One is on the unplanned v0.1.0 release in <code>.github/workflows/release.yml</code>, and one is on the tests' pushes in <code>src/release.test.ts</code>.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "script",
+   "title": "The release script does each step, and works by hand",
+   "kicker": "scripts/release.ts and its tests: bump, set, released, and tag",
+   "intro": [
+    "<code>scripts/release.ts</code> is a TypeScript file that Node 24 runs directly by stripping its types. It imports only Node's own modules, so it needs no <code>pnpm install</code>. It has four commands:",
+    "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody><tr><td><code>bump patch|minor|major</code></td><td>Raises one part of the version, writes it to <code>package.json</code>, and prints it.</td></tr><tr><td><code>set X.Y.Z</code></td><td>Writes an exact version. Both commands refuse a version that does not go up.</td></tr><tr><td><code>released</code></td><td>Exits 0 when the version on <code>origin/main</code> is tagged, and 3 when it is not.</td></tr><tr><td><code>tag</code></td><td>Tags that version, force-moves <code>v0</code>, pushes both, and creates the GitHub release. <code>--no-release</code> skips the release.</td></tr></tbody></table></div>",
+    "The version to tag comes from <code>origin/main</code>, never from your checkout, so a bump that has not merged cannot name a release.",
+    "The tests run the script against a temporary repository whose <code>origin</code> is a bare repository on disk. A stand-in that records its arguments replaces the GitHub release."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Field's release version is <code>package.json</code>'s alone. The daemon (<code>native/audiod/src/version.h</code>) and the model workers (<code>DAEMON_VERSION</code> in each worker's <code>protocol.py</code>) keep their own versions, which describe what each process speaks, so a release never touches them."
+    }
+   ],
+   "files": [
+    {
+     "path": "scripts/release.ts",
+     "note": "The four commands, and the tag step that pushes <code>vX.Y.Z</code> and force-moves <code>v0</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 60,
+       "text": "<code>set</code> compares versions as numbers, so it refuses 0.9.0 after 0.10.0. The test at <code>src/release.test.ts</code> line 75 covers it, and all 14 tests passed at this head."
+      },
+      {
+       "kind": "context",
+       "line": 100,
+       "text": "<code>merged</code> fetches tags with <code>--force</code>, because every release moves <code>v0</code>, and a stale local copy of it would otherwise refuse the fetch."
+      },
+      {
+       "kind": "verify",
+       "line": 110,
+       "text": "<code>git</code> and <code>gh</code> run through <code>spawnSync</code> with argument arrays, so no value passes through a shell."
+      },
+      {
+       "kind": "context",
+       "line": 140,
+       "text": "The two tags go out in two pushes. A failure between them leaves <code>vX.Y.Z</code> pushed and <code>v0</code> unmoved. A re-run of the publish job then reports the version released and exits 0, and <code>tag</code> refuses it. A remote that rejected the second push once reproduced this. The review suggests one <code>git push --atomic</code> for both tags."
+      },
+      {
+       "kind": "verify",
+       "line": 147,
+       "text": "The GitHub repository comes from <code>remote.origin.url</code> as configured, not from <code>git remote get-url</code>, which applies <code>insteadOf</code> rewrites. The test at <code>src/release.test.ts</code> line 99 checks that a rewritten remote still names <code>okamnesiac/field</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/release.test.ts",
+     "note": "Runs the script against a temporary repository with a bare <code>origin</code>.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 51,
+       "text": "Under a common <code>pushInsteadOf</code> setting, these tests push tags to the real repository. The script's own <code>git</code> calls inherit the real <code>HOME</code>, and git applies a global <code>pushInsteadOf</code> rule to this configured GitHub URL rather than to the local <code>insteadOf</code> rewrite. With <code>[url \"git@github.com:\"] pushInsteadOf = https://github.com/</code> in <code>~/.gitconfig</code>, the first <code>tag()</code> test pushes <code>v0.1.0</code> and <code>v0</code> to <code>okamnesiac/field</code>. A decoy repository in GitHub's place received both tags. Fix: set <code>remote.origin.pushurl</code> to the bare repository, or set <code>GIT_CONFIG_GLOBAL</code> and <code>GIT_CONFIG_NOSYSTEM</code> in <code>process.env</code> for the suite."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "workflow",
+   "title": "The Release workflow proposes a bump and publishes the merge",
+   "kicker": ".github/workflows/release.yml: a hand-started propose job, and a publish job on main",
+   "intro": [
+    "The workflow has two jobs, and each runs <code>scripts/release.ts</code> under plain Node. The <b>propose</b> job runs when a maintainer starts the workflow by hand. It runs <code>bump</code>, commits the new version on a <code>release/vX.Y.Z</code> branch, force-pushes that branch, and opens the release pull request. The <b>publish</b> job runs on every push to <code>main</code> that changes <code>package.json</code>. It runs <code>released</code>, and then <code>tag</code> when that exits 3, which means the version on <code>main</code> has no tag yet.",
+    "This repository does not let GitHub Actions open pull requests (<b>Settings &gt; Actions &gt; General &gt; Workflow permissions</b>). So today the propose job pushes the branch, fails, and prints the link that opens the pull request by hand. Merging that pull request still publishes the release."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The workflow is Projector's <code>release.yml</code> step for step. It adds <code>actions/setup-node</code> for Node 24, and the link it prints when it cannot open the pull request."
+    },
+    {
+     "kind": "verify",
+     "text": "Every <code>${{ }}</code> value reaches the shell through <code>env:</code>, never inline in a <code>run</code> step. <code>bump</code> is a <code>choice</code> input, and the script exits 2 on any other value. Both <code>run</code> steps pass <code>bash -n</code> after a YAML parse."
+    },
+    {
+     "kind": "verify",
+     "text": "The organization's one ruleset covers only <code>main</code>: no force push, linear history, squash merges, resolved threads, and no required checks. No ruleset covers tags or <code>release/*</code>, so force-moving <code>v0</code> and force-pushing the release branch are allowed. Both were read with <code>gh api</code> from the rulesets and effective-rules endpoints."
+    }
+   ],
+   "files": [
+    {
+     "path": ".github/workflows/release.yml",
+     "note": "Two jobs: propose on a manual run, and publish on a <code>package.json</code> push to <code>main</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 24,
+       "text": "<code>contents: write</code> applies to both jobs, which push a branch or tags. Only the propose job adds <code>pull-requests: write</code>."
+      },
+      {
+       "kind": "context",
+       "line": 58,
+       "text": "The force push replaces the workflow's own release branch when a run is retried. No ruleset covers <code>release/*</code>."
+      },
+      {
+       "kind": "flag",
+       "line": 88,
+       "text": "Any <code>package.json</code> edit merged before the first release publishes v0.1.0. <code>main</code> is at 0.1.0 with no tag, and this step releases whenever <code>released</code> exits 3, without checking that the push changed the version. So the next pull request that edits <code>package.json</code> without a bump, such as #198's <code>build:native</code> change, tags <code>v0.1.0</code>, creates <code>v0</code>, and publishes a v0.1.0 release ahead of the planned 0.2.0. Running this step against a local bare remote reproduced it. Fix: pass <code>github.event.before</code> through <code>env:</code>, and exit 0 when <code>package.json</code>'s version there equals the merged one."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The plan decides a release is a tag that installers build",
+   "kicker": "docs/projects/install/readme.md: §3.1, §3.2, §4, §7.1 to §7.3, and §9",
+   "intro": [
+    "The install plan had said a release would publish built files: a CLI tarball, a daemon for each platform, and checksums. It left open, in §7.1, whether a published daemon could carry JUCE's and the VST3 SDK's copyleft terms. This change decides §7.1: Field publishes no daemon binary. A user who builds the daemon for their own use distributes nothing, so those terms ask nothing of them. JUCE is not in the repository either, because CMake fetches it at build time.",
+    "Once every user needs a compiler for the daemon, a prebuilt CLI would save only the few seconds <code>tsc</code> takes, so the plan drops it too. A release becomes a tag and a GitHub release. The release installer, chunk 3, downloads the tag's source and runs the steps a checkout install runs."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The plan stays <code>in-progress</code>, so the change makes no new readiness claim. The questions it opens go to chunk 3: how a release install links <code>field</code> (§3.2), and whether Windows gets an <code>install.ps1</code> (§7.6). Which domain serves the installer (§7.4) and worker environments across versions (§7.5) stay open for chunks 3 and 4."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "§3.1 describes tag-only releases, §3.2 builds from source, §7.1 and §7.3 are decided, and §9 records chunk 2 as built.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 11,
+       "text": "\"Field has releases now\" runs ahead of the facts: no release exists yet, and §9.3 still owes the first. The review suggests \"Field can cut releases now\"."
+      },
+      {
+       "kind": "context",
+       "line": 306,
+       "text": "§4's earlier decision, that releases ship built artifacts, is amended in place with what changed, as the repository's rules ask when new evidence overturns a decision."
+      },
+      {
+       "kind": "context",
+       "line": 347,
+       "text": "This acceptance criterion does not hold until the first release exists. See the flag on <code>.github/workflows/release.yml</code> line 88."
+      },
+      {
+       "kind": "context",
+       "line": 399,
+       "text": "One obligation survives the decision: if audiofield.io ever runs the daemon for users, AGPLv3 §13 asks it to offer them the daemon's source."
+      },
+      {
+       "kind": "context",
+       "line": 426,
+       "text": "§7.3 decides the case where binaries come later: build them on a maintainer's Mac, because a macOS runner costs ten times a Linux one under a $40 monthly Actions cap."
+      },
+      {
+       "kind": "verify",
+       "line": 549,
+       "text": "<code>can_approve_pull_request_reviews</code> is <code>false</code> today, read with <code>gh api repos/okamnesiac/field/actions/permissions/workflow</code>."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "How a maintainer cuts a release",
+   "kicker": "docs/release.md, and the links to it from docs/README.md and AGENTS.md",
+   "intro": [
+    "<code>docs/release.md</code> is the page a maintainer reads to cut a release: start the workflow, merge its pull request, and let the publish job tag it. It also shows the four script commands for running the steps by hand, and says why the daemon's and the workers' versions do not move with a release.",
+    "<code>docs/README.md</code> and <code>AGENTS.md</code> each add the page to their list of docs. The <code>AGENTS.md</code> edit is in its docs list, outside the section that Projector generates."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/release.md",
+     "note": "The maintainer's how-to: the workflow, the script by hand, and the versions a release leaves alone.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 30,
+       "text": "This sentence does not hold before the first release. See the flag on <code>.github/workflows/release.yml</code> line 88."
+      },
+      {
+       "kind": "verify",
+       "line": 56,
+       "text": "The version files it names exist: <code>native/audiod/src/version.h</code>, and <code>DAEMON_VERSION</code> in the <code>aced</code> and <code>voiced</code> workers' <code>protocol.py</code>. <code>python/worker</code> is the shared protocol library, not a worker."
+      }
+     ]
+    },
+    {
+     "path": "docs/README.md"
+    },
+    {
+     "path": "AGENTS.md"
+    }
+   ]
+  }
+ ],
+ "project": "install"
+}

@@ -1,0 +1,948 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+new file mode 100644
+index 00000000..043a5cef
+--- /dev/null
++++ b/.github/workflows/release.yml
+@@ -0,0 +1,104 @@
++name: Release
++
++# Start a release by hand: choose patch, minor, or major, and the propose job
++# opens a pull request that raises the version in package.json. Merging it is
++# the decision to ship; the publish job then tags the merged version, moves the
++# major tag the installer follows, and creates the GitHub release
++# (install.md §3.1, docs/release.md).
++#
++# Both jobs run scripts/release.ts under plain Node, which strips its types,
++# so neither installs a dependency. A release publishes no files: whoever
++# installs it builds it, the daemon included (install.md §7.1).
++on:
++  workflow_dispatch:
++    inputs:
++      bump:
++        description: Which part of the version to raise
++        type: choice
++        options: [patch, minor, major]
++        default: patch
++  push:
++    branches: [main]
++    paths: [package.json]
++
++permissions:
++  contents: write
++
++concurrency:
++  group: release
++  cancel-in-progress: false
++
++jobs:
++  propose:
++    if: github.event_name == 'workflow_dispatch'
++    runs-on: ubuntu-latest
++    permissions:
++      contents: write
++      pull-requests: write
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 24
++      - name: Open the release pull request
++        env:
++          BUMP: ${{ inputs.bump }}
++          GH_TOKEN: ${{ github.token }}
++          REPO: ${{ github.repository }}
++        run: |
++          set -euo pipefail
++          version=$(node scripts/release.ts bump "$BUMP")
++          branch="release/v$version"
++          git config user.name "github-actions[bot]"
++          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
++          git switch -c "$branch"
++          git commit --quiet -am "Release $version"
++          # The branch belongs to this workflow; a rerun after a run that pushed it
++          # but could not open the pull request replaces it.
++          git push --quiet --force origin "$branch"
++          cat > "$RUNNER_TEMP/body.md" <<EOF
++          Raises Field's version to $version in \`package.json\`. Merging this pull request publishes the release: the Release workflow then tags \`v$version\` on the merge commit, moves the major tag to it, and creates the GitHub release with generated notes.
++
++          ## Testing
++
++          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`. After the merge, the publish job runs \`node scripts/release.ts released\`, which exits 3 for an untagged version, and then \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
++          EOF
++          # A pull request someone opened by hand from the branch after a failed run
++          # already carries the force-pushed commit.
++          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
++            echo "a pull request from $branch is already open"
++          elif ! gh pr create --base main --head "$branch" --title "Release $version" --body-file "$RUNNER_TEMP/body.md"; then
++            # GitHub refuses unless the repository allows GitHub Actions to create
++            # pull requests (Settings > Actions > General). The branch is pushed,
++            # so the pull request can be opened by hand.
++            echo "::error::could not open the pull request; open it from https://github.com/$REPO/compare/main...$branch?expand=1"
++            exit 1
++          fi
++
++  publish:
++    if: github.event_name == 'push'
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 24
++      # A package.json change that leaves the version alone, or one whose version
++      # is already tagged, releases nothing.
++      - name: Tag and publish the merged version
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          git config user.name "github-actions[bot]"
++          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
++          status=0
++          node scripts/release.ts released || status=$?
++          case "$status" in
++            0) exit 0 ;;
++            3) ;;
++            *) exit "$status" ;;
++          esac
++          node scripts/release.ts tag
+diff --git a/AGENTS.md b/AGENTS.md
+index 692a7f05..0b668c0c 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -20,7 +20,8 @@ The docs are [overview](docs/README.md), [CLI](docs/cli.md),
+ [architecture](docs/architecture.md), [tracks](docs/tracks.md),
+ [project model](docs/project-model.md), [build graph](docs/build-graph.md),
+ [audio engine](docs/audio-engine.md), [remote](docs/remote.md),
+-[keys](docs/keys.md), [install](docs/install.md).
++[keys](docs/keys.md), [install](docs/install.md),
++[release](docs/release.md).
+ 
+ Where code does not exist yet these describe how the system is *designed* to
+ work and are the source of truth for it, which is less of the repo than it
+diff --git a/docs/README.md b/docs/README.md
+index ba91df71..b04c5a35 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -122,4 +122,5 @@ The current build order lives in [projects/](projects/README.md).
+ - [Remote](remote.md) — login, clone, push and pull, and the read-through cache against an audiofield remote
+ - [Keys](keys.md) — the computer keyboard as a MIDI instrument, and how to write a keymap
+ - [Install](install.md) — `./install.sh` and `field upgrade`: what each step runs, and how to read the status
++- [Release](release.md) — cut a release: the Release workflow, `scripts/release.ts`, and the versions a release leaves alone
+ - [Projects](projects/README.md) — work in progress, next, and later
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 4d2b5d1c..0ff5bd4e 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -8,9 +8,10 @@ priority: now
+ **Goal:** one command installs Field and another keeps it current, the
+ way Projector's `install.sh` and `project upgrade` do. `./install.sh`
+ installs a checkout today, and `field upgrade` runs it from any
+-directory. Once Field has releases, `curl -fsSL https://field.one/install.sh | bash`
+-installs one with no clone, no pnpm, and no compiler, and `field upgrade`
+-moves it to the next release.
++directory. Field has releases now, and once the release installer
++exists, `curl -fsSL https://field.one/install.sh | bash` installs one
++with no clone, building it as the checkout installer does, and
++`field upgrade` moves it to the next release.
+ 
+ ## 1 The problem
+ 
+@@ -181,46 +182,62 @@ decide the rest.
+ 
+ ### 3.1 Releases (chunk 2)
+ 
+-Projector releases need no artifact: pip builds the package from
+-GitHub's source archive of the `v0` tag. Field cannot do that cheaply,
+-because turning its source into something that runs needs pnpm, `tsc`,
+-CMake, a C++ compiler, and three minutes of compiling JUCE. So a Field
+-release publishes built artifacts:
+-
+-- **`field-<version>.tgz`.** The CLI, platform-independent: `dist/`,
+-  `package.json`, `LICENSE`, production `node_modules/` (commander,
+-  yaml, and zod, all plain JavaScript), and the directories the CLI
+-  reads from its package root, which are `keymaps/`, `sc/`, and
+-  `python/`. It needs only Node 24 to run.
+-- **`field-audiod-<version>-<platform>.tgz`.** The daemon, one per
+-  platform: `darwin-arm64` and `linux-x64` first (§7.2), under the
+-  terms §7.1 settles.
+-- **`SHA256SUMS`**, which the installer verifies.
+-
+-The version is `package.json`'s. A release script, like Projector's
+-`.github/scripts/release.py`, bumps it and, once the bump merges, pushes
+-an immutable `v0.2.0` tag, moves `v0` to the same commit, and creates
+-the GitHub release. `v0` is the channel the installer follows.
++A release is a version tag and a GitHub release, as Projector's are,
++and publishes no files. Whoever installs it builds it from the tag's
++source, the daemon included, because Field publishes no daemon binary
++(§7.1). `docs/release.md` describes how to cut one.
++
++The version is `package.json`'s, the one `field --version` prints.
++`scripts/release.ts`, modeled on Projector's `.github/scripts/release.py`,
++has four commands:
++
++| Command | Does |
++| --- | --- |
++| `bump patch\|minor\|major` | Raises one part of the version, writes it to `package.json`, and prints it. |
++| `set X.Y.Z` | Writes an exact version. Both refuse a version that does not go up. |
++| `released` | Exits 0 when the version on `origin/main` is tagged, and 3 when it is not. |
++| `tag` | Tags that version `vX.Y.Z`, force-moves the major tag `v0` to the same commit, pushes both, and creates the GitHub release with generated notes. `--no-release` skips the GitHub release. |
++
++`.github/workflows/release.yml` runs them as Projector's Release
++workflow does. Started by hand with `patch`, `minor`, or `major`, its
++propose job runs `bump` on a `release/vX.Y.Z` branch and opens the
++release pull request. When a change to `package.json` reaches `main`,
++its publish job runs `released`, and `tag` when that exits 3. Node 24
++runs the script directly by stripping its types, and the script imports
++only Node's own modules, so neither job installs a dependency.
++
++`field-audiod` (`native/audiod/src/version.h`) and the model workers
++(`DAEMON_VERSION`) keep versions of their own. They report them in
++`hello`, the daemon stamps its version into take manifests, and they
++move with what each process does, so a release leaves them alone.
+ 
+ ### 3.2 The release installer (chunk 3)
+ 
+-Without a checkout, `install.sh` installs a release:
++Without a checkout, `install.sh` installs a release by building it:
+ 
+ 1. It reads the version from `package.json` at `FIELD_REF` (default
+    `v0`) in `FIELD_REPO` (default `okamnesiac/field`), which is how
+    Projector's installer learns the version it is installing.
+-2. It downloads the CLI and the daemon for this platform from that
+-   GitHub release, and verifies both against `SHA256SUMS`.
+-3. It unpacks them into `~/.local/share/field/<version>/`, with the daemon
+-   where `daemonBinary()` looks, switches
+-   `~/.local/share/field/current` to it, and links `~/.local/bin/field`
+-   to `current/dist/cli.js`. The previous version stays until the switch
+-   succeeds, so a failed download leaves the old install working.
+-4. It sets up again each worker that was set up in the previous version
++2. It downloads GitHub's source archive of the immutable tag for that
++   version, `vX.Y.Z` rather than `v0`, and unpacks it into
++   `~/.local/share/field/<version>/`.
++3. It runs the same steps a checkout install runs, with the same
++   prerequisite checks: `pnpm install --frozen-lockfile`, the CLI and UI
++   builds, and the daemon build.
++4. It switches `~/.local/share/field/current` to the new version and
++   links `field` to it. The previous version stays until the switch
++   succeeds, so a failed download or build leaves the old install
++   working.
++5. It sets up again each worker that was set up in the previous version
+    (§7.5).
+ 
+-It needs Node 24, curl, and tar, and no pnpm and no compiler. A platform
+-with no prebuilt daemon stops and says to install from a checkout.
++It needs what `./install.sh` needs, plus curl and tar: Node 24, pnpm,
++CMake 3.24 or newer, and a C++ compiler. The first install compiles
++JUCE, which takes a few minutes. Each version unpacks into a directory
++of its own, so chunk 3 keeps JUCE's download outside it, for example
++with CMake's `FETCHCONTENT_BASE_DIR`, so that an upgrade does not fetch
++JUCE again. Whether `field` is linked by `pnpm add -g`, as a checkout
++is, or through `~/.local/bin`, is chunk 3's to settle (§4).
+ 
+ `field upgrade` in a release install finds no checkout beside its
+ package, so it downloads the newest installer, from
+@@ -263,9 +280,10 @@ a private one. The website and the README then lead with this command.
+   - A shim in `~/.local/bin` that runs `node <checkout>/dist/cli.js`.
+     It would spare newcomers `pnpm setup`, but every existing install is
+     a pnpm link and moving them means migrating each one. Release
+-    installs (chunk 3) use `~/.local/bin` because they must not need
+-    pnpm, and `status` reports `cli-shadowed` when both exist and the
+-    wrong one is first on PATH.
++    installs (chunk 3) were to use `~/.local/bin` because they would not
++    need pnpm. Since §7.1 they build with pnpm too, so chunk 3 settles
++    how they link `field`. `status` reports `cli-shadowed` when two
++    `field` commands exist and the wrong one is first on PATH.
+ - **Never pull, never switch branches.** The checkout may hold work in
+   progress. `status` reports how far behind it is, which is Projector's
+   choice too.
+@@ -285,9 +303,18 @@ a private one. The website and the README then lead with this command.
+   and the installer touches the binary after each build, so
+   `audiod-stale` means a source changed since the installer last built
+   the daemon, and the build it asks for clears it (§8.1).
+-- **Releases ship built artifacts**, not a source archive (§3.1). The
+-  source archive is what Projector installs from, and for Field it would
+-  make every user install pnpm and a compiler and wait out a JUCE build.
++- **Releases are tags, and whoever installs one builds it** (§3.1,
++  amended 2026-10-11). This first said releases ship built artifacts, a
++  CLI tarball and a daemon per platform, so that a release install would
++  need no pnpm and no compiler. What changed is §7.1: a published daemon
++  binary is a distribution of JUCE and the VST3 SDK under copyleft
++  terms, and a user who builds the daemon from the release's source
++  distributes nothing. Once every user needs a compiler for the daemon,
++  a prebuilt CLI saves only the three seconds `tsc` takes, so it went
++  too, and with it the checksums and the per-platform builds. A release
++  install runs the steps a checkout install runs. Prebuilt binaries
++  remain the optimization to make if the toolchain turns out to be the
++  barrier (§7.3).
+ - **The UI builds with the CLI.** `field ui` serves `ui/dist`, which
+   bundles code from `src/`, so a CLI built without its UI leaves
+   `field ui` stale or refusing. The `cli` target builds both rather than
+@@ -312,19 +339,26 @@ Chunk 1:
+ - `field upgrade workers` re-syncs the worker environments that are set
+   up and creates none.
+ 
+-Chunks 2 to 4:
++Chunk 2:
++
++- Running the Release workflow with `patch`, `minor`, or `major` opens a
++  pull request that changes only the version in `package.json`.
++- Merging it tags `vX.Y.Z`, moves `v0` to the same commit, and creates
++  the GitHub release. A `package.json` change that leaves the version
++  alone releases nothing.
++- A release publishes no files.
++
++Chunks 3 and 4:
+ 
+-- A release publishes the CLI, a daemon for each supported platform, and
+-  checksums, and moves `v0`.
+-- On a machine with Node 24 and no checkout,
+-  `curl -fsSL https://field.one/install.sh | bash` installs `field` and
+-  `field-audiod`, and `field upgrade` later moves both to the next
+-  release.
++- On a machine with the checkout installer's prerequisites and no
++  checkout, `curl -fsSL https://field.one/install.sh | bash` installs
++  `field` and builds `field-audiod`, and `field upgrade` later moves both
++  to the next release.
+ 
+ ## 6 Chunks
+ 
+-1. **The checkout installer and `field upgrade`.** §2. This change.
+-2. **Releases.** §3.1. Blocked on §7.1.
++1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
++2. **Releases.** §3.1. This change.
+ 3. **The release installer.** §3.2. Needs chunk 2, and decides whether
+    Windows gets an `install.ps1` (§7.6).
+ 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
+@@ -332,7 +366,7 @@ Chunks 2 to 4:
+ 
+ ## 7 Open questions
+ 
+-### 7.1 The daemon binary's license
++### 7.1 The daemon binary's license (DECIDED, 2026-10-11)
+ 
+ Field's code is under the MIT License (#184). The daemon carries more
+ than Field's code: `field-audiod` links JUCE, which is AGPLv3 or
+@@ -342,18 +376,34 @@ commercial JUCE license does not cover the SDK.
+ [README.md](../../../README.md) "License" and
+ [architecture.md](../../architecture.md) "Licensing" record these terms.
+ 
+-So a daemon binary that chunk 2 publishes is a distribution under AGPLv3
+-and GPLv3, unless the publisher holds both commercial licenses. Decide
+-which before chunk 2 publishes one:
+-
+-- **Publish under the copyleft terms.** The daemon's archive carries the
+-  license notices, and the repository at the release tag is its source,
+-  which needs the repository to be public by then.
++So a daemon binary that a release published would be a distribution
++under AGPLv3 and GPLv3, unless the publisher held both commercial
++licenses.
++
++**Decided: Field publishes no daemon binary, and whoever installs Field
++builds it.** What a release distributes is Field's MIT source. JUCE is
++not in the repository either: `native/audiod/CMakeLists.txt` fetches it
++from JUCE's own repository at build time. A user's build is under the
++copyleft terms for that user's own use, and those terms attach only to
++someone who distributes it. The two options this beat:
++
++- **Publish under the copyleft terms**, with the license notices in the
++  daemon's archive and the repository at the release tag as its source.
++  It would make the one-line install need no compiler, at the price of
++  building, signing, and hosting a binary per platform (§7.3), and of a
++  source obligation on every release.
+ - **Hold both commercial licenses**: a commercial JUCE license and
+-  Steinberg's proprietary VST3 license.
++  Steinberg's proprietary VST3 license. It costs money every month to
++  remove an obligation that publishing nothing removes for free.
++
++One obligation remains outside this plan: if audiofield.io ever runs
++`field-audiod` on its servers to render for users, AGPLv3 §13 asks it to
++offer those users the daemon's source. The source is public, so that is
++easy to meet, but it is an obligation.
+ 
+-A newer JUCE narrows the choice. Steinberg released VST3 SDK 3.8.0
+-under the MIT License
++If prebuilt binaries become worth making, a newer JUCE narrows the
++choice they need. Steinberg released VST3 SDK 3.8.0 under the MIT
++License
+ ([announcement](https://forums.steinberg.net/t/vst-3-8-0-sdk-released/1011988),
+ and `LICENSE.txt` at the SDK's `v3.8.0_build_66` tag), and JUCE 8.0.11
+ is the first JUCE release that bundles it: its
+@@ -367,18 +417,22 @@ enable. Moving the daemon's pin off 8.0.4 is a change of its own.
+ 
+ ### 7.2 Platforms
+ 
+-`darwin-arm64` and `linux-x64` first. Intel Macs (`darwin-x64`) and
+-`linux-arm64` each cost one more build per release. A platform with no
+-binary can still install from a checkout.
++Answered by §7.1. A release has no per-platform files, so it installs
++wherever the checkout installer builds: macOS and Linux, on any
++architecture CMake and JUCE support. Windows is §7.6.
+ 
+-### 7.3 Where the macOS daemon builds
++### 7.3 Where the macOS daemon builds (DECIDED, 2026-10-11)
+ 
+-GitHub bills a macOS runner at ten times the Linux rate, a cold JUCE
+-build takes minutes, and this account caps Actions spending at $40 a
+-month. Either the release workflow builds the macOS daemon with a warm
+-cache, or the release script builds it locally and uploads it with
+-`gh release upload`. The second is cheaper, and makes a release depend
+-on one machine.
++Nowhere, for now: after §7.1 a release builds nothing that depends on
++the platform, so the release workflow runs on Linux in seconds.
++
++If prebuilt binaries come later, they build locally, on a maintainer's
++Mac, and `gh release upload` attaches them to the release. GitHub bills
++a macOS runner at ten times the Linux rate, a cold JUCE build takes
++minutes, and this account caps Actions spending at $40 a month. Building
++in the release workflow with a warm cache lost to that cost, and the
++price of the local build, a release that depends on one machine, is one
++to pay only once binaries exist.
+ 
+ ### 7.4 Which domain serves the installer
+ 
+@@ -406,9 +460,8 @@ with the steps, and the installer's tests skip there.
+ Chunk 3 decides whether Windows gets an `install.ps1` of its own. A
+ checkout on Windows installs with the four commands in
+ `docs/install.md`, but a release install has no checkout to run them
+-in, and the release installer is bash too. The answer goes with whether
+-releases publish a Windows daemon at all, which §7.2 leaves out of the
+-first platforms.
++in, and the release installer is bash too. Since §7.1 a Windows release
++install would build the daemon with MSVC, as a Windows checkout does.
+ 
+ ## 8 Chunk 1 as built (2026-10-11)
+ 
+@@ -471,3 +524,47 @@ first platforms.
+ ### 8.3 What is still owed
+ 
+ - Chunks 2 to 4, and the decisions in §7 that gate them.
++
++## 9 Chunk 2 as built (2026-10-11)
++
++### 9.1 What implementation settled
++
++- **The script is TypeScript that Node runs directly.** Projector's
++  release script is Python, its own language; Field's is
++  `scripts/release.ts`. Node 24 strips its types, verified on 24.19.0
++  with no warning, and it imports only Node's modules, so the workflow
++  sets up Node and runs it with no `pnpm install`. `src/release.test.ts`
++  imports it, which is what puts it under `pnpm typecheck`.
++- **One version file.** Projector's script checks that three version
++  files agree. Field releases only `package.json`'s version, because the
++  daemon's and the workers' versions describe their protocols (§3.1).
++- **The GitHub repository comes from the configured remote URL.**
++  `git remote get-url` applies `insteadOf` rewrites, which can turn a
++  GitHub URL into a mirror's, so the script reads
++  `remote.<name>.url` instead.
++- **Tags are fetched with `--force`.** Every release moves `v0`, and a
++  local copy of the old one would otherwise refuse the fetch that
++  `released` and `tag` start with.
++- **This repository does not let GitHub Actions open pull requests**
++  (`can_approve_pull_request_reviews` is `false` on 2026-10-11), so the
++  propose job can push the release branch but not open its pull
++  request. The job then fails with the link that opens it by hand, and
++  `docs/release.md` names the setting.
++
++### 9.2 What was verified, and how
++
++- `src/release.test.ts` runs the script's functions against a temporary
++  repository whose `origin` is a bare repository standing in for the
++  GitHub URL. It covers each `bump` part, `set` refusing a version that
++  does not go up, `tag` pushing both tags and moving `v0` on the next
++  release, tagging what `origin/main` holds rather than an unpushed
++  bump, refusing a tagged version, a remote that is not GitHub, a failed
++  GitHub release naming the command that finishes it, `released`'s exit
++  codes, and plain `node` running the file.
++- The workflow itself has not run. Its first run is the first release.
++
++### 9.3 What is still owed
++
++- The first release. Run the Release workflow with `minor` to release
++  0.2.0, which tags `v0.2.0` and creates `v0`.
++- Chunks 3 and 4.
+diff --git a/docs/release.md b/docs/release.md
+new file mode 100644
+index 00000000..9bb21a8a
+--- /dev/null
++++ b/docs/release.md
+@@ -0,0 +1,65 @@
++# Release Field
++
++A Field release is a version tag and a GitHub release, and nothing else.
++It publishes no files: whoever installs a release builds it, the
++`field-audiod` daemon included. The version is the one in `package.json`,
++which `field --version` prints. Each release pushes an immutable tag such
++as `v0.2.0`, moves the major tag (`v0`) to the same commit, and creates
++the GitHub release with notes generated from the merged pull requests.
++`v0` is the channel that the release installer will follow
++([install.md](projects/install/readme.md) §3.2).
++
++## Cut a release
++
++1. On GitHub, open **Actions > Release > Run workflow**, and choose which
++   part of the version to raise: `patch`, `minor`, or `major`.
++2. The workflow opens a pull request titled `Release X.Y.Z` that changes
++   only the version in `package.json`. Review and merge it like any other
++   pull request.
++3. Merging is the decision to ship. The workflow's publish job sees the
++   new version on `main`, tags it, moves `v0`, and creates the GitHub
++   release.
++
++The workflow can open the pull request only when the repository allows
++GitHub Actions to create pull requests, under **Settings > Actions >
++General > Workflow permissions**. Without that setting, the job pushes
++the `release/vX.Y.Z` branch, fails, and prints the link that opens the
++pull request by hand. Merging that pull request publishes the release
++just the same.
++
++A change to `package.json` that leaves the version alone, or whose version
++is already tagged, releases nothing.
++
++## Run the steps by hand
++
++`scripts/release.ts` does each step, and the workflow runs nothing else.
++Node 24 runs it directly, with no `pnpm install`:
++
++```sh
++node scripts/release.ts bump minor      # raise the version, write it, print it
++node scripts/release.ts set 0.3.0       # write an exact version instead
++node scripts/release.ts released        # exit 0 if main's version is tagged, 3 if not
++node scripts/release.ts tag             # tag main's version, move v0, create the GitHub release
++```
++
++`bump` and `set` refuse a version that does not go up. `tag` reads the
++version from `origin/main`, not from your checkout, so an unmerged bump
++cannot name a release, and it refuses a version that is already tagged.
++It needs an authenticated `gh` for the GitHub release, and
++`tag --no-release` pushes the tags alone. If the GitHub release fails
++after the tags are pushed, the error prints the `gh release create`
++command that finishes it.
++
++## Versions a release leaves alone
++
++`field-audiod` and the model workers keep versions of their own:
++`native/audiod/src/version.h` for the daemon, and `DAEMON_VERSION` in
++each worker's `protocol.py`. Each one reports its version in `hello`,
++which `field --version` prints for each daemon that is running, and the
++daemon stamps its version into every take's manifest. They change with
++what the daemon or the worker does, not with a release, so the release
++script never touches them.
++
++Under `0.x`, a minor release may break compatibility, so the `v0` channel
++promises less than a `v1` channel will. A breaking change after `1.0.0`
++starts the next major tag.
+diff --git a/scripts/release.ts b/scripts/release.ts
+new file mode 100644
+index 00000000..1b273067
+--- /dev/null
++++ b/scripts/release.ts
+@@ -0,0 +1,213 @@
++// Set Field's release version, or tag a release of it (install.md §3.1).
++//
++//   node scripts/release.ts bump patch|minor|major   raise one part of the version, write it, and print it
++//   node scripts/release.ts set X.Y.Z                write an exact version instead
++//   node scripts/release.ts released                 exit 0 if origin/main's version is tagged, 3 if not
++//   node scripts/release.ts tag [--no-release]       tag vX.Y.Z at origin/main, move vX, and create the GitHub release
++//
++// The Release workflow (.github/workflows/release.yml) runs these, as
++// Projector's runs its .github/scripts/release.py, and they work by hand
++// from any checkout. Node 24 runs this file directly by stripping its
++// types, so it imports nothing but Node's own modules: the workflow runs it
++// without installing a dependency.
++//
++// The release version is package.json's, the one `field --version` prints.
++// field-audiod (native/audiod/src/version.h) and the model workers carry
++// versions of their own, which move with what they report in `hello` and
++// stamp into take manifests, so a release leaves them alone.
++
++import { spawnSync } from 'node:child_process';
++import { readFileSync, writeFileSync } from 'node:fs';
++import { dirname, join, resolve } from 'node:path';
++import { fileURLToPath } from 'node:url';
++
++export class ReleaseError extends Error {}
++
++export type Part = 'patch' | 'minor' | 'major';
++type Semver = [number, number, number];
++
++const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
++const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
++const VERSION_FIELD = /("version"\s*:\s*")[^"]*(")/;
++export const NOT_RELEASED = 3;
++
++export function parse(version: string): Semver {
++  const match = SEMVER.exec(version);
++  if (!match) throw new ReleaseError(`${JSON.stringify(version)} is not X.Y.Z`);
++  return [Number(match[1]), Number(match[2]), Number(match[3])];
++}
++
++function above(a: Semver, b: Semver): boolean {
++  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
++  return false;
++}
++
++function versionOf(packageJson: string): string {
++  const version: unknown = (JSON.parse(packageJson) as { version?: unknown }).version;
++  if (typeof version !== 'string') throw new ReleaseError('package.json has no version');
++  return version;
++}
++
++export function current(root: string): string {
++  return versionOf(readFileSync(join(root, 'package.json'), 'utf8'));
++}
++
++// Rewrites the one field rather than the whole file, so package.json keeps
++// its formatting and key order, and refuses a version that does not go up:
++// a tag names one commit for good.
++export function setVersion(root: string, version: string): void {
++  const now = current(root);
++  if (!above(parse(version), parse(now))) {
++    throw new ReleaseError(`${version} is not above the current version ${now}`);
++  }
++  const path = join(root, 'package.json');
++  const text = readFileSync(path, 'utf8');
++  if (!VERSION_FIELD.test(text)) throw new ReleaseError('package.json has no version field');
++  writeFileSync(path, text.replace(VERSION_FIELD, `$1${version}$2`));
++}
++
++export function bump(root: string, part: Part): string {
++  const [major, minor, patch] = parse(current(root));
++  const version = {
++    patch: `${major}.${minor}.${patch + 1}`,
++    minor: `${major}.${minor + 1}.0`,
++    major: `${major + 1}.0.0`,
++  }[part];
++  setVersion(root, version);
++  return version;
++}
++
++function git(root: string, ...args: string[]): string {
++  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
++  if (result.error) throw new ReleaseError(`git ${args.join(' ')} failed: ${result.error.message}`);
++  if (result.status !== 0) throw new ReleaseError(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
++  return result.stdout.trim();
++}
++
++export function repoSlug(url: string): string | undefined {
++  const trimmed = url.trim();
++  for (const prefix of ['git@github.com:', 'ssh://git@github.com/', 'https://github.com/']) {
++    if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length).replace(/\.git$/, '').replace(/\/$/, '');
++  }
++  return undefined;
++}
++
++// The branch's commit on the remote, the version it names, and whether that
++// version is tagged. Tags are fetched with --force because every release
++// moves the major tag, and a local copy of the old one would otherwise
++// refuse the fetch.
++export function merged(root: string, remote: string, branch: string): { commit: string; version: string; tagged: boolean } {
++  git(root, 'fetch', '--quiet', '--tags', '--force', remote, branch);
++  const commit = git(root, 'rev-parse', `refs/remotes/${remote}/${branch}`);
++  const version = versionOf(git(root, 'show', `${commit}:package.json`));
++  parse(version);
++  return { commit, version, tagged: git(root, 'tag', '--list', `v${version}`) !== '' };
++}
++
++export type CreateRelease = (slug: string, tag: string) => void;
++
++function ghRelease(slug: string, tag: string): void {
++  const result = spawnSync('gh', ['release', 'create', tag, '--repo', slug, '--verify-tag', '--generate-notes'], {
++    encoding: 'utf8',
++  });
++  if (result.error) {
++    const code = (result.error as NodeJS.ErrnoException).code;
++    throw new ReleaseError(code === 'ENOENT' ? 'the gh CLI is not installed' : result.error.message);
++  }
++  if (result.status !== 0) throw new ReleaseError(`gh release create failed: ${result.stderr.trim()}`);
++}
++
++export interface TagOptions {
++  remote?: string | undefined;
++  branch?: string | undefined;
++  githubRelease?: boolean | undefined;
++  createRelease?: CreateRelease | undefined;
++}
++
++// Tags the version merged on the branch, never the checkout's, so an
++// unmerged bump cannot name a release. The immutable tag names the exact
++// release, and the major tag is the channel the installer follows
++// (install.md §3.2), moved to the same commit.
++export function tag(root: string, options: TagOptions = {}): string {
++  const remote = options.remote ?? 'origin';
++  const branch = options.branch ?? 'main';
++  const { commit, version, tagged } = merged(root, remote, branch);
++  const release = `v${version}`;
++  const major = `v${parse(version)[0]}`;
++  if (tagged) throw new ReleaseError(`${release} already exists; set a new version first`);
++  git(root, 'tag', '-a', release, commit, '-m', `Field ${version}`);
++  git(root, 'tag', '-f', '-a', major, commit, '-m', `Field ${version}`);
++  git(root, 'push', '--quiet', remote, `refs/tags/${release}`);
++  git(root, 'push', '--quiet', '--force', remote, `refs/tags/${major}`);
++  const done = `tagged ${release} and moved ${major} to ${commit.slice(0, 9)} on ${remote}/${branch}`;
++  if (options.githubRelease === false) return done;
++  try {
++    // The configured URL, not `git remote get-url`, which applies
++    // `insteadOf` rewrites and can turn a GitHub URL into a mirror's.
++    const slug = repoSlug(git(root, 'config', '--get', `remote.${remote}.url`));
++    if (slug === undefined) throw new ReleaseError(`${remote} is not a GitHub repository`);
++    (options.createRelease ?? ghRelease)(slug, release);
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    throw new ReleaseError(
++      `${release} and ${major} are pushed, but the GitHub release was not created (${reason}); ` +
++        `finish with: gh release create ${release} --verify-tag --generate-notes`,
++    );
++  }
++  return `${done}, and published the ${release} GitHub release`;
++}
++
++const USAGE = 'usage: node scripts/release.ts bump patch|minor|major | set X.Y.Z | released | tag [--no-release]';
++
++function options(args: string[], flags: string[]): Map<string, string | true> {
++  const found = new Map<string, string | true>();
++  for (let i = 0; i < args.length; i++) {
++    const arg = args[i]!;
++    if (arg === '--no-release' && flags.includes(arg)) {
++      found.set(arg, true);
++    } else if ((arg === '--remote' || arg === '--branch') && args[i + 1] !== undefined) {
++      found.set(arg, args[++i]!);
++    } else {
++      throw new ReleaseError(`unexpected argument ${arg}\n${USAGE}`);
++    }
++  }
++  return found;
++}
++
++export function main(argv: string[], root: string = ROOT, out: (line: string) => void = console.log): number {
++  const [command, ...rest] = argv;
++  try {
++    if (command === 'bump' && rest.length === 1 && ['patch', 'minor', 'major'].includes(rest[0]!)) {
++      out(bump(root, rest[0] as Part));
++    } else if (command === 'set' && rest.length === 1) {
++      setVersion(root, rest[0]!);
++      out(`set ${rest[0]} in package.json`);
++    } else if (command === 'released') {
++      const found = options(rest, []);
++      const { version, tagged } = merged(root, (found.get('--remote') as string) ?? 'origin', (found.get('--branch') as string) ?? 'main');
++      out(`v${version} is ${tagged ? 'released' : 'not released yet'}`);
++      return tagged ? 0 : NOT_RELEASED;
++    } else if (command === 'tag') {
++      const found = options(rest, ['--no-release']);
++      out(
++        tag(root, {
++          remote: found.get('--remote') as string | undefined,
++          branch: found.get('--branch') as string | undefined,
++          githubRelease: !found.has('--no-release'),
++        }),
++      );
++    } else {
++      console.error(USAGE);
++      return 2;
++    }
++  } catch (error) {
++    if (!(error instanceof ReleaseError)) throw error;
++    console.error(`release: ${error.message}`);
++    return 1;
++  }
++  return 0;
++}
++
++if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  process.exitCode = main(process.argv.slice(2));
++}
+diff --git a/src/release.test.ts b/src/release.test.ts
+new file mode 100644
+index 00000000..1b05b239
+--- /dev/null
++++ b/src/release.test.ts
+@@ -0,0 +1,187 @@
++import { spawnSync } from 'node:child_process';
++import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { bump, current, main, NOT_RELEASED, parse, repoSlug, setVersion, tag } from '../scripts/release.js';
++
++// scripts/release.ts against a temporary repository whose `origin` is a
++// bare repository beside it (install.md §3.1), so tags are really pushed
++// and really fetched. The GitHub release is the one step a test cannot
++// take, so it is a stand-in that records its arguments.
++
++let root: string;
++let origin: string;
++let checkout: string;
++
++function git(cwd: string, ...args: string[]): string {
++  const result = spawnSync('git', args, {
++    cwd,
++    encoding: 'utf8',
++    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: root },
++  });
++  if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
++  return result.stdout.trim();
++}
++
++function commit(message: string): void {
++  git(checkout, 'commit', '--quiet', '-am', message);
++  git(checkout, 'push', '--quiet', 'origin', 'HEAD:main');
++}
++
++const PACKAGE = '{\n  "name": "field",\n  "version": "0.1.0",\n  "type": "module"\n}\n';
++const GITHUB = 'https://github.com/okamnesiac/field.git';
++
++beforeEach(() => {
++  root = realpathSync(mkdtempSync(join(tmpdir(), 'field-release-')));
++  origin = join(root, 'origin.git');
++  checkout = join(root, 'checkout');
++  git(root, 'init', '--quiet', '--bare', '-b', 'main', origin);
++  git(root, 'clone', '--quiet', origin, checkout);
++  for (const [key, value] of [
++    ['user.name', 't'],
++    ['user.email', 't@t'],
++    ['commit.gpgsign', 'false'],
++    ['tag.gpgsign', 'false'],
++  ] as const) {
++    git(checkout, 'config', key, value);
++  }
++  // origin names the GitHub repository, as a real clone's does, and git
++  // rewrites that URL to the bare repository beside it.
++  git(checkout, 'config', 'remote.origin.url', GITHUB);
++  git(checkout, 'config', `url.${origin}.insteadOf`, GITHUB);
++  writeFileSync(join(checkout, 'package.json'), PACKAGE);
++  git(checkout, 'add', 'package.json');
++  git(checkout, 'commit', '--quiet', '-m', 'one');
++  git(checkout, 'push', '--quiet', 'origin', 'HEAD:main');
++});
++
++afterEach(() => {
++  rmSync(root, { recursive: true, force: true });
++});
++
++describe('the release version', () => {
++  it('raises each part, resetting the parts below it, and writes only the version field', () => {
++    expect(bump(checkout, 'patch')).toBe('0.1.1');
++    expect(bump(checkout, 'minor')).toBe('0.2.0');
++    expect(bump(checkout, 'major')).toBe('1.0.0');
++    expect(readFileSync(join(checkout, 'package.json'), 'utf8')).toBe(PACKAGE.replace('0.1.0', '1.0.0'));
++  });
++
++  it('sets an exact version, and refuses one that does not go up', () => {
++    setVersion(checkout, '0.10.0');
++    expect(current(checkout)).toBe('0.10.0');
++    // 0.9.0 sorts after 0.10.0 as text and before it as a version.
++    expect(() => setVersion(checkout, '0.9.0')).toThrow('0.9.0 is not above the current version 0.10.0');
++    expect(() => setVersion(checkout, '0.10.0')).toThrow('is not above');
++    expect(() => setVersion(checkout, '1.0')).toThrow('"1.0" is not X.Y.Z');
++    expect(current(checkout)).toBe('0.10.0');
++  });
++
++  it('parses only X.Y.Z', () => {
++    expect(parse('12.0.3')).toEqual([12, 0, 3]);
++    expect(() => parse('v1.2.3')).toThrow('is not X.Y.Z');
++    expect(() => parse('1.2.3-rc.1')).toThrow('is not X.Y.Z');
++  });
++});
++
++describe('tagging a release', () => {
++  it('tags the merged version, moves the major tag, and creates the GitHub release', () => {
++    const calls: string[][] = [];
++    const head = git(checkout, 'rev-parse', 'HEAD');
++    expect(tag(checkout, { createRelease: (slug, name) => calls.push([slug, name]) })).toBe(
++      `tagged v0.1.0 and moved v0 to ${head.slice(0, 9)} on origin/main, and published the v0.1.0 GitHub release`,
++    );
++    expect(git(origin, 'rev-parse', 'v0.1.0^{commit}')).toBe(head);
++    expect(git(origin, 'rev-parse', 'v0^{commit}')).toBe(head);
++    expect(git(origin, 'tag', '-l', '--format=%(contents:subject)', 'v0.1.0')).toBe('Field 0.1.0');
++    // The repository origin names, though git fetched from a path.
++    expect(calls).toEqual([['okamnesiac/field', 'v0.1.0']]);
++  });
++
++  it('pushes the tags from a remote that is not GitHub, and says the release is unfinished', () => {
++    git(checkout, 'config', 'remote.origin.url', origin);
++    expect(() => tag(checkout)).toThrow('the GitHub release was not created (origin is not a GitHub repository)');
++    expect(git(origin, 'tag', '--list')).toBe('v0\nv0.1.0');
++  });
++
++  it('moves the major tag forward on the next release and leaves the old tag where it was', () => {
++    const first = git(checkout, 'rev-parse', 'HEAD');
++    tag(checkout, { githubRelease: false });
++    bump(checkout, 'minor');
++    commit('two');
++    const second = git(checkout, 'rev-parse', 'HEAD');
++    expect(tag(checkout, { githubRelease: false })).toBe(`tagged v0.2.0 and moved v0 to ${second.slice(0, 9)} on origin/main`);
++    expect(git(origin, 'rev-parse', 'v0.1.0^{commit}')).toBe(first);
++    expect(git(origin, 'rev-parse', 'v0.2.0^{commit}')).toBe(second);
++    expect(git(origin, 'rev-parse', 'v0^{commit}')).toBe(second);
++  });
++
++  it('tags what the remote branch holds, not an unpushed bump', () => {
++    bump(checkout, 'minor');
++    git(checkout, 'commit', '--quiet', '-am', 'unpushed');
++    expect(tag(checkout, { githubRelease: false })).toContain('tagged v0.1.0');
++  });
++
++  it('refuses a version that is already tagged', () => {
++    tag(checkout, { githubRelease: false });
++    expect(() => tag(checkout, { githubRelease: false })).toThrow('v0.1.0 already exists; set a new version first');
++  });
++
++  it('names the command that finishes a release whose GitHub step failed', () => {
++    expect(() =>
++      tag(checkout, {
++        createRelease: () => {
++          throw new Error('HTTP 403');
++        },
++      }),
++    ).toThrow(
++      'v0.1.0 and v0 are pushed, but the GitHub release was not created (HTTP 403); ' +
++        'finish with: gh release create v0.1.0 --verify-tag --generate-notes',
++    );
++    expect(git(origin, 'tag', '--list')).toBe('v0\nv0.1.0');
++  });
++
++  it('reads GitHub slugs from every URL form git accepts', () => {
++    expect(repoSlug('git@github.com:okamnesiac/field.git')).toBe('okamnesiac/field');
++    expect(repoSlug('ssh://git@github.com/okamnesiac/field.git')).toBe('okamnesiac/field');
++    expect(repoSlug('https://github.com/okamnesiac/field')).toBe('okamnesiac/field');
++    expect(repoSlug('/tmp/origin.git')).toBeUndefined();
++  });
++});
++
++describe('the command line', () => {
++  function run(...argv: string[]): { status: number; lines: string[] } {
++    const lines: string[] = [];
++    return { status: main(argv, checkout, (line) => lines.push(line)), lines };
++  }
++
++  it('says whether the merged version is released, and exits 3 while it is not', () => {
++    expect(run('released')).toEqual({ status: NOT_RELEASED, lines: ['v0.1.0 is not released yet'] });
++    expect(run('tag', '--no-release').status).toBe(0);
++    expect(run('released')).toEqual({ status: 0, lines: ['v0.1.0 is released'] });
++  });
++
++  it('prints the new version from bump, which is what the workflow reads', () => {
++    expect(run('bump', 'minor')).toEqual({ status: 0, lines: ['0.2.0'] });
++    expect(run('set', '0.3.0')).toEqual({ status: 0, lines: ['set 0.3.0 in package.json'] });
++  });
++
++  it('exits 2 on a usage error and 1 on a refused release', () => {
++    expect(run('bump', 'huge').status).toBe(2);
++    expect(run('publish').status).toBe(2);
++    expect(run('set', '0.0.1').status).toBe(1);
++    expect(run('tag', '--force').status).toBe(1);
++  });
++
++  it('runs under plain node with no dependencies installed, as the workflow runs it', () => {
++    // The script edits the checkout it lives in, which here is this one, so
++    // it is asked only for a usage error: that proves it loads, strips its
++    // types, and dispatches.
++    const script = join(import.meta.dirname, '..', 'scripts', 'release.ts');
++    const usage = spawnSync(process.execPath, [script], { encoding: 'utf8' });
++    expect(usage.status).toBe(2);
++    expect(usage.stderr).toContain('usage: node scripts/release.ts');
++    expect(usage.stderr).not.toContain('Warning');
++  });
++});
