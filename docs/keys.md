@@ -113,10 +113,10 @@ notes and those that only render, by whether each program reads
 `FIELD_MODE`:
 
 ```console
-$ field keys bass
-field keys bass: no instrument program at …/examples/bloom/shared/instruments/bass.scd
+$ field keys organ
+field keys organ: no instrument program at …/examples/bloom/shared/instruments/organ.scd
 In shared/instruments/:
-  plays from notes: still-water-pad
+  plays from notes: bass, juno, still-water-pad
   renders only:     creek-kit, seven-eight-loop (no FIELD_MODE=voice branch; see docs/keys.md)
 ```
 
@@ -154,9 +154,20 @@ if ("FIELD_MODE".getenv == "voice") {
 The host owns everything between MIDI and voices: one voice per
 sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
 pitch bend, which it applies to `freq` on every sounding voice, up to
-two semitones either way. It ignores modulation (CC 1) for now. In
-`examples/bloom`, `still-water-pad` answers voice mode; its render
-branch is unchanged and renders the same bytes as before.
+two semitones either way. It ignores modulation (CC 1) for now.
+
+`examples/bloom` has three instruments that answer voice mode:
+
+- **`still-water-pad`** — the song's sine pad; its render branch is
+  unchanged and renders the same bytes as before.
+- **`juno`** — the JU-06A, a model of the Roland Juno's chain from
+  [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
+  classic Juno pad: saw and pulse with the width swept, a slow attack,
+  and the chorus on.
+- **`bass`** — the same JU-06A set as offset's bass: a saw with a square
+  sub an octave down, a short envelope that opens the filter on each
+  note, and no chorus. It plays at true pitch, so press `Z` to drop an
+  octave.
 
 ## Record what you play
 
