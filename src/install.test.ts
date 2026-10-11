@@ -813,6 +813,7 @@ posix('install.sh installs a release', () => {
     expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current and field still runs it');
     expect(current()).toBe('0.2.0');
     expect(field('--version').stdout).toBe('0.2.0\n');
+    expect(existsSync(join(data, '.download-0.3.0'))).toBe(false);
   });
 
   it('leaves the installed version current when the new one does not build, and installs it on the next run', () => {
@@ -824,6 +825,9 @@ posix('install.sh installs a release', () => {
     expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current');
     expect(current()).toBe('0.2.0');
     expect(field('--version').stdout).toBe('0.2.0\n');
+    // Removed, so status never offers it as a version to switch back to.
+    expect(existsSync(join(data, '0.3.0'))).toBe(false);
+    expect(rows(release('status').stdout).has('previous')).toBe(false);
     expect(release().status).toBe(0);
     expect(current()).toBe('0.3.0');
   });
@@ -834,6 +838,7 @@ posix('install.sh installs a release', () => {
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('0.2.0 did not install, and nothing was switched to it');
     expect(existsSync(join(data, 'current'))).toBe(false);
+    expect(existsSync(join(data, '0.2.0'))).toBe(false);
     expect(existsSync(shim)).toBe(false);
   });
 
@@ -860,6 +865,7 @@ posix('install.sh installs a release', () => {
     expect(run.status).toBe(3);
     expect(run.stderr).toContain('0.3.0 did not install, so 0.2.0 stays current');
     expect(current()).toBe('0.2.0');
+    expect(existsSync(join(data, '0.3.0'))).toBe(false);
   });
 
   it('skips a worker whose uv is gone, which could not run in the old version either', () => {

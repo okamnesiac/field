@@ -243,7 +243,8 @@ Without a checkout, `install.sh` installs a release by building it.
    removes every version but the new one and the one it replaced.
 
 Steps 1 to 4 leave the installed version alone, so a failed download,
-build, or worker setup leaves it current, and an exit trap says so. This
+build, or worker setup leaves it current, and an exit trap says so and
+removes the new version's directory and its download. This
 moves the worker setup ahead of the switch, where the first draft of
 this section put it after.
 
@@ -732,7 +733,10 @@ building it found.
 - **A version directory that is not current is never trusted.** A
   half-unpacked or half-built directory from an interrupted install is
   deleted and downloaded again, rather than resumed, because nothing
-  records how far it got.
+  records how far it got. A failed install deletes its own on the way
+  out, so `status` does not list it as a `previous` version to switch
+  back to. A run killed outright runs no exit trap, so its directory
+  stays, and `status` lists it, until the next install deletes it.
 - **The archive's top-level directory is taken whatever its name.**
   GitHub names it `<repo>-<version>`, and a fork's differs, so the
   installer checks that there is exactly one and that its

@@ -833,8 +833,15 @@ show_release_status() {
 }
 
 # Why a run that started installing a version stopped, and what still runs.
+# What it built of that version goes, because a version directory that is
+# not current is never trusted, and `status` would offer it as one to
+# switch back to.
 release_failed() {
   [ "$1" -ne 0 ] || return 0
+  # Never the version current names, should a run stop after the switch.
+  if [ "$(current_version)" != "$INSTALLING" ]; then
+    rm -rf "${DATA_DIR:?}/${INSTALLING:?}" "$DATA_DIR/.download-$INSTALLING"
+  fi
   if [ -n "$REPLACING" ]; then
     echo "install.sh: $INSTALLING did not install, so $REPLACING stays current and field still runs it" >&2
   else

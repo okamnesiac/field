@@ -89,6 +89,9 @@ and the error says so:
 install.sh: 0.3.0 did not install, so 0.2.0 stays current and field still runs it
 ```
 
+The installer then removes what it built of the version that failed, so
+the next run starts that version from its download again.
+
 The first install downloads and compiles JUCE, which takes a few
 minutes. Every later version compiles JUCE's modules again, but none
 downloads JUCE again: the download stays in
