@@ -1,0 +1,89 @@
+{
+ "version": 1,
+ "name": "Windows export home path",
+ "project": "windows-portability",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 192,
+  "title": "Print a Windows home path with a tilde (windows-portability.md §7.2)",
+  "head": "6d640adc9bec55e2bb1aeded43cd1cdbd52114c2",
+  "headRef": "windows/paths",
+  "base": "a6c10315bfd2ec0bd7c2a9d3e36a31a28bf82dbc",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field export</code> builds labels and copies the results to <code>~/Desktop</code>, or to the folder <code>--to</code> names, and prints one line per file saying where it landed. To keep that line short, it prints a path under your home folder with <code>~</code> in place of the home folder, through <code>homeRelative</code> in <code>src/commands/export.ts</code>.",
+   "On Windows that shortening never happened. <code>homeRelative</code> checked for the home path followed by <code>/</code>, but Windows paths use <code>\\</code>, so every export printed its full <code>C:\\Users\\…</code> path. The Windows portability plan recorded this in its list of standalone defects (<code>windows-portability.md</code> §7.2).",
+   "This pull request gives <code>homeRelative</code> a <code>separator</code> parameter that defaults to <code>path.sep</code>, the platform's separator. A Windows path under the profile now prints as <code>~\\Desktop\\…</code>, a sibling folder such as <code>C:\\Users\\justinx</code> is still not treated as home, and macOS and Linux keep <code>/</code>. The plan marks the item done."
+  ],
+  "cards": [
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>The first head, <code>ae05c15</code>, also ported the <code>sclang</code> lookup. The author removed that in <code>6d640ad</code> and left it to #186, so the two pull requests no longer overlap except in the plan file, where they edit different items.</li><li>The review of <code>6d640ad</code> requests changes with one open finding: the existing <code>homeRelative</code> test fails on the Windows CI job, because its POSIX assertions now take the Windows default separator there.</li><li>The <code>linux</code> CI job passes. The <code>windows</code> job's other 12 failures also fail on <code>main</code>.</li></ul>"
+   },
+   {
+    "id": "later",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li>On a OneDrive-redirected profile, the Desktop you see lives under <code>OneDrive\\Desktop</code>, not where <code>defaultExportDir()</code> writes. The plan calls this a cosmetic wart, and it stays.</li><li>No Windows machine has run <code>field export</code> with this change. The unit test is the only coverage.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "home-relative",
+   "title": "Shortening the home folder with the platform's separator",
+   "kicker": "How the export line decides whether a path is under your home folder",
+   "intro": [
+    "<code>homeRelative(path, home, separator)</code> returns <code>path</code> with <code>~</code> in place of <code>home</code> when the path is the home folder itself or sits inside it. A path is inside the home folder only when it starts with the home path followed by a separator, so <code>/Users/justinx</code> never becomes <code>~x</code>.",
+    "The change makes that separator a parameter. Its default is <code>path.sep</code>, which is <code>/</code> on macOS and Linux and <code>\\</code> on Windows, so the only caller, the export line in <code>src/cli.ts</code>, gets the right rule on each platform without passing anything."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The default export folder is <code>join(homedir(), 'Desktop')</code>, so on Windows it always starts with the home path and a <code>\\</code>. A <code>--to</code> folder that you type in another case, such as <code>c:\\users\\me\\Music</code>, still prints in full, because the comparison is case-sensitive. That matches <code>main</code> and is cosmetic."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/export.ts",
+     "note": "Adds the <code>separator</code> parameter, defaulting to <code>path.sep</code>, and uses it in the prefix check.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "On macOS, mocking <code>node:path</code>'s <code>sep</code> to <code>\\</code> made <code>homeRelative('C:\\\\Users\\\\justin\\\\Desktop\\\\x.wav', 'C:\\\\Users\\\\justin')</code> return <code>~\\Desktop\\x.wav</code> with the default separator, as a Windows host would.",
+       "line": 74
+      }
+     ]
+    },
+    {
+     "path": "src/commands/export.test.ts",
+     "note": "Adds two Windows cases that pass <code>\\</code> explicitly: a file under the home folder, and a sibling folder that is not home.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "The existing POSIX assertions in this test, from line 184, leave the separator out, so on a Windows host they get <code>\\</code>. The <code>windows</code> CI job fails <code>abbreviates $HOME and only $HOME</code> because <code>homeRelative('/Users/justin/Desktop/creek-mix-main-v1.wav', '/Users/justin')</code> comes back unchanged. Passing <code>'/'</code> in those assertions, as the Windows ones pass <code>'\\\\'</code>, makes the test mean the same thing on every host.",
+       "line": 191
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The plan records the item as done",
+   "kicker": "The Windows portability plan's list of standalone defects",
+   "intro": [
+    "<code>windows-portability.md</code> §7.2 lists defects that the Windows sweep found outside any planned chunk. Each item stays in the list as a record, and a fixed one gains a dated <b>Done</b> note. This pull request adds that note to the <code>homeRelative</code> item and leaves the plan's status at <code>in-progress</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Marks the <code>homeRelative</code> item done and says that the OneDrive Desktop stays a wart."
+    }
+   ]
+  }
+ ]
+}
