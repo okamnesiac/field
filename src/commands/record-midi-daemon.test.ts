@@ -14,6 +14,7 @@ import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { recordTake } from './record.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // MIDI takes (keyboard-instrument.md §12.4) against the real daemon in
 // null-output mode, with `field-audiod --keys` publishing the source
@@ -98,7 +99,9 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
         // already gone
       }
     }
-    rmSync(root, { recursive: true, force: true });
+    // A killed daemon on Windows holds the project as its cwd until it
+    // has exited, and rmSync is refused until then.
+    await removeTempProject(root);
   });
 
   async function connect(): Promise<AudiodClient> {
