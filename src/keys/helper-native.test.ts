@@ -124,6 +124,13 @@ async function startKeys(ctx: TestContext, name: string): Promise<{ keys: Helper
     console.warn(`skipping the native MIDI round trip: ${reason}`);
     ctx.skip(reason);
   }
+  // Windows has no virtual MIDI ports for --keys to publish
+  // (windows-portability.md §7.2), so the helper refuses there by design.
+  if ('error' in published && process.platform === 'win32') {
+    const reason = `no virtual MIDI ports on Windows, and --keys said ${JSON.stringify(published['error'])}`;
+    console.warn(`skipping the native MIDI round trip: ${reason}`);
+    ctx.skip(reason);
+  }
   // On macOS the ready line also names the system output, which the
   // voice host gives scsynth for both directions.
   const { output, ...ready } = published;

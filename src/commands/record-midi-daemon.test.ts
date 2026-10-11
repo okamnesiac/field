@@ -75,7 +75,9 @@ function readLines(root: string, file: string): MidiTakeLine[] {
     .map((line) => midiTakeLineSchema.parse(JSON.parse(line)));
 }
 
-describe.skipIf(!binary)('MIDI takes through the daemon', () => {
+// win32: serve mode refuses until the named-pipe transport
+// (windows-portability.md chunk 4); every test here dials the socket.
+describe.skipIf(!binary || process.platform === 'win32')('MIDI takes through the daemon', () => {
   let root: string;
   const helpers: Helper[] = [];
   const daemons: number[] = [];
