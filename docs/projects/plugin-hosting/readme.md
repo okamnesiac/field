@@ -3,7 +3,7 @@ status: in-progress
 priority: now
 ---
 
-# Plan: hosted plugins — AU and VST3 as inserts
+# Hosted plugins — AU and VST3 as inserts
 
 **Goal:** third-party plugins join insert chains as first-class
 content — named readably, pinned exactly, their state content-addressed

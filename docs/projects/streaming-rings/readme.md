@@ -3,7 +3,7 @@ status: draft
 priority: next
 ---
 
-# Plan: Streaming rings
+# Streaming rings
 
 **Goal:** the live engine streams sources and track buffers through
 bounded rings instead of preloading whole files and rendering every

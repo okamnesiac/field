@@ -3,7 +3,7 @@ status: in-progress
 priority: now
 ---
 
-# Plan: Arming
+# Arming
 
 You arm the tracks you want to play or record, and `field keys` plays
 every armed MIDI track's instrument in unison while `field record`

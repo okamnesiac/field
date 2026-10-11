@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Remote asset store
+# Remote asset store
 
 **Goal:** S3-backed backend behind the content-hash abstraction, when LFS costs
 hurt.

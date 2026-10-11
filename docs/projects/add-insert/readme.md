@@ -7,7 +7,7 @@ choosers, and `--at`. The editor handoff (§5) needs `field open`, which
 plugin-hosting's chunk 3 builds, so it moved into that chunk; until
 then the command prints the `field open` line it would run.
 
-# Plan: `field insert` — add an insert with a chooser
+# `field insert` — add an insert with a chooser
 
 **Goal:** one command that adds an insert to a track: fully pinned at
 birth, found with an interactive search over the scanned inventory

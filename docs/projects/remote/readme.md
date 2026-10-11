@@ -3,7 +3,7 @@ status: in-progress
 priority: next
 ---
 
-# Plan: Remote — login, clone, push, and a read-through cache
+# Remote — login, clone, push, and a read-through cache
 
 **Goal:** the CLI half of audiofield.io: `field login`, `field clone
 <owner>/<project>`, `field push` and `field pull`, and a `field build`

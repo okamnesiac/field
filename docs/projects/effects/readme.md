@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: Offline effects
+# Offline effects
 
 **Status:** Shipped — the rules in #14 (eq with the Fyra-derived
 auto-normalizing gain, limiter, reverb) and all three insert homes in

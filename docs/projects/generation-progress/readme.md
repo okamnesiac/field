@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Generation progress
+# Generation progress
 
 **Goal:** real per-step progress from the workers (ACE step counts, Chatterbox
 chunking) over the existing progress events; today a minutes-long

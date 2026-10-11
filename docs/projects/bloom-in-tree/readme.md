@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: bloom moves into field
+# bloom moves into field
 
 **Status:** Done (2026-08-08). The example lives at `examples/bloom`, CI
 runs `field check` against it (#85), and `okamnesiac/bloom` is deleted.

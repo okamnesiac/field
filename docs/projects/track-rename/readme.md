@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: `field track rename`
+# `field track rename`
 
 **Goal:** `field track rename` (and its siblings) rename a track and
 rewrite every reference to it in one commit, which is what makes names

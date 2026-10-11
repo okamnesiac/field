@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: Playback
+# Playback
 
 **Status:** Shipped (#12–#13, merged 2026-08-05): the daemon, the socket,
 and blocking `field play` with `--from` and the `field transport` family —

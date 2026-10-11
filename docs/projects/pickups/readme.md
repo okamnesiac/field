@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Pickups — negative local positions
+# Pickups — negative local positions
 
 **Goal:** a placement or clip may start before its parent's zero, which
 is how a pickup works

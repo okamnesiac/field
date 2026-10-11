@@ -11,7 +11,7 @@ it turns on is tested. And converted delivery has run on the null
 device only, because the hardware #143 played on switched to 44.1 kHz
 rather than converting.
 
-# Plan: Cross-rate live wiring
+# Cross-rate live wiring
 
 **Goal:** deliver [realtime.md](../realtime/readme.md) decision 7's promise — "a
 foreign-rate dirty track therefore runs live like every other track" —

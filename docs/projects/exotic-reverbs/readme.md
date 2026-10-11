@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Exotic reverb architectures
+# Exotic reverb architectures
 
 **Goal:** velvet-noise reverbs, scattering delay networks: interesting papers,
 no track record worth a mix; revisit once plate and hall have soaked

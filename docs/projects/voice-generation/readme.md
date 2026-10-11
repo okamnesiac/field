@@ -7,7 +7,7 @@ status: completed
 clause, start-to-audio in seconds rather than minutes on the M3 Max,
 was never measured on record.
 
-# Plan: Voice generation
+# Voice generation
 
 **Status:** Shipped — creek sings. Chunk 1 landed as schema (#58),
 worker lifecycle (#59), `field-voiced` (#60) and the CLI seam (#61);
