@@ -318,6 +318,39 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
   );
 
   it(
+    'starts a second take on one arm where the first take left each controller',
+    { timeout: 20_000 },
+    async (ctx) => {
+      const name = source('carry');
+      const keys = await publishOrSkip(ctx, name);
+      const client = await connect();
+      try {
+        // One arm for both takes, as a lasting arm would keep it.
+        await armListing(client, name);
+        await sleep(100);
+        send(keys, [0xbf, 114, 20]);
+        await sleep(100);
+        const first = await client.record();
+        await sleep(100);
+        send(keys, [0xbf, 114, 50]);
+        await waitFor(
+          () => readLines(root, first.file).some((line) => line.at > 0 && line.midi[0] === 0xbf && line.midi[1] === 114),
+          3000,
+          'the controller sent during the first take',
+        );
+        await client.stop();
+        const second = await client.record();
+        await sleep(100);
+        await client.stop();
+        const chased = readLines(root, second.file).filter((line) => line.at === 0 && line.midi[0] === 0xbf && line.midi[1] === 114);
+        expect(chased.map((line) => line.midi)).toEqual([[0xbf, 114, 50]]);
+      } finally {
+        client.close();
+      }
+    },
+  );
+
+  it(
     'records a source on the sample clock, with no audio fields, and finalizes on stop',
     { timeout: 20_000 },
     async (ctx) => {

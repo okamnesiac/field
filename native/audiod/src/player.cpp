@@ -1474,6 +1474,10 @@ juce::int64 Player::stampMidiBlock (juce::int64 untilFrames, int n, double block
         }
         if (chasePending)
             writeChase (push);
+        // After this take's chased lines, so they never repeat a change it
+        // records: the next take on this arm starts from every change, kept
+        // or past `until`, as one after the take ends would be.
+        chaseArrival (arrival);
         at = std::max (at, midiLastAt);
         if (at >= untilFrames)
             return;
@@ -1542,9 +1546,10 @@ void Player::recordMidiCompanions (int n, double blockStartMs)
         first = companions[(size_t) c].midiTake.load();
     if (first == nullptr)
     {
-        // A stop detached them.
+        // A stop detached them, so what arrived belongs to no take, and
+        // only the chase keeps it.
         companionMidiRunning = false;
-        drainMidiArrivals ([] (const MidiArrival&) {});
+        drainMidiArrivals ([this] (const MidiArrival& arrival) { chaseArrival (arrival); });
         return;
     }
     const auto eachCompanion = [&] (auto&& use)

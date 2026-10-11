@@ -345,16 +345,20 @@ A MIDI take starts where the controllers were
 ([instrument-knobs.md](projects/instrument-knobs/readme.md) §2.8). From
 the arm, the daemon keeps the latest value of each controller from 0 to
 119 on each channel: first those `arm` passes in `controllers`, a list
-of `{channel, cc, value}` with `channel` from 1 to 16, then each control
-change that arrives before the take starts. At the take's first sample
-it writes one line per channel and controller, at `at: 0` and ahead of
-every other line, in the order the values last arrived, with the ones
-`arm` passed and nothing replaced first. Every MIDI take of a pass gets
-the same lines. Controllers 120 to 127 are channel mode messages, which
-act once, and are never chased. The table is 16 channels by 120
-controllers, updated in constant time per message by the callback, and
-each arm starts it over. `arm` refuses `controllers` that are out of
-range. A daemon that does this lists `midi-chase` in `hello.features`.
+of `{channel, cc, value}` with `channel` from 1 to 16, then every
+control change that arrives, whether before a take, during one, or past
+its `until`. At a take's first sample it writes one line per channel
+and controller, at `at: 0` and ahead of every other line, in the order
+the values last arrived, with the ones `arm` passed and nothing replaced
+first. A change the take records is in the table only after those
+lines, so it is never written twice, and a second take on one arm
+starts each controller where the first take left it. Every MIDI take of
+a pass gets the same lines. Controllers 120 to 127 are channel mode
+messages, which act once, and are never chased. The table is 16
+channels by 120 controllers, updated in constant time per message by
+the callback, and each arm starts it over. `arm` refuses `controllers`
+that are out of range. A daemon that does this lists `midi-chase` in
+`hello.features`.
 
 The transaction is a directory, `.field/recording/take-YYYYMMDD-HHMMSS/`,
 as for audio:

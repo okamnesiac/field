@@ -483,7 +483,10 @@ parts close the gap:
    channel, so a render then starts on the value the voice last heard.
    The render applies these rows before a note at 0, because
    `renderEvents` already puts control changes before note-ons at one
-   instant.
+   instant. *Amended (2026-10-11, chunk 3):* the table follows every
+   control change from the arm, recorded or not, so a second take on
+   one arm starts each controller where the first take left it
+   (§11.1).
 
 All of it is MIDI, so it serves any source: a hardware knob moved after
 the arm starts the take where it was too. It also closes
@@ -1055,14 +1058,27 @@ criteria a person checks by hand at a kitty terminal and by ear.
   own.
 - **`arm` refuses `controllers` out of range** rather than dropping
   them, as it refuses a bad input channel.
+- **The table follows every control change from the arm, not only
+  those before the start.** A change a take records enters the table
+  after the take's lines at `at: 0`, so it is never written twice. A
+  change past `until`, or in the block where a stop detaches an audio
+  take's MIDI companions, enters it too, as one after the take ends
+  always did. So a second take on one arm, which arming.md chunk 3's
+  lasting arm makes, starts each controller where the first take left
+  it. `field record` still arms once per take.
+- **A block whose pull ran before `record`'s request chases what it
+  drains.** #204 lets such a block wait for the next to start the take,
+  and what it drains arrived before the start.
 
 ### 11.2 What was verified, and how
 
 | Check | Result |
 | --- | --- |
-| The full suite, against a `field-audiod` built from this branch | 90 files: 1193 tests pass, and 1 skips. |
+| The full suite, against a `field-audiod` built from this branch | 91 files: 1216 tests pass, and 1 skips. |
 | `src/commands/record-midi-daemon.test.ts` against the daemon built from this branch, through CoreMIDI | Seeded `cc 110 = 10` and `cc 111 = 20` on channel 16, then sent `cc 112 = 30` on channel 15, `cc 110 = 40` on 16, and CC 120 before the start, and `cc 111 = 50` after it. The take's lines at `at: 0` were `cc 111 = 20`, `cc 112 = 30`, `cc 110 = 40`, in that order, with no CC 120; `cc 111 = 50` landed at its own time, after them. `arm` refused a channel of 0, a CC of 120, and a value of 128. |
 | `field record` end to end, in the same file | With `.field/keys.json` published by the test's own process, the landed notes file had `{ at: 0, cc: 113, value: 23, channel: 16 }`. |
+| Ten `record`s on one arm with `FIELD_AUDIOD_LATCH_STALL_MS=8`, in the same file | A CC sent just before each `record` was in every take. With a discarding drain in the block whose pull ran before `record`'s request, a take missed it in 4 of 4 runs. |
+| Two `record`s on one arm, in the same file | `cc 114 = 20` sent before the first take and `cc 114 = 50` during it: the second take's line at `at: 0` was `cc 114 = 50`. Before every recorded change entered the table, it was `cc 114 = 20`. |
 | `src/commands/record-plan.test.ts` | `field record` reads the file only while its process runs and only for a daemon with `midi-chase`, and ignores a file it cannot parse; a `field keys` that quits leaves another one's file. |
 
 ### 11.3 What is still owed
