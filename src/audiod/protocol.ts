@@ -81,6 +81,23 @@ export const recordStatusSchema = z.object({
   written: z.number().int().optional(), // reached the file (audio takes)
   events: z.number().int().optional(), // a MIDI take's messages captured so far
   dropped: z.number().int().optional(), // the FIFO refused (a stalled writer)
+  // With more than one track armed, every one, the primary first (daemon
+  // feature "record-tracks", arming.md §2.2): its kind, its input and
+  // meter, and while recording its take and that take's progress.
+  armed: z
+    .array(
+      z.object({
+        track: z.string(),
+        kind: z.enum(['audio', 'midi']),
+        input: z.number().int().optional(),
+        input_peak: z.number().optional(),
+        transaction: z.string().optional(),
+        frames: z.number().int().optional(),
+        events: z.number().int().optional(),
+        dropped: z.number().int().optional(),
+      }),
+    )
+    .optional(),
 });
 
 // What arm opened: the device and input, its channel count, the rate
@@ -114,6 +131,25 @@ export const recordResponseSchema = z.object({
   transaction: z.string(),
   file: z.string(),
   started_at_samples: z.number().int(), // -1 while a pre-rolled take waits for its position
+  // Every armed track's take, the primary's first ("record-tracks").
+  takes: z.array(z.object({ track: z.string(), transaction: z.string(), file: z.string() })).optional(),
+});
+
+// One armed track, as `arm` with `tracks` takes it (arming.md §2.2).
+export type ArmTrack = { track: string; kind: 'audio'; input: number } | { track: string; kind: 'midi' };
+
+// What arming a set opened: every track armed, the audio side's device
+// and latency when one is audio, and the MIDI side's sources when one is
+// MIDI.
+export const armTracksResponseSchema = z.object({
+  ok: z.literal(true),
+  armed: z.array(z.object({ track: z.string(), kind: z.enum(['audio', 'midi']), input: z.number().int().optional() })),
+  device: z.string().optional(),
+  channels: z.number().int().optional(),
+  input_latency: z.number().int().optional(),
+  sources: z.array(z.string()).optional(),
+  sample_rate: z.number(),
+  output_latency: z.number().int(),
 });
 
 // The metronome schedule (recording.md §7): tick positions on the bed's
@@ -235,6 +271,7 @@ export const recoverResponseSchema = z.object({
 export const stopResponseSchema = z.object({
   ok: z.literal(true),
   take: anyTakeSchema.optional(),
+  takes: z.array(anyTakeSchema).optional(), // every armed track's ("record-tracks")
 });
 
 export const loadResponseSchema = z.object({

@@ -16,13 +16,13 @@ import {
   parseExportBitDepth,
   parseExportRate,
   parseCountIn,
-  parseInputChannel,
+  parseInputChannels,
   parseSeed,
   parseVariantNumber,
   parseVariants,
   wantsVersion,
 } from './cliParsers.js';
-import { buildLabels, explainLabel, projectRelative, queryDeps, remoteReads } from './commands/build.js';
+import { buildLabels, explainLabel, explanationJson, projectRelative, queryDeps, remoteReads } from './commands/build.js';
 import { formatReach, rootNote } from './model/levels.js';
 import { formatCable } from './model/cables.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
@@ -93,7 +93,8 @@ program
   .description('initialize a Field project in the current directory')
   .option('--name <slug>', 'project name (defaults to the directory name)')
   .option('--sample-rate <hz>', 'project sample rate', (v) => Number(v))
-  .action((opts: { name?: string; sampleRate?: number }) => {
+  .option('--license <spdx>', "the project's license, an SPDX identifier such as CC-BY-4.0 (default: none)")
+  .action((opts: { name?: string; sampleRate?: number; license?: string }) => {
     try {
       const root = init({ dir: process.cwd(), ...opts });
       process.stdout.write(`initialized Field project at ${root}\n`);
@@ -869,9 +870,25 @@ for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
 }
 
 program
-  .command('record [target]')
+  .command('ui <song>')
+  .description('open the web face on a song: transport, lanes, levels, mute and solo (ctrl-c stops)')
+  .option('--port <port>', 'bind this port instead of a random one', (v) => parseInt(v, 10))
+  .option('--no-open', 'print the URL without opening anything')
+  .option('--browser', 'open a browser tab instead of the app window')
+  .action(async (song: string, opts: { port?: number; open?: boolean; browser?: boolean }) => {
+    try {
+      const root = requireRoot();
+      const { runUi } = await import('./commands/ui.js');
+      await runUi(root, song, { ...(opts.port !== undefined ? { port: opts.port } : {}), open: opts.open !== false, browser: opts.browser === true });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
+  .command('record [targets...]')
   .description('record a take on a track through field-audiod: arms an input, or MIDI when the record entry names an instrument, takes against what is playing, ctrl-c stops and finalizes')
-  .option('--input <n>', 'input channel on the device, counting from 1 (default 1); audio takes only', parseInputChannel)
+  .option('--input <n,...>', 'input channel on the device, counting from 1, one per audio track in the order named (default 1, 2, ...); audio takes only', parseInputChannels)
   .option('--device <name>', 'input device (field devices lists them; default: the system input); audio takes only')
   .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
   .option('--click', 'a metronome through the take, synthesized in the engine against the song\'s map')
@@ -885,9 +902,9 @@ program
   .option('--land <id>', 'land a finalized transaction nothing landed, instead of recording')
   .action(
     async (
-      target: string | undefined,
+      targets: string[],
       opts: {
-        input?: number;
+        input?: number[];
         device?: string;
         at?: string;
         click?: boolean;
@@ -940,7 +957,7 @@ program
           process.stdout.write(`${landedLine(landed)}\n`);
           return;
         }
-        if (target === undefined) {
+        if (targets.length === 0) {
           throw new Error(
             'record needs a track to record (creek/track:lead-vocal), or --list / --recover <id> / --land <id>',
           );
@@ -963,7 +980,7 @@ program
         const { takes, missed } = await recordTake(
           root,
           project,
-          target,
+          targets,
           {
             ...(opts.input !== undefined ? { input: opts.input } : {}),
             ...(opts.device !== undefined ? { device: opts.device } : {}),
@@ -1047,18 +1064,19 @@ program
   });
 
 program
-  .command('keys [instrument]')
+  .command('keys [targets...]')
   .description(
-    'play the computer keyboard as the MIDI source "Field Keys", and a SuperCollider instrument from it when you name one ' +
+    'play the computer keyboard as the MIDI source "Field Keys", and SuperCollider instruments from it: name instruments, ' +
+      'or tracks (creek/track:keys) to play the instrument each MIDI track names, all at once ' +
       '(needs a terminal with the kitty keyboard protocol; Esc quits)',
   )
   .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
   .option('--device <name>', 'output device for the instrument (field devices lists them; default: the system output)')
   .option('--print', 'print the keymap as a keyboard diagram and exit')
-  .action(async (instrument: string | undefined, opts: { keymap?: string; print?: boolean; device?: string }) => {
+  .action(async (targets: string[], opts: { keymap?: string; print?: boolean; device?: string }) => {
     try {
       const { keysCommand } = await import('./commands/keys.js');
-      await keysCommand(instrument, opts);
+      await keysCommand(targets, opts);
     } catch (err) {
       fail(err);
     }
@@ -1081,10 +1099,15 @@ program
   .command('explain <label>')
   .description('show a label\'s type, inputs, action key, and cache status')
   .option('--no-remote', 'do not consult the remote cache')
-  .action(async (label: string, opts: { remote?: boolean }) => {
+  .option('--json', 'print the explanation as JSON')
+  .action(async (label: string, opts: { remote?: boolean; json?: boolean }) => {
     try {
       const root = requireRoot();
       const e = await explainLabel(root, label, remoteReads(root, { noRemote: opts.remote === false }));
+      if (opts.json === true) {
+        process.stdout.write(`${explanationJson(e)}\n`);
+        return;
+      }
       process.stdout.write(`${e.label} (${e.kind})\n`);
       // The CLI speaks the format's language (project-layout.md §4):
       // type, not the engine's rule.
@@ -1213,10 +1236,11 @@ program
 program
   .command('arrangement <song>')
   .description("the song's structure, derived from its output track's placements")
-  .action(async (songName: string) => {
+  .option('--json', 'print the arrangement as JSON')
+  .action(async (songName: string, opts: { json?: boolean }) => {
     try {
-      const { arrangement } = await import('./commands/arrangement.js');
-      process.stdout.write(`${arrangement(requireRoot(), songName)}\n`);
+      const { arrangement, arrangementJson } = await import('./commands/arrangement.js');
+      process.stdout.write(`${(opts.json === true ? arrangementJson : arrangement)(requireRoot(), songName)}\n`);
     } catch (err) {
       fail(err);
     }

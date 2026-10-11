@@ -354,7 +354,7 @@ juce::var Transaction::finalize()
     return finalManifest;
 }
 
-juce::var Transaction::list (const juce::File& root, const juce::String& activeId)
+juce::var Transaction::list (const juce::File& root, const juce::StringArray& activeIds)
 {
     juce::Array<juce::var> entries;
     auto dirs = recordingRoot (root).findChildFiles (juce::File::findDirectories, false);
@@ -368,7 +368,7 @@ juce::var Transaction::list (const juce::File& root, const juce::String& activeI
                 o->setProperty (prop.name, prop.value);
         const auto id = d.getFileName();
         o->setProperty ("id", id);
-        o->setProperty ("active", id == activeId);
+        o->setProperty ("active", activeIds.contains (id));
         const bool complete = (bool) manifest.getProperty ("complete", false);
         o->setProperty ("complete", complete);
         // On disk, not in the manifest: an incomplete transaction's

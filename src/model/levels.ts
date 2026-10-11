@@ -34,6 +34,11 @@ export interface Reach {
   pans: PanHop[];
   via: string[]; // tracks between this one and the root, nearest first
   paths: number; // identical paths collapsed into this one
+  // A placement on the path carries `mute: true`, so nothing travels it:
+  // the graph leaves a muted placement out of the plan. Listed rather
+  // than dropped, because "placed, but muted" is the answer to "why is
+  // this silent", and dropping the path would read as "nothing places it".
+  muted: boolean;
 }
 
 // Every path from `trackName` up to a root, where a root is a track
@@ -61,12 +66,12 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
   // One list (nested-tracks.md §18): the entries that create parent
   // edges are exactly the ones that place a track — audio and generator
   // entries are leaves of this walk, not hops on it.
-  const parents = new Map<string, { in: string; gainDb: number; pan: number }[]>();
+  const parents = new Map<string, { in: string; gainDb: number; pan: number; mute: boolean }[]>();
   for (const track of song.tracks) {
     for (const entry of track.data.inputs ?? []) {
       if (entry.track === undefined) continue;
       const list = parents.get(entry.track) ?? [];
-      list.push({ in: track.data.name, gainDb: entry.gain_db, pan: entry.pan });
+      list.push({ in: track.data.name, gainDb: entry.gain_db, pan: entry.pan, mute: entry.mute });
       parents.set(entry.track, list);
     }
   }
@@ -83,7 +88,7 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
     const up = parents.get(name) ?? [];
     if (up.length === 0) {
       // A root: the path ends here, having accumulated nothing.
-      const root: Reach[] = [{ to: name, gainDb: 0, pans: [], via: [], paths: 1 }];
+      const root: Reach[] = [{ to: name, gainDb: 0, pans: [], via: [], paths: 1, muted: false }];
       memo.set(name, root);
       return root;
     }
@@ -101,6 +106,7 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
           // it is the destination rather than a stop along the way.
           via: above.to === edge.in ? [] : [edge.in, ...above.via],
           paths: above.paths,
+          muted: edge.mute || above.muted,
         });
       }
     }
@@ -124,6 +130,7 @@ function collapse(found: Reach[]): Reach[] {
       reach.gainDb,
       reach.via.join('>'),
       reach.pans.map((p) => `${p.in}/${p.track}@${p.pan}`).join(','),
+      reach.muted,
     ].join('|');
     const existing = byShape.get(shape);
     if (existing) existing.paths += reach.paths;
@@ -157,7 +164,9 @@ export function formatReach(reach: Reach): string {
   // it aside — two parenthetical groups back to back read as though the
   // second belonged to the first (#92 review).
   const caveat = reach.pans.length > 1 ? ' — balances compose per channel, not into one pan' : '';
-  return `track:${reach.to} ${parts.join(', ')}${where}${caveat}`;
+  // Muted first among the notes: it overrides every level on the line.
+  const muted = reach.muted ? ' — muted on this path, so it is silent here' : '';
+  return `track:${reach.to} ${parts.join(', ')}${where}${muted}${caveat}`;
 }
 
 // A root track is either the song's output or something nothing consumes.

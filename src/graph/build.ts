@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { sha256File, sha256Text } from '../hash.js';
+import { sha256File, sha256FileSync, sha256Text } from '../hash.js';
 import { formatLabel } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { reaches, type Reach } from '../model/levels.js';
@@ -184,6 +184,41 @@ function outPath(project: LoadedProject, node: GeneratorNode): string {
 // rename are idempotent for identical content.
 let nextTmp = 0;
 
+// Rename onto a destination another process may hold open. POSIX allows
+// it outright — the reader keeps the inode it opened, which is the whole
+// mechanism watch.md §1.6 relies on. Windows refuses with EPERM unless
+// the reader opened the file with FILE_SHARE_DELETE, which the daemon's
+// JUCE streams do not, so the rename has to wait for the reader to move
+// on. It does move on: a stem whose bytes actually changed forces a
+// session swap, and the swap reopens the files. Bounded rather than
+// indefinite, and the failure names the cause instead of surfacing a
+// bare errno (windows-portability.md §1.7).
+function renameOverwrite(tmp: string, out: string): void {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    try {
+      renameSync(tmp, out);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const contended = code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+      if (!contended || Date.now() > deadline) {
+        rmSync(tmp, { force: true });
+        if (contended) {
+          throw new Error(
+            `could not replace ${out}: it is held open by another process (a playing daemon?) — ` +
+              'stop playback and rebuild',
+          );
+        }
+        throw err;
+      }
+      // Synchronous wait: materialize runs inside the build's sync path,
+      // and yielding here would let a second materialize interleave.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
+
 // The read-through (remote.md §3.4): on a local miss, ask the remote for
 // the action key, and on a hit bring its outputs into the CAS and the
 // entry into the index so that everything below here — materialize,
@@ -295,13 +330,34 @@ async function buildNode(
   const materialize = (sha256: string): string => {
     const out = outPath(project, node);
     mkdirSync(dirname(out), { recursive: true });
+    // Already exactly these bytes: nothing to do. Worth checking before
+    // touching the path at all, because this is the common case under
+    // watch — a cache hit re-materializing an artifact that is already
+    // correct — and on Windows it is the difference between working and
+    // not: the daemon holds the artifact open while it streams it, and
+    // renaming onto an open file is EPERM there (windows-portability.md
+    // §1.7). Size first so the hash is only paid when it can match.
+    if (existsSync(out) && statSync(out).size === statSync(casPath(project, sha256)).size) {
+      if (sha256FileSync(out) === sha256) return out;
+    }
     // Copy-to-temp + rename, never copy-in-place: under watch the daemon
     // may be streaming the previous artifact from this very path, and an
     // in-place copy truncates under its reader. A fresh inode leaves the
     // playing pass untouched until the swap (watch.md §1.6).
     const tmp = `${out}.tmp-${process.pid}-${nextTmp++}`;
-    copyFileSync(casPath(project, sha256), tmp);
-    renameSync(tmp, out);
+    try {
+      copyFileSync(casPath(project, sha256), tmp);
+      renameOverwrite(tmp, out);
+    } catch (err) {
+      // Never leave the copy behind. Before the rename learned to clean
+      // up after itself, a contended destination leaked one artifact-sized
+      // file per attempt, and the watch loop retries — one project had
+      // accumulated 2,990 of them totalling 3.7 GB, which a synced folder
+      // then dutifully uploaded. The copy is worthless the moment it does
+      // not land.
+      rmSync(tmp, { force: true });
+      throw err;
+    }
     return out;
   };
 

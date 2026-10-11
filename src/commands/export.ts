@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, linkSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
+import { extname, join, sep } from 'node:path';
 import { hasWavSignature, readWavHeader } from '../audio/wav.js';
 import { renderInsertChain } from '../audio/render-daemon.js';
 import { sha256File } from '../hash.js';
@@ -67,9 +67,14 @@ export function defaultExportDir(): string {
 // Paths under $HOME print with a tilde: an export line is meant to be
 // read at a glance, and the interesting half is the end of it. Only a
 // path that is $HOME or sits beneath it qualifies — `/Users/justinx`
-// must not become `~x`.
-export function homeRelative(path: string, home = homedir()): string {
-  return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+// must not become `~x`. The separator is the platform's, so a Windows
+// path under the profile prints as `~\Desktop\…` (windows-portability.md
+// §7.2), and Windows paths compare without regard to case.
+export function homeRelative(path: string, home = homedir(), separator = sep): string {
+  const prefix = path.slice(0, home.length);
+  const rest = path.slice(home.length);
+  const isHome = separator === '\\' ? prefix.toLowerCase() === home.toLowerCase() : prefix === home;
+  return isHome && (rest === '' || rest.startsWith(separator)) ? `~${rest}` : path;
 }
 
 // `//songs/creek/mix:main` → `creek-mix-main`: the whole label with the

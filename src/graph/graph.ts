@@ -394,6 +394,13 @@ export function buildGraph(project: LoadedProject): Graph {
         withInserts: boolean,
         extent: { lengthSamples?: number | undefined; loop?: boolean | undefined },
       ) => {
+        // Muted placements leave the plan here, before anything walks
+        // inputs — so the stem spec, its action key, the dep edges, and
+        // the live session (which reads these same specs) all agree the
+        // placement is absent, and a mute toggle re-keys the stem the
+        // way any spec edit does. One cut because planFor is where every
+        // consumer's view of the track is minted.
+        track = { ...track, inputs: track.inputs.filter((e) => !e.mute) };
         const rate = trackRate(track);
         // A track plans in its own time (nested-tracks.md §13). The two
         // timelines never have to be reconciled as maps: this stem's
@@ -458,7 +465,10 @@ export function buildGraph(project: LoadedProject): Graph {
         // The cables arriving here become plan inputs: the sender's stem
         // for a post tap, the tap node for pre — converted at the edge
         // like any source when the sender renders at another rate.
-        const cableIns = (cablesByReceiver.get(track.name) ?? []).map((cable) => {
+        // A cable with no arrivals — every sender placement muted — is
+        // silent, so it is no input at all, and the receiver stops
+        // depending on the sender.
+        const cableIns = (cablesByReceiver.get(track.name) ?? []).filter((cable) => cable.arrivals.length > 0).map((cable) => {
           const raw = cable.tap === 'pre' ? tapRef(cable.sender) : trackRef(cable.sender);
           ensureConvert(raw);
           return { ref: raw, gainDb: cable.gainDb, arrivals: cable.arrivals };

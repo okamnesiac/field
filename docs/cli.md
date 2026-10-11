@@ -45,8 +45,11 @@ to capture a take; only plain artifact playback has a fallback (see
 [Platform notes](#platform-notes)).
 
 SuperCollider renders every `supercollider:` entry. `field build` runs
-`sclang` from your `PATH`, from the macOS app bundle, or from
-`FIELD_SCLANG` — see [Environment variables](#environment-variables).
+the `sclang` that `FIELD_SCLANG` names, or else the one on your `PATH`
+(`sclang.exe` on Windows), or else the one the SuperCollider installer
+put in place: the macOS app bundle, or the newest
+`SuperCollider-<version>` folder under Program Files on Windows. See
+[Environment variables](#environment-variables).
 
 To see what you have, ask the version:
 
@@ -136,6 +139,10 @@ creek (12 bars)
   9.1.1 0:20.0  phrase
 ```
 
+`--json` prints the same structure as JSON, with the field names of
+`ArrangementView` in `src/commands/arrangement.ts`, for a program to
+read.
+
 The bar count appears when the song declares a `length:`. A song that
 declares none is as long as its material, which is also what governs
 where playback stops.
@@ -169,7 +176,9 @@ cable: receive "drum-verb" ← track:drums, -10.0 dB (tap post), arrives at samp
 Once the inputs are built, each input shows its hash in place of
 `(not built)`, and an `action:` line reports the action key and whether
 it is cached. Once the label itself is built, an `output:` line gives
-the output's hash and size.
+the output's hash and size. `--json` prints the whole explanation as
+JSON, with the field names of `Explanation` in `src/graph/build.ts`; an
+input that is not built yet has an empty `sha256`.
 
 `creek` cannot answer either command on a fresh checkout. Its generated
 takes are not committed, so `field query` and `field explain` on
@@ -304,7 +313,7 @@ daemon: field-audiod 0.14.0
 
 | Command | Does |
 | --- | --- |
-| `field transport status` | state, position, file, and device |
+| `field transport status` | state, position, file, device, and every armed track |
 | `field transport play` | starts or resumes the transport |
 | `field transport pause` | pauses, holding position |
 | `field transport stop` | stops the transport |
@@ -313,6 +322,52 @@ daemon: field-audiod 0.14.0
 
 `quit` is how you pick up a new build: the daemon respawns on the next
 `field play`, running the binary you just compiled.
+
+## Open a song in the UI
+
+`field ui <song>` opens a window on a song: the transport, a timeline
+with one lane per placement, levels, mute and solo, clip edits, and the
+selected track's insert chain. Every gesture in the window ends as an
+edit to the project's YAML, which the running session picks up exactly
+as it picks up an edit you make in an editor. Solo is the exception: it
+changes what you hear and writes nothing. Ctrl-c, or closing the window,
+stops the transport and ends the session.
+
+The window is a web client served by `field` itself, so build it once
+first. `field ui` refuses with that command when the build is missing:
+
+```sh
+pnpm --dir ui build
+field ui tall-grass
+```
+
+`field ui` prints the URL it serves on, then opens the app window. The
+URL carries a token that the server checks, and it serves only
+`127.0.0.1`:
+
+```console
+$ field ui creek --no-open
+field ui: http://127.0.0.1:53581/?t=ec78bbed68e25fb16cfba087facc6f0b
+```
+
+| Option | Does |
+| --- | --- |
+| `--port <port>` | serves on this port instead of a random one |
+| `--no-open` | prints the URL and opens nothing |
+| `--browser` | opens a browser tab instead of the app window |
+
+The app window is an Electron shell from the `ui/` workspace. When it
+is not installed, or exits before its window opens, `field ui` opens a
+browser instead and keeps the session running. [ui.md](projects/ui/readme.md)
+§6 records what the window does and why.
+
+The app window receives the session URL in its environment, out of
+sight of other users. A browser does not: `--browser`, and the fallback
+to a browser, hand the URL with its token to `open`, `xdg-open`, or
+`start` on the command line, where another user on a shared machine can
+read it, and a browser that starts for it can keep it in its own
+command line while it runs. Use the app window, or `--no-open` and paste
+the URL yourself, where that matters.
 
 ## Record a take
 
@@ -345,7 +400,7 @@ and stops.
 | Option | Does |
 | --- | --- |
 | `--device <name>` | picks an input device (default: the system input) |
-| `--input <n>` | records this channel of the device, counting from 1 (default 1) |
+| `--input <n,...>` | records these channels of the device, counting from 1, one per audio track in the order named (default 1, 2, ...) |
 | `--at <position>` | starts the take at `bar[.beat[.tick]]` |
 | `--until <position>` | punches out: the take ends on that exact sample |
 | `--loop` | loops `--at` to `--until`, landing a take every pass until ctrl-c |
@@ -356,6 +411,22 @@ and stops.
 
 `--until` and `--count-in` need `--at`, and `--loop` needs `--until`
 and a live song as the bed. Under `--loop`, the last pass is chosen.
+
+Name several tracks to record them in one pass, audio, MIDI, or both:
+every take starts on the same sample and lands on its own track. A
+track whose record entry names an instrument records MIDI
+([keys.md](keys.md#record-what-you-play)). The audio tracks take
+`--input` channels in the order you name them, 1, 2, and on when you
+give none; `--loop` records one track only:
+
+```sh
+field record tall-grass/track:vocal tall-grass/track:guitar tall-grass/track:keys --input 1,2
+```
+
+`field transport status` in another terminal lists every armed track. If
+one track's take never arrives while the others land, `field record`
+exits with an error that names the track and the `--recover <id>` that
+finalizes it.
 
 Every take is a transaction under `.field/recording/` until it lands, so
 a crash loses nothing that reached the disk. `field record --list`
@@ -439,7 +510,13 @@ Watch mode never asks the remote.
 | `field import <file> --song <name>` | copy audio in and record it in `assets.yaml` |
 
 `field init` takes `--name <slug>` and `--sample-rate <hz>`; without
-them it uses the directory name and the default rate.
+them it uses the directory name and the default rate. `--license <spdx>`
+writes the project's license, an SPDX identifier such as `CC-BY-4.0`,
+`CC0-1.0`, or `MIT`, into `field.yaml` as `license:`. Without it,
+`field.yaml` carries no license. The license speaks for the work the
+project's authors made; an imported asset keeps the license it arrived
+under. `field check` reports a `license:` that is not an SPDX
+identifier.
 
 `field import` records the file's content hash and its WAV facts — rate,
 bit depth, channels, frame count — and refuses a WAV whose sample rate
@@ -535,7 +612,7 @@ somewhere other than `<program>.wav` in the current directory.
 
 | Variable | Does |
 | --- | --- |
-| `FIELD_SCLANG` | path to `sclang`, ahead of `PATH` and the macOS app bundle |
+| `FIELD_SCLANG` | path to `sclang`, ahead of `PATH` and the installed SuperCollider |
 | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
 | `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
 | `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
@@ -587,7 +664,9 @@ amended. Porting the rest is tracked there and in
 | `field play <patterns...>` | play a song live, or audition artifacts |
 | `field devices` | list output and input devices |
 | `field transport <op>` | drive the running daemon |
-| `field record <track>` | record a take onto a track's `record:` entry |
+| `field ui <song>` | open a song in the UI window, served on `127.0.0.1` |
+| `field record <tracks...>` | record a take onto each track's `record:` entry, in one pass |
+| `field keys [targets...]` | play the keyboard as a MIDI source, and instruments or MIDI tracks from it |
 | `field login` | log in to a remote and store the token |
 | `field logout` | forget the stored token |
 | `field clone <owner>/<project> [dir]` | clone a project and warm the build cache |

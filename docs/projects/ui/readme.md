@@ -1,6 +1,6 @@
 ---
-status: draft
-priority: next
+status: in-progress
+priority: now
 ---
 
 # Plan: the UI, first version
@@ -137,7 +137,10 @@ stale this line.
   Tauri buy native menus, a dock icon, and window adjacency with
   chunk 3's plugin editors, at the price of a shell runtime and its
   updates. Leaning: browser first, shell when editor adjacency
-  actually hurts.
+  actually hurts. **Settled 2026-08-20: the shell, and the lean was
+  wrong about which cost bites first** — see §6. Adjacency never came
+  up; being unable to see a blank window's console did, on the first
+  day the thing was opened.
 - **Where the client lives.** A pnpm workspace package (`ui/`), or
   `src/ui/` with its own tsconfig for DOM types. The repo is a single
   package today; the workspace split is cleaner for a DOM/bundler
@@ -177,3 +180,133 @@ stale this line.
   first version's surface is small enough that this can stay
   hand-rolled and be revisited with evidence; recorded so the first
   stylesheet is not mistaken for a decision.
+
+## 6 Implemented (2026-08-18), with mute and solo
+
+The plan is ninjudd's from #156, brought over whole; this section is
+what the first implementation settled, added at the end so §1–§5 keep
+their numbers. Everything in §3's scope shipped as written, except
+where this section says otherwise, and the mute non-goal fell the way
+§3 predicted: the schema line came. The pull request that carried the
+first version also crossed four more of §3's non-goals once the view
+was in use; the last bullets below record each, with the reason it
+was taken.
+
+- **`mute:` exists** (schema/track.ts): a boolean on the placement
+  beside `gain_db` and `pan`, the loop entry's `enabled:` shape
+  applied to a whole placement — a field rather than a gain gesture for
+  §2's own reason, and on the placement rather than the track because
+  levels live there and a track placed twice can be muted in one home.
+  `planFor` excludes muted placements, so the stem spec, its action
+  key, the deps, and the live session agree; a toggle re-keys, and
+  re-muting is a cache hit. The UI writes it like any other placement
+  field.
+- **Solo is session-only** (model/solo.ts): a listening gesture, so it
+  lives where play/pause does — in the running session, held by the
+  `field ui` server, written nowhere. Soloing compiles an alternate
+  feed: the soloed track's subtree whole, its carriers keeping only the
+  inputs that lead to it, and its send receivers audible transitively
+  (solo drums, keep the room drums feed). Muted placements cannot carry
+  a solo. While a solo is held, every file edit swaps the soloed
+  compile rather than ramping, because ramp indexes address the
+  daemon's session and the soloed session's indexes are not the
+  un-soloed compile's. Solo offers on track lanes only in this version:
+  the walk starts from a track, and an audio placement of `main` has
+  no subtree to walk.
+- **One lane per `main` placement, opening into nested rows**: the
+  top level is one lane per placement in `main`, and lane-per-placement
+  rather than lane-per-track is what makes mute-on-the-placement the
+  button's exact meaning. A lane that places a track opens, on request,
+  into the placements in that track's file, as deep as the tree goes
+  (amended 2026-10-10; this bullet first said the lanes stay flat and
+  the nesting an engine concern). Each row carries the file it lives
+  in, that file's hash, and its index in `inputs:`, so a child row's
+  edit writes the placing track's file under that file's own stale
+  guard. Which rows are open is view state, persisted nowhere.
+- **Musical time is projected in the browser after all** (amended
+  2026-08-20; this bullet said the opposite for two days, and §2 said
+  client-side before that). The first implementation kept the projection
+  in field's own process and shipped rendered strings, which is cheaper
+  and was wrong for one reason nobody had measured: **the daemon emits
+  position on a 250 ms heartbeat** (`main.cpp`'s `Heartbeat`), so a
+  readout that only moves when an event arrives moves four times a
+  second. That reads as broken — reported as "the time thing is really
+  jumpy… it needs to flow" — and no amount of machine speed fixes it,
+  because the samples in between are never sent. A view that runs its
+  own playhead between events and resynchronises on each one is the only
+  shape that flows, and that view needs the tempo map.
+
+  What kept the earlier decision honest still holds, and is why this is
+  cheap rather than a second implementation: the snapshot carries the
+  song's own tempo and meter **event arrays**, and the client builds the
+  same `TempoMap`/`MeterMap` from `src/time/tempo.ts` that the CLI uses
+  — pure arithmetic with no Node dependency, imported rather than
+  ported, so the two projections cannot drift. `ramp` travels with the
+  tempo events, or a ramped song would disagree. The load-bearing rule
+  is untouched: the daemon still hears only samples (playback.md §3.6).
+  The server keeps formatting the snapshot's `musical` string as the
+  value a song with no tempo map falls back to.
+- **§5's remaining questions, answered by the flip**: the client lives
+  in a `ui/` workspace package; fader drags write on release with no
+  live ramps inside the gesture (the bounded option §5 recorded stays
+  open for later, with its rollback obligations noted); hand-rolled
+  CSS.
+- **A desktop shell, not a browser tab — and not for §5's reason**
+  (amended 2026-08-20; this bullet said "browser tab, no shell" when
+  first written, and shipped the opposite two days later). §5 conditioned
+  the shell on window adjacency with chunk 3's plugin editors, and that
+  trigger has not fired — those editors do not exist yet. Two other
+  reasons did fire, on the first session that opened the thing:
+  a browser tab is the wrong answer to "open my project" when the tab
+  belongs to whatever browser happens to be default and the window
+  cannot own its own lifetime; and **a blank tab cannot be diagnosed
+  remotely**. The first render crashed on a React error nobody could
+  see, and the fix that found it was the shell mirroring the renderer's
+  console to the terminal `field ui` was launched from. A tool whose
+  failures are invisible to the person who can fix them is the more
+  expensive kind of cheap. Electron, because the client is already a web
+  app and Tauri would add a Rust toolchain the stack does not have;
+  `--browser` keeps the tab as an opt-out, and a missing Electron falls
+  back to it rather than failing. Its weight is real and recorded with
+  the rest in [project-core.md](../project-core/readme.md) §5. The stack record itself is
+  amended in [project-core.md](../project-core/readme.md) §5 (2026-08-18): the
+  `ui/` workspace member against §5's single-package sentence, `ws` on
+  the server, react + vite inside the member only — with the reasons
+  and what each amends, where `AGENTS.md` says decided records change.
+- **The timeline, with waveforms** (amended 2026-10-10; §3 listed
+  waveforms and arrangement editing as non-goals). The lanes draw on
+  one time axis under a bar ruler, with a playhead. Geometry comes from
+  the planner's own `placedWindow`, so the picture cannot disagree with
+  the render. §3's argument against waveforms was about doing them
+  properly — a peaks artifact with a build rule, a cache, and an
+  invalidation story — and it still stands for long material. What
+  shipped is the cheap half: an envelope computed on demand from the
+  stem the build already wrote, memoised by the file's identity, which
+  is enough for songs of a few minutes. The commits cite
+  "ui-timeline.md chunk 1"; that plan was never committed, and this
+  bullet is the record in its place.
+- **Clip move, split, and trims** (amended 2026-10-10; §3 listed
+  clip manipulation as a non-goal). Selecting a clip and dragging it,
+  cutting it at the playhead, and dragging either edge were the
+  gestures the timeline asked for as soon as it existed, and each is a
+  file edit like the fader: one write on release, in the spelling the
+  author used, with the stale guard and a load of the edited project
+  before the write (`src/commands/ui-edits.ts`, `src/commands/ui.ts`).
+  A looped or cross-rate clip refuses the gestures whose arithmetic
+  would be wrong for it.
+- **The insert editor** (amended 2026-10-10; §3 kept inserts read-only
+  and pointed at `field insert add`). Selecting a clip shows its
+  track's chain, with add, edit, and remove for the built-in effects:
+  a knob strip for `limit`, `reverb`, `plate`, and `hall`, and for the
+  `eq` a response curve with draggable bands. Every write is validated
+  by the same zod objects the track schema is built from, and a hosted
+  plugin stays read-only, its parameters belonging to its own editor
+  window (plugin-hosting.md §5). The EQ curve is computed in the view
+  because it redraws under a drag at frame rate, which a socket round
+  trip per pointer move cannot; its arithmetic lives in
+  `src/audio/eq-response.ts` under the suite, as render-pipeline.md
+  decision 4's amendment records.
+- **Verified on a live session**: play through a real device with
+  position streaming, a mute landing in YAML and riding the watch back
+  into the running audio, solo/un-solo swapping mid-play with the
+  transport carried, and a stale-hash edit rejected with a refresh.

@@ -180,3 +180,22 @@ exposing the CLI's verbs to agents is planned.
 Start at [docs/](docs/README.md) — the thesis and core concepts, with
 the index to the rest: architecture, tracks, the project model, the
 build graph, and the audio engine.
+
+## License
+
+Field's code is licensed under the [MIT License](LICENSE).
+
+The audio daemon, `field-audiod`, links two third-party codebases that
+carry their own terms:
+
+- **[JUCE](https://juce.com)**, licensed under AGPLv3 or a commercial
+  JUCE license.
+- **Steinberg's VST3 SDK**, compiled in so the daemon can host VST3
+  plugins. JUCE 8.0.4, the version the daemon pins, bundles it under
+  GPLv3 or Steinberg's proprietary VST3 license.
+
+A commercial JUCE license does not cover the VST3 SDK. Unless you hold
+both a commercial JUCE license and Steinberg's proprietary VST3
+license, a `field-audiod` binary you build or distribute is under
+copyleft terms: AGPLv3 for JUCE and GPLv3 for the VST3 SDK, so anyone
+who receives it is entitled to its source.

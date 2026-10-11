@@ -257,6 +257,33 @@ a crash can leave behind, and marks the manifest `recovered`; its
 `frames` is the journal's count or one past the last message's `at`,
 whichever is larger.
 
+## Several armed tracks
+
+`arm` with `tracks` arms several tracks at once
+([arming.md](projects/arming/readme.md) §2.2). Each entry is
+`{track, kind: "audio", input}` or `{track, kind: "midi"}`, and
+`device` names the input device for the audio ones. The device opens
+with every armed input active, and the MIDI ones hear every MIDI
+source, so two armed MIDI tracks record the same notes. The answer
+lists `armed`, the primary first: the first audio track, or the first
+track when none is audio. The rest are companions. A daemon that does
+this lists `record-tracks` in `hello.features`, and `arm` with one
+track and `kind: "midi"` are one-entry forms of the same thing.
+
+One `record` starts every armed track on the primary's latch, so every
+take starts at the same bed position, and its answer adds `takes`, each
+track's transaction. Every rule above runs on the primary, and the
+companions follow it: an audio companion pushes the same span of its own
+input, and `until` ends them all. MIDI companions of an audio primary
+end a block later, as a MIDI take always does, and the pass finalizes
+when every take has ended. `loop` refuses a set of more than one track.
+`stop` and `pause` answer with `takes`, every track's manifest, beside
+`take`, the primary's, and each take is its own `take` event.
+With more than one track armed, `status.record` adds `armed`: each
+track's kind, its input and meter, and while recording its transaction
+and progress. When any of them records MIDI, `status.record` also lists
+the MIDI `sources` they all hear.
+
 ## Landing a take
 
 When a take finalizes, `field record` lands it

@@ -40,10 +40,10 @@ export function oscMessage(address: string): Buffer {
   return Buffer.concat([pad(address), pad(',')]);
 }
 
-function sendQuit(port: number): Promise<void> {
+function sendOsc(address: string, port: number): Promise<void> {
   return new Promise((done) => {
     const socket = createSocket('udp4');
-    socket.send(oscMessage('/quit'), port, '127.0.0.1', () => socket.close(() => done()));
+    socket.send(oscMessage(address), port, '127.0.0.1', () => socket.close(() => done()));
   });
 }
 
@@ -72,12 +72,18 @@ const hostLine = z.union([
   z.object({ error: z.string() }),
   z.object({ voice_on: z.number() }),
   z.object({ voice_off: z.number() }),
+  z.object({ reloaded: z.literal(true) }),
+  z.object({ reload_error: z.string() }),
 ]);
 
 export type VoiceHostStatus =
   | { state: 'live'; device: string; sampleRate: number }
   | { state: 'restarting' }
-  | { state: 'voice'; note: number; on: boolean };
+  | { state: 'voice'; note: number; on: boolean }
+  // The program was loaded again after its file changed (§14): the next
+  // note plays the new voice, or, when it failed, still the last good one.
+  | { state: 'reloaded' }
+  | { state: 'reload-failed'; reason: string };
 
 export function parseHostLine(line: string): z.infer<typeof hostLine> | undefined {
   if (!line.startsWith('@field ')) return undefined;
@@ -89,7 +95,9 @@ export function parseHostLine(line: string): z.infer<typeof hostLine> | undefine
 }
 
 export interface VoiceHostOptions {
-  instrument: string;
+  // The programs to play, in unison: each note sounds a voice from each
+  // (arming.md §2.1).
+  instruments: string[];
   device?: string;
   onStatus?: (status: VoiceHostStatus) => void;
   // Called when the host exits on its own after it was ready.
@@ -105,12 +113,16 @@ export class VoiceHost {
   // The scsynth the host launched last, which `close` stops by process:
   // one that is still booting has not bound its port, so /quit misses it.
   private serverPid: number | undefined;
+  // sclang's first ERROR line since the last reload: a program that does
+  // not compile says why only there.
+  private reloadError: string | undefined;
   // Settles when the host first goes live, or rejects with why it did not.
   readonly ready: Promise<void>;
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly port: number,
+    private readonly langPort: number,
     options: VoiceHostOptions,
   ) {
     // sclang reports compile and runtime errors on stdout, so the tail of
@@ -141,6 +153,7 @@ export class VoiceHost {
       child.stderr.on('data', () => {});
       createInterface({ input: child.stdout }).on('line', (line) => {
         tail.push(line);
+        if (line.startsWith('ERROR:')) this.reloadError ??= line.slice('ERROR:'.length).trim();
         if (tail.length > OUTPUT_TAIL * 4) tail.splice(0, tail.length - OUTPUT_TAIL * 4);
         const parsed = parseHostLine(line);
         if (parsed === undefined) return;
@@ -154,7 +167,12 @@ export class VoiceHost {
           }
         } else if ('restarting' in parsed) options.onStatus?.({ state: 'restarting' });
         else if ('voice_on' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_on, on: true });
-        else options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
+        else if ('voice_off' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
+        else if ('reloaded' in parsed) options.onStatus?.({ state: 'reloaded' });
+        else {
+          const detail = this.reloadError;
+          options.onStatus?.({ state: 'reload-failed', reason: detail === undefined ? parsed.reload_error : `${parsed.reload_error}: ${detail}` });
+        }
       });
     });
     // Whoever starts a host awaits `ready`; until then a rejection is
@@ -167,19 +185,29 @@ export class VoiceHost {
   static async start(options: VoiceHostOptions): Promise<VoiceHost> {
     const env = options.env ?? process.env;
     const port = await freeUdpPort();
-    const child = spawn(sclangCommand(env), ['-D', voiceHostScript()], {
+    // sclang's own port, where `reload` reaches it.
+    const langPort = await freeUdpPort();
+    const child = spawn(sclangCommand(env), ['-u', String(langPort), '-D', voiceHostScript()], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...env,
         FIELD_MODE: 'voice',
-        FIELD_INSTRUMENT: options.instrument,
+        FIELD_INSTRUMENTS: JSON.stringify(options.instruments),
         FIELD_SC_PORT: String(port),
         FIELD_PARENT_PID: String(process.pid),
         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
         ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
       },
     });
-    return new VoiceHost(child, port, options);
+    return new VoiceHost(child, port, langPort, options);
+  }
+
+  // Asks the host to load every program again, as one has changed; if one
+  // does not load, every voice stays as it was. The result arrives as a
+  // `reloaded` or `reload-failed` status.
+  reload(): Promise<void> {
+    this.reloadError = undefined;
+    return sendOsc('/field/reload', this.langPort);
   }
 
   // /quit, then the server's process if it lingers, then sclang: SIGTERM,
@@ -199,7 +227,7 @@ export class VoiceHost {
   }
 
   private async stopServer(): Promise<void> {
-    await sendQuit(this.port);
+    await sendOsc('/quit', this.port);
     const pid = this.serverPid;
     if (pid === undefined || (await exited(pid, 500))) return;
     try {

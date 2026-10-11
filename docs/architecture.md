@@ -73,6 +73,27 @@ one helper, `src/git.ts`. Tokens live in the macOS keychain or
 `~/.field/credentials`, Field's first per-user state. See
 [remote.md](remote.md).
 
+**`field ui <song>` is a view over the files, served by the same
+process.** It compiles the song's live session, connects to the daemon,
+and serves the client in `ui/` over HTTP and one WebSocket per view, bound
+to `127.0.0.1`. A gesture in the view ends as a YAML edit, written
+through the same comment-preserving document code every editor uses, and
+the watch loop carries it into the playing session exactly as it carries
+a hand edit; the server never pushes an edit to the daemon itself. Two
+guards stand because the socket accepts writes. The upgrade checks the
+`Origin` header against the server's own addresses and a per-launch
+token, and every edit carries the sha256 of the file bytes it was made
+against, so an edit to a file that changed underneath is refused and the
+view refreshed. Before writing, the server loads the project with the
+edited text and refuses any edit that would add an error. Solo is
+session-only: the server compiles an alternate session holding the
+soloed track's subtree, its carriers, and its send receivers
+(`src/model/solo.ts`), and writes nothing. The view opens in an Electron
+shell from the `ui/` workspace member, or in a browser with `--browser`
+or when the shell cannot start; closing the shell, or ctrl-c, stops the
+transport and ends the session. See
+[projects/ui/readme.md](projects/ui/readme.md).
+
 ## Native audio daemon (C++ / JUCE) — `field-audiod`
 
 The daemon owns all latency-sensitive and hardware-facing work. Its
@@ -140,12 +161,19 @@ you about 0.7ms.
   real-time threading bugs at the FFI boundary. Not worth borrow
   checking in roughly 30% of one contained process.
 
-**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial. Field uses
-AGPL while personal/open-source; if productized closed-source, a
-commercial license (about $130/month Pro tier, or perpetual) resolves
-it. JUCE stays **quarantined inside the daemon** — it never leaks into
-other components, so licensing exposure is one process and the hosting
-layer stays swappable.
+**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial, and the
+daemon also compiles in Steinberg's VST3 SDK to host VST3 plugins,
+which JUCE 8.0.4 bundles under GPLv3 or Steinberg's proprietary VST3
+license. A daemon built from this repository takes the copyleft option
+of each (see the README's License section). A closed-source build would
+need a commercial JUCE license and Steinberg's proprietary VST3 license
+both; the JUCE license alone does not cover the SDK. JUCE and the SDK
+stay **quarantined inside `native/audiod/`**: the daemon, and
+`field-fixture`, the test plugin the same CMake project builds for the
+hosting tests, whose VST3 build carries both and whose AU build carries
+JUCE. They never leak into the CLI, the workers, or the UI, so licensing
+exposure stays in that one directory and the hosting layer stays
+swappable.
 
 ## SuperCollider
 
@@ -162,8 +190,8 @@ OSC over UDP, which TypeScript handles fine. Two modes:
   `sc/voice-host.scd`, which boots its own scsynth on the output device
   and plays the instrument's voice from every MIDI source
   ([keys.md](keys.md)). Its sound goes straight to the device, beside
-  the daemon's rather than through the session graph; scsynth as a node
-  in that graph, receiving timestamped OSC, is
+  the daemon's rather than through the session graph. Bringing it into
+  that graph, so a track's inserts process it, is
   [live-supercollider](projects/live-supercollider/readme.md)'s work.
 
 SC source is tracked in Git and treated as code.

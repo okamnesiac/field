@@ -38,8 +38,10 @@ To keep what you play, record it into a track; see
   sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
   `field keys` reports that.
 - **SuperCollider, to play an instrument.** `field keys` finds `sclang`
-  the way `field build` does: `FIELD_SCLANG`, then your `PATH`, then
-  the macOS app bundle.
+  the way `field build` does: `FIELD_SCLANG`, then your `PATH`
+  (`sclang.exe` on Windows), then where the SuperCollider installer put
+  it, which is the macOS app bundle or the newest
+  `SuperCollider-<version>` folder under Program Files on Windows.
 
 You do not need to be inside a Field project.
 
@@ -134,10 +136,14 @@ these controls, and it must not render or exit.
 | `amp` | The velocity divided by 127 |
 | `gate` | 1 at note-on, 0 at note-off |
 | `out` | The output bus, 0 |
+| `mod` | Optional: the modulation wheel (CC 1), from 0 to 1, at note-on and whenever it moves |
 
-The voice writes two channels and frees itself after `gate` goes to 0,
-with an envelope that ends in `doneAction: 2`. The render variables are
-absent in voice mode, so check `FIELD_MODE` before you read them:
+A voice may leave `mod` out, and then the wheel does nothing to it. In
+`musical-typing`, the keys `3` to `8` set the wheel from 0 to full, as
+they do in Logic. The voice writes two channels and frees itself after
+`gate` goes to 0, with an envelope that ends in `doneAction: 2`. The
+render variables are absent in voice mode, so check `FIELD_MODE` before
+you read them:
 
 ```supercollider
 (
@@ -153,9 +159,22 @@ if ("FIELD_MODE".getenv == "voice") {
 ```
 
 The host owns everything between MIDI and voices: one voice per
-sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
-pitch bend, which it applies to `freq` on every sounding voice, up to
-two semitones either way. It ignores modulation (CC 1) for now.
+sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), pitch
+bend, which it applies to `freq` on every sounding voice, up to two
+semitones either way, and the modulation wheel, which it sets as `mod`
+on every sounding voice and on each new one.
+
+Saving the program while `field keys` plays loads it again. The next
+note plays the new voice, and notes already sounding finish as they
+started. A save that does not load, such as one with a syntax error,
+leaves the last voice that loaded playing, and the instrument's line
+says why:
+
+```console
+juno kept its last voice: juno.scd does not compile: syntax error, unexpected end of file
+```
+
+The next save that loads puts `· reloaded` on the line instead.
 
 `examples/bloom` has three instruments that answer voice mode:
 
@@ -164,11 +183,39 @@ two semitones either way. It ignores modulation (CC 1) for now.
 - **`juno`** — the JU-06A, a model of the Roland Juno's chain from
   [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
   classic Juno pad: saw and pulse with the width swept, a slow attack,
-  and the chorus on.
+  and the chorus on. The modulation wheel adds vibrato, as the lever on
+  a Juno's bender does.
 - **`bass`** — the same JU-06A set as offset's bass: a saw with a square
   sub an octave down, a short envelope that opens the filter on each
-  note, and no chorus. It plays at true pitch, so in `musical-typing`
-  press `Z` to drop an octave.
+  note, and no chorus. The modulation wheel opens the filter, up to four
+  times its cutoff. It plays at true pitch, so in `musical-typing` press
+  `Z` to drop an octave.
+
+## Play a track
+
+Name a track instead of an instrument, and `field keys` plays the
+instrument the track's record entry names, whether or not the track has
+any takes yet. Name several, and every key plays all of them at once:
+
+```console
+$ field keys creek/track:keys creek/track:bass
+keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers
+Field Keys · musical-typing · transpose 0 · velocity 100 · C3
+```
+
+A target with `track:` in it is a track; anything else is an
+instrument, so you can mix the two. A track whose record entry names no
+instrument plays the MIDI track under it, down its `track:` inputs, so
+naming a bus plays the part it carries. If more than one MIDI track is
+under it, `field keys` lists them and stops, and you name the ones you
+mean.
+
+The instrument still plays straight to the device, so the inserts on
+the track and on the tracks above it are not heard yet. When a track you
+named has any, the instrument's line ends
+`· dry: the effects on keys-bus are not heard yet`. Hearing them is the
+work of
+[the live-supercollider plan](projects/live-supercollider/readme.md).
 
 ## Record what you play
 
@@ -213,6 +260,19 @@ audio takes only. The take is placed by the output latency alone,
 because you play in time with what you hear. `field choose` picks
 among takes as it does for audio. For the files a take leaves, see
 [project-model.md](project-model.md) "MIDI takes".
+
+Name several tracks to record them in one pass: every MIDI track you
+name records the same notes, and an audio track records its own input,
+so you can sing and play at once:
+
+```console
+$ field record creek/track:vox creek/track:keys --at 17
+```
+
+A take starts with the modulation wheel at 0, because it records only
+the messages that arrive once it has started. A wheel you left up
+before then plays live but not in the take's render, so set it again
+after the take starts: move the wheel, or press the key that sets it.
 
 ## Keys are read by position
 

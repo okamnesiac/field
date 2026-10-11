@@ -16,35 +16,30 @@ var out = "FIELD_OUTPUT".getenv;
 var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
 var chans = "FIELD_CHANNELS".getenv.asInteger;
 var dur = "FIELD_DURATION".getenv.asFloat;
-var voiceDef, loadError, take, score, voicer, now = 0.0, nextNode = 1000;
+var here = PathName(thisProcess.nowExecutingPath).pathOnly;
+var voiceDef, problem, take, score, voicer, now = 0.0, nextNode = 1000;
 
 // Read above, and gone before the instrument loads: in voice mode the
 // render variables are absent, here as live (keys.md).
 ["FIELD_OUTPUT", "FIELD_SEED", "FIELD_DURATION", "FIELD_SAMPLE_RATE", "FIELD_CHANNELS"].do(_.unsetenv);
 
-voiceDef = try { thisProcess.interpreter.executeFile(instrument) } { |error| loadError = error.errorString; nil };
-case
-{ loadError.notNil } {
-	("ERROR: " ++ PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: " ++ loadError).postln;
+# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument);
+if (problem.notNil) {
+	("ERROR: " ++ problem).postln;
 	1.exit;
-}
-{ voiceDef.isKindOf(SynthDef).not } {
-	("ERROR: " ++ PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef").postln;
-	1.exit;
-}
-{
+} {
 	take = File.readAllString(eventsPath).parseJSON;
 	score = Score.new;
 	score.add([0.0, ['/d_recv', voiceDef.asBytes]]);
 
-	voicer = thisProcess.interpreter.executeFile(PathName(thisProcess.nowExecutingPath).pathOnly +/+ "voicer.scd").(
-		{ |note, velocity, freq|
+	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+		{ |note, velocity, freq, mod|
 			var node = nextNode;
 			nextNode = nextNode + 1;
-			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0]]);
+			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod]]);
 			node
 		},
-		{ |node, freq| score.add([now, [\n_set, node, \freq, freq]]) },
+		{ |node, control, value| score.add([now, [\n_set, node, control, value]]) },
 		{ |node| score.add([now, [\n_set, node, \gate, 0]]) }
 	);
 

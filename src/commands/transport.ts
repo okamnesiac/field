@@ -127,10 +127,17 @@ export async function transportStatusLines(
     // another terminal shows up here, which is also how you learn why
     // the daemon is refusing to idle-exit.
     if (status.record !== undefined && status.record.state !== 'idle') {
-      const input = `${status.record.device} input ${status.record.input} → ${status.record.track}`;
-      if (status.record.state === 'recording') {
-        const frames = status.record.frames !== undefined ? ` (${status.record.frames} frames)` : '';
-        lines.push(`recording: ${status.record.transaction}${frames} on ${input}`);
+      // Every armed track, the primary first (arming.md §2.2); a MIDI
+      // track listens to the arm's sources rather than to an input.
+      const record = status.record;
+      const tracks = record.armed ?? [{ track: record.track ?? '', kind: record.kind ?? 'audio', input: record.input }];
+      const midiFrom = `MIDI from ${(record.sources ?? []).join(', ')}`;
+      const input = tracks
+        .map((a) => `${a.kind === 'midi' ? midiFrom : `${record.device} input ${a.input}`} → ${a.track}`)
+        .join(', ');
+      if (record.state === 'recording') {
+        const frames = record.frames !== undefined ? ` (${record.frames} frames)` : '';
+        lines.push(`recording: ${record.transaction}${frames} on ${input}`);
       } else {
         lines.push(`armed: ${input}`);
       }

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { arrangement } from './arrangement.js';
+import { arrangement, arrangementJson } from './arrangement.js';
 import { check } from './check.js';
 import { createSong } from './create.js';
 import { init } from './init.js';
@@ -68,6 +68,18 @@ describe('field arrangement', () => {
       '  5.1.1 0:08.0  vox  (+3 dB, pan 0.2)',
       '  9.1.1 0:16.0  phrase',
     ]);
+  });
+
+  it('says which placements are muted, since they are placed but silent', () => {
+    threePasses();
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      readFileSync(join(root, 'songs/creek/tracks/main.yaml'), 'utf8').replace(
+        '    gain_db: 3\n',
+        '    gain_db: 3\n    mute: true\n',
+      ),
+    );
+    expect(arrangement(root, 'creek')).toContain('  5.1.1 0:08.0  vox  (muted, +3 dB, pan 0.2)');
   });
 
   it('reports the song length as a span, not the downbeat after it', () => {
@@ -172,5 +184,20 @@ describe('field arrangement', () => {
     rmSync(join(root, 'songs/creek/tracks/main.yaml'));
     expect(() => arrangement(root, 'creek')).toThrow('has no track named "main"');
     expect(() => arrangement(root, 'ghost')).toThrow('no such song');
+  });
+});
+
+describe('field arrangement --json', () => {
+  it('prints the ArrangementView with its own field names (remote.md §3.6)', () => {
+    threePasses();
+    const view = JSON.parse(arrangementJson(root, 'creek'));
+    expect(view.song).toBe('creek');
+    expect(view.placements.map((p: { track: string; bars: string }) => [p.track, p.bars])).toEqual([
+      ['phrase', '1.1.1'],
+      ['phrase', '5.1.1'],
+      ['vox', '5.1.1'],
+      ['phrase', '9.1.1'],
+    ]);
+    expect(view.placements[2]).toMatchObject({ track: 'vox', gainDb: 3, pan: 0.2, absolute: false });
   });
 });

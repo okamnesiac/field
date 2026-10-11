@@ -40,6 +40,10 @@ concurrency:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    # The ui/ workspace member pulls electron, which has no install
+    # script: it downloads its ~100 MB runtime only when something
+    # resolves the package to launch it. CI typechecks and builds the
+    # client and never opens the shell, so the install fetches nothing.
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -50,6 +54,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      # ui/ is its own workspace member with its own tsconfig, so neither
+      # the root typecheck nor the root build touches it — this is the
+      # only thing standing between the client and silent rot. `build`
+      # there is `tsc --noEmit && vite build`, so it is the typecheck
+      # too. Linux only: it is seconds of platform-neutral bundling, and
+      # duplicating it on the 10x runner buys nothing.
+      - run: pnpm --dir ui build
       # The example project, checked by the CLI that was just built. This
       # is the reason bloom moved into the tree (bloom-in-tree.md §1): the
       # format's only real consumer used to live in another repository,
