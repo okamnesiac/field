@@ -108,9 +108,10 @@ value. The first knob is always `mod`, the modulation wheel (CC 1), from
 1. Press `ArrowRight` or `ArrowLeft` to choose a knob. The chosen knob is
    in reverse video. The choice wraps past either end and sends nothing.
 2. Press `ArrowUp` or `ArrowDown` to turn the chosen knob one step up or
-   down. A step is one controller value, so a knob has 128 positions.
-   `field keys` sends the knob's controller with its new value on the
-   keymap's channel.
+   down. A step is one controller value, so a knob has 128 positions. On
+   a knob with a `step`, a step moves to the next controller value whose
+   value rounds differently. `field keys` sends the knob's controller
+   with its new value on the keymap's channel.
 3. Hold `ArrowUp` or `ArrowDown` to keep turning. After 300 ms the knob
    turns a step every 40 ms, two steps from one second, and four from
    one and a half, so a knob crosses its whole range in about 2.3
@@ -210,9 +211,10 @@ in the project. A value with a `/`, or ending in `.yaml`, is a path, and
 a leading `~/` means your home directory. Repeat `--knobs` for more than
 one file. With knobs from more than one instrument or file, each knob
 after `mod` carries the name of where it came from: the track, the
-program, or the file without `.knobs.yaml`, as in `keys.cutoff`. Two
-knobs on one controller share its value, and each shows it through its
-own range.
+program, or the file's name without `.knobs.yaml`, or without `.yaml`
+when it does not end in `.knobs.yaml`, as in `keys.cutoff` or
+`ju-06a.cutoff`. Two knobs on one controller share its value, and each
+shows it through its own range.
 
 ## Play an instrument
 

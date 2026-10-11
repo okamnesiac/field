@@ -272,10 +272,9 @@ for `juno.scd`), `FIELD_KNOBS` names a copy of it that passed Field's
 check, so the voice can map its controls through the knobs' ranges.
 `field keys <instrument>` plays that voice live; the render variables
 are absent in voice mode, so a program checks `FIELD_MODE` before
-reading them. A
-`supercollider:` entry never runs in voice mode, so voice mode changes
-its renders only through the program's own content hash. See
-[keys.md](keys.md).
+reading them. A `supercollider:` entry never runs in voice mode, so
+voice mode changes its renders only through the program's own content
+hash. See [keys.md](keys.md).
 
 ### `voice-render` — a recorded MIDI take, rendered
 

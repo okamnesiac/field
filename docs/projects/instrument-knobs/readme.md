@@ -940,6 +940,10 @@ and the glide wait for chunk 2, and the starting positions for chunk 3.
 - **The lines above the status line redraw together.** `redrawAbove`
   rewrites from the first line that changed and clears below when a
   keymap reload removes the knob line.
+- **`setsMod()` stays a keymap query.** The session's `mod` reads the
+  controller map, as §2.9 and §3 say, but `setsMod()` asks whether a
+  key can move the wheel, which the controllers sent so far cannot
+  answer, so it still reads the keymap's controls.
 - **The turn timer runs only while a turn key is held**, so a session
   with no turn held keeps no 40 ms interval.
 - **`musical` leaves the number row free in chunk 1.** Its typing keys

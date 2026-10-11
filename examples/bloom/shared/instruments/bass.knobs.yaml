@@ -1,7 +1,8 @@
-# bass's knobs (Field's docs/keys.md, "Knobs"): field keys shows them and
-# sends each as its controller, and bass.scd's voice maps each controller
-# through the range here. The numbers are General MIDI 2's sound
-# controllers, so a controller set up for General MIDI turns them too.
+# bass's knobs (Field's docs/keys.md, "Knob files"): field keys shows
+# them and sends each as its controller, and bass.scd's voice maps each
+# controller through the range here. The numbers are General MIDI 2's
+# sound controllers, so a controller set up for General MIDI turns them
+# too.
 knobs:
   - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 1200 }
   - { name: res, cc: 71, min: 0, max: 0.95, curve: lin, default: 0.4 }

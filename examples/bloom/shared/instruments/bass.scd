@@ -61,8 +61,9 @@ var ju06a = { |freq, gate, k, mod|
 if ("FIELD_MODE".getenv == "voice") {
 	// Each knob in bass.knobs.yaml, as the signal its controller sets: cc74
 	// from 0 to 1, mapped through the knob's range from the copy of the file
-	// that Field checked (keys.md, "Knobs"), starting at the knob's default.
-	// A knob the file leaves out keeps the setting's fixed value.
+	// that Field checked (keys.md, "Make an instrument playable"), starting
+	// at the knob's default. A knob the file leaves out keeps the setting's
+	// fixed value.
 	var knobs = ("FIELD_KNOBS".getenv ?? {
 		Error("bass maps its knobs from bass.knobs.yaml, whose checked copy Field names in FIELD_KNOBS").throw
 	}).parseYAMLFile["knobs"];
