@@ -125,7 +125,7 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
 | Row | Meaning |
 | --- | --- |
 | `checkout` | The checkout this installer belongs to, its branch, and its commit. |
-| `repo-current`, `repo-behind` | Whether the branch matches its upstream after a fetch. |
+| `repo-current`, `repo-ahead`, `repo-behind` | Whether the branch matches its upstream after a fetch, has commits the upstream lacks, or lacks commits the upstream has. A branch that is both ahead and behind reports `repo-behind`. |
 | `repo-untracked` | The branch has no upstream, or HEAD is detached, so there is nothing to compare against. |
 | `node`, `pnpm`, `cmake` | The versions found. `node-old`, `node-missing`, `pnpm-missing`, and `cmake-missing` say what to install. |
 | `cli` | pnpm's global `field` links this checkout. |

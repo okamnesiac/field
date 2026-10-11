@@ -435,6 +435,15 @@ posix('install.sh status', () => {
     );
   });
 
+  it('says a branch with unpushed commits is ahead of its upstream, rather than that it matches', () => {
+    write(join(repo, 'src/local.ts'), '');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '--quiet', '-m', 'local');
+    const status = rows(install('status').stdout);
+    expect(status.has('repo-current')).toBe(false);
+    expect(status.get('repo-ahead')).toBe('main is 1 commit ahead of origin/main');
+  });
+
   it('notes a FIELD_AUDIOD override', () => {
     expect(rows(install('status', { FIELD_AUDIOD: '/opt/field-audiod' }).stdout).get('audiod-override')).toBe(
       'FIELD_AUDIOD is set, so field runs /opt/field-audiod instead of this build',

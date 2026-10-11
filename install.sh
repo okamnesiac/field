@@ -46,6 +46,10 @@ warn_row() {
   fi
 }
 
+commits() {
+  if [ "$1" -eq 1 ]; then printf '1 commit'; else printf '%s commits' "$1"; fi
+}
+
 # A path for a message, with the home directory as ~.
 tilde() {
   case "$1" in
@@ -196,7 +200,7 @@ report_checkout_row() {
 # after fifteen seconds of a stalled HTTP transfer, so a bad network delays
 # the row rather than hanging the installer on it.
 report_checkout() {
-  local branch upstream remote behind commits note=""
+  local branch upstream remote behind ahead note=""
   git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1 || return 0
   if ! branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
     row repo-untracked "detached HEAD has no upstream to compare against"
@@ -217,12 +221,14 @@ report_checkout() {
     row repo-untracked "$branch tracks $upstream, which no longer exists$note"
     return 0
   fi
-  if [ "$behind" -eq 0 ]; then
+  ahead="$(git -C "$REPO" rev-list --count "$upstream..HEAD" 2>/dev/null)" || ahead=0
+  if [ "$behind" -gt 0 ]; then
+    warn_row repo-behind "$branch is $(commits "$behind") behind $upstream — run git pull in $(tilde "$REPO"), then $(rerun all)$note"
+  elif [ "$ahead" -gt 0 ]; then
+    row repo-ahead "$branch is $(commits "$ahead") ahead of $upstream$note"
+  else
     row repo-current "$branch matches $upstream$note"
-    return 0
   fi
-  if [ "$behind" -eq 1 ]; then commits="commit"; else commits="commits"; fi
-  warn_row repo-behind "$branch is $behind $commits behind $upstream — run git pull in $(tilde "$REPO"), then $(rerun all)$note"
 }
 
 report_tools() {

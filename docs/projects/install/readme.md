@@ -143,7 +143,7 @@ there (§7.6).
 
 | Piece | Current when | Compared by |
 | --- | --- | --- |
-| Checkout | it matches its upstream after a fetch | `git rev-list --count HEAD..@{upstream}`, as Projector's installer does |
+| Checkout | it is not behind its upstream after a fetch | `git rev-list --count HEAD..@{upstream}`, as Projector's installer does, and `@{upstream}..HEAD` for `repo-ahead` |
 | CLI | `dist/` was built from `HEAD` with the same number of uncommitted changes | `dist/build-info.json`, which `pnpm build` stamps and `field --version` already reads |
 | Daemon | no tracked file under `native/audiod` is newer than the binary | file mtimes, with the binary touched after each build (§8.1) |
 | Workers | each one set up passes `uv sync --check --locked` | `field setup --check` |
