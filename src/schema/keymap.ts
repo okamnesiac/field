@@ -48,10 +48,19 @@ const ccAction = z
   })
   .strict();
 
+// How far a knob action moves: a whole number of knobs or steps, in
+// either direction (instrument-knobs.md §2.3).
+const knobSteps = z
+  .number()
+  .int()
+  .refine((n) => n !== 0, 'must move at least one: a positive number moves right or up, a negative one left or down');
+
 const action = z.union([
   z.object({ transpose: z.number().int() }).strict(),
   z.object({ velocity: z.number().int() }).strict(),
   z.object({ bend: z.number().min(-1).max(1) }).strict(),
+  z.object({ knob: knobSteps }).strict(),
+  z.object({ turn: knobSteps }).strict(),
   ccAction,
   z.literal('panic'),
 ]);

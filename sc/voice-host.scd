@@ -5,8 +5,10 @@
 // only the lines that start with "@field ", each one JSON object; the rest
 // of sclang's output is left for diagnosing a failure.
 //
-// Environment: FIELD_INSTRUMENTS (a JSON list of the programs' absolute
-// paths, played in unison: each note sounds a voice from each),
+// Environment: FIELD_INSTRUMENTS (a JSON list of the programs, played in
+// unison: each note sounds a voice from each, and each is an object with
+// "program", its absolute path, and "knobs", the checked copy of its knob
+// file, absent when it has none: instrument-knobs.md §2.4),
 // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
 // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
 // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
@@ -137,9 +139,9 @@ boot = {
 // voices alike still both play.
 loadAll = {
 	var defs = [], why;
-	instruments.do { |path, i|
+	instruments.do { |each, i|
 		var def, problem;
-		# def, problem = loadVoice.(path);
+		# def, problem = loadVoice.(each["program"], each["knobs"]);
 		if (problem.notNil) { why = why ? problem } {
 			def.name = ("field" ++ i ++ "_" ++ def.name).asSymbol;
 			defs = defs.add(def);
@@ -176,10 +178,10 @@ run = {
 	Server.default = server;
 
 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
-		{ |note, velocity, freq, mod|
+		{ |note, velocity, freq, controls|
 			voiceDefs.collect { |def, i|
 				var out = buses[i] !? (_.index) ? 0;
-				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, out, \mod, mod], server)
+				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, out] ++ controls, server)
 			}
 		},
 		{ |synths, control, value| synths.do(_.set(control, value)) },

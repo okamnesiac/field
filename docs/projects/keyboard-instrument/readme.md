@@ -575,6 +575,13 @@ Chunk 4 adds its files when it appends its section (§6).
   | `tracker` | 32 notes | Tracker users, from FastTracker 2 to Renoise | It spends the number row on black keys and the `KeyZ` row on notes, so its controls move to the arrows and lose pitch bend and modulation. The octaves zig-zag between rows. |
   | `fourths` | 27 notes | Players of Ableton Push in fourths, LinnStrument, bass, and guitar | It is unfamiliar to keyboard players, has no piano shape, and spends every row on notes. Its gain beyond range is that a chord shape plays the same in every key. |
 
+  *Amended (2026-10-11, instrument-knobs.md chunk 1):* `musical`, Field's
+  adaptation of Musical Typing, replaces `musical-typing` as the default.
+  It keeps every note and the octave, velocity, and sustain keys, moves
+  the bend to `Comma` and `Period`, and spends the arrows on knobs,
+  where the modulation wheel is the knob `mod`
+  ([instrument-knobs.md](../instrument-knobs/readme.md) §2.3, §3.2).
+
 - **`sclang` turns MIDI into voices, not TypeScript.** The voice host
   is SuperCollider's own idiom (`MIDIdef`, `Synth`, `set(\gate, 0)`),
   and `sclang` already reads CoreMIDI. The same code can build an NRT

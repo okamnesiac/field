@@ -6,10 +6,10 @@
 // because a program's own bytes are the cache key for what it renders.
 //
 // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
-// bass` plays, with the mod wheel opening its filter (§14), and a
-// record entry with `instrument: bass` renders
+// bass` plays, with the mod wheel opening its filter (§14) and the knobs
+// in bass.knobs.yaml, and a record entry with `instrument: bass` renders
 // (keyboard-instrument.md §2.6). It plays at true pitch, so press Z in
-// musical-typing to drop an octave. Otherwise it runs under Field's
+// musical to drop an octave. Otherwise it runs under Field's
 // sc-render contract and renders offset's sequence from sessions/juno.scd,
 // a note every quarter second as offset plays it, for FIELD_DURATION.
 (
@@ -25,9 +25,12 @@ var bass = (
 );
 var level = 0.3; // a voice's gain: a bass line rarely stacks notes
 
-// One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
-// ends after the gate closes. The knobs are fixed per instrument, so they
-// shape the graph rather than arriving as controls. `mod`, the mod wheel
+// One JU-06A voice for the settings in `k`, stereo, freed when its
+// envelope ends after the gate closes. A render fixes every setting, so
+// they shape the graph. A voice takes four of them, the cutoff, the
+// resonance, the attack, and the release, as signals from its knobs; the
+// rest stay fixed, and those the graph tests with `if`, such as chorusOn,
+// must. `mod`, the mod wheel
 // from 0 to 1, comes only in voice mode: it adds vibrato of up to
 // modVibrato semitones and opens the filter by up to modOpen times its
 // cutoff. A render passes none, so its graph is the one without them.
@@ -56,8 +59,28 @@ var ju06a = { |freq, gate, k, mod|
 };
 
 if ("FIELD_MODE".getenv == "voice") {
+	// Each knob in bass.knobs.yaml, as the signal its controller sets: cc74
+	// from 0 to 1, mapped through the knob's range from the copy of the file
+	// that Field checked (keys.md, "Make an instrument playable"), starting
+	// at the knob's default. A knob the file leaves out keeps the setting's
+	// fixed value.
+	var knobs = ("FIELD_KNOBS".getenv ?? {
+		Error("bass maps its knobs from bass.knobs.yaml, whose checked copy Field names in FIELD_KNOBS").throw
+	}).parseYAMLFile["knobs"];
+	var knob = { |name, fixed|
+		var each = knobs.detect { |knob| knob["name"] == name };
+		if (each.isNil) { fixed } {
+			var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
+			spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+		}
+	};
 	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
-		Out.ar(out, ju06a.(freq, gate, bass, mod.lag(0.05)) * amp * level);
+		var k = bass.copy;
+		k[\vcfFreq] = knob.("cutoff", k[\vcfFreq]);
+		k[\vcfRes] = knob.("res", k[\vcfRes]);
+		k[\atk] = knob.("attack", k[\atk]);
+		k[\rel] = knob.("release", k[\rel]);
+		Out.ar(out, ju06a.(freq, gate, k, mod.lag(0.05)) * amp * level);
 	})
 } {
 	var seed = "FIELD_SEED".getenv.asInteger;

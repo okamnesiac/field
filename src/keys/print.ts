@@ -44,6 +44,8 @@ function actionTag(action: KeymapAction): string {
   if ('transpose' in action) return `T${signed(action.transpose)}`;
   if ('velocity' in action) return `V${signed(action.velocity)}`;
   if ('bend' in action) return `B${signed(action.bend)}`;
+  if ('knob' in action) return `K${signed(action.knob)}`;
+  if ('turn' in action) return `R${signed(action.turn)}`;
   return `cc${action.cc}`;
 }
 
@@ -52,6 +54,14 @@ export function describeAction(action: KeymapAction): string {
   if ('transpose' in action) return `transpose ${signed(action.transpose)}`;
   if ('velocity' in action) return `velocity ${signed(action.velocity)}`;
   if ('bend' in action) return `pitch bend ${signed(action.bend)} while held`;
+  if ('knob' in action) {
+    const knobs = Math.abs(action.knob);
+    return `move the choice ${knobs} knob${knobs === 1 ? '' : 's'} to the ${action.knob > 0 ? 'right' : 'left'}`;
+  }
+  if ('turn' in action) {
+    const steps = Math.abs(action.turn);
+    return `turn the chosen knob ${steps} step${steps === 1 ? '' : 's'} ${action.turn > 0 ? 'up' : 'down'}, faster while held`;
+  }
   const how = { set: '', hold: ' while held', toggle: ', toggled' }[action.mode];
   return `cc ${action.cc} = ${action.value}${how}`;
 }

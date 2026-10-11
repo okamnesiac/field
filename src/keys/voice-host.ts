@@ -107,6 +107,9 @@ export interface VoiceHostOptions {
   // The programs to play, in unison: each note sounds a voice from each
   // (arming.md §2.1).
   instruments: string[];
+  // For each program with a knob file, the checked copy its voice reads
+  // through FIELD_KNOBS (instrument-knobs.md §2.4).
+  knobs?: ReadonlyMap<string, string>;
   device?: string;
   onStatus?: (status: VoiceHostStatus) => void;
   // Called when the host exits on its own after it was ready.
@@ -230,7 +233,12 @@ export class VoiceHost {
       env: {
         ...env,
         FIELD_MODE: 'voice',
-        FIELD_INSTRUMENTS: JSON.stringify(options.instruments),
+        FIELD_INSTRUMENTS: JSON.stringify(
+          options.instruments.map((program) => {
+            const knobs = options.knobs?.get(program);
+            return knobs !== undefined ? { program, knobs } : { program };
+          }),
+        ),
         FIELD_SC_PORT: String(port),
         FIELD_PARENT_PID: String(process.pid),
         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
