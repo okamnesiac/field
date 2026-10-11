@@ -439,17 +439,16 @@ land as its own diff whenever.
 
 ### 7.2 Found by the sweep, not yet in any chunk
 
-- **`field init` plants chunk 1's defect in every new project**
-  (`commands/init.ts:60`): the `.gitattributes` it writes carries only
-  the seven LFS filter lines — no `* text=auto eol=lf`, no `*.state`
-  override — so a project created on (or cloned to) Windows has the
-  §1.1 checkout corruption against its *own* committed `.scd` programs
-  and asset pins, engine fix notwithstanding. The engine's file (chunk
-  1) is the template; `init` should write both halves. **Standalone,
-  and claimed by #159**, which is open against `main` and does exactly
-  that: `* text=auto eol=lf` ahead of the LFS lines, and `*.state
-  binary` after them. It is chunk 1's twin for user projects, and it
-  stays listed here until #159 lands.
+- **`field init` planted chunk 1's defect in every new project**
+  (`commands/init.ts:60` at `4f90a87`): the `.gitattributes` it wrote
+  carried only the seven LFS filter lines — no `* text=auto eol=lf`, no
+  `*.state` override — so a project created on (or cloned to) Windows
+  had the §1.1 checkout corruption against its *own* committed `.scd`
+  programs and asset pins, engine fix notwithstanding. **Done in #159**
+  (merged 2026-10-10): `init` now writes `* text=auto eol=lf` ahead of
+  the LFS lines and `*.state binary` after them, chunk 1's file as the
+  template. It stays in this list as the record of the sweep that
+  found it.
 - **The picker runs raw-mode VT decoding** (`commands/picker.ts:93`,
   `field insert add`'s chooser, #155): arrows are parsed as CSI
   sequences from a `setRawMode(true)` stdin. Windows Terminal and
