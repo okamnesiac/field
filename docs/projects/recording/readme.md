@@ -1,18 +1,18 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Chunks 1–3 and the punch-and-loop half of chunk 4 shipped
-(2026-09-06 to 2026-09-08): the daemon's input side; a `field record`
-whose take lands in the project — `audio/<node>/`, the ledger row,
-`takes.yaml`, chosen — and builds in place; the metronome in the engine
-with a count-in that begins the take on the exact sample; punch-out;
-and loop takes over the live session's region loop. Comping remains,
-to be planned once real takes have accumulated, and the latency
-arithmetic §12.3 recorded is still owed its loopback measurement.
-Closes when a take recorded against creek on the Apollo plays back in
-place, compensated, from `field build && field play`.
+**Outcome:** Shipped: chunks 1–4 (#166, #167, #169, #170) — the
+daemon's input side with crash-safe capture, takes that land in the
+project and build in place, the metronome and count-in in the engine,
+punch-out, and loop takes over the region loop. Comping, which §10 left
+to plan once takes accumulate, carries over to
+[comping](../comping/readme.md). §9's compensated placement rests on
+the device's declared latency: §13.2's loopback measurement, the
+§12.10 items owed to the first hardware session, and the `hardware/`
+schema §11 deferred all wait on a take recorded on the Apollo, which
+has not happened. They carry over to
+[apollo-session](../apollo-session/readme.md).
 
 # Plan: Recording
 
@@ -275,7 +275,7 @@ compensated, so what comes back sits where it was sung.
 1. **The input side** — duplex and null-input open, input enumeration,
    arm/record/stop verbs, transactional capture with journal and crash
    recovery, idle-exit pinning, `features` in hello with the two semver
-   gates migrated.
+   gates migrated. *Shipped in #166 (§12).*
 2. **The take lands** — finalize into `audio/<name>/` (timestamp
    names) plus the ledger row plus `takes.yaml`, the `record:` entry
    and its schema with takeless-builds-as-silence, resolver arm for

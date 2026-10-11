@@ -1,6 +1,7 @@
 import { resampleGenerator } from './resample.js';
 import { supercolliderGenerator } from './supercollider.js';
 import { stemGenerator } from './stem.js';
+import { voiceRenderGenerator } from './voice-render.js';
 import type { Generator, GeneratorSpec } from './types.js';
 
 // The translation point between the format's vocabulary and the
@@ -21,6 +22,7 @@ const RULES = {
   resample: resampleGenerator,
   supercollider: supercolliderGenerator,
   stem: stemGenerator,
+  'voice-render': voiceRenderGenerator,
 };
 
 export function generatorFor<T extends GeneratorSpec>(spec: T): Generator<T> {

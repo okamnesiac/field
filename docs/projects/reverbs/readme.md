@@ -1,12 +1,12 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped whole: a Dattorro `plate`, an FDN `hall` with
-per-band decay, and the old `reverb` kept deliberately as the live
-comparison. Stays open until the creek listening pass has flipped
-`space` between the three rooms and picked the example's room.
+**Outcome:** Shipped whole: a Dattorro `plate` (#144), an FDN `hall`
+with per-band decay (#146), and the old `reverb` kept deliberately as
+the live comparison. §5's live A/B ran on hardware under `--watch` in
+#146. The decision it enables, which room creek ships with, has not
+been made, so `space` still uses `reverb`.
 
 # Plan: Two reverbs that beat Freeverb
 

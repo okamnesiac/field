@@ -137,6 +137,9 @@ juce::String Server::dispatch (const juce::var& request)
         // punch-out, and a take per pass.
         features.add ("loop-region");
         features.add ("record-until");
+        // arm's kind "midi" and the MIDI take (keyboard-instrument.md
+        // §12.4).
+        features.add ("record-midi");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -212,12 +215,20 @@ juce::String Server::dispatch (const juce::var& request)
     }
     else if (op == "arm")
     {
-        auto input = request.getProperty ("input", juce::var (1));
-        if (! input.isInt() && ! input.isInt64() && ! input.isDouble())
-            return jsonLine (errorResponse (id, "arm needs an input channel number"));
-        auto info = player.arm (request.getProperty ("track", juce::var()).toString(),
-                                request.getProperty ("device", juce::var()).toString(),
-                                (int) input);
+        const auto track = request.getProperty ("track", juce::var()).toString();
+        const auto kind = request.getProperty ("kind", juce::var());
+        juce::var info;
+        if (kind.toString() == "midi")
+            info = player.armMidi (track);
+        else if (! kind.isVoid())
+            return jsonLine (errorResponse (id, "arm's kind is \"midi\", or absent for an audio input"));
+        else
+        {
+            auto input = request.getProperty ("input", juce::var (1));
+            if (! input.isInt() && ! input.isInt64() && ! input.isDouble())
+                return jsonLine (errorResponse (id, "arm needs an input channel number"));
+            info = player.arm (track, request.getProperty ("device", juce::var()).toString(), (int) input);
+        }
         if (info.getProperty ("error", juce::var()).isString())
             return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
         if (auto* o = info.getDynamicObject())

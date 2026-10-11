@@ -408,6 +408,22 @@ Recorded so the next reader does not re-derive it.
    `itOverSocket` tests in `click-daemon`, and the whole daemon describe
    in each of the other two. `click-daemon`'s `--render-live` test runs
    everywhere.
+
+   **Amended when the keyboard instrument arrived from `main`
+   (2026-10-10).** The merge of keyboard-instrument chunks 1 to 4 (#178,
+   #179, #181, #182) brought `keys.cpp`, the helper behind `field keys`,
+   with two things MSVC rejects. Its non-blocking stdin check used
+   `poll` and `read` from `<poll.h>` and `<unistd.h>`; on Windows it asks
+   `PeekNamedPipe` instead. And it publishes its source with
+   `MidiOutput::createNewDevice`, which JUCE declares only on macOS and
+   Linux, because Windows has no virtual MIDI ports; there the helper
+   refuses with the message it gives any failed publish (§7.2 records
+   the gap). `capture.cpp`'s MIDI takes reach the disk through the same
+   `syncToDisk` and `truncateTo` helpers as audio takes. The native round
+   trip in `keys/helper-native.test.ts` skips on win32 for want of a
+   virtual port, as it skips on Linux without ALSA, and
+   `record-midi-daemon`'s daemon describe takes the serve-mode guard,
+   naming chunk 4.
 3. **Determinism** (§1.4). Measure a Windows render against macOS and
    Linux; the toolchain floor or `clang-cl` depending on what the
    measurement says, and the UCRT — the unmeasured third libm — is where
@@ -547,9 +563,9 @@ land as its own diff whenever.
   serve-mode stub in `server.cpp` and every guard whose comment names
   chunk 4: the 9 in `version.test.ts`, and the serve-mode guards §5's
   chunk 2 amendments list — the describes in `audiod/client`,
-  `play-daemon`, plugin-hosting's live chains, `punch-daemon`, and
-  `record-daemon`, the 4 `itOverSocket` tests in `live-session`, and
-  the 3 in `click-daemon`. The other
+  `play-daemon`, plugin-hosting's live chains, `punch-daemon`,
+  `record-daemon`, and `record-midi-daemon`, the 4 `itOverSocket` tests
+  in `live-session`, and the 3 in `click-daemon`. The other
   guards chunk 2 planted are not chunk 4's to remove: the 21 in
   `generate.test.ts` and 3 describes in `aced`/`voiced` are the workers
   chunk's (§7.3 carries them), and `build.test.ts`'s 2 sclang stubs are
@@ -575,17 +591,16 @@ land as its own diff whenever.
 
 ### 7.2 Found by the sweep, not yet in any chunk
 
-- **`field init` plants chunk 1's defect in every new project**
-  (`commands/init.ts:60`): the `.gitattributes` it writes carries only
-  the seven LFS filter lines — no `* text=auto eol=lf`, no `*.state`
-  override — so a project created on (or cloned to) Windows has the
-  §1.1 checkout corruption against its *own* committed `.scd` programs
-  and asset pins, engine fix notwithstanding. The engine's file (chunk
-  1) is the template; `init` should write both halves. **Standalone,
-  and claimed by #159**, which is open against `main` and does exactly
-  that: `* text=auto eol=lf` ahead of the LFS lines, and `*.state
-  binary` after them. It is chunk 1's twin for user projects, and it
-  stays listed here until #159 lands.
+- **`field init` planted chunk 1's defect in every new project**
+  (`commands/init.ts:60` at `4f90a87`): the `.gitattributes` it wrote
+  carried only the seven LFS filter lines — no `* text=auto eol=lf`, no
+  `*.state` override — so a project created on (or cloned to) Windows
+  had the §1.1 checkout corruption against its *own* committed `.scd`
+  programs and asset pins, engine fix notwithstanding. **Done in #159**
+  (merged 2026-10-10): `init` now writes `* text=auto eol=lf` ahead of
+  the LFS lines and `*.state binary` after them, chunk 1's file as the
+  template. It stays in this list as the record of the sweep that
+  found it.
 - **The picker runs raw-mode VT decoding** (`commands/picker.ts:93`,
   `field insert add`'s chooser, #155): arrows are parsed as CSI
   sequences from a `setRawMode(true)` stdin. Windows Terminal and
@@ -616,12 +631,21 @@ land as its own diff whenever.
   `windows-latest` runner a request to the freshly spawned daemon fails
   with "field-audiod connection closed", so the daemon drops the
   connection or dies while it lists or recovers the killed take. The
-  cause is not diagnosed. `Capture::recover`'s errors are thrown and
+  cause is not diagnosed. `Transaction::recover`'s errors are thrown and
   answered as error responses, so a crash would have to bypass
-  exceptions; the CRT's invalid-parameter handler in `syncAndPatch`
+  exceptions; the CRT's invalid-parameter handler in `truncateAndSync`
   is one candidate. The test's temp project, and its `audiod.log`, is
   removed with it. The test skips on win32 until this is found.
   **Standalone**: start from the daemon log of one Windows run.
+- **`field keys` cannot publish a source on Windows**
+  (`native/audiod/src/keys.cpp`): the helper publishes the computer
+  keyboard as a virtual MIDI source, and Windows has no virtual MIDI
+  ports, so JUCE offers no `createNewDevice` there and the helper
+  refuses (chunk 2's amendment). Recording from a hardware controller
+  is unaffected. Playing keys on Windows needs a different route: a
+  loopback driver such as loopMIDI, Windows MIDI Services, or feeding
+  the voice host without a MIDI port at all. **Standalone**, and a
+  design question before it is a port.
 
 ### 7.3 The workers chunk, when it opens (§4 stands)
 

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join, posix } from 'node:path';
+import { accessSync, constants, existsSync } from 'node:fs';
+import { delimiter, dirname, join, posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
 import type { SupercolliderSound } from './types.js';
@@ -48,8 +49,51 @@ function formatScError(err: ExecError, programPath: string, timeoutMs: number): 
 
 // The home-shelf resolution (§4.3): every bare spelling resolves in its
 // natural home, explicit spellings escape — never a search path.
-export function programPath(sound: SupercolliderSound): string {
+export function programPath(sound: Pick<SupercolliderSound, 'source'>): string {
   return sound.source.includes('/') ? sound.source : posix.join('shared/instruments', sound.source);
+}
+
+// An instrument named by `field keys` or a record entry
+// (keyboard-instrument.md §2.1, §12.2): `.scd` is added to a name without
+// an extension, then it resolves as a supercollider: entry's source does.
+export function instrumentProgram(instrument: string): string {
+  return programPath({ source: posix.extname(instrument) === '' ? `${instrument}.scd` : instrument });
+}
+
+// Field's own SuperCollider programs, beside the package's source.
+export function scScript(name: string): string {
+  return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sc', name);
+}
+
+function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
+  for (const dir of (env['PATH'] ?? '').split(delimiter)) {
+    if (dir === '') continue;
+    const candidate = join(dir, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // not here
+    }
+  }
+  return undefined;
+}
+
+// The sclang to run: FIELD_SCLANG, then PATH, then the app bundle. One
+// lookup for a render and for the long-running voice host
+// (keyboard-instrument.md §2.8). The override is the determinism escape
+// hatch (sc-render.md §2); a typo'd wrapper must never silently run the
+// app bundle instead.
+export function sclangCommand(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env['FIELD_SCLANG'];
+  if (override) {
+    const found = override.includes('/') ? (existsSync(override) ? override : undefined) : onPath(override, env);
+    if (found === undefined) throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
+    return found;
+  }
+  const found = onPath('sclang', env) ?? (existsSync(SCLANG_APP_FALLBACK) ? SCLANG_APP_FALLBACK : undefined);
+  if (found === undefined) throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
+  return found;
 }
 
 // Run an SC program under the supercollider contract. Used by the rule
@@ -63,10 +107,14 @@ export async function runScProgram(
     channels: number;
     sampleRate: number;
     timeoutMs?: number;
+    // More of the program's environment, such as a take render's
+    // FIELD_INSTRUMENT and FIELD_EVENTS (keyboard-instrument.md §12.3).
+    env?: Record<string, string>;
   },
 ): Promise<void> {
   const env = {
     ...process.env,
+    ...params.env,
     FIELD_OUTPUT: outputPath,
     FIELD_SEED: String(params.seed),
     FIELD_DURATION: String(params.duration),
@@ -77,29 +125,14 @@ export async function runScProgram(
   // but the schema admits hour-long renders, and the ceiling exists to catch
   // hangs, not to race legitimate work.
   const timeout = params.timeoutMs ?? Math.max(180_000, 60_000 + params.duration * 10_000);
-  const options = { env, timeout };
-  const override = process.env['FIELD_SCLANG'];
+  // scsynth prints a line per score bundle in NRT, about 20 bytes, so a
+  // long take's render outgrows Node's 1 MiB default and is killed.
+  const options = { env, timeout, maxBuffer: 64 * 1024 * 1024 };
+  const sclang = sclangCommand();
   try {
-    await execFileAsync(override ?? 'sclang', [programPath], options);
+    await execFileAsync(sclang, [programPath], options);
   } catch (err) {
-    const e = err as ExecError;
-    if (e.code === 'ENOENT') {
-      if (override) {
-        // The override is the determinism escape hatch (sc-render.md §2); a
-        // typo'd wrapper must never silently render through the app bundle.
-        throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
-      }
-      if (existsSync(SCLANG_APP_FALLBACK)) {
-        try {
-          await execFileAsync(SCLANG_APP_FALLBACK, [programPath], options);
-          return;
-        } catch (fallbackErr) {
-          throw formatScError(fallbackErr as ExecError, programPath, timeout);
-        }
-      }
-      throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
-    }
-    throw formatScError(e, programPath, timeout);
+    throw formatScError(err as ExecError, programPath, timeout);
   }
 }
 

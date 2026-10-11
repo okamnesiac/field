@@ -91,16 +91,27 @@ jobs:
       # it. With setup-uv below the tests, that skip was unconditional in
       # CI and the test only ever ran on the author's machine.
       - uses: astral-sh/setup-uv@v5
-      # One test skips here: the sclang integration case in
-      # src/graph/build.test.ts, on a `!sclangPresent` probe rather than
-      # by excluding its file. Not the nine that linux-portability.md
+      # The tests that run real sclang always skip here, each on a probe
+      # for sclang rather than by excluding its file: the integration case
+      # in src/graph/build.test.ts, the two take renders in
+      # src/generators/voice-render.test.ts, and the voicer in
+      # src/keys/voicer.test.ts. Not the nine that linux-portability.md
       # decision 4 describes — `say` and `afconvert` both retired in
       # render-pipeline.md §6 chunk 5 and took their guards with them, so
       # nothing in the suite shells out to a macOS binary any more. Nor
-      # is that one skip a Linux limit: sclang runs on Linux, it just is
-      # not installed on the runner, and it skipped on macOS for the same
-      # reason back when there was a macOS runner to skip on. The
-      # daemon's protocol tests run here, in null-output mode.
+      # are those skips a Linux limit: sclang runs on Linux, it just is
+      # not installed on the runner, and the first of them skipped on
+      # macOS for the same reason back when there was a macOS runner to
+      # skip on. The daemon's protocol tests run here, in null-output mode.
+      #
+      # The native MIDI round trip, src/keys/helper-native.test.ts, also
+      # skips on a runner without the ALSA sequencer at /dev/snd/seq,
+      # where `field-audiod --keys` cannot publish a virtual source. Each
+      # of its cases skips by name, saying so, and fails rather than skips
+      # on any other machine where `--keys` reports an error. The MIDI
+      # take cases in src/commands/record-midi-daemon.test.ts skip here
+      # the same way, and its case for arming with no MIDI source runs
+      # only here, where the source list is reliably empty.
       - run: pnpm test
       # Python workers: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)

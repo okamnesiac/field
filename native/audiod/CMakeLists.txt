@@ -31,6 +31,8 @@ target_sources(field-audiod PRIVATE
   src/hosting.cpp
   src/capture.cpp
   src/click.cpp
+  src/keys.cpp
+  src/keyboard-layout.cpp
   src/dsp/biquad.cpp
   src/dsp/limiter.cpp
   src/dsp/hall.cpp
@@ -64,9 +66,10 @@ target_compile_definitions(field-audiod PRIVATE
 )
 
 # AU hosting references AUGenericView (CoreAudioKit), which JUCE's module
-# metadata does not link for a console target.
+# metadata does not link for a console target. Carbon carries the Text
+# Input Sources API that keyboard-layout.cpp reads the layout through.
 if(APPLE)
-  target_link_libraries(field-audiod PRIVATE "-framework CoreAudioKit")
+  target_link_libraries(field-audiod PRIVATE "-framework CoreAudioKit" "-framework Carbon")
 endif()
 
 target_link_libraries(field-audiod PRIVATE
