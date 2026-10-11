@@ -998,6 +998,9 @@ wait for chunk 3.
   share its value, and moves by the time since it started, so a late
   tick catches up rather than slowing the glide. Each tick sends at most
   one control change per gliding controller.
+- **The 40 ms timer runs while a turn key is held or a glide moves,**
+  as `tickWhileMoving` in `src/commands/keys.ts`, so a session with
+  neither keeps no interval. §9.1's turn timer becomes this one.
 - **A completed value that lands where the knob already is sends one
   control change** rather than nothing, so a receiver still at its own
   default takes the value the line shows.

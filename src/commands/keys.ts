@@ -280,14 +280,15 @@ async function playRouted(
   });
   const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
 
-  // A held turn key turns on a timer of its own, which runs only while
-  // one is held (instrument-knobs.md §2.6).
+  // A held turn key and a glide move a knob on a timer of their own, which
+  // runs only while a turn key is held or a glide moves
+  // (instrument-knobs.md §2.6 and §2.7).
   let ticker: NodeJS.Timeout | undefined;
-  const tickWhileTurning = (): void => {
+  const tickWhileMoving = (): void => {
     if (session.ticking() && ticker === undefined) {
       ticker = setInterval(() => {
         send(session.tick(performance.now()));
-        tickWhileTurning();
+        tickWhileMoving();
         draw();
       }, TICK_MS);
     } else if (!session.ticking() && ticker !== undefined) {
@@ -377,7 +378,7 @@ async function playRouted(
         if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
       }
     }
-    tickWhileTurning();
+    tickWhileMoving();
     draw();
   };
   const onSignal = (): void => stop();
@@ -394,7 +395,7 @@ async function playRouted(
   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
   stopWatchingKnobs.forEach((stopWatchingKnob) => stopWatchingKnob());
   send(session.quit());
-  tickWhileTurning();
+  tickWhileMoving();
   // A host still booting closes too: quitting never waits for it. The
   // inputs close after it, in play, once nothing writes them.
   await host?.close();
