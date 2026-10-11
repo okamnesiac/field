@@ -1,0 +1,302 @@
+{
+ "version": 1,
+ "name": "Host monitoring through tracks",
+ "project": "live-supercollider",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 213,
+  "title": "Hear a microphone through its track while it records: field record --monitoring host (live-supercollider.md chunk 4)",
+  "head": "f4f8f47700122318da10932e8cfcadbcbd9d5f47",
+  "headRef": "live/monitor",
+  "base": "5f7cd66a26e487a759e078cb89a959982f331d7e",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field records a microphone through <code>field record</code>: the daemon, <code>field-audiod</code>, opens the interface's input channel, writes it to a crash-safe take, and plays the song as the bed you perform against. Until this change you never heard the microphone through Field itself. <code>--monitoring</code> only wrote a label on the take's row, and you listened through your interface's own mixer, which this project calls <em>Apollo-direct</em> monitoring after the Universal Audio interface it was designed around.",
+   "This pull request makes <code>field record --monitoring host</code> play each armed audio track's input through that track's inserts, the buses above it, and <code>main</code>, from arming through the count-in and the take. The take itself stays the dry input. The default stays <code>apollo-direct</code>, which plays nothing of the input.",
+   "It reuses the path that the live-supercollider plan's chunks 1 to 3 built for <code>field keys</code>. A song's session can carry an <em>input window</em>: a slot on a track that plays a <em>live input</em>, a source outside the song, through that track's chain and every chain above it. <code>field keys</code> feeds an input window from a shared-memory ring. This change adds a second kind of live input, a <em>capture input</em>, which reads one channel straight from the audio callback's own input block.",
+   "<ol><li><b>Arm with a name.</b> <code>field record</code> arms each audio track with <code>monitor: \"capture:&lt;song&gt;/&lt;track&gt;\"</code>, and the daemon opens a capture input under that name, owned by the connection that armed.</li><li><b>Reload the song with it.</b> <code>field record</code> loads the song again with an input window naming the capture input, keeping the loaded session's loop, region, and solo.</li><li><b>Read it each callback.</b> Before the session renders a block, the daemon hands the callback's input block to every capture input, which reads its channel from it.</li><li><b>Tear down.</b> When the take ends, <code>field record</code> disarms, which closes the capture inputs, and loads the song again without them. A dropped connection also closes them.</li></ol>"
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms",
+    "html": "<ul class=\"tight\"><li><b>Live input</b>: a source outside the song that an input window plays, read once per block on the audio thread (<code>LiveInput</code>).</li><li><b>Input window</b>: a slot on a track in the compiled session that names a live input.</li><li><b>Capture input</b>: the new live input, reading one armed channel from the callback's input block (<code>CaptureInput</code>).</li><li><b>Ring</b>: the shared-memory buffer that carries a <code>field keys</code> voice from SuperCollider to the daemon.</li><li><b>Overlay</b>: the second instance of each track's chain that carries live inputs up to <code>main</code>, beside the rendered song.</li><li><b>Converted delivery</b>: the daemon resampling the song to a device that cannot run at the song's rate.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<p>The first review of <code>f4f8f47</code> opened three findings, all in <code>src/commands/record.ts</code>:</p><ul class=\"tight\"><li>A solo held in another terminal, or a monitored track that does not reach <code>main</code>, fails after arming and leaves the microphone armed.</li><li>Arming a separate input device can switch the daemon to converted delivery, which silences monitoring without an error.</li><li>The reload after the take puts this song back over one another terminal loaded during the take.</li></ul><p class=\"note\">Tests ran on the daemon's null device only. Criterion 6, hearing a real microphone through headphones, is owed on hardware.</p>"
+   },
+   {
+    "id": "left",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li>The latency policy in <code>docs/audio-engine.md</code> \"Latency\" is not built. What you hear is late by the input and output buffers plus the limiters and hosted plugins on the path.</li><li>Converted delivery is refused rather than resampled.</li><li>Monitoring without a take waits for arming.md chunk 3's lasting <code>field arm</code>.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "The arm and status contract",
+   "kicker": "What crosses the socket: a <code>monitor</code> name on an armed track, and capture inputs in <code>status</code>.",
+   "intro": [
+    "The CLI and the daemon agree on three additions. An audio entry in <code>arm</code>'s <code>tracks</code> list may carry <code>monitor</code>, the name of the capture input to open. <code>status.inputs</code>, which listed only <code>field keys</code> rings, now also lists capture inputs as <code>{name, kind: \"capture\", read, peak}</code>. The daemon advertises the <code>live-monitor</code> feature, so an older daemon gets a clear refusal.",
+    "The server passes the connection to <code>armSet</code> as the capture inputs' owner, which is how a dropped <code>field record</code> connection closes them."
+   ],
+   "files": [
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "<code>monitor</code> on <code>ArmTrack</code> and the armed response. The ring-only counters in <code>inputStatusSchema</code> become optional.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 315,
+       "text": "The only reader of a ring counter is <code>field keys</code>' <code>flowing()</code>, which reads <code>written</code> for its own ring names and falls back to <code>0</code>, so a capture entry without the field is harmless."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "Passes the connection to <code>armSet</code> and advertises <code>live-monitor</code>."
+    }
+   ]
+  },
+  {
+   "id": "capture",
+   "title": "The capture input",
+   "kicker": "A second kind of live input that reads one channel of the callback's own input block.",
+   "intro": [
+    "<code>CaptureBlock</code> holds the callback's input for the block in progress: its channel pointers, their count, and the frame count. <code>CaptureInput</code> is a <code>LiveInput</code> that reads one channel of that block onto both sides.",
+    "The session can read a block in more than one step, because it splits a block where a loop wraps. So the capture input keeps a cursor into the block, and starts the cursor again whenever the block's <code>generation</code> changes. A read past the block's end, a channel the block does not hold, or a closed input reads silence.",
+    "<code>field-audiod --capture-selftest</code> checks those cases without a device."
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/capture_input.h",
+     "note": "<code>CaptureBlock</code>, which the audio thread alone presents, reads, and clears, and <code>CaptureInput</code>, whose <code>close()</code> the message thread calls.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 19,
+       "text": "Every caller of <code>present</code>, <code>clear</code>, and <code>read</code> runs on the callback's thread inside <code>liveLock</code>'s try-lock, and every locate turns input reads off (<code>overlayReadsInputs</code>), so these plain fields have one thread. Traced through <code>renderOverlay</code>'s callers in <code>live.cpp</code>."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/capture_input.cpp",
+     "note": "The read, the counters <code>status</code> shows, and the self-test.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 17,
+       "text": "In steady state the session reads exactly the callback's frame count from each input per block, so the cursor neither pads nor drops. The step loop splits only at a wrap, and the limiter and hosted plugins emit as much as they take in once primed. Traced through <code>LiveSession::renderBlock</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 57,
+       "text": "Ran <code>field-audiod --capture-selftest</code> on a Release build of this head: it printed <code>{\"ok\":true}</code>."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "The <code>--capture-selftest</code> flag."
+    },
+    {
+     "path": "native/audiod/CMakeLists.txt",
+     "note": "Adds <code>capture_input.cpp</code> to the daemon's sources."
+    }
+   ]
+  },
+  {
+   "id": "player",
+   "title": "The player opens, feeds, and closes capture inputs",
+   "kicker": "Where <code>armSet</code> opens capture inputs, the callback feeds them, and disarm or a dropped connection closes them.",
+   "intro": [
+    "<code>Player</code> keeps capture inputs in a <code>captures</code> map beside the <code>rings</code> map, under the same lock, and a session load hands both to the new session.",
+    "<code>armSet</code> validates each <code>monitor</code>: a MIDI track has no input to monitor, two tracks cannot share a name, and a ring cannot already hold it. It opens the capture inputs only after nothing else in the arm can fail, replacing the previous arm's. <code>disarm</code>, a dropped connection, and quit close them.",
+    "In <code>pullAudio</code>, the callback presents its input block before the session renders and clears it afterwards. Under converted delivery it presents nothing, because the session then renders in session-rate steps that are not this block's frames."
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "The <code>captures</code> map's lifecycle, the present-and-clear around the render, and capture inputs in <code>status</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 1011,
+       "text": "Under converted delivery the capture inputs read silence. <code>field record</code> refuses host monitoring when <code>status.resampling</code> is set, but only before it arms. See the flag on <code>record.ts</code> line 296."
+      },
+      {
+       "kind": "verify",
+       "line": 1715,
+       "text": "<code>closeCaptures()</code> runs after the last failure point in <code>armSet</code>, so a refused arm keeps the previous arm's capture inputs, as the method's comment promises for the rest of the arm."
+      },
+      {
+       "kind": "verify",
+       "line": 763,
+       "text": "A dropped connection closes the capture inputs it opened and leaves the arm. <code>live-monitor.test.ts</code> checks both, and it passed on this head."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "Declares <code>captures</code>, <code>captureBlock</code>, <code>closeCaptures</code>, and the new <code>owner</code> argument to <code>armSet</code>."
+    }
+   ]
+  },
+  {
+   "id": "reload",
+   "title": "Every reload keeps both kinds of live input",
+   "kicker": "One helper lists the open live inputs for a song, so every command that reloads it keeps them.",
+   "intro": [
+    "When any command loads a song's session again, it must compile in the live inputs that are open for that song, or their input windows vanish and the voice or microphone goes silent. Chunk 3 did that for <code>field keys</code> rings with <code>keysInputsFor</code>.",
+    "This change moves that helper to <code>src/audiod/live-inputs.ts</code> as <code>liveInputsFor</code>, which matches both <code>keys:</code> and <code>capture:</code> names. <code>reloadWithInputs</code>, which reloads a song and keeps the loaded session's loop, region, and solo, moves beside it, so <code>field keys</code> and <code>field record</code> share it. <code>field play</code>, its watch, and <code>field ui</code> switch to the new helper with no other change."
+   ],
+   "files": [
+    {
+     "path": "src/audiod/live-inputs.ts",
+     "note": "<code>liveInputsFor</code>, <code>captureInputName</code>, and <code>reloadWithInputs</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 30,
+       "text": "<code>reloadWithInputs</code> loads <code>song</code> whatever the daemon plays now. It keeps loop, region, and solo only when the daemon already plays that song."
+      },
+      {
+       "kind": "verify",
+       "line": 10,
+       "text": "Song directories are one path segment and track names are slugs, so the regular expression splits every name a project allows. <code>t.node.trackName</code> is the same key <code>compileSession</code> looks tracks up by."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/routing.ts",
+     "note": "Uses the shared <code>reloadWithInputs</code> in place of its own copy."
+    },
+    {
+     "path": "src/commands/play.ts",
+     "note": "<code>keysInputsFor</code> becomes <code>liveInputsFor</code> for the load and the watch."
+    },
+    {
+     "path": "src/commands/ui.ts",
+     "note": "<code>keysInputsFor</code> becomes <code>liveInputsFor</code> for the load, solo swaps, and the watch."
+    }
+   ]
+  },
+  {
+   "id": "record",
+   "title": "field record --monitoring host",
+   "kicker": "The CLI flow: refuse what cannot be heard, arm with names, reload, and put the song back.",
+   "intro": [
+    "<code>--monitoring host</code> was already accepted as a label for the take's row. Now it also drives monitoring. Before arming, <code>field record</code> refuses when no named track records audio, when the daemon predates <code>live-monitor</code>, when the bed is a file, when the daemon plays another song, and when the daemon converts the song to the device's rate.",
+    "It then always arms in the <code>tracks</code> form, even for one track, so it can name each audio track's capture input. After arming it reloads the song with every open input. When the take ends, it disarms and reloads the song without the capture inputs.",
+    "The review's three findings sit here: a compile refusal that only surfaces after arming, a rate check made before the arm that can change the rate, and a final reload that ignores a song switch by another terminal."
+   ],
+   "files": [
+    {
+     "path": "src/commands/record.ts",
+     "note": "The refusals, <code>monitor</code> on each audio entry, and the two reloads.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 356,
+       "text": "This reload is the first place the capture input meets <code>compileSession</code>, which refuses an input whose track does not reach <code>main</code> after the loaded session's solo is applied. A solo held in <code>field ui</code>, a muted placement, or an unplaced record track therefore fails here, after arming and before the <code>try</code> whose <code>finally</code> disarms, so the microphone stays armed. Reproduced on the null daemon."
+      },
+      {
+       "kind": "flag",
+       "line": 296,
+       "text": "This rate check runs before arming, but arming a separate input device can itself switch the daemon to converted delivery. JUCE's combined device offers only the rates both devices share. Monitoring then reads silence with no error. The fix compares the armed rate with the song's after arming."
+      },
+      {
+       "kind": "flag",
+       "line": 471,
+       "text": "This reload loads <code>resolved.song</code> even when another terminal switched the daemon to another song during the take, so it replaces that song. Reproduced on the null daemon with <code>tall-grass</code> loaded mid-take."
+      },
+      {
+       "kind": "context",
+       "line": 317,
+       "text": "The capture input's name is <code>capture:&lt;song&gt;/&lt;track&gt;</code>, the shape <code>liveInputsFor</code> matches."
+      }
+     ]
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "The <code>--monitoring</code> help text names <code>host</code>."
+    },
+    {
+     "path": "src/commands/land.ts",
+     "note": "A comment on <code>monitoring</code> names <code>host</code>."
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests",
+   "kicker": "The daemon's capture inputs, and field record end to end, on the null device.",
+   "intro": [
+    "The null device's input 1 is a sawtooth that reaches full scale once a second, and its input 2 is a constant 0.25. A capture input's <code>peak</code> near 1 therefore proves it read input 1, and a gapless sawtooth in a landed take proves the take is the dry input."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Ran <code>live-monitor.test.ts</code>, <code>record-daemon.test.ts</code>, <code>routing.test.ts</code>, <code>live-input.test.ts</code>, and <code>live-session.test.ts</code> against a Release build of this head on the null device: 39 of 39 passed."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/audiod/live-monitor.test.ts",
+     "note": "The daemon alone: read while stopped and while playing, closed by disarm and by a dropped connection, and the three refusals."
+    },
+    {
+     "path": "src/commands/record-daemon.test.ts",
+     "note": "<code>field record --monitoring host</code> end to end, and the file-bed refusal."
+    },
+    {
+     "path": "src/keys/routing.test.ts",
+     "note": "Renamed to <code>liveInputsFor</code>."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Documentation and the plan",
+   "kicker": "Host monitoring as built, the chunk 4 plan section, and dated amendments to the recording plan.",
+   "intro": [
+    "<code>docs/cli.md</code>, <code>docs/audio-engine.md</code>, and <code>docs/architecture.md</code> describe host monitoring as built. The live-supercollider plan gains §12, with the flow, the wire shapes, the decisions and the alternatives they beat, and the files. The recording plan's §8 and §13 item 6 get dated amendments, because recording.md had placed host monitoring out of scope.",
+    "The live-supercollider plan stays <code>in-progress</code>, and §12 opens no new question. The recording plan is <code>completed</code>."
+   ],
+   "files": [
+    {
+     "path": "docs/projects/live-supercollider/readme.md",
+     "note": "§12 Host monitoring, criterion 6, and the chunk 4 log entry.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 398,
+       "text": "§12.1 step 2 lists the refusals made before arming. A solo on another track, a track that does not reach <code>main</code>, and a rate change caused by the arm are not among them. See the flags on <code>record.ts</code>."
+      }
+     ]
+    },
+    {
+     "path": "docs/cli.md",
+     "note": "<code>--monitoring host</code>, its refusals, and the headphones warning."
+    },
+    {
+     "path": "docs/audio-engine.md",
+     "note": "Host monitoring as built, and the capture input as the second source of a live input."
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "Moves monitoring through the engine from future work to built."
+    },
+    {
+     "path": "docs/projects/recording/readme.md",
+     "note": "Dated amendments to §8 and §13 item 6."
+    }
+   ]
+  }
+ ]
+}
