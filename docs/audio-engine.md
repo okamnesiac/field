@@ -90,8 +90,10 @@ The song still renders as before. The input travels beside it: its
 track and each track above it run a second instance of their chain on
 what the input carries, and `main` adds the result to its own mix before
 its own chain. The input reaches each track once, however many times
-the arrangement places its track, and runs late by the latency of the
-limiters and hosted plugins on its path.
+the arrangement places its track. Where it reaches a track along paths
+of unequal latency, the shorter ones are delayed to match the longest,
+and it reaches `main` late by that longest path's limiters and hosted
+plugins.
 [live-supercollider.md](projects/live-supercollider/readme.md) §9
 describes the overlay and what it gives up.
 

@@ -110,6 +110,9 @@ private:
         std::unique_ptr<dsp::Plate> plate;
         std::unique_ptr<dsp::Hall> hall;
         std::unique_ptr<LivePluginStage> plugin;
+        // A limiter's output, reserved at build, so running the chain in
+        // the callback never allocates for it.
+        std::vector<std::vector<float>> scratch;
     };
     // Everything needed to rebuild a stage: locate discards chain state
     // (a seek does not inherit the previous position's tails) and
@@ -227,6 +230,9 @@ private:
                         int n,
                         std::vector<std::vector<float>>& block,
                         juce::int64 absoluteFrom);
+    // A window's linear gain at a position on the unwrapped timeline:
+    // `baseGain` unless a ramp is gliding it.
+    static double rampedGain (const Window& window, juce::int64 absoluteAt, double baseGain);
     // Runs `working` through the chain from `fromStage`; a limiter stage
     // re-points working at what it emitted (which may be shorter while
     // its window primes).
@@ -277,18 +283,38 @@ private:
     // on the timeline, so it passes through each window's gain and pan
     // but not its start, duration, or fades, and reaches each consumer
     // once however often the arrangement places its track.
+    //
+    // Every path into a track is aligned to the longest: each feed waits
+    // in a delay line for the difference, so an input reaching a track
+    // two ways never meets itself offset.
+    struct DelayLine
+    {
+        juce::int64 samples = 0;
+        std::vector<std::vector<float>> line; // in flight
+        std::vector<std::vector<float>> out; // this block, once through
+    };
+    struct OverlayInput
+    {
+        int window = 0; // the track's input window
+        DelayLine delay;
+    };
     struct OverlayEdge
     {
         int child = 0; // tracks[] index of the live track read
         int window = 0; // the consumer's first window reading it
         bool pre = false; // a pre-tap cable reads the child's pre-chain block
+        DelayLine delay;
     };
     struct OverlayTrack
     {
         int track = 0;
-        std::vector<int> inputWindows;
+        std::vector<OverlayInput> inputs;
         std::vector<OverlayEdge> edges;
         std::vector<ChainStage> chain; // empty for the output track
+        // How late what reaches this track is, against its input, and
+        // how late it leaves this track's chain.
+        juce::int64 inLatency = 0;
+        juce::int64 outLatency = 0;
         // This block: the mix before the chain, and after it. The chain's
         // emission runs through `delayed`, preloaded with the chain's
         // latency in zeros, so `post` is always exactly one block, late
@@ -296,7 +322,10 @@ private:
         std::vector<std::vector<float>> pre, post, delayed;
     };
     void buildOverlay();
-    void renderOverlay (int n);
+    // `absoluteFrom` is the clock at the block's start: a ramp on a
+    // window the input passes through glides on the same timeline the
+    // song's does.
+    void renderOverlay (int n, juce::int64 absoluteFrom);
     std::vector<std::shared_ptr<LiveInput>> inputSources;
     std::vector<OverlayTrack> overlay; // children before the tracks that read them
     std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay

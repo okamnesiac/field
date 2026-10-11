@@ -43,24 +43,10 @@ const juce::Array<juce::var>& requireArray (const juce::var& object,
     return *array;
 }
 
-// The mixInputBlock arithmetic for a whole block: double accumulation,
-// the same balance law, so an input window adds exactly what a file
-// window with the same samples would.
-void addScaled (std::vector<std::vector<float>>& block,
-                const float* left,
-                const float* right,
-                int n,
-                double gainDb,
-                double pan)
+void reserveAll (std::vector<std::vector<float>>& channels, size_t frames)
 {
-    const double gain = std::pow (10.0, gainDb / 20.0);
-    double balanceL = 1.0, balanceR = 1.0;
-    dsp::balanceGains (pan, balanceL, balanceR);
-    for (int i = 0; i < n; ++i)
-    {
-        block[0][(size_t) i] = (float) ((double) block[0][(size_t) i] + (double) left[i] * gain * balanceL);
-        block[1][(size_t) i] = (float) ((double) block[1][(size_t) i] + (double) right[i] * gain * balanceR);
-    }
+    for (auto& channel : channels)
+        channel.reserve (frames);
 }
 
 // A file played as an input: what --render-live feeds an input window,
@@ -370,7 +356,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
 void LiveSession::buildOverlay()
 {
     const int count = (int) tracks.size();
-    const auto reads = [this] (const Window& window, const std::vector<bool>& set)
+    const auto reads = [] (const Window& window, const std::vector<bool>& set)
     {
         return window.kind != Window::file && window.kind != Window::input
                && set[(size_t) window.source];
@@ -423,7 +409,9 @@ void LiveSession::buildOverlay()
                 const auto& window = track.windows[(size_t) w];
                 if (window.kind == Window::input)
                 {
-                    slot.inputWindows.push_back (w);
+                    OverlayInput input;
+                    input.window = w;
+                    slot.inputs.push_back (std::move (input));
                     continue;
                 }
                 if (! reads (window, live))
@@ -437,8 +425,36 @@ void LiveSession::buildOverlay()
                     throw std::runtime_error ("a live input crosses from \""
                                               + tracks[(size_t) window.source].name + "\" into \""
                                               + track.name + "\" at another rate; an input's path needs one rate");
-                slot.edges.push_back ({ window.source, w, pre });
+                OverlayEdge edge;
+                edge.child = window.source;
+                edge.window = w;
+                edge.pre = pre;
+                slot.edges.push_back (std::move (edge));
             }
+
+            // Align every feed to the latest: an input arrives at once, a
+            // pre-tap edge as late as what reached its child, a post edge
+            // that plus its child's chain.
+            const auto arrival = [this] (const OverlayEdge& edge)
+            {
+                const auto& from = overlay[(size_t) overlayIndex[(size_t) edge.child]];
+                return edge.pre ? from.inLatency : from.outLatency;
+            };
+            for (const auto& edge : slot.edges)
+                slot.inLatency = std::max (slot.inLatency, arrival (edge));
+            const auto prepare = [] (DelayLine& delay, juce::int64 samples)
+            {
+                delay.samples = samples;
+                delay.line.assign (2, std::vector<float> ((size_t) samples, 0.0f));
+                delay.out.assign (2, std::vector<float>());
+                reserveAll (delay.line, (size_t) samples + 16384);
+                reserveAll (delay.out, 16384);
+            };
+            for (auto& input : slot.inputs)
+                prepare (input.delay, slot.inLatency);
+            for (auto& edge : slot.edges)
+                prepare (edge.delay, slot.inLatency - arrival (edge));
+
             juce::int64 latency = 0;
             if (t != outputTrack)
             {
@@ -449,15 +465,13 @@ void LiveSession::buildOverlay()
                     else if (stage.plugin != nullptr)
                         latency += stage.plugin->latencySamples();
             }
+            slot.outLatency = slot.inLatency + latency;
             slot.pre.assign (2, std::vector<float>());
             slot.post.assign (2, std::vector<float>());
             slot.delayed.assign (2, std::vector<float> ((size_t) latency, 0.0f));
-            for (int c = 0; c < 2; ++c)
-            {
-                slot.pre[(size_t) c].reserve (8192);
-                slot.post[(size_t) c].reserve (8192);
-                slot.delayed[(size_t) c].reserve ((size_t) latency + 16384);
-            }
+            reserveAll (slot.pre, 16384);
+            reserveAll (slot.post, 16384);
+            reserveAll (slot.delayed, (size_t) latency + 16384);
             overlayIndex[(size_t) t] = (int) overlay.size();
             overlay.push_back (std::move (slot));
             joined[(size_t) t] = grew = true;
@@ -467,11 +481,55 @@ void LiveSession::buildOverlay()
         inputScratch.assign (2, std::vector<float> (8192, 0.0f));
 }
 
-void LiveSession::renderOverlay (int n)
+// A feed through its delay line: the block that leaves it now, which is
+// the block that came in `samples` ago.
+static void passThrough (std::vector<std::vector<float>>& line,
+                         std::vector<std::vector<float>>& out,
+                         juce::int64 samples,
+                         const float* left,
+                         const float* right,
+                         int n,
+                         const float*& leftOut,
+                         const float*& rightOut)
+{
+    if (samples == 0)
+    {
+        leftOut = left;
+        rightOut = right;
+        return;
+    }
+    const float* in[2] = { left, right };
+    for (int c = 0; c < 2; ++c)
+    {
+        line[(size_t) c].insert (line[(size_t) c].end(), in[c], in[c] + n);
+        out[(size_t) c].assign (line[(size_t) c].begin(), line[(size_t) c].begin() + n);
+        line[(size_t) c].erase (line[(size_t) c].begin(), line[(size_t) c].begin() + n);
+    }
+    leftOut = out[0].data();
+    rightOut = out[1].data();
+}
+
+void LiveSession::renderOverlay (int n, juce::int64 absoluteFrom)
 {
     if (inputScratch[0].size() < (size_t) n)
         for (auto& channel : inputScratch)
             channel.resize ((size_t) n, 0.0f);
+    // mixInputBlock's arithmetic without the fades: double accumulation,
+    // the same balance law, and a ramp's glide sample by sample, so an
+    // input adds exactly what a file window with its samples would.
+    const auto add = [&] (std::vector<std::vector<float>>& block, const Window& window, const float* left,
+                          const float* right)
+    {
+        const double baseGain = std::pow (10.0, window.gainDb / 20.0);
+        double balanceL = 1.0, balanceR = 1.0;
+        dsp::balanceGains (window.pan, balanceL, balanceR);
+        for (int i = 0; i < n; ++i)
+        {
+            const double g = rampedGain (window, absoluteFrom + i, baseGain);
+            block[0][(size_t) i] = (float) ((double) block[0][(size_t) i] + (double) left[i] * g * balanceL);
+            block[1][(size_t) i] = (float) ((double) block[1][(size_t) i] + (double) right[i] * g * balanceR);
+        }
+    };
     for (auto& slot : overlay)
     {
         Track& track = tracks[(size_t) slot.track];
@@ -479,9 +537,9 @@ void LiveSession::renderOverlay (int n)
             channel.assign ((size_t) n, 0.0f);
         float* left = inputScratch[0].data();
         float* right = inputScratch[1].data();
-        for (const int w : slot.inputWindows)
+        for (auto& input : slot.inputs)
         {
-            const Window& window = track.windows[(size_t) w];
+            const Window& window = track.windows[(size_t) input.window];
             if (overlayReadsInputs)
                 inputSources[(size_t) window.source]->read (left, right, n);
             else
@@ -489,14 +547,20 @@ void LiveSession::renderOverlay (int n)
                 std::fill (left, left + n, 0.0f);
                 std::fill (right, right + n, 0.0f);
             }
-            addScaled (slot.post, left, right, n, window.gainDb, window.pan);
+            const float* l = nullptr;
+            const float* r = nullptr;
+            passThrough (input.delay.line, input.delay.out, input.delay.samples, left, right, n, l, r);
+            add (slot.post, window, l, r);
         }
-        for (const auto& edge : slot.edges)
+        for (auto& edge : slot.edges)
         {
             const auto& from = overlay[(size_t) overlayIndex[(size_t) edge.child]];
             const auto& source = edge.pre ? from.pre : from.post;
-            const Window& window = track.windows[(size_t) edge.window];
-            addScaled (slot.post, source[0].data(), source[1].data(), n, window.gainDb, window.pan);
+            const float* l = nullptr;
+            const float* r = nullptr;
+            passThrough (edge.delay.line, edge.delay.out, edge.delay.samples, source[0].data(), source[1].data(), n,
+                         l, r);
+            add (slot.post, track.windows[(size_t) edge.window], l, r);
         }
         // The output track's own chain runs on the true sum in renderBlock.
         if (slot.track == outputTrack)
@@ -587,8 +651,12 @@ void LiveSession::buildStages (std::vector<ChainStage>& chain,
             stage.eq = std::make_unique<dsp::Eq> (spec.bands, spec.normalize,
                                                   (double) trackRate, (size_t) 2);
         else if (spec.kind == 1)
+        {
             stage.limiter = std::make_unique<dsp::Limiter> (spec.limiter, (size_t) 2,
                                                             spec.horizonDb);
+            stage.scratch.assign (2, std::vector<float>());
+            reserveAll (stage.scratch, 16384 + (size_t) stage.limiter->latencySamples());
+        }
         else if (spec.kind == 2)
             stage.reverb = std::make_unique<dsp::Reverb> (spec.reverb, (size_t) 2);
         else if (spec.kind == 3)
@@ -692,26 +760,7 @@ void LiveSession::mixInputBlock (Track& track,
             const juce::int64 s = window.readOffset + i - window.compDelay;
             if (s < 0 || (size_t) s >= srcL->size())
                 continue;
-            double g = baseGain;
-            if (window.rampStart >= 0)
-            {
-                // A dB-linear glide from rampFromDb to gainDb, evaluated
-                // on the unwrapped timeline; before it starts, the old
-                // value; after, the new one — and after a wrap, still
-                // the new one.
-                const juce::int64 into = absoluteFrom + (at - from) - window.rampStart;
-                const double progress = window.rampLength <= 0
-                                            ? 1.0
-                                            : std::clamp ((double) into / (double) window.rampLength,
-                                                          0.0, 1.0);
-                if (into >= 0)
-                    g = std::pow (10.0,
-                                  (window.rampFromDb
-                                   + (window.gainDb - window.rampFromDb) * progress)
-                                      / 20.0);
-                else
-                    g = std::pow (10.0, window.rampFromDb / 20.0);
-            }
+            double g = rampedGain (window, absoluteFrom + (at - from), baseGain);
             if ((double) i < (double) window.fadeIn)
                 g *= (double) i / (double) window.fadeIn;
             const double fromEnd = (double) (window.duration - 1 - i);
@@ -724,6 +773,22 @@ void LiveSession::mixInputBlock (Track& track,
                 = (float) ((double) block[1][out] + (double) (*srcR)[(size_t) s] * g * balanceR);
         }
     }
+}
+
+double LiveSession::rampedGain (const Window& window, juce::int64 absoluteAt, double baseGain)
+{
+    if (window.rampStart < 0)
+        return baseGain;
+    // A dB-linear glide from rampFromDb to gainDb, evaluated on the
+    // unwrapped timeline; before it starts, the old value; after, the new
+    // one — and after a wrap, still the new one.
+    const juce::int64 into = absoluteAt - window.rampStart;
+    const double progress = window.rampLength <= 0
+                                ? 1.0
+                                : std::clamp ((double) into / (double) window.rampLength, 0.0, 1.0);
+    if (into >= 0)
+        return std::pow (10.0, (window.rampFromDb + (window.gainDb - window.rampFromDb) * progress) / 20.0);
+    return std::pow (10.0, window.rampFromDb / 20.0);
 }
 
 void LiveSession::ensureConverted (int trackIndexArg, int targetRate, bool pre)
@@ -813,9 +878,13 @@ void LiveSession::runStages (std::vector<ChainStage>& chain,
             stage.plugin->process (working);
         else if (stage.limiter != nullptr)
         {
-            std::vector<std::vector<float>> out (2);
-            stage.limiter->process (working, out);
-            working = std::move (out);
+            // Into the stage's own buffers, reserved at build, and back:
+            // the callback never allocates for a limiter.
+            for (auto& channel : stage.scratch)
+                channel.clear();
+            stage.limiter->process (working, stage.scratch);
+            for (size_t c = 0; c < working.size(); ++c)
+                working[c].assign (stage.scratch[c].begin(), stage.scratch[c].end());
         }
     }
 }
@@ -886,7 +955,7 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
         {
             // What the inputs reach, added before the output's chain so
             // its inserts hear the true sum (§9).
-            renderOverlay (step);
+            renderOverlay (step, clock);
             if (const int slot = overlayIndex[(size_t) outputTrack]; slot >= 0)
                 for (int c = 0; c < 2; ++c)
                     for (int i = 0; i < step; ++i)

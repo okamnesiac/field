@@ -191,12 +191,19 @@ in place of it. Each block, in the audio callback:
    the overlay blocks of the live tracks it reads, with each window's
    gain and pan, then runs a second instance of its own chain. A
    pre-tap cable reads the block before that chain.
-3. The chain's output passes through a delay preloaded with the chain's
+3. Every feed into a track is first delayed to the track's longest
+   incoming path. An input arrives at once, a pre-tap edge as late as
+   what reached its child, and a post edge that plus its child's chain
+   latency, so an input that reaches a track two ways, such as through
+   a bus with a limiter and through a reverb send, never meets itself
+   offset.
+4. The chain's output passes through a delay preloaded with the chain's
    latency, its limiters' and hosted plugins' together, so every block
    is exactly one block, late by that latency. A limiter's stream lag
    varies from block to block; the delay absorbs it.
-4. `main` adds what reaches it to its own mix of the song, and its own
-   chain runs on the sum.
+5. `main` adds what reaches it to its own mix of the song, and its own
+   chain runs on the sum. The input reaches `main` late by its longest
+   path's latency.
 
 An input has no place on the timeline, so it passes through each
 window's gain and pan but not its start, duration, or fades. It reaches
@@ -204,7 +211,13 @@ each track that reads its track once, through the first window that
 does, however many times the arrangement places it. The overlay chains
 keep their state across a locate, and the warmup a far locate renders
 into the void reads no input, because a source read there would be
-consumed off the audio thread.
+consumed off the audio thread. A gain ramp on a window the input passes
+through glides the input with the song, sample by sample on the same
+timeline. A session swap builds the overlay afresh in the new session:
+the input goes silent for its path's latency and any tail its chains
+were ringing stops. Chunk 3 swaps sessions under a playing input, and
+decides there whether that gap is acceptable or the overlay's state
+should carry across.
 
 **Why not evaluate the path in place.** A track's content sits on a
 timeline its placement offsets, and a track placed more than once would
@@ -241,7 +254,11 @@ must sit under `main`.
   cuts an eq's ring there, and an input has no end, so the overlay rings
   out. The test found the compiler's limiter latency one sample short of
   the engine's window, which `insertLatency` now mirrors operation for
-  operation. Criterion 2 holds in the compiled
+  operation. The review of the chunk found paths of unequal latency
+  meeting offset, which step 3 now aligns; a second golden holds an
+  input reaching `main` three ways, at 0, 145, and 290 samples, to the
+  offline render late by 290, with the tone loud enough that both
+  limiters reduce gain. Criterion 2 holds in the compiled
   session: the input's track and the bus above it keep their chains,
   and a sibling fed by a file is served from its stem. The daemon's
   `session` op refuses an input window until chunk 2 gives it a source,

@@ -41,12 +41,14 @@ const execOrError = async (args: string[], cwd: string): Promise<string> => {
 
 const FRAMES = 24000;
 
+// Loud enough that voice's limiter reduces gain, so the goldens hold the
+// overlay's limiters to the offline ones where it matters.
 function tone(): [Float32Array, Float32Array] {
   const left = new Float32Array(FRAMES);
   const right = new Float32Array(FRAMES);
   for (let i = 0; i < FRAMES; i++) {
-    left[i] = 0.5 * Math.sin((2 * Math.PI * 220 * i) / 48000);
-    right[i] = 0.4 * Math.sin((2 * Math.PI * 330 * i) / 48000);
+    left[i] = 1.25 * Math.sin((2 * Math.PI * 220 * i) / 48000);
+    right[i] = Math.sin((2 * Math.PI * 330 * i) / 48000);
   }
   return [left, right];
 }
@@ -126,6 +128,78 @@ async function scaffold(root: string): Promise<void> {
   writeFileSync(join(root, 'songs/monitor/song.yaml'), SONG('monitor', '[1]'));
 }
 
+// Paths of unequal latency into main: voice (a limiter, 145 samples)
+// directly, through `crush` (a second limiter, 290 in all) by a post
+// send, and through `wash` (a reverb, no latency) by a pre-tap send. The
+// overlay aligns them to the longest, so the output is the offline
+// render late by 290, with nothing meeting itself offset.
+async function splitScaffold(root: string): Promise<void> {
+  init({ dir: root, name: 'live-split' });
+  const src = join(tmpdir(), `live-split-tone-${process.pid}.wav`);
+  writeWavFloat32(src, 48000, tone());
+  for (const song of ['split-offline', 'split-live']) {
+    createSong(root, song);
+    for (const name of ['voice', 'crush', 'wash']) createTrack(root, song, name);
+    const voiceInputs =
+      song === 'split-offline' ? ['inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0'] : ['inputs: []'];
+    if (song === 'split-offline') await importAsset(root, song, src, 'tone');
+    writeFileSync(
+      join(root, `songs/${song}/tracks/voice.yaml`),
+      [
+        'name: voice',
+        'sends:',
+        '  crush:',
+        '    gain_db: -6',
+        '  wash:',
+        '    gain_db: -12',
+        '    tap: pre',
+        ...VOICE_INSERTS,
+        ...voiceInputs,
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, `songs/${song}/tracks/crush.yaml`),
+      ['name: crush', ...VOICE_INSERTS.slice(0, 1), ...VOICE_INSERTS.slice(8), 'inputs:', '  - receive: crush', ''].join('\n'),
+    );
+    writeFileSync(
+      join(root, `songs/${song}/tracks/wash.yaml`),
+      [
+        'name: wash',
+        'inserts:',
+        '  - effect: reverb',
+        '    mix: 0.5',
+        '    decay: 0.4',
+        '    predelay_ms: 5',
+        '    damping: 0.4',
+        'inputs:',
+        '  - receive: wash',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, `songs/${song}/tracks/main.yaml`),
+      [
+        'name: main',
+        ...MAIN_INSERTS,
+        'inputs:',
+        '  - track: voice',
+        '    anchor: absolute',
+        '    at: 0',
+        '  - track: crush',
+        '    anchor: absolute',
+        '    at: 0',
+        '  - track: wash',
+        '    anchor: absolute',
+        '    at: 0',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(join(root, `songs/${song}/song.yaml`), SONG(song, '[1]'));
+  }
+  rmSync(src);
+}
+
 describe.skipIf(!binary)('live inputs through --render-live (live-supercollider.md chunk 1)', () => {
   let root: string;
 
@@ -159,6 +233,30 @@ describe.skipIf(!binary)('live inputs through --render-live (live-supercollider.
       // placed twice, heard once. Past the tone the two part on
       // purpose. The stem ends where voice's content does and cuts the
       // eq's ring there; an input has no end, so the overlay rings out.
+      expect(live[c]!.subarray(0, late).every((s) => s === 0)).toBe(true);
+      let worst = 0;
+      for (let i = 0; i < FRAMES; i++) worst = Math.max(worst, Math.abs(live[c]![i + late]! - stem[c]![i]!));
+      expect(worst).toBe(0);
+    }
+  });
+
+  it('aligns every path into a track to the longest, so an input never meets itself offset', async () => {
+    await splitScaffold(root);
+    const offline = await buildLabels(root, ['//songs/split-offline/track:main']);
+    const stem = readWav(offline.find((o) => o.label.endsWith('track:main'))!.outputPath!).channels;
+
+    const { session } = await compileSession(root, 'split-live', { inputs: [{ track: 'voice', input: 'mic' }] });
+    const chainLate = (name: string) =>
+      session.tracks.find((t) => t.name === name)!.chain.reduce((sum, insert) => sum + insertLatency(insert, 48000), 0);
+    const late = chainLate('voice') + chainLate('crush');
+    expect(late).toBe(290);
+
+    writeFileSync(join(root, 'session.json'), JSON.stringify(session));
+    writeWavFloat32(join(root, 'mic.wav'), 48000, tone());
+    await execFileAsync(binary!, ['--render-live', 'session.json', 'live.wav', '--input', 'mic=mic.wav'], { cwd: root });
+    const live = readWav(join(root, 'live.wav')).channels;
+
+    for (let c = 0; c < 2; c++) {
       expect(live[c]!.subarray(0, late).every((s) => s === 0)).toBe(true);
       let worst = 0;
       for (let i = 0; i < FRAMES; i++) worst = Math.max(worst, Math.abs(live[c]![i + late]! - stem[c]![i]!));
