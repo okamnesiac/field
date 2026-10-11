@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveInstrument } from '../commands/keys.js';
+import { resolveInstrument } from './targets.js';
 import { freeUdpPort, instrumentPath, oscMessage, parseHostLine, VoiceHost, type VoiceHostStatus } from './voice-host.js';
 
 // A stand-in for sclang running the voice host: it records its
@@ -16,7 +16,7 @@ const log = process.env.STUB_LOG;
 writeFileSync(log + '.env', JSON.stringify({
   args: process.argv.slice(2),
   mode: process.env.FIELD_MODE,
-  instrument: process.env.FIELD_INSTRUMENT,
+  instruments: process.env.FIELD_INSTRUMENTS,
   device: process.env.FIELD_DEVICE ?? null,
   parent: process.env.FIELD_PARENT_PID,
 }));
@@ -169,7 +169,7 @@ describe('the voice host process', () => {
   it('starts sclang on the host script in voice mode and is ready when the host says so', async () => {
     const statuses: VoiceHostStatus[] = [];
     const host = await VoiceHost.start({
-      instrument: '/p/pad.scd',
+      instruments: ['/p/pad.scd'],
       device: 'Test Out',
       env: env('ready'),
       onStatus: (s) => statuses.push(s),
@@ -183,7 +183,7 @@ describe('the voice host process', () => {
     expect(seen.args[2]).toBe('-D');
     expect(seen.args[3]).toMatch(/sc\/voice-host\.scd$/);
     expect(existsSync(seen.args[3])).toBe(true);
-    expect(seen).toMatchObject({ mode: 'voice', instrument: '/p/pad.scd', device: 'Test Out', parent: String(process.pid) });
+    expect(seen).toMatchObject({ mode: 'voice', instruments: '["/p/pad.scd"]', device: 'Test Out', parent: String(process.pid) });
     await host.close();
     expect(readFileSync(log, 'latin1')).toContain('/quit');
   });
@@ -191,7 +191,7 @@ describe('the voice host process', () => {
   it('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
     const statuses: VoiceHostStatus[] = [];
     const host = await VoiceHost.start({
-      instrument: '/p/pad.scd',
+      instruments: ['/p/pad.scd'],
       env: { ...env('ready'), STUB_RELOADS: 'ok,fail' },
       onStatus: (s) => statuses.push(s),
     });
@@ -212,18 +212,18 @@ describe('the voice host process', () => {
   });
 
   it('rejects ready with the host error and what sclang printed after its banner', async () => {
-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('error') });
+    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('error') });
     await expect(host.ready).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
     await expect(host.ready).rejects.not.toThrow(/compiling class library/);
   });
 
   it('rejects ready when sclang exits before it is ready', async () => {
-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('silent') });
+    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('silent') });
     await expect(host.ready).rejects.toThrow(/exited with code 0 before the voice host was ready/);
   });
 
   it('closes a host that is still booting, without waiting for it to be ready', async () => {
-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('hang') });
+    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('hang') });
     const deadline = Date.now() + 5000;
     while (!existsSync(log) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
     await host.close();
@@ -232,7 +232,7 @@ describe('the voice host process', () => {
   });
 
   it('stops the server the host launched by process, when /quit cannot reach it', async () => {
-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: { ...env('hang'), STUB_SERVER: '1' } });
+    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: { ...env('hang'), STUB_SERVER: '1' } });
     try {
       const deadline = Date.now() + 5000;
       while (!existsSync(`${log}.server`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
@@ -250,7 +250,7 @@ describe('the voice host process', () => {
     const statuses: VoiceHostStatus[] = [];
     const reasons: string[] = [];
     const host = await VoiceHost.start({
-      instrument: '/p/x.scd',
+      instruments: ['/p/x.scd'],
       env: env('ready-then-die'),
       onStatus: (s) => statuses.push(s),
       onExit: (reason) => reasons.push(reason),
@@ -264,7 +264,7 @@ describe('the voice host process', () => {
 
   it('refuses a FIELD_SCLANG that does not exist', async () => {
     await expect(
-      VoiceHost.start({ instrument: '/p/x.scd', env: { ...process.env, FIELD_SCLANG: join(dir, 'missing') } }),
+      VoiceHost.start({ instruments: ['/p/x.scd'], env: { ...process.env, FIELD_SCLANG: join(dir, 'missing') } }),
     ).rejects.toThrow('FIELD_SCLANG points at a missing binary');
   });
 });

@@ -95,7 +95,9 @@ export function parseHostLine(line: string): z.infer<typeof hostLine> | undefine
 }
 
 export interface VoiceHostOptions {
-  instrument: string;
+  // The programs to play, in unison: each note sounds a voice from each
+  // (arming.md §2.1).
+  instruments: string[];
   device?: string;
   onStatus?: (status: VoiceHostStatus) => void;
   // Called when the host exits on its own after it was ready.
@@ -190,7 +192,7 @@ export class VoiceHost {
       env: {
         ...env,
         FIELD_MODE: 'voice',
-        FIELD_INSTRUMENT: options.instrument,
+        FIELD_INSTRUMENTS: JSON.stringify(options.instruments),
         FIELD_SC_PORT: String(port),
         FIELD_PARENT_PID: String(process.pid),
         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
