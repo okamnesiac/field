@@ -1,0 +1,229 @@
+{
+ "version": 1,
+ "name": "Recording several armed tracks",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 191,
+  "title": "Record several armed tracks in one pass: audio, MIDI, or both (arming.md chunk 2)",
+  "head": "30c730322c4feaded1f4b24e4deb9d056691b52c",
+  "headRef": "keys/record-tracks",
+  "base": "b3b9b77ede0685b8a568e680a398a5877c8f11d6",
+  "baseRef": "keys/arming",
+  "basePr": 189
+ },
+ "overview": {
+  "summary": [
+   "<code>field record</code> records a take onto a track through <code>field-audiod</code>, the audio daemon that owns the sound device. Until this change the daemon held one arm, so it recorded one track per pass: singing and playing the keys under the vocal took two performances. This pull request is chunk 2 of the arming plan. You name several tracks, and one pass records every one of them, audio, MIDI, or both. Every take starts on the same sample of the bed and lands on its own track.",
+   "The CLI resolves every track before anything opens. A track whose record entry names an instrument records MIDI; any other track records audio, and the audio tracks take <code>--input</code> channels in the order you name them, 1, 2, and on by default. One track still arms through the old one-track <code>arm</code>; several arm through <code>arm</code> with a <code>tracks</code> list, which a daemon advertises as the <code>record-tracks</code> feature.",
+   "The daemon does not rewrite its capture path. The first armed track is the <em>primary</em>, and every existing capture rule runs on it unchanged: the start latch, the count-in, the punch-out at <code>until</code>, and the loop hand-off. The other tracks are <em>companions</em> in fixed slots that the audio callback reads only through atomics. They start on the primary's latch, an audio companion pushes the same span of its own input channel, and they end with the primary's pass. An audio track is the primary whenever one is armed, so <code>--until</code> still cuts audio on its exact sample, and MIDI companions end one block later, as a MIDI take always has.",
+   "Left for later: loop takes stay one-track, every armed MIDI track hears every MIDI source (unison, not routing by channel), the lasting arm is chunk 3, plan criteria 6 to 8 need a real interface, and an older file-bed punch-out defect found along the way is tracked in #194."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Arm</b>: open the inputs a take will record and name the track it lands on.</li><li><b>Primary</b>: the first armed audio track, or the first track when none is audio. Every capture rule runs on it.</li><li><b>Companion</b>: any other armed track, in one of 15 fixed slots. It follows the primary's start and end.</li><li><b>Latch</b>: the audio callback's record of the bed position where a take starts.</li><li><b>Epoch</b>: <code>callbackEpoch</code>, a counter the callback bumps every block. The message thread waits two epochs after it detaches a take, so no block can still be pushing into it.</li><li><b>Null mode</b>: the daemon with no device, whose clock presents a sawtooth on input 1 and a constant on input 2. The tests run here.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>First review, at <code>9217fe4</code>: two findings. A refused audio-and-MIDI arm left the device's input open, and the new daemon test failed all five cases on the Windows CI job. Both are fixed at <code>6e2c0ec</code>, which also took the four suggestions: the missing-take error, every armed track in <code>field transport status</code>, the plan's status shape, and #194.</li><li>Second review, at <code>6e2c0ec</code>: the plan's #194 sentence broke its line wrapping, fixed at <code>30c7303</code>.</li><li>Third review, at <code>30c7303</code>: clean, with no finding open.</li><li>At <code>6e2c0ec</code>, whose code this head keeps unchanged, typecheck and <code>project check</code> passed. The record, punch, MIDI, click, and play daemon tests passed against a daemon built from that head, in null mode. Windows CI failed only the base branch's 12 tests.</li><li>Stacked on #189 (arming chunk 1) and #188.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "protocol",
+   "title": "The arm-set protocol",
+   "kicker": "What a client can send and read once a daemon records several tracks.",
+   "intro": [
+    "A client arms several tracks by sending <code>arm</code> with <code>tracks</code>, a list of <code>{track, kind: \"audio\", input}</code> or <code>{track, kind: \"midi\"}</code>. The answer lists <code>armed</code>, the primary first. The <code>record</code> answer adds <code>takes</code>, each track's transaction, and <code>stop</code> and <code>pause</code> answer with <code>takes</code>, every finalized manifest, beside <code>take</code>, the primary's. With more than one track armed, <code>status.record</code> adds <code>armed</code>, each track's kind, input, meter, and progress.",
+    "Every new field is optional on the client side, so a one-track daemon and a one-track CLI read each other as before."
+   ],
+   "files": [
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "The zod schemas for the new <code>arm</code> answer, the <code>takes</code> lists, and <code>status.record.armed</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 274,
+       "text": "<code>takes</code> is optional, and <code>record.ts</code> falls back to <code>take</code> when it is absent, so the new CLI reads an older daemon's <code>stop</code> answer. Checked by reading every <code>stop</code> reader in <code>src/</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/audiod/client.ts",
+     "note": "<code>armTracks</code>, the client call for <code>arm</code> with <code>tracks</code>."
+    },
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "Advertises <code>record-tracks</code>, routes <code>arm</code> with <code>tracks</code> to <code>armSet</code>, and answers <code>stop</code> and <code>pause</code> with every manifest.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 55,
+       "text": "<code>addTakes</code> leaves a take whose finalize threw out of both <code>take</code> and <code>takes</code>, and the daemon sends no <code>take</code> event for it. The CLI names any such track when the others land; see <code>record.ts</code>."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "daemon",
+   "title": "The daemon's primary and companions",
+   "kicker": "How the audio callback records several takes without new locks or allocation.",
+   "intro": [
+    "<code>Player</code> in <code>player.cpp</code> runs the audio callback, <code>processBlock</code>, once per block of samples on the device's real-time thread, and handles requests on the message thread. The callback must not allocate, lock, or do I/O, so the two threads share state only through atomics.",
+    "<code>armSet</code> replaces <code>arm</code> and <code>armMidi</code>, which are now its one-entry forms. It opens every MIDI source first, without starting them, so a set refused for its MIDI never touches the device. Then it opens every armed audio input on one duplex device, orders the audio tracks first, makes the first one the primary, and fills the companion slots. <code>record</code> opens one transaction per track. The callback's new <code>recordAudioBlock</code> starts the companions on the primary's latch and pushes each audio companion's own channel for the same span. <code>stampMidiBlock</code> is the MIDI stamping a MIDI take already did, factored out so that a MIDI primary's companions mirror it and an audio primary's MIDI companions run it on their own in <code>recordMidiCompanions</code>.",
+    "A take ends one of three ways. <code>stopRecording</code> detaches every pointer and waits two epochs before it finalizes. A punch-out ends the audio on its sample, the MIDI companions a block later, and the last one to end sets <code>captureDone</code>, which <code>serviceCapture</code> answers by finalizing every take. Loop takes refuse companions."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The callback reads <code>liveCompanions</code> slots and, inside each, only atomics. The message thread writes a slot's <code>track</code>, <code>input</code>, and <code>take</code> only while no take is live, because <code>armSet</code> refuses while recording."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "<code>armSet</code>, <code>recordAudioBlock</code>, <code>stampMidiBlock</code>, <code>recordMidiCompanions</code>, and the companion handling in <code>record</code>, <code>stopRecording</code>, <code>serviceCapture</code>, <code>status</code>, <code>recordings</code>, and <code>recover</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 980,
+       "text": "The per-companion meter and push loops are bounded by 15 slots and allocate nothing; built from this head and read through."
+      },
+      {
+       "kind": "context",
+       "line": 1136,
+       "text": "The pass is done when the audio has ended and no MIDI companion is still running. <code>recordMidiCompanions</code> sets <code>captureDone</code> from the other side, so either order of the two ends sets it once."
+      },
+      {
+       "kind": "verify",
+       "line": 1466,
+       "text": "Both MIDI refusals, this one and \"cannot open any MIDI source\" below, return before <code>openAudioInputs</code> changes the device, and after a successful audio open nothing else can fail. Checked by reading <code>armSet</code>; the daemon test of a refused set confirms the arm before it stays armed."
+      },
+      {
+       "kind": "verify",
+       "line": 1925,
+       "text": "The wait of two epochs before the MIDI detach, which an earlier review added so a stop keeps every message that arrived before it, now covers MIDI companions as well as a MIDI primary."
+      },
+      {
+       "kind": "verify",
+       "line": 2029,
+       "text": "After a punch-out, <code>serviceCapture</code> finalizes each companion only after the callback cleared its pointer; the daemon test that punches out at 24000 passes against this head."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "The <code>Companion</code> slot, the new private steps, and <code>nullInputMask</code>, which lets the null clock present each armed input in channel order."
+    },
+    {
+     "path": "native/audiod/src/capture.h",
+     "note": "<code>Transaction::list</code> takes every active transaction id, so a companion take in flight lists as active."
+    },
+    {
+     "path": "native/audiod/src/capture.cpp",
+     "note": "The matching change to <code>list</code>."
+    }
+   ]
+  },
+  {
+   "id": "cli",
+   "title": "field record with several tracks",
+   "kicker": "Planning the arm, arming, following the take, and landing every manifest.",
+   "intro": [
+    "<code>planArm</code> resolves each target to its record entry and kind before the daemon opens anything, so a mistake is an error before the performance rather than after it. It refuses a track named twice, tracks in two songs, <code>--input</code>, <code>--device</code>, or <code>--loop</code> when every track records MIDI, <code>--loop</code> over more than one track, and an <code>--input</code> list whose length does not match the audio tracks.",
+    "<code>captureTakes</code> arms one track as before and several through <code>armTracks</code>. Every take lands as its <code>take</code> event arrives, and a ctrl-c lands every manifest in the <code>stop</code> answer. When events trail, the fallback reads <code>recordings</code> for every transaction the <code>record</code> answer named, and a track whose take still never arrived fails the command with its <code>--recover</code> command. <code>field transport status</code> in another terminal lists every armed track, a MIDI one by the sources it hears."
+   ],
+   "files": [
+    {
+     "path": "src/commands/record.ts",
+     "note": "<code>planArm</code>, the several-track arm and its armed line, and landing every take.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 267,
+       "text": "The arm runs before the <code>try</code> whose <code>finally</code> disarms, so a refused arm is never followed by a disarm. That is why <code>armSet</code> itself must leave the device as it was on a refusal."
+      },
+      {
+       "kind": "verify",
+       "line": 406,
+       "text": "This runs after the recordings fallback has landed every complete take, so a track it names is incomplete on disk and <code>--recover</code> finalizes it. Checked by tracing the stop and fallback paths."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/transport.ts",
+     "note": "<code>field transport status</code> names every armed track, falling back to the one-track fields for an older daemon."
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "<code>record [targets...]</code> and <code>--input</code> as a list."
+    },
+    {
+     "path": "src/cliParsers.ts",
+     "note": "<code>parseInputChannels</code>, a comma-separated list of 1-based channels."
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests",
+   "kicker": "The plan's refusals, and several tracks through a real daemon in null mode.",
+   "intro": [
+    "<code>record-plan.test.ts</code> covers <code>planArm</code>'s inputs and refusals. <code>record-tracks-daemon.test.ts</code> runs the daemon in null mode: two audio tracks on inputs 1 and 2, a refused set that leaves the arm before it alone, an audio and a MIDI track, a punch-out over a live session, two MIDI tracks in unison, and <code>field record</code> end to end with <code>field transport status</code> read while it records. The MIDI cases publish a virtual source with <code>field-audiod --keys</code>, and skip on Windows, which has none."
+   ],
+   "files": [
+    {
+     "path": "src/commands/record-tracks-daemon.test.ts",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 93,
+       "text": "The MIDI cases skip on Windows, as <code>record-midi-daemon.test.ts</code> does, and <code>afterEach</code> cleans up with <code>removeTempProject</code>. The Windows CI job for this head passes the audio case and skips the four MIDI cases."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/record-plan.test.ts"
+    },
+    {
+     "path": "src/cliParsers.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Documentation and the plan",
+   "kicker": "The daemon's new section, the CLI manual, the keys guide, and the plan's record of chunk 2.",
+   "intro": [
+    "<code>docs/audio-engine.md</code> gains \"Several armed tracks\", which describes the protocol above. <code>docs/cli.md</code> describes recording several tracks, the missing-take error, and every armed track in <code>field transport status</code>, and adds the <code>field keys</code> row its command table lacked. <code>docs/keys.md</code> shows singing and playing in one pass. The arming plan's new §10 records what chunk 2 built, how it was checked, and one older defect found on the way, now issue #194: an audio punch-out against a file bed ends 3 samples short of <code>until</code>."
+   ],
+   "files": [
+    {
+     "path": "docs/audio-engine.md"
+    },
+    {
+     "path": "docs/cli.md"
+    },
+    {
+     "path": "docs/keys.md"
+    },
+    {
+     "path": "docs/projects/arming/readme.md",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 261,
+       "text": "§10's last lines are rewrapped to the paragraph's width (69 and 67 characters), with the same words, and point the file-bed punch-out at #194."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "arming"
+}
