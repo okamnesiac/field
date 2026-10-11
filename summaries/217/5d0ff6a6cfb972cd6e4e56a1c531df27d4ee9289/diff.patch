@@ -1,0 +1,100 @@
+diff --git a/docs/cli.md b/docs/cli.md
+index 37d4804..2dde89a 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -57,7 +57,7 @@ To see what you have, ask the version:
+ 
+ ```console
+ $ field --version
+-field 0.1.0  (6a310a4 on docs/cli)
++field 0.3.0
+ worker protocol 2
+ remote        https://audiofield.io (default)  not logged in
+ 
+@@ -67,8 +67,9 @@ daemons in .
+   field-voiced  not running
+ ```
+ 
+-The first line is the CLI build and the commit it came from, and it says
+-so when the checkout has moved on or carries uncommitted changes. The
++The first line is the CLI's version. A build from a checkout adds the
++commit it came from, as in `field 0.3.0  (6a310a4 on main)`, and says so
++when the checkout has moved on or carries uncommitted changes. The
+ `remote` line names the remote this project talks to, where that URL
+ came from, and whether you are logged in to it (see [Share a project
+ through a remote](#share-a-project-through-a-remote)). The rest reports
+diff --git a/scripts/stamp-build.mjs b/scripts/stamp-build.mjs
+index 5d20cfa..17c1939 100644
+--- a/scripts/stamp-build.mjs
++++ b/scripts/stamp-build.mjs
+@@ -37,4 +37,4 @@ const info =
+         dirtyFiles: status === undefined ? undefined : status.split('\n').filter((l) => l.trim()).length,
+       };
+ writeFileSync(stampPath, JSON.stringify(info, null, 2) + '\n');
+-process.stdout.write(`stamped dist/build-info.json (${info.commit?.slice(0, 7) ?? 'not a git checkout'})\n`);
++process.stdout.write(`stamped dist/build-info.json${info.commit ? ` (${info.commit.slice(0, 7)})` : ''}\n`);
+diff --git a/src/commands/version.test.ts b/src/commands/version.test.ts
+index 75a4761..837b85a 100644
+--- a/src/commands/version.test.ts
++++ b/src/commands/version.test.ts
+@@ -250,6 +250,36 @@ describe('resolveIdentity', () => {
+   });
+ });
+ 
++describe('formatVersionReport for a release install', () => {
++  it('prints the version alone, with nothing about a checkout', () => {
++    // A release is built from GitHub's source archive, which carries no
++    // commit, and that is the install most people have.
++    const text = formatVersionReport(
++      {
++        cli: { version: '0.3.0' },
++        workerProtocol: 2,
++        daemons: [],
++        remote: { api: 'https://audiofield.io', source: 'default' },
++      },
++      process.cwd(),
++    );
++    expect(text.split('\n')[0]).toBe('field 0.3.0');
++  });
++
++  it('still names the commit for a build from a checkout', () => {
++    const text = formatVersionReport(
++      {
++        cli: { version: '0.3.0', commit: 'aaaa111', branch: 'main' },
++        workerProtocol: 2,
++        daemons: [],
++        remote: { api: 'https://audiofield.io', source: 'default' },
++      },
++      process.cwd(),
++    );
++    expect(text.split('\n')[0]).toBe('field 0.3.0  (aaaa111 on main)');
++  });
++});
++
+ describe('formatVersionReport with a drifted checkout', () => {
+   it('names both shas and the command that reconciles them', () => {
+     const text = formatVersionReport(
+diff --git a/src/commands/version.ts b/src/commands/version.ts
+index 6ad8186..5b0d98f 100644
+--- a/src/commands/version.ts
++++ b/src/commands/version.ts
+@@ -317,6 +317,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
+   // Shortened at display alone; the report and the drift comparison
+   // carry full shas.
+   const short = (sha: string): string => sha.slice(0, 7);
++  // A release install is no checkout, and it is the usual install, so its
++  // line is the version alone; only a build from a checkout names a commit.
+   const build = cli.commit
+     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
+       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
+@@ -332,8 +334,8 @@ export function formatVersionReport(report: VersionReport, root: string): string
+           ? `; checkout has changed since the build — ${BUILD_CLI} to update`
+           : ''
+       }`
+-    : 'not a git checkout';
+-  lines.push(`field ${cli.version}  (${build})`);
++    : undefined;
++  lines.push(build === undefined ? `field ${cli.version}` : `field ${cli.version}  (${build})`);
+   lines.push(`worker protocol ${report.workerProtocol}`);
+   lines.push(formatRemoteReport(report.remote));
+   lines.push('');

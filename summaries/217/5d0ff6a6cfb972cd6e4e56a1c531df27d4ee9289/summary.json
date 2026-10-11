@@ -1,0 +1,122 @@
+{
+ "version": 1,
+ "name": "Version line for releases",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 217,
+  "title": "Print only the version when field was not built from a checkout",
+  "head": "5d0ff6a6cfb972cd6e4e56a1c531df27d4ee9289",
+  "headRef": "quiet-version-outside-checkout",
+  "base": "6f28530dc4b06a162b38e66c14428754e070a25f",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field --version</code> tells you which build of the Field CLI is running. Its first line is the version from <code>package.json</code>, followed in parentheses by the Git commit the build came from, so that during development you can see whether the code you are running is the code in your checkout.",
+   "A <b>release install</b> is the other way to get Field: <code>install.sh</code> downloads GitHub's source archive of a version's tag, unpacks it into a directory of its own, and builds it there. That archive has no <code>.git</code>, so the build has no commit to name, and the first line read <code>field 0.3.0&nbsp; (not a git checkout)</code>. Release installs are now the usual install, so the parenthetical described the normal case as if something were missing.",
+   "This pull request prints the version alone when the build has no commit, and leaves a build from a checkout exactly as it was. The build script's log line drops the same phrase, and <code>docs/cli.md</code> shows the release line in its example. How a build decides whether it has a commit does not change."
+  ],
+  "cards": [
+   {
+    "id": "cases",
+    "title": "What the first line prints for each build",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Build</th><th>First line at this head</th></tr></thead><tbody><tr><td>Release install, built from an archive with no <code>.git</code></td><td class=\"r\"><code>field 0.3.0</code> (was <code>field 0.3.0&nbsp; (not a git checkout)</code>)</td></tr><tr><td>Checkout on a branch, clean</td><td class=\"r\"><code>field 0.3.0&nbsp; (6a310a4 on main)</code></td></tr><tr><td>Checkout with a detached HEAD</td><td class=\"r\"><code>field 0.3.0&nbsp; (5d0ff6a)</code></td></tr><tr><td>Checkout built with an uncommitted file</td><td class=\"r\"><code>field 0.3.0&nbsp; (5d0ff6a, 1 file uncommitted)</code></td></tr><tr><td>Checkout edited after the build</td><td class=\"r\"><code>field 0.3.0&nbsp; (5d0ff6a; checkout has changed since the build — field upgrade cli to update)</code></td></tr></tbody></table></div><p class=\"note\">Every row except the clean branch was run by the review against this head. Only the first row changes.</p>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Build stamp</b>: <code>dist/build-info.json</code>, which <code>scripts/stamp-build.mjs</code> writes at the end of <code>pnpm build</code>. It holds the commit, branch, and count of uncommitted files the build saw, or <code>{}</code> when Git finds no commit.</li><li><b>Checkout</b>: a Git clone of the repository, built in place.</li><li><b>Release install</b>: a version's source archive, unpacked and built by <code>install.sh</code>, with no <code>.git</code>.</li><li><b>Drift</b>: the checkout moving after the build, by a new commit or by edits, which <code>field --version</code> reports beside the stamped commit.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "version-line",
+   "title": "The first line of field --version",
+   "kicker": "The formatter prints the version alone when the build has no commit",
+   "intro": [
+    "<code>formatVersionReport</code> turns the version report into the text <code>field --version</code> prints. Its first line is <code>field &lt;version&gt;</code>, plus a parenthetical describing the build's commit when there is one: the short commit, the branch unless HEAD is detached, the count of uncommitted files at build time, and any drift since.",
+    "When the report carries no commit, the parenthetical used to say <code>not a git checkout</code>. It is now left out, and the line is the version alone. The report's fields, and the code that fills them, are unchanged, so nothing about which builds have a commit moves."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/version.ts",
+     "note": "The formatter's <code>build</code> string becomes <code>undefined</code> when there is no commit, and the first line drops its parenthetical in that case.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "A report has no commit in two ways. Run from <code>dist/</code>, <code>buildIdentity</code> reads the build stamp and, when the stamp has no <code>commit</code>, falls back to asking Git at the package root, which finds none in an archive either. Run from source, it asks Git directly. Drift fields are set only beside a stamped commit, so leaving out the parenthetical drops no drift report."
+      },
+      {
+       "kind": "verify",
+       "text": "The review built a <code>git archive</code> of this head outside any repository, installed it with <code>pnpm install --frozen-lockfile</code>, and ran <code>node dist/cli.js --version</code>: the first line was <code>field 0.3.0</code>. In a detached checkout of the head, a clean build printed <code>field 0.3.0&nbsp; (5d0ff6a)</code>, and the dirty and drifted cases printed the forms in the overview's table.",
+       "line": 338
+      }
+     ]
+    },
+    {
+     "path": "src/commands/version.test.ts",
+     "collapsed": true,
+     "note": "Two formatter cases: a report with no commit prints <code>field 0.3.0</code>, and one with a commit and branch prints <code>field 0.3.0&nbsp; (aaaa111 on main)</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "These test the formatter alone. No automated test runs <code>field --version</code> from a build without <code>.git</code>; the release-install tests in <code>src/install.test.ts</code> run the real stamp script in such a tree but discard its output."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "build-stamp",
+   "title": "The build stamp's log line",
+   "kicker": "pnpm build stops printing \"not a git checkout\" for a release",
+   "intro": [
+    "<code>scripts/stamp-build.mjs</code> runs at the end of <code>pnpm build</code>. It asks Git for the commit at the package root, writes the build stamp, and logs one line. A release install builds twice, once from the <code>prepare</code> step of <code>pnpm install</code> and once from <code>pnpm run build</code>, so the old phrase appeared twice during every release install.",
+    "Only the log line changes. The stamp's JSON is the same <code>{}</code> for a build with no commit, so the two readers of it, <code>field --version</code> and the <code>report_build</code> check in <code>install.sh</code> that prints <code>cli-current</code> or <code>cli-stale</code>, read it as before."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "scripts/stamp-build.mjs",
+     "note": "The log line adds the short commit in parentheses only when the stamp has one.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The archive build logged <code>stamped dist/build-info.json</code> with nothing after it and wrote <code>{}</code>; a checkout build logged <code>stamped dist/build-info.json (5d0ff6a)</code>. A search of the repository found nothing that parses this line.",
+       "line": 40
+      },
+      {
+       "kind": "context",
+       "text": "The detection above this line is unchanged, and it has a gap the review lists as a suggestion: <code>git -C &lt;root&gt; rev-parse HEAD</code> searches upward, so a release unpacked inside another Git work tree, such as a home directory kept in Git, stamps that repository's commit. An archive of this head built that way printed <code>field 0.3.0&nbsp; (948b7e3 on main, 1 file uncommitted)</code>, as the base does. Asking Git only when the package root holds a <code>.git</code> entry, the test <code>install.sh</code> uses, would close it."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The documented example",
+   "kicker": "docs/cli.md shows the release line and describes what a checkout adds",
+   "intro": [
+    "The command reference's example of <code>field --version</code> now shows a release install's output, and the paragraph after it gives the checkout form as an inline example."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/cli.md",
+     "note": "The example's first line becomes <code>field 0.3.0</code>, and the text says a build from a checkout adds its commit.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The example matches the archive build's output line for line. Its <code>remote</code> line is the form the formatter prints for the default remote with no login, and the inline checkout example uses the formatter's two spaces before the parenthesis.",
+       "line": 60
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
