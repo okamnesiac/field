@@ -16,12 +16,12 @@ describe('the status line', () => {
   it('ends with the sounding notes, after anything else it has to say', () => {
     const session = musicalTyping();
     expect(statusText(session, undefined, undefined, 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · –',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · –',
     );
     session.press('KeyA');
     session.press('KeyD');
     expect(statusText(session, undefined, 'KeyA is both a note and a control', 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
     );
   });
 
@@ -30,10 +30,22 @@ describe('the status line', () => {
     session.press('Digit6');
     session.release('Digit6');
     expect(statusText(session, undefined, undefined, 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · mod 76 · –',
+      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 76 · –',
     );
     const tracker = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')));
-    expect(statusText(tracker, undefined, undefined, 200)).not.toContain('mod');
+    expect(statusText(tracker, undefined, undefined, 200)).not.toMatch(/bend|mod/);
+  });
+
+  it('shows the pitch bend while a bend key is held, at the same width', () => {
+    const session = musicalTyping();
+    session.press('KeyA');
+    const rest = statusText(session, undefined, undefined, 200);
+    session.press('Digit1');
+    const bent = statusText(session, undefined, undefined, 200);
+    expect(bent).toBe('Field Keys · musical-typing · transpose 0 · velocity 100 · bend -1 · mod 0 · C4');
+    expect(bent).toHaveLength(rest.length);
+    session.release('Digit1');
+    expect(statusText(session, undefined, undefined, 200)).toBe(rest);
   });
 
   it('shortens the text before the notes to fit, never the notes', () => {

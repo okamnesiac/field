@@ -115,6 +115,18 @@ describe('controls', () => {
     expect(session.press('Digit3')).toEqual([[CC, 1, 0]]);
   });
 
+  it('remembers the bend while its key is held', () => {
+    const session = musicalTyping();
+    session.press('Digit1');
+    expect(session.bend).toBe(-1);
+    session.release('Digit1');
+    expect(session.bend).toBe(0);
+    session.press('Digit2');
+    expect(session.bend).toBe(1);
+    session.releaseAll();
+    expect(session.bend).toBe(0);
+  });
+
   it('remembers the modulation wheel it last set', () => {
     const session = musicalTyping();
     expect(session.mod).toBe(0);

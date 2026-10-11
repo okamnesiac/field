@@ -9,7 +9,7 @@ the default keymap, and you can write your own.
 
 ```console
 $ field keys
-Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · C4 E4 G4
+Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · C4 E4 G4
 ```
 
 Name an instrument and `field keys` plays it too, from the keyboard and
@@ -19,7 +19,7 @@ from every other MIDI source:
 $ cd examples/bloom
 $ field keys pad
 pad live at 48000 Hz on MacBook Pro Speakers
-Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · D4
+Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · D4
 ```
 
 To keep what you play, record it into a track; see
@@ -55,10 +55,12 @@ for, once, and a new process gets a new MIDI client.
 2. In the application you want to play, choose `Field Keys` as the MIDI
    input. In Logic, `Field Keys` appears with your other MIDI inputs.
 3. Play. The status line shows the keymap, the transpose, the velocity,
-   the modulation wheel when the keymap has keys that set it, and last
-   the notes sounding, so playing changes only the end of the line. The
-   wheel's value is the last one `field keys` sent, from 0 to 127; a
-   controller's wheel does not change it. On a narrow terminal the text before the notes is shortened,
+   the pitch bend and the modulation wheel when the keymap has keys that
+   set them, and last the notes sounding, so playing changes only the
+   end of the line. The bend runs from `-1` to `+1` and always carries
+   its sign, so bending a chord does not move the notes; the wheel runs
+   from 0 to 127. Both are what `field keys` last sent; a controller's
+   bender and wheel do not change them. On a narrow terminal the text before the notes is shortened,
    and the notes only when they alone are wider than the terminal.
 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
    every held note and then All Notes Off, so nothing is left sounding,
@@ -202,7 +204,7 @@ any takes yet. Name several, and every key plays all of them at once:
 ```console
 $ field keys creek/track:keys creek/track:bass
 keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers
-Field Keys · musical-typing · transpose 0 · velocity 100 · mod 0 · C3
+Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · C3
 ```
 
 A target with `track:` in it is a track; anything else is an

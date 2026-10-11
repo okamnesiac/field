@@ -44,8 +44,10 @@ export class KeysSession {
   keymap: Keymap;
   transpose = 0;
   velocity: number;
-  // The modulation wheel (CC 1) as this session last set it, for the
-  // status line; the receiver starts it at 0.
+  // The pitch bend, from -1 to 1, and the modulation wheel (CC 1), from
+  // 0 to 127, as this session last sent them, for the status line; the
+  // receiver starts both at rest.
+  bend = 0;
   mod = 0;
   message: string | undefined;
   private readonly held = new Map<string, { channel: number; notes: number[] }>();
@@ -90,7 +92,10 @@ export class KeysSession {
     if (control !== undefined) {
       this.heldControls.delete(position);
       const { action, channel } = control;
-      if (action !== 'panic' && 'bend' in action) return [pitchBend(channel, BEND_CENTER)];
+      if (action !== 'panic' && 'bend' in action) {
+        this.bend = 0;
+        return [pitchBend(channel, BEND_CENTER)];
+      }
       if (action !== 'panic' && 'cc' in action) return [this.cc(channel, action.cc, 0)];
       return [];
     }
@@ -141,8 +146,12 @@ export class KeysSession {
     return messages;
   }
 
-  // Whether the keymap can move the modulation wheel, so the status line
-  // has a value of its own to show.
+  // Whether the keymap can bend or move the modulation wheel, so the
+  // status line has a value of its own to show.
+  setsBend(): boolean {
+    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'bend' in a);
+  }
+
   setsMod(): boolean {
     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'cc' in a && a.cc === MOD_WHEEL);
   }
@@ -183,6 +192,7 @@ export class KeysSession {
     }
     if ('bend' in action) {
       this.heldControls.set(position, { channel, action });
+      this.bend = action.bend;
       return [pitchBend(channel, bendValue(action.bend))];
     }
     if (action.mode === 'hold') {

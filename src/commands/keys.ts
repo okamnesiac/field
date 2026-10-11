@@ -242,6 +242,9 @@ export function statusText(
   width: number,
 ): string {
   const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
+  // The bend always carries its sign, so bending a held chord does not
+  // move the notes after it.
+  if (session.setsBend() || session.bend !== 0) parts.push(`bend ${session.bend < 0 ? '-' : '+'}${Math.abs(session.bend)}`);
   if (session.setsMod() || session.mod !== 0) parts.push(`mod ${session.mod}`);
   const unplayable = unplayablePositions(layout, session.keymap);
   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
