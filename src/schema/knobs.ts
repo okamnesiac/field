@@ -69,5 +69,3 @@ export const knobFileSchema = z
       }
     });
   });
-
-export type KnobFile = z.infer<typeof knobFileSchema>;
