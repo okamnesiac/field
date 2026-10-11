@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { accessSync, constants, existsSync } from 'node:fs';
-import { delimiter, dirname, join, posix } from 'node:path';
+import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
+import { dirname, extname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
@@ -65,33 +65,90 @@ export function scScript(name: string): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sc', name);
 }
 
-function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  for (const dir of (env['PATH'] ?? '').split(delimiter)) {
+// An environment variable by name. Windows names are case-insensitive —
+// PATH is usually spelled `Path` there — and only process.env itself knows
+// that, so a copied environment is searched without regard to case.
+function variable(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platform): string | undefined {
+  if (env[name] !== undefined || platform !== 'win32') return env[name];
+  const key = Object.keys(env).find((k) => k.toUpperCase() === name.toUpperCase());
+  return key === undefined ? undefined : env[key];
+}
+
+// A command name as the platform's shell would find it on PATH. Windows
+// runs `sclang` as `sclang.exe`, so a name without an extension is tried
+// with each PATHEXT extension and never bare: an extensionless file there
+// cannot run.
+function onPath(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string | undefined {
+  const windows = platform === 'win32';
+  const names =
+    windows && extname(name) === ''
+      ? (variable(env, 'PATHEXT', platform) ?? '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .filter((ext) => ext !== '')
+          .map((ext) => name + ext.toLowerCase())
+      : [name];
+  for (const dir of (variable(env, 'PATH', platform) ?? '').split(windows ? ';' : ':')) {
     if (dir === '') continue;
-    const candidate = join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // not here
+    for (const candidate of names.map((n) => join(dir, n))) {
+      try {
+        accessSync(candidate, constants.X_OK);
+        return candidate;
+      } catch {
+        // not here
+      }
     }
   }
   return undefined;
 }
 
-// The sclang to run: FIELD_SCLANG, then PATH, then the app bundle. One
-// lookup for a render and for the long-running voice host
+// Whether a FIELD_SCLANG value names a file rather than a command to look
+// up on PATH: any separator does, and on Windows a backslash or a drive
+// (`C:\Program Files\SuperCollider-3.13.0\sclang.exe`).
+function namesAFile(value: string, platform: NodeJS.Platform): boolean {
+  return platform === 'win32' ? /[\\/:]/.test(value) : value.includes('/');
+}
+
+// Where the SuperCollider installer puts sclang when it is not on PATH:
+// the app bundle on macOS, and a versioned directory under Program Files
+// on Windows, newest first (3.13.0 sorts after 3.9.3).
+function installedSclang(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string | undefined {
+  if (platform === 'darwin') return existsSync(SCLANG_APP_FALLBACK) ? SCLANG_APP_FALLBACK : undefined;
+  if (platform !== 'win32') return undefined;
+  const programFiles = variable(env, 'ProgramFiles', platform) ?? 'C:\\Program Files';
+  let entries: string[];
+  try {
+    entries = readdirSync(programFiles);
+  } catch {
+    return undefined;
+  }
+  return entries
+    .filter((entry) => /^SuperCollider/i.test(entry))
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    .map((entry) => join(programFiles, entry, 'sclang.exe'))
+    .find((candidate) => existsSync(candidate));
+}
+
+// The sclang to run: FIELD_SCLANG, then PATH, then where the installer
+// puts it. One lookup for a render and for the long-running voice host
 // (keyboard-instrument.md §2.8). The override is the determinism escape
 // hatch (sc-render.md §2); a typo'd wrapper must never silently run the
-// app bundle instead.
-export function sclangCommand(env: NodeJS.ProcessEnv = process.env): string {
+// installed sclang instead. The platform is a parameter so the Windows
+// rules are testable anywhere.
+export function sclangCommand(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
   const override = env['FIELD_SCLANG'];
   if (override) {
-    const found = override.includes('/') ? (existsSync(override) ? override : undefined) : onPath(override, env);
+    const found = namesAFile(override, platform)
+      ? existsSync(override)
+        ? override
+        : undefined
+      : onPath(override, env, platform);
     if (found === undefined) throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
     return found;
   }
-  const found = onPath('sclang', env) ?? (existsSync(SCLANG_APP_FALLBACK) ? SCLANG_APP_FALLBACK : undefined);
+  const found = onPath('sclang', env, platform) ?? installedSclang(env, platform);
   if (found === undefined) throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
   return found;
 }
