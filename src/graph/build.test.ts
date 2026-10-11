@@ -470,8 +470,10 @@ describe('runScProgram edges (no sclang needed)', () => {
   // The next two fake sclang with #!/bin/sh scripts. The code path they
   // exercise (execFile, the timeout, stdout capture) is platform-
   // independent; the *stub* is not — Windows has no shebang — so they
-  // skip there rather than growing a second stub dialect. A real
-  // sclang.exe goes through the same spawn untouched.
+  // skip there rather than growing a second stub dialect. A real sclang
+  // does not reach this spawn on Windows yet either: sclangCommand looks
+  // for `sclang` without `.exe` and reads a native FIELD_SCLANG path as a
+  // name to search for (windows-portability.md §7.2).
   it.skipIf(process.platform === 'win32')('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
     const hang = join(root, 'hang.sh');
     writeFileSync(hang, '#!/bin/sh\nsleep 5\n');
