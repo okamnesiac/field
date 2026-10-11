@@ -26,8 +26,13 @@ function executable(path: string): string {
   return path;
 }
 
+// A Windows host cannot run two of these: a Windows temp path holds a
+// drive colon that the POSIX rule's `:`-split PATH breaks apart, and a
+// directory named `C:` cannot exist there. The linux job runs them.
+const onPosixHost = it.skipIf(process.platform === 'win32');
+
 describe('sclangCommand', () => {
-  it('finds sclang on PATH by name on macOS and Linux', () => {
+  onPosixHost('finds sclang on PATH by name on macOS and Linux', () => {
     const sclang = executable(join(root, 'bin', 'sclang'));
     expect(sclangCommand({ PATH: join(root, 'bin') }, 'linux')).toBe(sclang);
   });
@@ -68,7 +73,7 @@ describe('sclangCommand', () => {
     );
   });
 
-  it('reads a native Windows FIELD_SCLANG as a path, not a name to search for', () => {
+  onPosixHost('reads a native Windows FIELD_SCLANG as a path, not a name to search for', () => {
     // A file named exactly like the override sits on PATH. Read as a name,
     // the search would find it; read as a path, it is missing.
     const override = 'C:\\SuperCollider\\sclang.exe';
