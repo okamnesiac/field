@@ -63,6 +63,14 @@ const refusingRunner: GeneratorRunner = async (node) => {
   throw new Error(`rendered ${node.label.name}, which a warmed clone must never do`);
 };
 
+// The setup below builds the source, commits it, clones it bare, and
+// pushes its LFS objects, one git or git-lfs process after another. On
+// the windows CI runner it takes 2 to 3 s, but a process start there
+// stalls now and then, and one stall pushed it past vitest's 10 s hook
+// default. Nothing here measures how fast clone is, so the hook gets
+// room to finish.
+const SETUP_TIMEOUT_MS = 30_000;
+
 beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'field-clone-'));
   source = join(tmp, 'source');
@@ -118,7 +126,7 @@ beforeEach(async () => {
       entry.outputs.map((o) => readFileSync(join(source, '.field', 'cache', 'cas', o.sha256))),
     );
   }
-});
+}, SETUP_TIMEOUT_MS);
 
 afterEach(async () => {
   await remote.close();
