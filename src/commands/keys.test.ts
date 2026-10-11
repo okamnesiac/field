@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { builtinKeymapDir, loadKeymap } from '../keys/keymap.js';
 import { KeysSession } from '../keys/session.js';
-import { statusText } from './keys.js';
+import { instrumentState, instrumentText, statusText } from './keys.js';
 
 // field keys' status line: the sounding notes come last, so playing
 // changes only the end of the line, and a narrow terminal shortens what
@@ -32,5 +32,33 @@ describe('the status line', () => {
     const line = statusText(session, undefined, undefined, 30);
     expect(line).toBe('Field Keys · musical-… · C4 E4');
     expect(line).toHaveLength(30);
+  });
+});
+
+describe('the instrument line', () => {
+  const live = { state: 'live' as const, device: 'MacBook Pro Speakers', sampleRate: 48000 };
+
+  it('names each armed track and its instrument, and an instrument given by program alone', () => {
+    const state = instrumentState([
+      { program: '/p/shared/instruments/juno.scd', track: 'creek/keys', unheardEffects: [] },
+      { program: '/p/shared/instruments/bass.scd', track: 'creek/bass', unheardEffects: [] },
+      { program: '/p/shared/instruments/pad.scd', unheardEffects: [] },
+    ])!;
+    expect(instrumentText({ ...state, status: live })).toBe(
+      'keys (juno) + bass (bass) + pad live at 48000 Hz on MacBook Pro Speakers',
+    );
+  });
+
+  it('ends with the effects not heard yet, each once', () => {
+    const state = instrumentState([
+      { program: '/p/juno.scd', track: 'creek/keys', unheardEffects: ['keys-bus'] },
+      { program: '/p/bass.scd', track: 'creek/bass', unheardEffects: ['keys-bus', 'band'] },
+    ])!;
+    expect(instrumentText({ ...state, status: live })).toBe(
+      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard yet',
+    );
+    expect(instrumentText({ ...state, status: live, reload: { failed: 'juno.scd does not compile' } })).toBe(
+      'keys (juno) + bass (bass) kept its last voice: juno.scd does not compile',
+    );
   });
 });

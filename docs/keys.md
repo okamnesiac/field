@@ -191,6 +191,32 @@ The next save that loads puts `· reloaded` on the line instead.
   times its cutoff. It plays at true pitch, so in `musical-typing` press
   `Z` to drop an octave.
 
+## Play a track
+
+Name a track instead of an instrument, and `field keys` plays the
+instrument the track's record entry names, whether or not the track has
+any takes yet. Name several, and every key plays all of them at once:
+
+```console
+$ field keys creek/track:keys creek/track:bass
+keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers
+Field Keys · musical-typing · transpose 0 · velocity 100 · C3
+```
+
+A target with `track:` in it is a track; anything else is an
+instrument, so you can mix the two. A track whose record entry names no
+instrument plays the MIDI track under it, down its `track:` inputs, so
+naming a bus plays the part it carries. If more than one MIDI track is
+under it, `field keys` lists them and stops, and you name the ones you
+mean.
+
+The instrument still plays straight to the device, so the inserts on
+the track and on the tracks above it are not heard yet. When a track you
+named has any, the instrument's line ends
+`· dry: the effects on keys-bus are not heard yet`. Hearing them is the
+work of
+[the live-supercollider plan](projects/live-supercollider/readme.md).
+
 ## Record what you play
 
 A track records what you play when its `record:` entry names an

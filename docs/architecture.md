@@ -190,8 +190,8 @@ OSC over UDP, which TypeScript handles fine. Two modes:
   `sc/voice-host.scd`, which boots its own scsynth on the output device
   and plays the instrument's voice from every MIDI source
   ([keys.md](keys.md)). Its sound goes straight to the device, beside
-  the daemon's rather than through the session graph; scsynth as a node
-  in that graph, receiving timestamped OSC, is
+  the daemon's rather than through the session graph. Bringing it into
+  that graph, so a track's inserts process it, is
   [live-supercollider](projects/live-supercollider/readme.md)'s work.
 
 SC source is tracked in Git and treated as code.

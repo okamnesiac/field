@@ -1,14 +1,13 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename } from 'node:path';
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
 import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
 import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
-import { instrumentPath, VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
+import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
+import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
 import { watchText } from '../keys/watch.js';
-import { findProjectRoot } from '../model/project.js';
 import type { Keymap } from '../schema/keymap.js';
 
 export const UNSUPPORTED_TERMINAL =
@@ -21,72 +20,20 @@ export interface KeysOptions {
   device?: string;
 }
 
-// A bare instrument name resolves on the project's instruments shelf, as a
-// supercollider: entry's source does; a path resolves from the project
-// root, or from here outside a project (keyboard-instrument.md §2.1).
-export function resolveInstrument(spec: string, cwd = process.cwd()): string {
-  const root = findProjectRoot(cwd);
-  if (root === undefined && !spec.includes('/')) {
-    throw new Error(
-      `field keys ${spec}: a bare instrument name resolves in a project's shared/instruments/, ` +
-        'and this is not inside a Field project; give the program by path instead',
-    );
-  }
-  const path = instrumentPath(spec, root ?? cwd);
-  if (!existsSync(path)) {
-    const shelf = root !== undefined ? `\n${describeShelf(root)}` : '';
-    throw new Error(`field keys ${spec}: no instrument program at ${path}${shelf}`);
-  }
-  return path;
-}
-
-// The programs on a project's instruments shelf, by name, split by whether
-// they can play from notes. A program that never reads FIELD_MODE cannot
-// answer voice mode, so its text is enough to tell, without starting
-// sclang for each one (keys.md "Make an instrument playable"). Each is
-// listed by a name field keys resolves: `.scd` is added back only to a
-// name with no extension, so pad.v2.scd lists whole.
-function shelfInstruments(root: string): { playable: string[]; renderOnly: string[] } {
-  const dir = join(root, 'shared', 'instruments');
-  const playable: string[] = [];
-  const renderOnly: string[] = [];
-  if (!existsSync(dir)) return { playable, renderOnly };
-  const files = readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.scd'))
-    .map((entry) => entry.name)
-    .sort();
-  for (const file of files) {
-    const stem = file.slice(0, -'.scd'.length);
-    const name = extname(stem) === '' ? stem : file;
-    (readFileSync(join(dir, file), 'utf8').includes('FIELD_MODE') ? playable : renderOnly).push(name);
-  }
-  return { playable, renderOnly };
-}
-
-function describeShelf(root: string): string {
-  const { playable, renderOnly } = shelfInstruments(root);
-  if (playable.length + renderOnly.length === 0) return 'shared/instruments/ has no programs yet.';
-  const lines = ['In shared/instruments/:', `  plays from notes: ${playable.length > 0 ? playable.join(', ') : 'none'}`];
-  if (renderOnly.length > 0) {
-    lines.push(`  renders only:     ${renderOnly.join(', ')} (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)`);
-  }
-  return lines.join('\n');
-}
-
-export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {
+export async function keysCommand(targets: string[], options: KeysOptions): Promise<void> {
   const source = resolveKeymapSource(options.keymap);
   const keymap = loadKeymap(source.path);
   if (options.print === true) {
     process.stdout.write(printKeymap(keymap));
     return;
   }
-  const program = instrument !== undefined ? resolveInstrument(instrument) : undefined;
+  const armed = resolveKeysTargets(targets);
   const { stdin, stdout } = process;
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
   }
   await withKittyKeyboard({ stdin, stdout }, (rest) =>
-    play({ stdin, stdout }, { source, keymap, program, device: options.device }, rest),
+    play({ stdin, stdout }, { source, keymap, armed, device: options.device }, rest),
   );
 }
 
@@ -118,25 +65,26 @@ async function withKittyKeyboard(tty: Tty, run: (rest: string) => Promise<void>)
 interface PlayOptions {
   source: KeymapSource;
   keymap: Keymap;
-  program: string | undefined;
+  armed: ArmedInstrument[];
   device: string | undefined;
 }
 
-type InstrumentState = {
-  name: string;
+export type InstrumentState = {
+  name: string; // what is armed, as the line names it
+  dry: string[]; // tracks whose effects the voices do not pass through yet
   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
   // What the last save of the program did (keyboard-instrument.md §14).
   reload?: { loaded: true } | { failed: string };
 };
 
 async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
-  const { source, program } = options;
+  const { source, armed } = options;
+  const programs = [...new Set(armed.map((a) => a.program))];
   const session = new KeysSession(options.keymap);
   let layout: KeyboardLayout | undefined;
   let layoutPositions: ReadonlyMap<string, string> | undefined;
   let reloadError: string | undefined;
-  const instrument: InstrumentState | undefined =
-    program !== undefined ? { name: basename(program, '.scd'), status: { state: 'starting' } } : undefined;
+  const instrument = instrumentState(armed);
 
   // An instrument has a line of its own above the status line: its state
   // changes a few times a session, the status line with every key. That
@@ -178,9 +126,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   // connects its MIDI inputs; the keyboard plays while it boots.
   const device = options.device ?? helper.defaultOutput;
   const host =
-    program !== undefined
+    programs.length > 0
       ? await VoiceHost.start({
-          instrument: program,
+          instruments: programs,
           ...(device !== undefined ? { device } : {}),
           onStatus: (status) => {
             if (status.state === 'voice') return;
@@ -194,8 +142,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
       : undefined;
   host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
 
-  // Saving the program loads it again, as saving a keymap does (§14).
-  const stopWatchingProgram = program !== undefined && host !== undefined ? watchText(program, () => void host.reload()) : undefined;
+  // Saving a program loads it again, as saving a keymap does
+  // (keyboard-instrument.md §14).
+  const stopWatchingPrograms = host !== undefined ? programs.map((p) => watchText(p, () => void host.reload())) : [];
   const stopWatching =
     source.kind === 'file'
       ? watchKeymap(source.path, (result) => {
@@ -239,7 +188,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   tty.stdin.removeListener('data', onData);
   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
   stopWatching?.();
-  stopWatchingProgram?.();
+  stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
   send(session.quit());
   // A host still booting closes too: quitting never waits for it.
   await host?.close();
@@ -248,9 +197,20 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   if (error !== undefined) throw error;
 }
 
+// What the instrument's line starts from: the armed tracks and
+// instruments by name, and the tracks whose effects are not heard yet.
+export function instrumentState(armed: ArmedInstrument[]): InstrumentState | undefined {
+  if (armed.length === 0) return undefined;
+  return {
+    name: armed.map(armedName).join(' + '),
+    dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
+    status: { state: 'starting' },
+  };
+}
+
 // A save that did not load leads with why, so a narrow terminal keeps the
 // error rather than the device; the voice that loaded last still plays.
-function instrumentText({ name, status, reload }: InstrumentState): string {
+export function instrumentText({ name, dry, status, reload }: InstrumentState): string {
   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
   const state =
     status.state === 'live'
@@ -258,7 +218,17 @@ function instrumentText({ name, status, reload }: InstrumentState): string {
       : status.state === 'restarting'
         ? `${name} restarting for a new sample rate`
         : `${name} starting`;
-  return reload === undefined ? state : `${state} · reloaded`;
+  // The voice plays straight to the device, so a track's inserts are not
+  // heard yet (arming.md §2.1, live-supercollider.md).
+  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard yet` : '';
+  return `${state}${reload === undefined ? '' : ' · reloaded'}${unheard}`;
+}
+
+// A track names itself and its instrument; an instrument given by program
+// names only itself.
+function armedName(armed: ArmedInstrument): string {
+  const program = basename(armed.program, '.scd');
+  return armed.track === undefined ? program : `${armed.track.split('/').pop()} (${program})`;
 }
 
 // The sounding notes come last, so playing changes only the end of the
