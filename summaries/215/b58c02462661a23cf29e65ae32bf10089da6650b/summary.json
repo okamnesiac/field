@@ -1,0 +1,115 @@
+{
+ "version": 1,
+ "name": "Projector conventions refresh",
+ "project": "",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 215,
+  "title": "Refresh the Projector section of AGENTS.md and the site workflow",
+  "head": "b58c02462661a23cf29e65ae32bf10089da6650b",
+  "headRef": "projector-agents-v4",
+  "base": "376a40362ea2dbecebc896a6fc86ae36e74edba2",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field keeps its project plans with Projector, a tool that also runs the review loops on Field's pull requests and publishes review summaries to the repository's site, <code>field.amnes.ac</code>. Projector writes two files into this repository and keeps them in a fixed shape: a section of <code>AGENTS.md</code> between <code>projector:begin</code> and <code>projector:end</code> markers, which every agent session reads as instructions, and the GitHub Actions workflow <code>.github/workflows/projector-site.yml</code>, which builds and deploys the site.",
+   "Both files had fallen behind Projector 0.7.8, and <code>project check</code> on <code>main</code> warns about each one. This pull request replaces them with exactly what 0.7.8 writes, using <code>project init --no-site --no-publish-rule</code> and <code>project site workflow --write</code>. Nothing else in the repository changes.",
+   "<ul><li><b>The agent instructions move from version 2 to version 4.</b> Every session now opens its pull requests as drafts and never marks one ready itself. A review loop marks a pull request ready once its head reviews clean. A fix to a stacked branch is carried up every layer above it right away.</li><li><b>The site deploys when a pull request closes.</b> A merged or closed pull request shows as Merged or Closed on the site's Reviews page as soon as the deploy finishes, instead of waiting for the next unrelated deploy. A pull request from a fork does not trigger a deploy.</li></ul>"
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Generated section</b>: the part of <code>AGENTS.md</code> between the <code>projector:begin</code> and <code>projector:end</code> markers. Projector owns it, and the number after <code>begin</code> is the template version.</li><li><b>Draft</b>: GitHub's draft state for a pull request. Under Projector's review loop, a draft means no clean review has signed off the head yet.</li><li><b><code>pull_request_target</code></b>: a GitHub Actions event that fires on pull request activity but runs the default branch's workflow at the default branch's commit, not the pull request's code.</li><li><b><code>github-pages</code> environment</b>: the deployment environment GitHub Pages uses. Here it accepts deployments only from <code>main</code>.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<p>A Projector review of this head found no defects and opened no threads. It confirmed that both files match Projector 0.7.8's templates exactly, that nothing outside the <code>AGENTS.md</code> markers changed, and that <code>project check</code> at this head prints no warning.</p><p class=\"note\">The workflow's new trigger cannot run until this merges, because GitHub runs <code>pull_request_target</code> only from the default branch's copy of the workflow.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "site-workflow",
+   "title": "The site deploys when a pull request closes",
+   "kicker": "A new trigger in the Projector site workflow, with a guard for forks",
+   "intro": [
+    "The Projector site workflow builds the site from the repository's docs, plans, and published review summaries, then deploys it to GitHub Pages. Before this change it ran when a summary was published, when the README, docs, or the workflow changed on <code>main</code>, and by hand. The site shows each pull request as open, merged, or closed, but a pull request that merged without touching the docs, or closed unmerged, started no deploy, so the Reviews page kept showing it as open until some later deploy.",
+    "The new <code>pull_request_target</code> trigger on <code>closed</code> fills that gap. The event runs the workflow file from <code>main</code> at <code>main</code>'s commit, so the site action checks out <code>main</code> and never the pull request's branch. Two expressions keep a fork's pull request from deploying anything."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": ".github/workflows/projector-site.yml",
+     "note": "Adds the <code>closed</code> trigger, a per-fork concurrency group, and a job condition that skips forks. The permissions and the action reference are unchanged.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The whole file is byte-identical to what Projector 0.7.8 writes for <code>@v0</code>, branch <code>main</code>, and <code>docs/projects</code>, checked by rendering the template from the installed package and comparing it with the template at the <code>v0.7.8</code> tag. <code>project check</code> at this head reports no <code>site-workflow-outdated</code> warning."
+      },
+      {
+       "kind": "verify",
+       "text": "The deploy is allowed from this event. The repository's <code>github-pages</code> environment accepts deployments only from <code>main</code>, checked through the environments API, and a <code>pull_request_target</code> run carries <code>main</code> as its ref.",
+       "line": 8
+      },
+      {
+       "kind": "context",
+       "text": "A fork's run gets a concurrency group of its own, <code>fork-&lt;run id&gt;</code>. With <code>cancel-in-progress: false</code>, GitHub keeps one pending run per group and replaces it with any newer one. In the shared <code>pages</code> group, a fork's run, which then skips its job, could replace a real deploy waiting there.",
+       "line": 17
+      },
+      {
+       "kind": "context",
+       "text": "This condition skips the job when the pull request's head lives in another repository, so a stranger opening and closing pull requests cannot start deploys. The pull request's fields appear only in this condition and in the concurrency group. Actions evaluates both expressions itself, so no pull request text reaches a shell.",
+       "line": 21
+      },
+      {
+       "kind": "context",
+       "text": "The workflow still calls <code>ninjudd/projector/actions/site@v0</code>, a tag that moves with each Projector release and now points at the same commit as <code>v0.7.8</code>. Inside it, the action uses GitHub's own actions at major tags. <code>project site workflow --action-ref</code> pins a release tag or a commit instead."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "agents-section",
+   "title": "Agent instructions move to version 4",
+   "kicker": "The generated Projector section of AGENTS.md, refreshed from the template",
+   "intro": [
+    "<code>AGENTS.md</code> is the instructions file every agent session in this repository reads first. Its last section, between the <code>projector:begin</code> and <code>projector:end</code> markers, comes from a template that ships with Projector. The repository had version 2, and Projector 0.7.8 ships version 4. This pull request skips over version 3 and takes both of its changes.",
+    "<ol><li><b>Version 3: stacked fixes travel up at once.</b> When a fix lands on a lower branch of a stack, <code>gh stack</code> rebases every layer above it right away, so each layer sits on the current head of the one below, and the stack can merge as a unit.</li><li><b>Version 4: pull requests open as drafts.</b> Every session opens its pull requests as drafts, each layer of a stack included, and never marks one ready itself. The review loop marks a pull request ready when its head reviews clean. Before this rule, only sessions running Projector's <code>implement</code> skill opened drafts, so other sessions' pull requests looked signed off before any review had read them.</li></ol>"
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "AGENTS.md",
+     "note": "Only the generated section changes: the version on its opening marker, a new paragraph on drafts, and a longer sentence on stacked fixes.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The block between the markers is identical to Projector 0.7.8's <code>agents-block.md</code> template rendered with <code>docs/projects</code>, and that template is identical at the <code>v0.7.8</code> tag. <code>project check</code> at this head reports no <code>instructions-outdated</code> warning.",
+       "line": 53
+      },
+      {
+       "kind": "verify",
+       "text": "Nothing above the markers changed. Removing the marked section from <code>AGENTS.md</code> at the base and at this head leaves identical files, so the repository's own Docs, Stack, and Pull requests sections are untouched."
+      },
+      {
+       "kind": "context",
+       "text": "This rule sits beside the repository's own Pull requests section, which says to open pull requests and never merge them, and that every review thread must be resolved before a merge. A draft that a clean review marks ready fits both. CI runs on every pull request, drafts included, so a draft still gets its checks. The Release workflow opens its release pull request itself, not through a session, so this rule does not reach it.",
+       "line": 75
+      },
+      {
+       "kind": "context",
+       "text": "The rebase was already the rule in version 2. Version 3 adds \"right away\" and \"every layer\", so a session no longer leaves upper layers on an old base until someone asks.",
+       "line": 84
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
