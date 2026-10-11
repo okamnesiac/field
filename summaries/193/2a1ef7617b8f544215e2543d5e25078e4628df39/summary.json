@@ -1,0 +1,213 @@
+{
+ "version": 1,
+ "name": "Project license and JSON output",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 193,
+  "title": "Add a project license to field.yaml, and --json to field explain and field arrangement (remote.md chunk 1)",
+  "head": "2a1ef7617b8f544215e2543d5e25078e4628df39",
+  "headRef": "remote/json-license",
+  "base": "a6c10315bfd2ec0bd7c2a9d3e36a31a28bf82dbc",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a command-line tool that keeps a music project as plain files in Git and builds the project's audio from them. Its <code>remote</code> plan connects Field to audiofield.io, a site that hosts projects and plays their mixes. This pull request lands the plan's last chunk: two things the site reads from a project rather than from Field's build cache.",
+   "<ul><li><b>A project license.</b> <code>field.yaml</code>, the project's manifest, takes an optional <code>license:</code> holding an SPDX identifier such as <code>CC-BY-4.0</code>. SPDX is the standard list of short license names. Field checks only that the value looks like one, and the site decides which licenses a public project may use. <code>field init --license</code> writes it.</li><li><b>JSON from two read-only commands.</b> <code>field explain &lt;label&gt;</code> describes one build target, and <code>field arrangement &lt;song&gt;</code> lists what a song places on its timeline. Each now takes <code>--json</code> and prints the value it already builds, under the TypeScript interface's field names, so a program can read it.</li></ul>",
+   "The plan held this chunk back until the site's render worker needed it. Justin chose on 2026-10-11 to land it now, since it needs no remote, and this pull request records that call in the plan's §9.1 and in <code>docs/remote.md</code>. The one open review finding is about how the plan was corrected: §8's definition of done and a §4 sentence were reworded in place, without the dated note this plan uses for every other correction."
+  ],
+  "cards": [
+   {
+    "id": "history",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li><b><code>2690b25</code>, changes requested.</b> One thread: <code>docs/remote.md</code> and plan §9.1 still said chunk 1 had not landed. Six suggestions in the body.</li><li><b><code>2a1ef76</code>, changes requested.</b> That thread is fixed and resolved, and all six suggestions are taken. One new thread: the §8 and §4 rewording carries no <code>*Amended (…):*</code> note, and two of its lines run past the paragraph's wrap.</li><li><b>CI.</b> At <code>2690b25</code>, <code>linux</code> passed and <code>windows</code> failed only in four test files this change does not touch, two of which also fail on <code>main</code>. CI on <code>2a1ef76</code> was still running when this summary was written.</li></ul>"
+   },
+   {
+    "id": "json-shape",
+    "title": "What the JSON carries",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Command</th><th>Prints</th><th>Not in the JSON</th></tr></thead><tbody><tr><td><code>explain --json</code></td><td><code>Explanation</code>: <code>label</code>, <code>kind</code>, <code>rule</code>, <code>ruleVersion</code>, <code>inputs</code>, <code>parameters</code>, <code>actionKey</code>, <code>cached</code>, <code>fetched</code>, <code>outputs</code>, <code>file</code>, <code>choice</code>, <code>levels</code></td><td class=\"r\">Nothing the text prints. An input not built yet has an empty <code>sha256</code>.</td></tr><tr><td><code>arrangement --json</code></td><td><code>ArrangementView</code>: <code>song</code>, <code>lengthTicks</code>, and <code>placements</code>, each with <code>track</code>, <code>at</code>, <code>bars</code>, <code>absolute</code>, <code>gainDb</code>, and <code>pan</code></td><td class=\"r\">Each placement's time in seconds, and the length in bars, which the text derives from the song's tempo and meter maps.</td></tr></tbody></table></div><p class=\"note\">A key whose value is <code>undefined</code>, such as <code>lengthTicks</code> on a song with no <code>length:</code>, is left out rather than printed as <code>null</code>.</p>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>SPDX identifier.</b> A short standard license name, such as <code>MIT</code> or <code>CC-BY-4.0</code>. <code>LicenseRef-…</code> names a custom license.</li><li><b>Placement.</b> An entry in a track's <code>inputs:</code> that puts another track on the timeline at a position, with a gain and a pan.</li><li><b>Tick.</b> Field's unit of musical time. A song's tempo map turns ticks into seconds, and its meter map turns them into <code>bar.beat.tick</code>.</li><li><b><code>Explanation</code> and <code>ArrangementView</code>.</b> The typed values <code>explain</code> and <code>arrangement</code> build before printing, in <code>src/graph/build.ts</code> and <code>src/commands/arrangement.ts</code>.</li></ul>"
+   },
+   {
+    "id": "pr-187",
+    "title": "Overlap with #187",
+    "html": "<p>#187, open, adds <code>muted</code> to <code>Placement</code> and to <code>Reach</code>, the type behind <code>explain</code>'s levels. These serializers print the interfaces whole, so once both land the JSON carries <code>placements[].muted</code> and <code>levels.reaches[].muted</code> with no further change. A cable whose sender placements are all muted shows as an empty <code>arrivals</code> list.</p><p class=\"note\"><code>git merge-tree</code> of <code>2a1ef76</code> with #187's <code>9857529</code> merges without a conflict.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "license",
+   "title": "The license in field.yaml",
+   "kicker": "An optional SPDX license in the project manifest, checked for shape and written by field init",
+   "intro": [
+    "<code>field.yaml</code> is the project manifest: a format version, the project's name, and its sample rate. Its schema, <code>projectSchema</code>, is strict, so <code>field check</code> reports any key the schema does not list. This group adds <code>license</code> to the schema as an optional string that must look like an SPDX identifier.",
+    "The check is loose on purpose. Field accepts any SPDX-shaped string, including a custom <code>LicenseRef-…</code> one, and leaves the list of allowed licenses to the site. A fixed list would need a new Field release each time the site allowed another license (remote.md §5, decision 7). A missing license is not an error either, because whether a public project needs one is also the site's rule.",
+    "<code>projectOrder</code> lists the manifest's keys in the order <code>field fmt</code> writes them, and the license goes after <code>name</code>. <code>field init --license &lt;id&gt;</code> writes the key, and refuses a malformed one before it creates any file. Without the flag, <code>init</code> writes no license line."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A project's license covers what the project's authors made. An imported sample keeps the license it arrived under. Whether <code>field check</code> should compare the two is left to the <code>splice</code> plan, which owns per-asset licenses (remote.md §9.10)."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/schema/manifest.ts",
+     "note": "Adds <code>SPDX_IDENTIFIER</code>, the shape pattern, and the optional <code>license</code> key after <code>name</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 9,
+       "text": "Ran the pattern at this head against the licenses the site plans to accept (audiofield-io.md §10.5): <code>CC0-1.0</code>, <code>CC-BY-4.0</code>, <code>CC-BY-SA-4.0</code>, <code>CC-BY-NC-4.0</code>, and <code>CC-BY-NC-SA-4.0</code> all pass, as do <code>LicenseRef-mine</code> and <code>GPL-2.0+</code>. <code>CC BY 4.0</code>, the empty string, and ids that start with <code>-</code> or <code>.</code> fail. The single-branch pattern accepts exactly what the earlier two-branch one did."
+      },
+      {
+       "kind": "verify",
+       "line": 22,
+       "text": "Ran <code>field fmt</code> on a <code>field.yaml</code> with <code>license:</code> before <code>name</code>. It moved the key after <code>name</code>, and <code>field check</code> had reported the file as not canonically formatted before that."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/init.ts",
+     "note": "Refuses a malformed license before creating anything, then writes the license into the manifest.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 57,
+       "text": "Ran <code>field init --license 'CC BY 4.0'</code> in an empty directory. It exits 1 with the SPDX message and leaves the directory empty."
+      },
+      {
+       "kind": "verify",
+       "line": 65,
+       "text": "Ran <code>field init --license</code> with <code>1.0</code>, <code>null</code>, <code>true</code>, <code>0x1F</code>, and <code>1e5</code>, strings that YAML would read as other types. The emitter quotes each one, and <code>field check</code> passes on all five."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/init.test.ts",
+     "note": "Pins the key order with and without a license, and the refusal in both <code>init</code> and <code>check</code>."
+    }
+   ]
+  },
+  {
+   "id": "json",
+   "title": "JSON from explain and arrangement",
+   "kicker": "Two serializers that print the values the commands already build",
+   "intro": [
+    "<code>field explain &lt;label&gt;</code> says what a build target is: its type, its inputs and their hashes, its cache key, whether its output is cached, and, for a track, where its signal goes and at what level. It builds that answer as an <code>Explanation</code>, then prints it as text. <code>field arrangement &lt;song&gt;</code> lists the tracks a song places on its timeline, in time order, as an <code>ArrangementView</code>, and <code>formatArrangement</code> turns that into text.",
+    "<code>--json</code> prints the same values with <code>JSON.stringify</code>. The field names are the interfaces' own, so a reader learns no second vocabulary, and a field added to either interface appears in the JSON with no further change (remote.md §5, decision 8). The serializers, <code>explanationJson</code> and <code>arrangementJson</code>, sit in the command modules, where tests can call them.",
+    "<code>arrangement</code> refuses a project with errors, because positions that never resolved would print as numbers that read like bar numbers. This group moves that refusal into <code>validProject</code>, so the text and JSON forms refuse the same projects."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A placement's <code>at</code> and the song's <code>lengthTicks</code> are in ticks. The text form also prints each placement's time in seconds and the song's length in bars, which <code>formatArrangement</code> derives from the song's tempo and meter maps. The JSON carries neither, so a reader needs those maps from <code>song.yaml</code>, which is how the site already reads them (audiofield-io.md §13.9)."
+    },
+    {
+     "kind": "context",
+     "text": "#187, open, adds <code>muted</code> to <code>Placement</code> and to <code>Reach</code>. Because these serializers print the interfaces whole, the JSON carries mute once both pull requests land."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/build.ts",
+     "note": "<code>explanationJson</code>: the <code>Explanation</code> as JSON.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 134,
+       "text": "Ran <code>field explain //songs/tall-grass/track:room --json</code> in <code>examples/bloom</code>. It carries the rule, the input, the parameters, the reach to <code>main</code> at −6 dB, and the <code>drum-verb</code> cable: everything the text form prints. Gains pass <code>z.number()</code>, which refuses infinity and NaN, so no gain prints as <code>null</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/arrangement.ts",
+     "note": "<code>arrangementJson</code>, and the shared <code>validProject</code> check that both forms call.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 150,
+       "text": "Ran <code>field arrangement creek --json</code> in <code>examples/bloom</code>. It prints <code>song</code>, <code>lengthTicks: 46080</code>, and the six placements the text form lists, in the same order. A valid project always has <code>time:</code>, so <code>at</code> is always in ticks."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/arrangement.test.ts",
+     "note": "The placements come back in time order, with their bars, gain, and pan."
+    },
+    {
+     "path": "src/graph/build.test.ts",
+     "note": "An explanation round-trips through JSON to an equal object."
+    }
+   ]
+  },
+  {
+   "id": "cli",
+   "title": "The command-line flags",
+   "kicker": "--license on init, and --json on explain and arrangement",
+   "intro": [
+    "<code>src/cli.ts</code> defines every <code>field</code> command with commander, a Node library for command-line options. This group adds the three flags and passes each to the code above. With <code>--json</code>, <code>explain</code> prints the JSON and returns before any text line."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/cli.ts",
+     "note": "Three new options, each passed to the code in the groups above.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 1085,
+       "text": "Searched the <code>explain</code> and <code>arrangement</code> paths for stdout writes and found none besides these. The remote cache's notice goes to stderr, so stdout holds only the JSON."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Docs and the plan",
+   "kicker": "The command manual, the project model, and the remote plan's record of the chunk",
+   "intro": [
+    "<code>docs/cli.md</code> is the command manual, <code>docs/project-model.md</code> describes a project's files, and <code>docs/remote.md</code> describes how Field talks to the site. The remote plan, <code>docs/projects/remote/readme.md</code>, records each chunk as it lands in §10, keeps its open questions in §9, and states in §8 what has to be true before the plan is done. This group updates all four.",
+    "When a review proves this plan wrong, the plan keeps the old text and adds a dated <code>*Amended (…):*</code> paragraph, as in §3.3 and decisions 6 and 13. <code>docs/projects/README.md</code> asks for that. This pull request rewords §8 and a §4 sentence in place instead, which is the open review finding."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/cli.md",
+     "note": "Describes the three flags, and says that an input not built yet has an empty <code>sha256</code> in the JSON."
+    },
+    {
+     "path": "docs/project-model.md",
+     "note": "Lists the license and the sample rate in the manifest's one-line description."
+    },
+    {
+     "path": "docs/projects/remote/readme.md",
+     "note": "Records the chunk in §10, adds a dated paragraph to §9.1, updates §9.8 and §9.10, and rewords §4 and §8.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 635,
+       "text": "Read the plan at this head. §9.1 ends with this dated 2026-10-11 paragraph, and every other line that says chunk 1 is unstarted or waiting is an older dated paragraph with a newer dated entry after it."
+      },
+      {
+       "kind": "flag",
+       "line": 603,
+       "text": "§8's criteria \"print the values their text forms show\" and \"fails <code>field check</code> with the file and line\", and §4's claim that the site derives <code>bar.beat</code> from <code>arrangement --json</code>, are rewritten with no <code>*Amended (…):*</code> note saying what they replaced. A later check against §8 cannot tell that its bar moved in this pull request. Lines 311 and 603 also run to 115 and 87 columns in prose wrapped near 70. Add an amended note to §8 and §4 that quotes the earlier text, and rewrap the two lines."
+      }
+     ]
+    },
+    {
+     "path": "docs/remote.md",
+     "note": "The Pull section's closing paragraph now says the plan's chunks are complete and points at the CLI manual for the new flags. What remains is the definition of done: a real project cloned and built on a second machine."
+    }
+   ]
+  }
+ ],
+ "project": "remote"
+}
