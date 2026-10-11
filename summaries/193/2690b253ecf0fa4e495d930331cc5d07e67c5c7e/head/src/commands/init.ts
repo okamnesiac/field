@@ -1,0 +1,104 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
+import { DEFAULT_SAMPLE_RATE, PROJECT_MANIFEST } from '../constants.js';
+import { git, tryGit } from '../git.js';
+import { isSlug } from '../ids.js';
+import { projectOrder, projectSchema, SPDX_IDENTIFIER } from '../schema/index.js';
+import { stringifyCanonical } from '../yaml/emit.js';
+
+// Audio and MIDI assets ride Git LFS; manifests stay plain text
+// (project-model.md "Assets").
+const LFS_PATTERNS = ['*.wav', '*.aif', '*.aiff', '*.flac', '*.mp3', '*.m4a', '*.caf'];
+
+// The whole .gitattributes a new project gets. The LF rule is first and
+// the binary rules override it (last match wins): field hashes
+// working-tree bytes — asset pins, .scd action keys, check's byte-wise
+// formatting gate — so a checkout that rewrote line endings would change
+// every one of those answers while `git status` stayed clean
+// (windows-portability.md §1.1). Git for Windows defaults
+// core.autocrlf=true, which does exactly that to any project that does
+// not pin LF itself. *.state is captured plugin state, named by its own
+// sha256 and refused if the bytes move — never a conversion candidate.
+const GITATTRIBUTES = [
+  '# Text checks out LF everywhere: field hashes file bytes as they sit',
+  '# on disk, so line endings are pinned rather than platform-dependent.',
+  '# Binary rules below override (last match wins); audio and plugin',
+  '# state are never touched.',
+  '* text=auto eol=lf',
+  '',
+  ...LFS_PATTERNS.map((p) => `${p} filter=lfs diff=lfs merge=lfs -text`),
+  '*.state binary',
+  '',
+].join('\n');
+
+const IGNORE_ENTRIES = ['.field/', '.DS_Store'];
+
+export interface InitOptions {
+  dir: string;
+  name?: string;
+  sampleRate?: number;
+  // An SPDX identifier for the project's own work (remote.md §3.5);
+  // without one, field.yaml carries no license line rather than a guess.
+  license?: string | undefined;
+}
+
+export function init(options: InitOptions): string {
+  const root = resolve(options.dir);
+  const manifestPath = join(root, PROJECT_MANIFEST);
+  if (existsSync(manifestPath)) {
+    throw new Error(`already a Field project: ${manifestPath}`);
+  }
+
+  const name = options.name ?? basename(root);
+  if (!isSlug(name)) {
+    throw new Error(`project name "${name}" must be a lowercase-slug (use --name)`);
+  }
+
+  if (options.license !== undefined && !SPDX_IDENTIFIER.test(options.license)) {
+    throw new Error(
+      `license "${options.license}" must be an SPDX license identifier, such as CC-BY-4.0, CC0-1.0, or MIT`,
+    );
+  }
+  const manifest = projectSchema.parse({
+    field: 1,
+    name,
+    ...(options.license !== undefined ? { license: options.license } : {}),
+    sample_rate: options.sampleRate ?? DEFAULT_SAMPLE_RATE,
+  });
+
+  mkdirSync(root, { recursive: true });
+  // shared/'s three shelves split by contract (project-layout.md §1.1
+  // as amended by §4): instruments make sound (.scd programs, model
+  // defs, later AU — however they are invoked), samples are committed
+  // sound that just is, and plugins change sound.
+  for (const dir of ['songs', 'shared/instruments', 'shared/samples', 'shared/plugins']) {
+    mkdirSync(join(root, dir), { recursive: true });
+    // Git can't track an empty directory; .gitkeep makes the project's
+    // shape survive clone.
+    writeFileSync(join(root, dir, '.gitkeep'), '');
+  }
+  writeFileSync(manifestPath, stringifyCanonical(manifest, projectOrder));
+
+  const gitignore = join(root, '.gitignore');
+  const existing = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : '';
+  const missing = IGNORE_ENTRIES.filter((e) => !existing.split('\n').includes(e));
+  if (missing.length > 0) {
+    appendFileSync(gitignore, (existing.endsWith('\n') || existing === '' ? '' : '\n') + missing.join('\n') + '\n');
+  }
+
+  const gitattributes = join(root, '.gitattributes');
+  if (!existsSync(gitattributes)) {
+    writeFileSync(gitattributes, GITATTRIBUTES);
+  }
+
+  if (!existsSync(join(root, '.git'))) {
+    git(['init'], { cwd: root });
+  }
+  // Warn and continue (remote.md §5 decision 6): a new project has no
+  // audio yet and may never commit any. `clone` is the verb that refuses.
+  if (tryGit(['lfs', 'install', '--local'], root) === undefined) {
+    process.stderr.write('warning: git-lfs not available; audio assets will not be tracked by LFS\n');
+  }
+
+  return root;
+}
