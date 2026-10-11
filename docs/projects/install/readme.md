@@ -3,7 +3,7 @@ status: in-progress
 priority: now
 ---
 
-# Plan: Install and upgrade
+# Install and upgrade
 
 **Goal:** one command installs Field and another keeps it current, the
 way Projector's `install.sh` and `project upgrade` do. `./install.sh`
