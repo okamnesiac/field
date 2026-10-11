@@ -30,9 +30,11 @@ pnpm add -g .
 
 ## Before you install
 
-Before it changes anything, the installer checks for each of these that
-the target needs, and stops with a message naming the one that is
-missing:
+Before it changes anything, the installer checks for the Node, pnpm,
+and CMake that the target needs, and stops with a message naming the one
+that is missing or too old. It does not look for a C++ compiler or the
+Linux development headers. When either is missing, the daemon build
+fails and says so, after `all` has already installed the CLI.
 
 - **Node 24 or newer.** The version in `.nvmrc`.
 - **pnpm.** `corepack enable pnpm` installs the version `package.json`
@@ -127,7 +129,7 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
 | `checkout` | The checkout this installer belongs to, its branch, and its commit. |
 | `repo-current`, `repo-ahead`, `repo-behind` | Whether the branch matches its upstream after a fetch, has commits the upstream lacks, or lacks commits the upstream has. A branch that is both ahead and behind reports `repo-behind`. |
 | `repo-untracked` | The branch has no upstream, or HEAD is detached, so there is nothing to compare against. |
-| `node`, `pnpm`, `cmake` | The versions found. `node-old`, `node-missing`, `pnpm-missing`, and `cmake-missing` say what to install. |
+| `node`, `pnpm`, `cmake` | The versions found. `node-old`, `node-missing`, `pnpm-missing`, `cmake-old`, and `cmake-missing` say what to install. |
 | `cli` | pnpm's global `field` links this checkout. |
 | `cli-missing`, `cli-elsewhere` | pnpm links no `field`, or links another checkout. Run `./install.sh cli` here to link this one. |
 | `cli-shadowed` | Another `field` comes before pnpm's on your PATH, so that one runs. |

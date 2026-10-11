@@ -26,6 +26,9 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/src/cli.ts" ]; then
 fi
 
 NODE_MAJOR=24
+# native/audiod/CMakeLists.txt's cmake_minimum_required.
+CMAKE_MAJOR=3
+CMAKE_MINOR=24
 # Where src/audiod/client.ts looks for the daemon, under the package root.
 AUDIOD_RELATIVE="native/audiod/build/field-audiod_artefacts/Release/field-audiod"
 
@@ -121,9 +124,21 @@ require_global_bin() {
   fi
 }
 
+cmake_version() { cmake --version 2>/dev/null | sed -n '1s/.* //p'; }
+
+cmake_new_enough() {
+  local major="${1%%.*}" minor="${1#*.}"
+  minor="${minor%%.*}"
+  [ "$major" -gt "$CMAKE_MAJOR" ] 2>/dev/null ||
+    { [ "$major" -eq "$CMAKE_MAJOR" ] && [ "$minor" -ge "$CMAKE_MINOR" ]; } 2>/dev/null
+}
+
 require_cmake() {
-  command -v cmake >/dev/null 2>&1 ||
-    die "building field-audiod needs CMake 3.24 or newer — brew install cmake on macOS" 69
+  local version
+  version="$(cmake_version)" ||
+    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer — brew install cmake on macOS" 69
+  cmake_new_enough "$version" ||
+    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version — brew upgrade cmake on macOS, or see https://cmake.org/download/" 69
 }
 
 install_cli() {
@@ -248,10 +263,12 @@ report_tools() {
   else
     warn_row pnpm-missing "run corepack enable pnpm, or see https://pnpm.io/installation"
   fi
-  if version="$(cmake --version 2>/dev/null | sed -n '1s/.* //p')"; then
+  if ! version="$(cmake_version)"; then
+    row cmake-missing "needed to build field-audiod — brew install cmake on macOS"
+  elif cmake_new_enough "$version"; then
     row cmake "$version"
   else
-    row cmake-missing "needed to build field-audiod — brew install cmake on macOS"
+    row cmake-old "$version — building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer"
   fi
 }
 

@@ -307,6 +307,19 @@ posix('install.sh audiod and workers', () => {
     expect(changes(run)).toEqual([]);
   });
 
+  it('refuses a CMake older than 3.24 before installing anything', () => {
+    write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.22.1"\n`, 0o755);
+    const run = install();
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('needs CMake 3.24 or newer, and cmake is 3.22.1');
+    expect(changes(run)).toEqual([]);
+  });
+
+  it('takes a CMake of a newer major version', () => {
+    write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 4.0.0"\n`, 0o755);
+    expect(install('audiod').status).toBe(0);
+  });
+
   it('fails when the daemon does not build', () => {
     const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
     expect(run.status).toBe(1);
@@ -442,6 +455,13 @@ posix('install.sh status', () => {
     const status = rows(install('status').stdout);
     expect(status.has('repo-current')).toBe(false);
     expect(status.get('repo-ahead')).toBe('main is 1 commit ahead of origin/main');
+  });
+
+  it('says when CMake is too old to build the daemon', () => {
+    write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.22.1"\n`, 0o755);
+    expect(rows(install('status').stdout).get('cmake-old')).toBe(
+      '3.22.1 — building field-audiod needs CMake 3.24 or newer',
+    );
   });
 
   it('notes a FIELD_AUDIOD override', () => {
