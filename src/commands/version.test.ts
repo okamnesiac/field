@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
 import { fileStore } from '../remote/credentials.js';
 import { git } from '../git.js';
+import { socketPathFor } from '../socketPath.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { SETUP_SPECS } from './generate.js';
 import {
@@ -36,6 +37,7 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+
 // A daemon that answers `hello` and nothing else, which is all this
 // command asks of one.
 function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Promise<void> {
@@ -46,7 +48,9 @@ function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Pro
       );
     });
     servers.push(server);
-    server.listen(join(root, socketRelative), () => resolve());
+    // What versionReport dials: a path on POSIX, a pipe name on Windows
+    // (socketPathFor, windows-portability.md chunk 4).
+    server.listen(socketPathFor(root, socketRelative), () => resolve());
   });
 }
 

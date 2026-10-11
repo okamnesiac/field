@@ -108,9 +108,9 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
   }
 
   // Publishes `name` with `--keys`. Resolves with the helper once it is
-  // ready, or with why there is no MIDI service, which only a Linux
-  // machine without the ALSA sequencer may say; anywhere else a helper
-  // that cannot publish fails the test.
+  // ready, or with why no source can be published, which only a Linux
+  // machine without the ALSA sequencer, or Windows, may say; anywhere
+  // else a helper that cannot publish fails the test.
   //
   // CoreMIDI on macOS can refuse a new source for a moment after this
   // file's earlier tests killed their helpers and daemons: run whole, the
@@ -151,6 +151,14 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
             unavailable:
               `no MIDI service: this Linux machine has no ALSA sequencer at /dev/snd/seq, ` +
               `and --keys said ${JSON.stringify(line['error'])}`,
+          };
+        }
+        // Windows has no virtual MIDI ports for --keys to publish
+        // (windows-portability.md §7.2), so the helper refuses there by
+        // design and the take tests have no source to record.
+        if ('error' in line && process.platform === 'win32') {
+          return {
+            unavailable: `no virtual MIDI ports on Windows, and --keys said ${JSON.stringify(line['error'])}`,
           };
         }
         if ('error' in line && process.platform === 'darwin' && retries > 0) {

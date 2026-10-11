@@ -12,6 +12,7 @@ import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { recordTake } from './record.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // The metronome in the engine (recording.md §7, chunk 3). The click is a
 // schedule the CLI projects and the daemon synthesizes, so two things
@@ -79,7 +80,7 @@ describe.skipIf(!binary)('the engine click', () => {
     } catch {
       // no daemon left behind
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempProject(root);
   });
 
   it('renders ticks on exactly the scheduled samples, accented on the downbeat', async () => {

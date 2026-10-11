@@ -13,6 +13,7 @@ import { compileSession, convertedLength, diffSessions } from '../graph/live.js'
 import { watchLiveSession } from '../commands/watch-live.js';
 import { AudiodClient, daemonBinary } from './client.js';
 import { sessionInsertSchema, type Session } from './session.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // Chunk 2's definition of correct (realtime.md decision 3 at graph
 // level): a non-looping session rendered by the live engine is
@@ -148,14 +149,15 @@ function wavData(path: string): Buffer {
   return bytes.subarray(at + 8, at + 8 + size);
 }
 
+
 describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
   let root: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'field-live-'));
   });
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await removeTempProject(root);
   });
 
   it('renders a non-looping session byte-identically to the offline stem', async () => {

@@ -1,0 +1,22 @@
+# Text checks out LF on every platform, whatever core.autocrlf says.
+# field hashes file content as it sits on disk — .scd programs are
+# action-key inputs by content hash, `field check`'s canonical-formatting
+# comparison is byte-wise, and asset pins are the sha256 of committed
+# bytes — so a CRLF checkout changes every one of those answers while
+# `git status` stays clean (git compares normalized content; field reads
+# the working tree). windows-portability.md §1.1 has the measurement.
+* text=auto eol=lf
+
+# Last match wins: committed audio and captured plugin state (*.state
+# under shared/plugins/, named by its own sha256 — plugins.ts refuses a
+# blob that stops hashing to its filename) are bytes, never candidates
+# for conversion. Neither type is in the tree today; these rules exist so
+# the first one arrives safely rather than riding the binary heuristic.
+*.wav   binary
+*.aif   binary
+*.aiff  binary
+*.flac  binary
+*.mp3   binary
+*.m4a   binary
+*.caf   binary
+*.state binary

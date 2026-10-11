@@ -47,9 +47,12 @@ export function daemonBinary(): string | undefined {
     return absolute;
   }
   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  // Same artefact directory on every platform — MSVC is a multi-config
+  // generator, but build:native pins --config Release, so the layout
+  // matches the single-config one. Only the suffix differs.
   const built = join(
     packageRoot,
-    'native/audiod/build/field-audiod_artefacts/Release/field-audiod',
+    `native/audiod/build/field-audiod_artefacts/Release/field-audiod${process.platform === 'win32' ? '.exe' : ''}`,
   );
   return existsSync(built) ? built : undefined;
 }
@@ -123,7 +126,11 @@ export class AudiodClient extends EventEmitter {
       if (!binary) {
         throw new Error('field-audiod is not built (field upgrade audiod, or set FIELD_AUDIOD)');
       }
-      const args = ['--socket', SOCKET_RELATIVE];
+      // POSIX gets the relative path (the daemon binds it against its
+      // cwd, staying inside sun_path); Windows gets the full pipe name,
+      // since a pipe is not a filesystem path and cwd means nothing to
+      // it. Client and daemon agree because both strings come from here.
+      const args = ['--socket', process.platform === 'win32' ? path : SOCKET_RELATIVE];
       // FIELD_AUDIOD_NULL covers spawns the caller doesn't parameterize
       // (field play in CI or on a deviceless machine).
       if (options.nullOutput ?? process.env['FIELD_AUDIOD_NULL'] === '1') args.push('--null-output');

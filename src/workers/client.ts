@@ -54,6 +54,16 @@ export function workerLaunchCommand(spec: WorkerSpec): { command: string; args: 
     if (!existsSync(absolute)) {
       throw new Error(`${spec.pythonOverrideEnv} points at a missing interpreter: ${override}`);
     }
+    // A JS override (the stub worker) is a script, not an executable:
+    // POSIX runs it through its shebang, Windows has no shebang and
+    // answers EFTYPE. Spawning the node that is running us is the same
+    // program on both, and pins the stub to the interpreter under test.
+    if (absolute.endsWith('.mjs') || absolute.endsWith('.js')) {
+      return {
+        command: process.execPath,
+        args: [absolute, '-m', spec.module, '--socket', spec.socketRelative],
+      };
+    }
     return { command: absolute, args: ['-m', spec.module, '--socket', spec.socketRelative] };
   }
   // --no-sync is what makes `field setup` a gate rather than a label.

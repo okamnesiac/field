@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildLabels } from './build.js';
 import { createSong } from './create.js';
@@ -81,10 +82,13 @@ beforeEach(async () => {
   bare = join(tmp, 'remotes', 'howlo', 'chemicals.git');
   mkdirSync(join(tmp, 'remotes', 'howlo'), { recursive: true });
   git(['init', '-q', '--bare', bare], { cwd: tmp });
-  git(['remote', 'add', 'origin', `file://${bare}`], { cwd: source });
+  // The remote as a file URL, built by pathToFileURL rather than by
+  // prefixing "file://": on Windows the prefix gives file://C:\..., which
+  // git-lfs cannot parse ("batch request: missing protocol").
+  git(['remote', 'add', 'origin', pathToFileURL(bare).href], { cwd: source });
 
   remote = await fakeRemote();
-  remote.addProject('howlo/chemicals', { clone_url: `file://${bare}`, default_branch: branch, visibility: 'public' });
+  remote.addProject('howlo/chemicals', { clone_url: pathToFileURL(bare).href, default_branch: branch, visibility: 'public' });
 });
 
 afterEach(async () => {

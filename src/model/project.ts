@@ -129,12 +129,23 @@ interface FileSpec<T> {
   order: KeyOrder;
 }
 
+// Project-relative paths are slash-separated wherever they are data, not
+// display: label pkgs derive from song.dir, diagnostics quote the paths
+// YAML spells with `/` (the schemas reject `\` outright), and the graph
+// compares them as strings. `relative()` answers in the platform
+// separator, so on Windows the raw answer would put backslashes inside
+// labels and no typed pattern could ever match. join() accepts the
+// forward slashes on the way back in, on every platform.
+export function projectPath(root: string, absPath: string): string {
+  return relative(root, absPath).split(sep).join('/');
+}
+
 function loadFile<T>(
   project: LoadedProject,
   absPath: string,
   spec: FileSpec<T>,
 ): LoadedFile<T> | undefined {
-  const path = relative(project.root, absPath);
+  const path = projectPath(project.root, absPath);
   let raw: string;
   try {
     raw = readFileSync(absPath, 'utf8');
@@ -312,7 +323,7 @@ export function loadProject(root: string): LoadedProject {
   for (const dir of songDirs) {
     const song: LoadedSong = {
       name: basename(dir),
-      dir: relative(project.root, dir),
+      dir: projectPath(project.root, dir),
       tracks: [],
       genTakes: new Map(),
       recordTakes: new Map(),
@@ -1224,7 +1235,7 @@ function validate(project: LoadedProject): void {
         if (!statSync(itemDir).isDirectory()) continue;
         if (!claimedTakesDirs.has(item) && existsSync(join(itemDir, TAKES_FILENAME))) {
           push(
-            join(song.dir, 'audio', item, TAKES_FILENAME),
+            `${song.dir}/audio/${item}/${TAKES_FILENAME}`,
             `no generative request claims audio/${item}/ — a renamed track or id ` +
               `leaves its takes behind; rename the directory (and its gen: key) ` +
               `to follow, or delete it`,
@@ -1232,7 +1243,7 @@ function validate(project: LoadedProject): void {
         }
         if (!claimedRecordDirs.has(item) && existsSync(join(itemDir, RECORD_TAKES_FILENAME))) {
           push(
-            join(song.dir, 'audio', item, RECORD_TAKES_FILENAME),
+            `${song.dir}/audio/${item}/${RECORD_TAKES_FILENAME}`,
             `no record entry claims audio/${item}/ — a renamed track or id leaves ` +
               `its takes behind; rename the directory (and its record: key) to ` +
               `follow, or add \`- record:\` back to the track`,

@@ -5,11 +5,20 @@ on:
     branches: [main]
   pull_request:
 
-# One job, on Linux. The macOS job is gone for cost: the 3,000 included
-# minutes are only 300 macOS minutes at the 10x rate, and it was spending
-# them to run a test set identical to this one — `say` and `afconvert`
-# retired in render-pipeline.md chunk 5 and took the last platform-bound
-# cases with them, so nothing in the suite needs a macOS binary.
+# Two jobs: `linux` runs every gate, and `windows` runs the same suite
+# without the Python gates (its own comment says why). There is no macOS
+# job, for cost: the 3,000 included minutes are only 300 macOS minutes at
+# the 10x rate, and it was spending them to run a test set identical to
+# this one — `say` and `afconvert` retired in render-pipeline.md chunk 5
+# and took the last platform-bound cases with them, so nothing in the
+# suite needs a macOS binary.
+#
+# The Windows job bills at twice the Linux per-minute rate, and its
+# expensive step is a cold JUCE build whenever GitHub has evicted its
+# cache. While the repository is private that comes to roughly 10 to 13
+# cents a run, and Actions minutes are free once it is public. It is kept
+# running on purpose (2026-10-10): it is the only thing that compiles
+# the daemon under MSVC and dials the named pipe.
 #
 # What that gives up, stated plainly (linux-portability.md decision 4,
 # amended 2026-08-08): nobody compiles native/audiod against CoreAudio in
@@ -119,3 +128,32 @@ jobs:
       - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
       - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
 
+
+  # Windows is a build-and-test-and-play target (windows-portability.md),
+  # and this job is what keeps the port from rotting: the same typecheck,
+  # build, example check, native build and suite as Linux. The Python
+  # pyright gates stay Linux-only — the workers keep their POSIX
+  # transport until their own chunk (§4), so gating them here would test
+  # a combination nothing supports. The JUCE FetchContent build is the
+  # expensive step. The cache key below is the Linux job's key verbatim:
+  # it already varies by `runner.os`, so the two jobs never share a
+  # cache, which matters because MSVC and ELF objects share nothing.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: cd examples/bloom && node ../../dist/cli.js check
+      - uses: actions/cache@v4
+        with:
+          path: native/audiod/build
+          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      - run: pnpm build:native
+      - run: pnpm test

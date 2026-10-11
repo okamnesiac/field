@@ -1,6 +1,6 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
@@ -142,7 +142,11 @@ describe('build', () => {
     const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);
     // Every outcome names a playable path — watch hands any label's fresh
     // artifact to the daemon, including committed content.
-    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad/pad.wav')).toBe(true);
+    // outputPath is a native absolute path; the suffix compares in the
+    // platform separator.
+    expect(
+      outcomes[0]!.outputPath!.endsWith(['songs', 'creek', 'audio', 'pad', 'pad.wav'].join(sep)),
+    ).toBe(true);
     // ...and says the path is a source it never produced, which `cached`
     // alone cannot distinguish from a cache hit.
     expect(outcomes[0]!.committed).toBe(true);
@@ -153,7 +157,7 @@ describe('build', () => {
     const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
     const rule = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
     expect(rule.committed).toBeUndefined();
-    expect(rule.outputPath!).toContain('.field/out'); // materialized, not committed
+    expect(rule.outputPath!).toContain(join('.field', 'out')); // materialized, not committed
   });
 
   it('materializes by rename, never in place (watch.md §1.6)', async () => {
@@ -463,7 +467,14 @@ describe('runScProgram edges (no sclang needed)', () => {
     });
   });
 
-  it('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
+  // The next two fake sclang with #!/bin/sh scripts. The code path they
+  // exercise (execFile, the timeout, stdout capture) is platform-
+  // independent; the *stub* is not — Windows has no shebang — so they
+  // skip there rather than growing a second stub dialect. A real sclang
+  // does not reach this spawn on Windows yet either: sclangCommand looks
+  // for `sclang` without `.exe` and reads a native FIELD_SCLANG path as a
+  // name to search for (windows-portability.md §7.2).
+  it.skipIf(process.platform === 'win32')('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
     const hang = join(root, 'hang.sh');
     writeFileSync(hang, '#!/bin/sh\nsleep 5\n');
     chmodSync(hang, 0o755);
@@ -474,7 +485,7 @@ describe('runScProgram edges (no sclang needed)', () => {
     });
   });
 
-  it('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
+  it.skipIf(process.platform === 'win32')('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
     const fail = join(root, 'fail.sh');
     writeFileSync(fail, '#!/bin/sh\necho "ERROR: Class not defined: Blah"\necho "boring stderr" >&2\nexit 1\n');
     chmodSync(fail, 0o755);

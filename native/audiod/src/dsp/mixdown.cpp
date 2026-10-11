@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 
@@ -88,8 +89,8 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
 
 void balanceGains (double pan, double& left, double& right)
 {
-    left = pan > 0.0 ? std::cos ((pan * M_PI) / 2.0) : 1.0;
-    right = pan < 0.0 ? std::cos ((-pan * M_PI) / 2.0) : 1.0;
+    left = pan > 0.0 ? std::cos ((pan * std::numbers::pi) / 2.0) : 1.0;
+    right = pan < 0.0 ? std::cos ((-pan * std::numbers::pi) / 2.0) : 1.0;
 }
 
 void applyDeclaredLength (std::vector<std::vector<float>>& channels, long declared, bool loop)

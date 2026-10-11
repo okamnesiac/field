@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -43,7 +44,7 @@ double sinc (double x)
 {
     if (x == 0.0)
         return 1.0;
-    const double pix = M_PI * x;
+    const double pix = std::numbers::pi * x;
     return std::sin (pix) / pix;
 }
 
@@ -61,7 +62,7 @@ std::vector<double> designPrototype (long phases, double inRate, double outRate)
     // what actually comes out rather than trusting them.
     const double beta = 0.1102 * (stopbandDb - 8.7);
     const double transitionHz =
-        ((stopbandDb - 8.0) / (2.285 * 2.0 * M_PI * (double) length)) * interpolatedRate;
+        ((stopbandDb - 8.0) / (2.285 * 2.0 * std::numbers::pi * (double) length)) * interpolatedRate;
     // Stopband edge at the lower Nyquist, so the −6 dB point sits half a
     // transition below it. Clamped in case a pathological ratio makes the
     // transition wider than the passband itself.

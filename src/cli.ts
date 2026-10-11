@@ -662,7 +662,15 @@ program
   });
 
 // The retiring fallback for machines without the built daemon: playback
-// through afplay, no transport, no --from.
+// through afplay, no transport, no --from. macOS only, and deliberately
+// not replaced anywhere else: since realtime.md, `field play` IS live
+// evaluation in the daemon, and a second, worse playback path would be
+// a liability, not a feature. Decided for Windows in
+// windows-portability.md §2.2 and widened to every non-macOS platform
+// with §2.2's own reasoning (recorded there as an amendment): afplay is
+// dead code off macOS by definition, so the caller refuses before it
+// gets here, and says so instead of announcing a fallback that cannot
+// run (#162 review caught the docs describing the wide guard first).
 async function playWithAfplay(items: Playable[]): Promise<void> {
   for (const item of items) {
     process.stdout.write(`playing ${item.label}\n`);
@@ -746,6 +754,12 @@ program
       let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
       const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
+        if (process.platform !== 'darwin') {
+          // afplay is a macOS binary: anywhere else the fallback could only
+          // die with ENOENT naming a tool this machine never had, so the
+          // build hint is the whole answer.
+          throw new Error('field-audiod is not built, and the afplay fallback is macOS-only — run `pnpm build:native`');
+        }
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
           throw new Error('--from, --device, --loop, --click, and --watch need field-audiod (field upgrade audiod)');
         }

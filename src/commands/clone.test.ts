@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildLabels } from './build.js';
 import { clone, describeWarm, gitConfigForRemote } from './clone.js';
@@ -97,10 +98,13 @@ beforeEach(async () => {
   bare = join(tmp, 'remotes', 'howlo', 'chemicals.git');
   mkdirSync(join(tmp, 'remotes', 'howlo'), { recursive: true });
   git(['clone', '-q', '--bare', source, bare], { cwd: tmp });
-  if (gitLfsAvailable()) tryGit(['lfs', 'push', '--all', `file://${bare}`, branch], source);
+  // The remote as a file URL, built by pathToFileURL rather than by
+  // prefixing "file://": on Windows the prefix gives file://C:\..., which
+  // git-lfs cannot parse ("batch request: missing protocol").
+  if (gitLfsAvailable()) tryGit(['lfs', 'push', '--all', pathToFileURL(bare).href, branch], source);
 
   remote = await fakeRemote();
-  remote.addProject('howlo/chemicals', { clone_url: `file://${bare}`, default_branch: branch, visibility: 'public' });
+  remote.addProject('howlo/chemicals', { clone_url: pathToFileURL(bare).href, default_branch: branch, visibility: 'public' });
   const actions = join(source, '.field', 'cache', 'actions');
   for (const file of readdirSync(actions)) {
     const entry = JSON.parse(readFileSync(join(actions, file), 'utf8')) as {
@@ -153,7 +157,7 @@ describe('field clone', () => {
     expect(result.dir).toBe(dir);
     expect(result.remote).toEqual({ api: remote.url, owner: 'howlo', project: 'chemicals' });
     expect(existsSync(join(dir, 'field.yaml'))).toBe(true);
-    expect(git(['remote', 'get-url', 'origin'], { cwd: dir })).toBe(`file://${bare}`);
+    expect(git(['remote', 'get-url', 'origin'], { cwd: dir })).toBe(pathToFileURL(bare).href);
 
     // The index and the bytes, for the stem as well as the mix.
     expect(readdirSync(join(dir, '.field', 'cache', 'actions'))).toHaveLength(2);
@@ -199,7 +203,7 @@ describe('field clone', () => {
     // "nothing cached on the remote yet", which was false).
     const dead = await fakeRemote({ noHello: true });
     try {
-      const { opts, out } = options({ target: `file://${bare}`, env: { FIELD_REMOTE: dead.url } });
+      const { opts, out } = options({ target: pathToFileURL(bare).href, env: { FIELD_REMOTE: dead.url } });
       const result = await clone(opts);
       const creek = result.warmed.find((w) => w.song === 'creek')!;
       expect(creek.note).toContain('not an audiofield remote');
@@ -219,7 +223,7 @@ describe('field clone', () => {
     const { opts } = options({ env: { FIELD_REMOTE: 'off' } });
     await expect(clone(opts)).rejects.toThrow(/FIELD_REMOTE=off.*clone by URL/);
     expect(remote.requests).toEqual([]);
-    const byUrl = options({ target: `file://${bare}`, env: { FIELD_REMOTE: 'off' } });
+    const byUrl = options({ target: pathToFileURL(bare).href, env: { FIELD_REMOTE: 'off' } });
     const result = await clone(byUrl.opts);
     expect(result.remote).toBeUndefined();
     expect(result.warmed).toEqual([]);
@@ -238,7 +242,7 @@ describe('field clone', () => {
 
   it('accepts a full URL, warming only when Field knows the host', async () => {
     // Anywhere Git reaches: cloned, no API, no warm.
-    const plain = options({ target: `file://${bare}`, env: {} });
+    const plain = options({ target: pathToFileURL(bare).href, env: {} });
     const result = await clone(plain.opts);
     expect(result.dir).toBe(join(work, 'chemicals'));
     expect(result.remote).toBeUndefined();
@@ -248,7 +252,7 @@ describe('field clone', () => {
 
     // The same URL with FIELD_REMOTE naming the API: the path's last two
     // segments name the project, and the warm runs.
-    const pointed = options({ target: `file://${bare}`, dir: 'again' });
+    const pointed = options({ target: pathToFileURL(bare).href, dir: 'again' });
     const again = await clone(pointed.opts);
     expect(again.remote).toEqual({ api: remote.url, owner: 'howlo', project: 'chemicals' });
     expect(again.warmed.find((w) => w.song === 'creek')?.fetched).toBe(2);
