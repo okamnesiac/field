@@ -117,7 +117,10 @@ describe('reloading a keymap on save', () => {
     renameSync(temp, path);
   }
 
-  it('applies two rename-on-save edits in a row, and keeps the keymap through an invalid one', async () => {
+  // Three reloads in a row, each allowed nextReload's 5 s: file events can
+  // arrive a second or more late on a loaded machine, so the test's budget
+  // covers all three rather than vitest's default 5 s for the whole test.
+  it('applies two rename-on-save edits in a row, and keeps the keymap through an invalid one', { timeout: 20_000 }, async () => {
     const path = join(dir, 'mine.yaml');
     writeFileSync(path, 'name: mine\nnotes: { KeyA: 0 }\n');
     const results: ReloadResult[] = [];
