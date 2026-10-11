@@ -1,11 +1,11 @@
 import { AudiodClient } from '../audiod/client.js';
-import { takeSchema, type AnyTake, type AudiodEvent, type RecordingEntry, type Take } from '../audiod/protocol.js';
+import { anyTakeSchema, type AnyTake, type AudiodEvent, type RecordingEntry } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { expandPattern } from '../graph/graph.js';
 import { formatLabel, parsePattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
-import { landTake, readTransaction, recordNodeFor, type LandedTake, type LandOptions } from './land.js';
+import { landAnyTake, readTransaction, recordNodeFor, type LandedTake, type LandOptions } from './land.js';
 import {
   formatPosition,
   musicalContext,
@@ -105,7 +105,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export interface RecordedTakes {
-  takes: { take: Take; landed: LandedTake }[]; // in the order they landed
+  takes: { take: AnyTake; landed: LandedTake }[]; // in the order they landed
   // Loop passes that began with no transaction ready and were skipped
   // (recording.md §15.4) — the daemon counts them so the set of takes is
   // never silently smaller than the set of passes.
@@ -136,7 +136,16 @@ export async function recordTake(
   const resolved = resolveRecordTarget(root, target);
   // Before arming: a track with nowhere to attach a take is an error to
   // give before the performance, not after it (recording.md §4).
-  recordNodeFor(project, resolved.label);
+  const node = recordNodeFor(project, resolved.label);
+  // A record entry with an instrument records MIDI (keyboard-instrument.md
+  // §12.2), which has no input channel or device to choose, and whose
+  // takes stay audio-only under a loop.
+  const kind = node.entry.record?.instrument !== undefined ? 'midi' : 'audio';
+  if (kind === 'midi' && (options.input !== undefined || options.device !== undefined || options.loop === true)) {
+    throw new Error(
+      `${node.trackName} records MIDI for ${node.entry.record!.instrument}: --input, --device, and --loop are for audio takes`,
+    );
+  }
   if (options.loop === true && options.until === undefined) {
     throw new Error('--loop needs --until — the region is --at to --until, a take per pass');
   }
@@ -146,8 +155,8 @@ export async function recordTake(
   // Each take lands as it arrives — under a loop, while the next one is
   // already recording — so the flow is one landing per manifest.
   const takes: RecordedTakes['takes'] = [];
-  const { missed } = await captureTakes(root, project, resolved, options, hooks, async (take) => {
-    const landed = await landTake(root, take, options);
+  const { missed } = await captureTakes(root, project, resolved, kind, options, hooks, async (take) => {
+    const landed = await landAnyTake(root, take, options);
     takes.push({ take, landed });
     hooks.onTake?.(landed);
   });
@@ -161,9 +170,10 @@ async function captureTakes(
   root: string,
   project: LoadedProject,
   resolved: RecordTarget,
+  kind: 'audio' | 'midi',
   options: RecordOptions,
   hooks: RecordHooks,
-  land: (take: Take) => Promise<void>,
+  land: (take: AnyTake) => Promise<void>,
 ): Promise<{ missed: number }> {
   const client = await AudiodClient.connect(root);
   try {
@@ -207,11 +217,26 @@ async function captureTakes(
     if (options.countIn !== undefined && (options.at === undefined || ctx === undefined)) {
       throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
     }
-    const armed = await client.arm(resolved.label, options.input ?? 1, options.device);
-    hooks.onArmed?.(
-      `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +
-        `latency in ${armed.input_latency} / out ${armed.output_latency} samples)`,
-    );
+    let armedRate: number;
+    if (kind === 'midi') {
+      if (!client.supports('record-midi')) {
+        throw new Error(
+          `field-audiod ${client.daemonVersion} predates MIDI recording — field transport quit, then record again`,
+        );
+      }
+      const armed = await client.armMidi(resolved.label);
+      armedRate = armed.sample_rate;
+      hooks.onArmed?.(
+        `armed   MIDI from ${armed.sources.join(', ')}  (${armed.sample_rate} Hz, latency out ${armed.output_latency} samples)`,
+      );
+    } else {
+      const armed = await client.arm(resolved.label, options.input ?? 1, options.device);
+      armedRate = armed.sample_rate;
+      hooks.onArmed?.(
+        `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +
+          `latency in ${armed.input_latency} / out ${armed.output_latency} samples)`,
+      );
+    }
 
     let at: number | undefined;
     if (options.at !== undefined) {
@@ -280,7 +305,6 @@ async function captureTakes(
       if (seen.has(take.id)) return;
       seen.add(take.id);
       queue = queue.then(async () => {
-        if ('kind' in take) throw new Error(`${take.id} is a MIDI take, which this path does not land`);
         await land(take);
         landedAny = true;
       });
@@ -355,9 +379,15 @@ async function captureTakes(
           announced = true;
           hooks.onStarted?.(`recording ${started.transaction} from ${formatPosition(s.record.started_at_samples, rate, ctx)}`);
         }
-        const elapsed = s.record.frames !== undefined ? ` ${(s.record.frames / armed.sample_rate).toFixed(1)}s` : '';
+        const elapsed = s.record.frames !== undefined ? ` ${(s.record.frames / armedRate).toFixed(1)}s` : '';
         missed = s.record.missed ?? missed;
-        hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${meterLine(s.record.input_peak)}${elapsed}${passesNote(s.record)}`);
+        // A MIDI take has no level to meter; what it has is the events it
+        // has caught.
+        const level =
+          s.record.kind === 'midi'
+            ? `${s.record.events ?? 0} event${s.record.events === 1 ? '' : 's'}`
+            : meterLine(s.record.input_peak);
+        hooks.onPosition?.(`${formatPosition(s.sample, rate, ctx)}  ${level}${elapsed}${passesNote(s.record)}`);
         await sleep(250);
       }
       if (endedItself) await client.stop().catch(() => {});
@@ -367,7 +397,7 @@ async function captureTakes(
       if (seen.size === 0) {
         const { recordings } = await client.recordings();
         const entry = recordings.find((r) => r.id === started.transaction && r.complete);
-        if (entry !== undefined) landOnce(takeSchema.parse(entry));
+        if (entry !== undefined) landOnce(anyTakeSchema.parse(entry));
       }
     }
   } finally {
@@ -395,20 +425,18 @@ export async function recoverRecording(
   root: string,
   id: string,
   options: LandOptions = {},
-): Promise<{ take: Take; landed: LandedTake }> {
+): Promise<{ take: AnyTake; landed: LandedTake }> {
   const client = await AudiodClient.connect(root);
-  let take: Take;
+  let take: AnyTake;
   try {
     if (!client.supports('record')) {
       throw new Error(`field-audiod ${client.daemonVersion} predates recording — field transport quit, then try again`);
     }
-    const recovered = (await client.recover(id)).take;
-    if ('kind' in recovered) throw new Error(`${id} is a MIDI take, which this path does not land`);
-    take = recovered;
+    take = (await client.recover(id)).take;
   } finally {
     client.close();
   }
-  return { take, landed: await landTake(root, take, options) };
+  return { take, landed: await landAnyTake(root, take, options) };
 }
 
 // `field record --land <id>`: a transaction the daemon finalized but
@@ -418,9 +446,9 @@ export async function landRecording(
   root: string,
   id: string,
   options: LandOptions = {},
-): Promise<{ take: Take; landed: LandedTake }> {
+): Promise<{ take: AnyTake; landed: LandedTake }> {
   const take = readTransaction(root, id);
-  return { take, landed: await landTake(root, take, options) };
+  return { take, landed: await landAnyTake(root, take, options) };
 }
 
 // One line per transaction for --list and for the report after a take.

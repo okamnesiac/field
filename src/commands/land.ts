@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, wr
 import { join } from 'node:path';
 import { Document, isSeq, parseDocument } from 'yaml';
 import { readWavHeader } from '../audio/wav.js';
-import { takeSchema, type Take } from '../audiod/protocol.js';
+import { anyTakeSchema, midiTakeLineSchema, type AnyTake, type MidiTake, type Take } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { generatorName, placedWindow } from '../generators/stem.js';
 import { sha256File } from '../hash.js';
@@ -10,6 +10,7 @@ import { parseLabel, SONG_OUTPUT_NAME } from '../labels.js';
 import { takenSongNames } from '../model/namespace.js';
 import { loadProject, recordTakesPath, type LoadedProject, type LoadedSong } from '../model/project.js';
 import { recordTakesOrder, recordTakesSchema, type InputEntry, type RecordedTake } from '../schema/index.js';
+import { formatNotesFile, notesFromMessages, type CapturedMessage } from '../schema/notes.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
 import { appendLedgerRow, openLedger } from './import.js';
@@ -118,13 +119,14 @@ export interface LandedTake {
   placements: number; // how many times the song places the track
   frames: number;
   sampleRate: number;
+  events?: number; // a MIDI take's captured messages
 }
 
 // A finalized transaction's manifest, read back from disk for --land.
-export function readTransaction(root: string, id: string): Take {
+export function readTransaction(root: string, id: string): AnyTake {
   const path = join(root, '.field', 'recording', id, 'manifest.json');
   if (!existsSync(path)) throw new Error(`no recording transaction ${id}`);
-  const take = takeSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  const take = anyTakeSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
   if (!take.complete) {
     throw new Error(`${id} is not complete — field record --recover ${id} finalizes it first`);
   }
@@ -141,7 +143,23 @@ function musicalPosition(meter: MeterMap, ticks: number): number[] {
   return parts;
 }
 
-export async function landTake(root: string, take: Take, options: LandOptions = {}): Promise<LandedTake> {
+// What every take shares on its way into the project, whatever it holds:
+// the checks, the node it lands in, the ledger it pins in, and where it
+// sits on the recording track.
+interface Landing {
+  root: string;
+  take: AnyTake;
+  node: RecordNode;
+  songDir: string;
+  ledger: ReturnType<typeof openLedger>['doc'];
+  trackRate: number;
+  startedAt: number;
+  windowStart: number;
+  placements: number;
+  position: number[] | undefined;
+}
+
+function beginLanding(root: string, take: AnyTake): Landing {
   if (!take.complete || take.frames === undefined) {
     throw new Error(`${take.id} is not complete — field record --recover ${take.id} finalizes it first`);
   }
@@ -150,24 +168,28 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   if (errors.length > 0) {
     throw new Error(`project has errors (field check) — fix them before landing ${take.id}`);
   }
-  const { song, trackName, node, entry } = recordNodeFor(project, take.track);
+  const node = recordNodeFor(project, take.track);
+  const { song, trackName, entry } = node;
+  const midi = 'kind' in take;
+  // The entry's instrument decides the kind of take it records
+  // (keyboard-instrument.md §12.2), so a take of the other kind has no
+  // business landing in it.
+  if (midi && entry.record?.instrument === undefined) {
+    throw new Error(
+      `${take.id} is a MIDI take, and ${trackName}'s record entry names no instrument to play it — ` +
+        `give it one, as record: { instrument: <name> }`,
+    );
+  }
+  if (!midi && entry.record?.instrument !== undefined) {
+    throw new Error(`${take.id} is an audio take, and ${trackName}'s record entry records MIDI for ${entry.record.instrument}`);
+  }
   const songDir = join(root, song.dir);
   const track = song.tracks.find((t) => t.data.name === trackName)!.data;
-
-  // The bytes, into the song's ledger under the record node's directory.
-  const source = join(root, take.file);
-  if (!existsSync(source)) throw new Error(`${take.file} is missing — nothing to land`);
+  if (!existsSync(join(root, take.file))) throw new Error(`${take.file} is missing — nothing to land`);
   const { doc: ledger, assets } = openLedger(songDir);
   if (assets.some((a) => a.name === take.id) || takenSongNames(songDir).has(take.id)) {
     throw new Error(`"${take.id}" is already a name in ${song.name} — was this take landed already?`);
   }
-  const file = `audio/${node}/${take.id}.wav`;
-  const dest = join(songDir, 'audio', node, `${take.id}.wav`);
-  mkdirSync(join(songDir, 'audio', node), { recursive: true });
-  copyFileSync(source, dest);
-  const header = readWavHeader(dest);
-  const sha256 = await sha256File(dest);
-  const bytes = statSync(dest).size;
 
   // The record: placement counted from the record entry's own window,
   // at the track's rate — the same reading the graph makes (graph.ts
@@ -176,9 +198,6 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   // moves its takes. The daemon's start is on the bed's timeline at the
   // bed's rate; the track's origin on that timeline comes off, the rate
   // changes, then the entry's window start comes off in track samples.
-  // Latency is the device's declared round trip (§12.3 — input plus
-  // output, which is what a performer hearing the interface's direct
-  // path actually runs behind), scaled from device samples the same way.
   const songRate = song.song?.data.rate ?? project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
   const trackRate = track.rate ?? songRate;
   const timelineRate = take.timeline_rate ?? take.sample_rate;
@@ -197,8 +216,6 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
       : entry.anchor === 'absolute'
         ? entry.at
         : 0;
-  const startedAt = onTrack - windowStart;
-  const latency = Math.round(((take.input_latency + take.output_latency) * trackRate) / take.sample_rate);
   // What the song's map said at capture, when the bed was the song —
   // its live session, or an artifact of it (a stem, a take) — and not
   // when it was some other file.
@@ -212,23 +229,28 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
           Math.round(new TempoMap(song.time.tempo, timelineRate).samplesToTicks(startedOnBed)),
         )
       : undefined;
-  const row: RecordedTake = {
-    asset: take.id,
-    started_at_samples: startedAt,
-    ...(position !== undefined ? { musical_position: position } : {}),
-    latency,
-    device: take.device,
-    input: take.input,
-    ...(options.monitoring !== undefined ? { monitoring: options.monitoring } : {}),
-    ...(options.consolePreset !== undefined ? { console_preset: options.consolePreset } : {}),
-    recorded_at: take.started_wall,
+  return {
+    root,
+    take,
+    node,
+    songDir,
+    ledger,
+    trackRate,
+    startedAt: onTrack - windowStart,
+    windowStart,
+    placements: origin.placements,
+    position,
   };
+}
 
-  // Ledger first, then the row that names it, then the transaction goes:
-  // at every point a crash leaves a project `check` can describe — an
-  // orphan file, a pinned asset no row names — rather than a row whose
-  // bytes are not there.
-  appendLedgerRow(songDir, ledger, { name: take.id, file, sha256, bytes, header });
+// Ledger first, then the row that names it, then the transaction goes:
+// at every point a crash leaves a project `check` can describe — an
+// orphan file, a pinned asset no row names — rather than a row whose
+// bytes are not there.
+function finishLanding(landing: Landing, pin: Parameters<typeof appendLedgerRow>[2], row: RecordedTake): void {
+  const { root, take, songDir, ledger } = landing;
+  const node = landing.node.node;
+  appendLedgerRow(songDir, ledger, pin);
   const takesPath = recordTakesPath(songDir, node);
   let doc: Document;
   if (existsSync(takesPath)) {
@@ -249,19 +271,92 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   canonicalizeDocument(doc, recordTakesOrder);
   writeFileSync(takesPath, stringifyDocument(doc));
   rmSync(join(root, '.field', 'recording', take.id), { recursive: true, force: true });
+}
 
+function landed(landing: Landing, file: string, row: RecordedTake, frames: number, sampleRate: number): LandedTake {
   return {
-    song: song.name,
-    track: trackName,
-    node,
-    asset: take.id,
+    song: landing.node.song.name,
+    track: landing.node.trackName,
+    node: landing.node.node,
+    asset: landing.take.id,
     file,
     row,
-    placedAt: windowStart + startedAt - latency,
-    placements: origin.placements,
-    frames: header.frames,
-    sampleRate: header.sampleRate,
+    placedAt: landing.windowStart + row.started_at_samples - row.latency,
+    placements: landing.placements,
+    frames,
+    sampleRate,
   };
+}
+
+export async function landTake(root: string, take: Take, options: LandOptions = {}): Promise<LandedTake> {
+  const landing = beginLanding(root, take);
+  const { node } = landing.node;
+
+  // The bytes, into the song's ledger under the record node's directory.
+  const file = `audio/${node}/${take.id}.wav`;
+  const dest = join(landing.songDir, 'audio', node, `${take.id}.wav`);
+  mkdirSync(join(landing.songDir, 'audio', node), { recursive: true });
+  copyFileSync(join(root, take.file), dest);
+  const header = readWavHeader(dest);
+  const sha256 = await sha256File(dest);
+  const bytes = statSync(dest).size;
+
+  // Latency is the device's declared round trip (recording.md §12.3 —
+  // input plus output, which is what a performer hearing the interface's
+  // direct path actually runs behind), scaled from device samples to the
+  // track's.
+  const latency = Math.round(((take.input_latency + take.output_latency) * landing.trackRate) / take.sample_rate);
+  const row: RecordedTake = {
+    asset: take.id,
+    started_at_samples: landing.startedAt,
+    ...(landing.position !== undefined ? { musical_position: landing.position } : {}),
+    latency,
+    device: take.device,
+    input: take.input,
+    ...(options.monitoring !== undefined ? { monitoring: options.monitoring } : {}),
+    ...(options.consolePreset !== undefined ? { console_preset: options.consolePreset } : {}),
+    recorded_at: take.started_wall,
+  };
+  finishLanding(landing, { name: take.id, file, sha256, bytes, header }, row);
+  return landed(landing, file, row, header.frames, header.sampleRate);
+}
+
+// A MIDI take (keyboard-instrument.md §12.1, §12.2): the captured messages
+// pair into a notes file, written once by its one writer and pinned in the
+// ledger by hash like any take, with no WAV facts. Its latency is the
+// output latency alone: a player presses a key in time with what they
+// hear, which runs behind the playhead by that much.
+export async function landMidiTake(root: string, take: MidiTake): Promise<LandedTake> {
+  const landing = beginLanding(root, take);
+  const { node } = landing.node;
+  const messages: CapturedMessage[] = readFileSync(join(root, take.file), 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => midiTakeLineSchema.parse(JSON.parse(line)));
+  const notes = notesFromMessages(messages, take.frames!, take.sample_rate);
+
+  const file = `audio/${node}/${take.id}.notes.yaml`;
+  const dest = join(landing.songDir, 'audio', node, `${take.id}.notes.yaml`);
+  mkdirSync(join(landing.songDir, 'audio', node), { recursive: true });
+  writeFileSync(dest, formatNotesFile(notes));
+  const sha256 = await sha256File(dest);
+  const bytes = statSync(dest).size;
+
+  const row: RecordedTake = {
+    asset: take.id,
+    started_at_samples: landing.startedAt,
+    ...(landing.position !== undefined ? { musical_position: landing.position } : {}),
+    latency: Math.round((take.output_latency * landing.trackRate) / take.sample_rate),
+    sources: take.sources,
+    recorded_at: take.started_wall,
+  };
+  finishLanding(landing, { name: take.id, file, sha256, bytes }, row);
+  return { ...landed(landing, file, row, take.frames!, take.sample_rate), events: messages.length };
+}
+
+// Lands either kind of take, by what its manifest says it is.
+export function landAnyTake(root: string, take: AnyTake, options: LandOptions = {}): Promise<LandedTake> {
+  return 'kind' in take ? landMidiTake(root, take) : landTake(root, take, options);
 }
 
 // `field choose <song>/<node> --take <name>`: repoint which take the
