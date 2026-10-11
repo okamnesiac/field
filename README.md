@@ -180,6 +180,7 @@ carry their own terms:
   GPLv3 or Steinberg's proprietary VST3 license.
 
 A commercial JUCE license does not cover the VST3 SDK. Unless you hold
-the commercial license for each, a `field-audiod` binary you build or
-distribute is under copyleft terms: AGPLv3 for JUCE and GPLv3 for the
-VST3 SDK, so anyone who receives it is entitled to its source.
+both a commercial JUCE license and Steinberg's proprietary VST3
+license, a `field-audiod` binary you build or distribute is under
+copyleft terms: AGPLv3 for JUCE and GPLv3 for the VST3 SDK, so anyone
+who receives it is entitled to its source.
