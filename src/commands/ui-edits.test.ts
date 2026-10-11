@@ -20,6 +20,22 @@ import {
 
 const track = (lines: string[]) => lines.join('\n') + '\n';
 
+// One song clock for every placement test: 120 bpm in 4/4 at 48 kHz, so
+// a bar is 96000 samples and 3840 ticks.
+const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
+const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+const barSamples = 96000;
+const barTicks = 3840;
+
+// A parsed entry with every default the schema fills, as the server
+// hands the edit functions; tests name only what they set.
+const full = (over: Record<string, unknown>) =>
+  ({
+    at: 0, anchor: 'musical', source_offset: 0, slip: 0,
+    gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
+    ...over,
+  }) as unknown as InputEntry;
+
 describe('placement edits', () => {
   it('writes a set value and deletes a default, leaving the file minimal', () => {
     const raw = track(['name: main', 'inputs:', '  - track: bass']);
@@ -40,14 +56,10 @@ describe('placement edits', () => {
 });
 
 describe('placement moves', () => {
-  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
-  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
-  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
   const entry = (at: number) => ({ track: 'hats', at, anchor: 'musical' }) as InputEntry;
 
   it('keeps a musical array spelling, and the comment on its line', () => {
     const raw = track(['name: drums', 'inputs:', '  - track: hats', '    at: [2] # pickup wants the second bar']);
-    const barTicks = tempo.samplesToTicks(barSamples);
     const moved = applyMove(raw, 0, entry(barTicks), barSamples, tempo, meter);
     if (!moved.ok) throw new Error(moved.message);
     expect(moved.text).toContain('at: [3] # pickup wants the second bar');
@@ -76,17 +88,6 @@ describe('placement moves', () => {
 });
 
 describe('placement splits', () => {
-  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
-  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
-  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
-  const barTicks = 3840;
-  const full = (over: Record<string, unknown>) =>
-    ({
-      at: 0, anchor: 'musical', source_offset: 0, slip: 0,
-      gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
-      ...over,
-    }) as unknown as InputEntry;
-
   it('cuts a windowed musical clip into two that add back up', () => {
     const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
     const parsed = full({ audio: 'riff', duration: barTicks * 2 });
@@ -215,17 +216,6 @@ describe('placement splits', () => {
 });
 
 describe('placement stretches', () => {
-  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
-  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
-  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
-  const barTicks = 3840;
-  const full = (over: Record<string, unknown>) =>
-    ({
-      at: 0, anchor: 'musical', source_offset: 0, slip: 0,
-      gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
-      ...over,
-    }) as unknown as InputEntry;
-
   it('trims the end to the length the drag drew, and touches nothing else', () => {
     const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
     const parsed = full({ audio: 'riff', duration: barTicks * 2 });
