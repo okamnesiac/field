@@ -105,6 +105,7 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
     delete process.env['FIELD_AUDIOD_NULL'];
     delete process.env['FIELD_AUDIOD_SERVICE_STALL_MS'];
     delete process.env['FIELD_AUDIOD_OPEN_STALL_MS'];
+    delete process.env['FIELD_AUDIOD_LATCH_STALL_MS'];
     try {
       const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
       await client.quit();
@@ -118,20 +119,26 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
   it('a take at `at` on a bed already playing starts there, however long its transactions take to open', { timeout: 15_000 }, async () => {
     // Opening a take's transactions outlasts many blocks here, as a slow
     // disk would; a bed already playing must not carry the take past `at`
-    // meanwhile, live or from a file.
+    // meanwhile, live or from a file. Each block also waits between its
+    // pull and its latch, which is where record's jump can land, so a
+    // block that read its position before the jump must not latch it.
     process.env['FIELD_AUDIOD_OPEN_STALL_MS'] = '200';
+    process.env['FIELD_AUDIOD_LATCH_STALL_MS'] = '4';
     const client = await AudiodClient.connect(root, { nullOutput: true });
     try {
       const { session } = await compileSession(root, 'creek');
       for (const load of [() => client.session(session), () => client.load(join(root, 'songs/creek/audio/bed/bed.wav'))]) {
         await load();
-        await client.play();
-        await sleep(300);
         await client.arm('//songs/creek/track:main', 1);
-        const started = await client.record(24000);
-        expect(started.started_at_samples).toBe(24000);
-        const take = (await client.stop()).take!;
-        expect(take.started_at_samples).toBe(24000);
+        for (let i = 0; i < 4; i++) {
+          await client.locate(NULL_RATE * 3);
+          await client.play();
+          await sleep(150);
+          const started = await client.record(24000);
+          expect(started.started_at_samples).toBe(24000);
+          const take = (await client.stop()).take!;
+          expect(take.started_at_samples).toBe(24000);
+        }
         // An `at` past the bed's end is refused once the transactions are
         // open, and leaves none of them behind.
         const before = (await client.recordings()).recordings.length;
@@ -139,6 +146,24 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
         expect((await client.recordings()).recordings).toHaveLength(before);
         await client.disarm();
       }
+    } finally {
+      client.close();
+    }
+  });
+
+  it('a loop take refused at its jump leaves the session unlooped, as a stop does', { timeout: 15_000 }, async () => {
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    try {
+      await client.session((await compileSession(root, 'creek')).session);
+      await client.arm('//songs/creek/track:main', 1);
+      // The region fits, so record sets it, and the pre-roll before zero
+      // is refused at the jump, once the transactions are open.
+      await expect(client.record(24000, -100, 48000, true)).rejects.toThrow('locate out of range');
+      const status = await client.status();
+      expect(status.looping).toBe(false);
+      expect(status.loop_from).toBeUndefined();
+      expect(status.record?.state).toBe('armed');
+      await client.disarm();
     } finally {
       client.close();
     }

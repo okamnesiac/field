@@ -83,7 +83,10 @@ Player::Player (bool useNullOutput)
                           : 0),
       openStallMs (useNullOutput
                        ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_OPEN_STALL_MS", "0").getIntValue()
-                       : 0)
+                       : 0),
+      latchStallMs (useNullOutput
+                        ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_LATCH_STALL_MS", "0").getIntValue()
+                        : 0)
 {
     formatManager.registerBasicFormats();
 }
@@ -882,6 +885,7 @@ void Player::rebuildLiveConverter()
 
 juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
 {
+    blockSawRequest = false;
     {
         // The pointer is only readable under the lock (cursor's finding:
         // checking it first races a message-thread load). A missed lock
@@ -893,6 +897,9 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
                 std::fill (out[c], out[c] + n, 0.0f);
             return -1;
         }
+        // What the latch may act on: a request this pull saw, so the
+        // position it returns is from after record's jump to `at`.
+        blockSawRequest = captureStartRequested.load();
         if (liveSession != nullptr)
         {
             // The song-timeline position this block starts at — wrapped
@@ -968,24 +975,28 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
             // or a tick on: the first playing block is where both start.
             return -1;
         }
+        if (readerSource == nullptr)
+        {
+            for (int c = 0; c < numChannels; ++c)
+                std::fill (out[c], out[c] + n, 0.0f);
+            return -2; // no bed: the tap places against the free clock
+        }
+        // A file bed's position and pull under the same lock as a live
+        // one's, so record's jump falls wholly before or after them.
+        const juce::int64 position = transport.isPlaying() ? positionSamples() : -1;
+        juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
+        juce::AudioSourceChannelInfo info (&buffer, 0, n);
+        transport.getNextAudioBlock (info);
+        return position;
     }
-    if (readerSource == nullptr)
-    {
-        for (int c = 0; c < numChannels; ++c)
-            std::fill (out[c], out[c] + n, 0.0f);
-        return -2; // no bed: the tap places against the free clock
-    }
-    const juce::int64 position = transport.isPlaying() ? positionSamples() : -1;
-    juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
-    juce::AudioSourceChannelInfo info (&buffer, 0, n);
-    transport.getNextAudioBlock (info);
-    return position;
 }
 
 void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
 {
     const double blockStartMs = juce::Time::getMillisecondCounterHiRes();
     const juce::int64 position = pullAudio (out, numOutputs, n);
+    if (latchStallMs > 0)
+        std::this_thread::sleep_for (std::chrono::milliseconds (latchStallMs));
     const juce::int64 freeBefore = freeClock.fetch_add (n);
     // The metronome rides the output after the pull, positioned by the
     // same block-start position the capture latches on; with no bed it
@@ -1052,6 +1063,11 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
     int from = 0; // the first frame of this block the take includes
     if (target != nullptr && captureStartRequested.load())
     {
+        // Armed after this block's pull: its position may be from before
+        // record's jump, so the next block, which saw the request, starts
+        // the take.
+        if (! blockSawRequest)
+            return;
         // A missed live lock made this block silence with no position to
         // latch; the take starts on the next block instead, so the latch
         // and the first pushed samples always describe the same instant.
@@ -1197,6 +1213,11 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
     };
     if (captureStartRequested.load())
     {
+        if (! blockSawRequest)
+        {
+            drainMidiArrivals (discard);
+            return;
+        }
         int from = 0;
         const juce::int64 startAt = captureStartAt.load();
         if (startAt >= 0)
@@ -1824,6 +1845,13 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
         standbyCapture = nullptr;
         captureStartRequested = false;
         captureLoop = false; // or every later stop would end a loop that never ran
+        // The region was the refused take's, as stop clears it.
+        if (loop && liveSession != nullptr)
+        {
+            const juce::ScopedLock guard (liveLock);
+            liveSession->setLoopRegion (0, 0);
+            liveLoop = liveSession->looping();
+        }
         for (int c = 0; c < companionCount; ++c)
         {
             companions[(size_t) c].audio = nullptr;

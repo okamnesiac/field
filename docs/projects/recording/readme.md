@@ -605,7 +605,10 @@ What landed, and the decisions it made:
    bed already rolling, `record` jumped to `at` before it opened the
    take's transactions, so the blocks that played meanwhile started the
    first take after `at`. It now opens them first, then jumps and arms
-   the start in one hold of the lock the callback only tries.
+   the start in one hold of the lock the callback only tries, and a
+   block latches the start only when its pull saw it armed under that
+   lock, which a file bed's pull now takes too. A loop take refused
+   there clears the region it set, as a stop does.
 5. **`field record --loop` lands takes as they arrive**, each `take`
    event landing in order while the next pass records, the last one
    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs

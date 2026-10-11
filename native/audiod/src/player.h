@@ -274,6 +274,10 @@ private:
     // transactions, from FIELD_AUDIOD_OPEN_STALL_MS, so a test can make
     // the open outlast the blocks a rolling bed plays meanwhile.
     const int openStallMs;
+    // And between a block's pull and its latch, from
+    // FIELD_AUDIOD_LATCH_STALL_MS, so a test can land record's hold
+    // between the two.
+    const int latchStallMs;
     // locate without its refusal under a take: record jumps to `at` once
     // its transactions are open.
     juce::String seek (juce::int64 sample);
@@ -373,6 +377,11 @@ private:
     // The 1-based inputs open on the device, ascending (message thread).
     juce::Array<int> armedInputs;
     std::atomic<bool> captureStartRequested { false };
+    // Audio thread: whether this block's pull saw captureStartRequested
+    // set, under liveLock. record arms the request and jumps to `at` in one
+    // hold of that lock, so a block that saw it pulled after the jump, and
+    // one that did not may have read the position from before it.
+    bool blockSawRequest = false;
     std::atomic<bool> captureStarted { false };
     // The position the requested take waits for (record's `at` when a
     // `start` was given); -1 means the next block, whatever its position.
