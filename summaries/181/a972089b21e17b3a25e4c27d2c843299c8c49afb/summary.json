@@ -1,0 +1,179 @@
+{
+ "version": 1,
+ "name": "Tracker and fourths keymaps",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 181,
+  "title": "Ship the tracker and fourths keymaps (keyboard-instrument.md chunk 3)",
+  "head": "a972089b21e17b3a25e4c27d2c843299c8c49afb",
+  "headRef": "keys/chunk-3",
+  "base": "f8b0f8a7b3217d3500ab50edd2ba1be2056a3656",
+  "baseRef": "keys/chunk-2",
+  "basePr": 179
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI instrument. It publishes a virtual MIDI source named <code>Field Keys</code> and sends a note each time you press a key. A <em>keymap</em>, a small YAML file, decides what each physical key plays. Before this pull request one keymap shipped with Field: <code>musical-typing</code>, a copy of Logic Pro's Musical Typing, which reaches only 18 notes before you transpose.",
+   "This pull request adds the two other built-in keymaps that the keyboard-instrument plan chose. Both widen the range, and both are plain data files in <code>keymaps/</code>, the directory where <code>field keys</code> already looks up a keymap given by bare name. No program code changes.",
+   "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Keymap</th><th>What it plays</th><th>Range</th></tr></thead><tbody><tr><td><code>tracker</code></td><td>The layout music trackers use, from FastTracker 2 to Renoise. The bottom letter row and the top letter row are two piano octaves, each with its black keys on the row above it. <code>Z</code> plays C3 (MIDI 48) and <code>Q</code> plays C4 (60).</td><td class=\"r\">32 notes</td></tr><tr><td><code>fourths</code></td><td>An isomorphic grid. Each key to the right is a semitone higher, and each row is a perfect fourth (5 semitones) above the row below, as on a bass guitar. A chord shape plays the same in every key. <code>Z</code> plays C3 (48).</td><td class=\"r\">27 notes</td></tr></tbody></table></div>",
+   "The text of both files is not new. Chunk 1 carried it as inline fixtures in the schema tests, to prove the keymap format could express these keymaps before they shipped. This pull request moves that text into <code>keymaps/</code>, points the tests at the shipped files, and describes both keymaps in <code>docs/keys.md</code>. The plan records the chunk as built in a new §11."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Position.</b> A physical key, named by its W3C <code>KeyboardEvent.code</code> value, such as <code>KeyZ</code> or <code>Comma</code>. The name comes from the US key in that place, but it means the place, so a keymap plays the same under Dvorak or AZERTY.</li><li><b>Base and offset.</b> A key plays MIDI note <code>base</code> plus its offset in semitones. Both new keymaps set <code>base: 48</code>.</li><li><b>Scientific pitch notation.</b> How <code>--print</code> names notes: MIDI 60 is C4, so 48 is C3 and 72 is C5. Logic numbers its octaves one lower and calls MIDI 60 C3.</li><li><b>Grid.</b> A rule that gives whole rows their offsets: <code>column</code> semitones per key to the right, plus <code>row</code> semitones per row up.</li><li><b>Built-in.</b> A keymap file in <code>keymaps/</code>. A bare name such as <code>--keymap tracker</code> only ever names one.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>Four Projector reviews, all clean, with no finding threads. The first, at <code>57c18fb</code>, made two suggestions about the plan's §11 record. One said the diagram row pointed at tables §11 does not have, and the other said §11 did not record criteria 28 and 29 at a real keyboard as still owed.</li><li>The second commit, <code>a4a55a1</code>, answers both in §11, and the review of <code>a4a55a1</code> confirmed it.</li><li>The third and fourth heads, <code>f2b7c2b</code> and <code>a972089</code>, rebase the same two commits onto <code>keys/chunk-2</code> as chunks 1 and 2 gain fixes. This pull request's own diff is unchanged, and both reviews were clean.</li><li>Criteria 28 and 29 ran in a pseudo-terminal through the real helper and CoreMIDI. A run at a real keyboard is still owed, and §11 now says so.</li><li>This pull request is stacked on #179 (chunk 2, the voice host), which is stacked on #178 (chunk 1, <code>field keys</code> and the keymap format). This page shows only chunk 3's diff.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "keymaps",
+   "title": "Two keymaps ship as data files",
+   "kicker": "The tracker and fourths keymaps, as the YAML files that field keys loads by bare name",
+   "intro": [
+    "Each file is a keymap in the format chunk 1 introduced. <code>field keys --keymap tracker</code> finds <code>keymaps/tracker.yaml</code> because a bare name always names a file in that directory. The schema in <code>src/schema/keymap.ts</code> checks each file when it loads.",
+    "The two files spell their notes in different ways:",
+    "<ul><li><b><code>tracker</code> lists every key.</b> Its <code>notes</code> map gives each position an offset from C3. The bottom row's white keys and the home row's black keys make the lower octave, and the top row's white keys and the number row's black keys make the upper octave. A position with no black key above it on a piano, such as <code>F</code> or <code>4</code>, stays unbound.</li><li><b><code>fourths</code> states a rule.</b> Its one-line <code>grid</code> gives each key the offset <code>column index × 1 + row index × 5</code>, over the bottom, home, top, and number rows, from lowest to highest.</li></ul>",
+    "Both keymaps play notes on the bottom row and the number row, which <code>musical-typing</code> keeps for its controls. So their controls move to keys that play no note: the left and right arrows transpose by an octave, the up and down arrows change velocity by 20, and <code>Space</code> holds the sustain pedal. Neither binds pitch bend or modulation, a cost the plan accepted for these two keymaps."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Both files are byte-identical to the <code>TRACKER</code> and <code>FOURTHS</code> fixture strings in the base branch's <code>src/schema/keymap.test.ts</code>, compared by script. <code>fourths.yaml</code> also matches the example in plan §2.4."
+    },
+    {
+     "kind": "context",
+     "text": "The rebase brought in a base change to the schema: named grid rows now count when it looks for a position given twice. The four rows that <code>fourths</code> names share no key, so the file still validates, and both diagrams render the same as before."
+    }
+   ],
+   "files": [
+    {
+     "path": "keymaps/tracker.yaml",
+     "note": "The tracker layout, spelled key by key: 37 positions that play 32 distinct notes, from C3 to G5.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Every binding checked by hand against a piano. The white keys <code>Z X C V B N M , . /</code> play offsets 0, 2, 4, 5, 7, 9, 11, 12, 14, and 16, and <code>Q W E R T Y U I O P [ ]</code> play 12 to 31 on the white notes. Every black key sits between the two white keys a semitone either side of it. The rendered <code>--print</code> diagram matches.",
+       "line": 5
+      },
+      {
+       "kind": "context",
+       "text": "The lower octave runs five notes past its top: <code>Comma</code> to <code>Slash</code> play C4 to E4, the same notes as <code>KeyQ</code> to <code>KeyE</code>. Two keys that share a note keep it sounding until the last of them is released, as chunk 1's session already handles.",
+       "line": 17
+      },
+      {
+       "kind": "verify",
+       "text": "<code>KeyI</code> plays 48 + 24 = 72 (C5), the third note criterion 28 expects. The schema test asserts it, and changing the value to 23 makes that test fail.",
+       "line": 34
+      },
+      {
+       "kind": "context",
+       "text": "These five controls are the same in both new keymaps. Transpose moves every new note by 12 semitones. <code>field keys</code> refuses a transpose that would push any bound note outside MIDI's 0 to 127, so <code>tracker</code> reaches four octaves up and four down.",
+       "line": 43
+      }
+     ]
+    },
+    {
+     "path": "keymaps/fourths.yaml",
+     "note": "The fourths layout as one grid rule over the four letter and number rows, with the same controls as tracker.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Expanded by hand. The rows have 10, 11, 12, and 12 keys, so the offsets run 0 to 9, 5 to 15, 10 to 21, and 15 to 26: 27 distinct notes from 48 to 74. <code>KeyZ</code>, <code>KeyA</code>, <code>KeyQ</code>, and <code>Digit1</code> play 48, 53, 58, and 63. <code>Z B D</code> play C E G (48, 52, 55), and one key to the right, <code>X N F</code> play 49, 53, 56, as criterion 29 expects.",
+       "line": 4
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "The tests read the shipped files",
+   "kicker": "Tests that carried the keymaps as inline fixtures now load them from keymaps/",
+   "intro": [
+    "In the base branch, <code>src/schema/keymap.test.ts</code> held <code>tracker</code> and <code>fourths</code> as inline YAML strings. Now a small <code>builtin(name)</code> helper reads <code>keymaps/&lt;name&gt;.yaml</code>, so the same assertions run against the files that ship. These include the <code>fourths</code> test's existing checks of criterion 29's two chords and the 27-note total.",
+    "<code>src/keys/keymap.test.ts</code>, which covers how <code>field keys</code> finds a keymap, now pins the list of built-ins to exactly three names. A new test resolves each built-in by its bare name and loads it, and checks that the file's <code>name</code> field matches its file name."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "<code>pnpm typecheck</code> exits 0 at this head, and the schema, keymap, print, and session test files pass 49 tests. The session tests are included because the stack's rebases changed the session code beneath this pull request."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/schema/keymap.test.ts",
+     "note": "The schema tests drop the inline fixtures and read the built-in files through a builtin(name) helper.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This test now loads the shipped <code>fourths.yaml</code>. Its unchanged assertions below check criterion 29's chord shape, so a wrong grid rule in the shipped file fails here before anyone plays it.",
+       "line": 53
+      }
+     ]
+    },
+    {
+     "path": "src/keys/keymap.test.ts",
+     "note": "The loader tests pin the three built-in names and load every built-in by bare name.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "<code>toEqual</code> pins the exact list, so a fourth built-in must update this test. <code>builtinKeymapNames()</code> sorts the names, which fixes this order.",
+       "line": 35
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The docs describe both keymaps, and the plan records the chunk",
+   "kicker": "A new section of docs/keys.md, and §11 of the keyboard-instrument plan",
+   "intro": [
+    "<code>docs/keys.md</code> is the user guide for <code>field keys</code>. It gains a section, <b>The other built-in keymaps</b>, between the section on the default keymap and the section on choosing one. A table gives each keymap's layout and range, and the section points to <code>--print</code> to see either keymap drawn on a keyboard.",
+    "The keyboard-instrument plan gains §11, <b>Chunk 3 as built</b>, which follows the pattern of §9 and §10 for the earlier chunks. It records that the files ship exactly as the fixtures were, and lists what was checked: the tests, criteria 28 and 29 in a pseudo-terminal through the real helper and CoreMIDI, and the notes each <code>--print</code> diagram shows. A closing line records what is still owed: criteria 28 and 29 at a real keyboard in Ghostty and iTerm2. The plan stays <code>in-progress</code>, because chunk 4, recording, remains."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "A new section that describes tracker and fourths, with a table of what each plays and its range.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The section matches the files: C3 on <code>Z</code> in both keymaps, octave transpose and velocity on the arrows, and sustain held on <code>Space</code>. No other doc names <code>musical-typing</code> as the only built-in.",
+       "line": 205
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "§11 records chunk 3 as built: the files, how each check ran, and what is still owed.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The letters in these rows are what this Mac's Colemak-based layout types at each position. Under Colemak, <code>z b s</code> are <code>KeyZ KeyB KeyD</code>, <code>x k t</code> are <code>KeyX KeyN KeyF</code>, and <code>u</code> is <code>KeyI</code>, so the rows name the positions the criteria ask for.",
+       "line": 1004
+      },
+      {
+       "kind": "verify",
+       "text": "The notes named here match the diagrams that <code>loadKeymap</code> and <code>printKeymap</code> render, the two calls <code>--print</code> makes: MIDI 48 (C3) under <code>KeyZ</code> in both diagrams, 60 (C4) under <code>KeyQ</code> and <code>Comma</code> in <code>tracker</code>, and 53, 58, and 63 (F3, A#3, D#4) under <code>KeyA</code>, <code>KeyQ</code>, and <code>Digit1</code> in <code>fourths</code>.",
+       "line": 1005
+      },
+      {
+       "kind": "context",
+       "text": "§9.3 and §10.4 record what the earlier chunks still owe, and this line does the same for chunk 3. A pseudo-terminal run proves the decoding, the positions, and the MIDI output, but not how Ghostty and iTerm2 report real key presses.",
+       "line": 1007
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
