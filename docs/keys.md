@@ -155,8 +155,9 @@ saving the file reloads it: the next key press uses the new keymap, and
 notes already sounding finish as they started. A controller you toggled
 on, such as this example's sustain, goes back to 0 on the reload, so the
 notes it was holding end. If the saved file has an error, `field keys`
-keeps the keymap it has and shows the error in the status line. `field keys --keymap ~/keymaps/mine.yaml --print` draws it
-without a supported terminal, which helps while you design one.
+keeps the keymap it has and shows the error in the status line.
+`field keys --keymap ~/keymaps/mine.yaml --print` draws it without a
+supported terminal, which helps while you design one.
 
 ### Fields
 
