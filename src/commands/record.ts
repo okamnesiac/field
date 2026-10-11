@@ -1,5 +1,5 @@
 import { AudiodClient } from '../audiod/client.js';
-import { takeSchema, type AudiodEvent, type RecordingEntry, type Take } from '../audiod/protocol.js';
+import { takeSchema, type AnyTake, type AudiodEvent, type RecordingEntry, type Take } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { expandPattern } from '../graph/graph.js';
 import { formatLabel, parsePattern } from '../labels.js';
@@ -276,10 +276,11 @@ async function captureTakes(
     const seen = new Set<string>();
     let queue: Promise<void> = Promise.resolve();
     let landedAny = false;
-    const landOnce = (take: Take): void => {
+    const landOnce = (take: AnyTake): void => {
       if (seen.has(take.id)) return;
       seen.add(take.id);
       queue = queue.then(async () => {
+        if ('kind' in take) throw new Error(`${take.id} is a MIDI take, which this path does not land`);
         await land(take);
         landedAny = true;
       });
@@ -401,7 +402,9 @@ export async function recoverRecording(
     if (!client.supports('record')) {
       throw new Error(`field-audiod ${client.daemonVersion} predates recording — field transport quit, then try again`);
     }
-    take = (await client.recover(id)).take;
+    const recovered = (await client.recover(id)).take;
+    if ('kind' in recovered) throw new Error(`${id} is a MIDI take, which this path does not land`);
+    take = recovered;
   } finally {
     client.close();
   }
@@ -421,7 +424,7 @@ export async function landRecording(
 }
 
 // One line per transaction for --list and for the report after a take.
-export function describeTake(take: Take | RecordingEntry, sampleRate?: number): string {
+export function describeTake(take: AnyTake | RecordingEntry, sampleRate?: number): string {
   const rate = take.sample_rate ?? sampleRate ?? DEFAULT_SAMPLE_RATE;
   const frames = 'frames' in take && take.frames !== undefined ? take.frames : (take as RecordingEntry).frames_on_disk;
   const seconds = frames !== undefined ? ` (${frames} frames, ${(frames / rate).toFixed(1)} s)` : '';

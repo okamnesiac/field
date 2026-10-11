@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
+  armMidiResponseSchema,
   armResponseSchema,
   devicesResponseSchema,
   errorResponseSchema,
@@ -257,6 +258,13 @@ export class AudiodClient extends EventEmitter {
       device !== undefined ? { track, input, device } : { track, input },
       armResponseSchema,
     );
+  }
+  // Arm for MIDI (keyboard-instrument.md §12.4, supports('record-midi')):
+  // every MIDI input the daemon can see, and no audio input. A take then
+  // records their messages; `record` and `stop` work as for audio, and
+  // loop takes are refused.
+  armMidi(track: string) {
+    return this.request('arm', { track, kind: 'midi' }, armMidiResponseSchema);
   }
   disarm() {
     return this.request('disarm', {}, okResponseSchema);

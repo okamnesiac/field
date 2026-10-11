@@ -97,7 +97,10 @@ jobs:
       # skips on a runner without the ALSA sequencer at /dev/snd/seq,
       # where `field-audiod --keys` cannot publish a virtual source. Each
       # of its cases skips by name, saying so, and fails rather than skips
-      # on any other machine where `--keys` reports an error.
+      # on any other machine where `--keys` reports an error. The MIDI
+      # take cases in src/commands/record-midi-daemon.test.ts skip here
+      # the same way, and its case for arming with no MIDI source runs
+      # only here, where the source list is reliably empty.
       - run: pnpm test
       # Python workers: pyright strict is the gate (ace-generation.md §3.4).
       # Only the dev group installs — the model environment (torch, mlx)
