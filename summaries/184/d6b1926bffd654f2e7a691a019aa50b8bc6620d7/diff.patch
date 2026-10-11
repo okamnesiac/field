@@ -1,0 +1,65 @@
+diff --git a/LICENSE b/LICENSE
+new file mode 100644
+index 0000000..0b624f6
+--- /dev/null
++++ b/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Amnesiac, LLC
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/README.md b/README.md
+index bf40574..427d06d 100644
+--- a/README.md
++++ b/README.md
+@@ -165,3 +165,21 @@ exposing the CLI's verbs to agents is planned.
+ Start at [docs/](docs/README.md) — the thesis and core concepts, with
+ the index to the rest: architecture, tracks, the project model, the
+ build graph, and the audio engine.
++
++## License
++
++Field's code is licensed under the [MIT License](LICENSE).
++
++The audio daemon, `field-audiod`, links two third-party codebases that
++carry their own terms:
++
++- **[JUCE](https://juce.com)**, licensed under AGPLv3 or a commercial
++  JUCE license.
++- **Steinberg's VST3 SDK**, compiled in so the daemon can host VST3
++  plugins. JUCE 8.0.4, the version the daemon pins, bundles it under
++  GPLv3 or Steinberg's proprietary VST3 license.
++
++A commercial JUCE license does not cover the VST3 SDK. Unless you hold
++the commercial license for each, a `field-audiod` binary you build or
++distribute is under copyleft terms: AGPLv3 for JUCE and GPLv3 for the
++VST3 SDK, so anyone who receives it is entitled to its source.
+diff --git a/package.json b/package.json
+index bc947ce..55f7612 100644
+--- a/package.json
++++ b/package.json
+@@ -2,6 +2,7 @@
+   "name": "field",
+   "version": "0.1.0",
+   "description": "Git-native, agent-operable music production system",
++  "license": "MIT",
+   "type": "module",
+   "bin": {
+     "field": "./dist/cli.js"
