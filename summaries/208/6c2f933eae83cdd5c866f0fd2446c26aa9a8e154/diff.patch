@@ -1,0 +1,170 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d40a7ce..e81d2ec 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -4,6 +4,12 @@ on:
+   push:
+     branches: [main]
+   pull_request:
++  # The Release workflow dispatches CI on each release branch it pushes.
++  # For a pull request that a workflow's own token opened, GitHub creates the
++  # pull_request run but holds it until someone approves it; a dispatched
++  # run needs no approval, so this is how a release pull request gets its
++  # checks unattended (docs/release.md).
++  workflow_dispatch:
+ 
+ # Two jobs: `linux` runs every gate, and `windows` runs the same suite
+ # without the Python gates (its own comment says why). There is no macOS
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 3050b1d..e7ca589 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -33,6 +33,7 @@ jobs:
+     if: github.event_name == 'workflow_dispatch'
+     runs-on: ubuntu-latest
+     permissions:
++      actions: write
+       contents: write
+       pull-requests: write
+     steps:
+@@ -61,19 +62,26 @@ jobs:
+ 
+           ## Testing
+ 
+-          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`. After the merge, the publish job runs \`node scripts/release.ts released\`, which exits 3 for an untagged version, and then \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
++          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`, and then dispatched CI on this branch, whose checks appear on this pull request. GitHub also holds a \`pull_request\` run of CI for approval here; leave it unapproved, because approving it runs every job a second time. After the merge, the publish job runs \`node scripts/release.ts released --since\` with the commit \`main\` held before the merge. That exits 3 because the merge raised the version to an untagged one, and the job then runs \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
+           EOF
+           # A pull request someone opened by hand from the branch after a failed run
+           # already carries the force-pushed commit.
+           if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+             echo "a pull request from $branch is already open"
+           elif ! gh pr create --base main --head "$branch" --title "Release $version" --body-file "$RUNNER_TEMP/body.md"; then
+-            # GitHub refuses unless the repository allows GitHub Actions to create
+-            # pull requests (Settings > Actions > General). The branch is pushed,
++            # GitHub refuses unless Actions may create pull requests, which an
++            # enterprise's policy must allow before its organization's and the
++            # repository's settings can (docs/release.md). The branch is pushed,
+             # so the pull request can be opened by hand.
+             echo "::error::could not open the pull request; open it from https://github.com/$REPO/compare/main...$branch?expand=1"
+             exit 1
+           fi
++          # For a pull request this job's token opened, GitHub creates CI's
++          # pull_request run but holds it until someone approves it. A
++          # workflow_dispatch run needs no approval, and its checks land on the
++          # branch's commit, which is the pull request's head, so CI runs
++          # unattended. Approving the held run as well would run CI twice.
++          gh workflow run ci.yml --ref "$branch"
+ 
+   publish:
+     if: github.event_name == 'push'
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 974c2e6..2b894ff 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -567,11 +567,31 @@ install would build the daemon with MSVC, as a Windows checkout does.
+   release pull request lowers the version, so it releases nothing
+   either. Tagging 0.1.0 as a baseline would also stop it, but that tag
+   would name a version nobody released.
+-- **This repository does not let GitHub Actions open pull requests**
+-  (`can_approve_pull_request_reviews` is `false` on 2026-10-11), so the
+-  propose job can push the release branch but not open its pull
+-  request. The job then fails with the link that opens it by hand, and
+-  `docs/release.md` names the setting.
++- **GitHub Actions may open pull requests only where the enterprise
++  allows it.** The first release run (38167355504) pushed
++  `release/v0.2.0` and then could not open its pull request, because the
++  `amnesiac` enterprise's policy forbade it, and an enterprise policy
++  overrides the organization's and the repository's settings. On
++  2026-10-11 the enterprise allowed it, the `okamnesiac` organization and
++  this repository were set to allow it, and a re-run opened #207.
++  `docs/release.md` names all three levels.
++- **A pull request the workflow opens gets no CI until someone approves
++  it.** For an event that a workflow's own token caused, GitHub creates
++  the `pull_request` run but holds it as `action_required`. #207's CI
++  run 38167745651 was held that way, and ran, and passed, only when
++  Justin approved it. `workflow_dispatch` and `repository_dispatch` are
++  exempt, so the propose job dispatches `ci.yml` on the release branch
++  after opening the pull request, and `ci.yml` accepts
++  `workflow_dispatch`. The checks land on the branch's commit, the pull
++  request's head. The held run still appears, and `docs/release.md` tells
++  the release's reviewer to leave it unapproved: its concurrency group,
++  `CI-refs/pull/<n>/merge`, differs from the dispatched run's
++  `CI-refs/heads/release/vX.Y.Z`, so approving it runs every job again.
++  Two alternatives lost. Approving the held run by hand needs no workflow
++  change, and lost because it is a click on every release, and Justin
++  asked for CI to run by itself. A token from a GitHub App would avoid
++  the hold, and lost because it needs an App and two secrets to do what
++  one extra trigger does.
+ 
+ ### 9.2 What was verified, and how
+ 
+diff --git a/docs/release.md b/docs/release.md
+index d61587b..bdcc94d 100644
+--- a/docs/release.md
++++ b/docs/release.md
+@@ -14,18 +14,30 @@ the GitHub release with notes generated from the merged pull requests.
+ 1. On GitHub, open **Actions > Release > Run workflow**, and choose which
+    part of the version to raise: `patch`, `minor`, or `major`.
+ 2. The workflow opens a pull request titled `Release X.Y.Z` that changes
+-   only the version in `package.json`. Review and merge it like any other
+-   pull request.
++   only the version in `package.json`, and starts CI on it. Review and
++   merge it like any other pull request.
+ 3. Merging is the decision to ship. The workflow's publish job sees the
+    new version on `main`, tags it, moves `v0`, and creates the GitHub
+    release.
+ 
+-The workflow can open the pull request only when the repository allows
+-GitHub Actions to create pull requests, under **Settings > Actions >
+-General > Workflow permissions**. Without that setting, the job pushes
+-the `release/vX.Y.Z` branch, fails, and prints the link that opens the
+-pull request by hand. Merging that pull request publishes the release
+-just the same.
++For a pull request that a workflow's own token opened, GitHub creates
++CI's `pull_request` run but holds it until someone approves it, and the
++pull request offers **Approve workflows to run**. Leave that run
++unapproved. The workflow dispatches CI on the release branch instead,
++because a `workflow_dispatch` run needs no approval, and its checks land
++on the branch's commit, which is the pull request's head. That is why
++`.github/workflows/ci.yml` lists `workflow_dispatch` among its triggers.
++Approving the held run as well would run every CI job a second time on
++the same commit.
++
++The workflow can open the pull request only when GitHub Actions may
++create pull requests. That is **Allow GitHub Actions to create and
++approve pull requests**, under **Workflow permissions**, at three
++levels, each of which must allow it before the one below can: the
++enterprise (for Field, `amnesiac`, under **Policies > Actions**), the
++organization, and the repository (each under **Settings > Actions >
++General**). Without it, the job pushes the `release/vX.Y.Z` branch,
++fails, and prints the link that opens the pull request by hand.
+ 
+ Only a merge that raises the version releases. A change to `package.json`
+ that leaves the version alone releases nothing, even while that version
+diff --git a/src/release.test.ts b/src/release.test.ts
+index 6504442..c8d6dc4 100644
+--- a/src/release.test.ts
++++ b/src/release.test.ts
+@@ -86,7 +86,12 @@ describe('the release version', () => {
+   });
+ });
+ 
+-describe('tagging a release', () => {
++// Each test here runs a dozen git commands against a fresh repository and a
++// bare remote. On the Windows runner one took 10.4 s, past vitest's
++// 5-second default, where Linux takes under one.
++const GIT_HEAVY = { timeout: 30_000 };
++
++describe('tagging a release', GIT_HEAVY, () => {
+   it('tags the merged version, moves the major tag, and creates the GitHub release', () => {
+     const calls: string[][] = [];
+     const head = git(checkout, 'rev-parse', 'HEAD');
+@@ -204,7 +209,7 @@ describe('tagging a release', () => {
+   });
+ });
+ 
+-describe('the command line', () => {
++describe('the command line', GIT_HEAVY, () => {
+   function run(...argv: string[]): { status: number; lines: string[] } {
+     const lines: string[] = [];
+     return { status: main(argv, checkout, (line) => lines.push(line)), lines };
