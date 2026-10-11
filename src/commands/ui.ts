@@ -844,8 +844,6 @@ export async function runUi(root: string, songName: string, options: UiOptions =
   // works. The dependency's weight is recorded in project-core.md §5.
   const { spawn } = await import('node:child_process');
   let shell: ReturnType<typeof spawn> | undefined;
-  // Settles once the shell has exited and its profile is removed.
-  let shellGone: Promise<void> = Promise.resolve();
   const openInBrowser = () => {
     const opener =
       process.platform === 'darwin'
@@ -881,16 +879,13 @@ export async function runUi(root: string, songName: string, options: UiOptions =
           env: { ...process.env, FIELD_UI_URL: url, FIELD_UI_PROFILE: profile },
         });
         shell = launched;
-        shellGone = new Promise<void>((resolve) => {
-          launched.once('exit', () => {
-            try {
-              rmSync(profile, { recursive: true, force: true });
-            } catch {
-              // An orphaned Electron can still hold it on Windows after
-              // a kill; the temp directory is the OS's to clear then.
-            }
-            resolve();
-          });
+        launched.once('exit', () => {
+          try {
+            rmSync(profile, { recursive: true, force: true });
+          } catch {
+            // An orphaned Electron can still hold it on Windows after a
+            // kill; the temp directory is the OS's to clear then.
+          }
         });
         shell.on('error', () => {
           process.stderr.write('field ui: could not start the app shell; opening a browser\n');
@@ -926,10 +921,10 @@ export async function runUi(root: string, songName: string, options: UiOptions =
       resolve();
     });
   });
+  // The profile goes in the shell's exit handler. A shell still running
+  // keeps this process alive until that handler has run, so nothing here
+  // waits for it.
   if (shell !== undefined && shell.exitCode === null) shell.kill();
-  // The profile goes when the shell has exited, which a kill only asks
-  // for; wait a moment for it rather than leave the directory behind.
-  await Promise.race([shellGone, new Promise((resolve) => setTimeout(resolve, 2000))]);
   watchAbort.abort();
   // Ending the session ends the playback it started: the daemon stops
   // only at the end of the stream and stays up while playing, so closing
