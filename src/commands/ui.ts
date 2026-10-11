@@ -187,13 +187,50 @@ export async function runUi(root: string, songName: string, options: UiOptions =
         `(field play ${songName} fails the same way, for the same reason.)`,
     );
   }
-  const client = await AudiodClient.connect(root);
-  if (!client.supports('session') || !client.supports('swap')) {
-    throw new Error(
-      `field-audiod ${client.daemonVersion} predates live sessions — field transport quit, then retry`,
-    );
+  // Everything that can refuse without touching the daemon refuses
+  // first: the client build, and the port. Loading the session replaces
+  // whatever the daemon is playing, so a taken --port found after that
+  // would cost the playing session and then crash.
+  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const distDir = join(packageRoot, 'ui', 'dist');
+  const http = createServer();
+  await new Promise<void>((resolve, reject) => {
+    const refuse = (err: NodeJS.ErrnoException) =>
+      reject(
+        err.code === 'EADDRINUSE'
+          ? new Error(`field ui: port ${options.port} is already in use — pick another with --port, or omit it`)
+          : err,
+      );
+    http.once('error', refuse);
+    http.listen(options.port ?? 0, '127.0.0.1', () => {
+      http.off('error', refuse);
+      resolve();
+    });
+  });
+  if (!existsSync(join(distDir, 'index.html'))) {
+    http.close();
+    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
   }
-  const loaded = await client.session(compiled.session);
+
+  // From here a failure must not leave the port bound behind it.
+  const connectAndLoad = async () => {
+    const connected = await AudiodClient.connect(root);
+    if (!connected.supports('session') || !connected.supports('swap')) {
+      connected.close();
+      throw new Error(
+        `field-audiod ${connected.daemonVersion} predates live sessions — field transport quit, then retry`,
+      );
+    }
+    return { client: connected, loaded: await connected.session(compiled.session) };
+  };
+  let client: AudiodClient;
+  let loaded: Awaited<ReturnType<AudiodClient['session']>>;
+  try {
+    ({ client, loaded } = await connectAndLoad());
+  } catch (err) {
+    http.close();
+    throw err;
+  }
   ctx = musicalContext(loadProject(root), `songs/${songName}`, loaded.sample_rate);
 
   const mainFile = () => {
@@ -742,9 +779,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     }
   };
 
-  // Static assets: the client's build output, shipped with the package.
-  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const distDir = join(packageRoot, 'ui', 'dist');
+  // Static assets: the client's build output in distDir, shipped with
+  // the package.
   const MIME: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript',
@@ -762,11 +798,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     res.end(readFileSync(file));
   };
 
-  if (!existsSync(join(distDir, 'index.html'))) {
-    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
-  }
-
-  const http = createServer(serveStatic);
+  http.on('request', serveStatic);
   const wss = new WebSocketServer({ noServer: true });
   http.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -822,7 +854,6 @@ export async function runUi(root: string, songName: string, options: UiOptions =
     });
   });
 
-  await new Promise<void>((resolve) => http.listen(options.port ?? 0, '127.0.0.1', resolve));
   const address = http.address();
   const port = typeof address === 'object' && address !== null ? address.port : 0;
   const url = `http://127.0.0.1:${port}/?t=${token}`;
