@@ -1,0 +1,372 @@
+{
+ "version": 1,
+ "name": "Windows build and paths (chunk 2)",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 160,
+  "title": "Windows builds and renders: the CLI, the paths, and the daemon (windows-portability.md chunk 2)",
+  "head": "c82062a9a61ed5709a279adbc5435b37e1cb4cfc",
+  "headRef": "windows/build",
+  "base": "1283ef807c8d387b511a8114b3d62717bdf9bd81",
+  "baseRef": "windows/inventory",
+  "basePr": 158
+ },
+ "overview": {
+  "summary": [
+   "field is a command-line tool that keeps a music project as files in Git. Its audio engine is a C++ daemon, <code>field-audiod</code>. The CLI runs it two ways: as a subprocess that renders one file and exits (<code>--render</code>, <code>--render-live</code>, <code>--scan</code>), and as a long-lived server it talks to over a local control socket for playback and recording. The Windows portability plan, <code>docs/projects/windows-portability/readme.md</code>, brings field up on Windows in five chunks. This pull request is chunk 2. Its base is #158, which sits on chunk 1 (#157), and #161 and #163 build on it.",
+   "Chunk 2 makes field build on Windows and makes the subprocess half of the daemon work there, so offline rendering runs. The control socket stays POSIX-only until chunk 4 replaces it with a Windows named pipe. Until then, the daemon's serve mode refuses on Windows, and every test that needs the socket skips there with a comment that names what will remove the guard.",
+   "The change does four things:",
+   "<ol><li><b>Paths become data with one spelling.</b> On Windows, Node's <code>relative()</code> answers with backslashes, so a song directory came out as <code>songs\\creek</code>. Build labels are made from that directory, so no label a user typed could ever match. Project-relative paths that the program compares or sends now always use <code>/</code>.</li><li><b>MSVC compiles the daemon.</b> Five fixes: <code>std::numbers::pi</code> for the non-standard <code>M_PI</code>, an explicitly move-only <code>LiveSession::Track</code>, a guarded <code>SIGPIPE</code>, a Windows stub for the socket server, and Windows spellings of <code>fsync</code> and <code>ftruncate</code> in the recording code. The daemon also splits <code>FIELD_PLUGIN_PATH</code> on <code>;</code> on Windows, where <code>:</code> would cut a path at its drive letter, and the <code>field keys</code> helper checks stdin and refuses to publish a MIDI source in ways MSVC accepts.</li><li><b>The CLI finds and builds the binary.</b> <code>daemonBinary()</code> adds <code>.exe</code> on Windows, and <code>pnpm build:native</code> passes <code>--config Release</code>, which Visual Studio's multi-config build needs.</li><li><b>The tests know which platform they are on.</b> Suffix assertions compare in the platform separator, the stub worker runs through Node itself, and socket-bound tests skip on <code>win32</code>.</li></ol>",
+   "This pull request runs no Windows CI job, so no Windows build of this exact head is on record here. The author's Windows run was at <code>1acb58f</code> on 2026-08-18. Since then, merges of the base branch brought in the recording code (#166, #167, #169, #170) and the keyboard instrument (#178, #179, #181, #182) from <code>main</code>. Later commits port the native code each one brought in, guard their socket and virtual-MIDI tests on <code>win32</code>, and fix how the daemon splits <code>FIELD_PLUGIN_PATH</code> on Windows. The review of this head is clean, with no finding open, so a human approval is what remains. The <a href=\"https://github.com/okamnesiac/field/pull/160\">review body</a> lists four non-blocking suggestions."
+  ],
+  "cards": [
+   {
+    "id": "guards",
+    "title": "Which test guards go away, and when",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Guarded tests</th><th>Why they skip on Windows</th><th>What removes the guard</th></tr></thead><tbody><tr><td>9 in <code>version.test.ts</code></td><td>A fake daemon binds a Unix socket, which Node on Windows cannot do</td><td class=\"r\">Chunk 4</td></tr><tr><td>Whole describes in <code>audiod/client</code>, <code>play-daemon</code>, <code>punch-daemon</code>, <code>record-daemon</code>, <code>record-midi-daemon</code>, and <code>plugin-hosting</code>'s live chains; 4 tests in <code>live-session</code> and 3 in <code>click-daemon</code></td><td>They dial the daemon's control socket, and serve mode refuses on Windows</td><td class=\"r\">Chunk 4</td></tr><tr><td>21 in <code>generate.test.ts</code>; 3 describes in <code>aced</code> and <code>voiced</code></td><td>The Python workers and the stub worker serve on <code>AF_UNIX</code></td><td class=\"r\">The workers chunk (plan §4)</td></tr><tr><td>2 in <code>graph/build.test.ts</code></td><td>Their fake <code>sclang</code> is a <code>#!/bin/sh</code> script</td><td class=\"r\">Nothing planned</td></tr><tr><td>The native round trip in <code>keys/helper-native</code></td><td>Windows has no virtual MIDI ports, so <code>--keys</code> cannot publish a source</td><td class=\"r\">A design decision (plan §7.2)</td></tr></tbody></table></div>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Serve mode</b>: the daemon running as a server on the control socket, for playback and recording.</li><li><b>Subprocess mode</b>: the daemon run once with <code>--render</code>, <code>--render-live</code>, or <code>--scan</code>, with no socket.</li><li><b>Project-relative path</b>: a path from the project root, such as <code>songs/creek/tracks/pad.yaml</code>.</li><li><b>Multi-config generator</b>: a CMake build, such as Visual Studio's, that picks Debug or Release at build time with <code>--config</code>, not at configure time.</li><li><b>Chunk 4</b>: the plan's named-pipe transport, which replaces the Unix socket on Windows.</li></ul>"
+   },
+   {
+    "id": "history",
+    "title": "Review history",
+    "html": "<ul class=\"tight\"><li>A review of <code>1acb58f</code> found that <code>main</code>'s #165 rewrote the same <code>build:native</code> line. At this head the line keeps both #165's <code>--parallel 4</code> and <code>--config Release</code>, and that thread is resolved.</li><li>The review of <code>18849a0</code> found that three daemon test files from the base merge ran on Windows and failed at connect. <code>c12dac0</code> guards their socket tests, and that thread is resolved.</li><li><code>bd26b8a</code> took four of that review's suggestions: one exported <code>projectPath</code>, slash-joined stranded-takes diagnostics, and two corrected comments. The review of <code>bd26b8a</code> was clean.</li><li><code>13c068e</code> splits <code>FIELD_PLUGIN_PATH</code> on <code>;</code> on Windows. The review of <code>13c068e</code> was clean.</li><li><code>6ca2a36</code> merged the keyboard instrument from <code>main</code>, and <code>76049b2</code> ported <code>keys.cpp</code> to MSVC and guarded the MIDI tests. <code>e5af809</code> merged a plan-only base commit. The review of <code>e5af809</code> found that, since #179 arrived with the base merge, the comment beside the <code>sclang</code> test guards no longer held on Windows. <code>c82062a</code> rewrites it and points at §7.2, and that thread is resolved. The review of <code>c82062a</code> is clean.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "paths",
+   "title": "Project-relative paths use forward slashes",
+   "kicker": "The model, the build report, and the live session spell every project-relative path with <code>/</code>",
+   "intro": [
+    "A <b>project-relative path</b> is a path from the project root, such as <code>songs/creek</code>. The model loads every song and file with a path like this. Build labels such as <code>//songs/creek/track:pad</code> are made from a song's directory, and the YAML schemas already reject <code>\\</code> in paths. On Windows, Node's <code>relative()</code> answers with backslashes, so the model stored <code>songs\\creek</code>, and no label or pattern a user typed could match it. The author reports about 70 tests failing with \"no such label\" for this reason.",
+    "The fix states one rule: a project-relative path that the program compares, stores, or sends uses <code>/</code>. A path that stays local, such as an absolute output path, keeps the platform's separator. On macOS and Linux the separator is already <code>/</code>, so nothing changes there.",
+    "Three places apply the rule. <code>projectPath</code> in the model converts each loaded file path and each song directory, and <code>compileSession</code> calls it for the input file paths it writes into the session JSON for the daemon. <code>projectRelative</code> in the build command converts the paths that <code>field build</code> prints. The two diagnostics for a stranded takes file are built as slash-joined strings."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Every comparison against <code>song.dir</code> in <code>src/</code> already compares a slash-joined value: traced the <code>s.dir ===</code> sites in <code>transport.ts</code>, <code>land.ts</code>, and <code>graph/build.ts</code>, and every caller of <code>musicalContext</code>. Each passes a label package, <code>songs/${name}</code>, <code>songDirOfPkg</code>, <code>songDirOfPath</code>, or a graph node's <code>songDir</code>, and all of these use <code>/</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/model/project.ts",
+     "note": "Exports <code>projectPath</code>, uses it for each loaded file's path and each song's directory, and slash-joins the two stranded-takes diagnostics.",
+     "checks": []
+    },
+    {
+     "path": "src/commands/build.ts",
+     "note": "<code>projectRelative</code> returns a slash-separated path when the path is inside the project. Both callers print it.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Both callers of <code>projectRelative</code> print its output. The plan's chunk 2 amendment counts that output as data, while §7.4 says a printed path keeps the platform's separator. The review suggests saying in one place that these printed paths take slashes, and why."
+      }
+     ]
+    },
+    {
+     "path": "src/graph/live.ts",
+     "note": "The session JSON's <code>file</code> paths come from <code>projectPath</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The daemon resolves these paths with <code>projectRoot.getChildFile</code> (<code>live.cpp:107</code>), and JUCE's <code>File::getChildFile</code> replaces <code>/</code> with <code>\\</code> on Windows before it joins. Checked in the fetched JUCE source, <code>juce_File.cpp:439</code>.",
+       "line": 286
+      },
+      {
+       "kind": "verify",
+       "text": "With <code>relative</code> and <code>sep</code> dropped from the imports, nothing else in the file uses them. Checked by searching the file at this head."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "daemon",
+   "title": "MSVC compiles the daemon",
+   "kicker": "The fixes that let <code>field-audiod</code> build and find plugins on Windows, with no change to what it does elsewhere",
+   "intro": [
+    "<code>field-audiod</code> is the C++ audio daemon. GCC and Clang build it on Linux and macOS. MSVC, Microsoft's compiler, rejected it for reasons that reading the code had not found. The fixes keep behavior identical on the other platforms.",
+    "<ol><li><b><code>M_PI</code> becomes <code>std::numbers::pi</code>.</b> <code>M_PI</code> is not standard C++. glibc and Apple's library define it, and MSVC does not. <code>std::numbers::pi</code> is the same double, so renders do not change. The daemon builds as C++20, which <code>&lt;numbers&gt;</code> needs.</li><li><b><code>LiveSession::Track</code> is explicitly move-only.</b> A track holds <code>unique_ptr</code>s in its effect chain, so copying one cannot compile. MSVC instantiated the copy anyway when a vector of tracks grew.</li><li><b><code>SIGPIPE</code> is guarded.</b> Windows has no <code>SIGPIPE</code>. A write to a closed pipe returns an error there, so the guarantee the POSIX line gives holds without it.</li><li><b>The socket server has a Windows stub.</b> <code>server.cpp</code> is hand-written <code>AF_UNIX</code> code. On Windows it compiles to a stub whose <code>start()</code> refuses with a pointer to chunk 4, so serve mode exits while the subprocess modes run.</li><li><b><code>capture.cpp</code> spells <code>fsync</code> and <code>ftruncate</code> per platform.</b> The recording code came in with the base merge. MSVC has <code>_commit</code> and <code>_chsize_s</code> in their place.</li><li><b><code>FIELD_PLUGIN_PATH</code> splits on <code>;</code> on Windows.</b> The variable lists folders the daemon searches for plugins in place of the system defaults; the tests point it at the built fixture plugin. Splitting on <code>:</code> cut a Windows path at its drive letter, so <code>D:\\a\\VST3</code> became <code>D</code> and <code>\\a\\VST3</code>, which resolves against the current drive. One helper now splits on <code>;</code> under <code>_WIN32</code> and on <code>:</code> elsewhere, as each platform splits <code>PATH</code>.</li><li><b>The <code>field keys</code> helper is ported.</b> <code>field-audiod --keys</code> publishes the computer keyboard as a virtual MIDI source. It came in with the keyboard instrument from <code>main</code>. On Windows its non-blocking stdin check asks <code>PeekNamedPipe</code> in place of <code>poll</code>, and a closed pipe reads as <code>ERROR_BROKEN_PIPE</code>. Windows has no virtual MIDI ports, so JUCE declares no <code>createNewDevice</code> there, and the helper refuses with the message it gives any failed publish.</li></ol>"
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The Linux CI job built the daemon with GCC and passed at this head."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "Wraps the POSIX server in <code>#if</code> and adds a Windows stub whose <code>start()</code> refuses.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The stub defines every non-inline public member that <code>server.h</code> declares: the constructor, the destructor, <code>start</code>, <code>beginShutdown</code>, <code>broadcast</code>, <code>sweepClosedConnections</code>, and <code>connectionCount</code>. The helpers in the POSIX half sit in an anonymous namespace, so nothing outside the file needs them. Checked by reading both files."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "Guards the <code>SIGPIPE</code> line on <code>_WIN32</code> and amends its comment to say why Windows needs no equivalent."
+    },
+    {
+     "path": "native/audiod/src/live.h",
+     "note": "Declares <code>Track</code>'s special members: copy deleted, move defaulted.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The comment names the trigger: MSVC's <code>std::map</code> move constructor is not <code>noexcept</code>, so vector growth falls back through <code>move_if_noexcept</code> to a copy, which cannot copy the chain.",
+       "line": 142
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/capture.cpp",
+     "note": "Adds <code>syncToDisk</code> and <code>truncateTo</code>. Audio and MIDI takes reach the disk through <code>truncateAndSync</code> and <code>syncData</code>, which call them.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Both helpers sit in the file's anonymous namespace, and no raw <code>fsync</code>, <code>ftruncate</code>, or <code>fileno</code> call remains outside them after the merge with <code>main</code>'s <code>Transaction</code> rework. Both <code>fopen</code> calls use binary modes, so MSVC's text mode cannot rewrite take bytes. Checked by reading the file at this head."
+      },
+      {
+       "kind": "context",
+       "text": "Recording runs only in serve mode, which refuses on Windows until chunk 4. So this code compiles on Windows but does not run there yet. The review suggests opening these files, and the WAV files in <code>wavfile.cpp</code>, through a UTF-8 <code>std::filesystem::path</code>. MSVC reads a narrow path in the ANSI code page, so a non-ASCII path fails to open."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/hosting.cpp",
+     "note": "Adds <code>pluginPathFromEnvironment</code> and calls it from both the scan and the render's plugin lookup.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The helper replaces two identical loops, keeps <code>:</code> on macOS and Linux, and sits in an earlier anonymous namespace of the same file, so both callers see it. Every test sets <code>FIELD_PLUGIN_PATH</code> to a single folder, so no test depends on the separator. Checked by reading the file and every reader of the variable.",
+       "line": 120
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/keys.cpp",
+     "note": "Adds a Windows branch to <code>stdinEnded</code> and refuses to publish a source on Windows.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>poll</code>, <code>read</code>, and <code>STDIN_FILENO</code> stay in the POSIX branch. <code>&lt;windows.h&gt;</code> comes after every JUCE header, and the file uses no name that header turns into a macro. Checked by reading the file at this head.",
+       "line": 134
+      },
+      {
+       "kind": "context",
+       "text": "JUCE declares <code>MidiOutput::createNewDevice</code> only on macOS and Linux, so this branch is what lets the file compile. The plan's §7.2 records <code>field keys</code> on Windows as a design question.",
+       "line": 201
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/dsp/biquad.cpp",
+     "note": "Two uses of <code>M_PI</code> become <code>std::numbers::pi</code>."
+    },
+    {
+     "path": "native/audiod/src/dsp/mixdown.cpp",
+     "note": "Two uses of <code>M_PI</code> in the pan law become <code>std::numbers::pi</code>."
+    },
+    {
+     "path": "native/audiod/src/dsp/resample.cpp",
+     "note": "Two uses of <code>M_PI</code> in the resampler's filter design become <code>std::numbers::pi</code>."
+    }
+   ]
+  },
+  {
+   "id": "binary",
+   "title": "The CLI finds and builds the binary",
+   "kicker": "The <code>.exe</code> suffix in <code>daemonBinary()</code> and <code>--config Release</code> in <code>build:native</code>",
+   "intro": [
+    "<code>daemonBinary()</code> is the one function the CLI and the tests use to find the built daemon. It looks in the JUCE artefacts directory, <code>native/audiod/build/field-audiod_artefacts/Release/</code>. On Windows the file is <code>field-audiod.exe</code>, so the function now adds that suffix.",
+    "The directory name depends on the build configuration. Visual Studio's build is <b>multi-config</b>: it ignores <code>-DCMAKE_BUILD_TYPE=Release</code> and builds Debug unless <code>cmake --build</code> gets <code>--config Release</code>. Generators that build one configuration ignore that flag, so <code>build:native</code> now passes it on every platform, beside the <code>--parallel 4</code> that #165 added.",
+    "Finding the binary on Windows also turns on every test that skips only when the binary is missing. Each such test that dials the socket now skips on <code>win32</code> as well."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/audiod/client.ts",
+     "note": "<code>daemonBinary()</code> adds <code>.exe</code> on <code>win32</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Every test file that reaches the daemon socket guards those tests on <code>win32</code>: <code>audiod/client</code>, <code>live-session</code>, <code>plugin-hosting</code>, <code>play-daemon</code>, <code>click-daemon</code>, <code>punch-daemon</code>, <code>record-daemon</code>, and <code>version</code>. Checked by listing every test file that calls <code>AudiodClient</code>, <code>playThroughDaemon</code>, <code>playLiveSession</code>, <code>recordTake</code>, or <code>transportCommand</code>, then reading its guards.",
+       "line": 54
+      }
+     ]
+    },
+    {
+     "path": "package.json",
+     "note": "<code>build:native</code> passes <code>--config Release</code> after <code>--parallel 4</code>."
+    }
+   ]
+  },
+  {
+   "id": "worker",
+   "title": "The stub worker runs through Node",
+   "kicker": "A JavaScript interpreter override starts with <code>process.execPath</code> instead of its shebang",
+   "intro": [
+    "field's generative workers are Python daemons. An environment variable such as <code>FIELD_ACED_PYTHON</code> overrides the interpreter that starts them. The tests point it at <code>src/testing/stub-worker.mjs</code>, a stub that answers like a worker. On macOS and Linux the stub ran through its <code>#!</code> line. Windows has no shebang support, and starting the file fails with <code>EFTYPE</code>.",
+    "<code>workerLaunchCommand</code> now starts a <code>.js</code> or <code>.mjs</code> override with <code>process.execPath</code>, the Node binary that is running field. That works the same on every platform. On Windows the stub tests still skip, because the stub listens on an <code>AF_UNIX</code> socket."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/workers/client.ts",
+     "note": "Starts a <code>.js</code> or <code>.mjs</code> interpreter override with <code>process.execPath</code>."
+    },
+    {
+     "path": "src/workers/setup.test.ts",
+     "note": "The test helper builds <code>.venv/Scripts</code> on Windows, which is the directory <code>workerScriptInstalled</code> checks there.",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests skip what Windows cannot run yet, and compare in its separator",
+   "kicker": "Per-test guards with their reasons, and suffix checks written with <code>sep</code>",
+   "intro": [
+    "The tests change in two ways. Assertions that compared a native absolute path with a <code>/</code>-joined literal now build the literal with <code>join</code> or <code>sep</code>. Tests that need something Windows does not have yet skip on <code>win32</code>, each with a comment that names what will remove the guard. The overview's table lists the guard families.",
+    "One more test fix: <code>plan-limits.test.ts</code> runs <code>pnpm gen:limits</code>. On Windows <code>pnpm</code> is a <code>.cmd</code> script, which Node starts only through a shell, so the test passes <code>shell</code> on <code>win32</code>."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "The guard counts match the plan's amendment: 9 guards in <code>version.test.ts</code>, 21 in <code>generate.test.ts</code>, 3 describes in <code>aced</code> and <code>voiced</code>, and 2 in <code>graph/build.test.ts</code>. Counted in the diff."
+    },
+    {
+     "kind": "verify",
+     "text": "In <code>live-session.test.ts</code>, every test that calls <code>AudiodClient.connect</code> is one of the four <code>itOverSocket</code> tests. The others run <code>--render-live</code> as a subprocess. Checked by listing each test's calls."
+    },
+    {
+     "kind": "verify",
+     "text": "In <code>punch-daemon.test.ts</code> and <code>record-daemon.test.ts</code>, every test in the guarded describe either calls <code>AudiodClient.connect</code> or goes through <code>recordTake</code>, which connects. <code>click-daemon.test.ts</code>'s unguarded <code>--render-live</code> test is safe on Windows, because its <code>afterEach</code> catches the failed connect. Checked by reading each describe."
+    },
+    {
+     "kind": "verify",
+     "text": "Of the 17 test files <code>main</code> added or changed in this base, three gate on <code>daemonBinary()</code>, which this change turns on for Windows. <code>punch-daemon</code> and <code>record-daemon</code> carry the serve-mode guard. Every test in <code>record-midi-daemon</code>'s guarded describe goes through <code>connect()</code> or <code>recordTake</code>. <code>helper-native</code> skips on Windows when <code>--keys</code> reports its error, which is the first line it prints there. Checked by reading each file."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/audiod/live-session.test.ts",
+     "note": "Four socket tests use <code>itOverSocket</code>; the <code>--render-live</code> tests keep running on Windows."
+    },
+    {
+     "path": "src/audio/plugin-hosting.test.ts",
+     "note": "Skips the whole live-chains describe on <code>win32</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Only the tests at lines 531 and 587 dial the socket. Lines 434, 470, 483, 659, and 690 render through <code>--render-live</code> or only compile, and this guard skips them too. The review suggests guarding just the two socket tests, as <code>click-daemon.test.ts</code> and <code>live-session.test.ts</code> do.",
+       "line": 364
+      }
+     ]
+    },
+    {
+     "path": "src/audiod/client.test.ts",
+     "note": "Skips the protocol describe on <code>win32</code>, since every test in it dials the socket."
+    },
+    {
+     "path": "src/commands/play-daemon.test.ts",
+     "note": "Skips <code>field play</code> through the daemon on <code>win32</code> until chunk 4."
+    },
+    {
+     "path": "src/commands/click-daemon.test.ts",
+     "note": "Three socket tests use <code>itOverSocket</code>; the <code>--render-live</code> click test runs everywhere."
+    },
+    {
+     "path": "src/commands/punch-daemon.test.ts",
+     "note": "Skips the punch-out and loop-take describe on <code>win32</code> until chunk 4; the loop-line helper tests still run."
+    },
+    {
+     "path": "src/commands/record-daemon.test.ts",
+     "note": "Skips the recording describe on <code>win32</code> until chunk 4; the record helper tests still run."
+    },
+    {
+     "path": "src/commands/record-midi-daemon.test.ts",
+     "note": "Skips the MIDI-takes describe on <code>win32</code> until chunk 4."
+    },
+    {
+     "path": "src/keys/helper-native.test.ts",
+     "note": "Skips the native MIDI round trip on Windows when <code>--keys</code> cannot publish, as it does on Linux without ALSA.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This skip reads the line <code>--keys</code> prints first. On Windows that is the publish error, because the non-Apple layout reader prints no layout report.",
+       "line": 129
+      }
+     ]
+    },
+    {
+     "path": "src/commands/version.test.ts",
+     "note": "Nine fake-daemon tests use <code>itOverPosixSocket</code>."
+    },
+    {
+     "path": "src/commands/generate.test.ts",
+     "note": "Twenty-one tests that start the stub worker use <code>itSpawnsAWorker</code>.",
+     "checks": []
+    },
+    {
+     "path": "src/aced/client.test.ts",
+     "note": "Skips the live <code>field-aced</code> describe on <code>win32</code> until the workers chunk."
+    },
+    {
+     "path": "src/voiced/client.test.ts",
+     "note": "Skips both live <code>field-voiced</code> describes on <code>win32</code> until the workers chunk."
+    },
+    {
+     "path": "src/graph/build.test.ts",
+     "note": "Suffix checks use <code>sep</code> and <code>join</code>; the two <code>#!/bin/sh</code> fake-<code>sclang</code> tests skip on <code>win32</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This comment says a real sclang does not reach the spawn on Windows yet. <code>sclangCommand</code>, which <code>runScProgram</code> calls first, checks PATH only for <code>sclang</code> without <code>.exe</code>, and it searches a native <code>FIELD_SCLANG</code> path as if it were a name. The plan's §7.2 records the gap as standalone work.",
+       "line": 473
+      }
+     ]
+    },
+    {
+     "path": "src/commands/watch.test.ts",
+     "note": "Two suffix checks on <code>outputPath</code> use <code>sep</code>."
+    },
+    {
+     "path": "src/schema/plan-limits.test.ts",
+     "note": "Runs <code>pnpm</code> through a shell on <code>win32</code>."
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The plan records what chunk 2 found",
+   "kicker": "Four dated amendments to chunk 2, and a new §7.2 entry for <code>field keys</code>",
+   "intro": [
+    "The plan's §5 lists the chunks. This change adds four amendments under chunk 2. The first, dated 2026-08-17, records the path finding, the smaller Windows fixes, and the guard families. The second, dated 2026-08-18, records what MSVC found and the author's Windows run: every test file passed, and the block-invariance check reported bit-identical output. The two dated 2026-10-10 record what the merges from <code>main</code> needed: the <code>capture.cpp</code> port and guards for the recording code, and the <code>keys.cpp</code> port and guards for the keyboard instrument.",
+    "§7.1 now lists every guard whose comment names chunk 4 as chunk 4's to remove. A new §7.2 entry records that <code>field keys</code> cannot publish a source on Windows, marked standalone and a design question. The plan stays <code>in-progress</code>. Other edits in this region of the file, such as §6's 104-byte answer, §7.2's <code>sclangCommand</code> entry, and §7.4's statement of the slash rule, come from the base branch, not this pull request."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Adds four chunk 2 amendments to §5, widens §7.1's list of guards chunk 4 removes, and adds the <code>field keys</code> entry to §7.2.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This amendment lists diagnostics and <code>projectRelative</code>'s output as data, but both are printed for a person, and §7.4 says a printed path keeps the platform's separator. The review suggests reconciling the two.",
+       "line": 344
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

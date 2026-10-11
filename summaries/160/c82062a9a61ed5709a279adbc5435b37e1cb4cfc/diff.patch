@@ -1,0 +1,1332 @@
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index 0949f09a..11b67039 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -332,6 +332,86 @@ Recorded so the next reader does not re-derive it.
+    `--render-live` directly by the tests that exercise it — both plain
+    subprocess runs of the compiled binary, no socket — so **the whole
+    offline render path works** once the binary exists.
++
++   **Amended on implementation (2026-08-17).** The first red run found
++   the largest Windows defect in a place this plan never looked, because
++   the assessment grepped for includes and APIs rather than for
++   separator leaks: label pkgs derive from `song.dir`, which was raw
++   `relative()` output — `songs\creek` on Windows — so **no typed label
++   or pattern could ever match** and ~70 tests failed with "no such
++   label". The fix states an invariant the model half-enforced already
++   (its schemas reject `\` in YAML paths): project-relative paths are
++   slash-separated wherever they are *data* — `song.dir`, diagnostics,
++   the session JSON handed to the daemon, `projectRelative`'s output —
++   and native only where they are genuinely local (absolute paths,
++   `BuildOutcome.outputPath`). Also discovered, all small: `pnpm` is a
++   `.cmd` shim `execFile` cannot spawn (the one test that shells it gets
++   `shell` on win32); the stub worker is a shebang script Windows cannot
++   exec, so a `.js`/`.mjs` interpreter override now runs through
++   `process.execPath` (more hermetic everywhere); a test helper built
++   `.venv/bin` where the probe reads `.venv/Scripts`; and four path
++   assertions, two in `watch.test.ts` and two in `build.test.ts`,
++   compared native paths against `/`-joined strings. The
++   `server.cpp` chunk-4 stub earns its place here rather than there:
++   without it the binary does not link, and chunk 2's milestone is the
++   binary. Transport-bound tests (fake daemons on `.sock` paths, the
++   stub worker's AF_UNIX serve, two `#!/bin/sh` sclang fakes) are
++   guarded per test with the reason beside them, decision-4-of-
++   linux-portability style — 9 in `version.test.ts` naming chunk 4; 21
++   in `generate.test.ts` plus three describes in `aced`/`voiced` naming
++   the workers' §4, which is not chunk 4; 2 in `build.test.ts` naming
++   nothing, since only a second stub dialect removes them (#158 review
++   corrected an earlier version of this sentence).
++
++   **Amended again when the compiler arrived (2026-08-18).** MSVC found
++   two defects in the daemon that no amount of reading had: `M_PI` is
++   not standard C++ (glibc and Apple's libc++ hand it out, MSVC does
++   not), used six times across `biquad.cpp`, `mixdown.cpp` and
++   `resample.cpp` — now `std::numbers::pi`, the same double bit for
++   bit; and `LiveSession::Track`'s *implicit* copy constructor, which
++   clang never instantiates because nothing uses it, but MSVC's STL
++   compiles eagerly and rejects over the chain's `unique_ptr`s — Track
++   is now explicitly move-only, which is what it always was. One more
++   guard family joined at verification: the serve-mode describes
++   (`audiod/client`, `play-daemon`, plugin-hosting's live chains, and
++   four socket tests in `live-session`) run now that the binary exists
++   and refuse at the chunk-2 stub, so they skip on win32 naming chunk 4
++   — while `--render`, `--render-live` and `--scan` subprocess tests
++   run and pass. Verified in batches on the Windows machine: every
++   test file passes; `field-dsp-check` reports all block partitions
++   bit-identical, resampler included, which is chunk 3's first good
++   omen. The one caveat worth keeping: under full parallel load this
++   particular machine (OneDrive checkout, Defender re-scanning the
++   fresh exe per spawn) drops an occasional spawn — every such failure
++   re-ran green in isolation, and a CI runner shares none of those
++   conditions.
++
++   **Amended when recording arrived from `main` (2026-10-10).** The
++   merge of recording chunks 1 to 4 (#166, #167, #169, #170) brought one
++   more POSIX-only daemon file and three more socket test files.
++   `capture.cpp` now spells `fsync` and `ftruncate` as the CRT's
++   `_commit` and `_chsize_s` on Windows. The socket tests in
++   `click-daemon`, `punch-daemon`, and `record-daemon` skip on win32
++   naming chunk 4, the same serve-mode guard as above: three
++   `itOverSocket` tests in `click-daemon`, and the whole daemon describe
++   in each of the other two. `click-daemon`'s `--render-live` test runs
++   everywhere.
++
++   **Amended when the keyboard instrument arrived from `main`
++   (2026-10-10).** The merge of keyboard-instrument chunks 1 to 4 (#178,
++   #179, #181, #182) brought `keys.cpp`, the helper behind `field keys`,
++   with two things MSVC rejects. Its non-blocking stdin check used
++   `poll` and `read` from `<poll.h>` and `<unistd.h>`; on Windows it asks
++   `PeekNamedPipe` instead. And it publishes its source with
++   `MidiOutput::createNewDevice`, which JUCE declares only on macOS and
++   Linux, because Windows has no virtual MIDI ports; there the helper
++   refuses with the message it gives any failed publish (§7.2 records
++   the gap). `capture.cpp`'s MIDI takes reach the disk through the same
++   `syncToDisk` and `truncateTo` helpers as audio takes. The native round
++   trip in `keys/helper-native.test.ts` skips on win32 for want of a
++   virtual port, as it skips on Linux without ALSA, and
++   `record-midi-daemon`'s daemon describe takes the serve-mode guard,
++   naming chunk 4.
+ 3. **Determinism** (§1.4). Measure a Windows render against macOS and
+    Linux; the toolchain floor or `clang-cl` depending on what the
+    measurement says, and the UCRT — the unmeasured third libm — is where
+@@ -412,8 +492,12 @@ land as its own diff whenever.
+   `shutdown(SHUT_RD)`, single-owner via `FILE_FLAG_FIRST_PIPE_INSTANCE`
+   replacing `flock`), `socketPathFor`'s pipe-name branch (§2.3), and
+   `audiod/client.ts` connecting to `\\.\pipe\…`. Removes the chunk-2
+-  serve-mode stub in `server.cpp` and the 9 guards in
+-  `version.test.ts` — the ones whose comment names chunk 4. The other
++  serve-mode stub in `server.cpp` and every guard whose comment names
++  chunk 4: the 9 in `version.test.ts`, and the serve-mode guards §5's
++  chunk 2 amendments list — the describes in `audiod/client`,
++  `play-daemon`, plugin-hosting's live chains, `punch-daemon`,
++  `record-daemon`, and `record-midi-daemon`, the 4 `itOverSocket` tests
++  in `live-session`, and the 3 in `click-daemon`. The other
+   guards chunk 2 planted are not chunk 4's to remove: the 21 in
+   `generate.test.ts` and 3 describes in `aced`/`voiced` are the workers
+   chunk's (§7.3 carries them), and `build.test.ts`'s 2 sclang stubs are
+@@ -483,6 +567,15 @@ land as its own diff whenever.
+   whether the probe succeeds under a Windows CI shell where `git`
+   resolves but the LFS subcommand may not. One CI run answers it, with
+   the `windows-latest` job (chunk 5).
++- **`field keys` cannot publish a source on Windows**
++  (`native/audiod/src/keys.cpp`): the helper publishes the computer
++  keyboard as a virtual MIDI source, and Windows has no virtual MIDI
++  ports, so JUCE offers no `createNewDevice` there and the helper
++  refuses (chunk 2's amendment). Recording from a hardware controller
++  is unaffected. Playing keys on Windows needs a different route: a
++  loopback driver such as loopMIDI, Windows MIDI Services, or feeding
++  the voice host without a MIDI port at all. **Standalone**, and a
++  design question before it is a port.
+ 
+ ### 7.3 The workers chunk, when it opens (§4 stands)
+ 
+diff --git a/native/audiod/src/capture.cpp b/native/audiod/src/capture.cpp
+index 9fc34a12..9d453fd6 100644
+--- a/native/audiod/src/capture.cpp
++++ b/native/audiod/src/capture.cpp
+@@ -1,7 +1,11 @@
+ #include "capture.h"
+ 
+ #include <sys/stat.h>
++#if defined(_WIN32)
++#include <io.h>
++#else
+ #include <unistd.h>
++#endif
+ 
+ #include <algorithm>
+ #include <cstring>
+@@ -20,6 +24,28 @@ constexpr long dataSizeAt = 54;
+ constexpr int fifoCapacity = 1 << 20; // ~22 s at 48 kHz: the writer wakes every 20 ms
+ constexpr double journalEverySeconds = 1.0;
+ 
++// The two calls crash safety rides on, spelled per platform: push a
++// file's bytes to the device, and cut it to a length. MSVC's CRT has
++// neither fsync nor ftruncate; _commit is FlushFileBuffers, and
++// _chsize_s takes the 64-bit size a long take needs.
++int syncToDisk (std::FILE* f)
++{
++#if defined(_WIN32)
++    return _commit (_fileno (f));
++#else
++    return ::fsync (fileno (f));
++#endif
++}
++
++int truncateTo (std::FILE* f, juce::int64 bytes)
++{
++#if defined(_WIN32)
++    return _chsize_s (_fileno (f), bytes) == 0 ? 0 : -1;
++#else
++    return ::ftruncate (fileno (f), (off_t) bytes);
++#endif
++}
++
+ void putTag (uint8_t* at, const char* tag) { std::memcpy (at, tag, 4); }
+ void putU16 (uint8_t* at, uint16_t v)
+ {
+@@ -118,14 +144,14 @@ void truncateAndSync (const juce::File& file, juce::int64 bytes, Patch&& patch)
+     std::FILE* f = std::fopen (file.getFullPathName().toRawUTF8(), "r+b");
+     if (f == nullptr)
+         throw std::runtime_error ("cannot open " + file.getFullPathName().toStdString());
+-    if (::ftruncate (fileno (f), (off_t) bytes) != 0)
++    if (truncateTo (f, bytes) != 0)
+     {
+         std::fclose (f);
+         throw std::runtime_error ("cannot truncate " + file.getFullPathName().toStdString());
+     }
+     patch (f);
+     std::fflush (f);
+-    ::fsync (fileno (f));
++    syncToDisk (f);
+     std::fclose (f);
+ }
+ 
+@@ -222,7 +248,7 @@ void Transaction::joinWriter()
+ void Transaction::syncData()
+ {
+     std::fflush (data);
+-    ::fsync (fileno (data));
++    syncToDisk (data);
+ }
+ 
+ void Transaction::closeData()
+diff --git a/native/audiod/src/dsp/biquad.cpp b/native/audiod/src/dsp/biquad.cpp
+index 23e17ac2..7fce077f 100644
+--- a/native/audiod/src/dsp/biquad.cpp
++++ b/native/audiod/src/dsp/biquad.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <numbers>
+ #include <stdexcept>
+ 
+ namespace field::dsp
+@@ -12,7 +13,7 @@ Biquad design (const Band& band, double sampleRate)
+     // Clamped to 45% of Nyquist: a bell parked at the very top of the
+     // range would otherwise produce coefficients that blow up.
+     const double frequency = std::min (band.frequency, sampleRate * 0.45);
+-    const double w = (2.0 * M_PI * frequency) / sampleRate;
++    const double w = (2.0 * std::numbers::pi * frequency) / sampleRate;
+     const double sn = std::sin (w);
+     const double cs = std::cos (w);
+     const double A = std::pow (10.0, band.gainDb / 40.0);
+@@ -87,7 +88,7 @@ Biquad design (const Band& band, double sampleRate)
+ 
+ double magnitudeDb (const Biquad& biquad, double frequency, double sampleRate)
+ {
+-    const double w = (2.0 * M_PI * std::min (frequency, sampleRate * 0.45)) / sampleRate;
++    const double w = (2.0 * std::numbers::pi * std::min (frequency, sampleRate * 0.45)) / sampleRate;
+     const double cw = std::cos (w);
+     const double sw = std::sin (w);
+     const double c2w = std::cos (2.0 * w);
+diff --git a/native/audiod/src/dsp/mixdown.cpp b/native/audiod/src/dsp/mixdown.cpp
+index 3090ec97..b1f001fa 100644
+--- a/native/audiod/src/dsp/mixdown.cpp
++++ b/native/audiod/src/dsp/mixdown.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <numbers>
+ #include <stdexcept>
+ #include <string>
+ 
+@@ -88,8 +89,8 @@ std::vector<std::vector<float>> sumClips (const std::vector<std::vector<std::vec
+ 
+ void balanceGains (double pan, double& left, double& right)
+ {
+-    left = pan > 0.0 ? std::cos ((pan * M_PI) / 2.0) : 1.0;
+-    right = pan < 0.0 ? std::cos ((-pan * M_PI) / 2.0) : 1.0;
++    left = pan > 0.0 ? std::cos ((pan * std::numbers::pi) / 2.0) : 1.0;
++    right = pan < 0.0 ? std::cos ((-pan * std::numbers::pi) / 2.0) : 1.0;
+ }
+ 
+ void applyDeclaredLength (std::vector<std::vector<float>>& channels, long declared, bool loop)
+diff --git a/native/audiod/src/dsp/resample.cpp b/native/audiod/src/dsp/resample.cpp
+index 4ba80e71..388b72a6 100644
+--- a/native/audiod/src/dsp/resample.cpp
++++ b/native/audiod/src/dsp/resample.cpp
+@@ -3,6 +3,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdint>
++#include <numbers>
+ #include <numeric>
+ #include <stdexcept>
+ #include <string>
+@@ -43,7 +44,7 @@ double sinc (double x)
+ {
+     if (x == 0.0)
+         return 1.0;
+-    const double pix = M_PI * x;
++    const double pix = std::numbers::pi * x;
+     return std::sin (pix) / pix;
+ }
+ 
+@@ -61,7 +62,7 @@ std::vector<double> designPrototype (long phases, double inRate, double outRate)
+     // what actually comes out rather than trusting them.
+     const double beta = 0.1102 * (stopbandDb - 8.7);
+     const double transitionHz =
+-        ((stopbandDb - 8.0) / (2.285 * 2.0 * M_PI * (double) length)) * interpolatedRate;
++        ((stopbandDb - 8.0) / (2.285 * 2.0 * std::numbers::pi * (double) length)) * interpolatedRate;
+     // Stopband edge at the lower Nyquist, so the −6 dB point sits half a
+     // transition below it. Clamped in case a pathological ratio makes the
+     // transition wider than the passband itself.
+diff --git a/native/audiod/src/hosting.cpp b/native/audiod/src/hosting.cpp
+index 40950f05..2702c99b 100644
+--- a/native/audiod/src/hosting.cpp
++++ b/native/audiod/src/hosting.cpp
+@@ -110,6 +110,25 @@ namespace
+         object->setProperty ("params", params);
+         return juce::var (object);
+     }
++
++    // FIELD_PLUGIN_PATH as a search path, split the way the platform
++    // splits PATH. Windows paths carry a drive colon, so splitting on ':'
++    // there turns D:\a\VST3 into "D" and a drive-relative \a\VST3 that
++    // resolves against whichever drive the process's cwd is on: the scan
++    // found the fixture from the checkout's drive while --render-live,
++    // running in a temp project on C:, did not.
++    juce::FileSearchPath pluginPathFromEnvironment (const juce::String& extra)
++    {
++#if defined(_WIN32)
++        const char* separator = ";";
++#else
++        const char* separator = ":";
++#endif
++        juce::FileSearchPath searchPath;
++        for (const auto& piece : juce::StringArray::fromTokens (extra, separator, ""))
++            searchPath.addIfNotAlreadyThere (juce::File (piece));
++        return searchPath;
++    }
+ } // namespace
+ 
+ bool hostingWasUsed()
+@@ -154,8 +173,7 @@ int runScan (const std::string& formatName, const std::string& exePath)
+     juce::FileSearchPath searchPath;
+     const auto extra = juce::SystemStats::getEnvironmentVariable ("FIELD_PLUGIN_PATH", "");
+     if (extra.isNotEmpty())
+-        for (const auto& piece : juce::StringArray::fromTokens (extra, ":", ""))
+-            searchPath.addIfNotAlreadyThere (juce::File (piece));
++        searchPath = pluginPathFromEnvironment (extra);
+     else
+         searchPath = format->getDefaultLocationsToSearch();
+ 
+@@ -290,8 +308,7 @@ namespace
+             juce::FileSearchPath searchPath;
+             const auto extra = juce::SystemStats::getEnvironmentVariable ("FIELD_PLUGIN_PATH", "");
+             if (extra.isNotEmpty())
+-                for (const auto& piece : juce::StringArray::fromTokens (extra, ":", ""))
+-                    searchPath.addIfNotAlreadyThere (juce::File (piece));
++                searchPath = pluginPathFromEnvironment (extra);
+             else
+                 searchPath = format->getDefaultLocationsToSearch();
+             for (const auto& candidate : format->searchPathsForPlugins (searchPath, true, true))
+diff --git a/native/audiod/src/keys.cpp b/native/audiod/src/keys.cpp
+index c39e7841..0b4101bf 100644
+--- a/native/audiod/src/keys.cpp
++++ b/native/audiod/src/keys.cpp
+@@ -5,8 +5,14 @@
+ #include <juce_audio_devices/juce_audio_devices.h>
+ #include <juce_events/juce_events.h>
+ 
++#if defined(_WIN32)
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#include <windows.h>
++#else
+ #include <poll.h>
+ #include <unistd.h>
++#endif
+ 
+ #include <atomic>
+ #include <csignal>
+@@ -127,6 +133,26 @@ std::unique_ptr<juce::MidiInput> openSource (const juce::String& name, juce::Mid
+ // reached end of input.
+ bool stdinEnded()
+ {
++#if defined(_WIN32)
++    // Windows has no poll on a pipe; PeekNamedPipe is its non-blocking
++    // question. The monitor's stdin is the pipe its parent spawned it with,
++    // and a closed write end reads as ERROR_BROKEN_PIPE. Any other handle,
++    // a console included, is never "ended" here, as poll would say.
++    const HANDLE in = GetStdHandle (STD_INPUT_HANDLE);
++    for (;;)
++    {
++        DWORD available = 0;
++        if (PeekNamedPipe (in, nullptr, 0, nullptr, &available, nullptr) == 0)
++            return GetLastError() == ERROR_BROKEN_PIPE;
++        if (available == 0)
++            return false;
++        char discarded[256];
++        DWORD got = 0;
++        const DWORD want = available < sizeof (discarded) ? available : (DWORD) sizeof (discarded);
++        if (ReadFile (in, discarded, want, &got, nullptr) == 0 || got == 0)
++            return true;
++    }
++#else
+     pollfd stdinPoll { STDIN_FILENO, POLLIN, 0 };
+     while (poll (&stdinPoll, 1, 0) > 0)
+     {
+@@ -135,6 +161,7 @@ bool stdinEnded()
+             return true;
+     }
+     return false;
++#endif
+ }
+ 
+ // The system output's name, which the voice host names as scsynth's input
+@@ -168,7 +195,14 @@ int runKeys (const juce::String& name)
+     const KeyboardLayoutWatcher watcher (printKeyboardLayout);
+     printKeyboardLayout();
+ 
++    // JUCE declares createNewDevice only where the OS lets a process
++    // publish a MIDI port (macOS, Linux); Windows has no virtual ports, so
++    // there the helper refuses below with the same message as a failure.
++#if JUCE_WINDOWS
++    std::unique_ptr<juce::MidiOutput> source;
++#else
+     auto source = juce::MidiOutput::createNewDevice (name);
++#endif
+     if (source == nullptr)
+     {
+         printError ("cannot create a virtual MIDI source named " + name + " on this system");
+diff --git a/native/audiod/src/live.h b/native/audiod/src/live.h
+index 2391891d..70555a60 100644
+--- a/native/audiod/src/live.h
++++ b/native/audiod/src/live.h
+@@ -138,6 +138,20 @@ class LiveSession
+ 
+     struct Track
+     {
++        // Move-only, and said so: the chain holds unique_ptrs and
++        // nothing ever copies a Track. MSVC's std::map move constructor
++        // is not noexcept, so the two maps below make Track's implicit
++        // move constructor not noexcept either, and vector<Track>
++        // reallocation falls back through move_if_noexcept to the
++        // implicit copy constructor, which cannot copy the chain.
++        // libstdc++ and libc++ maps move noexcept, which is why this
++        // only surfaced on Windows.
++        Track() = default;
++        Track (const Track&) = delete;
++        Track& operator= (const Track&) = delete;
++        Track (Track&&) = default;
++        Track& operator= (Track&&) = default;
++
+         std::string name;
+         int rate = 0;
+         std::vector<Window> windows;
+diff --git a/native/audiod/src/main.cpp b/native/audiod/src/main.cpp
+index 53c10bf2..85fb79b5 100644
+--- a/native/audiod/src/main.cpp
++++ b/native/audiod/src/main.cpp
+@@ -322,9 +322,12 @@ int main (int argc, char* argv[])
+     }
+ 
+     // A write to a dying client must be an error return, never a
+-    // process-killing signal. This is the whole mechanism, on every
+-    // platform: with SIGPIPE ignored, write() to a closed peer returns
+-    // EPIPE and Server::send stops.
++    // process-killing signal. On POSIX this line is the whole mechanism:
++    // with SIGPIPE ignored, write() to a closed peer returns EPIPE and
++    // Server::send stops. Windows has no SIGPIPE at all — a send to a
++    // closed peer is an error return by definition — so the guarantee
++    // holds there with no line to write, and the guard below is absence
++    // of the symbol, not absence of the guarantee.
+     //
+     // There used to be a per-socket SO_NOSIGPIPE alongside it, described
+     // as belt and braces. It was redundant, and the redundancy was
+@@ -348,7 +351,9 @@ int main (int argc, char* argv[])
+     // SIGPIPE back at SIG_DFL, so it asserted nothing. Provoking the
+     // window from outside means winning a race the daemon is built to
+     // lose, and a test that hits it only sometimes is worse than none.
++#if ! defined(_WIN32)
+     std::signal (SIGPIPE, SIG_IGN);
++#endif
+ 
+     juce::ScopedJuceInitialiser_GUI juceInit;
+ 
+diff --git a/native/audiod/src/server.cpp b/native/audiod/src/server.cpp
+index 2d51e647..c66bb2f5 100644
+--- a/native/audiod/src/server.cpp
++++ b/native/audiod/src/server.cpp
+@@ -2,6 +2,36 @@
+ #include "player.h"
+ #include "version.h"
+ 
++#if defined(_WIN32)
++
++// The control socket does not exist on Windows yet: this transport is
++// AF_UNIX by hand (see the header), and windows-portability.md chunk 4
++// replaces it with a named pipe behind the same interface. Until then
++// the daemon still earns its keep as a subprocess — --render,
++// --render-live and --scan never construct a Server — and serve mode
++// refuses at start() with a pointer, instead of the file failing to
++// compile. The private loop methods stay declared and undefined; nothing
++// on this path can reach them.
++
++Server::Server (Player& p, juce::String relativeSocketPath)
++    : player (p), socketPath (std::move (relativeSocketPath))
++{
++}
++
++Server::~Server() = default;
++
++juce::String Server::start()
++{
++    return "the control socket is not implemented on Windows yet (windows-portability.md chunk 4)";
++}
++
++void Server::beginShutdown() {}
++void Server::broadcast (const juce::String&) {}
++void Server::sweepClosedConnections() {}
++int Server::connectionCount() { return 0; }
++
++#else
++
+ #include <fcntl.h>
+ #include <sys/file.h>
+ #include <sys/socket.h>
+@@ -475,3 +505,5 @@ int Server::connectionCount()
+             ++open;
+     return open;
+ }
++
++#endif // !defined(_WIN32)
+diff --git a/package.json b/package.json
+index e94828a5..bc947cee 100644
+--- a/package.json
++++ b/package.json
+@@ -16,7 +16,7 @@
+     "field": "tsx src/cli.ts",
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit",
+-    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build --parallel 4",
++    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build --parallel 4 --config Release",
+     "gen:limits": "tsx scripts/gen-plan-limits.ts"
+   },
+   "dependencies": {
+diff --git a/src/aced/client.test.ts b/src/aced/client.test.ts
+index cb3f4c7e..5523ba85 100644
+--- a/src/aced/client.test.ts
++++ b/src/aced/client.test.ts
+@@ -39,7 +39,10 @@ function findInterpreter(): string | undefined {
+ 
+ const interpreter = findInterpreter();
+ 
+-describe.skipIf(!interpreter)('field-aced protocol (live daemon)', () => {
++// win32: the worker serves on an AF_UNIX socket CPython does not bind on
++// Windows; the workers keep their POSIX transport until their own chunk
++// (windows-portability.md §4).
++describe.skipIf(!interpreter || process.platform === 'win32')('field-aced protocol (live daemon)', () => {
+   let root: string;
+   let client: AcedClient;
+   let savedPythonPath: string | undefined;
+diff --git a/src/audio/plugin-hosting.test.ts b/src/audio/plugin-hosting.test.ts
+index 8a64af71..f6f5dce8 100644
+--- a/src/audio/plugin-hosting.test.ts
++++ b/src/audio/plugin-hosting.test.ts
+@@ -358,7 +358,10 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
+   });
+ });
+ 
+-describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md chunk 2)', () => {
++// win32: the live path runs over the control socket, which waits on the
++// named-pipe transport (windows-portability.md chunk 4); the offline
++// describe above renders through --render subprocesses and runs.
++describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted chains live (plugin-hosting.md chunk 2)', () => {
+   let root: string;
+ 
+   beforeEach(async () => {
+diff --git a/src/audiod/client.test.ts b/src/audiod/client.test.ts
+index f4516450..7925b1b1 100644
+--- a/src/audiod/client.test.ts
++++ b/src/audiod/client.test.ts
+@@ -27,7 +27,10 @@ describe('event schema', () => {
+   });
+ });
+ 
+-describe.skipIf(!binary)('field-audiod protocol', () => {
++// win32: the binary exists but serve mode refuses until the named-pipe
++// transport (windows-portability.md chunk 4); every test here dials the
++// socket.
++describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol', () => {
+   let root: string;
+   let client: AudiodClient;
+ 
+diff --git a/src/audiod/client.ts b/src/audiod/client.ts
+index 396e9020..abb2d4ba 100644
+--- a/src/audiod/client.ts
++++ b/src/audiod/client.ts
+@@ -47,9 +47,12 @@ export function daemonBinary(): string | undefined {
+     return absolute;
+   }
+   const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
++  // Same artefact directory on every platform — MSVC is a multi-config
++  // generator, but build:native pins --config Release, so the layout
++  // matches the single-config one. Only the suffix differs.
+   const built = join(
+     packageRoot,
+-    'native/audiod/build/field-audiod_artefacts/Release/field-audiod',
++    `native/audiod/build/field-audiod_artefacts/Release/field-audiod${process.platform === 'win32' ? '.exe' : ''}`,
+   );
+   return existsSync(built) ? built : undefined;
+ }
+diff --git a/src/audiod/live-session.test.ts b/src/audiod/live-session.test.ts
+index c98d65e9..3982312a 100644
+--- a/src/audiod/live-session.test.ts
++++ b/src/audiod/live-session.test.ts
+@@ -148,6 +148,11 @@ function wavData(path: string): Buffer {
+   return bytes.subarray(at + 8, at + 8 + size);
+ }
+ 
++// The four tests below dial the socket; they wait on the named-pipe
++// transport (windows-portability.md chunk 4). The --render-live tests
++// around them run the binary as a subprocess and run everywhere.
++const itOverSocket = it.skipIf(process.platform === 'win32');
++
+ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+   let root: string;
+ 
+@@ -175,7 +180,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     expect(live.equals(stem)).toBe(true);
+   });
+ 
+-  it('loads, plays, ramps, and locates a session over the socket', async () => {
++  itOverSocket('loads, plays, ramps, and locates a session over the socket', async () => {
+     await scaffold(root);
+     const { session } = await compileSession(root, 'opener');
+ 
+@@ -251,7 +256,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     expect(diffSessions(before, before)).toEqual({ kind: 'same' });
+   });
+ 
+-  it('a session swap carries the transport (realtime.md chunk 3)', async () => {
++  itOverSocket('a session swap carries the transport (realtime.md chunk 3)', async () => {
+     await scaffold(root);
+     const { session } = await compileSession(root, 'opener');
+     const client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
+@@ -503,7 +508,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     expect(convertedLength(24000, 48000, 48000)).toBe(24000);
+   });
+ 
+-  it('a device that cannot switch converts delivery instead of refusing', async () => {
++  itOverSocket('a device that cannot switch converts delivery instead of refusing', async () => {
+     init({ dir: root, name: 'fortyfour', sampleRate: 44100 });
+     createSong(root, 'opener');
+     const tone = join(tmpdir(), `ff-tone-${process.pid}.wav`);
+@@ -550,7 +555,7 @@ describe.skipIf(!binary)('live session (realtime.md chunk 2)', () => {
+     }
+   });
+ 
+-  it('a swap keeps converted delivery seamless: the queued tail survives', async () => {
++  itOverSocket('a swap keeps converted delivery seamless: the queued tail survives', async () => {
+     // Swap-with-carry under conversion (cross-rate-live.md decision 3,
+     // minjudd's finding on #143): the FIFO holds already-converted
+     // audio the ear has not heard yet, and a swap that keeps the rate
+diff --git a/src/commands/build.ts b/src/commands/build.ts
+index d3bbcecf..6d037367 100644
+--- a/src/commands/build.ts
++++ b/src/commands/build.ts
+@@ -56,7 +56,10 @@ export function projectRelative(root: string, path: string): string {
+   // outputs, whose path parts are slugs by grammar, but the line should
+   // mean what it looks like it means.
+   const outside = rel === '..' || rel.startsWith(`..${sep}`);
+-  return rel === '' || outside ? path : rel;
++  // Project-relative means slash-separated, matching how every other
++  // project-relative path is spelled (model/project.ts projectPath); the
++  // absolute fallback stays native, since being absolute is its point.
++  return rel === '' || outside ? path : rel.split(sep).join('/');
+ }
+ 
+ // Building trusts only a valid project: schema or reference errors fail
+diff --git a/src/commands/click-daemon.test.ts b/src/commands/click-daemon.test.ts
+index 1a307d7b..cee5410a 100644
+--- a/src/commands/click-daemon.test.ts
++++ b/src/commands/click-daemon.test.ts
+@@ -52,6 +52,11 @@ function zeroCrossings(samples: Float32Array): number {
+   return n;
+ }
+ 
++// The three tests that dial the socket wait on the named-pipe transport
++// (windows-portability.md chunk 4). The --render-live test runs the
++// binary as a subprocess and runs everywhere.
++const itOverSocket = it.skipIf(process.platform === 'win32');
++
+ describe.skipIf(!binary)('the engine click', () => {
+   let root: string;
+ 
+@@ -123,7 +128,7 @@ describe.skipIf(!binary)('the engine click', () => {
+     expect(zeroCrossings(left.subarray(24000, 24720))).toBeCloseTo(2 * 1046.5 * 0.015, -1);
+   });
+ 
+-  it('takes a schedule over the socket, reports it, and clears it with the bed', async () => {
++  itOverSocket('takes a schedule over the socket, reports it, and clears it with the bed', async () => {
+     const client = await AudiodClient.connect(root, { nullOutput: true });
+     try {
+       expect(client.supports('click')).toBe(true);
+@@ -145,7 +150,7 @@ describe.skipIf(!binary)('the engine click', () => {
+     }
+   });
+ 
+-  it('a pre-rolled take begins on exactly the sample it was asked for', { timeout: 15_000 }, async () => {
++  itOverSocket('a pre-rolled take begins on exactly the sample it was asked for', { timeout: 15_000 }, async () => {
+     const client = await AudiodClient.connect(root, { nullOutput: true });
+     try {
+       await client.load(join(root, 'songs/creek/audio/bed/bed.wav'));
+@@ -172,7 +177,7 @@ describe.skipIf(!binary)('the engine click', () => {
+     }
+   });
+ 
+-  it('field record --count-in pre-rolls a bar and lands the take exactly at --at', { timeout: 20_000 }, async () => {
++  itOverSocket('field record --count-in pre-rolls a bar and lands the take exactly at --at', { timeout: 20_000 }, async () => {
+     createTrack(root, 'creek', 'lead-vocal');
+     writeFileSync(
+       join(root, 'songs/creek/tracks/lead-vocal.yaml'),
+diff --git a/src/commands/generate.test.ts b/src/commands/generate.test.ts
+index 5f5dc944..bfbd92a6 100644
+--- a/src/commands/generate.test.ts
++++ b/src/commands/generate.test.ts
+@@ -46,6 +46,13 @@ const stubWorker = join(
+ 
+ let root: string;
+ 
++// The tests below that actually generate spawn the stub worker, which
++// serves on an AF_UNIX socket path, and Node on Windows cannot listen
++// there (the local domain is named pipes).
++// The workers keep their POSIX transport until their own chunk
++// (windows-portability.md §4); validation-only tests run everywhere.
++const itSpawnsAWorker = it.skipIf(process.platform === 'win32');
++
+ beforeEach(() => {
+   root = mkdtempSync(join(tmpdir(), 'field-generate-'));
+   init({ dir: root, name: 'test-album' });
+@@ -152,7 +159,7 @@ describe('field generate: which generator, decided before anything spawns', () =
+     ).rejects.toThrow('--conviction is a voice option');
+   });
+ 
+-  it('still asks music for exactly one length, and asks voice for none', async () => {
++  itSpawnsAWorker('still asks music for exactly one length, and asks voice for none', async () => {
+     const { bars: _bars, ...noLength } = music;
+     await expect(generateVariants(root, 'pad', noLength)).rejects.toThrow(
+       'exactly one of --bars or --duration',
+@@ -265,7 +272,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
+     ).rejects.toThrow('does not match its recorded sha256');
+   });
+ 
+-  it('generates from the bytes it pins, even if the recording changes mid-run', async () => {
++  itSpawnsAWorker('generates from the bytes it pins, even if the recording changes mid-run', async () => {
+     // The window is real: the CLI resolves the reference, then the worker
+     // reads it minutes later, after daemon start and a weights download.
+     // Edit the recording inside that window and put it back afterwards
+@@ -312,7 +319,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
+     }
+   });
+ 
+-  it('leaves no snapshot behind', async () => {
++  itSpawnsAWorker('leaves no snapshot behind', async () => {
+     await importReference();
+     const before = readdirSync(tmpdir()).filter((e) => e.startsWith('field-voice-ref-'));
+     await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
+@@ -320,7 +327,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
+     expect(after).toEqual(before);
+   });
+ 
+-  it('pins the reference by name and hash, and hands the worker a path', async () => {
++  itSpawnsAWorker('pins the reference by name and hash, and hands the worker a path', async () => {
+     const path = await importReference();
+     const result = await generateVariants(root, 'line', { ...voice, voiceRef: 'ref-voice' });
+ 
+@@ -350,7 +357,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
+     expect((await check(root)).unformatted).toEqual([]);
+   });
+ 
+-  it('resolves a shared reference by its full label', async () => {
++  itSpawnsAWorker('resolves a shared reference by its full label', async () => {
+     mkdirSync(join(root, 'shared/audio'), { recursive: true });
+     writeFileSync(join(root, 'shared/audio/justin.wav'), REF_BYTES);
+     writeFileSync(
+@@ -372,7 +379,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
+     expect((await check(root)).diagnostics).toEqual([]);
+   });
+ 
+-  it("omits voice_ref entirely for the model's own voice", async () => {
++  itSpawnsAWorker("omits voice_ref entirely for the model's own voice", async () => {
+     // "" and absent are different requests (#60), and the entry has the
+     // same distinction: no key at all, not an empty one. This is the
+     // configuration bloom generates with today (§6).
+@@ -392,7 +399,7 @@ describe('field generate: resolving the voice a line is generated in', () => {
+ describe('field generate: what lands on disk', () => {
+   const voice = { song: 'creek', text: 'the water knows the way', seed: 7, variants: 2 };
+ 
+-  it('lands variants in seed order, hashed as written, and check-green', async () => {
++  itSpawnsAWorker('lands variants in seed order, hashed as written, and check-green', async () => {
+     const result = await generateVariants(root, 'line', voice);
+     expect(result.files).toEqual([
+       join('songs', 'creek', 'audio', 'line', '1.wav'),
+@@ -424,7 +431,7 @@ describe('field generate: what lands on disk', () => {
+     expect(checked.unformatted).toEqual([]);
+   });
+ 
+-  it('scaffolds a leaf track for a brand-new request', async () => {
++  itSpawnsAWorker('scaffolds a leaf track for a brand-new request', async () => {
+     // The create path's file is a track like any other — the shape every
+     // request lives in (nested-tracks.md §18, decision 12) — and it must
+     // be exactly the file a person would write: no defaulted placement
+@@ -439,7 +446,7 @@ describe('field generate: what lands on disk', () => {
+     expect((await check(root)).unformatted).toEqual([]);
+   });
+ 
+-  it('routes music to field-aced and voice to field-voiced', async () => {
++  itSpawnsAWorker('routes music to field-aced and voice to field-voiced', async () => {
+     // Same verb, different socket — which is the whole of the routing
+     // decision (project-layout.md §1.7). The stub answers with the name
+     // it was invoked as, and the client refuses a mismatch (#60), so a
+@@ -460,7 +467,7 @@ describe('field generate: what lands on disk', () => {
+     expect((await check(root)).diagnostics).toEqual([]);
+   });
+ 
+-  it('sends the delivery knobs and records them, translating only at the worker', async () => {
++  itSpawnsAWorker('sends the delivery knobs and records them, translating only at the worker', async () => {
+     // `conviction` is our name end to end — schema, protocol and wire —
+     // and becomes `cfg_weight` inside the adapter, which is the boundary
+     // where Chatterbox's vocabulary starts (voice-generation.md §8).
+@@ -477,7 +484,7 @@ describe('field generate: what lands on disk', () => {
+     expect((await check(root)).unformatted).toEqual([]);
+   });
+ 
+-  it('omits them entirely when unset, rather than pinning a default', async () => {
++  itSpawnsAWorker('omits them entirely when unset, rather than pinning a default', async () => {
+     // Absent means "whatever the model does", which is not the same as
+     // the number the model happens to default to today. Writing 0.5 down
+     // would silently pin it if Chatterbox ever moved.
+@@ -490,7 +497,7 @@ describe('field generate: what lands on disk', () => {
+     expect(raw).not.toContain('conviction');
+   });
+ 
+-  it('reports progress from the worker, and says who is starting first', async () => {
++  itSpawnsAWorker('reports progress from the worker, and says who is starting first', async () => {
+     const stages: string[] = [];
+     await generateVariants(root, 'line', { ...voice, onProgress: (s) => stages.push(s) });
+     // The first line arrives before the worker exists: daemon boot,
+@@ -515,7 +522,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
+     writeFileSync(join(root, 'songs/creek/tracks/topline.yaml'), yaml);
+   }
+ 
+-  it('takes the request from the entry and fills it in place, comments intact', async () => {
++  itSpawnsAWorker('takes the request from the entry and fills it in place, comments intact', async () => {
+     writeLeaf(`# generate your own — nobody's creek is anybody else's\n${TAKELESS}`);
+     const result = await generateVariants(root, 'topline', run);
+     expect(result.files).toHaveLength(2);
+@@ -532,7 +539,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
+     expect((await check(root)).diagnostics).toEqual([]);
+   });
+ 
+-  it('refuses a flag that would be a second answer to what the entry says', async () => {
++  itSpawnsAWorker('refuses a flag that would be a second answer to what the entry says', async () => {
+     writeLeaf(TAKELESS);
+     await expect(
+       generateVariants(root, 'topline', { ...run, text: 'a different line' }),
+@@ -544,7 +551,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
+     expect(takesOf('topline').variants).toHaveLength(2);
+   });
+ 
+-  it('fills a music entry that carries both lengths', async () => {
++  itSpawnsAWorker('fills a music entry that carries both lengths', async () => {
+     // What `field generate` itself writes: the seconds it ran at, and the
+     // bars it was asked for. The flag rule is exactly one, so passing both
+     // through would make an ordinary request unfillable — with advice
+@@ -569,7 +576,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
+     expect(existsSync(join(root, 'songs/creek/audio/topline'))).toBe(false);
+   });
+ 
+-  it('leaves the leaf byte-identical, writing the takes beside the audio', async () => {
++  itSpawnsAWorker('leaves the leaf byte-identical, writing the takes beside the audio', async () => {
+     // The reason for the split (bloom-in-tree.md §7): a shipped request is
+     // committed, and generating into it made using the tool as documented
+     // produce a diff. Bytes, not just content — a re-emit that happened to
+@@ -593,7 +600,7 @@ describe('field generate: filling a leaf that shipped without takes', () => {
+     expect((await check(root)).diagnostics).toEqual([]);
+   });
+ 
+-  it('refuses to run over takes that already exist', async () => {
++  itSpawnsAWorker('refuses to run over takes that already exist', async () => {
+     writeLeaf(TAKELESS);
+     await generateVariants(root, 'topline', run);
+     // The trigger policy (project-layout.md §1.2): re-running would
+@@ -619,7 +626,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
+     );
+   }
+ 
+-  it('fills by gen node name and leaves the track file untouched', async () => {
++  itSpawnsAWorker('fills by gen node name and leaves the track file untouched', async () => {
+     writeGenLeaf();
+     const trackPath = join(root, 'songs/creek/tracks/rain-pad.yaml');
+     const before = readFileSync(trackPath, 'utf8');
+@@ -649,7 +656,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
+     ).rejects.toThrow('the entry already says what to generate');
+   });
+ 
+-  it('refuses to refill an entry that has takes', async () => {
++  itSpawnsAWorker('refuses to refill an entry that has takes', async () => {
+     writeGenLeaf();
+     await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 1 });
+     await expect(
+@@ -690,7 +697,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
+     ).rejects.toThrow('built by a rule, not generated');
+   });
+ 
+-  it('choosing repoints the gen-keyed takes and nothing else', async () => {
++  itSpawnsAWorker('choosing repoints the gen-keyed takes and nothing else', async () => {
+     writeGenLeaf();
+     await generateVariants(root, 'rain-pad', { song: 'creek', seed: 7, variants: 2 });
+     const result = await chooseVariant(root, 'rain-pad', { song: 'creek', variant: 2 });
+@@ -704,7 +711,7 @@ describe('field generate: entry mechanics (nested-tracks.md §18 step 3)', () =>
+     expect((await check(root)).diagnostics).toEqual([]);
+   });
+ 
+-  it('choose refuses a takes file that attaches elsewhere', async () => {
++  itSpawnsAWorker('choose refuses a takes file that attaches elsewhere', async () => {
+     // A misattached file would otherwise get `chosen` rewritten and a
+     // success report, while the loader rejects the file and the graph
+     // never sees the choice.
+diff --git a/src/commands/play-daemon.test.ts b/src/commands/play-daemon.test.ts
+index 2427dc69..07eff15f 100644
+--- a/src/commands/play-daemon.test.ts
++++ b/src/commands/play-daemon.test.ts
+@@ -22,7 +22,9 @@ const binary = (() => {
+   }
+ })();
+ 
+-describe.skipIf(!binary)('field play through the daemon', () => {
++// win32: serve mode refuses until the named-pipe transport
++// (windows-portability.md chunk 4).
++describe.skipIf(!binary || process.platform === 'win32')('field play through the daemon', () => {
+   let root: string;
+   let project: LoadedProject;
+ 
+diff --git a/src/commands/punch-daemon.test.ts b/src/commands/punch-daemon.test.ts
+index 9738da65..7468594e 100644
+--- a/src/commands/punch-daemon.test.ts
++++ b/src/commands/punch-daemon.test.ts
+@@ -68,7 +68,9 @@ describe('the loop line', () => {
+   });
+ });
+ 
+-describe.skipIf(!binary)('punch-out and loop takes', () => {
++// win32: serve mode refuses until the named-pipe transport
++// (windows-portability.md chunk 4); every test here dials the socket.
++describe.skipIf(!binary || process.platform === 'win32')('punch-out and loop takes', () => {
+   let root: string;
+ 
+   beforeEach(async () => {
+diff --git a/src/commands/record-daemon.test.ts b/src/commands/record-daemon.test.ts
+index 28b99369..624ab99c 100644
+--- a/src/commands/record-daemon.test.ts
++++ b/src/commands/record-daemon.test.ts
+@@ -80,7 +80,9 @@ describe('record helpers', () => {
+   });
+ });
+ 
+-describe.skipIf(!binary)('recording through the daemon', () => {
++// win32: serve mode refuses until the named-pipe transport
++// (windows-portability.md chunk 4); every test here dials the socket.
++describe.skipIf(!binary || process.platform === 'win32')('recording through the daemon', () => {
+   let root: string;
+ 
+   beforeEach(() => {
+diff --git a/src/commands/record-midi-daemon.test.ts b/src/commands/record-midi-daemon.test.ts
+index 47f2063c..29cabd3b 100644
+--- a/src/commands/record-midi-daemon.test.ts
++++ b/src/commands/record-midi-daemon.test.ts
+@@ -75,7 +75,9 @@ function readLines(root: string, file: string): MidiTakeLine[] {
+     .map((line) => midiTakeLineSchema.parse(JSON.parse(line)));
+ }
+ 
+-describe.skipIf(!binary)('MIDI takes through the daemon', () => {
++// win32: serve mode refuses until the named-pipe transport
++// (windows-portability.md chunk 4); every test here dials the socket.
++describe.skipIf(!binary || process.platform === 'win32')('MIDI takes through the daemon', () => {
+   let root: string;
+   const helpers: Helper[] = [];
+   const daemons: number[] = [];
+diff --git a/src/commands/version.test.ts b/src/commands/version.test.ts
+index 36dd7a25..1350d8bd 100644
+--- a/src/commands/version.test.ts
++++ b/src/commands/version.test.ts
+@@ -36,6 +36,13 @@ afterEach(async () => {
+   rmSync(root, { recursive: true, force: true });
+ });
+ 
++// fakeDaemon binds a Unix socket, which Node on Windows cannot do — the
++// local domain is named pipes there. Every test that fakes a daemon goes
++// with the transport when windows-portability.md chunk 4 moves
++// socketPathFor to pipe names; the guard is the transport's, not each
++// test's own.
++const itOverPosixSocket = it.skipIf(process.platform === 'win32');
++
+ // A daemon that answers `hello` and nothing else, which is all this
+ // command asks of one.
+ function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Promise<void> {
+@@ -77,7 +84,7 @@ describe('field --version', () => {
+     expect(formatVersionReport(report, root)).toContain('field-voiced  not running');
+   });
+ 
+-  it('reports what a running daemon says about itself', async () => {
++  itOverPosixSocket('reports what a running daemon says about itself', async () => {
+     await fakeDaemon('.field/voiced.sock', {
+       protocol: WORKER_PROTOCOL_VERSION,
+       daemon: 'field-voiced',
+@@ -92,7 +99,7 @@ describe('field --version', () => {
+     expect(voiced.note).toBeUndefined();
+   });
+ 
+-  it('flags a daemon whose protocol predates this build', async () => {
++  itOverPosixSocket('flags a daemon whose protocol predates this build', async () => {
+     // The reason the command exists. A worker started before a protocol
+     // change answers hello perfectly well and will then refuse — or,
+     // before the bump that made this visible, quietly do the wrong
+@@ -110,7 +117,7 @@ describe('field --version', () => {
+     expect(formatVersionReport(report, root)).toContain('!');
+   });
+ 
+-  it('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
++  itOverPosixSocket('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
+     // audiod is at protocol 1 and the workers at 2; comparing either
+     // against the other invents a disagreement. Skipping audiod was the
+     // alternative and worse: AudiodClient refuses a mismatch and
+@@ -125,7 +132,7 @@ describe('field --version', () => {
+     expect(audiod.note).toContain('rebuild the daemon');
+   });
+ 
+-  it('does not flag a current audiod merely for differing from the workers', async () => {
++  itOverPosixSocket('does not flag a current audiod merely for differing from the workers', async () => {
+     // The invented-disagreement case: audiod at its own current protocol
+     // is fine even though that number is not the workers'.
+     await fakeDaemon(AUDIOD_SOCKET, {
+@@ -138,7 +145,7 @@ describe('field --version', () => {
+     expect(audiod.note).toBeUndefined();
+   });
+ 
+-  it('does not hand audiod a remedy for a process that is not audiod', async () => {
++  itOverPosixSocket('does not hand audiod a remedy for a process that is not audiod', async () => {
+     // The interaction, not the gap: put a worker on audiod's socket and
+     // the old code reported field-audiod at the worker's version, then
+     // measured the worker's protocol 2 against audiod's 1 and printed
+@@ -155,13 +162,13 @@ describe('field --version', () => {
+     expect(audiod.note).not.toContain('rebuild the daemon');
+   });
+ 
+-  it('does not report an audiod refusal as a healthy audiod', async () => {
++  itOverPosixSocket('does not report an audiod refusal as a healthy audiod', async () => {
+     await fakeDaemon(AUDIOD_SOCKET, { ok: false, error: 'unknown op' });
+     const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
+     expect(audiod.note).toContain('refused the hello');
+   });
+ 
+-  it('says when the wrong worker is on a socket', async () => {
++  itOverPosixSocket('says when the wrong worker is on a socket', async () => {
+     // One socket convention across every worker means a stale or
+     // mis-pointed socket puts one worker's process under another's name.
+     // A version report that mislabels a process is worse than one that
+@@ -175,7 +182,7 @@ describe('field --version', () => {
+     expect(voiced.note).toContain('identifies as field-aced');
+   });
+ 
+-  it('does not report a refusal as a healthy daemon', async () => {
++  itOverPosixSocket('does not report a refusal as a healthy daemon', async () => {
+     // `ok: false` is a refusal, not a hello. Reporting it as running with
+     // an unknown version is the command's own kind of lie.
+     await fakeDaemon('.field/voiced.sock', { ok: false, error: 'unknown op' });
+@@ -183,7 +190,7 @@ describe('field --version', () => {
+     expect(voiced.note).toContain('refused the hello');
+   });
+ 
+-  it('does not flag a daemon that agrees', async () => {
++  itOverPosixSocket('does not flag a daemon that agrees', async () => {
+     // The negative half: a warning that fires on a current daemon is a
+     // warning nobody reads.
+     await fakeDaemon('.field/aced.sock', {
+diff --git a/src/commands/watch.test.ts b/src/commands/watch.test.ts
+index c5e8551b..e8a156be 100644
+--- a/src/commands/watch.test.ts
++++ b/src/commands/watch.test.ts
+@@ -1,6 +1,6 @@
+ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { join, sep } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import type { BuildOutcome, GeneratorRunner } from '../graph/build.js';
+ import { sha256Text } from '../hash.js';
+@@ -288,7 +288,9 @@ describe('watchBuild', { timeout: 20_000 }, () => {
+     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
+     if (first.kind !== 'outcomes') return;
+     const base = first.outcomes.find((o) => o.label === '//songs/creek/gen:gen1')!;
+-    expect(base.outputPath!.endsWith('audio/gen1/1.wav')).toBe(true);
++    // outputPath is a native absolute path; compare the suffix in the
++    // platform separator.
++    expect(base.outputPath!.endsWith(['audio', 'gen1', '1.wav'].join(sep))).toBe(true);
+ 
+     // field choose is exactly this YAML edit (watch.md §1.5): the label's
+     // hash moves and the report carries the newly chosen committed file —
+@@ -299,7 +301,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
+     );
+     if (moved.kind !== 'outcomes') return;
+     const repointed = moved.changed.find((o) => o.label === '//songs/creek/gen:gen1')!;
+-    expect(repointed.outputPath!.endsWith('audio/gen1/2.wav')).toBe(true);
++    expect(repointed.outputPath!.endsWith(['audio', 'gen1', '2.wav'].join(sep))).toBe(true);
+     expect(repointed.sha256).toBe(sha256Text('variant two bytes'));
+ 
+     abort.abort();
+diff --git a/src/graph/build.test.ts b/src/graph/build.test.ts
+index 7fbe41e9..19d19bf4 100644
+--- a/src/graph/build.test.ts
++++ b/src/graph/build.test.ts
+@@ -1,6 +1,6 @@
+ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { join, sep } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { createSong } from '../commands/create.js';
+ import { importAsset } from '../commands/import.js';
+@@ -142,7 +142,11 @@ describe('build', () => {
+     const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);
+     // Every outcome names a playable path — watch hands any label's fresh
+     // artifact to the daemon, including committed content.
+-    expect(outcomes[0]!.outputPath!.endsWith('songs/creek/audio/pad/pad.wav')).toBe(true);
++    // outputPath is a native absolute path; the suffix compares in the
++    // platform separator.
++    expect(
++      outcomes[0]!.outputPath!.endsWith(['songs', 'creek', 'audio', 'pad', 'pad.wav'].join(sep)),
++    ).toBe(true);
+     // ...and says the path is a source it never produced, which `cached`
+     // alone cannot distinguish from a cache hit.
+     expect(outcomes[0]!.committed).toBe(true);
+@@ -153,7 +157,7 @@ describe('build', () => {
+     const outcomes = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+     const rule = outcomes.find((o) => o.label.endsWith(':pad-eq'))!;
+     expect(rule.committed).toBeUndefined();
+-    expect(rule.outputPath!).toContain('.field/out'); // materialized, not committed
++    expect(rule.outputPath!).toContain(join('.field', 'out')); // materialized, not committed
+   });
+ 
+   it('materializes by rename, never in place (watch.md §1.6)', async () => {
+@@ -463,7 +467,14 @@ describe('runScProgram edges (no sclang needed)', () => {
+     });
+   });
+ 
+-  it('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
++  // The next two fake sclang with #!/bin/sh scripts. The code path they
++  // exercise (execFile, the timeout, stdout capture) is platform-
++  // independent; the *stub* is not — Windows has no shebang — so they
++  // skip there rather than growing a second stub dialect. A real sclang
++  // does not reach this spawn on Windows yet either: sclangCommand looks
++  // for `sclang` without `.exe` and reads a native FIELD_SCLANG path as a
++  // name to search for (windows-portability.md §7.2).
++  it.skipIf(process.platform === 'win32')('diagnoses a timeout as a missing 0.exit, not a generic failure', async () => {
+     const hang = join(root, 'hang.sh');
+     writeFileSync(hang, '#!/bin/sh\nsleep 5\n');
+     chmodSync(hang, 0o755);
+@@ -474,7 +485,7 @@ describe('runScProgram edges (no sclang needed)', () => {
+     });
+   });
+ 
+-  it('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
++  it.skipIf(process.platform === 'win32')('surfaces sclang stdout in failures (where SC prints its errors)', async () => {
+     const fail = join(root, 'fail.sh');
+     writeFileSync(fail, '#!/bin/sh\necho "ERROR: Class not defined: Blah"\necho "boring stderr" >&2\nexit 1\n');
+     chmodSync(fail, 0o755);
+diff --git a/src/graph/live.ts b/src/graph/live.ts
+index 584ccb6e..806962aa 100644
+--- a/src/graph/live.ts
++++ b/src/graph/live.ts
+@@ -37,12 +37,12 @@
+ // bit-identical (decision 3). CPU scales with what is being edited,
+ // not with the session.
+ 
+-import { join, relative } from 'node:path';
++import { join } from 'node:path';
+ import { wavFrameCount } from '../audio/wav.js';
+ import { SESSION_VERSION, insertGrowth, insertLatency, type Session, type SessionInsert, type SessionTrack } from '../audiod/session.js';
+ import { buildLabels } from '../commands/build.js';
+ import { formatLabel } from '../labels.js';
+-import { formatDiagnostic, loadProject } from '../model/project.js';
++import { formatDiagnostic, loadProject, projectPath } from '../model/project.js';
+ import type { SpecInsert } from '../generators/stem.js';
+ import { toPluginWire } from '../audio/plugins.js';
+ import { explain, type Explanation } from './build.js';
+@@ -280,7 +280,10 @@ export async function compileSession(
+     for (const outcome of await buildLabels(root, toBuild)) {
+       if (outcome.outputPath !== undefined)
+         fileByLabel.set(outcome.label, {
+-          path: relative(root, outcome.outputPath),
++          // Slash-separated like every path in the session JSON: the
++          // daemon resolves them against its cwd, and Windows accepts
++          // the forward slashes there too.
++          path: projectPath(root, outcome.outputPath),
+           sha256: outcome.sha256,
+         });
+     }
+diff --git a/src/keys/helper-native.test.ts b/src/keys/helper-native.test.ts
+index 610fe5a2..f6356f17 100644
+--- a/src/keys/helper-native.test.ts
++++ b/src/keys/helper-native.test.ts
+@@ -124,6 +124,13 @@ async function startKeys(ctx: TestContext, name: string): Promise<{ keys: Helper
+     console.warn(`skipping the native MIDI round trip: ${reason}`);
+     ctx.skip(reason);
+   }
++  // Windows has no virtual MIDI ports for --keys to publish
++  // (windows-portability.md §7.2), so the helper refuses there by design.
++  if ('error' in published && process.platform === 'win32') {
++    const reason = `no virtual MIDI ports on Windows, and --keys said ${JSON.stringify(published['error'])}`;
++    console.warn(`skipping the native MIDI round trip: ${reason}`);
++    ctx.skip(reason);
++  }
+   // On macOS the ready line also names the system output, which the
+   // voice host gives scsynth for both directions.
+   const { output, ...ready } = published;
+diff --git a/src/model/project.ts b/src/model/project.ts
+index 5bd670a8..3a899a06 100644
+--- a/src/model/project.ts
++++ b/src/model/project.ts
+@@ -129,12 +129,23 @@ interface FileSpec<T> {
+   order: KeyOrder;
+ }
+ 
++// Project-relative paths are slash-separated wherever they are data, not
++// display: label pkgs derive from song.dir, diagnostics quote the paths
++// YAML spells with `/` (the schemas reject `\` outright), and the graph
++// compares them as strings. `relative()` answers in the platform
++// separator, so on Windows the raw answer would put backslashes inside
++// labels and no typed pattern could ever match. join() accepts the
++// forward slashes on the way back in, on every platform.
++export function projectPath(root: string, absPath: string): string {
++  return relative(root, absPath).split(sep).join('/');
++}
++
+ function loadFile<T>(
+   project: LoadedProject,
+   absPath: string,
+   spec: FileSpec<T>,
+ ): LoadedFile<T> | undefined {
+-  const path = relative(project.root, absPath);
++  const path = projectPath(project.root, absPath);
+   let raw: string;
+   try {
+     raw = readFileSync(absPath, 'utf8');
+@@ -312,7 +323,7 @@ export function loadProject(root: string): LoadedProject {
+   for (const dir of songDirs) {
+     const song: LoadedSong = {
+       name: basename(dir),
+-      dir: relative(project.root, dir),
++      dir: projectPath(project.root, dir),
+       tracks: [],
+       genTakes: new Map(),
+       recordTakes: new Map(),
+@@ -1224,7 +1235,7 @@ function validate(project: LoadedProject): void {
+         if (!statSync(itemDir).isDirectory()) continue;
+         if (!claimedTakesDirs.has(item) && existsSync(join(itemDir, TAKES_FILENAME))) {
+           push(
+-            join(song.dir, 'audio', item, TAKES_FILENAME),
++            `${song.dir}/audio/${item}/${TAKES_FILENAME}`,
+             `no generative request claims audio/${item}/ — a renamed track or id ` +
+               `leaves its takes behind; rename the directory (and its gen: key) ` +
+               `to follow, or delete it`,
+@@ -1232,7 +1243,7 @@ function validate(project: LoadedProject): void {
+         }
+         if (!claimedRecordDirs.has(item) && existsSync(join(itemDir, RECORD_TAKES_FILENAME))) {
+           push(
+-            join(song.dir, 'audio', item, RECORD_TAKES_FILENAME),
++            `${song.dir}/audio/${item}/${RECORD_TAKES_FILENAME}`,
+             `no record entry claims audio/${item}/ — a renamed track or id leaves ` +
+               `its takes behind; rename the directory (and its record: key) to ` +
+               `follow, or add \`- record:\` back to the track`,
+diff --git a/src/schema/plan-limits.test.ts b/src/schema/plan-limits.test.ts
+index 9abb997b..d470e121 100644
+--- a/src/schema/plan-limits.test.ts
++++ b/src/schema/plan-limits.test.ts
+@@ -23,7 +23,13 @@ const header = join(root, 'native/audiod/src/plan-limits.h');
+ describe('generated plan limits', () => {
+   it('is in step with the zod schemas', () => {
+     const committed = readFileSync(header, 'utf8');
+-    execFileSync('pnpm', ['gen:limits'], { cwd: root, stdio: 'pipe' });
++    // shell on Windows only: pnpm is a .cmd shim there, which execFile
++    // cannot spawn directly (and Node refuses .cmd without a shell).
++    execFileSync('pnpm', ['gen:limits'], {
++      cwd: root,
++      stdio: 'pipe',
++      shell: process.platform === 'win32',
++    });
+     const regenerated = readFileSync(header, 'utf8');
+     expect(regenerated, 'run `pnpm gen:limits` and commit the result').toBe(committed);
+   });
+diff --git a/src/voiced/client.test.ts b/src/voiced/client.test.ts
+index aec61b0c..ca0a4feb 100644
+--- a/src/voiced/client.test.ts
++++ b/src/voiced/client.test.ts
+@@ -39,7 +39,10 @@ function findInterpreter(): string | undefined {
+ 
+ const interpreter = findInterpreter();
+ 
+-describe.skipIf(!interpreter)('field-voiced protocol (live daemon)', () => {
++// win32: the worker serves on an AF_UNIX socket CPython does not bind on
++// Windows; the workers keep their POSIX transport until their own chunk
++// (windows-portability.md §4).
++describe.skipIf(!interpreter || process.platform === 'win32')('field-voiced protocol (live daemon)', () => {
+   let root: string;
+   let client: VoicedClient;
+   let savedPythonPath: string | undefined;
+@@ -249,7 +252,8 @@ function findBareInterpreter(): string | undefined {
+ 
+ const bare = findBareInterpreter();
+ 
+-describe.skipIf(!bare)('a backend failure reaches the log', () => {
++// win32: same AF_UNIX guard as above.
++describe.skipIf(!bare || process.platform === 'win32')('a backend failure reaches the log', () => {
+   let root: string;
+   let client: VoicedClient;
+   let savedPythonPath: string | undefined;
+diff --git a/src/workers/client.ts b/src/workers/client.ts
+index 33589cf8..f9886e83 100644
+--- a/src/workers/client.ts
++++ b/src/workers/client.ts
+@@ -54,6 +54,16 @@ export function workerLaunchCommand(spec: WorkerSpec): { command: string; args:
+     if (!existsSync(absolute)) {
+       throw new Error(`${spec.pythonOverrideEnv} points at a missing interpreter: ${override}`);
+     }
++    // A JS override (the stub worker) is a script, not an executable:
++    // POSIX runs it through its shebang, Windows has no shebang and
++    // answers EFTYPE. Spawning the node that is running us is the same
++    // program on both, and pins the stub to the interpreter under test.
++    if (absolute.endsWith('.mjs') || absolute.endsWith('.js')) {
++      return {
++        command: process.execPath,
++        args: [absolute, '-m', spec.module, '--socket', spec.socketRelative],
++      };
++    }
+     return { command: absolute, args: ['-m', spec.module, '--socket', spec.socketRelative] };
+   }
+   // --no-sync is what makes `field setup` a gate rather than a label.
+diff --git a/src/workers/setup.test.ts b/src/workers/setup.test.ts
+index 76023847..e26921d1 100644
+--- a/src/workers/setup.test.ts
++++ b/src/workers/setup.test.ts
+@@ -41,9 +41,12 @@ afterEach(() => {
+ });
+ 
+ // The two layouts that matter: a worker uv has installed, and the
+-// `uv sync --only-group dev` environment CI builds for pyright.
++// `uv sync --only-group dev` environment CI builds for pyright. The venv
++// script directory is what uv writes on each platform — the same branch
++// workerScriptInstalled probes, or the helper builds a layout the probe
++// never looks at.
+ function devOnlyWorker(): string {
+-  const binDir = join(tempProject, '.venv', 'bin');
++  const binDir = join(tempProject, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin');
+   rmSync(tempProject, { recursive: true, force: true });
+   mkdirSync(binDir, { recursive: true });
+   writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');
