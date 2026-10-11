@@ -1,0 +1,271 @@
+{
+ "version": 1,
+ "name": "UI review follow-ups",
+ "project": "ui",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 187,
+  "title": "Follow up the UI's review: a patched Electron, the token out of argv, mute in explain, and the port bound first",
+  "head": "9857529f4fe62efd356578b379cc971595e3eed1",
+  "headRef": "ui/review-followups",
+  "base": "6a628173793bd9d84311808706899d3473326195",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field ui &lt;song&gt;</code> opens a song in a desktop window: a local web server inside the <code>field</code> process serves a React client, and an Electron shell (<code>ui/shell.cjs</code>) shows it. Every gesture in the window ends as an edit to the song's YAML. The UI's first version merged in #163 with a list of review suggestions it did not take. This pull request works through that list.",
+   "It falls into three kinds of change:",
+   "<ul><li><b>Security.</b> The shell moves to a patched <code>electron</code>, which also moves <code>undici</code>. The session URL, which carries a per-launch token that guards the server's WebSocket, now reaches the shell in its environment instead of on its command line, where other users on a shared machine can read it. The shell's browser profile is a fresh <code>mkdtemp</code> directory that <code>field ui</code> creates for each launch and removes after the shell exits, instead of a fixed, guessable path under the shared temp directory.</li><li><b>Output that said something untrue.</b> <code>field ui</code> now binds its port before it loads the song into the audio daemon, so a taken <code>--port</code> no longer stops whatever the daemon was playing and then crashes. <code>field explain</code> and <code>field arrangement</code> now show muted placements as muted, and an explained cable says when it is silent. The timeline names generator lanes the way the build graph does, and the EQ panel draws at the track's own sample rate.</li><li><b>Tidying.</b> Snapshot fields the view never read are gone, the waveform path is built once per envelope, the UI moves to <code>vite</code> 7, <code>nanoid</code> and <code>source-map-js</code> move past their advisories, and an owner track's clock is built by one helper.</li></ul>",
+   "Three items need a musical or product decision rather than code, and the pull request body lists them with their options: a mute that makes a receiver's parents disagree about what it hears, a soloed row inside a bus that loses the bus's sends, and cross-rate owners and record lanes that the timeline draws in session samples."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Placement</b>: an entry in a track's <code>inputs:</code> that puts another track, audio, or a generator on that track's timeline. <code>mute: true</code> lives on a placement.</li><li><b>Path</b>: one chain of placements from a track up to a root track, such as the song's output <code>main</code>. <code>field explain</code> lists one line per path, and calls identical paths \"placements\".</li><li><b>Cable</b>: a send from one track to a <code>receive:</code> on another. Its <b>arrivals</b> are the sample offsets at which the sender's audio lands in the receiver.</li><li><b>Shell</b>: the Electron process that shows the client in its own window.</li><li><b>Snapshot</b>: the JSON message the server sends the view whenever the song or the transport changes.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li><b>First review, at <code>93047a1</code>.</b> It requested two changes. The shell deleted its own profile on <code>quit</code>, which fails on Windows while Chromium still holds the files and shows an error dialog. A reflowed paragraph in <code>docs/build-graph.md</code> broke the 72-column wrapping. Both were fixed.</li><li><b>Second review, at <code>963c088</code>.</b> It requested one change. A two-second timer that was never cleared made every session end about two seconds late. It was dropped, along with the race it was part of.</li><li><b>Third review, at <code>9857529</code>.</b> Clean. All three finding threads are resolved.</li></ul><p class=\"note\">Both typechecks, the <code>ui</code> build, and the six changed test files pass in a scratch worktree, and the Linux CI job passes. The Windows job fails on <code>main</code> in tests this change does not touch.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "protocol",
+   "title": "The snapshot loses two unread fields and gains a track rate",
+   "kicker": "The wire format between the server and the view",
+   "intro": [
+    "<code>ui-protocol.ts</code> holds the types both sides of the WebSocket share. The client imports them directly, so the <code>ui</code> typecheck fails when the client reads a field the server stopped sending.",
+    "The snapshot drops <code>lanes</code>, an older flat list of the main file's placements, and the main file's <code>sha256</code>. The view draws from <code>timeline.lanes</code> and sends each lane's own file hash with an edit, so neither field was read. Each timeline lane gains <code>trackRate</code>, the sample rate the placed track renders at."
+   ],
+   "files": [
+    {
+     "path": "src/commands/ui-protocol.ts",
+     "note": "Removes <code>UiLane</code> and the snapshot's <code>lanes</code> and <code>file.sha256</code>; adds <code>trackRate</code> to <code>UiTimelineLane</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Nothing in <code>ui/src</code> reads <code>snap.lanes</code> or <code>snap.file.sha256</code>: the client imports <code>UiSnapshot</code> from this file, and <code>pnpm --dir ui typecheck</code> passes at this head. The footer still reads <code>snap.file.path</code>."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mute",
+   "title": "Explain and arrangement show what a mute does",
+   "kicker": "Muted paths, muted placements, and silent cables in the CLI's answers",
+   "intro": [
+    "A muted placement is dropped before the build graph plans a track, so nothing below it reaches that parent, and any send inside it goes silent. <code>field explain &lt;track&gt;</code> answers \"how loud is this track, and where does it go\" by listing each path to a root with its summed gain. Before this change it listed a path through a muted placement at its normal gain, and <code>field arrangement</code> listed a muted placement like any other.",
+    "Now a path is muted when any placement on it is muted, and <code>formatReach</code> adds \"muted on this path, so it is silent here\" to its line. The path stays listed, because \"placed, but muted\" answers why a track is quiet. <code>field arrangement</code> labels the placement <code>muted</code>. A cable whose every sender path is muted printed <code>0 arrivals at samples </code>; both ends now say it is silent."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "\"Placement of track:keys\" in the cable wording counts paths, as the rest of explain does: a muted group that contains the sender also silences the cable, and the existing test at <code>src/model/cables.test.ts:545</code> calls that \"a muted sender placement\"."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/model/levels.ts",
+     "note": "Carries each placement's <code>mute</code> into the path walk, keeps muted and unmuted paths apart when identical paths collapse, and words the muted note.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "<code>muted: edge.mute || above.muted</code> matches playback: <code>planFor</code> in <code>src/graph/graph.ts</code> filters <code>mute</code> entries out before planning, so every path through one carries nothing. <code>src/model/levels.test.ts</code> passes.",
+       "line": 109
+      }
+     ]
+    },
+    {
+     "path": "src/model/levels.test.ts"
+    },
+    {
+     "path": "src/model/cables.ts",
+     "note": "<code>formatCable</code> says a cable with no audible arrivals is silent, from either end.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Zero arrivals here means the audible pass dropped every path: <code>checkCables</code> reports and skips a cable whose first pass finds nothing, and the second pass walks a subset of the first pass's edges, so it cannot skip a cable the first pass kept.",
+       "line": 516
+      }
+     ]
+    },
+    {
+     "path": "src/model/cables.test.ts"
+    },
+    {
+     "path": "src/commands/arrangement.ts",
+     "note": "Adds <code>muted</code> to each <code>Placement</code> and puts it first in the line's parenthetical notes."
+    },
+    {
+     "path": "src/commands/arrangement.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "timeline",
+   "title": "The timeline names record lanes and carries each track's rate",
+   "kicker": "The projection from the song's files to the lanes the view draws",
+   "intro": [
+    "<code>projectTimeline</code> turns the loaded song into lanes with sample windows, one per placement, recursing into placed tracks. Three things change in it.",
+    "<ol><li><b>Generator lanes take the graph's name.</b> A <code>record:</code> entry read <code>input N</code>, and a <code>supercollider:</code> or <code>generative:</code> entry read its kind, so two in one track looked the same. Each is now named by <code>generatorName</code>, the function the build graph names its node with: the owning track's name, or <code>&lt;track&gt;-&lt;id&gt;</code>.</li><li><b>Each track lane carries <code>trackRate</code>.</b> A track renders at its own <code>rate:</code>, or the song's, and its EQ designs its filters at that rate. The view draws the EQ curve at this rate.</li><li><b>One clock helper.</b> <code>ownerClock</code> builds an owner track's tempo and meter maps, its own or else the song's, at the session rate. The timeline and the server's edit handlers both call it, so a clip lands where the drag showed it.</li></ol>"
+   ],
+   "files": [
+    {
+     "path": "src/commands/ui-timeline.ts",
+     "note": "Adds <code>ownerClock</code>, the generator lane names, and <code>trackRate</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 245,
+       "text": "<code>trackRate</code> follows the graph's rule: <code>graph.ts</code> renders a track at <code>track.rate ?? songRate</code>, with no rate inherited from a parent track, and the session rate is the output's, which is the song rate."
+      },
+      {
+       "kind": "verify",
+       "line": 185,
+       "text": "<code>ownerClock</code> gives the same maps the timeline built before: the owner's tempo, else the song's, else 120 bpm, at the session rate."
+      },
+      {
+       "kind": "verify",
+       "line": 231,
+       "text": "Record, <code>supercollider:</code> and <code>generative:</code> entries all take <code>generatorName</code>, the name <code>graph.ts</code> mints their nodes with. <code>src/commands/ui-timeline.test.ts</code> checks two ids in one track."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/ui-timeline.test.ts"
+    },
+    {
+     "path": "src/commands/ui-edits.test.ts",
+     "note": "Hoists the shared 120 bpm clock and the <code>full()</code> entry helper out of three <code>describe</code> blocks; no test changes what it asserts."
+    }
+   ]
+  },
+  {
+   "id": "server",
+   "title": "field ui binds first and keeps the token off argv",
+   "kicker": "The server's startup order, the shell launch, and the shell's profile",
+   "intro": [
+    "Loading a song into the audio daemon replaces whatever it was playing. <code>runUi</code> used to load the session first and listen on <code>--port</code> last, with no error listener, so a taken port stopped the playing song and then crashed on an unhandled <code>EADDRINUSE</code>. It now compiles the song, binds the port, checks for the client build, and only then connects to the daemon and loads the session. A taken port fails with a message naming <code>--port</code>, and a failure while connecting closes the port.",
+    "The shell used to receive the session URL, token included, as a command-line argument. It now reads <code>FIELD_UI_URL</code> from its environment. Its browser profile was <code>field-ui-profile-&lt;uid&gt;</code> under the shared temp directory, which another user could create first. <code>field ui</code> now creates a <code>mkdtemp</code> directory, mode 0700, for each launch, passes it as <code>FIELD_UI_PROFILE</code>, and removes it once the shell's process exits. The shell cannot remove it itself, because Electron emits <code>quit</code> while Chromium still holds the profile's files open, and Windows refuses to delete an open file."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The shell's changes were reviewed by reading and with Node reproductions of the exit order, not by launching the window. The PR body's Testing section gives the manual check on macOS."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/ui.ts",
+     "note": "Moves the bind and the build check ahead of the daemon, drops the unread snapshot fields, uses <code>ownerClock</code>, passes the URL and the profile in the shell's environment, and removes the profile after the shell exits.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 877,
+       "text": "The token reaches the shell without touching argv: <code>runUi</code> spawns <code>ui/node_modules/electron/cli.js</code> with only <code>shell.cjs</code> as an argument, and Electron 43.7.9's <code>cli.js</code> spawns the binary with the inherited environment."
+      },
+      {
+       "kind": "verify",
+       "line": 200,
+       "text": "<code>src/commands/ui.test.ts</code> holds a port, runs <code>runUi</code> on it, and sees the refusal with no daemon spawned for the project. It passes at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 886,
+       "text": "The profile goes on every exit of the shell: a normal close, Ctrl-C, a crash, and a failed start that falls back to a browser. The removal retries five times and catches a final failure, so it cannot crash the CLI."
+      },
+      {
+       "kind": "verify",
+       "line": 926,
+       "text": "Nothing waits after the session ends. In a reduced copy of this code, the process exits at 0 ms with no shell. With a shell that takes 1.5 s to stop, the running shell keeps Node alive until its <code>exit</code> handler removes the profile, at 1,707 ms, and the process exits in the same millisecond."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/ui.test.ts"
+    },
+    {
+     "path": "ui/shell.cjs",
+     "note": "Reads <code>FIELD_UI_URL</code> and <code>FIELD_UI_PROFILE</code> from its environment, and no longer creates or removes the profile itself."
+    }
+   ]
+  },
+  {
+   "id": "view",
+   "title": "The view draws EQ at the track's rate and caches its waveforms",
+   "kicker": "Two small client changes",
+   "intro": [
+    "The insert panel now gets the selected lane's <code>trackRate</code>, so an EQ on a 96 kHz track draws the response its filters really have. The timeline builds each lane's waveform path once per envelope array and keeps it in a <code>WeakMap</code>. Every row re-renders on each frame while playing, because the playhead moves, and rebuilding a 1,200-point path per row per frame was most of the frame's work."
+   ],
+   "files": [
+    {
+     "path": "ui/src/App.tsx",
+     "note": "Passes <code>selLane.trackRate</code> to <code>Inserts</code> ahead of the session rate."
+    },
+    {
+     "path": "ui/src/Timeline.tsx",
+     "note": "Adds <code>wavePath</code>, keyed on the envelope array, which stays the same object until a new snapshot replaces it."
+    }
+   ]
+  },
+  {
+   "id": "deps",
+   "title": "A patched Electron and one vite",
+   "kicker": "The UI workspace's dependencies and the lockfile",
+   "intro": [
+    "<code>electron</code> 43.4.1 carried GHSA-qmv3-fv6v-rmhq, fixed in 43.5.0, and the <code>undici</code> 7.29.0 that Electron's downloader pulls in carried advisories fixed in 7.29.1. The range moves to <code>^43.7.9</code>, which resolves <code>undici</code> 7.30.0. The UI also moves from <code>vite</code> 6 to 7, so the lockfile holds one <code>vite</code> and one <code>esbuild</code>. A lockfile refresh moves <code>postcss</code>'s <code>nanoid</code> to 3.3.20 and <code>source-map-js</code> to 1.2.2, past their advisories, inside <code>postcss</code>'s own ranges."
+   ],
+   "files": [
+    {
+     "path": "ui/package.json",
+     "note": "<code>electron</code> to <code>^43.7.9</code>, <code>vite</code> to <code>^7.3.6</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The GitHub advisory database lists no advisory for <code>electron@43.7.9</code>, <code>undici@7.30.0</code>, <code>vite@7.3.6</code>, <code>nanoid@3.3.20</code>, or <code>source-map-js@1.2.2</code>. <code>pnpm --dir ui build</code> succeeds with <code>vite</code> 7.3.6."
+      },
+      {
+       "kind": "context",
+       "text": "<code>pnpm audit</code> still reports four advisories, in <code>vitest</code> 3.2.7's <code>tinypool</code> and <code>@vitest/mocker</code>, which need <code>vitest</code> 4.1.11 or later."
+      }
+     ]
+    },
+    {
+     "path": "pnpm-lock.yaml"
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The docs catch up with the change",
+   "kicker": "A citation fix, the mute labels, and what --browser does with the token",
+   "intro": [
+    "In <code>docs/build-graph.md</code>, the citation of the mix-assembly plan's §1 sat after the sentence about muted entries, which it does not back. It now follows the sentence about how a stem sums its entries, and the paragraph is re-wrapped at 72 columns.",
+    "<code>docs/tracks.md</code> now says that <code>field explain</code> keeps a path through a muted placement and marks it, and that <code>field arrangement</code> labels a muted placement. <code>docs/cli.md</code> now says that the app window gets the token in its environment, while <code>--browser</code> and the fallback to a browser pass it on a command line that other users can read."
+   ],
+   "files": [
+    {
+     "path": "docs/build-graph.md"
+    },
+    {
+     "path": "docs/tracks.md",
+     "note": "One sentence on how <code>field explain</code> and <code>field arrangement</code> show a muted placement.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Both match the code: <code>formatReach</code> adds \"muted on this path, so it is silent here\", and <code>formatArrangement</code> puts <code>muted</code> first in the line's notes."
+      }
+     ]
+    },
+    {
+     "path": "docs/cli.md",
+     "note": "A paragraph on where the token goes for the app window and for a browser."
+    }
+   ]
+  }
+ ]
+}
