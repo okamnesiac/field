@@ -3,12 +3,14 @@ status: ready
 priority: next
 ---
 
-# Plan: Instrument knobs
+# Instrument knobs
 
-**Goal:** an instrument names the knobs it exposes, `field keys` shows
-them on a line of their own, and you choose one with the left and right
-arrows and turn it with up and down, faster the longer you hold, while
-every sounding voice and every take you record follows.
+**Goal:** `field keys` becomes a MIDI controller with knobs. It reads
+an instrument's knobs from a knob file and shows them on a line of
+their own. You choose a knob with the left and right arrows, turn it
+with up and down, faster the longer you hold, or type its value on the
+number row. Every change leaves as a plain MIDI controller message
+that any instrument can answer and every take you record keeps.
 
 ## 1 Problem
 
@@ -37,177 +39,257 @@ Justin asked on 2026-10-11 for a different way to change parameters
 than keys `3` to `8`: the arrows to move between knobs, up and down to
 change the value, and holding to move faster, with each instrument
 listing the knobs it exposes by name and `field keys` showing them.
+Reviewing this plan in #202, he asked for two more things. The keymap
+should leave keys `1` and `2` alone too, so that the number row can
+type a knob's value. And the knobs should belong to `field keys` as a
+MIDI controller, so that they drive any MIDI instrument, not only a
+SuperCollider one.
 
 ## 2 Solution
 
-An instrument declares its knobs in its voice. Each knob is a control
-of the voice's SynthDef with a `ControlSpec`, SuperCollider's own
-description of a control's range, curve, step, and units, and the
-SynthDef's metadata lists the knobs in order with the MIDI controller
-(CC) that turns each. The voice host reads the list when it loads the
-program, before any audio runs, and reports it to `field keys`, which
-puts the modulation wheel first as the knob `mod`. Two new keymap
-actions choose a knob (`knob`) and turn it (`turn`), and Musical Typing
-binds them to the arrows. A turn sends the knob's controller through
-`Field Keys` like any other control change. The voicer sets the control
-on every sounding voice and starts every new voice with it, a take
-captures it, and the take's render maps it through the same
-declaration. Holding a turn key turns faster the longer you hold it,
-timed by `field keys` from the press to the release. A knob line
-between the instrument's line and the status line shows every knob,
-the chosen one in reverse video, each value at a fixed width. Last, a
-take starts with the knob positions you had: `field keys` publishes
-the controllers it has sent, `field record` passes them to the daemon
-when it arms, and the daemon writes the latest value of each
-controller at the take's first sample.
+`field keys` gains knobs the way a hardware controller has them. A
+*knob file*, a small YAML file, describes an instrument's knobs: each
+one's name, the MIDI controller (CC) that turns it, and its range,
+curve, step, units, and default. A SuperCollider instrument keeps its
+knob file beside its program. Any other instrument, such as a hardware
+synth or an instrument in Logic, gets a knob file that you name with
+`--knobs`. `field keys` reads the files once, in TypeScript, puts the
+modulation wheel first as the knob `mod`, and works only from that
+list. Three keymap actions choose a knob (`knob`), turn it (`turn`),
+and type a character of its value (`type`). `musical`, Field's
+adaptation of Logic's Musical Typing, replaces `musical-typing` as the
+default keymap: the arrows choose and turn, the number row types, and
+the pitch bend moves to `B` and `N`. Holding a turn key turns faster
+the longer you hold it, and a typed value glides to its target at a
+speed the keymap sets. Everything a knob does leaves `field keys` as
+control changes on `Field Keys`, so a take records it and any
+instrument can answer it. A SuperCollider instrument answers through
+the voicer, which hands each controller to its voices as a control
+named for its number, as it already hands the wheel over as `mod`. The
+instrument maps that control to its own parameter, as a hardware synth
+maps a controller to its own. A knob line between the instrument's line
+and the status line shows every knob. Last, a take starts with the knob
+positions you had: `field keys` publishes the controllers it has sent,
+`field record` passes them to the daemon when it arms, and the daemon
+writes them at the take's first sample.
 
 ### 2.1 What happens when you turn a knob
 
-1. In `examples/bloom`, you run `field keys juno`. The voice host loads
-   `juno.scd` in voice mode with `sc/voice-load.scd`, which reads the
-   voice's knob list and checks it (§2.2). The host prints one `knob`
-   line per knob and then a `knobs` line (§2.4), before it boots
-   `scsynth`.
-2. `field keys` builds its knob list: `mod`, then `juno`'s knobs in the
-   order `juno` lists them. It draws the knob line with `mod` chosen. A
-   knob you have not turned shows its default, which is what the voice
-   plays.
-3. You press `ArrowRight`, which Musical Typing binds to `{ knob: 1 }`.
-   The choice moves to `cutoff`. Nothing is sent.
-4. You hold a chord and press `ArrowUp`, bound to `{ turn: 1 }`.
+1. In `examples/bloom`, you run `field keys juno`. `field keys`
+   resolves `juno` to `shared/instruments/juno.scd`, reads
+   `juno.knobs.yaml` beside it, and checks it (§2.2). It loads
+   `musical`, builds its knob list, `mod` and then `juno`'s knobs in
+   the file's order, and draws the knob line with `mod` chosen. A knob
+   you have not changed shows its default.
+2. You press `ArrowRight`, bound to `{ knob: 1 }`. The choice moves to
+   `cutoff`. Nothing is sent.
+3. You hold a chord and press `ArrowUp`, bound to `{ turn: 1 }`.
    `field keys` moves `cutoff`'s controller value one step up and sends
-   CC 74 with it on the keymap's channel. Before the first turn, the
+   CC 74 with it on the keymap's channel. Before the first change, the
    value it moves from is the default, unmapped to 0 to 127 and
    rounded.
-5. The voicer stores the value, and the host sets `cutoff` on `juno`'s
-   synth in every sounding voice to the value the knob's spec maps it
-   to. The chord's filter opens. Every new voice starts with it.
-6. You keep holding `ArrowUp`. The knob turns again every 40 ms, more
+4. The voicer in the voice host stores CC 74 and sets `cc74`, from 0 to
+   1, on every sounding voice. `juno` maps `cc74` through the range in
+   its knob file to its filter's cutoff (§2.4). The chord's filter
+   opens, and every new voice starts with it.
+5. You keep holding `ArrowUp`. The knob turns again every 40 ms, more
    steps at a time the longer you hold (§2.6), and stops at the top of
    its range or when you release the key.
-7. You save `juno.scd`. The host loads it again (keyboard-instrument.md
-   §14) and reports its knobs again. `field keys` keeps each
+6. Still holding the chord, you type `800`. The knob line shows
+   `cutoff 800_ Hz`, and the chord keeps sounding. You press `Enter`.
+   The controller value nearest 800 Hz is 62, which maps to 810 Hz, and
+   `field keys` glides CC 74 there over about half a second (§2.7).
+7. You save `juno.knobs.yaml`. `field keys` reads it again, keeps each
    controller's value, and keeps the choice on the same knob by name.
-8. You quit. Knob positions last only for the session, so the next
-   `field keys juno` starts at the defaults.
+   It reloads `juno`'s voice too, as a save of `juno.scd` does
+   (keyboard-instrument.md §14), because the voice reads the file.
+8. You press `Ctrl-C` to quit. Knob positions last only for the
+   session.
 
-A take records each turn you make during it, and the build renders the
-take through `sc/voice-render.scd`, which loads the instrument with the
-same `voice-load.scd` and drives the same voicer, so each controller
-change turns the knob it turned live. §2.7 makes the take start where
-your knobs were before it.
+Without an instrument, `field keys --knobs ~/knobs/ju-06a.yaml` does
+steps 2 to 6 for whatever listens to `Field Keys`, such as a hardware
+synth or an instrument in Logic, which answers the same controller
+messages in its own way. A take records each change you make during
+it, and its render plays the changes back through the instrument; §2.8
+makes the take start where your knobs were before it.
 
-### 2.2 An instrument declares its knobs
+### 2.2 A knob file describes an instrument's knobs
 
-A knob is a control of the voice's SynthDef that has a spec and is
-listed under `knobs` in the SynthDef's metadata. `juno`'s voice, whose
-settings Event is named `pad`, declares four:
-
-```supercollider
-SynthDef(\junoKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
-	var k = pad.copy;
-	k[\vcfFreq] = \cutoff.kr(pad[\vcfFreq], 0.05, spec: ControlSpec(50, 15000, \exp, units: "Hz"));
-	k[\vcfRes] = \res.kr(pad[\vcfRes], 0.05, spec: ControlSpec(0, 0.95));
-	k[\atk] = \attack.kr(pad[\atk], spec: ControlSpec(0.005, 4, \exp, units: "s"));
-	k[\rel] = \release.kr(pad[\rel], spec: ControlSpec(0.02, 8, \exp, units: "s"));
-	Out.ar(out, ju06a.(freq, gate, k, mod.lag(0.05)) * amp * level);
-}, metadata: (knobs: [cutoff: 74, res: 71, attack: 73, release: 72]))
+```yaml
+# shared/instruments/juno.knobs.yaml
+knobs:
+  - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 2000 }
+  - { name: res, cc: 71, min: 0, max: 0.95, curve: lin, default: 0.3 }
+  - { name: attack, cc: 73, min: 0.005, max: 4, curve: exp, units: s, default: 0.8 }
+  - { name: release, cc: 72, min: 0.02, max: 8, curve: exp, units: s, default: 1.5 }
 ```
 
-| Part | Written as | Meaning |
+| Field | Default | Meaning |
 | --- | --- | --- |
-| The control | `\cutoff.kr(default, lag, spec: …)`, or a SynthDef argument with its spec under `specs` in the metadata | The knob's name is the control's name, and its default is the control's default. A lag smooths the steps between controller values. |
-| The spec | `ControlSpec(min, max, warp, step, units: …)` | The range from `min` to `max`; the warp, `\lin` or `\exp`; the `step` a value rounds to, 0 for none; and the `units` shown after the value. |
-| The list | `metadata: (knobs: [name: cc, …])` | Which controls are knobs, in the order the knob line shows them, and the controller that turns each. |
+| `name` | Required | Shown on the knob line. |
+| `cc` | Required | The controller that turns the knob. |
+| `min`, `max` | 0 and 127 | The knob's range. A turn stops at its ends, and a typed value clamps to them. |
+| `curve` | `lin` | How the controller's 128 values spread over the range: `lin` evenly, `exp` by equal ratios. |
+| `step` | 0 | The quantum the knob's values round to; 0 for none. |
+| `units` | None | Shown after the value, and the units a typed value is in. |
+| `default` | `min` | The value the instrument starts at, which the knob shows until you change it. |
 
-A controller value `v` from 0 to 127 sets the control to
-`spec.map(v / 127)`. That is `min + (max - min) * v / 127` for `\lin`
-and `min * (max / min) ** (v / 127)` for `\exp`, rounded to `step`.
+The list's order is the knob line's order. A controller value `v` from
+0 to 127 means `min + (max - min) * v / 127` on a `lin` knob and
+`min * (max / min) ** (v / 127)` on an `exp` knob, rounded to `step`.
+That is SuperCollider's `ControlSpec.map` for its warps of the same
+names, so a SuperCollider instrument that maps with `ControlSpec` agrees
+with what `field keys` shows.
 
-`voice-load.scd` checks the list when it loads the voice. A list that
-breaks a rule fails the load, as a program that does not answer voice
-mode does, with an error that names the knob:
+**The instrument sets each knob's range.** The knob file belongs to the
+instrument, beside its program, and `min` and `max` are its range.
+`field keys` never turns a knob past them.
 
-- **Each knob is a control of the voice, with a spec.** `freq`, `amp`,
-  `gate`, `out`, and `mod` are never knobs, because the host sets them.
-- **The warp is `\lin` or `\exp`.** `field keys` draws each value with
-  the same formula, and these are the two warps it mirrors.
+A zod schema, `src/schema/knobs.ts`, checks a knob file when
+`field keys` reads it. A file that fails stops `field keys` at start
+with its errors, as a keymap does, and a save that fails keeps the last
+good list and names the error on the status line. The rules:
+
 - **The controller is free.** It is from 2 to 119, and not 6, 32, 38,
   64, or 96 to 101. Those are bank select (0 and 32), data entry,
   sustain, and the parameter-number controllers; 1 is the wheel, which
-  Field owns; and 120 to 127 are channel mode messages.
-- **No name or controller appears twice** in one voice.
-- **The default is inside the range.**
+  is the knob `mod`; and 120 to 127 are channel mode messages.
+- **No name or controller appears twice** in one file, and no knob is
+  named `mod`.
+- **An `exp` range does not touch or cross zero.** `min` and `max` are
+  non-zero and of one sign, as an exponential curve needs:
+  `ControlSpec(0, 1, \exp)` maps every controller value above 0 to
+  `nan`.
+- **`min` and `max` differ, and `default` is inside the range, ends
+  included.** `bass`'s attack default, 0.005, is the bottom of its
+  range.
 
-A knob must be a value the graph uses as a signal. A setting that
-decides the graph's shape, such as `juno`'s `chorusOn`, its `pwmMode`,
-or its `subLevel > 0` test, stays a constant. `juno` and `bass` each
-expose the four knobs above, with the same specs; `pad` declares none.
-Their numbers follow General MIDI 2's defaults for the sound
-controllers (71 resonance, 72 release, 73 attack, 74 cutoff), so a
-hardware controller set up for General MIDI 2 turns the same knobs.
-Controllers 20 to 31 and 102 to 119 have no assigned meaning and suit
-the rest. The render branches keep their constants and their bytes.
+`field keys` finds knob files two ways:
 
-### 2.3 Two keymap actions choose and turn a knob
+| You give | `field keys` reads |
+| --- | --- |
+| An instrument, or a track whose record entry names one | `<program>.knobs.yaml` beside the program, when it exists: `juno.knobs.yaml` for `juno.scd`. An instrument without one has no knobs but `mod`. |
+| `--knobs <name or path>` | A bare name is `shared/instruments/<name>.knobs.yaml` in the project. A value with a `/`, or ending in `.yaml`, is a path, and a leading `~/` means your home directory. Repeat the flag for more than one file. |
+
+The knob list is `mod`, then each armed instrument's knobs, then each
+`--knobs` file's. `field keys` watches each file as it watches a keymap
+given by path, so a save applies at once. `juno` and `bass` each get a
+knob file with the four knobs above; `bass`'s defaults are 1200, 0.4,
+0.005, and 0.15. `pad` gets none. The numbers follow General MIDI 2's
+defaults for the sound controllers (71 resonance, 72 release, 73
+attack, 74 cutoff), so a hardware controller set up for General MIDI 2
+turns the same knobs. Controllers 20 to 31 and 102 to 119 have no
+assigned meaning and suit the rest.
+
+### 2.3 The keymap chooses, turns, and types
 
 | Action | Effect |
 | --- | --- |
 | `{ knob: <n> }` | Moves the choice n knobs to the right, or to the left when n is negative, wrapping past either end. Sends nothing. |
 | `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning while the key is held (§2.6). |
+| `{ type: <c> }` | Types c into an entry for the chosen knob's value (§2.7). c is a digit, `"."`, or `"-"`. |
 
 The schema takes n as a non-zero integer. A step is one controller
-value. For a knob whose spec has a `step`, a step is the next
-controller value that maps to a different value, so a knob with two
-positions moves in one press. A turn stops at 0 and at 127. Pressing a
-second turn key while one is held turns with the second and stops the
-first.
+value. For a knob with a `step`, a step is the next controller value
+that maps to a different value, so a knob with two positions moves in
+one press. A turn stops at 0 and at 127. Pressing a second turn key
+while one is held turns with the second and stops the first.
 
-Musical Typing binds the arrows, which it leaves free today:
+A keymap gains one field:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `glide` | 0 | The seconds a typed value takes to cross the knob's whole range; a shorter move takes its share. 0 sets the value at once. |
+
+`keymaps/musical-typing.yaml` becomes `keymaps/musical.yaml`. It keeps
+its `base` and `notes`, so every note sits where Musical Typing puts
+it, and gains `glide: 1` and these controls:
 
 ```yaml
+controls:
+  KeyZ: { transpose: -12 }
+  KeyX: { transpose: 12 }
+  KeyC: { velocity: -20 }
+  KeyV: { velocity: 20 }
+  KeyB: { bend: -1 }
+  KeyN: { bend: 1 }
+  Tab: { cc: 64, value: 127, mode: hold }
   ArrowLeft: { knob: -1 }
   ArrowRight: { knob: 1 }
   ArrowUp: { turn: 1 }
   ArrowDown: { turn: -1 }
+  Digit1: { type: 1 }
+  # Digit2 to Digit9 the same
+  Digit0: { type: 0 }
+  Period: { type: "." }
+  Minus: { type: "-" }
 ```
 
-Keys `3` to `8` keep setting the wheel to fixed steps, and the knob
-line shows where `mod` lands. `tracker` and `fourths` spend the arrows
-on transpose and velocity, and do not change (§7 question 2).
-`field keys --print` tags the actions `K-1`, `K+1`, `R+1`, and `R-1`,
-and describes each in its list of controls. Without an instrument, the
-knob list is `mod` alone, so the arrows turn the wheel for Logic or any
-other receiver.
+- **It is the default,** and the only built-in keymap drawn from
+  Logic's. `--keymap musical-typing` fails, as any unknown bare name
+  does, with a message that lists the built-ins. `docs/keys.md` shows
+  Logic's number row, the bend on `1` and `2` and the wheel's steps on
+  `3` to `8`, as controls to copy into a keymap of your own.
+- **The bend moves to `B` and `N`,** on the bottom row beside the
+  octave and velocity keys, down on the left and up on the right, held
+  as before. Neither plays a note, and neither is an arrow or a typing
+  key.
+- **The wheel's steps go.** The wheel is the knob `mod`, which the
+  arrows turn and the number row types.
+- **`tracker` and `fourths` do not change** (§7 question 2).
 
-### 2.4 The voice host reports knobs, and the voicer turns them
+`field keys --print` tags the actions `K-1`, `K+1`, `R+1`, `R-1`, and
+each typing key with its character, and describes each in its list of
+controls.
 
-The host prints two new `@field` lines:
+### 2.4 The instrument answers the controllers
 
-| Line | Meaning |
-| --- | --- |
-| `{"knob":"cutoff","instrument":0,"cc":74,"min":50,"max":15000,"warp":"exp","step":0,"default":2000,"units":"Hz"}` | One knob of the program at that index in `FIELD_INSTRUMENTS`, in the order the program lists them. |
-| `{"knobs":4}` | The list is complete. The `knob` lines since the last `knobs` line replace the list `field keys` has. The host prints the list after the first load, before the server boots, and after each reload that loads. |
+Only control changes leave `field keys`. Each instrument answers them
+in its own way, as it would answer a hardware controller's knobs:
 
-Both are flat JSON objects, which the host's `emit` already writes.
-Inside SuperCollider, the work follows the split that exists:
+- **A hardware synth or an instrument in Logic** maps each controller
+  itself, through its own MIDI implementation or Logic's controller
+  assignments. Its knob file only tells `field keys` what to show. If
+  the file's range is wrong, the line shows the wrong number and the
+  sound is unchanged.
+- **The voicer hands every controller to the voices.** It already keeps
+  the wheel's last value and gives it to each voice as `mod`. It does
+  the same for every controller from 2 to 119 except sustain (64): it
+  keeps each one's last value, one value per controller for every
+  channel, and gives it to new voices and to sounding voices as a
+  control named for its number, `cc74`, from 0 to 1. `scsynth` ignores
+  a control a voice lacks. This is the voice host's MIDI
+  implementation. It is the same for every instrument and every MIDI
+  source, and it knows nothing about knobs.
+- **A SuperCollider voice maps its own controls.** `juno`'s voice reads
+  its knob file with sclang's `parseYAMLFile` and maps each knob's
+  control through a `ControlSpec` built from it, so its ranges are
+  written once:
 
-- **`voice-load.scd` builds the mapping once.** With the voice, it
-  answers the knob list and two functions built from it: the knob
-  arguments a new voice starts with, given the controller values so
-  far, and the control and value that one controller change sets. The
-  host and the take's render both call them.
-- **The voicer keeps the controller values.** It stores the last value
-  of every controller from 0 to 119 other than 1 and 64, one value per
-  controller for every channel, as it keeps `mod`. It passes them to
-  `start` as a fifth argument, and calls a new `turn` callback,
-  `turn.(voice, cc, value)`, on every sounding voice when one changes.
-- **The host turns each instrument's own knob.** A voice is a list of
-  synths, one per armed instrument (arming.md §9). `start` gives each
-  synth its own instrument's knob arguments, and `turn` sets the knob
-  on that controller on each synth whose instrument has one. Every
-  armed instrument hears every MIDI message (arming.md §3), so
-  instruments that declare the same controller all follow it.
+  ```supercollider
+  var knobs = (PathName(thisProcess.nowExecutingPath).pathOnly +/+ "juno.knobs.yaml").parseYAMLFile["knobs"];
+  var knob = { |name|
+      var each = knobs.detect { |knob| knob["name"] == name };
+      var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol);
+      spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+  };
+  ```
+
+  `k[\vcfFreq] = knob.("cutoff")` then puts the knob in place of the
+  constant. `parseYAMLFile` returns every number as a string, so the
+  helper converts each field, and it reads every field, so `juno`'s and
+  `bass`'s files spell each one out rather than lean on the defaults.
+  The lag smooths the steps between controller values.
+  A knob must be a value the graph uses as a signal; a setting that
+  decides the graph's shape, such as `juno`'s `chorusOn`, stays a
+  constant. The render branches keep their constants and their bytes.
+
+A take's render runs the same voicer in `sc/voice-render.scd`, so the
+controller messages in a take reach the voice as they did live. The
+knob file is now part of how a take sounds, so it becomes one of the
+render's cache inputs when it exists. A hardware controller's knob that
+sends CC 74 turns `juno`'s cutoff too, because to the voicer it is the
+same controller.
 
 ### 2.5 `field keys` shows the knobs
 
@@ -215,37 +297,50 @@ Inside SuperCollider, the work follows the split that exists:
 $ field keys juno
 juno live at 48000 Hz on MacBook Pro Speakers
 mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s
-Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · C4 E4 G4
+Field Keys · musical · transpose 0 · velocity 100 · bend +0 · C4 E4 G4
 ```
 
 The knob line sits between the instrument's line and the status line.
 `field keys` redraws it in place when its text changes, as it redraws
 the instrument's line.
 
-- **It appears when the keymap binds `knob` or `turn`.** The status
-  line then leaves out its `mod` field, because the knob line shows the
-  wheel. A keymap without those actions keeps today's status line.
+- **It appears when the keymap binds a knob action.** The status line
+  then leaves out its `mod` field, because the knob line shows the
+  wheel. A keymap without knob actions keeps today's status line.
 - **The chosen knob is in reverse video.** Reverse video takes no
   columns, so moving the choice moves nothing.
-- **A value keeps its width.** A value prints with three significant
-  digits, in thousands with `k` from 1000 up (`2.00 kHz`), and, for a
-  knob in seconds, in thousandths with `m` below 1 (`800 ms`). It
-  prints as a whole number for `mod` and for a knob whose step is
-  whole. Units follow after a space. Each value is padded on the left
-  to the widest that its default or any of its 128 controller values
-  prints. So turning a knob moves nothing after it, and the notes are
-  on another line.
+- **A value keeps its width.** An `exp` knob prints three significant
+  digits, in thousands with `k` from 1000 up (`2.00 kHz`) and, for a
+  knob in seconds, in thousandths with `m` below 1 (`800 ms`). A `lin`
+  knob prints the decimal places that give the end of its range
+  farthest from zero three significant digits, so `res`, whose range
+  ends at 0.95, prints `0.000` to `0.950`. `mod`, and a knob whose step
+  is whole, print whole numbers. Units follow after a space. Each value
+  is padded on the left to the widest that its default or any of its
+  128 controller values prints. The places are fixed per knob, as the
+  bend's are per keymap.
+- **A glide shows as it moves.** The value runs to its target at its
+  fixed width.
+- **An entry takes the value's place.** While you type (§2.7), the
+  chosen knob shows what you have typed, then `_`, then the units,
+  padded to the value's width: `cutoff  800_ Hz`. An entry longer than
+  that widens the knob until the entry closes, which moves only the
+  knobs after it.
 - **A narrow terminal shows a window of whole knobs.** The window holds
   the chosen knob, and `‹` or `›` marks an end where knobs are hidden.
   The window moves only when the choice leaves it, so turning never
   scrolls it.
-- **Several armed instruments name their knobs.** Each knob after `mod`
-  carries its track's name, or its program's when you named a program,
-  as in `keys.cutoff`. Two knobs on one controller share one value, and
-  each shows it through its own spec.
-- **Values are what `field keys` sent.** Until the host reports, the
-  line shows `mod` alone. A USB controller's knob moves the voice but
-  not the line, as with the bend and the wheel today.
+- **Several sources name their knobs.** With more than one armed
+  instrument or knob file, each knob after `mod` carries its source's
+  name: the track's, the program's, or the knob file's without its
+  `.knobs.yaml`, as in `keys.cutoff`. Two knobs on one controller share
+  one value, and each shows it through its own range.
+- **Values are what `field keys` sent.** A hardware controller's knob
+  moves the voice but not the line, as with the bend and the wheel
+  today.
+
+The notes are on the status line, so nothing on the knob line, whether
+a turn, a glide, an entry, or a scroll, moves them.
 
 ### 2.6 Holding turns faster
 
@@ -266,11 +361,68 @@ focus-out, a panic, and quitting each stop the turn. The session takes
 the time as an argument, `tick(now)`, so tests run the curve without
 waiting.
 
-### 2.7 A take starts where your knobs are
+### 2.7 Typing a value
+
+In `musical` the number row types; it plays no notes and sends nothing
+until you complete an entry.
+
+1. **The first typing key opens an entry** on the chosen knob. The
+   entry holds digits, at most one `.`, and a `-` only as its first
+   character; a key that would break that does nothing. Typing keys are
+   positions, as every key in a keymap is (keyboard-instrument.md
+   §2.3): `.` and `-` are where QWERTY has them, whatever your layout
+   prints there. The numeric keypad does not type, because its keys
+   are not positions a keymap binds.
+2. **You type in the knob's units,** the ones its knob file names:
+   `2000` for 2 kHz on `cutoff`, and `0.8` for 800 ms on `attack`. `mod`
+   takes 0 to 127. The entry shows the units as you type.
+3. **`Enter` completes the entry.** `field keys` clamps the number to
+   the knob's range, ends included, and takes the controller value
+   whose mapped value is nearest: `800` on `cutoff` is 62, which maps to
+   810 Hz; `99999` is 127, 15.0 kHz; and `20` is 0, 50.0 Hz. An entry
+   with no digit completes nothing.
+4. **The knob glides there.** With `glide` above 0, `field keys` moves
+   the controller toward its target at `127 / glide` steps a second,
+   sending one control change on each 40 ms tick, so a glide too sends
+   at most 25 a second and its last tick lands on the target. With
+   `glide: 0` it sends the target at once. In `musical`, a glide across
+   the whole range takes one second, and 15.0 kHz to 810 Hz takes half
+   a second.
+5. **A knob action completes the entry first.** `ArrowLeft` or
+   `ArrowRight` completes it and then moves the choice. `ArrowUp` or
+   `ArrowDown` completes it and then turns, which stops the glide it
+   started (below).
+6. **`Backspace` deletes the last character,** and closes an empty
+   entry.
+7. **`Esc` cancels the entry** and leaves the knob as it was.
+8. **Every other key acts as it does without an entry,** and the entry
+   stays open: notes play, and the octave, velocity, bend, and sustain
+   keys work. An entry has no timeout. A keymap reload, or a knob file
+   reload that removes the knob, closes it without completing it.
+
+A glide runs on its own, and each knob can have one:
+
+- **Notes, the other controls, and the choice leave it alone.** Moving
+  to another knob and typing there starts that knob's glide beside it.
+- **A new entry on the gliding knob** leaves the glide running while
+  you type. Completing it starts a new glide from where the knob is.
+- **A turn of the gliding knob stops the glide** where it is and turns
+  from there.
+- **A panic, a keymap reload, and quitting stop every glide** where it
+  is.
+
+`Enter` and `Backspace` act only on an entry and otherwise do nothing.
+Like `Esc`, they are not positions a keymap binds. With no entry open,
+`Esc` no longer quits: it puts `Ctrl-C quits` on the status line, and
+`Ctrl-C` is how you leave, in every keymap. `isQuit` in
+`src/keys/terminal.ts` quits on `Ctrl-C` alone, and a keymap still
+cannot bind `Esc`.
+
+### 2.8 A take starts where your knobs are
 
 A take records only what arrives after it starts
 (keyboard-instrument.md §14.5). Without this step, a take renders with
-every knob at its default until you turn it during the take. Three
+every knob at its default until you change it during the take. Three
 parts close the gap:
 
 1. **`field keys` publishes what it sent.** Run inside a project, it
@@ -291,264 +443,377 @@ parts close the gap:
    value of each controller from 0 to 119 on each channel: first the
    values `arm` passed, then each control change that arrives before
    the take starts, which it drops today. When the take starts, it
-   writes one line per controller at `at: 0`, ahead of every other
-   line, in each MIDI take of the pass. The notes file then begins
-   `controls` with those rows, and the render applies them before a
-   note at 0, because `renderEvents` already puts control changes
-   before note-ons at one instant.
+   writes one line per channel and controller at `at: 0`, ahead of
+   every other line, in each MIDI take of the pass. It writes the
+   seeded values first and the rest in the order their values last
+   arrived. The voicer keeps one value per controller for every
+   channel, so a render then starts on the value the voice last heard.
+   The render applies these rows before a note at 0, because
+   `renderEvents` already puts control changes before note-ons at one
+   instant.
 
-This also closes keyboard-instrument.md §14.5's gap for the wheel: a
-take now starts with the wheel where you left it.
+All of it is MIDI, so it serves any source: a hardware knob moved after
+the arm starts the take where it was too. It also closes
+keyboard-instrument.md §14.5's gap for the wheel.
 
-### 2.8 Files
+### 2.9 Files
 
 | File | Change |
 | --- | --- |
-| `sc/voice-load.scd` | Reads and checks the `knobs` metadata (§2.2), and answers the knob list and the two mapping functions with the voice. |
-| `sc/voicer.scd` | Keeps every controller's last value, passes them to `start`, and calls `turn` when one changes (§2.4). |
-| `sc/voice-host.scd` | Prints the `knob` and `knobs` lines after each load, and starts and turns each instrument's synth through its own mapping. |
-| `sc/voice-render.scd` | The same `start` and `turn`, through the take's instrument. |
-| `src/schema/keymap.ts` | The `knob` and `turn` actions. |
-| `keymaps/musical-typing.yaml` | Binds the arrows (§2.3). |
-| `src/keys/knobs.ts` (new) | The knob shape and the zod schema for the host's lines, the map from a controller value to a value, the next step of a stepped knob, and a value's text and width. |
-| `src/keys/session.ts` | The controllers it has sent, by number, which the `mod` field and `setsMod()` become reads of; the knob list and the choice; and a held turn, advanced by `tick(now)`. |
-| `src/keys/voice-host.ts` | Collects `knob` lines into a status at each `knobs` line. |
-| `src/keys/print.ts` | The tags and descriptions of the two actions. |
-| `src/commands/keys.ts` | The knob line, the timer that ticks a held turn, the knob list kept across reloads, and `.field/keys.json` (chunk 2). |
-| `examples/bloom/shared/instruments/juno.scd`, `bass.scd` | Knobs in voice mode. The render branches keep their code and their bytes. |
-| `src/commands/record.ts`, `src/audiod/protocol.ts`, `src/audiod/client.ts` | Read `.field/keys.json` and pass `controllers` in `arm` (chunk 2). |
-| `native/audiod/src/player.cpp`, `player.h`, `server.cpp` | The chase: seeded from `arm`, updated before the start, written at the start; and the `midi-chase` feature (chunk 2). |
-| `docs/keys.md` | Turning knobs, the two actions, the arrows in the Musical Typing table, declaring knobs under "Make an instrument playable", and how a take starts (chunk 2). |
-| `docs/build-graph.md` | The voice contract gains knobs, and a take's render turns them as they turned live. |
-| `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 2). |
+| `src/schema/knobs.ts` (new) | The knob file's schema and the rules in §2.2. |
+| `src/keys/knobs.ts` (new) | Finds an instrument's knob file and resolves `--knobs`; reads and watches knob files; maps between a controller value and a value; finds the next step of a stepped knob and the controller value nearest a typed value; and prints a value at its width. |
+| `src/schema/keymap.ts` | The `knob`, `turn`, and `type` actions, the `glide` field, and the reserved `Escape`'s message, which says it cancels a typed value. |
+| `keymaps/musical-typing.yaml` → `keymaps/musical.yaml` | Renamed, with the controls in §2.3 and `glide: 1`. |
+| `src/keys/keymap.ts`, `src/cli.ts` | `DEFAULT_KEYMAP` is `musical`. `field keys` takes `--knobs`, and its help says `Ctrl-C` quits. |
+| `src/keys/terminal.ts` | `isQuit` quits on `Ctrl-C` alone. |
+| `src/keys/position.ts` | Resolves `Enter` and `Backspace`, which the terminal reports as `CSI 13 u` and `CSI 127 u`, as keys a keymap cannot bind. |
+| `src/keys/session.ts` | The controllers it has sent, by number, which the `mod` field and `setsMod()` become reads of; the knob list and the choice; a held turn, the entry, and each glide, advanced by `tick(now)`. |
+| `src/keys/print.ts` | The tags and descriptions of the three actions. |
+| `src/commands/keys.ts` | The knob line, the timer that ticks turns and glides, `--knobs`, watching knob files and reloading an instrument's voice when its file changes, `Esc` cancelling an entry or naming `Ctrl-C`, and `.field/keys.json` (chunk 3). |
+| `sc/voicer.scd`, `sc/voice-host.scd`, `sc/voice-render.scd` | The voicer keeps every controller from 2 to 119 except 64 and hands it to voices as `cc<n>`; the host and the render pass those values into each new synth. Nothing here knows about knobs. |
+| `src/generators/voice-render.ts` | The instrument's knob file, when it exists, is a cache input of a take's render. |
+| `examples/bloom/shared/instruments/juno.knobs.yaml`, `bass.knobs.yaml` (new); `juno.scd`, `bass.scd` | The knob files, and voices that map `cc<n>` through them. The render branches keep their code and their bytes, and `bass.scd`'s comment names `musical`. |
+| `src/commands/record.ts`, `src/audiod/protocol.ts`, `src/audiod/client.ts` | Read `.field/keys.json` and pass `controllers` in `arm` (chunk 3). |
+| `native/audiod/src/player.cpp`, `player.h`, `server.cpp` | The chase: seeded from `arm`, updated before the start, written at the start; and the `midi-chase` feature (chunk 3). |
+| `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls under "Make an instrument playable"; and how a take starts (chunk 3). |
+| `docs/build-graph.md` | The voice contract gains the `cc<n>` controls, and the knob file joins a take's render inputs. |
+| `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 3). |
+| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits and at §3's choice of Musical Typing as the default, each pointing here. |
 
-## 3 Why this design (DECIDED, 2026-10-11, for Justin's review)
+## 3 Why this design (DECIDED, 2026-10-11, Justin's review of #202)
 
-Justin set the shape: the arrows choose and turn, holding goes faster,
-and each instrument lists its knobs by name. The rest is decided here
-with the alternative each choice beat, and review can overturn any of
-it.
+Justin reviewed this plan in #202, accepted its design, and made the
+calls in §3.1. The largest is that the knobs belong to the controller.
+§3.2 records the calls his answers needed, for his review.
 
 - **A knob is a MIDI controller, not an OSC message to the voice
-  host.** `field keys` already sends OSC to `sclang`'s port to reload,
-  and OSC would carry a float and a name. But a take holds only the
-  MIDI that the daemon captures and stamps (keyboard-instrument.md §3),
-  so a knob sent by OSC would never reach a take, and timing it would
-  need an alignment against the transport that nothing measures. As a
-  controller, a turn is captured, landed, and rendered by code that
-  exists, as the wheel is, and a hardware controller's knob turns it
-  too. The cost is 128 steps per knob, which the control's lag
-  smooths. It keeps keyboard-instrument.md §3's decision that
-  `field keys` is a MIDI device, not a line straight to SuperCollider.
+  host.** A take holds only the MIDI that the daemon captures and
+  stamps (keyboard-instrument.md §3), so a knob sent by OSC would never
+  reach a take. As a controller, a change is captured, landed, and
+  rendered by code that exists, as the wheel is, and any instrument
+  that answers MIDI answers it. The cost is 128 steps per knob, which
+  a voice's lag smooths.
 - **The instrument names each knob's controller.** Field could number
-  knobs from a pool in the order they are declared. A take stores
-  controller numbers and renders again whenever its program changes,
-  so reordering the knobs would make every old take turn the wrong
-  ones. A declared number is the knob's address, as on a hardware
+  knobs from a pool in the order they are listed. A take stores
+  controller numbers and renders again whenever its instrument
+  changes, so reordering the knobs would make every old take turn the
+  wrong ones. A named number is the knob's address, as on a hardware
   synth's MIDI chart.
-- **The declaration lives in the SynthDef.** One file holds the control
-  and its description, so a knob that names a missing control fails
-  the load, and the program's content hash, already the render's cache
-  input, covers a changed range. `ControlSpec` is SuperCollider's own
-  vocabulary for a control's range, and `NamedControl` already stores
-  it in the SynthDef's metadata. Rejected: a `juno.knobs.yaml` beside
-  the program, which Field could read without `sclang`, but whose
-  names and defaults would drift from the SynthDef unseen, and which
-  the render would need as a second input. Rejected: a structured
-  comment that Field parses, which is a second language inside the
-  program. Reading the knobs needs `sclang`, which `field keys` runs
-  anyway, and the knobs arrive before the server boots.
-- **Only `\lin` and `\exp`.** `field keys` draws each value itself, so
-  it mirrors the warp's formula. Two warps cover a frequency, a time,
-  and a level, and a voice that wants another curve can shape a `\lin`
-  knob inside its graph.
+- **Only `lin` and `exp`.** `field keys` draws each value itself, and
+  a SuperCollider voice maps with `ControlSpec`'s warps of the same
+  names, so the two agree. Two curves cover a frequency, a time, and a
+  level, and a voice that wants another can shape a `lin` knob inside
+  its graph.
 - **The wheel is the first knob.** It is the one continuous control any
-  voice may have, so every control you can turn sits on one line, and
-  a keymap with no instrument still turns something.
-- **Keys `3` to `8` stay.** The keymap is named for Logic's, which puts
-  the wheel there, and the knob line shows where they set it. Rejected:
-  removing them, which breaks the match with Logic and frees keys that
-  nothing else needs.
+  instrument may answer, so every control you can set sits on one line,
+  and `field keys` with no knob file still sets something.
 - **`field keys` times a hold.** The kitty protocol gives it every
   release, so a hold is an exact interval. The terminal's repeat
   follows the operating system's typing setting, which can be slow or
-  off and differs over SSH, so the speed of a sweep would be a typing
-  preference. Repeat events stay ignored, so every other held key still
-  acts once (keyboard-instrument.md §2.2).
+  off and differs over SSH. Repeat events stay ignored, so every other
+  held key still acts once (keyboard-instrument.md §2.2).
 - **The knobs get a line of their own.** The status line keeps the
   notes last so that playing never moves them (keyboard-instrument.md
-  §2.4). The chosen knob on that line would show one knob at a time.
-  A separate line shows every knob by name, and turning cannot move the
-  notes.
+  §2.4). A separate line shows every knob by name, and nothing on it
+  can move the notes.
 - **The daemon writes the starting positions, seeded from
   `field keys`.** Rejected: `field keys` resending its controllers when
   the daemon arms, which needs a daemon connection of its own and races
   a take that starts at once. Rejected: knob positions saved on the
   track, which would start each take where the last take left the
-  knobs, not where you set them. Rejected: waiting for arming.md
-  chunk 3's lasting arm, which opens the MIDI inputs only from the
-  moment you arm. The chase also serves a hardware knob turned after
-  the arm.
+  knobs. Rejected: waiting for arming.md chunk 3's lasting arm, which
+  opens the MIDI inputs only from the moment you arm.
 - **Not automation.** [automation.md](../automation/readme.md)
   describes curves written in project YAML. A knob turned while you
   play belongs to the performance, like the wheel, so it rides in the
   take.
 
 The plan extends what exists rather than building beside it: the
-voicer's `set` path that carries `mod`, `voice-load.scd` shared by the
-host and the render, the `@field` lines and their `emit`, the take's
-`controls` rows and the order `renderEvents` gives them, the session's
-controller tracking from #195, and the instrument line's redraw. It
-replaces the session's `mod` field and `setsMod()` with reads of one
-controller map, and it moves the wheel from the status line to the
-knob line when a keymap binds knob actions.
+voicer's path for the wheel, which `cc<n>` generalizes; the take's
+`controls` rows and the order `renderEvents` gives them; the session's
+controller tracking from #195; keymap watching; and the instrument
+line's redraw. It replaces the session's `mod` field and `setsMod()`
+with reads of one controller map, and `musical-typing` with `musical`.
+
+### 3.1 Justin's calls (DECIDED, 2026-10-11, Justin)
+
+- **The knobs belong to the controller.** Choosing, turning, typing,
+  gliding, keeping each knob's value, and the knob line are
+  `field keys`' work. Only control changes leave it, so the knobs drive
+  Logic, a hardware synth, or an AU instrument as they drive `juno`, and
+  a hardware controller's knobs turn `juno` as they turn any synth. No
+  knob logic runs in SuperCollider. This replaces the plan's first
+  version, which declared knobs in the SynthDef's metadata, reported
+  them from the voice host, and mapped controllers to controls in
+  `voice-load.scd`.
+- **Every instrument describes its knobs one way,** whatever makes its
+  sound (§3.2 says which way).
+- **A keymap of its own, `musical`, with the number row for typing.**
+  The name is a wink to Musical Typing that does not copy it. A value
+  far from where a knob sits is one entry rather than a long hold.
+  Rejected: adding the arrows to `musical-typing` and keeping keys `1`
+  to `8`, which left no room to type.
+- **`Enter` completes an entry and `Esc` cancels it.** `Esc` no longer
+  quits; with no entry open it says that `Ctrl-C` quits. This amends
+  keyboard-instrument.md §2.4's rule that `Escape` always quits. Its
+  purpose holds: no keymap can trap you, because `Ctrl-C` always quits
+  and no keymap binds `Esc` or a `Ctrl` chord.
+- **The instrument sets each knob's range,** in its knob file.
+- **The bend moves to the bottom row.**
+- **A typed value moves at a speed you set,** rather than jumping.
+
+### 3.2 Calls made here (DECIDED, 2026-10-11, for Justin's review)
+
+- **One knob file format for every instrument, which only TypeScript
+  reads for `field keys`.** A SuperCollider program reads its own file
+  to map its controls, so its ranges are written once. Rejected: knobs
+  declared in the SynthDef's metadata, as the first version had. It
+  keeps a SuperCollider program free of drift, but Field would need
+  `sclang` to learn any knob, would carry SuperCollider code that knows
+  the convention, and would read two formats. A knob file can still
+  drift from an instrument that ignores it, such as a hardware synth's
+  file written by hand. Then the line shows the wrong number and the
+  sound is unchanged, which is the hardware controller's trade too.
+- **Knob files sit beside the program, or come from `--knobs`.** A
+  knob file belongs to the instrument, so it sits where the instrument
+  does and resolves the way an instrument does. Rejected: a field in a
+  keymap, because a keymap belongs to the player and works with any
+  instrument (keyboard-instrument.md §3). Rejected: a field in a track
+  file, because a track already names its instrument.
+- **The voicer hands every controller over as `cc<n>`, from 0 to 1.**
+  It is what the voicer already does for the wheel. Rejected: the
+  voicer mapping through the knob file, which is knob logic in
+  SuperCollider. Rejected: each instrument answering MIDI itself,
+  which would have every instrument rebuild the voicer.
+- **`musical` replaces `musical-typing`.** Field's built-ins are its
+  adaptations, each with a name of its own, and an exact copy of
+  Logic's beside it would make two defaults to choose between. Anyone
+  who wants Logic's number row copies its controls from
+  `docs/keys.md`. This amends keyboard-instrument.md §3, which chose
+  Musical Typing as the default because Logic and Ableton Live users
+  already know it, and because it leaves the number row free for the
+  bend and the wheel. `musical` keeps what those users know, the notes
+  and the octave and velocity keys. It gives the number row to typing,
+  moves the bend to `B` and `N`, and makes the wheel a knob. Rejected:
+  keeping `musical-typing` beside it. When `tracker` and `fourths` are
+  adapted, the proposed names are `tracked` and `quartal`.
+- **The bend sits on `B` and `N`.** They are the first free keys after
+  the bottom row's octave and velocity keys.
+- **`glide` is a keymap field: seconds to cross a knob's whole range.**
+  How a typed value moves is how you play, like the keymap's starting
+  `velocity`, not a property of the instrument. A time for the whole
+  range is a speed you can picture, on the same scale as a held turn's
+  2.3 seconds. The schema's default, 0, sets a value at once, so a
+  keymap that never mentions glides behaves as typing does elsewhere.
+  `musical` sets 1, because it is the keymap built for knobs and Justin
+  asked for typed values to move. Rejected: a field in the knob file,
+  and a command-line flag, which adds a second place to set it.
+- **A glide is a run of control changes.** A take records it and any
+  instrument answers it. Rejected: a glide inside the instrument, such
+  as a longer lag, which a hardware synth cannot be told and a take
+  could not hold.
+- **Typing keys are actions, not a keymap flag.** A `type` action per
+  key keeps one rule, that a position maps to an action, so the
+  schema's checks and `--print` cover typing keys with no new case.
+  Rejected: a flag such as `typing: true` that claims the number row.
+- **You type in the knob file's units.** The unit on the line moves
+  with the value (`810 Hz`, then `2.00 kHz`), so typing in it would
+  make `2` mean 2 Hz or 2 kHz depending on where the knob sits. A
+  suffix such as `k` cannot be typed, because letters are notes.
+- **A value outside the range clamps.** A turn stops at the ends too,
+  and the line shows where the value landed. Rejected: refusing it,
+  which would hold the entry open with nowhere to say why.
+- **An entry closes only when you close it.** A knob action completes
+  it first, as a spreadsheet completes a cell when you move off it.
+  Rejected: a timeout, which would complete a number you stopped in the
+  middle of to play, or throw it away.
+- **A typed value lands on a step.** The controller carries 128 steps,
+  so `field keys` sends the nearest and shows it, rather than showing
+  the number you typed and playing another.
 
 ## 4 Acceptance criteria
 
-Run these in `examples/bloom`, in Ghostty or iTerm2:
+Run these in `examples/bloom`, in Ghostty or iTerm2. The monitor is
+`native/audiod/build/field-audiod_artefacts/Release/field-audiod
+--midi-monitor "Field Keys"`, run from the Field checkout in another
+terminal.
 
 | # | Do | Expect |
 | --- | --- | --- |
-| 1 | Run `field keys juno`. | The knob line reads `mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s`, with `mod` in reverse video. The status line has no `mod` field. |
-| 2 | Press `ArrowRight`, and hold `ArrowDown` until `cutoff` stops at `50.0 Hz`. Hold a chord, and hold `ArrowUp` for three seconds. | The chord's filter opens, slowly and then faster, and `cutoff` stops at `15.0 kHz` about 2.3 seconds after the press. Nothing after `cutoff` moves, and the notes stay where they were. |
-| 3 | Tap `ArrowDown` once. | `cutoff` drops by one step. |
-| 4 | Repeat criterion 2 while `native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor "Field Keys"` runs from the Field checkout in another terminal. | Rising CC 74 values, never more than 25 in one second. |
-| 5 | With `mod` chosen, press `ArrowLeft`. | `release` is chosen. |
-| 6 | With `cutoff` turned and chosen, change `juno.scd`'s list to `[cutoff: 74, res: 71]` and save. | The line shows `mod`, `cutoff`, and `res`. `cutoff` keeps its value and stays chosen. |
-| 7 | Change the list to `[cutof: 74]` and save. | The instrument's line starts `juno kept its last voice:` and names `cutof` as a knob that is not a control of the voice. |
-| 8 | Run `field keys pad`, then `field keys` with no instrument. | Each knob line shows `mod` alone, and `ArrowUp` turns it. |
-| 9 | Run `field keys juno --keymap tracker`. | No knob line, and today's status line. |
-| 10 | Narrow the terminal to 40 columns, press `ArrowRight` past the last knob shown, then turn it. | The window moves to show it, with `‹` at the left. Turning does not move the window. |
-| 11 | Give `creek` a track `keys` with `instrument: juno` and a track `bass` with `instrument: bass`. Run `field keys creek/track:keys creek/track:bass`, choose `keys.cutoff`, and turn it. | Both instruments' filters move. `bass.cutoff` shows its own value for CC 74. |
-| 12 | Record a take on `keys`, sweeping `cutoff` during it, then build and play. | The render sweeps where you swept. |
-| 13 | Run `field sc render shared/instruments/juno.scd --seed 1 --duration 4 --output <file>` before and after the change, and the same for `bass.scd`. Compare each pair with `cmp`. | Identical. A difference means the change touched a render branch. |
-| 14 | Chunk 2. In one terminal run `field keys juno` and turn `cutoff` down. In another run `field record creek/track:keys --at 17`. Play without touching a knob, stop, build, and play. | The take renders dark from its first note, and the notes file's first `controls` row is `{ at: 0, cc: 74, value: … }`. |
-| 15 | Chunk 2. Run criterion 14's `field record` with `--count-in 1`, and turn `res` during the count-in. | The take starts with that `res`. |
+| 1 | Run `field keys juno`. | The status line names `musical` and has no `mod` field. The knob line reads `mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s`, with `mod` in reverse video. |
+| 2 | Press `ArrowRight`, and hold `ArrowDown` until `cutoff` stops at `50.0 Hz`. Hold a chord, hold `ArrowUp` for three seconds, then tap `ArrowDown`. | The chord's filter opens, slowly and then faster, and `cutoff` stops at `15.0 kHz` about 2.3 seconds after the press; the tap drops it one step. Nothing after `cutoff` moves, and the notes stay where they were. |
+| 3 | With `mod` chosen, press `ArrowLeft`. | `release` is chosen. |
+| 4 | With `cutoff` at `15.0 kHz`, hold a chord, type `800`, and press `Enter`. | While you type, the knob reads `800_ Hz` and the chord keeps sounding. After `Enter`, the value runs down to `810 Hz` in about half a second, and the filter closes with it. |
+| 5 | On `cutoff`, type `99999` and press `Enter`; then type `20` and press `Enter`. | `15.0 kHz`, then `50.0 Hz`. |
+| 6 | On `cutoff`, type `12`, press `Backspace`, type `5`, and press `Esc`. Press `Esc` again, then `Ctrl-C`. | The entry reads `15_ Hz`. The first `Esc` closes it and leaves `cutoff` as it was. The second puts `Ctrl-C quits` on the status line, and `field keys` keeps running. `Ctrl-C` quits. |
+| 7 | On `cutoff`, type `300` and press `ArrowRight`. | `cutoff` glides to `301 Hz`, and `res` is chosen. |
+| 8 | Type `15000` on `cutoff` at `50.0 Hz`, press `Enter`, and press `ArrowUp` while it glides. | The glide stops, and `cutoff` turns one step up from where it stopped. |
+| 9 | Hold `N` over a held note, then release it. | The note bends up two semitones and returns, and the status line shows `bend +1`, then `bend +0`. |
+| 10 | Run `field keys --keymap musical-typing`. | Exit 1. The message lists `musical`, `tracker`, and `fourths`. |
+| 11 | With `cutoff` changed and chosen, delete the `attack` and `release` lines from `juno.knobs.yaml` and save. Then change `res`'s `cc` to 1 and save. | The line shows `mod`, `cutoff`, and `res`, and `cutoff` keeps its value and stays chosen. After the second save, the status line names the error and the knobs stay as they were. |
+| 12 | Write `~/knobs/test.yaml` with juno's `cutoff` line alone. Start the monitor, run `field keys --knobs ~/knobs/test.yaml`, choose `cutoff`, hold `ArrowUp` for a second, then type `800` and press `Enter`. | The monitor shows CC 74 rising, never more than 25 in one second, then a run of CC 74 values that ends at 62. No instrument runs: this is what Logic or a hardware synth would receive. |
+| 13 | With `field keys juno` running, turn a USB controller's knob that sends CC 74. | `juno`'s filter moves, and the knob line does not. |
+| 14 | Run `field keys pad`, type `64`, and press `Enter`. | The knob line shows `mod` alone, and it reads `64`. |
+| 15 | Run `field keys juno --keymap tracker`. | No knob line, and today's status line. |
+| 16 | Narrow the terminal to 40 columns, press `ArrowRight` past the last knob shown, then turn it. | The window moves to show it, with `‹` at the left. Turning does not move the window. |
+| 17 | Give `creek` a track `keys` with `instrument: juno` and a track `bass` with `instrument: bass`. Run `field keys creek/track:keys creek/track:bass`, choose `keys.cutoff`, and turn it. | Both instruments' filters move. `bass.cutoff` shows its own value for CC 74. |
+| 18 | Record a take on `keys`, sweeping `cutoff` and typing a value during it, then build and play. | The render sweeps and glides where you did. |
+| 19 | Run `field sc render shared/instruments/juno.scd --seed 1 --duration 4 --output <file>` before and after the change, and the same for `bass.scd`. Compare each pair with `cmp`. | Identical. A difference means the change touched a render branch. |
+| 20 | In one terminal run `field keys juno` and type a low `cutoff`. In another run `field record creek/track:keys --at 17`. Play without touching a knob, stop, build, and play. | The take renders dark from its first note, and the notes file's first `controls` row is `{ at: 0, cc: 74, value: … }`. |
+| 21 | Run criterion 20's `field record` with `--count-in 1`, and turn `res` during the count-in. | The take starts with that `res`. |
 
 These vitest tests fail before the change:
 
-- **`src/schema/keymap.test.ts`.** Accepts `knob` and `turn` with
-  non-zero integers and rejects 0 and fractions. `musical-typing`
-  binds the four arrows.
-- **`src/keys/knobs.test.ts` (new).** Maps controller values through
-  `\lin`, `\exp`, and stepped specs to the numbers `ControlSpec.map`
-  gives. Finds the next step of a two-position knob. Prints `2.00 kHz`,
-  `800 ms`, `0.300`, and whole numbers, with one width across all 128
-  values. Parses the host's `knob` and `knobs` lines.
+- **`src/schema/knobs.test.ts` (new).** Accepts `juno`'s and `bass`'s
+  files, and a default at the end of its range. Fills `min`, `max`,
+  `curve`, `step`, and `default`. Rejects a repeated name or
+  controller, a knob named `mod`, a reserved controller, an `exp` range
+  that touches 0, equal `min` and `max`, and a default outside the
+  range.
+- **`src/keys/knobs.test.ts` (new).** Finds `juno.knobs.yaml` beside
+  `juno.scd`, and resolves `--knobs` by bare name and by path. Maps
+  controller 62 on `juno`'s `cutoff` to 809.6 Hz, as `ControlSpec.map`
+  does, and finds 62 as the value nearest 800. Finds the next step of a
+  two-position knob. Prints `2.00 kHz`, `800 ms`, `res` from `0.000` to
+  `0.950`, and whole numbers, at one width across each knob's values.
+- **`src/schema/keymap.test.ts` and `src/keys/keymap.test.ts`.** Accept
+  `knob`, `turn`, and `type`, and reject a zero step, a fraction, and a
+  character other than a digit, `"."`, or `"-"`. `glide` defaults to
+  0. With no `--keymap` and no `FIELD_KEYMAP`, the keymap is `musical`,
+  which binds the arrows, `B` and `N`, and the number row.
+  `musical-typing` is not a built-in.
+- **`src/keys/terminal.test.ts` and `src/keys/position.test.ts`.**
+  `Esc` is not a quit and `Ctrl-C` is. `CSI 13 u` resolves to `Enter`
+  and `CSI 127 u` to `Backspace`.
 - **`src/keys/session.test.ts`.** `knob` wraps both ways. `turn` sends
   the knob's controller on the keymap's channel from the default's
   unmapped value, and stops at 0 and 127. Driven by `tick(now)`, a held
   turn moves 1 step at the press, none before 300 ms, then 1, 2, and 4
-  steps a tick at the times in §2.6, and stops on release and on
-  focus-out. Keys `3` to `8` move the `mod` knob. A new knob list keeps
+  steps a tick at the times in §2.6. An entry ignores a second `.` and
+  a later `-`, deletes on `Backspace`, completes on `Enter` and before
+  a knob action, and lets a note play while it is open. With `glide: 1`
+  a value from 127 to 62 glides in 13 ticks and lands on 62; a turn
+  stops it; a panic stops every glide; with `glide: 0` it is one
+  control change. A `cc: 1` key moves `mod`. A new knob list keeps
   values by controller and the choice by name.
 - **`src/commands/keys.test.ts`.** The knob line at rest, the chosen
-  knob's reverse video, the same length before and after a turn, the
-  window and its marks on a narrow terminal, and the status line
-  without `mod` when the keymap binds knob actions and with it when it
-  does not.
-- **`src/keys/voice-host.test.ts`, against a stub `sclang`.** Three
-  `knob` lines and a `knobs` line become a status with three knobs, and
-  a later list replaces it.
-- **`src/keys/voicer.test.ts`, through real `sclang`.** With a voice
-  that has a `cutoff` knob on CC 74, a voice starts without it, CC 74
-  at 127 sets 15000 on the sounding voice, and a new voice starts at
-  15000. `voice-load.scd` rejects a knob with no spec, a name that is
-  not a control, a reserved controller, a repeated controller, and a
-  `\db` warp.
+  knob's reverse video, the same length through a turn and a glide, an
+  entry in the value's place, the window on a narrow terminal, and the
+  status line with and without `mod`. `Esc` with an entry open cancels
+  it; `Esc` without one shows `Ctrl-C quits` and does not quit.
+- **`src/keys/print.test.ts`.** The `musical` diagram matches a stored
+  copy.
+- **`src/keys/voicer.test.ts`, through real `sclang`.** CC 74 at 127
+  sets `cc74` to 1.0 on the sounding voice, and a new voice starts with
+  it. CC 64 never becomes a control, and CC 1 still arrives as `mod`.
 - **`src/generators/voice-render.test.ts`, through real `sclang`.** A
-  take with a knob's controller at 0 renders differently from the same
-  take without it.
-- **`src/commands/record-midi-daemon.test.ts`, chunk 2.** A seeded
-  controller lands at `at: 0`. A control change sent after the arm and
-  before the start replaces its seed at `at: 0`. One sent after the
-  start lands at its own time. Controllers 120 to 127 are never chased.
-- **`src/commands/record-plan.test.ts`, chunk 2.** `field record` reads
+  take with CC 74 renders differently from the same take without it
+  through a voice that reads `cc74`, and editing the knob file renders
+  the take again.
+- **`src/commands/record-midi-daemon.test.ts` and
+  `src/commands/record-plan.test.ts`, chunk 3.** A seeded controller
+  lands at `at: 0`. A control change sent after the arm and before the
+  start replaces its seed, and two channels' rows come in the order
+  their values last arrived. One sent after the start lands at its own
+  time. Controllers 120 to 127 are never chased. `field record` reads
   `.field/keys.json` only while its process runs, and only for a daemon
   with `midi-chase`.
 
 The tests through real `sclang` skip by name where it is absent, as
-they do today. Every criterion in the table makes sound or needs a
-terminal with the kitty protocol, so each pull request's Testing
+they do today. Every criterion in the table needs a terminal with the
+kitty protocol, and most make sound, so each pull request's Testing
 section records the ones it ran.
 
 ## 5 Cost
 
-The hot path is a held turn key. It sends at most 25 control changes a
-second, each one pipe write and one CoreMIDI send, which
-keyboard-instrument.md §5 puts well under a millisecond. The host sets
-one control per sounding synth per change: a five-note chord on two
-instruments is 10 sets a tick, 250 a second, which `scsynth` handles
-without strain. `field keys` redraws the knob line at most 25 times a
-second, one write each, and in chunk 2 writes `.field/keys.json` as
-often, a few hundred bytes by rename.
+The hot path is a held turn key or a glide. Each sends at most 25
+control changes a second, each one pipe write and one CoreMIDI send,
+which keyboard-instrument.md §5 puts well under a millisecond. The
+voice host sets one control per sounding synth per change: a five-note
+chord on two instruments is 10 sets a tick, 250 a second, which
+`scsynth` handles without strain. `field keys` redraws the knob line at
+most once a tick, and in chunk 3 writes `.field/keys.json` as often, a
+few hundred bytes by rename. Reading a knob file is one small YAML
+parse at start and at each save.
 
-The rest is small. Checking the knob list adds nothing to the host's
-start beyond a scan of the SynthDef's controls. A two-second sweep adds
-about 50 rows to a take's notes file, and one set per sounding voice
-per row to its render. The daemon's chase is a table of 16 channels by
-120 controllers that the audio callback updates in constant time per
-message before the start, and writes once, as a few lines in practice.
-Editing `juno.scd` and `bass.scd` changes their content hashes, so a
-take rendered through either renders once more.
+The rest is small. A two-second sweep adds about 50 rows to a take's
+notes file, and one set per sounding voice per row to its render. The
+daemon's chase is a table of 16 channels by 120 controllers that the
+audio callback updates in constant time per message before the start,
+and writes once, as a few lines in practice. Editing `juno.scd` and
+`bass.scd` changes their content hashes, so a take rendered through
+either renders once more.
 
 ## 6 Rollout
 
-1. **Knobs, live and in takes.** The declaration and its checks, the
-   voicer, host, and render, the two actions, the session, the knob
-   line, `juno` and `bass`, and the docs. A knob turned during a take is
-   recorded and rendered from here on. Criteria 1 to 13.
-2. **Where a take starts.** `.field/keys.json`, `controllers` in `arm`,
+1. **Knobs, live and in takes.** Knob files and `--knobs`; choosing,
+   turning, and the knob line; `musical` as the default, with the
+   arrows and the bend on `B` and `N`; the voicer's `cc<n>`; `juno` and
+   `bass` with their knob files; the render's new input; the docs; and
+   the note at keyboard-instrument.md §3. Criteria 1 to 3, 9 to 11, 13,
+   and 15 to 19, and criterion 12 up to its typed value.
+2. **Typing and the glide.** The `type` action and the number row,
+   `Enter` and `Backspace`, `Esc` cancelling and no longer quitting,
+   `glide`, and the entry and the glide on the knob line, with the note
+   at keyboard-instrument.md §2.4. It needs chunk 1's knobs. Criteria 4
+   to 8, 12, and 14.
+3. **Where a take starts.** `.field/keys.json`, `controllers` in `arm`,
    and the daemon's chase. It needs chunk 1's controller map. Criteria
-   14 and 15.
+   20 and 21.
 
 ## 7 Open questions
 
+Each question is deferred out of this plan, so none blocks a chunk.
+
 1. **Knobs in the Electron UI.** The UI draws knobs for inserts
-   (`ui/src/Inserts.tsx`) but nothing of `field keys`, and neither
-   `field keys` nor its voice host has a channel to it. Showing an
-   armed instrument's knobs there follows the UI playing instruments,
-   which arming.md chunk 3's arm buttons begin. Justin decides whether
-   "display them in the UI" includes the Electron UI, and when. The
-   declaration and the host's lines are what it would read, through a
-   command that loads a program and prints its knobs without playing.
+   (`ui/src/Inserts.tsx`) but nothing of `field keys`, and has no
+   channel to it. This plan shows knobs in `field keys` and puts them in
+   YAML files that the UI can read as they are. Showing an armed
+   instrument's knobs in the UI waits until the UI plays instruments,
+   which arming.md chunk 3's arm buttons begin. Justin decides then
+   whether it shows them.
 2. **Knob keys in `tracker` and `fourths`.** Both spend the arrows on
    transpose and velocity and every row on notes, so neither binds the
-   new actions in this plan, and a keymap of your own can. Justin
-   decides whether either should give its velocity keys to `turn`.
+   knob actions in this plan, and criterion 15 checks that `tracker`
+   is unchanged. A keymap of your own can bind them meanwhile. Justin
+   decides, once `musical` has been played with, whether to adapt them
+   as `tracked` and `quartal` (§3.2).
 3. **More than 128 steps.** Deferred until a knob's steps are audible
    through its lag. MIDI 1.0's 14-bit controller pairs and NRPN are the
    two ways to finer steps, and either changes how a knob names its
-   controller.
+   controller. Finer steps would also let a typed value land exactly.
 4. **Keeping a sound you dialed in.** Knob positions last for the
-   session. Writing them back as the program's defaults, or as named
-   patches beside it, is deferred until someone wants to keep one; until
-   then you copy the values into the program.
+   session. Writing them back as the knob file's defaults, or as named
+   patches beside it, is deferred until someone wants to keep one;
+   until then you copy the values into the file.
 
 ## 8 Background
 
 - **The voice contract.** `docs/keys.md` "Make an instrument playable"
   and `docs/build-graph.md` list `freq`, `amp`, `gate`, `out`, and an
-  optional `mod`, and nothing else a voice can take.
+  optional `mod`, and nothing else a voice can take. The voicer turns
+  CC 1 into `mod` and ignores every other controller but 64 and 123.
 - **The instruments.** `juno.scd` and `bass.scd` hold 26 settings in an
   Event and pass it to `ju06a`, whose comment says they "shape the graph
   rather than arriving as controls". `ju06a` tests `pwmMode`,
   `subLevel`, `noiseLevel`, and `chorusOn` with `if`, so those decide
-  the graph's shape. Both voices declare only `mod` beyond the contract.
-- **Repeats.** `KeysSession.handleKey` returns nothing for a `repeat`
-  event, and the protocol's flag 2, which `field keys` sets, reports
-  them.
-- **The status line.** #195 added `bend` and `mod`. The bend prints
-  with a sign and fixed decimal places so the notes do not move; `mod`
-  prints 0 to 127 unpadded.
+  the graph's shape.
+- **Musical Typing's keys.** `keymaps/musical-typing.yaml` plays notes
+  on the home row and on `W E T Y U O P`, and binds `Z X C V`, `Tab`,
+  and `1` to `8`. `B`, `N`, `M`, `,`, `.`, `/`, `9`, `0`, `-`, `=`,
+  `Q`, `R`, `I`, the brackets, and the arrows are free.
+- **Esc, Enter, and Backspace.** `isQuit` in `src/keys/terminal.ts`
+  quits on an `Esc` press, and `field keys` checks it before the
+  session sees the key. Under the protocol's flag 8 the terminal
+  reports `Enter` and `Backspace` as `CSI 13 u` and `CSI 127 u`, but
+  `positionOf` in `src/keys/position.ts` names only `Tab` and `Space`
+  among such keys, so both resolve to nothing today.
 - **What a take keeps.** Before the start, the daemon drains MIDI
   arrivals and discards them (`Player` in `native/audiod/src/player.cpp`,
-  and `stampMidiBlock` drops any `at` below 0). `field record` polls
-  status every 250 ms and learns of a start from it.
-- **SuperCollider 3.14.1.** `Symbol.kr(val, lag, fixedLag, spec)` calls
-  `NamedControl.kr`, which stores the spec under the SynthDef's
-  `metadata[\specs]`. `ControlSpec.map` applies the warp, then rounds
-  to `step`, which is the formula in §2.2.
+  and `stampMidiBlock` drops any `at` below 0).
+- **SuperCollider 3.14.1.** `String.parseYAMLFile` reads a knob file,
+  and returns its numbers as strings. `ControlSpec(50, 15000,
+  \exp).map(62 / 127)` gives 809.6, which is §2.7's 810 Hz.
 - **The sound controllers.** General MIDI 2 adopts the MIDI 1.0 sound
   controller defaults: 71 resonance, 72 release time, 73 attack time,
   74 brightness, which synths use for cutoff, and 75 to 78 decay and
