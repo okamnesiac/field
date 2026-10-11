@@ -309,7 +309,8 @@ Chunks 2 to 4:
 
 1. **The checkout installer and `field upgrade`.** §2. This change.
 2. **Releases.** §3.1. Blocked on §7.1.
-3. **The release installer.** §3.2. Needs chunk 2.
+3. **The release installer.** §3.2. Needs chunk 2, and decides whether
+   Windows gets an `install.ps1` (§7.6).
 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
    chunk 3 and a public repository.
 
@@ -361,8 +362,14 @@ version.
 `install.sh` is bash, and Field's Windows support is
 [windows-portability.md](../windows-portability/readme.md). Windows
 installs from a checkout by hand for now, `field upgrade` refuses there
-with the steps, and the installer's tests skip there. Whether Windows
-gets an `install.ps1` of its own is open.
+with the steps, and the installer's tests skip there.
+
+Chunk 3 decides whether Windows gets an `install.ps1` of its own. A
+checkout on Windows installs with the four commands in
+`docs/install.md`, but a release install has no checkout to run them
+in, and the release installer is bash too. The answer goes with whether
+releases publish a Windows daemon at all, which §7.2 leaves out of the
+first platforms.
 
 ## 8 Chunk 1 as built (2026-10-11)
 
