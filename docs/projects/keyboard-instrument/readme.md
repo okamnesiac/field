@@ -989,3 +989,21 @@ corrected to match.
   make sound, so no run here played them. The restart in criterion 25
   also needs a device whose rate moves; the logic that drives it runs
   only in `sclang`.
+
+## 11 Chunk 3 as built (2026-10-10)
+
+`tracker` and `fourths` ship in `keymaps/`, exactly as chunk 1's schema
+tests carried them, and those tests now read the shipped files. Both
+put transpose and velocity on the arrows and sustain on `Space`; neither
+binds pitch bend or modulation, as §3 says.
+
+| Check | Result |
+| --- | --- |
+| The schema and keymap tests | `tracker` plays 32 notes with `KeyZ` 48, `KeyQ` 60, and `KeyI` 72; `fourths` expands to 27 notes with `KeyZ` 48, `KeyA` 53, `KeyQ` 58, and `Digit1` 63. Every built-in resolves by its bare name and loads. |
+| Criterion 28, in a pseudo-terminal through the real helper and CoreMIDI, typing as this Mac's ColemakC layout does | `z`, `q`, and `u` (which is `KeyI` there) played 48, 60, and 72, each with its own note-off, and `ArrowRight` moved the transpose to +12. |
+| Criterion 29, the same way | `z b s` together played 48, 52, and 55, and `x k t`, one key to the right, played 49, 53, and 56: the same major-triad shape a semitone higher. |
+| `field keys --keymap <name> --print` | Both diagrams put C3 under `KeyZ`. `tracker` puts C4 under both `KeyQ` and `Comma`; `fourths` puts F3 under `KeyA`, A#3 under `KeyQ`, and D#4 under `Digit1`. |
+
+Still owed: criteria 28 and 29 at a real keyboard in Ghostty and
+iTerm2. The runs above typed the protocol's bytes into a
+pseudo-terminal, as §9.3 explains for criteria 1 to 20.

@@ -32,7 +32,15 @@ describe('resolving a keymap', () => {
   });
 
   it('lists the built-ins', () => {
-    expect(builtinKeymapNames()).toContain('musical-typing');
+    expect(builtinKeymapNames()).toEqual(['fourths', 'musical-typing', 'tracker']);
+  });
+
+  it('resolves and loads every built-in by its bare name', () => {
+    for (const name of builtinKeymapNames()) {
+      const source = resolveKeymapSource(name, {});
+      expect(source.kind).toBe('builtin');
+      expect(loadKeymap(source.path).name).toBe(name);
+    }
   });
 
   it('resolves a bare name only to a built-in', () => {

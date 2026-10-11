@@ -1,0 +1,10 @@
+name: fourths
+description: One semitone per key, each row a fourth above the row below.
+base: 48
+grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
+controls:
+  ArrowLeft: { transpose: -12 }
+  ArrowRight: { transpose: 12 }
+  ArrowDown: { velocity: -20 }
+  ArrowUp: { velocity: 20 }
+  Space: { cc: 64, value: 127, mode: hold }
