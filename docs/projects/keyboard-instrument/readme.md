@@ -778,13 +778,12 @@ Each chunk is one pull request, in order:
    graph. This is deferred to that project on purpose.
 5. **Reloading the voice when its file changes.** The voice host could
    re-run the program and add the new SynthDef while you play, as a
-   keymap given by path already reloads. This is deferred until chunk 2
-   has been played with.
+   keymap given by path already reloads. §14 answers it: it reloads.
 6. **A control for modulation.** The voice host ignores CC 1, because
    the contract has no control for it. Adding an optional `mod` control,
    which a voice may leave out, would let an instrument respond to the
-   modulation keys and a controller's mod wheel. This is deferred until
-   chunk 2 has been played with.
+   modulation keys and a controller's mod wheel. §14 answers it with
+   that control.
 7. **Layers.** A keymap could bind a second set of positions that
    applies while `Shift` or another key is held, which would double its
    range without a transpose. The format leaves room for a `layers`
@@ -1270,3 +1269,75 @@ record entry has `instrument: pad`.
   `field import` takes audio only, so there is no way yet to pin an
   edit. A command that re-pins a notes file is the follow-up if editing
   notes turns out to matter.
+
+## 14 Voice reload and the modulation wheel (2026-10-11)
+
+§7 deferred questions 5 and 6 "until chunk 2 has been played with".
+Justin has played with it, and asked for both. Saving an instrument's
+program while `field keys` plays now loads it again, and the modulation
+wheel reaches the voice as an optional `mod` control.
+
+### 14.1 What was built
+
+- **Reload.** `field keys` watches the instrument's program the way it
+  watches a keymap given by path: `watchText` in `src/keys/watch.ts`,
+  which `watchKeymap` now uses too, watches the directory and calls only
+  when the text changes. On a change, Field sends `/field/reload` to
+  `sclang`'s own port, which it chooses and passes with `-u`, as it
+  already chooses `scsynth`'s. The host loads the program again with
+  `sc/voice-load.scd`, the loader its first load and the take render
+  also use. A voice that loads is what the next note plays, and notes
+  already sounding finish as they started. One that does not leaves the
+  last good voice playing, and the instrument's line says why, with
+  `sclang`'s own `ERROR:` line attached when the program does not
+  compile.
+- **The modulation wheel.** CC 1 divided by 127 is `mod`, which the
+  voicer passes to each new voice and sets on every sounding voice when
+  it moves, live and in a take's render. The voicer's `setFreq` became
+  `set.(voice, control, value)`, which carries both `freq` and `mod`. A
+  voice may leave `mod` out; `scsynth` ignores a control a SynthDef does
+  not have. `juno` turns it into vibrato, up to half a semitone at
+  5.5 Hz, as the lever on a Juno's bender does; `bass` opens its filter,
+  up to four times its cutoff; `pad` has none.
+- **Renders.** `juno`'s and `bass`'s render branches pass no `mod`, so
+  their graphs, and their renders, are unchanged.
+
+### 14.2 Decisions (DECIDED, 2026-10-11)
+
+- **Field watches; the host loads.** Rejected: `sclang` polling the
+  program's modification time, which would be a second watcher with
+  one-second resolution and none of the rename-on-save handling the
+  keymap watch already proves.
+- **The reload is an OSC message to `sclang`'s port,** accepted only
+  from `127.0.0.1`. Rejected: `sclang`'s standard input, which `-D`
+  turns off.
+- **A failed reload keeps the last good voice.** Silence, or a host
+  that exits, would end the session over a typo.
+- **`mod` is one value for every channel,** as the voicer's bend is.
+
+### 14.3 Acceptance criteria
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 37 | In `examples/bloom`, run `field keys juno`. Hold a note, change `juno.scd`'s `level` from 0.12 to 0.05, and save. Play another note. | The instrument's line ends `· reloaded`. The held note keeps sounding as it started; the new note is quieter. |
+| 38 | Save `juno.scd` with a syntax error, then play. | The line reads `juno kept its last voice: juno.scd does not compile: …`, and the keys still play `juno`. Fixing the file brings back `· reloaded`. |
+| 39 | With `field keys juno`, hold a note and press `8`, then `3`. | Vibrato appears, then stops. |
+| 40 | With `field keys bass`, hold a note and press `8`. | The filter opens. |
+| 41 | Record a take on a track whose record entry has `instrument: juno`, moving the wheel while you play, then build. | The render has the vibrato where you played it. |
+
+### 14.4 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| `src/keys/voicer.test.ts`, through real `sclang` | A note starts with `mod` 0; CC 1 at 127 sets 1.0 on the sounding voice, a new voice starts with 1.0, and CC 1 at 0 sets 0.0 on both. The voicer still plays after `forgetVoices`. |
+| `src/keys/voice-host.test.ts`, against a stub `sclang` | `sclang` starts with `-u <port> -D <script>`; `reload` sends `/field/reload` to that port, and the host's answers become `reloaded` and `reload-failed` with `sclang`'s `ERROR:` line attached. |
+| `src/generators/voice-render.test.ts`, through real `sclang` | With a voice whose level is `mod`, a take with no CC 1 renders silent, and one with CC 1 at 127 before its note renders sound. The render's cache inputs now include `sc/voice-load.scd`. |
+| `juno` and `bass` render branches | With seed 1 and 4 s, in stereo and mono, the same bytes as before `mod`. |
+| `field keys juno` in a pseudo-terminal, with the real host and no keys pressed | Live at 48000 Hz on this Mac's speakers. A good save of `juno.scd` showed `· reloaded`; one without a semicolon showed `juno kept its last voice: juno.scd does not compile: syntax error, unexpected …`; restoring the file showed `· reloaded` again. |
+
+### 14.5 What is still owed
+
+- **Criteria 37 to 41 by ear.** The runs above pressed no keys.
+- **A save in the first seconds of a session** can arrive before
+  `sclang` has registered its reload responder, and is then lost; the
+  next save reloads.

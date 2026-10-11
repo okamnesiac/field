@@ -7,7 +7,9 @@ import { freeUdpPort, instrumentPath, oscMessage, parseHostLine, VoiceHost, type
 
 // A stand-in for sclang running the voice host: it records its
 // environment, listens on the scsynth port it was given, records an OSC
-// /quit there, and behaves as STUB_MODE says.
+// /quit there, and behaves as STUB_MODE says. On its own port (-u) it
+// answers each /field/reload with the next of STUB_RELOADS: ok, or fail
+// with sclang's ERROR line first, as a program that does not compile does.
 const STUB = `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require('node:fs');
 const log = process.env.STUB_LOG;
@@ -55,6 +57,18 @@ socket.bind(Number(process.env.FIELD_SC_PORT), '127.0.0.1', () => {
       break;
   }
 });
+const args = process.argv.slice(2);
+const lang = require('node:dgram').createSocket('udp4');
+const reloads = (process.env.STUB_RELOADS ?? '').split(',').filter(Boolean);
+lang.on('message', (msg) => {
+  appendFileSync(log + '.lang', msg.toString('latin1').split('\\0')[0] + '\\n');
+  if (reloads.shift() === 'ok') console.log('@field {"reloaded":true}');
+  else {
+    console.log("ERROR: syntax error, unexpected end of file, expecting '}'");
+    console.log('@field {"reload_error":"pad.scd does not compile"}');
+  }
+});
+lang.bind(Number(args[args.indexOf('-u') + 1]), '127.0.0.1');
 // A datagram that arrived just before the signal is still logged.
 process.on('SIGTERM', () => setTimeout(() => process.exit(0), 100));
 `;
@@ -163,12 +177,38 @@ describe('the voice host process', () => {
     await host.ready;
     expect(statuses).toEqual([{ state: 'live', device: 'Test Out', sampleRate: 48000 }]);
     const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
-    expect(seen.args[0]).toBe('-D');
-    expect(seen.args[1]).toMatch(/sc\/voice-host\.scd$/);
-    expect(existsSync(seen.args[1])).toBe(true);
+    // sclang's own port first, where a reload reaches it.
+    expect(seen.args[0]).toBe('-u');
+    expect(Number(seen.args[1])).toBeGreaterThan(0);
+    expect(seen.args[2]).toBe('-D');
+    expect(seen.args[3]).toMatch(/sc\/voice-host\.scd$/);
+    expect(existsSync(seen.args[3])).toBe(true);
     expect(seen).toMatchObject({ mode: 'voice', instrument: '/p/pad.scd', device: 'Test Out', parent: String(process.pid) });
     await host.close();
     expect(readFileSync(log, 'latin1')).toContain('/quit');
+  });
+
+  it('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
+    const statuses: VoiceHostStatus[] = [];
+    const host = await VoiceHost.start({
+      instrument: '/p/pad.scd',
+      env: { ...env('ready'), STUB_RELOADS: 'ok,fail' },
+      onStatus: (s) => statuses.push(s),
+    });
+    await host.ready;
+    const settle = async (count: number): Promise<void> => {
+      for (let i = 0; i < 100 && statuses.length < count; i++) await new Promise((r) => setTimeout(r, 20));
+    };
+    await host.reload();
+    await settle(2);
+    await host.reload();
+    await settle(3);
+    expect(statuses.slice(1)).toEqual([
+      { state: 'reloaded' },
+      { state: 'reload-failed', reason: "pad.scd does not compile: syntax error, unexpected end of file, expecting '}'" },
+    ]);
+    expect(readFileSync(`${log}.lang`, 'latin1')).toBe('/field/reload\n/field/reload\n');
+    await host.close();
   });
 
   it('rejects ready with the host error and what sclang printed after its banner', async () => {

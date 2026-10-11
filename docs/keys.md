@@ -134,8 +134,11 @@ these controls, and it must not render or exit.
 | `amp` | The velocity divided by 127 |
 | `gate` | 1 at note-on, 0 at note-off |
 | `out` | The output bus, 0 |
+| `mod` | Optional: the modulation wheel (CC 1), from 0 to 1, at note-on and whenever it moves |
 
-The voice writes two channels and frees itself after `gate` goes to 0,
+A voice may leave `mod` out, and then the wheel does nothing to it. In
+`musical-typing`, the keys `3` to `8` set the wheel from 0 to full, as
+they do in Logic. The voice writes two channels and frees itself after `gate` goes to 0,
 with an envelope that ends in `doneAction: 2`. The render variables are
 absent in voice mode, so check `FIELD_MODE` before you read them:
 
@@ -153,9 +156,22 @@ if ("FIELD_MODE".getenv == "voice") {
 ```
 
 The host owns everything between MIDI and voices: one voice per
-sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
-pitch bend, which it applies to `freq` on every sounding voice, up to
-two semitones either way. It ignores modulation (CC 1) for now.
+sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), pitch
+bend, which it applies to `freq` on every sounding voice, up to two
+semitones either way, and the modulation wheel, which it sets as `mod`
+on every sounding voice and on each new one.
+
+Saving the program while `field keys` plays loads it again. The next
+note plays the new voice, and notes already sounding finish as they
+started. A save that does not load, such as one with a syntax error,
+leaves the last voice that loaded playing, and the instrument's line
+says why:
+
+```console
+juno kept its last voice: juno.scd does not compile: syntax error, unexpected end of file
+```
+
+The next save that loads puts `· reloaded` on the line instead.
 
 `examples/bloom` has three instruments that answer voice mode:
 
@@ -164,11 +180,13 @@ two semitones either way. It ignores modulation (CC 1) for now.
 - **`juno`** — the JU-06A, a model of the Roland Juno's chain from
   [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
   classic Juno pad: saw and pulse with the width swept, a slow attack,
-  and the chorus on.
+  and the chorus on. The modulation wheel adds vibrato, as the lever on
+  a Juno's bender does.
 - **`bass`** — the same JU-06A set as offset's bass: a saw with a square
   sub an octave down, a short envelope that opens the filter on each
-  note, and no chorus. It plays at true pitch, so in `musical-typing`
-  press `Z` to drop an octave.
+  note, and no chorus. The modulation wheel opens the filter, up to four
+  times its cutoff. It plays at true pitch, so in `musical-typing` press
+  `Z` to drop an octave.
 
 ## Record what you play
 

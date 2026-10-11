@@ -7,6 +7,7 @@ import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
 import { instrumentPath, VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
+import { watchText } from '../keys/watch.js';
 import { findProjectRoot } from '../model/project.js';
 import type { Keymap } from '../schema/keymap.js';
 
@@ -121,7 +122,12 @@ interface PlayOptions {
   device: string | undefined;
 }
 
-type InstrumentState = { name: string; status: VoiceHostStatus | { state: 'starting' } };
+type InstrumentState = {
+  name: string;
+  status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
+  // What the last save of the program did (keyboard-instrument.md §14).
+  reload?: { loaded: true } | { failed: string };
+};
 
 async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
   const { source, program } = options;
@@ -178,7 +184,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
           ...(device !== undefined ? { device } : {}),
           onStatus: (status) => {
             if (status.state === 'voice') return;
-            instrument!.status = status;
+            if (status.state === 'reloaded') instrument!.reload = { loaded: true };
+            else if (status.state === 'reload-failed') instrument!.reload = { failed: status.reason };
+            else instrument!.status = status;
             draw();
           },
           onExit: (reason) => stop(new Error(`the voice host stopped: ${reason}`)),
@@ -186,6 +194,8 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
       : undefined;
   host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
 
+  // Saving the program loads it again, as saving a keymap does (§14).
+  const stopWatchingProgram = program !== undefined && host !== undefined ? watchText(program, () => void host.reload()) : undefined;
   const stopWatching =
     source.kind === 'file'
       ? watchKeymap(source.path, (result) => {
@@ -229,6 +239,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   tty.stdin.removeListener('data', onData);
   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
   stopWatching?.();
+  stopWatchingProgram?.();
   send(session.quit());
   // A host still booting closes too: quitting never waits for it.
   await host?.close();
@@ -237,10 +248,17 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   if (error !== undefined) throw error;
 }
 
-function instrumentText({ name, status }: InstrumentState): string {
-  if (status.state === 'live') return `${name} live at ${status.sampleRate} Hz on ${status.device}`;
-  if (status.state === 'restarting') return `${name} restarting for a new sample rate`;
-  return `${name} starting`;
+// A save that did not load leads with why, so a narrow terminal keeps the
+// error rather than the device; the voice that loaded last still plays.
+function instrumentText({ name, status, reload }: InstrumentState): string {
+  if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
+  const state =
+    status.state === 'live'
+      ? `${name} live at ${status.sampleRate} Hz on ${status.device}`
+      : status.state === 'restarting'
+        ? `${name} restarting for a new sample rate`
+        : `${name} starting`;
+  return reload === undefined ? state : `${state} · reloaded`;
 }
 
 // The sounding notes come last, so playing changes only the end of the
