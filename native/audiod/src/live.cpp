@@ -942,9 +942,11 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
     {
         const bool region = loopTo > loopFrom && clock >= loopFrom;
         const juce::int64 t = region ? wrap (clock) : loop && length > 0 ? clock % length : clock;
-        const juce::int64 until = region ? loopTo - t
-                                : loop && length > 0 ? length - t
-                                                     : std::max<juce::int64> (1, output.postLength - t);
+        // A step ends only where the clock wraps. With nothing to wrap
+        // the block renders whole, past the output's content too: a
+        // chain cannot tell the difference, and a live input reads whole
+        // blocks instead of one frame at a time.
+        const juce::int64 until = region ? loopTo - t : loop && length > 0 ? length - t : n - filled;
         const int step = (int) std::min<juce::int64> (n - filled, std::max<juce::int64> (1, until));
 
         auto& mixed = scratchMixed;

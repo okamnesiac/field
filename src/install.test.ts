@@ -444,6 +444,28 @@ posix('install.sh status', () => {
     );
   });
 
+  it('counts the ring header and FieldOut, which the same build compiles, as daemon sources', () => {
+    install();
+    const built = new Date(Date.now() - 30_000);
+    const sources = new Date(Date.now() - 60_000);
+    utimesSync(join(repo, AUDIOD), built, built);
+    for (const file of ['native/audiod/CMakeLists.txt', 'native/audiod/src/main.cpp']) utimesSync(join(repo, file), sources, sources);
+    expect(rows(install('status').stdout).has('audiod-current')).toBe(true);
+    write(join(repo, 'native/ring/field_ring.h'), '');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '--quiet', '-m', 'the ring');
+    expect(rows(install('status').stdout).get('audiod-stale')).toBe(
+      'native/ring/field_ring.h changed since field-audiod was built — run field upgrade audiod',
+    );
+    utimesSync(join(repo, 'native/ring/field_ring.h'), sources, sources);
+    write(join(repo, 'native/sc-fieldout/FieldOut.cpp'), '');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '--quiet', '-m', 'FieldOut');
+    expect(rows(install('status').stdout).get('audiod-stale')).toBe(
+      'native/sc-fieldout/FieldOut.cpp changed since field-audiod was built — run field upgrade audiod',
+    );
+  });
+
   it('reports the daemon current after the rebuild it names, though CMake relinked nothing', () => {
     install();
     const past = new Date(Date.now() - 60_000);

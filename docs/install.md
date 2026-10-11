@@ -58,7 +58,7 @@ With none, they run `all`.
 | Target | What it runs |
 | --- | --- |
 | `cli` | `pnpm install --frozen-lockfile`, then `pnpm run build` and `pnpm run build:ui`, then `pnpm add -g <checkout>` unless pnpm's global `field` already links this checkout. The install covers the `ui/` workspace, the `electron` package included, and `build:ui` builds the client `field ui` serves, which takes about two seconds. |
-| `audiod` | `pnpm run build:native`. The first build fetches and compiles JUCE, which takes a few minutes; later builds compile only what changed. |
+| `audiod` | `pnpm run build:native`, which builds `field-audiod` and the FieldOut plugin that carries `field keys`' voices into it. The first build fetches and compiles JUCE, which takes a few minutes; later builds compile only what changed. |
 | `workers` | `field setup --existing`, which re-syncs each worker environment you set up with `field setup` and sets up no new one. |
 | `all` | `cli`, then `audiod`, then `workers`. |
 | `status` | Reports what is installed, changing nothing. |
@@ -138,7 +138,7 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
 | `not-on-path` | pnpm's global bin directory is not on your PATH. Run `pnpm setup`. |
 | `cli-current`, `cli-stale`, `cli-unbuilt` | Whether `dist/` was built from the checkout as it stands: the same commit, and the same number of uncommitted changes. `field --version` makes the same comparison. |
 | `ui-current`, `ui-stale`, `ui-missing` | Whether `ui/dist` holds a build, and whether any tracked file it may bundle is newer than that build: anything under `ui/` or `src/` other than a test, and `pnpm-lock.yaml`. The UI imports some of `src/`, and the check does not know which files, so an edit to a file it does not import also reads as stale. `field upgrade cli` rebuilds the UI and clears the row. |
-| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod` is newer than it. The installer touches `field-audiod` after each build, because CMake relinks it only when its own sources change, so `field upgrade audiod` clears `audiod-stale`. |
+| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod`, `native/ring`, or `native/sc-fieldout` is newer than it. The installer touches `field-audiod` after each build, because CMake relinks it only when its own sources change, so `field upgrade audiod` clears `audiod-stale`. |
 | `audiod-override` | `FIELD_AUDIOD` is set, so `field` runs that binary instead of this build. |
 | `worker-current`, `worker-stale`, `worker-absent`, `worker-no-uv` | Each worker environment, from `field setup --check`. |
 

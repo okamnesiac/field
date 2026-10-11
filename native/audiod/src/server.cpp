@@ -158,6 +158,9 @@ juce::String Server::dispatch (const juce::var& request)
         // §12.4).
         features.add ("record-midi");
         features.add ("record-tracks");
+        // The input and input_close ops, `inputs` in status, and input
+        // windows in a session (live-supercollider.md chunk 2).
+        features.add ("live-input");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -196,6 +199,23 @@ juce::String Server::dispatch (const juce::var& request)
         if (auto* o = info.getDynamicObject())
             for (auto& prop : o->getProperties())
                 ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "input")
+    {
+        // A live input (live-supercollider.md §2): a ring FieldOut writes
+        // and the session's input window of this name reads.
+        auto info = player.openInput (request.getProperty ("name", juce::var()).toString());
+        if (info.getProperty ("error", juce::var()).isString())
+            return jsonLine (errorResponse (id, info.getProperty ("error", juce::var()).toString()));
+        if (auto* o = info.getDynamicObject())
+            for (auto& prop : o->getProperties())
+                ok->setProperty (prop.name, prop.value);
+    }
+    else if (op == "input_close")
+    {
+        auto error = player.closeInput (request.getProperty ("name", juce::var()).toString());
+        if (error.isNotEmpty())
+            return jsonLine (errorResponse (id, error));
     }
     else if (op == "ramp")
     {

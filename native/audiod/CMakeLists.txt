@@ -28,6 +28,7 @@ target_sources(field-audiod PRIVATE
   src/render.cpp
   src/plan.cpp
   src/live.cpp
+  src/ring_input.cpp
   src/hosting.cpp
   src/capture.cpp
   src/click.cpp
@@ -52,6 +53,10 @@ target_sources(field-audiod PRIVATE
 target_compile_options(field-audiod PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-ffp-contract=off>
 )
+
+# The audio ring FieldOut writes and the daemon reads
+# (live-supercollider.md chunk 2), shared with native/sc-fieldout.
+target_include_directories(field-audiod PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../ring)
 
 target_compile_definitions(field-audiod PRIVATE
   JUCE_WEB_BROWSER=0

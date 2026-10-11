@@ -194,6 +194,14 @@ carry their own terms:
   plugins. JUCE 8.0.4, the version the daemon pins, bundles it under
   GPLv3 or Steinberg's proprietary VST3 license.
 
+FieldOut, the SuperCollider server plugin in `native/sc-fieldout/` that
+carries `field keys`' voice into the daemon, is licensed under
+GPL-3.0-or-later ([its LICENSE](native/sc-fieldout/LICENSE)), because it
+builds against SuperCollider's plugin interface, whose headers are
+vendored beside it from SuperCollider 3.14.1. It runs inside `scsynth`,
+not in Field's processes, and shares only an MIT header describing the
+shared-memory ring with the rest of Field.
+
 A commercial JUCE license does not cover the VST3 SDK. Unless you hold
 both a commercial JUCE license and Steinberg's proprietary VST3
 license, a `field-audiod` binary you build or distribute is under
