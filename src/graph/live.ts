@@ -122,10 +122,17 @@ export interface CompiledSession {
   dirty: string[];
 }
 
+// A live input to attach (live-supercollider.md §2): the window named
+// `input` goes on `track`, and the daemon feeds it.
+export interface SessionInput {
+  track: string;
+  input: string;
+}
+
 export async function compileSession(
   root: string,
   songName: string,
-  options: { loop?: boolean; solo?: string } = {},
+  options: { loop?: boolean; solo?: string; inputs?: SessionInput[] } = {},
 ): Promise<CompiledSession> {
   const project = loadProject(root);
   const errors = project.diagnostics.filter((d) => d.severity !== 'warning');
@@ -163,6 +170,56 @@ export async function compileSession(
     });
   }
   if (!shapes.has('main')) throw new Error(`song "${songName}" has no track named "main"`);
+
+  // Live inputs (live-supercollider.md §2): each input's track and
+  // every track above it on the way to main stay live — never frozen
+  // into a stem, which has no chain left — so the engine can run a
+  // second instance of each chain for the input (§9). The path must
+  // reach main, or nobody hears the input, and must stay at one rate,
+  // because the overlay has no converter yet.
+  const liveInputs = options.inputs ?? [];
+  const convertSource = (dep: string): string | undefined => {
+    if (!/\/convert:/.test(dep)) return undefined;
+    const node = graph.nodes.get(dep);
+    if (node === undefined || node.kind !== 'rule') return undefined;
+    const source = (node.spec as { source?: string }).source;
+    return source === undefined ? undefined : /^(?:track|tap):(.+)$/.exec(source)?.[1];
+  };
+  const readers = new Map<string, { name: string; convert: boolean }[]>();
+  for (const shape of shapes.values()) {
+    for (const dep of shape.deps) {
+      const direct = /\/(?:track|tap):(.+)$/.exec(dep)?.[1];
+      const converted = direct === undefined ? convertSource(dep) : undefined;
+      const child = direct ?? converted;
+      if (child === undefined || !shapes.has(child)) continue;
+      readers.set(child, [...(readers.get(child) ?? []), { name: shape.name, convert: converted !== undefined }]);
+    }
+  }
+  const liveBound = new Set<string>();
+  const inputNames = new Set<string>();
+  for (const { track, input } of liveInputs) {
+    if (!shapes.has(track)) throw new Error(`input "${input}" names "${track}", which is not a track in song "${songName}"`);
+    if (inputNames.has(input)) throw new Error(`input "${input}" is named twice`);
+    inputNames.add(input);
+    const reach = new Set<string>();
+    const queue = [track];
+    while (queue.length > 0) {
+      const name = queue.pop()!;
+      if (reach.has(name)) continue;
+      reach.add(name);
+      for (const reader of readers.get(name) ?? []) {
+        if (reader.convert) {
+          throw new Error(
+            `the input on "${track}" crosses from "${name}" into "${reader.name}" at another rate; ` +
+              `an input's path needs one rate`,
+          );
+        }
+        queue.push(reader.name);
+      }
+    }
+    if (!reach.has('main')) throw new Error(`"${track}" is not under main, so input "${input}" would not be heard`);
+    for (const name of reach) liveBound.add(name);
+  }
 
   // The freeze (realtime.md decision 4): a track whose stem action is
   // already cached is served as that stem — one file window, no chain,
@@ -219,7 +276,7 @@ export async function compileSession(
   const frozen = new Set<string>();
   const candidates = new Set<string>();
   for (const name of shapes.keys()) {
-    if (name === 'main' || preTapped.has(name)) continue;
+    if (name === 'main' || preTapped.has(name) || liveBound.has(name)) continue;
     candidates.add(name);
     // Hosted chains freeze by the same rule as built-ins now
     // (plugin-hosting.md chunk 2 lifted chunk 1's unconditional
@@ -418,6 +475,10 @@ export async function compileSession(
         inputs.push({ file: built.path, sha256: built.sha256, ...base, duration });
       }
     }
+
+    // The inputs on this track: no place on the timeline, so no length
+    // and no latency here; the engine's overlay carries them (§9).
+    for (const { input } of liveInputs.filter((i) => i.track === name)) inputs.push({ input, gain_db: 0 });
 
     // comp_delay stays zero (Codex caught the double-compensation): the
     // engine's buffers are timeline-aligned — a chain's stream lag is

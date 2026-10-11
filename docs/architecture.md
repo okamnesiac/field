@@ -194,6 +194,10 @@ OSC over UDP, which TypeScript handles fine. Two modes:
   the daemon's rather than through the session graph. Bringing it into
   that graph, so a track's inserts process it, is
   [live-supercollider](projects/live-supercollider/readme.md)'s work.
+  The engine's half has landed: a live session carries an input up
+  through every chain above its track ([audio-engine.md](audio-engine.md)
+  "Live inputs"), and the ring that feeds it from SuperCollider is
+  next.
 
 SC source is tracked in Git and treated as code.
 
