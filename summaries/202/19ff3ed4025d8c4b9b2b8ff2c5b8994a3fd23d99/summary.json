@@ -1,0 +1,164 @@
+{
+ "version": 1,
+ "name": "Instrument knobs plan",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 202,
+  "title": "Plan instrument knobs: choose with the arrows, turn with up and down, and record every turn",
+  "head": "19ff3ed4025d8c4b9b2b8ff2c5b8994a3fd23d99",
+  "headRef": "spec/instrument-knobs",
+  "base": "4467d6f0cc80ce4ba8d102429195287331ee493a",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI instrument. Given an instrument, such as <code>juno</code>, it also starts a <b>voice host</b>: a SuperCollider process (<code>sclang</code> driving its own <code>scsynth</code>) that turns each note into a voice of that instrument. Today the only thing about the sound you can change while you play is the modulation wheel, in six fixed steps on keys <code>3</code> to <code>8</code>. Everything else, such as <code>juno</code>'s filter cutoff, is baked into the instrument's SynthDef as a constant, so changing it means editing the file and saving.",
+   "This pull request adds a plan, <code>docs/projects/instrument-knobs/readme.md</code>, at <code>status: ready</code> and <code>priority: next</code>. It changes no code. The plan lets an instrument declare <b>knobs</b>: controls of its SynthDef, each with a <code>ControlSpec</code> (SuperCollider's own description of a range, a curve, a step, and units) and a MIDI controller number. <code>field keys</code> shows the knobs on a new line above the status line. In Musical Typing, the left and right arrows choose a knob and up and down turn it, faster the longer you hold. A turn goes out as an ordinary MIDI control change, so the voicer sets it on every sounding voice, a recorded take captures it, and the take's render applies it the same way.",
+   "A second chunk makes a take start where your knobs were: <code>field keys</code> writes the controllers it has sent to <code>.field/keys.json</code>, <code>field record</code> passes them to the daemon when it arms, and the daemon writes them at the take's first sample.",
+   "The review of this head requested changes. The plan claims <code>ready</code> while two of its open questions wait on Justin, and criterion 1's exact knob line contradicts the plan's own width rule. Both are flagged on their lines below."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Knob</b>: a control of an instrument's voice that the instrument lists under <code>knobs</code> in its SynthDef's metadata, with a spec and a controller number.</li><li><b>Controller (CC)</b>: a MIDI control-change number from 0 to 127. CC 1 is the modulation wheel, and CC 64 is the sustain pedal.</li><li><b><code>ControlSpec</code></b>: SuperCollider's range description. <code>spec.map(x)</code> turns 0 to 1 into a value, by a straight line (<code>\\lin</code>) or a curve (<code>\\exp</code>).</li><li><b>Voice host</b>: <code>sc/voice-host.scd</code>, the <code>sclang</code> program behind <code>field keys</code>. It prints <code>@field</code> lines of JSON that Field reads.</li><li><b>Voicer</b>: <code>sc/voicer.scd</code>, the MIDI-to-voice rules that the live host and a take's offline render share.</li><li><b>Take</b>: one recording. A MIDI take is a notes file of notes, <code>controls</code> rows, and bends, which the build renders through the instrument.</li><li><b>Chase</b>: remembering each controller's last value before a take starts, so that the take can start with it.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "What the review found",
+    "html": "<ul class=\"tight\"><li><b>Readiness (blocking).</b> Questions 1 and 2 in §7 say \"Justin decides\" on a <code>ready</code> plan, and criterion 9 depends on question 2.</li><li><b>Criterion 1 (blocking).</b> The §2.5 width rule pads <code>res</code> to <code>res   0.300</code>, not <code>res 0.300</code>.</li><li><b>Suggestions.</b> Reject an <code>\\exp</code> range that touches 0. Say whether \"inside the range\" includes its ends, since <code>bass</code>'s attack sits on the minimum. Replay chased rows in arrival order. Match #200's heading change, whichever lands second.</li></ul>"
+   },
+   {
+    "id": "rollout",
+    "title": "Two chunks",
+    "html": "<ol><li><b>Knobs, live and in takes.</b> The declaration and its checks, the voicer, host, and render, the two keymap actions, the knob line, <code>juno</code> and <code>bass</code>, and the docs. Criteria 1 to 13.</li><li><b>Where a take starts.</b> <code>.field/keys.json</code>, <code>controllers</code> in the daemon's <code>arm</code> request, and the daemon's chase. Criteria 14 and 15.</li></ol>"
+   },
+   {
+    "id": "later",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li>Knobs in the Electron UI (question 1, open).</li><li>Knob keys in <code>tracker</code> and <code>fourths</code>, whose arrows already transpose and set velocity (question 2, open).</li><li>Finer than 128 steps per knob (question 3, deferred).</li><li>Saving a dialed-in sound as defaults or a patch (question 4, deferred).</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "plan",
+   "title": "The instrument knobs plan",
+   "kicker": "One new plan: how an instrument declares knobs, how field keys turns them, and how a take keeps them",
+   "intro": [
+    "The plan follows the repository's plan layout. §1 states the problem, §2 the design, §3 the decisions with the alternatives they beat, §4 the acceptance criteria and tests, §5 the cost, §6 the two chunks, §7 the open questions, and §8 the facts about today's code the design rests on.",
+    "The design reuses paths that already exist rather than adding a parallel one. A knob is a MIDI controller, so it travels the way the modulation wheel already does: from <code>field keys</code> through the virtual MIDI source <code>Field Keys</code> to the voice host, and into a take through the daemon that records MIDI. The voicer, which already sets <code>mod</code> on sounding voices, gains a callback that sets any knob. The render already replays a take through the same voicer, so a recorded turn renders as it sounded.",
+    "Read §2.2 for what an instrument writes, §2.5 for what you see, §2.6 for the hold timing, and §2.7 for the take's starting positions. §3 explains why each piece was chosen over its alternative."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Every section the plan cites exists and says what the plan cites it for: keyboard-instrument.md §2.2, §2.4, §2.6, §3, §5, §14, and §14.5, and arming.md §3, §9, and chunk 3. Checked by reading each section at the base."
+    },
+    {
+     "kind": "verify",
+     "text": "Every existing file that §2.8 and §4 name exists at the base. Only <code>src/keys/knobs.ts</code> and its test are missing, and the plan marks them new. Every command-line flag the criteria use exists in <code>src/cli.ts</code> or the daemon's <code>main.cpp</code>."
+    },
+    {
+     "kind": "context",
+     "text": "Three open pull requests touch files this plan will change: #201 (<code>sc/voice-host.scd</code>, <code>src/commands/keys.ts</code>, <code>src/keys/voice-host.ts</code>) and #198 (<code>player.cpp</code>, <code>server.cpp</code>, <code>protocol.ts</code>, <code>client.ts</code>). #201 gives each instrument's synths their own output bus and leaves the voice's SynthDef and controls alone, so the overlap is in text only."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/instrument-knobs/readme.md",
+     "note": "The new plan, at <code>status: ready</code> and <code>priority: next</code>.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "context",
+       "line": 6,
+       "text": "Every plan on <code>main</code> opens with <code>Plan: </code>, so this heading matches today. #200, open, drops that prefix from every plan but cannot see this one. Whichever lands second should make this <code># Instrument knobs</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 26,
+       "text": "<code>juno.scd</code>'s settings Event holds 26 entries, and its comment says the knobs \"shape the graph rather than arriving as controls\", as quoted. Checked in the file at the base."
+      },
+      {
+       "kind": "verify",
+       "line": 109,
+       "text": "In SuperCollider 3.14.1, <code>Symbol.kr(val, lag, fixedLag, spec)</code> passes the spec to <code>NamedControl</code>, which stores it under the SynthDef's <code>metadata[\\specs]</code>. So the voice host can read each knob's range from the loaded SynthDef. Checked in <code>Symbol.sc</code> and <code>GraphBuilder.sc</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 114,
+       "text": "The four settings this example turns into knobs, <code>vcfFreq</code>, <code>vcfRes</code>, <code>atk</code>, and <code>rel</code>, reach <code>ju06a</code>'s graph as signals, through multiplication, <code>clip</code>, and <code>Env.adsr</code>, never through an <code>if</code>. A control there works. <code>juno</code>'s defaults (2000, 0.3, 0.8, 1.5) and <code>bass</code>'s (1200, 0.4, 0.005, 0.15) fall inside these specs."
+      },
+      {
+       "kind": "verify",
+       "line": 125,
+       "text": "This is SuperCollider's own <code>ControlSpec.map</code>: it clips to 0 to 1, applies the warp, and rounds to <code>step</code>. So <code>field keys</code> can draw the value the voice plays. Checked in <code>Spec.sc</code>."
+      },
+      {
+       "kind": "context",
+       "line": 133,
+       "text": "Suggestion from the review, not blocking: SuperCollider's <code>\\exp</code> warp needs a non-zero range of one sign. <code>ControlSpec(0, 1, \\exp)</code> maps every controller value above 0 to <code>nan</code>, so the load should reject it."
+      },
+      {
+       "kind": "context",
+       "line": 140,
+       "text": "Suggestion from the review, not blocking: <code>bass</code>'s attack default, 0.005, equals the minimum of the attack spec it shares with <code>juno</code>. Say that \"inside\" includes the ends, or a strict check fails <code>bass</code> at load."
+      },
+      {
+       "kind": "verify",
+       "line": 166,
+       "text": "<code>keymaps/musical-typing.yaml</code> binds no arrow today. <code>tracker.yaml</code> and <code>fourths.yaml</code> bind all four arrows to transpose and velocity, which is why the plan leaves those keymaps alone. The new tags <code>K±1</code> and <code>R±1</code> do not collide with the existing <code>T</code>, <code>V</code>, <code>B</code>, <code>cc</code>, and <code>!!</code> tags in <code>src/keys/print.ts</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 190,
+       "text": "The host loads every program before it boots <code>scsynth</code> (<code>loadAll</code> runs before <code>run</code> in <code>sc/voice-host.scd</code>), and <code>emit</code> writes flat JSON objects. So the knob lines can arrive before any audio runs, as this row says."
+      },
+      {
+       "kind": "verify",
+       "line": 204,
+       "text": "The voicer's <code>start</code> callback takes four arguments today (<code>note</code>, <code>velocity</code>, <code>freq</code>, <code>mod</code>), so the controller values would be a fifth. The voicer keeps <code>mod</code> as one value for every channel (keyboard-instrument.md §14.2), as this bullet keeps every controller."
+      },
+      {
+       "kind": "context",
+       "line": 217,
+       "text": "This example shows <code>res 0.300</code>. The width rule below this example pads it to <code>res   0.300</code>. See the flag on criterion 1."
+      },
+      {
+       "kind": "verify",
+       "line": 262,
+       "text": "From 0, one step at the press, then 18, 24, and 84 steps through the three bands above, reach 127 at 2.30 s. One send per 40 ms tick is 25 a second at most. That matches criteria 2 and 4. Computed from the table."
+      },
+      {
+       "kind": "context",
+       "line": 290,
+       "text": "Suggestion from the review, not blocking: the chase keeps a value per channel, but the voicer keeps one per controller for every channel. If two channels send the same controller before a take, the rows at <code>at: 0</code> replay in table order, not arrival order. Writing them in arrival order keeps the render on the value the voice last played."
+      },
+      {
+       "kind": "verify",
+       "line": 298,
+       "text": "<code>renderEvents</code> in <code>src/schema/notes.ts</code> orders note-offs, then control changes and bends, then note-ons at one instant. A <code>controls</code> row already carries <code>cc</code>, <code>value</code>, and an optional <code>channel</code>, so a knob turn needs no new kind of event in the notes file."
+      },
+      {
+       "kind": "context",
+       "line": 325,
+       "text": "\"DECIDED … for Justin's review\" is the form arming.md §3 uses: the choices are recorded with the alternatives they beat, and review can still overturn them."
+      },
+      {
+       "kind": "flag",
+       "line": 412,
+       "text": "Criterion 1's knob line contradicts the width rule in §2.5. Each value prints at three significant digits, padded to the widest of all 128 controller values. For <code>res</code>, <code>ControlSpec(0, 0.95)</code>, controller value 1 prints as <code>0.00748</code>, seven characters, so the rule draws <code>res   0.300</code>, not <code>res 0.300</code>. The other four knobs come out as written. Either change this text and the example on line 217, or fix each knob's precision from its range."
+      },
+      {
+       "kind": "flag",
+       "line": 507,
+       "text": "The plan is <code>ready</code>, but questions 1 (the Electron UI) and 2 (on line 515: <code>tracker</code> and <code>fourths</code>) wait on Justin rather than being answered or deferred. Criterion 9 depends on question 2's answer. Record each as a decision with the alternative it beat, defer it out of the plan as questions 3 and 4 do, or set the plan back to <code>draft</code>."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "instrument-knobs"
+}
