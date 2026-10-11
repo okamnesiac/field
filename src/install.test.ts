@@ -508,6 +508,18 @@ posix('install.sh status', () => {
   });
 });
 
+// Reads files only, so it runs on Windows too.
+describe('install.sh constants', () => {
+  it('requires the CMake that native/audiod/CMakeLists.txt does', () => {
+    const cmake = readFileSync(join(packageRoot, 'native/audiod/CMakeLists.txt'), 'utf8');
+    const script = readFileSync(join(packageRoot, 'install.sh'), 'utf8');
+    const required = /cmake_minimum_required\(VERSION (\d+)\.(\d+)/.exec(cmake);
+    expect(required).not.toBeNull();
+    expect(/^CMAKE_MAJOR=(\d+)$/m.exec(script)?.[1]).toBe(required![1]);
+    expect(/^CMAKE_MINOR=(\d+)$/m.exec(script)?.[1]).toBe(required![2]);
+  });
+});
+
 posix('install.sh refuses', () => {
   it('outside a checkout, and says to clone', () => {
     const run = install(undefined, {}, join(root, 'install.sh'));
