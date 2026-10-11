@@ -307,8 +307,8 @@ export const REMOTE_API_VERSION = 1;
 
 Two things the contract deliberately does not carry: musical time
 (the action key already covers the resolved placement plan, and the
-site derives `bar.beat` from `arrangement --json`), and any request to
-render. The remote never asks the CLI for anything; every conversation
+site derives `bar.beat` from its own copy of Field's tempo map,
+audiofield-io.md §13.9), and any request to render. The remote never asks the CLI for anything; every conversation
 starts here. The request and response shapes are zod schemas in
 `src/remote/protocol.ts`, the way `helloResponseSchema` is, so the
 site's tests can import the same file (§7).
@@ -596,9 +596,11 @@ remote, and exits 0. `field push` after a one-line change to a track
 file uploads exactly the entries the change re-rendered and reports
 them by label, and a second `field push` uploads nothing. `field
 explain //songs/creek/track:main --json` and `field arrangement creek
---json` print the values their text forms show. A `license: not a
-license` line fails `field check` with the file and line and a missing
-`license` passes. `field clone` on a machine without `git-lfs` stops
+--json` print the values their text forms are built from: positions in
+ticks and as bar.beat.tick, with seconds left to a reader that brings
+the song's tempo map, as the site does (audiofield-io.md §13.9). A
+`license: not a license` line fails `field check` with the file and the
+key, and a missing `license` passes. `field clone` on a machine without `git-lfs` stops
 before cloning and names the package to install. And real music has
 been cloned and built through it: a HOWLO project on the site, on a
 second machine, playing from fetched artifacts with nothing rendered
@@ -629,6 +631,11 @@ own copy of Field's tempo map (audiofield-io.md §13.9) rather than
 from `arrangement --json`, and the render worker that wants `--json`
 is moot for v1 (audiofield-io.md §10.14), so chunk 1 waits on that
 worker.
+
+Landed ahead of the worker (2026-10-11): Justin chose chunk 1 for the
+overnight batch, since it needs no remote at all, and it landed before
+the render worker exists. The priority stays `next`; §8's definition
+of done is what keeps the plan open.
 
 ### 9.2 Keychain, or `~/.field/credentials` everywhere
 

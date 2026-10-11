@@ -6,7 +6,7 @@ import { sampleRate, slug } from './common.js';
 // an SPDX identifier, checked for shape and nothing else. A project may
 // leave it out; whether a public project must carry one is the site's
 // rule, which a project on disk cannot know.
-export const SPDX_IDENTIFIER = /^(LicenseRef-[A-Za-z0-9.-]+|[A-Za-z0-9][A-Za-z0-9.+-]*)$/;
+export const SPDX_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/;
 export const spdxIdentifier = z
   .string()
   .regex(SPDX_IDENTIFIER, 'must be an SPDX license identifier, such as CC-BY-4.0, CC0-1.0, or MIT');

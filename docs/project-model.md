@@ -21,7 +21,7 @@ library; build labels address both (`//songs/opener/track:main`,
 
 ```text
 project/
-├── field.yaml            # project manifest: name, license, engine versions
+├── field.yaml            # project manifest: name, license, sample rate
 ├── shared/               # material reused across songs, by contract
 │   ├── instruments/      # definitions that make sound (.scd, model defs, AU)
 │   ├── samples/          # committed sound that just is
