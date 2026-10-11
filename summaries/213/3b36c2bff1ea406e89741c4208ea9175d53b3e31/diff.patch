@@ -1,0 +1,1785 @@
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 8a1a243..d8bddb6 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -120,10 +120,12 @@ one input channel into a crash-safe transaction under
+ behind ([audio-engine.md](audio-engine.md) "Capture as built"); a
+ stopped take lands in the project and builds in place, the metronome
+ and count-in run in the engine, and punch-out and loop takes ride the
+-live session's region loop. The rest — comping, monitoring through the
+-engine, editor windows, routing, metering beyond the armed input's
+-peak — is future work whose settled decisions live in
+-[audio-engine.md](audio-engine.md).
++live session's region loop. Monitoring through the engine followed
++with [live-supercollider.md](projects/live-supercollider/readme.md)
++§12: `field record --monitoring host` plays the armed input through its
++track's effects. The rest — comping, editor windows, routing, metering
++beyond the armed input's peak — is future work whose settled decisions
++live in [audio-engine.md](audio-engine.md).
+ 
+ MIDI is hardware-facing too, so it lives here as well
+ ([keys.md](keys.md)). `field keys` reads the keyboard in TypeScript and
+diff --git a/docs/audio-engine.md b/docs/audio-engine.md
+index 839a64d..1210234 100644
+--- a/docs/audio-engine.md
++++ b/docs/audio-engine.md
+@@ -10,7 +10,9 @@ crash-safe transaction and its recovery — described in
+ [Capture as built](#capture-as-built) below. Takes land in the project
+ and build in place
+ ([projects/recording/readme.md](projects/recording/readme.md));
+-comping and monitoring through the engine are later work. This
++monitoring through the engine is `field record --monitoring host`
++([Monitoring](#monitoring-host-vs-apollo-direct)), and comping is later
++work. This
+ document records the decisions already settled so the phases that build
+ it start from agreement, not from scratch. Language and framework
+ decisions (C++/JUCE, and the alternatives rejected) also live in
+@@ -59,6 +61,19 @@ During recording, three related but distinct paths run simultaneously:
+ - **Apollo direct** — input monitored in the Apollo's DSP (Console) at
+   near-zero latency while Field handles playback and capture.
+ 
++Host monitoring as built: `field record --monitoring host` arms each
++audio track with `monitor`, a name, and the daemon opens a *capture
++input* under it that reads that track's armed channel. The song is
++loaded again with an input window on the track naming it, so the input
++travels the same way a [live input](#live-inputs) does: through the
++track's inserts, each bus above it, and `main`, beside the rendered
++song, playing or stopped. The capture tap still takes the dry channel.
++Disarming closes the capture inputs, and `field record` loads the song
++again without them, while the daemon still plays it and no other take
++records. The bypass-and-report latency policy below is not built: what
++you hear is late by the input and output buffers and the limiters and
++hosted plugins on the path.
++
+ **Decision — Console is configured manually in V1.** Console is the
+ mixer in the Apollo's DSP and matters only on the input side (preamp
+ gain, Unison, direct monitoring, cue mixes); for playback and mixing the
+@@ -86,6 +101,12 @@ the timeline:
+ { "input": "keys-voice", "gain_db": 0 }
+ ```
+ 
++An armed input is the other source: `field record --monitoring host`
++names each armed audio track's input `capture:<song>/<track>`
++([Monitoring](#monitoring-host-vs-apollo-direct)), and the daemon reads
++it straight from the block its callback is in, one channel on both
++sides.
++
+ The song still renders as before. The input travels beside it: its
+ track and each track above it run a second instance of their chain on
+ what the input carries, and `main` adds the result to its own mix before
+@@ -153,9 +174,9 @@ it.
+ Recording is transactional: a `.field/recording/<transaction-id>/`
+ directory holds a manifest, a journal, and audio written continuously in
+ recoverable chunks. A normal stop finalizes the asset and writes a take
+-manifest (timeline placement, device, latency, monitoring context,
+-session metadata); after a crash, Field recovers any valid audio from
+-the transaction.
++manifest (timeline placement, device, latency, session metadata),
++and the take's row records how it was monitored; after a crash, Field
++recovers any valid audio from the transaction.
+ 
+ ## Capture as built
+ 
+diff --git a/docs/cli.md b/docs/cli.md
+index 9340cbc..0a7265e 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -403,12 +403,29 @@ and stops.
+ | `--loop` | loops `--at` to `--until`, landing a take every pass until ctrl-c |
+ | `--click` | plays a metronome through the take |
+ | `--count-in <bars>` | clicks this many bars before `--at` |
+-| `--monitoring <mode>` | records how you monitored the take (default `apollo-direct`) |
++| `--monitoring <mode>` | how you monitor the take, recorded on its row (default `apollo-direct`); `host` plays each audio input through its track |
+ | `--console-preset <name>` | records the Console preset the take expects |
+ 
+ `--until` and `--count-in` need `--at`, and `--loop` needs `--until`
+ and a live song as the bed. Under `--loop`, the last pass is chosen.
+ 
++With `--monitoring host`, you hear each audio track's input through
++that track's inserts, the buses above it, and `main`, from the moment
++it arms, count-in included, until the take ends. The take itself is the
++dry input; the effects are only what you hear:
++
++```sh
++field record tall-grass/track:vocal --monitoring host --at 2 --count-in 1
++```
++
++Host monitoring needs the song as a live bed at the device's rate, with
++each track it hears reaching `main`: it refuses a file bed, another
++song, a device the daemon converts the song for, and a track that a
++solo, a muted placement, or the arrangement keeps from `main`. Use
++headphones, or a microphone the speakers cannot reach.
++With the default, `apollo-direct`, Field plays nothing of the input,
++and you monitor in your interface's mixer.
++
+ Name several tracks to record them in one pass, audio, MIDI, or both:
+ every take starts on the same sample and lands on its own track. A
+ track whose record entry names an instrument records MIDI
+diff --git a/docs/projects/live-supercollider/readme.md b/docs/projects/live-supercollider/readme.md
+index aa377ab..8334def 100644
+--- a/docs/projects/live-supercollider/readme.md
++++ b/docs/projects/live-supercollider/readme.md
+@@ -154,6 +154,7 @@ live tracks with the capture input as the source.
+ | 3 | Run `field keys creek/track:keys-bus` where `keys-bus` has a 700 Hz lowpass, and play. | You hear the instrument through the lowpass; the instrument's line no longer says dry. |
+ | 4 | Measure the added latency: a click from the voice host to the device, through the ring and back out. | At most one daemon block plus one device buffer more than playing straight to the device. |
+ | 5 | Play for an hour. | No dropout or click from the ring running empty or full. |
++| 6 | Run `field record <song>/track:<track> --monitoring host --at 2 --count-in 1` with headphones and a microphone, on a track with an insert. | You hear the microphone through the insert through the count-in and the take; the take is the dry input. |
+ 
+ ## 5 Cost
+ 
+@@ -171,7 +172,7 @@ jitter buffer, at least one of the larger of the two processes' blocks.
+    drift handling. Criteria 4 and 5.
+ 3. **`field keys` through it.** Criterion 3.
+ 4. **Host monitoring of a microphone** through the same live tracks,
+-   with the capture input as the source.
++   with the capture input as the source. §12. Criterion 6.
+ 
+ ## 7 Open questions
+ 
+@@ -197,7 +198,7 @@ The survey behind this plan, as the code stood on 2026-10-11:
+ - **Window kinds:** `file`, `track`, and `receive` (`src/audiod/session.ts`; `native/audiod/src/live.h`).
+ - **Insert kinds:** eq, limit, reverb, plate, hall, and hosted `plugin`.
+ - **Hosted plugins are inserts only,** with an empty `MidiBuffer`, so no instrument plugin exists to host a voice.
+-- **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1.
++- **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1. *Chunk 4 adds one (§12).*
+ - **Changing a live session** swaps the whole session at a block boundary (the `session` op); there are no per-insert edits.
+ - **The voice host** runs `scsynth` with a hardware buffer of 128 frames; the daemon takes JUCE's default buffer.
+ 
+@@ -354,6 +355,32 @@ must sit under `main`.
+   and criteria 4 and 5 on the real device, are still owed; a swap under
+   a playing input, which §9 leaves to this chunk, rebuilds the overlay
+   cold, a gap of the path's latency, accepted for now.
++- 2026-10-11 — Chunk 4 (branch `live/monitor`), host monitoring, as §12
++  describes. `field-audiod --capture-selftest` reads a capture input
++  whole, in the steps a loop wrap makes, past its block, with nothing
++  presented, and closed. `src/audiod/live-monitor.test.ts` arms the null
++  clock's sawtooth with `monitor`, loads a session naming it, and finds
++  it read at full scale while stopped and while playing; disarming, and
++  a dropped connection, close it; and the refusals hold.
++  `src/commands/record-daemon.test.ts` runs
++  `field record --monitoring host` and finds the input read while the
++  take records, the take dry and gapless with `monitoring: host` on its
++  row, and the song loaded again without the input, and refuses a file
++  bed before arming. Criterion 6 by ear is still owed. Its first review
++  found three gaps. A track the loaded solo or the arrangement kept from
++  `main` failed only at the reload after arming and left the input
++  armed; it is now refused before arming, with a test. A separate input
++  device could open the pair at a rate the song is not, silencing
++  monitoring; it is now refused after the arm, which is released. No
++  test reaches that refusal, because the null device runs only at 48 kHz
++  and a song at another rate is refused before arming, so it waits for
++  criterion 6's session on a real device pair. The reload after the take
++  put the song back over one another terminal had loaded, as
++  `field keys` did on quit; it now happens only while the daemon still
++  plays the song and no take records, with tests for both commands. The
++  second review found that a refused arm, such as one under another
++  terminal's take, still ran that reload; only an arm that succeeded is
++  released now, with a test.
+ 
+ ## 11 FieldOut's license (DECIDED, 2026-10-11)
+ 
+@@ -368,3 +395,102 @@ MIT-only at the cost of a second repository and release step, and §3's
+ loopback device, which needs no plugin at all but brings a third-party
+ driver or a Mac-only API, its own clock, and more latency. Justin chose
+ the plugin in this repository.
++
++## 12 Host monitoring (chunk 4, 2026-10-11)
++
++`field record --monitoring host` plays each armed audio track's input
++through that track's inserts, the buses above it, and `main`, while the
++take itself stays dry. The input is a second kind of live input: where
++`field keys` feeds an input window from a ring, a monitored arm feeds
++one from the device's own input, read in the same callback that plays
++the song.
++
++### 12.1 Flow
++
++1. You run `field record tall-grass/track:vocal --monitoring host --at 2
++   --count-in 1`. `field record` loads the bed as before.
++2. Before arming, it refuses when no named track records audio, when
++   the daemon lacks `live-monitor`, when the bed is a file, which can
++   carry no input window, when the daemon plays another song, when the
++   daemon converts the song to the device's rate, and when the song,
++   compiled as the reload will compile it, under the loaded loop and
++   solo and with the capture inputs, cannot hear a track, which a solo,
++   a muted placement, or the arrangement can keep from `main`.
++3. It arms with `monitor: "capture:tall-grass/vocal"` on each audio
++   entry, always in the `tracks` form. The daemon opens a capture input
++   under that name for each, reading that entry's channel of the
++   callback's input, owned by the connection that armed.
++4. It refuses, and releases the arm, when arming opened the device at
++   a rate the song is not, which a separate input device can do, because
++   the pair opens only at rates both devices share. Otherwise it loads
++   the song again with every open input, `field keys`' rings and the
++   capture inputs, keeping the loaded session's loop, region, and solo,
++   as `field keys` does (`reloadWithInputs`). Whatever throws after the
++   arm, `field record` releases it.
++5. Each callback, the daemon presents its input block before the
++   session renders, and each capture input reads its channel from it, on
++   both sides, from a cursor that starts again each block, because the
++   session reads a block in steps where a loop wraps. The overlay (§9)
++   carries it up the track's path, playing or stopped. The capture tap
++   still takes the dry channel after the render.
++6. When the take ends, `field record` disarms, which closes the capture
++   inputs, and loads the song again without them while the daemon still
++   plays it and no other take records (`reloadIfPlaying`), so a song
++   another terminal loaded during the take plays on, and another
++   terminal's take keeps its bed; `field keys` closes the same way. A
++   `field record` that dies drops its connection, which closes them
++   too; the arm itself stays, as it always has.
++
++### 12.2 Shapes
++
++| Shape | Before | After |
++| --- | --- | --- |
++| `arm` audio entry | `{track, kind: "audio", input}` | adds `monitor`, the capture input's name |
++| `arm` response `armed[]` | `{track, kind, input}` | adds `monitor` when given |
++| `status.inputs[]` | a ring's counters | adds capture inputs, `{name, kind: "capture", read, peak}`; the ring's own fields become optional in `src/audiod/protocol.ts` |
++| Feature | — | `live-monitor` |
++| Daemon flag | — | `--capture-selftest` |
++| `src/audiod/live-inputs.ts` | `keysInputsFor` in `src/keys/routing.ts` | `liveInputsFor`, which lists both kinds, `captureInputName`, `compileWithInputs`, `reloadWithInputs`, and `reloadIfPlaying`, which `field keys` and `field record` share |
++
++### 12.3 Decisions (DECIDED, 2026-10-11, for Justin's review)
++
++- **`--monitoring host` turns it on, and `apollo-direct` stays the
++  default.** The flag already said how a take was monitored, so `host`
++  now does what it records. Rejected: a separate `--monitor` flag, two
++  flags for one fact that could disagree; and monitoring whenever armed,
++  which feeds back through a laptop's speakers and doubles an Apollo's
++  own cue.
++- **From arm to disarm, inside `field record`,** so the count-in is
++  heard. Monitoring without a take waits for arming.md chunk 3's
++  lasting `field arm`.
++- **A capture input, a second `LiveInput`,** rather than a new window
++  kind: the session format, its version, and `live.cpp` are unchanged,
++  and every command that reloads a song keeps a monitored input through
++  `liveInputsFor`, as it keeps a routed voice.
++- **Refused under converted delivery,** where the session renders in
++  session-rate steps that are not the callback's frames, rather than
++  given a device-to-session resampler, which would add latency and a
++  kernel to the path you sing into; `field keys` refuses the same case.
++- **Separate input and output devices are allowed.** JUCE combines
++  them (`AudioIODeviceCombiner`), so the input and the output still
++  meet in one callback, at the cost of a FIFO's latency on the output
++  and zeros on drift. Unverified on hardware, as recording.md §12.10
++  already notes for any combined pair.
++- **The latency policy is not built.** audio-engine.md "Latency"
++  describes bypassing or substituting high-latency plugins on entering
++  record; until criterion 6 measures what a singer hears, the monitored
++  input arrives late by both buffers and the path's limiters and hosted
++  plugins.
++
++### 12.4 Files
++
++| File | Change |
++| --- | --- |
++| `native/audiod/src/capture_input.h`, `capture_input.cpp` (new) | `CaptureBlock`, `CaptureInput`, and `runCaptureSelfTest`. |
++| `native/audiod/src/player.h`, `player.cpp` | `captures` beside `rings`; `armSet` parses `monitor` and opens them; `disarm` and a dropped connection close them; `pullAudio` presents the input block; `status` lists them. |
++| `native/audiod/src/server.cpp`, `main.cpp` | The connection passed to `armSet`; `live-monitor`; `--capture-selftest`. |
++| `src/audiod/live-inputs.ts` (new) | `liveInputsFor`, `captureInputName`, `compileWithInputs`, `reloadWithInputs`, `reloadIfPlaying`. |
++| `src/commands/record.ts` | The refusals, `monitor` on the arm, the two reloads, and releasing the arm whatever throws after it. |
++| `src/keys/routing.ts`, `src/commands/play.ts`, `src/commands/ui.ts` | Use `liveInputsFor` and `reloadWithInputs`. |
++| `src/audiod/protocol.ts` | `monitor` on `ArmTrack` and `armed[]`; capture inputs in `status.inputs`. |
++| `docs/cli.md`, `docs/audio-engine.md`, `docs/architecture.md`, `docs/projects/recording/readme.md` | Host monitoring as built, with dated amendments in recording.md §8 and §13.6. |
+diff --git a/docs/projects/recording/readme.md b/docs/projects/recording/readme.md
+index bbac36e..f86453e 100644
+--- a/docs/projects/recording/readme.md
++++ b/docs/projects/recording/readme.md
+@@ -260,7 +260,11 @@ machine — the story playback.md §3.4 deferred to this phase — is an
+ open question (§11): its schema wants deciding from a real Apollo
+ session, not invented here. Host monitoring (input through Field's
+ engine and effects, with the latency policy beside it) is real future
+-work and stays out of scope.
++work and stays out of scope. *Amended (2026-10-11,
++[live-supercollider.md](../live-supercollider/readme.md) §12):* host
++monitoring is built as `field record --monitoring host`, through the
++live session's input windows; Apollo-direct stays the default, and the
++latency policy is still unbuilt.
+ 
+ ## 9 Definition of done
+ 
+@@ -477,6 +481,8 @@ What landed, and the decisions it made:
+    The wall-clock time is the transaction's; monitoring defaults to
+    `apollo-direct` on the CLI (the V1 decision in audio-engine.md) and
+    the preset is `--console-preset`, recorded only when given.
++   *Amended (2026-10-11, live-supercollider.md §12):* `host` also plays
++   the input through the engine while the take records.
+ 7. **Landing is the last step of `field record`,** and also of
+    `--recover`; `--land <id>` covers a transaction the daemon finalized
+    but nothing landed. The CLI refuses a track without a `record:`
+diff --git a/native/audiod/CMakeLists.txt b/native/audiod/CMakeLists.txt
+index 418ada7..66a037d 100644
+--- a/native/audiod/CMakeLists.txt
++++ b/native/audiod/CMakeLists.txt
+@@ -29,6 +29,7 @@ target_sources(field-audiod PRIVATE
+   src/plan.cpp
+   src/live.cpp
+   src/ring_input.cpp
++  src/capture_input.cpp
+   src/hosting.cpp
+   src/capture.cpp
+   src/click.cpp
+diff --git a/native/audiod/src/capture_input.cpp b/native/audiod/src/capture_input.cpp
+new file mode 100644
+index 0000000..9f7dd66
+--- /dev/null
++++ b/native/audiod/src/capture_input.cpp
+@@ -0,0 +1,126 @@
++#include "capture_input.h"
++
++#include <algorithm>
++#include <cmath>
++#include <vector>
++
++namespace field
++{
++
++CaptureInput::CaptureInput (std::shared_ptr<CaptureBlock> captureBlock, int inputChannel)
++    : block (std::move (captureBlock)), channel (inputChannel)
++{
++}
++
++void CaptureInput::read (float* left, float* right, int n)
++{
++    if (block->generation != seen)
++    {
++        seen = block->generation;
++        cursor = 0;
++    }
++    const int c = channel.load (std::memory_order_relaxed);
++    const float* source = block->in != nullptr && c >= 0 && c < block->numInputs ? block->in[c] : nullptr;
++    const int have = source != nullptr ? std::clamp (block->frames - cursor, 0, n) : 0;
++    float loudest = 0.0f;
++    for (int i = 0; i < have; ++i)
++    {
++        const float sample = source[cursor + i];
++        left[i] = sample;
++        right[i] = sample;
++        loudest = std::max (loudest, std::abs (sample));
++    }
++    std::fill (left + have, left + n, 0.0f);
++    std::fill (right + have, right + n, 0.0f);
++    cursor += n;
++    if (have > 0)
++    {
++        framesRead.fetch_add (have, std::memory_order_relaxed);
++        if (loudest > peak.load (std::memory_order_relaxed))
++            peak.store (loudest, std::memory_order_relaxed);
++    }
++}
++
++juce::var CaptureInput::stats (bool consumePeak)
++{
++    auto* object = new juce::DynamicObject();
++    object->setProperty ("kind", "capture");
++    object->setProperty ("read", (juce::int64) framesRead.load (std::memory_order_relaxed));
++    object->setProperty ("peak", (double) (consumePeak ? peak.exchange (0.0f) : peak.load()));
++    return juce::var (object);
++}
++
++// Exactly equal, said without ==, which -Wfloat-equal flags: the test
++// reads samples back unchanged, so nothing nearer will do.
++static bool same (float a, float b) { return ! (a < b) && ! (b < a); }
++
++std::string runCaptureSelfTest()
++{
++    auto block = std::make_shared<CaptureBlock>();
++    std::vector<float> first (512), second (512);
++    for (int i = 0; i < 512; ++i)
++    {
++        first[(size_t) i] = (float) i / 512.0f;
++        second[(size_t) i] = 0.5f;
++    }
++    const float* channels[2] = { first.data(), second.data() };
++    std::vector<float> left (600), right (600);
++    CaptureInput input (block, 1);
++    auto expect = [&] (bool held, const char* what) { return held ? std::string() : std::string (what); };
++
++    // Nothing presented: silence, and nothing counted.
++    std::fill (left.begin(), left.end(), 1.0f);
++    input.read (left.data(), right.data(), 512);
++    if (auto error = expect (left[0] == 0.0f && right[511] == 0.0f, "an unpresented block was not silent"); ! error.empty())
++        return error;
++
++    // A whole block: its channel, on both sides.
++    block->present (channels, 2, 512);
++    input.read (left.data(), right.data(), 512);
++    block->clear();
++    if (auto error = expect (left[0] == 0.5f && right[511] == 0.5f, "a whole block did not read its channel"); ! error.empty())
++        return error;
++
++    // The steps a loop wrap makes: the second carries on where the first
++    // stopped, and a step past the block reads silence beyond it.
++    CaptureInput ramp (block, 0);
++    block->present (channels, 2, 512);
++    ramp.read (left.data(), right.data(), 200);
++    if (auto error = expect (same (left[199], first[199]), "the first step did not read the block's start"); ! error.empty())
++        return error;
++    ramp.read (left.data(), right.data(), 400);
++    block->clear();
++    if (auto error = expect (same (left[0], first[200]) && same (left[311], first[511]) && left[312] == 0.0f && right[399] == 0.0f,
++                             "the second step did not carry on, or did not pad past the block");
++        ! error.empty())
++        return error;
++
++    // The next block starts the cursor again.
++    block->present (channels, 2, 512);
++    ramp.read (left.data(), right.data(), 512);
++    block->clear();
++    if (auto error = expect (same (left[0], first[0]) && same (left[511], first[511]), "the next block did not start again"); ! error.empty())
++        return error;
++
++    // A channel the block does not hold, and a closed input: silence.
++    CaptureInput beyond (block, 2);
++    block->present (channels, 2, 512);
++    beyond.read (left.data(), right.data(), 512);
++    ramp.close();
++    ramp.read (right.data(), left.data(), 512);
++    block->clear();
++    if (auto error = expect (left[0] == 0.0f && right[0] == 0.0f && left[511] == 0.0f && right[511] == 0.0f,
++                             "a missing channel or a closed input was not silent");
++        ! error.empty())
++        return error;
++
++    // The counters: what was read, and the peak that reading resets.
++    const auto stats = input.stats (true);
++    if (auto error = expect ((juce::int64) stats["read"] == 512 && (double) stats["peak"] == 0.5 && (double) input.stats()["peak"] == 0.0,
++                             "the counters did not count the one block read");
++        ! error.empty())
++        return error;
++    return {};
++}
++
++} // namespace field
+diff --git a/native/audiod/src/capture_input.h b/native/audiod/src/capture_input.h
+new file mode 100644
+index 0000000..22fcf62
+--- /dev/null
++++ b/native/audiod/src/capture_input.h
+@@ -0,0 +1,78 @@
++#pragma once
++
++#include <juce_core/juce_core.h>
++
++#include <atomic>
++#include <cstdint>
++#include <memory>
++#include <string>
++
++#include "live.h"
++
++namespace field
++{
++
++// The device's input for the block the callback is in, for the capture
++// inputs to read (live-supercollider.md §12): presented before the
++// session renders and cleared after, both on the audio thread, which is
++// the only thread that reads it.
++struct CaptureBlock
++{
++    const float* const* in = nullptr;
++    int numInputs = 0;
++    int frames = 0;
++    uint64_t generation = 0;
++
++    void present (const float* const* input, int count, int n)
++    {
++        in = input;
++        numInputs = count;
++        frames = n;
++        ++generation;
++    }
++    void clear()
++    {
++        in = nullptr;
++        numInputs = 0;
++        frames = 0;
++    }
++};
++
++// Host monitoring (live-supercollider.md §12): an armed audio input read
++// by the session input window of the same name, so the track it records
++// on is heard through its inserts, its buses, and main while the take
++// itself stays dry. It reads the block the callback presented, from a
++// cursor that starts again each block, because the session reads a block
++// in steps when a loop wraps inside it. One channel, on both sides.
++class CaptureInput final : public LiveInput
++{
++public:
++    // `channel` is the index in the callback's input array, which holds
++    // only the device's active inputs.
++    CaptureInput (std::shared_ptr<CaptureBlock> block, int channel);
++
++    void read (float* left, float* right, int n) override;
++
++    // Disarming stops the reading; a session still holding this input
++    // reads silence until it lets go. Message thread.
++    void close() { channel.store (-1); }
++
++    // For `status`: frames read and the loudest sample since a client
++    // last read the peak, which `consumePeak` resets.
++    juce::var stats (bool consumePeak = false);
++
++private:
++    std::shared_ptr<CaptureBlock> block;
++    std::atomic<int> channel;
++    uint64_t seen = 0; // audio thread: the block the cursor counts in
++    int cursor = 0;
++    std::atomic<juce::int64> framesRead { 0 };
++    std::atomic<float> peak { 0.0f };
++};
++
++// --capture-selftest: a CaptureInput read whole, in the steps a loop
++// wrap makes, past its block, with nothing presented, and closed. Empty
++// string when every case holds.
++std::string runCaptureSelfTest();
++
++} // namespace field
+diff --git a/native/audiod/src/main.cpp b/native/audiod/src/main.cpp
+index eec19b7..72cf1c8 100644
+--- a/native/audiod/src/main.cpp
++++ b/native/audiod/src/main.cpp
+@@ -1,5 +1,6 @@
+ #include "player.h"
+ #include "capture.h"
++#include "capture_input.h"
+ #include "hosting.h"
+ #include "keys.h"
+ #include "live.h"
+@@ -151,6 +152,7 @@ int main (int argc, char* argv[])
+     juce::String renderLiveClick;
+     std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
+     bool ringSelfTest = false;
++    bool captureSelfTest = false;
+     int ringFeedId = 0;
+     std::string ringFeedWav;
+     juce::String scanFormat;
+@@ -205,6 +207,8 @@ int main (int argc, char* argv[])
+             nullOutput = true;
+         else if (arg == "--ring-selftest")
+             ringSelfTest = true;
++        else if (arg == "--capture-selftest")
++            captureSelfTest = true;
+         else if (arg == "--ring-feed" && i + 2 < argc)
+         {
+             const juce::String id (argv[++i]);
+@@ -231,6 +235,7 @@ int main (int argc, char* argv[])
+                           "       field-audiod --state-capture <au|vst3> <identifier> "
+                           "<paramsJson> <out>\n"
+                           "       field-audiod --ring-selftest\n"
++                          "       field-audiod --capture-selftest\n"
+                           "       field-audiod --ring-feed <ring> <file.wav>\n"
+                           "       field-audiod --keys <name>\n"
+                           "       field-audiod --midi-monitor <name>\n");
+@@ -337,6 +342,19 @@ int main (int argc, char* argv[])
+         return 0;
+     }
+ 
++    // The capture input's own check (capture_input.h): an armed input
++    // read whole, in a loop wrap's steps, and with nothing to read.
++    if (captureSelfTest)
++    {
++        if (auto error = field::runCaptureSelfTest(); ! error.empty())
++        {
++            std::fprintf (stderr, "field-audiod: capture self-test failed: %s\n", error.c_str());
++            return 1;
++        }
++        std::printf ("{\"ok\":true}\n");
++        return 0;
++    }
++
+     // An input without SuperCollider (ring_input.h): a file into a ring.
+     if (ringFeedId > 0)
+     {
+diff --git a/native/audiod/src/player.cpp b/native/audiod/src/player.cpp
+index b9715f0..d5c4e48 100644
+--- a/native/audiod/src/player.cpp
++++ b/native/audiod/src/player.cpp
+@@ -1,6 +1,7 @@
+ #include "player.h"
+ 
+ #include "capture.h"
++#include "capture_input.h"
+ #include "live.h"
+ #include "ring_input.h"
+ #include "version.h"
+@@ -77,7 +78,7 @@ void retireOnMessageThread (std::unique_ptr<field::LiveSession> retired)
+ }
+ } // namespace
+ 
+-Player::Player (bool useNullOutput) : nullMode (useNullOutput)
++Player::Player (bool useNullOutput) : nullMode (useNullOutput), captureBlock (std::make_shared<field::CaptureBlock>())
+ {
+     formatManager.registerBasicFormats();
+ }
+@@ -393,6 +394,8 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
+             std::lock_guard<std::mutex> hold (inputsLock);
+             for (const auto& [name, input] : rings)
+                 inputs[name] = input.ring;
++            for (const auto& [name, open] : captures)
++                inputs[name] = open.input;
+         }
+         auto next = std::make_unique<field::LiveSession> (session, projectRoot, inputs);
+         // Pre-roll outside the lock too: a swap lands at the old
+@@ -701,7 +704,7 @@ juce::var Player::openInput (const juce::String& name, const void* owner)
+         return juce::var (result.get());
+     }
+     std::lock_guard<std::mutex> hold (inputsLock);
+-    if (rings.count (name.toStdString()) > 0)
++    if (rings.count (name.toStdString()) > 0 || captures.count (name.toStdString()) > 0)
+     {
+         result->setProperty ("error", "input \"" + name + "\" is already open");
+         return juce::var (result.get());
+@@ -729,12 +732,35 @@ void Player::closeInputs()
+     for (auto& [name, input] : rings)
+         input.ring->retire();
+     rings.clear();
++    for (auto& [name, open] : captures)
++        open.input->close();
++    captures.clear();
++}
++
++void Player::closeCaptures (const void* owner)
++{
++    std::lock_guard<std::mutex> hold (inputsLock);
++    for (auto it = captures.begin(); it != captures.end();)
++    {
++        if (owner == nullptr || it->second.owner == owner)
++        {
++            it->second.input->close();
++            it = captures.erase (it);
++        }
++        else
++        {
++            ++it;
++        }
++    }
+ }
+ 
+ void Player::closeInputsOwnedBy (const void* owner)
+ {
+     if (owner == nullptr)
+         return;
++    // A monitored arm whose `field record` died stops being heard with
++    // its connection; the arm itself stays, as it always has.
++    closeCaptures (owner);
+     std::lock_guard<std::mutex> hold (inputsLock);
+     for (auto it = rings.begin(); it != rings.end();)
+     {
+@@ -769,7 +795,7 @@ juce::var Player::status (bool consumePeak)
+         // Each open input's ring and its counters (live-supercollider.md
+         // §2): whether FieldOut is writing, and whether the reader keeps up.
+         std::lock_guard<std::mutex> hold (inputsLock);
+-        if (! rings.empty())
++        if (! rings.empty() || ! captures.empty())
+         {
+             juce::Array<juce::var> list;
+             for (const auto& [name, input] : rings)
+@@ -778,6 +804,13 @@ juce::var Player::status (bool consumePeak)
+                 stats.getDynamicObject()->setProperty ("name", juce::String (name));
+                 list.add (stats);
+             }
++            // The armed inputs a session hears (live-supercollider.md §12).
++            for (const auto& [name, open] : captures)
++            {
++                auto stats = open.input->stats (consumePeak);
++                stats.getDynamicObject()->setProperty ("name", juce::String (name));
++                list.add (stats);
++            }
+             result->setProperty ("inputs", list);
+         }
+     }
+@@ -955,7 +988,7 @@ void Player::rebuildLiveConverter()
+         ch.reserve (1 << 16);
+ }
+ 
+-juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
++juce::int64 Player::pullAudio (const float* const* in, int numInputs, float* const* out, int numChannels, int n)
+ {
+     {
+         // The pointer is only readable under the lock (cursor's finding:
+@@ -970,6 +1003,17 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
+         }
+         if (liveSession != nullptr)
+         {
++            // The armed input, for the capture inputs a monitored session
++            // reads (live-supercollider.md §12), until the render is done.
++            // Converted delivery renders session-rate steps that are not
++            // this block's frames, so it hears nothing: the CLI refuses
++            // host monitoring there.
++            captureBlock->present (liveConverter == nullptr ? in : nullptr, numInputs, n);
++            struct Cleared
++            {
++                field::CaptureBlock& block;
++                ~Cleared() { block.clear(); }
++            } cleared { *captureBlock };
+             // The song-timeline position this block starts at — wrapped
+             // into whichever loop is in force, as status reports it —
+             // which is where a take beginning here is placed.
+@@ -1067,7 +1111,7 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
+ void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
+ {
+     const double blockStartMs = juce::Time::getMillisecondCounterHiRes();
+-    const juce::int64 position = pullAudio (out, numOutputs, n);
++    const juce::int64 position = pullAudio (in, numInputs, out, numOutputs, n);
+     const juce::int64 freeBefore = freeClock.fetch_add (n);
+     // The metronome rides the output after the pull, positioned by the
+     // same block-start position the capture latches on; with no bed it
+@@ -1510,7 +1554,7 @@ juce::var Player::armMidi (const juce::String& track)
+     return armSet ({ juce::var (entry.get()) }, {});
+ }
+ 
+-juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device)
++juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner)
+ {
+     auto result = obj();
+     auto fail = [&] (const juce::String& error)
+@@ -1530,9 +1574,10 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
+         juce::String track;
+         bool midi = false;
+         int input = 0;
++        juce::String monitor; // the capture input's name, when monitored
+     };
+     std::vector<Entry> audio, midi;
+-    juce::StringArray named;
++    juce::StringArray named, monitored;
+     juce::Array<int> inputs;
+     for (const auto& item : tracks)
+     {
+@@ -1544,6 +1589,18 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
+         if (named.contains (entry.track))
+             return fail (entry.track + " is armed twice");
+         named.add (entry.track);
++        entry.monitor = item.getProperty ("monitor", juce::var()).toString();
++        if (entry.monitor.isNotEmpty())
++        {
++            if (kind == "midi")
++                return fail (entry.track + " records MIDI, which has no input to monitor");
++            if (monitored.contains (entry.monitor))
++                return fail ("two tracks are monitored as \"" + entry.monitor + "\"");
++            monitored.add (entry.monitor);
++            std::lock_guard<std::mutex> hold (inputsLock);
++            if (rings.count (entry.monitor.toStdString()) > 0)
++                return fail ("input \"" + entry.monitor + "\" is already open");
++        }
+         if (kind == "midi")
+         {
+             entry.midi = true;
+@@ -1653,6 +1710,17 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
+         companion.channel = entry.midi ? 0 : channelIndex (entry.input);
+     }
+     liveCompanions = companionCount;
++    // The monitored inputs, replacing the arm before it's: each reads its
++    // channel of the block the callback presents.
++    closeCaptures();
++    {
++        std::lock_guard<std::mutex> hold (inputsLock);
++        for (const auto& entry : audio)
++            if (entry.monitor.isNotEmpty())
++                captures[entry.monitor.toStdString()] = {
++                    std::make_shared<field::CaptureInput> (captureBlock, channelIndex (entry.input)), owner
++                };
++    }
+     inputPeak = 0.0f;
+     freeClock = 0;
+     // The kind before the flag, so the null clock never presents an input
+@@ -1668,6 +1736,8 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
+         item->setProperty ("kind", entry.midi ? "midi" : "audio");
+         if (! entry.midi)
+             item->setProperty ("input", entry.input);
++        if (entry.monitor.isNotEmpty())
++            item->setProperty ("monitor", entry.monitor);
+         armedList.add (juce::var (item.get()));
+     }
+     result->setProperty ("armed", armedList);
+@@ -1793,6 +1863,7 @@ juce::String Player::disarm()
+     armedMidi = false;
+     liveCompanions = 0;
+     companionCount = 0;
++    closeCaptures();
+     closeMidiInputs();
+     if (! armedInputs.isEmpty())
+     {
+diff --git a/native/audiod/src/player.h b/native/audiod/src/player.h
+index db84742..579b841 100644
+--- a/native/audiod/src/player.h
++++ b/native/audiod/src/player.h
+@@ -22,6 +22,8 @@ namespace field
+ {
+ class LiveSession;
+ class RingInput;
++class CaptureInput;
++struct CaptureBlock;
+ }
+ 
+ // Owns the output device (or the null-output clock used in CI), the loaded
+@@ -143,14 +145,17 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // Arms several tracks at once (arming.md §2.2): each entry is
+     // {track, kind: "audio", input} or {track, kind: "midi"}. An audio
+     // entry takes its own input channel on `device`; a MIDI entry hears
+-    // every MIDI source. The first audio entry, or the first entry when
++    // every MIDI source. An audio entry with `monitor`, a name, also opens
++    // a capture input under that name for a session's input window to
++    // read (live-supercollider.md §12), owned by `owner`, the connection,
++    // and closed at disarm or when that connection drops. The first audio entry, or the first entry when
+     // none is audio, is the primary that every capture rule runs on; the
+     // rest are companions that start on its latch and end with its pass.
+     // arm and armMidi are this with one entry. Returns {error} or
+     // {armed, sample_rate, output_latency}, plus the audio side's
+     // {device, input, channels, input_latency} and the MIDI side's
+     // {sources}, and {kind: "midi"} when the one entry is MIDI.
+-    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device);
++    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner = nullptr);
+     // Closes the input side again. Empty string on success.
+     juce::String disarm();
+     // Start a take: locate to `at` when given (a source must be loaded
+@@ -225,9 +230,9 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+ 
+     // The one block both the device callback and the null clock go
+     // through: the output pull, then the capture tap over the input.
+-    // Input first would read as natural, but the order is immaterial —
+-    // both halves describe the same block — and pulling first is what
+-    // yields the transport position the tap latches.
++    // Pulling first is what yields the transport position the tap
++    // latches; the pull is handed the input too, for the capture inputs
++    // a monitored session reads (live-supercollider.md §12).
+     void processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n);
+     // The output pull: the live session when one is loaded (behind a
+     // try-lock — a missed block during a message-thread edit is silence,
+@@ -236,7 +241,7 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // and the block is silence — a capture start defers to the next
+     // block then, which keeps the latch and the first pushed samples
+     // describing the same instant.
+-    juce::int64 pullAudio (float* const* out, int numChannels, int n);
++    juce::int64 pullAudio (const float* const* in, int numInputs, float* const* out, int numChannels, int n);
+     // The MIDI take's share of a block (keyboard-instrument.md §12.4):
+     // the start latch, stamping each queued arrival against the instant
+     // the block began, the samples elapsed, and the end at `until`.
+@@ -314,6 +319,18 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+         const void* owner = nullptr; // the connection that opened it
+     };
+     std::map<std::string, OpenInput> rings;
++    // The armed inputs a session can hear (live-supercollider.md §12), by
++    // input name, under inputsLock with the rings; the callback presents
++    // its input block to them through captureBlock.
++    struct OpenCapture
++    {
++        std::shared_ptr<field::CaptureInput> input;
++        const void* owner = nullptr;
++    };
++    std::map<std::string, OpenCapture> captures;
++    std::shared_ptr<field::CaptureBlock> captureBlock;
++    // Closes every capture input, or those `owner` opened. Takes inputsLock.
++    void closeCaptures (const void* owner = nullptr);
+     std::atomic<bool> livePlaying { false };
+     juce::int64 liveLength = 0;
+     juce::String liveSong;
+diff --git a/native/audiod/src/server.cpp b/native/audiod/src/server.cpp
+index aed3f48..af6ac24 100644
+--- a/native/audiod/src/server.cpp
++++ b/native/audiod/src/server.cpp
+@@ -161,6 +161,9 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
+         // The input and input_close ops, `inputs` in status, and input
+         // windows in a session (live-supercollider.md chunk 2).
+         features.add ("live-input");
++        // `monitor` on arm's audio entries: capture inputs a session's
++        // input windows read (live-supercollider.md §12).
++        features.add ("live-monitor");
+         ok->setProperty ("features", features);
+     }
+     else if (op == "devices")
+@@ -253,7 +256,7 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
+         const auto kind = request.getProperty ("kind", juce::var());
+         juce::var info;
+         if (auto* tracks = request.getProperty ("tracks", juce::var()).getArray())
+-            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString());
++            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString(), owner);
+         else if (kind.toString() == "midi")
+             info = player.armMidi (track);
+         else if (! kind.isVoid())
+diff --git a/src/audiod/live-inputs.ts b/src/audiod/live-inputs.ts
+new file mode 100644
+index 0000000..ae41f4e
+--- /dev/null
++++ b/src/audiod/live-inputs.ts
+@@ -0,0 +1,68 @@
++import type { AudiodClient } from './client.js';
++import { compileSession, type CompiledSession, type SessionInput } from '../graph/live.js';
++
++// The inputs a song's input windows read (live-supercollider.md): a
++// `field keys` voice's ring, `keys:<song>/<track>` (chunk 3), and an armed
++// input a `field record --monitoring host` hears, `capture:<song>/<track>`
++// (§12). Every command that loads a song's session compiles in the ones
++// open for it, so a reload from `field play`, its watch, `field ui`, or
++// `field record` keeps both heard.
++const LIVE_INPUT = /^(?:keys|capture):([^/]+)\/(.+)$/;
++
++// The capture input `field record --monitoring host` opens for `track`.
++export function captureInputName(song: string, track: string): string {
++  return `capture:${song}/${track}`;
++}
++
++// The open inputs for `song`, as `compileSession` takes them.
++export async function liveInputsFor(client: AudiodClient, song: string): Promise<SessionInput[]> {
++  if (!client.supports('live-input')) return [];
++  const { inputs } = await client.status();
++  return (inputs ?? []).flatMap(({ name }) => {
++    const match = LIVE_INPUT.exec(name);
++    return match !== null && match[1] === song ? [{ track: match[2]!, input: name }] : [];
++  });
++}
++
++// `song` as a reload would compile it now: with whatever inputs are open,
++// plus `extra`, and whatever the session loaded now was compiled and set
++// with: its loop, its region, and its solo. Throws as compileSession does,
++// so a caller can learn before it opens an input that the song cannot
++// hear it.
++export async function compileWithInputs(
++  client: AudiodClient,
++  root: string,
++  song: string,
++  extra: SessionInput[] = [],
++): Promise<{ compiled: CompiledSession; region: [number, number] | undefined }> {
++  const status = await client.status();
++  const same = status.live === true && status.song === song;
++  const compiled = await compileSession(root, song, {
++    ...(same && status.looping === true ? { loop: true } : {}),
++    ...(same && status.solo !== undefined ? { solo: status.solo } : {}),
++    inputs: [...(await liveInputsFor(client, song)), ...extra],
++  });
++  const region: [number, number] | undefined =
++    same && status.loop_from !== undefined && status.loop_to !== undefined ? [status.loop_from, status.loop_to] : undefined;
++  return { compiled, region };
++}
++
++// Loads `song` again as compileWithInputs compiles it. Opening or closing
++// an input changes only the inputs.
++export async function reloadWithInputs(client: AudiodClient, root: string, song: string): Promise<void> {
++  const { compiled, region } = await compileWithInputs(client, root, song);
++  await client.session(compiled.session);
++  if (region !== undefined) await client.loop(region[0], region[1]);
++}
++
++// After closing inputs: loads `song` again without them only while the
++// daemon still plays it and no take records, so a song another terminal
++// loaded meanwhile plays on, and a take another terminal records keeps
++// its bed and its loop region. Under a take, a closed input reads silence
++// until the next load.
++export async function reloadIfPlaying(client: AudiodClient, root: string, song: string): Promise<void> {
++  const status = await client.status();
++  if (status.live === true && status.song === song && status.record?.state !== 'recording') {
++    await reloadWithInputs(client, root, song);
++  }
++}
+diff --git a/src/audiod/live-monitor.test.ts b/src/audiod/live-monitor.test.ts
+new file mode 100644
+index 0000000..ca320e7
+--- /dev/null
++++ b/src/audiod/live-monitor.test.ts
+@@ -0,0 +1,138 @@
++import { execFile } from 'node:child_process';
++import { mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { promisify } from 'node:util';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { createSong, createTrack } from '../commands/create.js';
++import { init } from '../commands/init.js';
++import { compileSession } from '../graph/live.js';
++import { removeTempProject } from '../testing/temp.js';
++import { AudiodClient, daemonBinary } from './client.js';
++import type { ArmTrack } from './protocol.js';
++
++// Host monitoring (live-supercollider.md §12): an armed audio input that
++// a session's input window reads, so the track it records on is heard
++// through its effects. The null clock's input 1 is a sawtooth that
++// reaches full scale every second, and its input 2 a constant 0.25.
++
++const binary = (() => {
++  try {
++    return daemonBinary();
++  } catch {
++    return undefined;
++  }
++})();
++
++const execFileAsync = promisify(execFile);
++const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
++
++// A track with nothing on it, under a main of one bar: the shape an input
++// window goes on.
++function scaffold(root: string): void {
++  init({ dir: root, name: 'live-monitor' });
++  createSong(root, 'monitor');
++  createTrack(root, 'monitor', 'voice');
++  writeFileSync(join(root, 'songs/monitor/tracks/voice.yaml'), 'name: voice\ninputs: []\n');
++  writeFileSync(join(root, 'songs/monitor/tracks/main.yaml'), 'name: main\ninputs:\n  - track: voice\n');
++  writeFileSync(
++    join(root, 'songs/monitor/song.yaml'),
++    'name: monitor\ntime:\n  tempo:\n    - at: 0\n      bpm: 120\n  meter:\n    - at: 0\n      numerator: 4\n      denominator: 4\nlength: [1]\n',
++  );
++}
++
++describe.skipIf(!binary || process.platform === 'win32')('host monitoring (live-supercollider.md §12)', () => {
++  let root: string;
++  let client: AudiodClient | undefined;
++
++  beforeEach(() => {
++    root = mkdtempSync(join(tmpdir(), 'field-live-monitor-'));
++  });
++  afterEach(async () => {
++    if (client !== undefined) {
++      try {
++        await client.quit();
++      } catch {
++        // already gone
++      }
++      client.close();
++      client = undefined;
++    }
++    await removeTempProject(root);
++  });
++
++  it('reads an armed input whole, in the steps a loop wrap makes, past its block, and closed', async () => {
++    const { stdout } = await execFileAsync(binary!, ['--capture-selftest']);
++    expect(stdout.trim()).toBe('{"ok":true}');
++  });
++
++  it('plays a monitored input through its track, stopped and playing, until disarm closes it', { timeout: 20_000 }, async () => {
++    scaffold(root);
++    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
++    expect(client.supports('live-monitor')).toBe(true);
++    const armed = await client.armTracks([{ track: '//songs/monitor/track:voice', kind: 'audio', input: 1, monitor: 'capture:monitor/voice' }]);
++    expect(armed.armed).toEqual([{ track: '//songs/monitor/track:voice', kind: 'audio', input: 1, monitor: 'capture:monitor/voice' }]);
++    expect((await client.status()).inputs).toEqual([{ name: 'capture:monitor/voice', kind: 'capture', read: 0, peak: 0 }]);
++
++    const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'capture:monitor/voice' }] });
++    await client.session(session);
++    // Stopped: the idle path hears the sawtooth over silence.
++    await sleep(1200);
++    const stopped = (await client.status()).inputs![0]!;
++    expect(stopped.read).toBeGreaterThan(24000);
++    expect(stopped.peak).toBeGreaterThan(0.9);
++    // Playing: the song's own render hears it, block for block.
++    await client.play();
++    await sleep(1200);
++    const playing = (await client.status()).inputs![0]!;
++    expect(playing.read).toBeGreaterThan(stopped.read + 24000);
++    expect(playing.peak).toBeGreaterThan(0.9);
++
++    // Disarming closes it; the session holding it plays on, reading
++    // silence until the song is loaded again without it.
++    await client.disarm();
++    expect((await client.status()).inputs).toBeUndefined();
++    await sleep(200);
++    expect((await client.status()).state).toBe('playing');
++  });
++
++  it("stops monitoring with the connection that armed it, and keeps another connection's", { timeout: 20_000 }, async () => {
++    scaffold(root);
++    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
++    const arming = await AudiodClient.connect(root, { spawnIfNeeded: false });
++    await arming.armTracks([{ track: '//songs/monitor/track:voice', kind: 'audio', input: 2, monitor: 'capture:monitor/voice' }]);
++    expect((await client.status()).inputs?.map((i) => i.name)).toEqual(['capture:monitor/voice']);
++    arming.close();
++    let inputs = (await client.status()).inputs;
++    for (let i = 0; i < 50 && inputs !== undefined; i++) {
++      await sleep(20);
++      inputs = (await client.status()).inputs;
++    }
++    expect(inputs).toBeUndefined();
++    // The arm itself stays, as it did before monitoring existed.
++    expect((await client.status()).record?.state).toBe('armed');
++    await client.disarm();
++  });
++
++  it('refuses to monitor a MIDI track, one name twice, or a name an input already has', async () => {
++    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
++    // What the types forbid, the daemon refuses too.
++    await expect(
++      client.armTracks([{ track: '//songs/monitor/track:keys', kind: 'midi', monitor: 'capture:monitor/keys' } as ArmTrack]),
++    ).rejects.toThrow('//songs/monitor/track:keys records MIDI, which has no input to monitor');
++    await expect(
++      client.armTracks([
++        { track: '//songs/monitor/track:voice', kind: 'audio', input: 1, monitor: 'capture:monitor/voice' },
++        { track: '//songs/monitor/track:choir', kind: 'audio', input: 2, monitor: 'capture:monitor/voice' },
++      ]),
++    ).rejects.toThrow('two tracks are monitored as "capture:monitor/voice"');
++    await client.openInput('capture:monitor/voice');
++    await expect(
++      client.armTracks([{ track: '//songs/monitor/track:voice', kind: 'audio', input: 1, monitor: 'capture:monitor/voice' }]),
++    ).rejects.toThrow('input "capture:monitor/voice" is already open');
++    await client.closeInput('capture:monitor/voice');
++    await client.armTracks([{ track: '//songs/monitor/track:voice', kind: 'audio', input: 1, monitor: 'capture:monitor/voice' }]);
++    await expect(client.openInput('capture:monitor/voice')).rejects.toThrow('input "capture:monitor/voice" is already open');
++    await client.disarm();
++  });
++});
+diff --git a/src/audiod/protocol.ts b/src/audiod/protocol.ts
+index 6a6d29c..1a539f0 100644
+--- a/src/audiod/protocol.ts
++++ b/src/audiod/protocol.ts
+@@ -136,14 +136,23 @@ export const recordResponseSchema = z.object({
+ });
+ 
+ // One armed track, as `arm` with `tracks` takes it (arming.md §2.2).
+-export type ArmTrack = { track: string; kind: 'audio'; input: number } | { track: string; kind: 'midi' };
++// An audio track's `monitor` names a capture input for a session's input
++// window to read (live-supercollider.md §12, "live-monitor").
++export type ArmTrack = { track: string; kind: 'audio'; input: number; monitor?: string } | { track: string; kind: 'midi' };
+ 
+ // What arming a set opened: every track armed, the audio side's device
+ // and latency when one is audio, and the MIDI side's sources when one is
+ // MIDI.
+ export const armTracksResponseSchema = z.object({
+   ok: z.literal(true),
+-  armed: z.array(z.object({ track: z.string(), kind: z.enum(['audio', 'midi']), input: z.number().int().optional() })),
++  armed: z.array(
++    z.object({
++      track: z.string(),
++      kind: z.enum(['audio', 'midi']),
++      input: z.number().int().optional(),
++      monitor: z.string().optional(),
++    }),
++  ),
+   device: z.string().optional(),
+   channels: z.number().int().optional(),
+   input_latency: z.number().int().optional(),
+@@ -294,18 +303,21 @@ export const inputResponseSchema = z.object({
+   sample_rate: z.number(),
+ });
+ 
+-// An open input in status: frames FieldOut wrote, the daemon read, and
+-// FieldOut dropped for want of room; how often the reader ran dry; the
+-// frames it skipped to hold its level against a fast writer; and the
+-// loudest sample read since a client last asked, which the asking resets.
++// An open input in status. A ring's: frames FieldOut wrote, the daemon
++// read, and FieldOut dropped for want of room; how often the reader ran
++// dry; the frames it skipped to hold its level against a fast writer. A
++// capture input's (`kind: "capture"`, live-supercollider.md §12): frames
++// read off the armed input. Both: the loudest sample read since a client
++// last asked, which the asking resets.
+ export const inputStatusSchema = z.object({
+   name: z.string(),
+-  ring: z.number().int(),
+-  written: z.number().int(),
++  kind: z.literal('capture').optional(),
++  ring: z.number().int().optional(),
++  written: z.number().int().optional(),
+   read: z.number().int(),
+-  dropped: z.number().int(),
+-  underruns: z.number().int(),
+-  skipped: z.number().int(),
++  dropped: z.number().int().optional(),
++  underruns: z.number().int().optional(),
++  skipped: z.number().int().optional(),
+   peak: z.number(),
+ });
+ 
+diff --git a/src/cli.ts b/src/cli.ts
+index a76c3f0..e34ebeb 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -896,7 +896,7 @@ program
+   .option('--count-in <bars>', 'pre-roll this many bars before --at, clicking; the take begins exactly at --at', parseCountIn)
+   .option('--until <position>', 'punch out at bar[.beat[.tick]]: the take ends there exactly and lands while the mix plays on')
+   .option('--loop', 'loop --at to --until, landing a take every pass until ctrl-c (needs a live song as the bed); audio takes only')
+-  .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
++  .option('--monitoring <mode>', 'how you monitor the take, recorded on its row (default apollo-direct); host plays each audio input through its track')
+   .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
+   .option('--list', 'list the transactions under .field/recording/ instead of recording')
+   .option('--recover <id>', 'finalize a take a dead daemon left behind and land it, instead of recording')
+diff --git a/src/commands/land.ts b/src/commands/land.ts
+index 9253574..cc330b4 100644
+--- a/src/commands/land.ts
++++ b/src/commands/land.ts
+@@ -104,7 +104,7 @@ export function trackOrigin(
+ }
+ 
+ export interface LandOptions {
+-  monitoring?: string | undefined; // audio-engine.md "Monitoring": apollo-direct is V1
++  monitoring?: string | undefined; // audio-engine.md "Monitoring": apollo-direct by default, or host
+   consolePreset?: string | undefined;
+ }
+ 
+diff --git a/src/commands/play.ts b/src/commands/play.ts
+index 57c49dd..b04fcbc 100644
+--- a/src/commands/play.ts
++++ b/src/commands/play.ts
+@@ -437,13 +437,14 @@ export async function playLiveSession(
+       );
+     }
+     if (options.device !== undefined) await client.selectDevice(options.device);
+-    // A `field keys` routed into this song (live-supercollider.md chunk
+-    // 3) keeps its inputs through this load, or its voice goes silent.
+-    const { keysInputsFor } = await import('../keys/routing.js');
+-    const keysInputs = await keysInputsFor(client, song);
+-    if (keysInputs.length > 0) {
++    // A `field keys` routed into this song, or a monitored take
++    // (live-supercollider.md chunk 3 and §12), keeps its inputs through
++    // this load, or it goes silent.
++    const { liveInputsFor } = await import('../audiod/live-inputs.js');
++    const liveInputs = await liveInputsFor(client, song);
++    if (liveInputs.length > 0) {
+       session = (
+-        await compileSession(root, song, { ...(options.loop === true ? { loop: true } : {}), inputs: keysInputs })
++        await compileSession(root, song, { ...(options.loop === true ? { loop: true } : {}), inputs: liveInputs })
+       ).session;
+     }
+     const loaded = await client.session(session);
+@@ -501,7 +502,7 @@ export async function playLiveSession(
+         {
+           signal: watchAbort.signal,
+           ...(options.loop === true ? { loop: true } : {}),
+-          inputs: () => keysInputsFor(client, song),
++          inputs: () => liveInputsFor(client, song),
+         },
+         {
+           onEdit: async (edit, fresh) => {
+diff --git a/src/commands/record-daemon.test.ts b/src/commands/record-daemon.test.ts
+index 86897f3..dc2ff55 100644
+--- a/src/commands/record-daemon.test.ts
++++ b/src/commands/record-daemon.test.ts
+@@ -10,6 +10,7 @@ import { createSong, createTrack } from './create.js';
+ import { importAsset } from './import.js';
+ import { init } from './init.js';
+ import { buildLabels } from './build.js';
++import { compileSession } from '../graph/live.js';
+ import { describeTake, meterLine, recordTake, resolveRecordTarget } from './record.js';
+ import { transportCommand, transportStatusLines } from './transport.js';
+ import { check } from './check.js';
+@@ -48,6 +49,18 @@ function assertGapless(samples: Float32Array): void {
+   }
+ }
+ 
++// A client of the daemon a running command spawned, once it answers.
++async function waitForClientOf(root: string): Promise<AudiodClient> {
++  for (let i = 0; ; i++) {
++    try {
++      return await AudiodClient.connect(root, { spawnIfNeeded: false });
++    } catch (err) {
++      if (i >= 100) throw err;
++      await sleep(50);
++    }
++  }
++}
++
+ function sleep(ms: number): Promise<void> {
+   return new Promise((resolve) => setTimeout(resolve, ms));
+ }
+@@ -470,6 +483,161 @@ describe.skipIf(!binary)('recording through the daemon', () => {
+     client.close();
+   });
+ 
++  it(
++    'field record --monitoring host: hears the input through its track while it takes, keeps the take dry, and loads the song back without it',
++    { timeout: 30_000 },
++    async () => {
++      await importTone('tone', NULL_RATE * 6);
++      createTrack(root, 'creek', 'lead-vocal');
++      writeFileSync(
++        join(root, 'songs/creek/tracks/main.yaml'),
++        ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
++      );
++      writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
++      const project = loadProject(root);
++      const lines: string[] = [];
++      let interrupted = false;
++      const recording = recordTake(
++        root,
++        project,
++        'creek/track:lead-vocal',
++        { input: 1, monitoring: 'host' },
++        {
++          onBed: (line) => lines.push(line),
++          onArmed: (line) => lines.push(line),
++          interrupted: () => interrupted,
++        },
++      );
++      // While it takes, the session reads the armed input: the null
++      // sawtooth, which reaches full scale once a second. Each status
++      // read resets the peak, so the loudest is kept across them.
++      let loudest = 0;
++      const watcher = await waitForClientOf(root);
++      await waitFor(
++        async () => {
++          const status = await watcher.status();
++          const input = status.inputs?.find((i) => i.name === 'capture:creek/lead-vocal');
++          if (input === undefined) return false;
++          loudest = Math.max(loudest, input.peak);
++          return status.record?.state === 'recording' && input.read > NULL_RATE * 1.5;
++        },
++        10_000,
++        'the monitored input to be read while the take records',
++      );
++      expect(loudest).toBeGreaterThan(0.9);
++      interrupted = true;
++      const { takes } = await recording;
++      expect(lines).toEqual([
++        'live    creek',
++        expect.stringMatching(/^armed {3}lead-vocal: null input 1 {2}\(48000 Hz, latency in 0 \/ out 0 samples\)$/),
++        'monitor lead-vocal through creek (host monitoring — use headphones)',
++      ]);
++      // The take is the dry input, and its row says how it was heard.
++      const { take, landed } = takes[0]!;
++      expect(landed.row).toMatchObject({ monitoring: 'host', input: 1 });
++      assertGapless(readWav(join(root, 'songs/creek', landed.file)).channels[0]!);
++      expect(take.complete).toBe(true);
++      // Disarmed, the song is loaded again without the input.
++      const after = await watcher.status();
++      expect(after).toMatchObject({ live: true, song: 'creek' });
++      expect(after.inputs).toBeUndefined();
++      watcher.close();
++    },
++  );
++
++  it('field record --monitoring host refuses a track the solo or the arrangement keeps from main, before arming', { timeout: 15_000 }, async () => {
++    await importTone('tone', NULL_RATE * 2);
++    createTrack(root, 'creek', 'bed');
++    createTrack(root, 'creek', 'lead-vocal');
++    writeFileSync(join(root, 'songs/creek/tracks/bed.yaml'), ['name: bed', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'));
++    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
++    const client = await AudiodClient.connect(root);
++    try {
++      // Placed in main, but another terminal solos the bed.
++      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: bed', '  - track: lead-vocal', ''].join('\n'));
++      await client.session((await compileSession(root, 'creek', { solo: 'bed' })).session);
++      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
++        /^host monitoring cannot play the input through creek: .*lead-vocal/,
++      );
++      expect((await client.status()).record?.state).toBe('idle');
++      // Not placed in main at all.
++      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: bed', ''].join('\n'));
++      await client.session((await compileSession(root, 'creek')).session);
++      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
++        /^host monitoring cannot play the input through creek: .*lead-vocal/,
++      );
++      expect((await client.status()).record?.state).toBe('idle');
++    } finally {
++      client.close();
++    }
++  });
++
++  it('a song another terminal loads during a monitored take plays on after it', { timeout: 30_000 }, async () => {
++    await importTone('tone', NULL_RATE * 6);
++    createSong(root, 'tall-grass');
++    createTrack(root, 'creek', 'lead-vocal');
++    writeFileSync(
++      join(root, 'songs/creek/tracks/main.yaml'),
++      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
++    );
++    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
++    let interrupted = false;
++    const recording = recordTake(root, loadProject(root), 'creek/track:lead-vocal', { input: 1, monitoring: 'host' }, {
++      interrupted: () => interrupted,
++    });
++    const other = await waitForClientOf(root);
++    await waitFor(async () => (await other.status()).record?.state === 'recording', 10_000, 'the take to start');
++    // Another terminal, field ui tall-grass say, loads its song under the take.
++    await other.session((await compileSession(root, 'tall-grass')).session);
++    interrupted = true;
++    await recording;
++    expect(await other.status()).toMatchObject({ live: true, song: 'tall-grass', record: { state: 'idle' } });
++    other.close();
++  });
++
++  it("a monitored field record refused under another terminal's take leaves that take's bed and loop alone", { timeout: 20_000 }, async () => {
++    await importTone('tone', NULL_RATE * 6);
++    createTrack(root, 'creek', 'lead-vocal');
++    writeFileSync(
++      join(root, 'songs/creek/tracks/main.yaml'),
++      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
++    );
++    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
++    const other = await AudiodClient.connect(root);
++    try {
++      // Another terminal loops a take over the song's first beat.
++      await other.session((await compileSession(root, 'creek')).session);
++      await other.arm('//songs/creek/track:main', 1);
++      await other.record(0, undefined, 24000, true);
++      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
++        'cannot re-arm while recording',
++      );
++      await sleep(600);
++      expect(await other.status()).toMatchObject({
++        song: 'creek',
++        loop_from: 0,
++        loop_to: 24000,
++        record: { state: 'recording', loop: true },
++      });
++      await other.stop();
++    } finally {
++      other.close();
++    }
++  });
++
++  it('field record --monitoring host refuses a file bed before arming', { timeout: 15_000 }, async () => {
++    const tone = await importTone('tone', NULL_RATE * 2);
++    createTrack(root, 'creek', 'lead-vocal');
++    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
++    const client = await AudiodClient.connect(root);
++    await client.load(tone);
++    await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
++      "host monitoring plays the input through creek's tracks, and the bed is the file",
++    );
++    expect((await client.status()).record?.state).toBe('idle');
++    client.close();
++  });
++
+   it('a stop from another terminal finalizes the take the blocking side is waiting on', { timeout: 20_000 }, async () => {
+     await importTone('tone', NULL_RATE * 20);
+     writeFileSync(
+diff --git a/src/commands/record.ts b/src/commands/record.ts
+index d686034..134370d 100644
+--- a/src/commands/record.ts
++++ b/src/commands/record.ts
+@@ -1,4 +1,5 @@
+ import { AudiodClient } from '../audiod/client.js';
++import { captureInputName, compileWithInputs, reloadIfPlaying, reloadWithInputs } from '../audiod/live-inputs.js';
+ import { anyTakeSchema, type AnyTake, type AudiodEvent, type RecordingEntry } from '../audiod/protocol.js';
+ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
+ import { expandPattern } from '../graph/graph.js';
+@@ -157,6 +158,10 @@ export function planArm(root: string, project: LoadedProject, targets: string[],
+     throw new Error(`armed tracks record against one song, and these are in ${songs.join(' and ')}`);
+   }
+   const audio = tracks.filter((t) => t.kind === 'audio');
++  // Host monitoring hears an audio input (live-supercollider.md §12).
++  if (options.monitoring === 'host' && audio.length === 0) {
++    throw new Error('--monitoring host plays an audio input through its track, and every track named records MIDI');
++  }
+   if (audio.length === 0 && (options.input !== undefined || options.device !== undefined || options.loop === true)) {
+     const only = tracks.length === 1 ? tracks[0]! : undefined;
+     throw new Error(
+@@ -222,6 +227,14 @@ async function captureTakes(
+   // Every track is in one song (planArm), whose session is the bed.
+   const resolved = tracks[0]!.resolved;
+   const client = await AudiodClient.connect(root);
++  // Host monitoring (live-supercollider.md §12): each audio track's input
++  // feeds an input window on that track, so you hear it through its
++  // inserts, its buses, and main, while the take stays dry.
++  const monitored = options.monitoring === 'host' ? tracks.filter((t) => t.kind === 'audio') : [];
++  // Whether this call's arm succeeded, so whatever throws after it
++  // releases it; a refused arm, such as one under another terminal's
++  // take, holds nothing to release.
++  let armedHere = false;
+   try {
+     if (!client.supports('record')) {
+       throw new Error(
+@@ -235,13 +248,9 @@ async function captureTakes(
+     // loaded here so one terminal is enough.
+     let status = await client.status();
+     if (status.live !== true && status.path === null) {
+-      const { compileSession } = await import('../graph/live.js');
+       // A `field keys` routed into this song keeps its inputs through
+       // the bed's load (live-supercollider.md chunk 3).
+-      const { keysInputsFor } = await import('../keys/routing.js');
+-      const keysInputs = await keysInputsFor(client, resolved.song);
+-      const compiled = await compileSession(root, resolved.song, keysInputs.length > 0 ? { inputs: keysInputs } : {});
+-      await client.session(compiled.session);
++      await reloadWithInputs(client, root, resolved.song);
+       hooks.onBed?.(`live    ${resolved.song}`);
+       status = await client.status();
+     }
+@@ -267,8 +276,44 @@ async function captureTakes(
+     if (options.countIn !== undefined && (options.at === undefined || ctx === undefined)) {
+       throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
+     }
++    if (monitored.length > 0) {
++      if (!client.supports('live-monitor')) {
++        throw new Error(
++          `field-audiod ${client.daemonVersion} predates host monitoring — field transport quit, then record again`,
++        );
++      }
++      if (status.live !== true) {
++        throw new Error(
++          `host monitoring plays the input through ${resolved.song}'s tracks, and the bed is the file ${status.path}: ` +
++            `field transport quit, then record again to play ${resolved.song} live`,
++        );
++      }
++      if (status.song !== resolved.song) {
++        throw new Error(
++          `host monitoring plays the input through ${resolved.song}'s tracks, and the daemon is playing ${status.song ?? 'another song'}`,
++        );
++      }
++      if (status.resampling) {
++        throw new Error(
++          `host monitoring needs the device at ${resolved.song}'s ${rate} Hz, and the daemon converts the song to the device's rate`,
++        );
++      }
++      // The song as the reload after arming will compile it, before
++      // anything arms: a track the loaded solo, a muted placement, or the
++      // arrangement keeps from main cannot be heard.
++      try {
++        await compileWithInputs(
++          client,
++          root,
++          resolved.song,
++          monitored.map((t) => ({ track: t.node.trackName, input: captureInputName(t.resolved.song, t.node.trackName) })),
++        );
++      } catch (err) {
++        throw new Error(`host monitoring cannot play the input through ${resolved.song}: ${(err as Error).message}`);
++      }
++    }
+     let armedRate: number;
+-    if (tracks.length > 1) {
++    if (tracks.length > 1 || monitored.length > 0) {
+       if (!client.supports('record-tracks')) {
+         throw new Error(
+           `field-audiod ${client.daemonVersion} predates recording several tracks — field transport quit, then record again`,
+@@ -276,10 +321,18 @@ async function captureTakes(
+       }
+       const armed = await client.armTracks(
+         tracks.map((t) =>
+-          t.kind === 'midi' ? { track: t.resolved.label, kind: 'midi' as const } : { track: t.resolved.label, kind: 'audio' as const, input: t.input! },
++          t.kind === 'midi'
++            ? { track: t.resolved.label, kind: 'midi' as const }
++            : {
++                track: t.resolved.label,
++                kind: 'audio' as const,
++                input: t.input!,
++                ...(monitored.includes(t) ? { monitor: captureInputName(t.resolved.song, t.node.trackName) } : {}),
++              },
+         ),
+         options.device,
+       );
++      armedHere = true;
+       armedRate = armed.sample_rate;
+       // In the daemon's order, the primary first.
+       const named = new Map(tracks.map((t) => [t.resolved.label, t.node.trackName]));
+@@ -299,12 +352,14 @@ async function captureTakes(
+         );
+       }
+       const armed = await client.armMidi(resolved.label);
++      armedHere = true;
+       armedRate = armed.sample_rate;
+       hooks.onArmed?.(
+         `armed   MIDI from ${armed.sources.join(', ')}  (${armed.sample_rate} Hz, latency out ${armed.output_latency} samples)`,
+       );
+     } else {
+       const armed = await client.arm(resolved.label, tracks[0]!.input!, options.device);
++      armedHere = true;
+       armedRate = armed.sample_rate;
+       hooks.onArmed?.(
+         `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +
+@@ -312,6 +367,23 @@ async function captureTakes(
+       );
+     }
+ 
++    // The song again, now with each monitored input on its track. A
++    // separate input device can open the pair at a rate the song is not,
++    // which the daemon then converts, and converted delivery hears no
++    // input: refused here, after the arm, which the finally releases.
++    if (monitored.length > 0) {
++      if (armedRate !== rate) {
++        throw new Error(
++          `host monitoring needs the device at ${resolved.song}'s ${rate} Hz, and arming ` +
++            `${options.device ?? 'the input'} opened it at ${armedRate} Hz`,
++        );
++      }
++      await reloadWithInputs(client, root, resolved.song);
++      hooks.onArmed?.(
++        `monitor ${monitored.map((t) => t.node.trackName).join(', ')} through ${resolved.song} (host monitoring — use headphones)`,
++      );
++    }
++
+     let at: number | undefined;
+     if (options.at !== undefined) {
+       if (ctx === undefined) throw new Error('--at is musical time and the loaded bed has no tempo map');
+@@ -420,7 +492,6 @@ async function captureTakes(
+       // between takes — and the click, which belongs to this take, not
+       // to whatever plays the bed next.
+       if (clicking) await client.click({ rate, ticks: [] }).catch(() => {});
+-      await client.disarm().catch(() => {});
+     }
+     if (!landedAny) {
+       throw new Error(`the take ended but its manifest never arrived (${transaction ?? 'no transaction'})`);
+@@ -501,6 +572,14 @@ async function captureTakes(
+       }
+     }
+   } finally {
++    // Release the input whatever happened after the arm, the take or a
++    // refusal before it; the microphone is not ours between takes.
++    // Disarming closes the monitored inputs, and the song plays on
++    // without them, unless another terminal loaded another meanwhile.
++    if (armedHere) {
++      await client.disarm().catch(() => {});
++      if (monitored.length > 0) await reloadIfPlaying(client, root, resolved.song).catch(() => {});
++    }
+     client.close();
+   }
+ }
+diff --git a/src/commands/ui.ts b/src/commands/ui.ts
+index 6f22b77..cb5516e 100644
+--- a/src/commands/ui.ts
++++ b/src/commands/ui.ts
+@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
+ import { parseDocument } from 'yaml';
+ import { WebSocketServer, type WebSocket } from 'ws';
+ import { z } from 'zod';
+-import { keysInputsFor } from '../keys/routing.js';
++import { liveInputsFor } from '../audiod/live-inputs.js';
+ import { AudiodClient } from '../audiod/client.js';
+ import { BUILD_UI, INSTALL_UI } from '../remedies.js';
+ import type { CompiledSession } from '../graph/live.js';
+@@ -223,10 +223,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+         `field-audiod ${connected.daemonVersion} predates live sessions — field transport quit, then retry`,
+       );
+     }
+-    // A `field keys` routed into this song (live-supercollider.md chunk
+-    // 3) keeps its inputs through this load, or its voice goes silent.
+-    const keysInputs = await keysInputsFor(connected, songName);
+-    if (keysInputs.length > 0) compiled = await compileSession(root, songName, { inputs: keysInputs });
++    // A `field keys` routed into this song, or a monitored take
++    // (live-supercollider.md chunk 3 and §12), keeps its inputs through
++    // this load, or it goes silent.
++    const liveInputs = await liveInputsFor(connected, songName);
++    if (liveInputs.length > 0) compiled = await compileSession(root, songName, { inputs: liveInputs });
+     return { client: connected, loaded: await connected.session(compiled.session) };
+   };
+   let client: AudiodClient;
+@@ -349,10 +350,10 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+   // soloed session's indexes are not the un-soloed compile's, so ramping
+   // across that boundary would move the wrong fader.
+   const swapSession = async (solo: string | null = soloed) => {
+-    const keysInputs = await keysInputsFor(client, songName);
++    const liveInputs = await liveInputsFor(client, songName);
+     compiled = await compileSession(root, songName, {
+       ...(solo !== null ? { solo } : {}),
+-      ...(keysInputs.length > 0 ? { inputs: keysInputs } : {}),
++      ...(liveInputs.length > 0 ? { inputs: liveInputs } : {}),
+     });
+     const swapped = await client.session(compiled.session);
+     ctx = musicalContext(loadProject(root), `songs/${songName}`, swapped.sample_rate);
+@@ -363,7 +364,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+     root,
+     songName,
+     compiled,
+-    { signal: watchAbort.signal, inputs: () => keysInputsFor(client, songName) },
++    { signal: watchAbort.signal, inputs: () => liveInputsFor(client, songName) },
+     {
+       onEdit: async (edit, fresh) => {
+         // A recompile that changed nothing in the session — the watch's
+diff --git a/src/keys/routing.test.ts b/src/keys/routing.test.ts
+index 6e88b65..4946714 100644
+--- a/src/keys/routing.test.ts
++++ b/src/keys/routing.test.ts
+@@ -10,7 +10,8 @@ import { createSong, createTrack } from '../commands/create.js';
+ import { init } from '../commands/init.js';
+ import { removeTempProject } from '../testing/temp.js';
+ import { compileSession } from '../graph/live.js';
+-import { keysInputsFor, routeArmed, type Routing } from './routing.js';
++import { liveInputsFor } from '../audiod/live-inputs.js';
++import { routeArmed, type Routing } from './routing.js';
+ 
+ // Playing through the effects (live-supercollider.md chunk 3): an input
+ // per armed track in the daemon, and the song's session loaded with them.
+@@ -87,9 +88,9 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
+       expect(status.inputs).toEqual([expect.objectContaining({ name: 'keys:creek/bass', ring: routed.rings[0] })]);
+       // Another command loading the song, as field play, its watch,
+       // field ui, and field record do, compiles the input back in.
+-      const inputs = await keysInputsFor(client, 'creek');
++      const inputs = await liveInputsFor(client, 'creek');
+       expect(inputs).toEqual([{ track: 'bass', input: 'keys:creek/bass' }]);
+-      expect(await keysInputsFor(client, 'tall-grass')).toEqual([]);
++      expect(await liveInputsFor(client, 'tall-grass')).toEqual([]);
+       const { session } = await compileSession(root, 'creek', { inputs });
+       await client.session(session);
+       expect((await client.status()).inputs).toEqual([expect.objectContaining({ name: 'keys:creek/bass' })]);
+@@ -157,6 +158,18 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
+     }
+   });
+ 
++  it('leaves a song another terminal loaded meanwhile when it closes', async () => {
++    const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
++    const client = await AudiodClient.connect(root);
++    try {
++      await client.session((await compileSession(root, 'tall-grass')).session);
++      await routed.close();
++      expect(await client.status()).toMatchObject({ live: true, song: 'tall-grass' });
++    } finally {
++      client.close();
++    }
++  });
++
+   it('says whether FieldOut is writing the ring', async () => {
+     const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
+     try {
+diff --git a/src/keys/routing.ts b/src/keys/routing.ts
+index a4cd7fd..0a7f143 100644
+--- a/src/keys/routing.ts
++++ b/src/keys/routing.ts
+@@ -1,5 +1,5 @@
+ import { AudiodClient } from '../audiod/client.js';
+-import { compileSession, type SessionInput } from '../graph/live.js';
++import { reloadIfPlaying, reloadWithInputs } from '../audiod/live-inputs.js';
+ import { BUILD_DAEMON } from '../remedies.js';
+ import type { ArmedInstrument } from './targets.js';
+ import { fieldOutPluginDir } from './voice-host.js';
+@@ -35,21 +35,6 @@ export interface Unrouted {
+   reason: string;
+ }
+ 
+-const KEYS_INPUT = /^keys:([^/]+)\/(.+)$/;
+-
+-// The open `field keys` inputs for `song`, as `compileSession` takes them:
+-// every command that loads that song's session compiles them in, so a
+-// reload from `field play`, its watch, `field ui`, or `field record` keeps
+-// a routed voice heard.
+-export async function keysInputsFor(client: AudiodClient, song: string): Promise<SessionInput[]> {
+-  if (!client.supports('live-input')) return [];
+-  const { inputs } = await client.status();
+-  return (inputs ?? []).flatMap(({ name }) => {
+-    const match = KEYS_INPUT.exec(name);
+-    return match !== null && match[1] === song ? [{ track: match[2]!, input: name }] : [];
+-  });
+-}
+-
+ export async function routeArmed(
+   armed: ArmedInstrument[],
+   root: string,
+@@ -82,26 +67,13 @@ export async function routeArmed(
+   const closeOpened = async (): Promise<void> => {
+     for (const name of opened.splice(0)) await client.closeInput(name).catch(() => {});
+   };
+-  // The song with whatever inputs are open now, others' included, and
+-  // whatever the session loaded now was compiled and set with: its loop,
+-  // its region, and its solo. A field keys load changes only the inputs.
+-  const reload = async (): Promise<void> => {
+-    const status = await client.status();
+-    const same = status.live === true && status.song === song;
+-    const { session } = await compileSession(root, song, {
+-      ...(same && status.looping === true ? { loop: true } : {}),
+-      ...(same && status.solo !== undefined ? { solo: status.solo } : {}),
+-      inputs: await keysInputsFor(client, song),
+-    });
+-    await client.session(session);
+-    if (same && status.loop_from !== undefined && status.loop_to !== undefined) {
+-      await client.loop(status.loop_from, status.loop_to);
+-    }
+-  };
++  // The song with whatever inputs are open now, others' included; a
++  // field keys load changes only the inputs.
++  const reload = (): Promise<void> => reloadWithInputs(client, root, song);
+   const unrouted = async (reason: string): Promise<Unrouted> => {
+     if (opened.length > 0) {
+       await closeOpened();
+-      await reload().catch(() => {});
++      await reloadIfPlaying(client, root, song).catch(() => {});
+     }
+     client.close();
+     return { reason };
+@@ -158,10 +130,10 @@ export async function routeArmed(
+       close: async () => {
+         try {
+           await closeOpened();
+-          // The song as it is now: without these inputs, with any others.
+-          // A song that no longer compiles keeps the session it has, and
+-          // so does one under a take, whose closed input reads silence.
+-          if ((await client.status()).record?.state !== 'recording') await reload();
++          // The song as it is now: without these inputs, with any others,
++          // while the daemon still plays it and no take records. A song
++          // that no longer compiles keeps the session it has.
++          await reloadIfPlaying(client, root, song);
+         } catch {
+           // the daemon or the project went away; nothing is left to restore
+         } finally {

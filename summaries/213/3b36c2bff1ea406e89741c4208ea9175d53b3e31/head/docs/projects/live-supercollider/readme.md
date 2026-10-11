@@ -1,0 +1,496 @@
+---
+status: in-progress
+priority: now
+---
+
+# Live SuperCollider
+
+**Goal:** the voice `field keys` plays reaches the daemon's live graph as
+an input on its MIDI track, so the inserts on that track and on every
+track above it process what you play, as they process the track's takes.
+
+## 1 Problem
+
+`field keys` plays an instrument in its own `scsynth`, which writes
+straight to the output device
+([keyboard-instrument.md](../keyboard-instrument/readme.md) §2.6). A
+track's inserts run inside `field-audiod`. So when you arm a MIDI track
+under a bus with an EQ ([arming.md](../arming/readme.md) §2.1), you hear
+the instrument dry, and `field keys` says so.
+
+Two things in the daemon stand in the way, not one:
+
+- **Nothing carries audio between Field's processes.** There is no
+  shared memory, pipe, or socket carrying audio anywhere in `native/`,
+  `src/`, or `sc/`; IPC is NDJSON over a Unix socket and OSC to
+  `scsynth` (`docs/architecture.md`).
+- **A live session renders every track but the output track ahead of
+  time.** `native/audiod/src/live.h` describes the engine as
+  "just-in-time offline rendering": every source is a committed or
+  built file, so a non-output track renders in full when the session
+  loads (`live.cpp` `produceUntil`), and only the output track mixes
+  and runs its chain per block (`renderBlock`, `runChain`). A voice
+  played by hand has no future to render, so the tracks between it and
+  `main` cannot be pre-rendered.
+
+`docs/build-graph.md` already classes "a SuperCollider node played by
+hand" as live-only, never cached, and `realtime/readme.md` expects that
+"capture becomes an input node… monitoring falls out of the same
+callback". This plan builds the input node and the live tracks it
+needs, and the transport that brings the voice to it.
+
+## 2 Solution
+
+A live session gains an `input` window kind: a source the daemon reads
+each block from outside the session. Every track on the path from an
+input up to `main` becomes a *live* track, which mixes and runs its
+chain in the audio callback instead of rendering at load; its siblings
+fed only by files stay pre-rendered, and the freeze never collapses a
+live track into a stem. The voice reaches the input through a shared
+memory ring: a small `scsynth` plugin, `FieldOut`, writes the voice host's
+output into it, and the daemon reads it with a jitter buffer and drift
+correction. `field keys` asks the daemon to put an input on each armed
+MIDI track and points the voice host at that ring instead of the device.
+
+*Amended (2026-10-11, as built in chunk 1):* the tracks on an input's
+path do not trade their pre-rendering for per-block evaluation, as this
+section first said ("Every track on the path from an input up to `main`
+becomes a *live* track, which mixes and runs its chain in the audio
+callback instead of rendering at load"). The song renders exactly as
+before, and the input travels beside it through a second instance of
+each chain on its path, summed into `main` before `main`'s own chain.
+§9 describes that overlay and why it replaced the first design. The
+freeze still never collapses a track on the path.
+
+### 2.1 Flow
+
+1. You run `field keys creek/track:keys-bus`. Arming resolves it to the
+   MIDI track `keys` under it (arming.md §2.1).
+2. `field keys` asks the daemon for a live input on `keys`. The daemon
+   creates a ring, loads the song's session if none is loaded, marks
+   `keys`, `keys-bus`, and every track above them live, and answers with
+   the ring's name.
+3. The voice host plays into `FieldOut.ar(ring)` rather than `Out.ar(0)`.
+   Its `scsynth` still runs on a device, the same one the daemon uses,
+   so the two callbacks share a clock.
+4. Each block, the daemon reads the ring into the input window, runs
+   `keys`'s inserts, mixes it into `keys-bus`, runs the EQ, and so on up
+   to `main`, beside the pre-rendered tracks.
+5. With the transport stopped, the live tracks still run, so you can
+   play over silence (§7 question 2). With it playing, you play over the
+   song.
+6. When `field keys` exits, the daemon drops the input and the live
+   marking, and the session renders as before.
+
+*Amended (2026-10-11, as built in chunk 3):* `field keys` opens the
+inputs and compiles and loads the song itself, rather than the daemon
+loading it "if none is loaded" (step 2): it always loads the song with
+every open `keys:` input, keeping the loaded session's loop, region, and
+solo, and `field play`, its watch, `field ui`, and `field record` do the
+same when they load it. The voice host does not call `FieldOut.ar(ring)`
+in place of `Out.ar(0)` (step 3): each routed instrument's voices write
+to its private bus through `out`, and a route synth Field writes,
+`In` into `FieldOut`, carries the bus to the ring, on the daemon's
+device. On exit `field keys` closes the inputs and loads the song again
+with what remains (step 6), and the daemon closes an input whose
+connection drops.
+
+### 2.2 Shapes
+
+| Shape | Change |
+| --- | --- |
+| Session window kinds (`src/audiod/session.ts`, `live.h`) | Adds `input`, naming a ring: `{kind: "input", ring, channels}`. |
+| Live tracks (`live.cpp`) | A track with an input below it evaluates per block; `comp_delay` on its path becomes non-zero for the first time. |
+| Freeze (`src/graph/live.ts`) | A track with an input below it is never collapsed into its stem. |
+| Daemon protocol | `input` op: attach a ring to a track, answer its name; `input_close`. |
+| Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. *Amended (2026-10-11, as built in chunk 3):* `FIELD_RINGS`, a ring or null per instrument, and `FIELD_ROUTE_DEF`, the route's SynthDef file; FieldOut's directory reaches scsynth on `SC_PLUGIN_PATH`. |
+| `FieldOut` (new, `native/sc-fieldout/`) | An `scsynth` UGen plugin writing its input into a POSIX shared-memory, single-producer, single-consumer ring. |
+
+*Amended (2026-10-11, as built in chunk 2):* the `input` op takes a
+name and answers `{ring, capacity, channels, sample_rate}`, where `ring`
+is the number FieldOut takes, below 2^24 because a UGen input is a
+float; `input_close` frees the name, and `status` lists each open input
+with its counters. FieldOut lives in `native/sc-fieldout` under GPL-3.0
+(§11) and shares `native/ring/field_ring.h` with the daemon.
+
+*Amended (2026-10-11, as built in chunk 1):* the input window is
+`{input: <name>, gain_db, pan?}`, where the name is the source the
+daemon resolves, a ring from chunk 2 on; the channel count is always
+two, as every other window's. The "Live tracks" row is §9's overlay,
+and `comp_delay` stays zero, because the overlay runs late by its own
+chain latency instead of delaying the song.
+
+## 3 Why this design
+
+Three ways to bring the voice in were weighed:
+
+- **A shared-memory ring from a `scsynth` plugin (chosen).** A crash in
+  the voice cannot take the daemon down, it needs no third-party driver,
+  and the voice host's interface stays as it is. It is the most new
+  code: a native SC plugin built per platform, and a reader with a
+  jitter buffer and drift handling.
+- **The daemon hosting the voice.** No SuperCollider AU or VST3 exists,
+  so this means embedding `libscsynth` with a driver the daemon pulls
+  each block: one clock and sample-accurate MIDI, at the price of a
+  patched SC build, synthesis inside the daemon's callback, and a GPLv3
+  library beside JUCE. Rejected.
+- **A loopback device the daemon captures.** BlackHole, or a Core Audio
+  process tap on macOS 14.2 and later, extending `arm`'s duplex open to
+  a persistent stereo input. The least SC work and the fastest
+  prototype, but a third-party driver or a Mac-only API, its own clock,
+  about three buffers of latency, and the microphone permission in the
+  way. Kept as the fallback if §7 question 1 goes against the plugin.
+
+The input window is built first and alone, because host monitoring of a
+microphone (`docs/audio-engine.md` "Monitoring") needs exactly the same
+live tracks with the capture input as the source.
+
+## 4 Acceptance criteria
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 1 | In a session test, feed an `input` window a known signal under a track with an EQ and a limiter. | The output equals the offline render of the same signal through the same chain, within the limiter's tolerance. |
+| 2 | Load a session with an input under `keys-bus`. | `keys`, `keys-bus`, and the tracks above them are live; a sibling fed by a file is still pre-rendered. |
+| 3 | Run `field keys creek/track:keys-bus` where `keys-bus` has a 700 Hz lowpass, and play. | You hear the instrument through the lowpass; the instrument's line no longer says dry. |
+| 4 | Measure the added latency: a click from the voice host to the device, through the ring and back out. | At most one daemon block plus one device buffer more than playing straight to the device. |
+| 5 | Play for an hour. | No dropout or click from the ring running empty or full. |
+| 6 | Run `field record <song>/track:<track> --monitoring host --at 2 --count-in 1` with headphones and a microphone, on a track with an insert. | You hear the microphone through the insert through the count-in and the take; the take is the dry input. |
+
+## 5 Cost
+
+The live path runs in the audio callback, so its cost is per block:
+the chains of every live track, which today run once at load. A typical
+path is the MIDI track and one or two buses, each with a few built-in
+inserts. The ring adds one copy per block per input. Latency is the
+jitter buffer, at least one of the larger of the two processes' blocks.
+
+## 6 Rollout
+
+1. **The input window and live tracks,** fed in tests by a synthetic
+   source. Criteria 1 and 2.
+2. **`FieldOut` and the daemon's reader,** with the jitter buffer and
+   drift handling. Criteria 4 and 5.
+3. **`field keys` through it.** Criterion 3.
+4. **Host monitoring of a microphone** through the same live tracks,
+   with the capture input as the source. §12. Criterion 6.
+
+## 7 Open questions
+
+1. **The transport.** The plan recommends the shared-memory ring.
+   Justin decides between it and the loopback prototype before chunk 2.
+   Taken as recommended (2026-10-11): Justin started the work without
+   choosing otherwise, so chunk 2 builds the ring. Choosing the loopback
+   prototype instead reopens this before chunk 2 lands.
+2. **Playing with the transport stopped.** Live tracks running while the
+   song is stopped need the callback to run with no playhead; the plan
+   assumes they do. Justin confirms before chunk 3. Taken as assumed
+   (2026-10-11), on the same start: chunk 3 runs the overlay and
+   `main`'s chain while the song is stopped.
+3. **Several armed tracks under one bus.** Each armed MIDI track gets its
+   own input and ring, so a bus with two armed tracks sums two live
+   inputs. Decided with arming.md chunk 3, which settles how armed
+   tracks are held.
+
+## 8 Background
+
+The survey behind this plan, as the code stood on 2026-10-11:
+
+- **Window kinds:** `file`, `track`, and `receive` (`src/audiod/session.ts`; `native/audiod/src/live.h`).
+- **Insert kinds:** eq, limit, reverb, plate, hall, and hosted `plugin`.
+- **Hosted plugins are inserts only,** with an empty `MidiBuffer`, so no instrument plugin exists to host a voice.
+- **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1. *Chunk 4 adds one (§12).*
+- **Changing a live session** swaps the whole session at a block boundary (the `session` op); there are no per-insert edits.
+- **The voice host** runs `scsynth` with a hardware buffer of 128 frames; the daemon takes JUCE's default buffer.
+
+## 9 The overlay
+
+What an input reaches is evaluated per block beside the song rather than
+in place of it. Each block, in the audio callback:
+
+1. Each input window reads its source, one block of stereo.
+2. Each track the input reaches, children first, mixes its inputs and
+   the overlay blocks of the live tracks it reads, with each window's
+   gain and pan, then runs a second instance of its own chain. A
+   pre-tap cable reads the block before that chain.
+3. Every feed into a track is first delayed to the track's longest
+   incoming path. An input arrives at once, a pre-tap edge as late as
+   what reached its child, and a post edge that plus its child's chain
+   latency, so an input that reaches a track two ways, such as through
+   a bus with a limiter and through a reverb send, never meets itself
+   offset.
+4. The chain's output passes through a delay preloaded with the chain's
+   latency, its limiters' and hosted plugins' together, so every block
+   is exactly one block, late by that latency. A limiter's stream lag
+   varies from block to block; the delay absorbs it.
+5. `main` adds what reaches it to its own mix of the song, and its own
+   chain runs on the sum. The input reaches `main` late by its longest
+   path's latency.
+
+An input has no place on the timeline, so it passes through each
+window's gain and pan but not its start, duration, or fades. It reaches
+each track that reads its track once, through the first window that
+does, however many times the arrangement places it. The overlay chains
+keep their state across a locate, and the warmup a far locate renders
+into the void reads no input, because a source read there would be
+consumed off the audio thread. A gain ramp on a window the input passes
+through glides the input with the song, sample by sample on the same
+timeline. A session swap builds the overlay afresh in the new session:
+the input goes silent for its path's latency and any tail its chains
+were ringing stops. Chunk 3 swaps sessions under a playing input, and
+decides there whether that gap is acceptable or the overlay's state
+should carry across. Glides on the overlay run on a clock of its own,
+which keeps moving while the transport is stopped, so a fader moved
+while stopped finishes its glide. The idle path's second instance of
+the output's chain is rebuilt when the transport stops or pauses, on the
+message thread beside the output chain's own rebuild, so playing over
+silence after a stop carries no tail from before play.
+
+**Why not evaluate the path in place.** A track's content sits on a
+timeline its placement offsets, and a track placed more than once would
+need to be at several positions at once. creek places `phrase` three
+times, so an input under `phrase` would have three "nows", and a
+streaming chain can only be in one. The overlay keeps the song's
+render untouched, and with it the golden equivalence the live engine
+rests on.
+
+**What it gives up.** Linear inserts (eq, reverb, plate, hall) give the
+same result whether they process the song and the input together or
+apart, and `main`'s chain processes the true sum. A limiter or hosted
+plugin on a track between the input and `main` hears the input apart
+from that track's own content, so it does not duck the song under your
+playing. That is a monitoring difference only: a take recorded on the
+track renders through the real chain.
+
+**Limits in chunk 1.** An input's path stays at one rate, because the
+overlay has no converter; a path that crosses rates is refused, by the
+compiler and by the engine. Each input name appears once, and an input
+must sit under `main`.
+
+## 10 Progress
+
+- 2026-10-11 — Chunk 1 (branch `live/input-window`). Session version 4
+  adds the input window, `compileSession` takes `inputs` and keeps each
+  input's path out of the freeze, and the engine runs §9's overlay.
+  `field-audiod --render-live --input <name>=<file.wav>` feeds an input
+  from a file, which is how `src/audiod/live-input.test.ts` proves
+  criterion 1: the output equals the offline render of the same signal
+  through the same chains, sample for sample, 145 samples late, the
+  input track's limiter latency, for as long as the signal lasts. Past
+  it the two part on purpose: the stem ends with its track's content and
+  cuts an eq's ring there, and an input has no end, so the overlay rings
+  out. The test found the compiler's limiter latency one sample short of
+  the engine's window, which `insertLatency` now mirrors operation for
+  operation. The review of the chunk found paths of unequal latency
+  meeting offset, which step 3 now aligns; a second golden holds an
+  input reaching `main` three ways, at 0, 145, and 290 samples, to the
+  offline render late by 290, with the tone loud enough that all three
+  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2
+  holds in the compiled session: the input's track and the bus above it
+  keep their chains,
+  and a sibling fed by a file is served from its stem. The daemon's
+  `session` op refuses an input window until chunk 2 gives it a source,
+  so nothing outside the tests can attach one yet.
+- 2026-10-11 — Chunk 2 (branch `live/ring`, stacked on chunk 1).
+  `FieldOut` builds against SuperCollider 3.14.1's plugin headers,
+  vendored under `native/sc-fieldout/vendor`, and writes through
+  `native/ring/field_ring.h`, the layout and writer the daemon shares.
+  The daemon's `RingInput` makes the ring, holds a block plus 256 frames,
+  drops the oldest frames when the writer runs fast, and waits to fill
+  again when it runs dry; `field-audiod --ring-selftest` runs it against
+  that same writer through steady state, a gap, a fast writer, and no
+  reader. `src/audiod/live-ring.test.ts` runs FieldOut in scsynth's
+  non-realtime mode into a ring the daemon made, and a playing session
+  reads it. Building it turned up a constraint for chunk 3: at shutdown
+  scsynth unloads its plugins before it frees the synths still running,
+  so a FieldOut left running crashes scsynth on its way out, and the
+  voice host must free FieldOut before it quits. Criteria 4 and 5, the
+  added latency and an hour without a dropout, need the real device and
+  wait for chunk 3. The review of the chunk found the reader's margin
+  shrinking with each piece of a split block, which a song past its
+  content made one frame long; the margin now rests on the largest block
+  asked for, and past the content a block renders whole. It also found
+  rings left behind when a daemon that hosted a plugin exits without its
+  destructors, so the daemon retires them first, and the reader now
+  starts at the present after a gap longer than the ring. The ring's
+  stated rate is the device's when the input opens, and a session that
+  moves the device leaves it stale; chunk 3 checks the rates before it
+  routes a voice.
+
+- 2026-10-11 — Chunk 3 (branch `live/keys`, stacked on chunk 2).
+  `field keys` on tracks opens an input per armed track, loads the song's
+  session with them, and starts the voice host with a ring per
+  instrument; each routed instrument's voices play into a private bus
+  that a route synth, `In` into `FieldOut`, carries to its ring.
+  `src/keys/synthdef.ts` writes the route because sclang has no
+  `FieldOut` class, and the host loads it by file. Every way the host
+  stops frees its nodes first, which chunk 2 found scsynth needs. With
+  the transport stopped the daemon plays the overlay through a second
+  instance of `main`'s chain (§7 question 2), so the song's chain and
+  position do not move; open inputs pin the daemon open as an arm does.
+  Each input now reports a `peak`, and `--ring-feed` writes a file into a
+  ring as FieldOut would. `src/keys/routing-voice.test.ts` runs the whole
+  path through real sclang and scsynth: a note from a published MIDI
+  source reaches the track's input in the daemon. When routing is not
+  possible, the line keeps the dry note and says why. The review of the
+  chunk found five gaps, now closed: an input closes with the connection
+  that opened it, in place of pinning the daemon open, and `field keys`
+  closes its routing in a `finally`; `field play`, its watch,
+  `field ui`, and `field record` compile in the open `keys:` inputs for
+  their song, so their loads keep a routed voice heard; the voice host
+  boots on the daemon's device and plays dry when `--device` names
+  another or the daemon converts the song's rate, and each ring carries
+  the device's rate once a session has settled it; FieldOut reaches
+  scsynth through `SC_PLUGIN_PATH`, beside its own plugins, which on
+  Linux the replaced plugin path had lost; and the voice contract says
+  a voice writes to `out`, a private bus when routed. Its second review
+  found five more: a `field keys` load dropped another terminal's loop,
+  region, and solo, now carried through `status`, which reports the
+  solo; a ramp while stopped restarted its glide every block, now on the
+  overlay's own clock; a failed route said nothing when no named track
+  had inserts, and the dry note now names the effects above the track
+  too and always gives the reason; `field keys` checks that FieldOut is
+  writing once the voice goes live; and §2.1, §2.2, arming.md, and
+  keyboard-instrument.md carry dated amendments for what chunk 3
+  changed. Criterion 3 by ear,
+  and criteria 4 and 5 on the real device, are still owed; a swap under
+  a playing input, which §9 leaves to this chunk, rebuilds the overlay
+  cold, a gap of the path's latency, accepted for now.
+- 2026-10-11 — Chunk 4 (branch `live/monitor`), host monitoring, as §12
+  describes. `field-audiod --capture-selftest` reads a capture input
+  whole, in the steps a loop wrap makes, past its block, with nothing
+  presented, and closed. `src/audiod/live-monitor.test.ts` arms the null
+  clock's sawtooth with `monitor`, loads a session naming it, and finds
+  it read at full scale while stopped and while playing; disarming, and
+  a dropped connection, close it; and the refusals hold.
+  `src/commands/record-daemon.test.ts` runs
+  `field record --monitoring host` and finds the input read while the
+  take records, the take dry and gapless with `monitoring: host` on its
+  row, and the song loaded again without the input, and refuses a file
+  bed before arming. Criterion 6 by ear is still owed. Its first review
+  found three gaps. A track the loaded solo or the arrangement kept from
+  `main` failed only at the reload after arming and left the input
+  armed; it is now refused before arming, with a test. A separate input
+  device could open the pair at a rate the song is not, silencing
+  monitoring; it is now refused after the arm, which is released. No
+  test reaches that refusal, because the null device runs only at 48 kHz
+  and a song at another rate is refused before arming, so it waits for
+  criterion 6's session on a real device pair. The reload after the take
+  put the song back over one another terminal had loaded, as
+  `field keys` did on quit; it now happens only while the daemon still
+  plays the song and no take records, with tests for both commands. The
+  second review found that a refused arm, such as one under another
+  terminal's take, still ran that reload; only an arm that succeeded is
+  released now, with a test.
+
+## 11 FieldOut's license (DECIDED, 2026-10-11)
+
+FieldOut is GPL-3.0-or-later, in this repository, with its own
+`LICENSE` beside it. A UGen builds against SuperCollider's plugin
+interface, which is GPL-3.0, so the plugin is too. The rest of Field
+stays MIT: the daemon and FieldOut share only the ring's layout, an MIT
+header, and nothing links across that line.
+
+The alternatives were a separate GPL repository, which keeps this one
+MIT-only at the cost of a second repository and release step, and §3's
+loopback device, which needs no plugin at all but brings a third-party
+driver or a Mac-only API, its own clock, and more latency. Justin chose
+the plugin in this repository.
+
+## 12 Host monitoring (chunk 4, 2026-10-11)
+
+`field record --monitoring host` plays each armed audio track's input
+through that track's inserts, the buses above it, and `main`, while the
+take itself stays dry. The input is a second kind of live input: where
+`field keys` feeds an input window from a ring, a monitored arm feeds
+one from the device's own input, read in the same callback that plays
+the song.
+
+### 12.1 Flow
+
+1. You run `field record tall-grass/track:vocal --monitoring host --at 2
+   --count-in 1`. `field record` loads the bed as before.
+2. Before arming, it refuses when no named track records audio, when
+   the daemon lacks `live-monitor`, when the bed is a file, which can
+   carry no input window, when the daemon plays another song, when the
+   daemon converts the song to the device's rate, and when the song,
+   compiled as the reload will compile it, under the loaded loop and
+   solo and with the capture inputs, cannot hear a track, which a solo,
+   a muted placement, or the arrangement can keep from `main`.
+3. It arms with `monitor: "capture:tall-grass/vocal"` on each audio
+   entry, always in the `tracks` form. The daemon opens a capture input
+   under that name for each, reading that entry's channel of the
+   callback's input, owned by the connection that armed.
+4. It refuses, and releases the arm, when arming opened the device at
+   a rate the song is not, which a separate input device can do, because
+   the pair opens only at rates both devices share. Otherwise it loads
+   the song again with every open input, `field keys`' rings and the
+   capture inputs, keeping the loaded session's loop, region, and solo,
+   as `field keys` does (`reloadWithInputs`). Whatever throws after the
+   arm, `field record` releases it.
+5. Each callback, the daemon presents its input block before the
+   session renders, and each capture input reads its channel from it, on
+   both sides, from a cursor that starts again each block, because the
+   session reads a block in steps where a loop wraps. The overlay (§9)
+   carries it up the track's path, playing or stopped. The capture tap
+   still takes the dry channel after the render.
+6. When the take ends, `field record` disarms, which closes the capture
+   inputs, and loads the song again without them while the daemon still
+   plays it and no other take records (`reloadIfPlaying`), so a song
+   another terminal loaded during the take plays on, and another
+   terminal's take keeps its bed; `field keys` closes the same way. A
+   `field record` that dies drops its connection, which closes them
+   too; the arm itself stays, as it always has.
+
+### 12.2 Shapes
+
+| Shape | Before | After |
+| --- | --- | --- |
+| `arm` audio entry | `{track, kind: "audio", input}` | adds `monitor`, the capture input's name |
+| `arm` response `armed[]` | `{track, kind, input}` | adds `monitor` when given |
+| `status.inputs[]` | a ring's counters | adds capture inputs, `{name, kind: "capture", read, peak}`; the ring's own fields become optional in `src/audiod/protocol.ts` |
+| Feature | — | `live-monitor` |
+| Daemon flag | — | `--capture-selftest` |
+| `src/audiod/live-inputs.ts` | `keysInputsFor` in `src/keys/routing.ts` | `liveInputsFor`, which lists both kinds, `captureInputName`, `compileWithInputs`, `reloadWithInputs`, and `reloadIfPlaying`, which `field keys` and `field record` share |
+
+### 12.3 Decisions (DECIDED, 2026-10-11, for Justin's review)
+
+- **`--monitoring host` turns it on, and `apollo-direct` stays the
+  default.** The flag already said how a take was monitored, so `host`
+  now does what it records. Rejected: a separate `--monitor` flag, two
+  flags for one fact that could disagree; and monitoring whenever armed,
+  which feeds back through a laptop's speakers and doubles an Apollo's
+  own cue.
+- **From arm to disarm, inside `field record`,** so the count-in is
+  heard. Monitoring without a take waits for arming.md chunk 3's
+  lasting `field arm`.
+- **A capture input, a second `LiveInput`,** rather than a new window
+  kind: the session format, its version, and `live.cpp` are unchanged,
+  and every command that reloads a song keeps a monitored input through
+  `liveInputsFor`, as it keeps a routed voice.
+- **Refused under converted delivery,** where the session renders in
+  session-rate steps that are not the callback's frames, rather than
+  given a device-to-session resampler, which would add latency and a
+  kernel to the path you sing into; `field keys` refuses the same case.
+- **Separate input and output devices are allowed.** JUCE combines
+  them (`AudioIODeviceCombiner`), so the input and the output still
+  meet in one callback, at the cost of a FIFO's latency on the output
+  and zeros on drift. Unverified on hardware, as recording.md §12.10
+  already notes for any combined pair.
+- **The latency policy is not built.** audio-engine.md "Latency"
+  describes bypassing or substituting high-latency plugins on entering
+  record; until criterion 6 measures what a singer hears, the monitored
+  input arrives late by both buffers and the path's limiters and hosted
+  plugins.
+
+### 12.4 Files
+
+| File | Change |
+| --- | --- |
+| `native/audiod/src/capture_input.h`, `capture_input.cpp` (new) | `CaptureBlock`, `CaptureInput`, and `runCaptureSelfTest`. |
+| `native/audiod/src/player.h`, `player.cpp` | `captures` beside `rings`; `armSet` parses `monitor` and opens them; `disarm` and a dropped connection close them; `pullAudio` presents the input block; `status` lists them. |
+| `native/audiod/src/server.cpp`, `main.cpp` | The connection passed to `armSet`; `live-monitor`; `--capture-selftest`. |
+| `src/audiod/live-inputs.ts` (new) | `liveInputsFor`, `captureInputName`, `compileWithInputs`, `reloadWithInputs`, `reloadIfPlaying`. |
+| `src/commands/record.ts` | The refusals, `monitor` on the arm, the two reloads, and releasing the arm whatever throws after it. |
+| `src/keys/routing.ts`, `src/commands/play.ts`, `src/commands/ui.ts` | Use `liveInputsFor` and `reloadWithInputs`. |
+| `src/audiod/protocol.ts` | `monitor` on `ArmTrack` and `armed[]`; capture inputs in `status.inputs`. |
+| `docs/cli.md`, `docs/audio-engine.md`, `docs/architecture.md`, `docs/projects/recording/readme.md` | Host monitoring as built, with dated amendments in recording.md §8 and §13.6. |
