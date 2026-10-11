@@ -188,6 +188,11 @@ describe('homeRelative', () => {
     // A sibling whose name merely starts with the home path is not home.
     expect(homeRelative('/Users/justinx/Desktop', '/Users/justin')).toBe('/Users/justinx/Desktop');
     expect(homeRelative('/tmp/elsewhere.wav', '/Users/justin')).toBe('/tmp/elsewhere.wav');
+    // With Windows' separator (windows-portability.md §7.2).
+    expect(homeRelative('C:\\Users\\justin\\Desktop\\creek-mix-main-v1.wav', 'C:\\Users\\justin', '\\')).toBe(
+      '~\\Desktop\\creek-mix-main-v1.wav',
+    );
+    expect(homeRelative('C:\\Users\\justinx\\Desktop', 'C:\\Users\\justin', '\\')).toBe('C:\\Users\\justinx\\Desktop');
   });
 });
 

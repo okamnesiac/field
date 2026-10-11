@@ -617,6 +617,9 @@ land as its own diff whenever.
   OneDrive-redirected profile is not the Desktop the user sees (the
   real one lives under `OneDrive\Desktop`); the export still lands and
   prints its path, so this is a wart rather than a break. **Standalone.**
+  **Done** (2026-10-11): `homeRelative` takes the platform's separator,
+  so a path under the profile prints as `~\Desktop\…`. The OneDrive
+  Desktop stays the wart it was.
 - **`sclangCommand` cannot find `sclang` on Windows**
   (`sclangCommand` in `generators/supercollider.ts`, re-checked
   2026-10-10 after #179). Since the keyboard instrument's voice host
@@ -631,7 +634,14 @@ land as its own diff whenever.
   `C:\Program Files\SuperCollider-<v>\sclang.exe`. Porting it means
   trying `.exe` on PATH and accepting a native absolute `FIELD_SCLANG`,
   as well as the fallback. **Standalone**, and §4 already scopes
-  SuperCollider itself to "whenever it is wanted".
+  SuperCollider itself to "whenever it is wanted". **Done**
+  (2026-10-11): on Windows the PATH search tries `sclang.exe` first, a
+  `FIELD_SCLANG` with a backslash or a native absolute path is taken as a
+  path, and the fallback is the newest
+  `%ProgramFiles%\SuperCollider-<version>\sclang.exe`; the macOS app
+  bundle is probed on macOS only. `src/generators/sclang-lookup.test.ts`
+  runs these rules on macOS with the platform as a parameter; no Windows
+  machine has run them yet.
 - **`git lfs install --local` failure advice** (`commands/init.ts:71`):
   the catch prints a warning and moves on, which is right; unverified
   whether the probe succeeds under a Windows CI shell where `git`

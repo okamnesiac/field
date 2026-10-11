@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { accessSync, constants, existsSync } from 'node:fs';
-import { delimiter, dirname, join, posix } from 'node:path';
+import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
+import { delimiter, dirname, isAbsolute, join, posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { sha256File } from '../hash.js';
@@ -65,33 +65,64 @@ export function scScript(name: string): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'sc', name);
 }
 
-function onPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
-  for (const dir of (env['PATH'] ?? '').split(delimiter)) {
+function onPath(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string | undefined {
+  // Windows finds a program by its extension, and sclang ships there as
+  // sclang.exe (windows-portability.md §7.2).
+  const names = platform === 'win32' && posix.extname(name) === '' ? [`${name}.exe`, name] : [name];
+  for (const dir of (env['PATH'] ?? env['Path'] ?? '').split(delimiter)) {
     if (dir === '') continue;
-    const candidate = join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // not here
+    for (const candidate of names.map((n) => join(dir, n))) {
+      try {
+        accessSync(candidate, constants.X_OK);
+        return candidate;
+      } catch {
+        // not here
+      }
     }
   }
   return undefined;
 }
 
-// The sclang to run: FIELD_SCLANG, then PATH, then the app bundle. One
+// Where SuperCollider installs when nothing else names it: the app bundle
+// on macOS, and on Windows the newest Program Files\SuperCollider-<version>.
+function installedSclang(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string | undefined {
+  if (platform === 'darwin') return existsSync(SCLANG_APP_FALLBACK) ? SCLANG_APP_FALLBACK : undefined;
+  if (platform !== 'win32') return undefined;
+  const programFiles = env['ProgramFiles'] ?? 'C:\\Program Files';
+  let installs: string[];
+  try {
+    installs = readdirSync(programFiles).filter((name) => /^SuperCollider-\d/.test(name));
+  } catch {
+    return undefined;
+  }
+  const version = (name: string): number[] => (name.match(/\d+/g) ?? []).map(Number);
+  installs.sort((a, b) => {
+    const [va, vb] = [version(a), version(b)];
+    for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+      if ((va[i] ?? 0) !== (vb[i] ?? 0)) return (vb[i] ?? 0) - (va[i] ?? 0);
+    }
+    return 0;
+  });
+  return installs.map((name) => join(programFiles, name, 'sclang.exe')).find((candidate) => existsSync(candidate));
+}
+
+// The sclang to run: FIELD_SCLANG, then PATH, then where SuperCollider
+// installs (the macOS app bundle, or Program Files on Windows). One
 // lookup for a render and for the long-running voice host
 // (keyboard-instrument.md §2.8). The override is the determinism escape
 // hatch (sc-render.md §2); a typo'd wrapper must never silently run the
 // app bundle instead.
-export function sclangCommand(env: NodeJS.ProcessEnv = process.env): string {
+export function sclangCommand(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
   const override = env['FIELD_SCLANG'];
   if (override) {
-    const found = override.includes('/') ? (existsSync(override) ? override : undefined) : onPath(override, env);
+    // A path names the binary, in either separator or as a native absolute
+    // path such as C:\Program Files\…\sclang.exe; a bare name is looked up.
+    const named = override.includes('/') || override.includes('\\') || isAbsolute(override) || win32.isAbsolute(override);
+    const found = named ? (existsSync(override) ? override : undefined) : onPath(override, env, platform);
     if (found === undefined) throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
     return found;
   }
-  const found = onPath('sclang', env) ?? (existsSync(SCLANG_APP_FALLBACK) ? SCLANG_APP_FALLBACK : undefined);
+  const found = onPath('sclang', env, platform) ?? installedSclang(env, platform);
   if (found === undefined) throw new Error('sclang not found on PATH (install SuperCollider or set FIELD_SCLANG)');
   return found;
 }
