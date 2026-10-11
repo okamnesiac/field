@@ -1,0 +1,69 @@
+// Renders a recorded take offline through an instrument's voice
+// (keyboard-instrument.md §12), with the voicer the live voice host uses,
+// so the take sounds as it was heard while it was played. Runs under the
+// sc-render contract, plus the take:
+//
+// FIELD_INSTRUMENT  the instrument program, loaded under FIELD_MODE=voice
+// FIELD_KNOBS       the checked copy of its knob file, when it has one
+//                   (instrument-knobs.md §2.4)
+// FIELD_EVENTS      a JSON file: {"events": [[seconds, kind, ...], ...]},
+//                   in time order, where kind is "on" (channel, note,
+//                   velocity), "off" (channel, note), "cc" (channel,
+//                   number, value), or "bend" (channel, value)
+// FIELD_OUTPUT, FIELD_SAMPLE_RATE, FIELD_CHANNELS, FIELD_DURATION
+(
+var instrument = "FIELD_INSTRUMENT".getenv;
+var knobs = "FIELD_KNOBS".getenv;
+var eventsPath = "FIELD_EVENTS".getenv;
+var out = "FIELD_OUTPUT".getenv;
+var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
+var chans = "FIELD_CHANNELS".getenv.asInteger;
+var dur = "FIELD_DURATION".getenv.asFloat;
+var here = PathName(thisProcess.nowExecutingPath).pathOnly;
+var voiceDef, problem, take, score, voicer, now = 0.0, nextNode = 1000;
+
+// Read above, and gone before the instrument loads: in voice mode the
+// render variables are absent, here as live (keys.md).
+["FIELD_OUTPUT", "FIELD_SEED", "FIELD_DURATION", "FIELD_SAMPLE_RATE", "FIELD_CHANNELS"].do(_.unsetenv);
+
+# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument, knobs);
+if (problem.notNil) {
+	("ERROR: " ++ problem).postln;
+	1.exit;
+} {
+	take = File.readAllString(eventsPath).parseJSON;
+	score = Score.new;
+	score.add([0.0, ['/d_recv', voiceDef.asBytes]]);
+
+	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+		{ |note, velocity, freq, controls|
+			var node = nextNode;
+			nextNode = nextNode + 1;
+			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0] ++ controls]);
+			node
+		},
+		{ |node, control, value| score.add([now, [\n_set, node, control, value]]) },
+		{ |node| score.add([now, [\n_set, node, \gate, 0]]) }
+	);
+
+	take["events"].do { |event|
+		now = event[0].asFloat;
+		switch (event[1].asString)
+		{ "on" } { voicer.noteOn(event[2].asInteger, event[3].asInteger, event[4].asInteger) }
+		{ "off" } { voicer.noteOff(event[2].asInteger, event[3].asInteger) }
+		{ "cc" } { voicer.cc(event[2].asInteger, event[3].asInteger, event[4].asInteger) }
+		{ "bend" } { voicer.bend(event[2].asInteger, event[3].asInteger) };
+	};
+
+	score.add([dur, [\c_set, 0, 0]]);
+	score.recordNRT(
+		outputFilePath: out,
+		sampleRate: rate,
+		headerFormat: "WAV",
+		sampleFormat: "int24",
+		options: ServerOptions.new.numOutputBusChannels_(chans),
+		duration: dur,
+		action: { 0.exit }
+	);
+};
+)
