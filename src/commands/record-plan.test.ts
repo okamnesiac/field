@@ -92,7 +92,7 @@ describe('the controllers a MIDI take starts from (instrument-knobs.md §2.8)', 
   });
 
   it('ignores what a field keys that has exited published', () => {
-    // A pid no process has: the largest a 32-bit pid_t holds.
+    // A pid no process has: one below the largest a 32-bit pid_t holds.
     publishControllers(dir, knobs, 2147483646);
     expect(controllersToChase(dir, true)).toEqual([]);
   });
