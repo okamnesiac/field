@@ -108,28 +108,71 @@ void writeJson (const juce::File& file, const juce::var& value)
         throw std::runtime_error ("cannot write " + file.getFullPathName().toStdString());
 }
 
-juce::var syncAndPatch (const juce::File& wav, juce::int64 frames)
+
+// Opens `file`, cuts it to `bytes`, hands it to `patch`, and syncs it. A
+// crash can leave a partial frame or line at the end; the file should end
+// where its last whole one does.
+template <typename Patch>
+void truncateAndSync (const juce::File& file, juce::int64 bytes, Patch&& patch)
 {
-    std::FILE* f = std::fopen (wav.getFullPathName().toRawUTF8(), "r+b");
+    std::FILE* f = std::fopen (file.getFullPathName().toRawUTF8(), "r+b");
     if (f == nullptr)
-        throw std::runtime_error ("cannot open " + wav.getFullPathName().toStdString());
-    // A crash can leave a partial frame at the end; the header will say
-    // `frames`, and the file should end where the header says.
-    if (::ftruncate (fileno (f), (off_t) (headerBytes + frames * 4)) != 0)
+        throw std::runtime_error ("cannot open " + file.getFullPathName().toStdString());
+    if (::ftruncate (fileno (f), (off_t) bytes) != 0)
     {
         std::fclose (f);
-        throw std::runtime_error ("cannot truncate " + wav.getFullPathName().toStdString());
+        throw std::runtime_error ("cannot truncate " + file.getFullPathName().toStdString());
     }
-    patchHeader (f, frames);
+    patch (f);
     std::fflush (f);
     ::fsync (fileno (f));
     std::fclose (f);
-    return {};
+}
+
+constexpr const char* wavName = "take.wav";
+constexpr const char* midiName = "take.midi.ndjson";
+constexpr int midiFifoCapacity = 1 << 14; // messages; the writer wakes every 20 ms
+
+bool isMidiTransaction (const juce::File& dir, const juce::var& manifest)
+{
+    return manifest.getProperty ("kind", juce::var()).toString() == "midi"
+           || dir.getChildFile (midiName).existsAsFile();
+}
+
+// The whole lines a MIDI take's file holds, where the last of them ends,
+// and the `at` it carries (-1 with no lines).
+struct MidiOnDisk
+{
+    juce::int64 events = 0;
+    juce::int64 bytes = 0;
+    juce::int64 lastAt = -1;
+};
+
+MidiOnDisk midiOnDisk (const juce::File& file)
+{
+    MidiOnDisk result;
+    juce::MemoryBlock block;
+    if (! file.loadFileAsData (block))
+        return result;
+    const auto* text = static_cast<const char*> (block.getData());
+    juce::int64 lastLine = 0;
+    for (juce::int64 i = 0; i < (juce::int64) block.getSize(); ++i)
+        if (text[i] == '\n')
+        {
+            lastLine = result.bytes;
+            result.bytes = i + 1;
+            ++result.events;
+        }
+    if (result.events > 0)
+        result.lastAt = (juce::int64) juce::JSON::parse (
+                            juce::String::fromUTF8 (text + lastLine, (int) (result.bytes - 1 - lastLine)))
+                            .getProperty ("at", -1);
+    return result;
 }
 } // namespace
 
-Capture::Capture (const juce::File& root, const Facts& f)
-    : facts (f), fifo (fifoCapacity), ring ((size_t) fifoCapacity), scratch ((size_t) fifoCapacity)
+Transaction::Transaction (const juce::File& root, const Facts& f, const char* name)
+    : facts (f), dataName (name)
 {
     // Timestamp names (recording.md §3): sortable, and two clones
     // recording independently cannot mint the same one. A second take in
@@ -147,37 +190,241 @@ Capture::Capture (const juce::File& root, const Facts& f)
     if (! dir.createDirectory())
         throw std::runtime_error ("cannot create " + dir.getFullPathName().toStdString());
 
-    const auto wavPath = dir.getChildFile ("take.wav");
-    wav = std::fopen (wavPath.getFullPathName().toRawUTF8(), "wb");
-    if (wav == nullptr)
-        throw std::runtime_error ("cannot open " + wavPath.getFullPathName().toStdString());
-    writeHeader (wav, facts.sampleRate);
-    std::fflush (wav);
-    writeManifest (false, false);
-    writeJournal();
+    const auto path = dir.getChildFile (dataName);
+    data = std::fopen (path.getFullPathName().toRawUTF8(), "wb");
+    if (data == nullptr)
+        throw std::runtime_error ("cannot open " + path.getFullPathName().toStdString());
+}
 
+Transaction::~Transaction()
+{
+    joinWriter();
+    // Not finalized: whatever the writer drained stays on disk, the WAV
+    // header unpatched, which is exactly what recover() expects.
+    closeData();
+}
+
+void Transaction::begin()
+{
+    writeManifest (false);
+    writeJournal();
     writer = std::thread ([this] { writerLoop(); });
 }
 
-Capture::~Capture()
+void Transaction::joinWriter()
 {
     stopWriter = true;
     wake.signal();
     if (writer.joinable())
         writer.join();
-    if (wav != nullptr)
+}
+
+void Transaction::syncData()
+{
+    std::fflush (data);
+    ::fsync (fileno (data));
+}
+
+void Transaction::closeData()
+{
+    if (data == nullptr)
+        return;
+    std::fflush (data);
+    std::fclose (data);
+    data = nullptr;
+}
+
+void Transaction::setStartedAt (juce::int64 positionSamples) noexcept
+{
+    startedAtSamples.store (positionSamples);
+}
+
+void Transaction::discard()
+{
+    joinWriter();
+    closeData();
+    finalized = true; // nothing left to finalize
+    dir.deleteRecursively();
+}
+
+void Transaction::writerLoop()
+{
+    auto lastJournal = juce::Time::getMillisecondCounterHiRes();
+    while (! stopWriter.load())
     {
-        // Not finalized: whatever the writer drained stays on disk under
-        // an unpatched header, which is exactly what recover() expects.
-        std::fflush (wav);
-        std::fclose (wav);
-        wav = nullptr;
+        wake.wait (20);
+        drain();
+        // The start position is latched by the callback on the first
+        // block; the manifest on disk learns it from here, off the audio
+        // thread, so a crash in the first second still leaves a
+        // placeable take. A standby opened ahead of its take (a loop's
+        // next pass) started when it latched, not when it was opened, so
+        // the wall time follows the latch.
+        if (! manifestHasStart && startedAtSamples.load() >= 0)
+        {
+            startedWall = juce::Time::getCurrentTime().toISO8601 (true);
+            writeManifest (false);
+        }
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (now - lastJournal >= journalEverySeconds * 1000.0)
+        {
+            lastJournal = now;
+            syncData();
+            writeJournal();
+        }
     }
 }
 
-void Capture::setStartedAt (juce::int64 positionSamples) noexcept
+void Transaction::writeJournal()
 {
-    startedAtSamples.store (positionSamples);
+    // What fsync has reached the disk with: the floor a recovery after
+    // power loss can trust. A process crash keeps more (everything the
+    // kernel accepted), and recover() reads the file for that.
+    juce::DynamicObject::Ptr o = new juce::DynamicObject();
+    describeJournal (*o);
+    o->setProperty ("flushed_at", juce::Time::getCurrentTime().toISO8601 (true));
+    writeJson (dir.getChildFile ("journal.json"), juce::var (o.get()));
+}
+
+void Transaction::writeManifest (bool complete)
+{
+    juce::DynamicObject::Ptr o = new juce::DynamicObject();
+    o->setProperty ("id", transactionId);
+    o->setProperty ("file", file());
+    o->setProperty ("track", facts.track);
+    if (facts.song.isNotEmpty())
+        o->setProperty ("song", facts.song);
+    if (facts.source.isNotEmpty())
+        o->setProperty ("source", facts.source);
+    describeFacts (*o);
+    const auto startedAt = startedAtSamples.load();
+    if (startedAt >= 0)
+    {
+        o->setProperty ("started_at_samples", startedAt);
+        manifestHasStart = true;
+    }
+    o->setProperty ("started_wall", startedWall);
+    o->setProperty ("daemon", facts.daemonVersion);
+    o->setProperty ("complete", complete);
+    if (complete)
+        describeCounts (*o);
+    writeJson (dir.getChildFile ("manifest.json"), juce::var (o.get()));
+    if (complete)
+        finalManifest = juce::var (o.get());
+}
+
+juce::var Transaction::finalize()
+{
+    if (finalized)
+        return finalManifest;
+    finalized = true;
+    joinWriter();
+    drain();
+    completeData();
+    syncData();
+    closeData();
+    writeJournal();
+    writeManifest (true);
+    return finalManifest;
+}
+
+juce::var Transaction::list (const juce::File& root, const juce::String& activeId)
+{
+    juce::Array<juce::var> entries;
+    auto dirs = recordingRoot (root).findChildFiles (juce::File::findDirectories, false);
+    dirs.sort();
+    for (const auto& d : dirs)
+    {
+        auto manifest = readManifest (d);
+        juce::DynamicObject::Ptr o = new juce::DynamicObject();
+        if (auto* m = manifest.getDynamicObject())
+            for (auto& prop : m->getProperties())
+                o->setProperty (prop.name, prop.value);
+        const auto id = d.getFileName();
+        o->setProperty ("id", id);
+        o->setProperty ("active", id == activeId);
+        const bool complete = (bool) manifest.getProperty ("complete", false);
+        o->setProperty ("complete", complete);
+        // On disk, not in the manifest: an incomplete transaction's
+        // frames or messages are what recover() would keep.
+        const bool midi = isMidiTransaction (d, manifest);
+        if (midi)
+        {
+            o->setProperty ("frames_on_disk", 0);
+            o->setProperty ("events_on_disk", midiOnDisk (d.getChildFile (midiName)).events);
+        }
+        else
+            o->setProperty ("frames_on_disk", framesOnDisk (d.getChildFile (wavName)));
+        if (! o->hasProperty ("file"))
+            o->setProperty ("file", ".field/recording/" + id + "/" + (midi ? midiName : wavName));
+        entries.add (juce::var (o.get()));
+    }
+    return juce::var (entries);
+}
+
+juce::var Transaction::recover (const juce::File& root, const juce::String& id)
+{
+    const auto d = recordingRoot (root).getChildFile (id);
+    if (id.isEmpty() || id.containsAnyOf ("/\\") || ! d.isDirectory())
+        throw std::runtime_error ("no recording transaction " + id.toStdString());
+    auto manifest = readManifest (d);
+    if ((bool) manifest.getProperty ("complete", false))
+        throw std::runtime_error (id.toStdString() + " is already complete");
+    const bool midi = isMidiTransaction (d, manifest);
+    const auto dataFile = d.getChildFile (midi ? midiName : wavName);
+    if (! dataFile.existsAsFile())
+        throw std::runtime_error (id.toStdString() + " has no " + dataFile.getFileName().toStdString()
+                                  + " to recover");
+    const auto journal = juce::JSON::parse (d.getChildFile ("journal.json"));
+
+    juce::DynamicObject::Ptr o = new juce::DynamicObject();
+    if (auto* m = manifest.getDynamicObject())
+        for (auto& prop : m->getProperties())
+            o->setProperty (prop.name, prop.value);
+    o->setProperty ("id", id);
+    if (! o->hasProperty ("file"))
+        o->setProperty ("file", ".field/recording/" + id + "/" + dataFile.getFileName());
+    o->setProperty ("complete", true);
+    o->setProperty ("recovered", true);
+    // The journal's counts are the fsync floor; what is kept is what the
+    // kernel had, which after a process crash is more. Both stay visible
+    // so the difference is a fact rather than a mystery.
+    if (midi)
+    {
+        const auto onDisk = midiOnDisk (dataFile);
+        truncateAndSync (dataFile, onDisk.bytes, [] (std::FILE*) {});
+        // The elapsed samples reach the journal once a second; a message
+        // written after the last journal shows the take ran at least to it.
+        const auto journaledFrames = (juce::int64) journal.getProperty ("frames", 0);
+        o->setProperty ("frames", std::max (journaledFrames, onDisk.lastAt + 1));
+        o->setProperty ("events", onDisk.events);
+        o->setProperty ("journaled_frames", journaledFrames);
+        o->setProperty ("journaled_events", journal.getProperty ("events", 0));
+    }
+    else
+    {
+        const auto frames = framesOnDisk (dataFile);
+        truncateAndSync (dataFile, headerBytes + frames * 4, [frames] (std::FILE* f) { patchHeader (f, frames); });
+        o->setProperty ("frames", frames);
+        o->setProperty ("journaled_frames", journal.getProperty ("frames", 0));
+    }
+    if (! o->hasProperty ("dropped"))
+        o->setProperty ("dropped", journal.getProperty ("dropped", 0));
+    writeJson (d.getChildFile ("manifest.json"), juce::var (o.get()));
+    return juce::var (o.get());
+}
+
+Capture::Capture (const juce::File& root, const Facts& f)
+    : Transaction (root, f, wavName), fifo (fifoCapacity), ring ((size_t) fifoCapacity), scratch ((size_t) fifoCapacity)
+{
+    writeHeader (data, facts.sampleRate);
+    std::fflush (data);
+    begin();
+}
+
+Capture::~Capture()
+{
+    joinWriter();
 }
 
 void Capture::push (const float* samples, int n) noexcept
@@ -212,188 +459,132 @@ void Capture::drain()
     const auto frames = (size_t) (size1 + size2);
     // Little-endian float32 straight from memory — the assumption
     // wavfile.h states for both supported platforms.
-    if (std::fwrite (scratch.data(), sizeof (float), frames, wav) == frames)
+    if (std::fwrite (scratch.data(), sizeof (float), frames, data) == frames)
         writtenFrames.fetch_add ((juce::int64) frames);
 }
 
-void Capture::discard()
+void Capture::completeData()
 {
-    stopWriter = true;
-    wake.signal();
-    if (writer.joinable())
-        writer.join();
-    if (wav != nullptr)
-    {
-        std::fclose (wav);
-        wav = nullptr;
-    }
-    finalized = true; // nothing left to finalize
-    dir.deleteRecursively();
+    patchHeader (data, writtenFrames.load());
 }
 
-void Capture::writerLoop()
+void Capture::describeProgress (juce::DynamicObject& record) const
 {
-    auto lastJournal = juce::Time::getMillisecondCounterHiRes();
-    while (! stopWriter.load())
-    {
-        wake.wait (20);
-        drain();
-        // The start position is latched by the callback on the first
-        // block; the manifest on disk learns it from here, off the audio
-        // thread, so a crash in the first second still leaves a
-        // placeable take. A standby opened ahead of its take (a loop's
-        // next pass) started when it latched, not when it was opened, so
-        // the wall time follows the latch.
-        if (! manifestHasStart && startedAtSamples.load() >= 0)
-        {
-            startedWall = juce::Time::getCurrentTime().toISO8601 (true);
-            writeManifest (false, false);
-        }
-        const auto now = juce::Time::getMillisecondCounterHiRes();
-        if (now - lastJournal >= journalEverySeconds * 1000.0)
-        {
-            lastJournal = now;
-            std::fflush (wav);
-            ::fsync (fileno (wav));
-            writeJournal();
-        }
-    }
+    record.setProperty ("frames", pushed());
+    record.setProperty ("written", written());
+    record.setProperty ("dropped", dropped());
 }
 
-void Capture::writeJournal()
+void Capture::describeFacts (juce::DynamicObject& manifest) const
 {
-    // What fsync has reached the disk with: the floor a recovery after
-    // power loss can trust. A process crash keeps more (everything the
-    // kernel accepted), and recover() reads the file for that.
-    journaledFrames = writtenFrames.load();
-    juce::DynamicObject::Ptr o = new juce::DynamicObject();
-    o->setProperty ("frames", journaledFrames);
-    o->setProperty ("dropped", droppedFrames.load());
-    o->setProperty ("flushed_at", juce::Time::getCurrentTime().toISO8601 (true));
-    writeJson (dir.getChildFile ("journal.json"), juce::var (o.get()));
-}
-
-void Capture::writeManifest (bool complete, bool recovered)
-{
-    juce::DynamicObject::Ptr o = new juce::DynamicObject();
-    o->setProperty ("id", transactionId);
-    o->setProperty ("file", ".field/recording/" + transactionId + "/take.wav");
-    o->setProperty ("track", facts.track);
-    if (facts.song.isNotEmpty())
-        o->setProperty ("song", facts.song);
-    if (facts.source.isNotEmpty())
-        o->setProperty ("source", facts.source);
-    o->setProperty ("device", facts.device);
-    o->setProperty ("input", facts.input);
-    o->setProperty ("sample_rate", facts.sampleRate);
+    manifest.setProperty ("device", facts.device);
+    manifest.setProperty ("input", facts.input);
+    manifest.setProperty ("sample_rate", facts.sampleRate);
     if (facts.timelineRate > 0.0)
-        o->setProperty ("timeline_rate", facts.timelineRate);
-    o->setProperty ("channels", 1);
-    o->setProperty ("bit_depth", 32);
-    o->setProperty ("format", "float");
-    o->setProperty ("input_latency", facts.inputLatency);
-    o->setProperty ("output_latency", facts.outputLatency);
-    const auto startedAt = startedAtSamples.load();
-    if (startedAt >= 0)
-    {
-        o->setProperty ("started_at_samples", startedAt);
-        manifestHasStart = true;
-    }
-    o->setProperty ("started_wall", startedWall);
-    o->setProperty ("daemon", facts.daemonVersion);
-    o->setProperty ("complete", complete);
-    if (complete)
-    {
-        o->setProperty ("frames", writtenFrames.load());
-        o->setProperty ("dropped", droppedFrames.load());
-    }
-    if (recovered)
-        o->setProperty ("recovered", true);
-    writeJson (dir.getChildFile ("manifest.json"), juce::var (o.get()));
-    if (complete)
-        finalManifest = juce::var (o.get());
+        manifest.setProperty ("timeline_rate", facts.timelineRate);
+    manifest.setProperty ("channels", 1);
+    manifest.setProperty ("bit_depth", 32);
+    manifest.setProperty ("format", "float");
+    manifest.setProperty ("input_latency", facts.inputLatency);
+    manifest.setProperty ("output_latency", facts.outputLatency);
 }
 
-juce::var Capture::finalize()
+void Capture::describeCounts (juce::DynamicObject& manifest) const
 {
-    if (finalized)
-        return finalManifest;
-    finalized = true;
-    stopWriter = true;
-    wake.signal();
-    if (writer.joinable())
-        writer.join();
-    drain();
-    patchHeader (wav, writtenFrames.load());
-    std::fflush (wav);
-    ::fsync (fileno (wav));
-    std::fclose (wav);
-    wav = nullptr;
-    writeJournal();
-    writeManifest (true, false);
-    return finalManifest;
+    manifest.setProperty ("frames", writtenFrames.load());
+    manifest.setProperty ("dropped", droppedFrames.load());
 }
 
-juce::var Capture::list (const juce::File& root, const juce::String& activeId)
+void Capture::describeJournal (juce::DynamicObject& journal) const
 {
-    juce::Array<juce::var> entries;
-    auto dirs = recordingRoot (root).findChildFiles (juce::File::findDirectories, false);
-    dirs.sort();
-    for (const auto& d : dirs)
+    journal.setProperty ("frames", writtenFrames.load());
+    journal.setProperty ("dropped", droppedFrames.load());
+}
+
+MidiCapture::MidiCapture (const juce::File& root, const Facts& f)
+    : Transaction (root, f, midiName), fifo (midiFifoCapacity), ring ((size_t) midiFifoCapacity)
+{
+    begin();
+}
+
+MidiCapture::~MidiCapture()
+{
+    joinWriter();
+}
+
+void MidiCapture::push (juce::int64 at, const juce::uint8* bytes, int size) noexcept
+{
+    int start1, size1, start2, size2;
+    fifo.prepareToWrite (1, start1, size1, start2, size2);
+    if (size1 + size2 == 0)
     {
-        auto manifest = readManifest (d);
-        juce::DynamicObject::Ptr o = new juce::DynamicObject();
-        if (auto* m = manifest.getDynamicObject())
-            for (auto& prop : m->getProperties())
-                o->setProperty (prop.name, prop.value);
-        const auto id = d.getFileName();
-        o->setProperty ("id", id);
-        o->setProperty ("active", id == activeId);
-        const bool complete = (bool) manifest.getProperty ("complete", false);
-        o->setProperty ("complete", complete);
-        // On disk, not in the manifest: an incomplete transaction's
-        // frames are what recover() would keep.
-        o->setProperty ("frames_on_disk", framesOnDisk (d.getChildFile ("take.wav")));
-        if (! o->hasProperty ("file"))
-            o->setProperty ("file", ".field/recording/" + id + "/take.wav");
-        entries.add (juce::var (o.get()));
+        droppedEvents.fetch_add (1);
+        return;
     }
-    return juce::var (entries);
+    auto& event = ring[(size_t) (size1 > 0 ? start1 : start2)];
+    event.at = at;
+    event.size = juce::jlimit (0, maxMessageBytes, size);
+    std::memcpy (event.bytes, bytes, (size_t) event.size);
+    fifo.finishedWrite (1);
+    pushedEvents.fetch_add (1);
 }
 
-juce::var Capture::recover (const juce::File& root, const juce::String& id)
+void MidiCapture::drain()
 {
-    const auto d = recordingRoot (root).getChildFile (id);
-    if (id.isEmpty() || id.containsAnyOf ("/\\") || ! d.isDirectory())
-        throw std::runtime_error ("no recording transaction " + id.toStdString());
-    auto manifest = readManifest (d);
-    if ((bool) manifest.getProperty ("complete", false))
-        throw std::runtime_error (id.toStdString() + " is already complete");
-    const auto wav = d.getChildFile ("take.wav");
-    if (! wav.existsAsFile())
-        throw std::runtime_error (id.toStdString() + " has no take.wav to recover");
-    const auto frames = framesOnDisk (wav);
-    syncAndPatch (wav, frames);
+    const int ready = fifo.getNumReady();
+    if (ready <= 0)
+        return;
+    int start1, size1, start2, size2;
+    fifo.prepareToRead (ready, start1, size1, start2, size2);
+    lines.clear();
+    const auto append = [this] (const Event& event)
+    {
+        lines += "{\"at\":" + std::to_string (event.at) + ",\"midi\":[";
+        for (int i = 0; i < event.size; ++i)
+            lines += (i > 0 ? "," : "") + std::to_string (event.bytes[i]);
+        lines += "]}\n";
+    };
+    for (int i = 0; i < size1; ++i)
+        append (ring[(size_t) (start1 + i)]);
+    for (int i = 0; i < size2; ++i)
+        append (ring[(size_t) (start2 + i)]);
+    fifo.finishedRead (size1 + size2);
+    if (std::fwrite (lines.data(), 1, lines.size(), data) == lines.size())
+        writtenEvents.fetch_add (size1 + size2);
+}
 
-    juce::DynamicObject::Ptr o = new juce::DynamicObject();
-    if (auto* m = manifest.getDynamicObject())
-        for (auto& prop : m->getProperties())
-            o->setProperty (prop.name, prop.value);
-    o->setProperty ("id", id);
-    if (! o->hasProperty ("file"))
-        o->setProperty ("file", ".field/recording/" + id + "/take.wav");
-    o->setProperty ("complete", true);
-    o->setProperty ("recovered", true);
-    o->setProperty ("frames", frames);
-    // The journal's count is the fsync floor; the frames kept are what
-    // the kernel had, which after a process crash is more. Both stay
-    // visible so the difference is a fact rather than a mystery.
-    const auto journal = juce::JSON::parse (d.getChildFile ("journal.json"));
-    o->setProperty ("journaled_frames", journal.getProperty ("frames", 0));
-    if (! o->hasProperty ("dropped"))
-        o->setProperty ("dropped", journal.getProperty ("dropped", 0));
-    writeJson (d.getChildFile ("manifest.json"), juce::var (o.get()));
-    return juce::var (o.get());
+void MidiCapture::describeProgress (juce::DynamicObject& record) const
+{
+    record.setProperty ("frames", frames());
+    record.setProperty ("events", events());
+    record.setProperty ("dropped", dropped());
+}
+
+void MidiCapture::describeFacts (juce::DynamicObject& manifest) const
+{
+    manifest.setProperty ("kind", "midi");
+    juce::Array<juce::var> sources;
+    for (const auto& source : facts.sources)
+        sources.add (source);
+    manifest.setProperty ("sources", sources);
+    manifest.setProperty ("sample_rate", facts.sampleRate);
+    if (facts.timelineRate > 0.0)
+        manifest.setProperty ("timeline_rate", facts.timelineRate);
+    manifest.setProperty ("output_latency", facts.outputLatency);
+}
+
+void MidiCapture::describeCounts (juce::DynamicObject& manifest) const
+{
+    manifest.setProperty ("frames", elapsedFrames.load());
+    manifest.setProperty ("events", writtenEvents.load());
+    manifest.setProperty ("dropped", droppedEvents.load());
+}
+
+void MidiCapture::describeJournal (juce::DynamicObject& journal) const
+{
+    journal.setProperty ("frames", elapsedFrames.load());
+    journal.setProperty ("events", writtenEvents.load());
+    journal.setProperty ("dropped", droppedEvents.load());
 }
 
 } // namespace field

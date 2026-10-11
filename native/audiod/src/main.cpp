@@ -384,15 +384,19 @@ int main (int argc, char* argv[])
     // client asks.
     // Held in a local: getArray() points into the var, and a temporary
     // var dies at the end of the condition that produced it.
-    const auto transactions = field::Capture::list (juce::File::getCurrentWorkingDirectory(), {});
+    const auto transactions = field::Transaction::list (juce::File::getCurrentWorkingDirectory(), {});
     if (auto* pending = transactions.getArray())
         for (const auto& entry : *pending)
             if (! (bool) entry.getProperty ("complete", false))
+            {
+                const bool midi = entry.hasProperty ("events_on_disk");
                 std::fprintf (stderr,
-                              "field-audiod: recoverable take %s (%lld frames on disk) — "
+                              "field-audiod: recoverable take %s (%lld %s on disk) — "
                               "recover it with the recover op\n",
                               entry.getProperty ("id", juce::var()).toString().toRawUTF8(),
-                              (long long) (juce::int64) entry.getProperty ("frames_on_disk", 0));
+                              (long long) (juce::int64) entry.getProperty (midi ? "events_on_disk" : "frames_on_disk", 0),
+                              midi ? "MIDI messages" : "frames");
+            }
 
     Heartbeat heartbeat (player, server, idleSeconds);
     // runDispatchLoopUntil rather than runDispatchLoop: the daemon has no
