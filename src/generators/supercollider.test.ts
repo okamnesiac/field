@@ -62,7 +62,16 @@ describe('sclangCommand', () => {
   it('refuses a FIELD_SCLANG batch file on Windows, and says why', () => {
     const wrapper = executable(join(root, 'bin', 'sclang-wrapper.cmd'));
     expect(() => sclangCommand({ FIELD_SCLANG: wrapper, PATH: join(root, 'bin') }, 'win32')).toThrow(
-      'which Windows will not start without a shell',
+      'which Windows cannot start directly',
+    );
+  });
+
+  it('refuses an extensionless FIELD_SCLANG on Windows the same way', () => {
+    // A POSIX-style stub has no extension, and Windows cannot start it
+    // either; the refusal has to read true for it too.
+    const stub = executable(join(root, 'bin', 'sclang'));
+    expect(() => sclangCommand({ FIELD_SCLANG: stub, PATH: join(root, 'bin') }, 'win32')).toThrow(
+      'which Windows cannot start directly',
     );
   });
 

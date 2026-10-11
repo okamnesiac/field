@@ -148,7 +148,7 @@ export function sclangCommand(
     if (found === undefined) throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
     if (platform === 'win32' && !WINDOWS_EXECUTABLES.includes(extname(found).toLowerCase())) {
       throw new Error(
-        `FIELD_SCLANG points at ${found}, which Windows will not start without a shell; ` +
+        `FIELD_SCLANG points at ${found}, which Windows cannot start directly; ` +
           'point it at sclang.exe or an .exe wrapper',
       );
     }
