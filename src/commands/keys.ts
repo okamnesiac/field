@@ -242,6 +242,9 @@ export function statusText(
   width: number,
 ): string {
   const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
+  const bends = session.bends();
+  if (bends.length > 0 || session.bend !== 0) parts.push(`bend ${bendText(session.bend, bends)}`);
+  if (session.setsMod() || session.mod !== 0) parts.push(`mod ${session.mod}`);
   const unplayable = unplayablePositions(layout, session.keymap);
   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
@@ -253,4 +256,22 @@ export function statusText(
   if (head.length + separator.length + notes.length <= width) return `${head}${separator}${notes}`;
   const room = width - separator.length - notes.length - 1; // 1 for the ellipsis
   return room > 0 ? `${head.slice(0, room)}…${separator}${notes}` : notes.slice(0, width);
+}
+
+// A pitch-bend message carries the bend in steps of 1/8192, about 0.0001,
+// so four decimal places show it as finely as it is sent.
+const BEND_PLACES = 4;
+
+// Every bend prints with its sign and with the decimal places the finest
+// bend in the keymap needs, so bending a held chord does not move the
+// notes after it.
+function bendText(bend: number, bends: number[]): string {
+  const places = Math.max(...[bend, ...bends].map(decimalPlaces));
+  return `${bend < 0 ? '-' : '+'}${Math.abs(bend).toFixed(places)}`;
+}
+
+function decimalPlaces(x: number): number {
+  let places = 0;
+  while (places < BEND_PLACES && Number(x.toFixed(places)) !== x) places++;
+  return places;
 }

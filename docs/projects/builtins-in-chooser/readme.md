@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Built-ins in the chooser — or as plugins
+# Built-ins in the chooser — or as plugins
 
 **Goal:** whether `eq` and friends join `field insert add`'s picker as rows
 that write `effect:` blocks, or become actual AU/VST3 wrappers; the

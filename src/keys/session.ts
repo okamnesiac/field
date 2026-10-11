@@ -11,6 +11,7 @@ const BLOCKING_MODS = MOD_ALT | MOD_CTRL | MOD_SUPER | MOD_HYPER | MOD_META;
 
 const BEND_CENTER = 8192;
 const BEND_MAX = 16383;
+const MOD_WHEEL = 1;
 const ALL_NOTES_OFF = 123;
 
 function noteOn(channel: number, note: number, velocity: number): MidiMessage {
@@ -43,6 +44,11 @@ export class KeysSession {
   keymap: Keymap;
   transpose = 0;
   velocity: number;
+  // The pitch bend, from -1 to 1, and the modulation wheel (CC 1), from
+  // 0 to 127, as this session last sent them, for the status line; the
+  // receiver starts both at rest.
+  bend = 0;
+  mod = 0;
   message: string | undefined;
   private readonly held = new Map<string, { channel: number; notes: number[] }>();
   private readonly holders = new Map<number, number>();
@@ -86,8 +92,11 @@ export class KeysSession {
     if (control !== undefined) {
       this.heldControls.delete(position);
       const { action, channel } = control;
-      if (action !== 'panic' && 'bend' in action) return [pitchBend(channel, BEND_CENTER)];
-      if (action !== 'panic' && 'cc' in action) return [controlChange(channel, action.cc, 0)];
+      if (action !== 'panic' && 'bend' in action) {
+        this.bend = 0;
+        return [pitchBend(channel, BEND_CENTER)];
+      }
+      if (action !== 'panic' && 'cc' in action) return [this.cc(channel, action.cc, 0)];
       return [];
     }
     const held = this.held.get(position);
@@ -113,7 +122,7 @@ export class KeysSession {
   }
 
   quit(): MidiMessage[] {
-    return [...this.releaseAll(), ...this.untoggleAll(), controlChange(this.keymap.channel, ALL_NOTES_OFF, 0)];
+    return [...this.releaseAll(), ...this.untoggleAll(), this.cc(this.keymap.channel, ALL_NOTES_OFF, 0)];
   }
 
   // A reloaded keymap applies to the next press; notes sounding finish
@@ -132,9 +141,19 @@ export class KeysSession {
   // A toggled sustain left on would hold the receiver's notes after
   // `field keys` has gone.
   private untoggleAll(): MidiMessage[] {
-    const messages = [...this.toggledOn.values()].map(({ channel, cc }) => controlChange(channel, cc, 0));
+    const messages = [...this.toggledOn.values()].map(({ channel, cc }) => this.cc(channel, cc, 0));
     this.toggledOn.clear();
     return messages;
+  }
+
+  // The bends the keymap can send, and whether it can move the modulation
+  // wheel, so the status line has a value of its own to show.
+  bends(): number[] {
+    return [...this.keymap.controls.values()].flatMap((a) => (a !== 'panic' && 'bend' in a ? [a.bend] : []));
+  }
+
+  setsMod(): boolean {
+    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'cc' in a && a.cc === MOD_WHEEL);
   }
 
   soundingNotes(): string[] {
@@ -151,10 +170,15 @@ export class KeysSession {
     return true;
   }
 
+  private cc(channel: number, cc: number, value: number): MidiMessage {
+    if (cc === MOD_WHEEL) this.mod = value;
+    return controlChange(channel, cc, value);
+  }
+
   private control(position: string, action: KeymapAction): MidiMessage[] {
     const channel = this.keymap.channel;
     if (action === 'panic') {
-      return [...this.releaseAll(), ...this.untoggleAll(), controlChange(channel, ALL_NOTES_OFF, 0)];
+      return [...this.releaseAll(), ...this.untoggleAll(), this.cc(channel, ALL_NOTES_OFF, 0)];
     }
     if ('transpose' in action) {
       const next = this.transpose + action.transpose;
@@ -168,21 +192,22 @@ export class KeysSession {
     }
     if ('bend' in action) {
       this.heldControls.set(position, { channel, action });
+      this.bend = action.bend;
       return [pitchBend(channel, bendValue(action.bend))];
     }
     if (action.mode === 'hold') {
       this.heldControls.set(position, { channel, action });
-      return [controlChange(channel, action.cc, action.value)];
+      return [this.cc(channel, action.cc, action.value)];
     }
     if (action.mode === 'toggle') {
       const on = this.toggledOn.get(position);
       if (on !== undefined) {
         this.toggledOn.delete(position);
-        return [controlChange(on.channel, on.cc, 0)];
+        return [this.cc(on.channel, on.cc, 0)];
       }
       this.toggledOn.set(position, { channel, cc: action.cc });
-      return [controlChange(channel, action.cc, action.value)];
+      return [this.cc(channel, action.cc, action.value)];
     }
-    return [controlChange(channel, action.cc, action.value)];
+    return [this.cc(channel, action.cc, action.value)];
   }
 }

@@ -3,7 +3,7 @@ status: draft
 priority: next
 ---
 
-# Plan: Live SuperCollider
+# Live SuperCollider
 
 **Goal:** the voice `field keys` plays reaches the daemon's live graph as
 an input on its MIDI track, so the inserts on that track and on every

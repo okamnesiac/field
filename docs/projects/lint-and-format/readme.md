@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: prettier and ESLint
+# prettier and ESLint
 
 **Goal:** neither is installed and no config exists, so a tool reaching for a
 formatter applies its own defaults (#83, 312 lines); ESLint is free,

@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: External instruments
+# External instruments
 
 **Goal:** MIDI out with a declared audio return graduates live-only →
 realtime-bounce, nondeterministic

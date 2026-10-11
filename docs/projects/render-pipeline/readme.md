@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: One rendering pipeline
+# One rendering pipeline
 
 **Status:** Shipped, chunks 1–6 (#50, #53, #54, #55 and chunk 5 here),
 chunk 2 having carried most of chunk 6 with it. One §7 question outlives

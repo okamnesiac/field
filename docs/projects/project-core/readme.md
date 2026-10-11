@@ -7,7 +7,7 @@ commitment never landed — `field track rename` and its siblings,
 rewriting every reference atomically — and carries over to
 [track-rename](../track-rename/readme.md).
 
-# Plan: Project core — format, CLI, build graph skeleton
+# Project core — format, CLI, build graph skeleton
 
 **Status:** Scaffold, schemas, tick/tempo math, deterministic YAML, and the
 first CLI commands shipped in #4; the asset store in #5; the build graph

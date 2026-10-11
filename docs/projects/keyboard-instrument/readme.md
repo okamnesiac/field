@@ -3,7 +3,7 @@ status: in-progress
 priority: now
 ---
 
-# Plan: Keyboard instrument
+# Keyboard instrument
 
 **Goal:** `field keys` turns the computer keyboard into a MIDI device
 that any application can play from, through a keymap you choose or

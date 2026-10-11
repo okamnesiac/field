@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Comping
+# Comping
 
 **Goal:** one active take assembled from several, so a performance can
 be built from the best moments of each pass

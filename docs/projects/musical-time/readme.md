@@ -4,7 +4,7 @@ status: completed
 
 **Outcome:** Shipped.
 
-# Plan: Musical time arrays
+# Musical time arrays
 
 **Status:** Shipped — #24 landed the arrays and bloom converted with
 it: creek is authored in `[bar, beat?, tick?]` notation (`at: [1]`,

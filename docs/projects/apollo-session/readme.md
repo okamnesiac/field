@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: The first Apollo session
+# The first Apollo session
 
 **Goal:** a take recorded against creek on the Apollo plays back in
 place, compensated, from `field build && field play`. That is the half

@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Everything is an action, and actions compose
+# Everything is an action, and actions compose
 
 **Goal:** every Field verb is an action in a searchable index, named
 macros of actions are committed to the project, and the user can bind a

@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Recording widget
+# Recording widget
 
 **Goal:** the native macOS control surface, last on purpose: a client of an
 engine that must exist first.

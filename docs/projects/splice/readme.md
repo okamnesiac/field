@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: Splice support
+# Splice support
 
 **Status:** Unstarted. Sketched 2026-08-09 from a later.md line; no code, no
 PRs. The open questions in §4 gate any chunking.

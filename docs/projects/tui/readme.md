@@ -3,7 +3,7 @@ status: draft
 priority: later
 ---
 
-# Plan: the TUI
+# The TUI
 
 **Goal:** a full-screen terminal face for a playing project, wanted
 outright (2026-08-12) and deliberately after the first
