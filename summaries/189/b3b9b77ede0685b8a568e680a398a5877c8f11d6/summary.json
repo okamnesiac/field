@@ -1,0 +1,232 @@
+{
+ "version": 1,
+ "name": "Arming tracks for field keys",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 189,
+  "title": "Plan arming and the live voice path, and let field keys play tracks in unison (arming.md chunk 1)",
+  "head": "b3b9b77ede0685b8a568e680a398a5877c8f11d6",
+  "headRef": "keys/arming",
+  "base": "8c282db3d88e2bec4924b280bf9867b050a1f042",
+  "baseRef": "keys/voice-reload-mod",
+  "basePr": 188
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> turns the computer keyboard into a MIDI source named <code>Field Keys</code>. Given an instrument, a SuperCollider program on the project's <code>shared/instruments/</code> shelf, it also starts a <em>voice host</em>: an <code>sclang</code> process that boots its own <code>scsynth</code> on the output device and plays the program's voice from every MIDI source. Until this change it took exactly one program, so to hear the part a track plays you had to know which program the track's record entry names, and you could not name the track at all.",
+   "This pull request does two things. It writes the plan for <em>arming</em>, which lets you choose the tracks to play or record together, and it rewrites the stub plan for the live voice path, which would let a track's effects process what you play. Then it builds arming's first chunk: <code>field keys</code> takes any number of targets, resolves a track to the instrument its record entry names, and plays every resolved instrument at once from one voice host.",
+   "<ol><li><b>You name targets.</b> <code>field keys creek/track:keys creek/track:bass</code>. A target with <code>track:</code> in it is a track; anything else is an instrument, resolved as before.</li><li><b>Each track resolves to one MIDI track.</b> A MIDI track is a track whose <code>record:</code> entry names an instrument, takes or not. A bus resolves to the one MIDI track under it; a bus with several refuses and lists them, so you name the ones you mean.</li><li><b>One voice host plays them in unison.</b> It loads every program, renames each SynthDef for its place in the list so two programs that name their voices alike both play, and starts one voice per program on every key.</li><li><b>The line says what is not heard.</b> The voice still plays straight to the device, so a bus's inserts are skipped, and the instrument's line ends <code>· dry: the effects on keys-bus are not heard yet</code>.</li></ol>",
+   "The first review, of <code>e22af1e</code>, found two problems, and this head fixes both. A bus that places its one MIDI track twice was refused as if it held two, and the plan's §2.1 described an instrument line and a reload the code did not have. The second review, of <code>b3b9b77</code>, found the head clean."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>MIDI track</b>: a track whose <code>record:</code> entry has <code>instrument:</code>. It plays that instrument from its MIDI takes, and it is a MIDI track before it has any.</li><li><b>Bus</b>: a track whose inputs include other tracks, as <code>- track: keys</code>.</li><li><b>Insert</b>: an effect on a track, such as an EQ, which runs inside the daemon <code>field-audiod</code>.</li><li><b>Voice host</b>: <code>sc/voice-host.scd</code> running in <code>sclang</code>, with its own <code>scsynth</code> on the output device.</li><li><b>Armed</b>: chosen to play or record. In this chunk you arm by naming targets on the command line.</li><li><b>Dry</b>: heard without the inserts on the tracks you named, because the voice skips the daemon.</li></ul>"
+   },
+   {
+    "id": "later",
+    "title": "What this leaves for later",
+    "html": "<ul class=\"tight\"><li><b>Recording several tracks in one pass</b> is arming chunk 2: an arm set in the daemon, one latch, one take per track.</li><li><b>A lasting arm</b> through <code>field arm</code> and the UI is chunk 3, after Justin decides where it lives.</li><li><b>Hearing the effects</b> waits on the live-supercollider plan, still a draft with the transport undecided.</li><li><b>Criterion 4 by ear</b>: two instruments sounding one key is still owed; nobody has listened yet.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "arming-plan",
+   "title": "The arming plan",
+   "kicker": "What it means to arm tracks, and the three chunks that build it",
+   "intro": [
+    "Arming is a set of tracks you choose to play or record. The plan has you arm tracks by naming them, because <code>field keys</code> and <code>field record</code> already take targets, and it puts a lasting arm, set with <code>field arm</code> or the UI, last, once Justin decides where it lives.",
+    "Read §2.1 for what this pull request builds, §3 for the decisions with the alternatives they beat, and §9 for what chunk 1 settled. The plan is <code>in-progress</code>, which claims the work is ready to build, so every open question has to be answered or deferred. All three in §7 are deferred explicitly, with who decides and when."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Two calls are Justin's: you choose what is armed, and armed tracks play in unison. The rest of §3 is decided in the plan \"for Justin's review\", so any of it can be overturned in review: refusing a bus over several MIDI tracks rather than arming all of them, one voice host rather than one per instrument, and audio inputs in the order you name the tracks."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/arming/readme.md",
+     "collapsed": false,
+     "note": "The new plan. §2.1 is chunk 1, built here; §2.2 and the daemon rows of §2.3 are chunk 2; §9 records what chunk 1 settled and what is still owed.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 66,
+       "text": "Fixed since the first review: §2.1 steps 3 and 4 now give the line as <code>keys (juno) + bass (bass) live at …</code>, the dry note as <code>keys-bus</code>, and a save as reloading every program. That matches <code>instrumentText</code> and the new instrument-line tests."
+      },
+      {
+       "kind": "context",
+       "line": 179,
+       "text": "Readiness: each of the three questions is deferred explicitly, to Justin before chunk 3, or until someone needs loop takes on two parts or a split-zone controller. None blocks chunk 1 or 2."
+      },
+      {
+       "kind": "context",
+       "line": 191,
+       "text": "This background describes the code before the change: <code>resolveInstrument</code> now lives in <code>src/keys/targets.ts</code>, and the voice host holds <code>voiceDefs</code>. §9 says so."
+      },
+      {
+       "kind": "context",
+       "line": 220,
+       "text": "The §9 table of checks lists only the first five target tests, not the test for a track that several paths reach or the instrument-line tests."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "targets",
+   "title": "Resolving targets to instruments",
+   "kicker": "How a track target becomes the program the voice host plays",
+   "intro": [
+    "<code>resolveKeysTargets</code> turns the command line into a list of <em>armed instruments</em>: a program's absolute path, the track it plays for when it came from a track, and the tracks between the one you named and the MIDI track whose inserts you will not hear. An instrument target goes through <code>resolveInstrument</code>, the same rule as before, which moved here from <code>src/commands/keys.ts</code> unchanged.",
+    "A track target goes through <code>resolveRecordTarget</code>, the label parser <code>field record</code> uses, which loads and validates the whole project. Then <code>midiTracksUnder</code> walks down the track's <code>track:</code> inputs to the tracks whose record entries name an instrument. A MIDI track counts once however many paths reach it, carrying the effects of every path. One found track is armed; none, or several different ones, is an error."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A track's instrument resolves the way the build resolves a record entry's <code>instrument:</code> for rendering a MIDI take, so <code>field keys</code> plays the same program the take renders through."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/keys/targets.ts",
+     "note": "New. Holds the instrument rule and shelf listing moved from the command, and the track rule this chunk adds.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 137,
+       "text": "Fixed since the first review: a MIDI track that several paths reach counts once, with the effects of every path. Checked on a copy of <code>examples/bloom</code>: a bus that places <code>keys</code> at <code>[1]</code> and <code>[5]</code> arms <code>keys</code> once, and a bus over both <code>keys-bus</code> and the <code>keys</code> under it arms <code>keys</code> with <code>keys-bus</code> unheard. A bus over two different MIDI tracks still refuses."
+      },
+      {
+       "kind": "verify",
+       "line": 85,
+       "text": "Fixed since the first review: a track armed again keeps the effects of every target, so <code>field keys creek/track:keys creek/track:keys-bus</code> and the reverse order both name <code>keys-bus</code>. Checked on the same copy."
+      },
+      {
+       "kind": "context",
+       "line": 133,
+       "text": "The dry list holds only the tracks from the one you named down to the MIDI track. Naming <code>keys</code> directly under an EQ'd <code>keys-bus</code> shows no dry note, as §2.1 step 4 now says."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/targets.test.ts",
+     "note": "New. A temporary project with <code>keys</code> and <code>bass</code> as MIDI tracks, <code>keys-bus</code> with an EQ over <code>keys</code>, <code>band</code> over both, and <code>keys-loop</code>, which reaches <code>keys</code> three ways.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The six tests pass at this head: <code>pnpm exec vitest run src/keys src/commands/keys</code> ran 95 tests, with 8 native-helper tests skipped."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "voice-host",
+   "title": "Unison in one voice host",
+   "kicker": "The host takes a list of programs and starts a voice from each on every key",
+   "intro": [
+    "The voice host is a SuperCollider script that <code>field keys</code> runs in <code>sclang</code>. It boots its own <code>scsynth</code>, loads a program's voice, a SynthDef with <code>freq</code>, <code>amp</code>, <code>gate</code>, and <code>out</code> controls, and hands MIDI to <code>sc/voicer.scd</code>, which decides when voices start and stop.",
+    "The host now reads <code>FIELD_INSTRUMENTS</code>, a JSON list of program paths, instead of one path. It renames each SynthDef to <code>field&lt;index&gt;_&lt;name&gt;</code>, so two programs that both call their voice <code>\\bassKey</code> do not replace each other, and its <code>start</code> callback returns a list of synths, one per program. The voicer needs no change, because it stores whatever <code>start</code> returns and passes it back to <code>set</code> and <code>release</code>."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "One host serves every armed instrument, so there is one <code>scsynth</code> to boot, restart, and quit. A rate restart adds every renamed SynthDef again through <code>addAll</code>; a reload loads every program and keeps all the old voices if any fails."
+    }
+   ],
+   "files": [
+    {
+     "path": "sc/voice-host.scd",
+     "note": "The list of programs, the renaming in <code>loadAll</code>, a voice that is a list of synths, and a reload of every program.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 110,
+       "text": "Checked in <code>sclang</code> with no server: <code>juno.scd</code> and <code>bass.scd</code> loaded through <code>voice-load.scd</code> as <code>field0_junoKey</code> and <code>field1_bassKey</code>, three programs that share <code>bassKey</code> got three distinct names, and paths with a space, a double quote, and non-ASCII letters survived the JSON list."
+      },
+      {
+       "kind": "context",
+       "line": 166,
+       "text": "One broken program holds back every reload: a fix saved to another program does not load until the broken one does. §9 records this as intended."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.ts",
+     "note": "<code>instruments</code> replaces <code>instrument</code> in the options and goes to the host as JSON; the <code>reload</code> comment says every program reloads."
+    },
+    {
+     "path": "src/keys/voice-host.test.ts",
+     "note": "The stub host records <code>FIELD_INSTRUMENTS</code>, and the <code>resolveInstrument</code> tests import it from its new home."
+    }
+   ]
+  },
+  {
+   "id": "command",
+   "title": "The command and its line",
+   "kicker": "field keys takes targets, and its instrument line names each armed track",
+   "intro": [
+    "<code>field keys</code> shows an instrument line above its status line, saying whether the voice is starting, live, or restarting. With several targets, the line joins one name per armed instrument with <code>+</code>: a track shows as <code>keys (juno)</code>, an instrument given by program as <code>juno</code>. When a track you named has inserts the voice skips, the line ends with the dry note.",
+    "The command dedupes programs before it starts the host, so naming <code>juno</code> and a track that plays <code>juno</code> starts one <code>juno</code> voice per key, and it watches each program so a save reloads the host."
+   ],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Takes targets, starts one host with the deduped programs, watches each program, and builds the line through <code>instrumentState</code> and <code>instrumentText</code>, exported for the tests.",
+     "checks": []
+    },
+    {
+     "path": "src/commands/keys.test.ts",
+     "note": "New tests for the instrument line: names joined with <code>+</code>, each unheard effect once, and a failed reload.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 38,
+       "text": "The three instrument-line tests pass at this head, in the same run."
+      }
+     ]
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "<code>keys [targets...]</code> is variadic and optional, so <code>field keys</code> with nothing still runs as a MIDI source only."
+    },
+    {
+     "path": "docs/keys.md",
+     "note": "A new \"Play a track\" section: naming tracks, mixing them with instruments, the bus rule, and the dry note."
+    }
+   ]
+  },
+  {
+   "id": "live-plan",
+   "title": "The live voice path, planned",
+   "kicker": "A draft plan for hearing a track's effects on what you play",
+   "intro": [
+    "A track's inserts run inside the daemon <code>field-audiod</code>, and the voice plays in its own <code>scsynth</code>, so nothing you play passes through them. The plan names two obstacles: nothing carries audio between Field's processes, and a live session renders every track except the output track in full when it loads, which a voice played by hand cannot be.",
+    "It proposes an <code>input</code> window kind, live tracks that mix and run their chains in the audio callback, and a shared-memory ring that a small <code>scsynth</code> plugin, <code>FieldOut</code>, writes and the daemon reads. It weighs that against embedding <code>libscsynth</code> in the daemon and against a loopback device."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The plan is a <code>draft</code>, so it claims no readiness, and its three questions, the transport, live tracks with the transport stopped, and several armed tracks under one bus, do not gate this change. It does not reverse keyboard-instrument.md §3 \"Straight to the device\", which handed this work to live-supercollider and kept the voice host's interface, as this plan does."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/live-supercollider/readme.md",
+     "collapsed": false,
+     "note": "Was a one-line stub (\"scsynth as a node in the real-time graph via timestamped OSC\"); now a full draft, moved from <code>later</code> to <code>next</code>.",
+     "checks": []
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "Its SuperCollider section now says bringing the voice into the session graph is live-supercollider's work, without naming the stub's \"timestamped OSC\" mechanism."
+    }
+   ]
+  }
+ ],
+ "project": "arming"
+}
