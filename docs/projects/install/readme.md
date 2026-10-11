@@ -228,10 +228,12 @@ Without a checkout, `install.sh` installs a release by building it.
    accepts only `X.Y.Z`.
 2. It downloads GitHub's source archive of the immutable tag for that
    version, `vX.Y.Z` rather than `v0`, checks that the archive holds one
-   top-level directory whatever its name and that its `package.json`
-   names the version, and moves it to `<data>/<version>/`. A version
-   directory that is not current is never trusted: it is deleted and
-   downloaded again.
+   top-level directory whatever its name, that its `package.json`
+   names the version, and that its `install.sh` writes the shim, and
+   moves it to `<data>/<version>/`. A version whose installer writes no
+   shim is from before release installs, and its `field upgrade` could
+   never upgrade it (§4). A version directory that is not current is
+   never trusted: it is deleted and downloaded again.
 3. It runs the same steps a checkout install runs, with the same
    prerequisite checks, plus curl and tar: `pnpm install
    --frozen-lockfile`, the CLI and UI builds, and the daemon build. It
@@ -392,6 +394,19 @@ a private one. The website and the README then lead with this command.
   it replaced, so going back is one `ln -sfn`. Keeping every version
   lost to disk use: each holds its own `node_modules`, JUCE build, and
   worker environments.
+- **An exact tag pins a release install, and the installer refuses a
+  version from before release installs** (§3.2). `release.conf` records
+  `FIELD_REF` whatever it names, so `FIELD_REF=v0.3.0` keeps repairing
+  0.3.0 until `FIELD_REF=v0 field upgrade` records `v0` again. Two
+  alternatives lost. Projector's `project upgrade` takes only the
+  repository from what pip recorded, so `PROJECTOR_REF` holds for one
+  command and the next upgrade returns to `v0`. Here that would make a
+  fork that follows its `main` name `FIELD_REF` on every upgrade.
+  Treating an exact tag apart from a branch lost because the
+  installer cannot tell them apart by name. The way back works only
+  for a version whose `field upgrade` reads `FIELD_REF`, and 0.2.0's
+  runs its own `install.sh` as a checkout's, so the installer refuses
+  any version whose `install.sh` writes no shim.
 
 ## 5 Acceptance criteria
 

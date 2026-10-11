@@ -325,6 +325,8 @@ interface Publish {
   // The archive's top-level directory, which GitHub names <repo>-<version>.
   prefix?: string;
   archive?: boolean;
+  // The version's own install.sh, when it is not this one.
+  installer?: string;
 }
 
 // Releases a version as the Release workflow does: package.json raised on
@@ -336,6 +338,7 @@ function publish(version: string, options: Publish = {}): void {
   const ref = options.ref ?? 'v0';
   const manifest = `{\n  "name": "field",\n  "version": "${version}"\n}\n`;
   write(join(upstream, 'package.json'), manifest);
+  if (options.installer !== undefined) write(join(upstream, 'install.sh'), options.installer);
   git(upstream, 'commit', '--quiet', '-am', `release ${version}`);
   git(upstream, 'tag', `v${version}`);
   write(join(serve, 'raw', slug, ref, 'package.json'), manifest);
@@ -916,6 +919,17 @@ posix('install.sh installs a release', () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("names version '../../x', which is not X.Y.Z");
     expect(existsSync(data)).toBe(false);
+  });
+
+  it('refuses a version older than release installs, whose field upgrade could not leave it', () => {
+    publish('0.2.0', { installer: '#!/usr/bin/env bash\necho "run this from a Field checkout" >&2\nexit 69\n' });
+    const run = release();
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('0.2.0 predates release installs');
+    expect(run.stderr).toContain('0.2.0 did not install, and nothing was switched to it');
+    expect(existsSync(join(data, 'current'))).toBe(false);
+    expect(existsSync(join(data, '0.2.0'))).toBe(false);
+    expect(run.log.some((line) => line.startsWith('pnpm'))).toBe(false);
   });
 
   it('follows the repository and ref it was installed from', () => {

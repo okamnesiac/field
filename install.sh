@@ -646,6 +646,11 @@ download_release() {
   fi
   [ "$(package_version < "$top/package.json")" = "$version" ] ||
     die "$url holds version $(package_version < "$top/package.json"), not $version"
+  # A version from before release installs has a `field upgrade` that runs
+  # its own install.sh as a checkout's, never reads FIELD_REF, and so could
+  # never move off it. Its installer writes no shim.
+  grep -qF "$SHIM_MARKER" "$top/install.sh" ||
+    die "$version predates release installs, so its field upgrade could not upgrade it — install a newer release, or clone the repository and check out v$version"
   mv "$top" "$DATA_DIR/$version"
   rm -rf "$staging"
 }

@@ -199,8 +199,16 @@ curl -fsSL https://raw.githubusercontent.com/you/field/main/install.sh | FIELD_R
 
 The installer reads the version from `package.json` at `FIELD_REF` and
 downloads the archive of that version's tag, so the ref can be a branch,
-`v0`, or an exact tag such as `v0.2.0`, which pins the install to that
-release. To follow `v0` again, run `FIELD_REF=v0 field upgrade`.
+`v0`, or an exact tag, `vX.Y.Z`, which pins the install to that
+release. Each `field upgrade` then repairs that release instead of
+moving to a newer one. To follow `v0` again, run
+`FIELD_REF=v0 field upgrade`.
+
+The installer refuses a release from before release installs, such as
+0.2.0. That version's `field upgrade` runs its own `install.sh` as if
+the version were a checkout, and never reads `FIELD_REF`, so an install
+pinned to it could not move off it. To run such a version, clone the
+repository and check out its tag.
 
 ### Remove a release install
 
