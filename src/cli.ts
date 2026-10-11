@@ -753,7 +753,8 @@ program
         return;
       }
       let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
-      const { AudiodClient, BUILD_DAEMON, daemonBinary } = await import('./audiod/client.js');
+      const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
+      const { BUILD_DAEMON } = await import('./remedies.js');
       if (!daemonBinary()) {
         if (process.platform !== 'darwin') {
           // afplay is a macOS binary: anywhere else the fallback could only

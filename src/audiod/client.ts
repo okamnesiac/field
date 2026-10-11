@@ -4,6 +4,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUILD_DAEMON } from '../remedies.js';
 import { socketPathFor as sharedSocketPath } from '../socketPath.js';
 import type { z } from 'zod';
 import {
@@ -58,14 +59,6 @@ export function daemonBinary(): string | undefined {
   );
   return existsSync(built) ? built : undefined;
 }
-
-// The command that builds the daemon, for every message that needs to name
-// one. Those messages fire inside a song project, where `pnpm build:native`
-// is not a script, and `field upgrade audiod` works from any directory
-// (install.md §2.5). It runs install.sh, which is bash, so Windows still
-// builds in the checkout (install.md §7.6).
-export const BUILD_DAEMON =
-  process.platform === 'win32' ? 'pnpm build:native in the field checkout' : 'field upgrade audiod';
 
 function socketPathFor(root: string): string {
   return sharedSocketPath(root, SOCKET_RELATIVE);

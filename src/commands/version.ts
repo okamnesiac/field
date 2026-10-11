@@ -10,7 +10,7 @@ import {
   PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION,
   SOCKET_RELATIVE as AUDIOD_SOCKET,
 } from '../audiod/protocol.js';
-import { BUILD_DAEMON } from '../audiod/client.js';
+import { BUILD_CLI, BUILD_DAEMON } from '../remedies.js';
 import { SETUP_SPECS } from './generate.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { defaultCredentialStore, resolveToken, type CredentialStore, type TokenSource } from '../remote/credentials.js';
@@ -320,7 +320,7 @@ export function formatVersionReport(report: VersionReport, root: string): string
   const build = cli.commit
     ? `${short(cli.commit)}${cli.branch && cli.branch !== 'HEAD' ? ` on ${cli.branch}` : ''}` +
       `${cli.dirtyFiles ? `, ${cli.dirtyFiles} file${cli.dirtyFiles === 1 ? '' : 's'} uncommitted` : ''}` +
-      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — pnpm build to update` : ''}` +
+      `${cli.checkoutCommit ? `; checkout now at ${short(cli.checkoutCommit)} — ${BUILD_CLI} to update` : ''}` +
       // No count here: checkoutDirtyFiles is the checkout's absolute
       // current state, but any number in this sentence reads as a delta
       // since the build — and a stamp taken from a dirty tree makes
@@ -329,7 +329,7 @@ export function formatVersionReport(report: VersionReport, root: string): string
       // only needs the fact.
       `${
         cli.checkoutDirtyFiles !== undefined
-          ? '; checkout has changed since the build — pnpm build to update'
+          ? `; checkout has changed since the build — ${BUILD_CLI} to update`
           : ''
       }`
     : 'not a git checkout';

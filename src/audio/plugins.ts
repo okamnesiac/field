@@ -14,7 +14,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path';
 import { z } from 'zod';
 
-import { BUILD_DAEMON, daemonBinary } from '../audiod/client.js';
+import { daemonBinary } from '../audiod/client.js';
+import { BUILD_DAEMON } from '../remedies.js';
 import { PPQ } from '../constants.js';
 import { sha256FileSync } from '../hash.js';
 import type { PluginInsert } from '../schema/effects.js';

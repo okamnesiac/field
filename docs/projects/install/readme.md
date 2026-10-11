@@ -65,7 +65,7 @@ install.sh: run this from a Field checkout: git clone https://github.com/okamnes
 
 | Target | Runs |
 | --- | --- |
-| `cli` | `pnpm install --frozen-lockfile`, `pnpm run build`, and `pnpm add -g <checkout>` unless pnpm's global `field` already links this checkout. |
+| `cli` | `pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run build:ui`, and `pnpm add -g <checkout>` unless pnpm's global `field` already links this checkout. |
 | `audiod` | `pnpm run build:native`. |
 | `workers` | `field setup --existing` (§2.4). |
 | `all` | `cli`, `audiod`, `workers`. |
@@ -136,10 +136,14 @@ with `core.fileMode` off does not keep.
 
 The installer's own messages name `field upgrade <target>` as the way
 back when pnpm's `field` links this checkout, and the script's path
-otherwise. The eight daemon error messages name `BUILD_DAEMON` from
-`src/audiod/client.ts`, which is `field upgrade audiod`, and on Windows
-`pnpm build:native` in the checkout, because `field upgrade` refuses
-there (§7.6).
+otherwise. The CLI's own remedies come from `src/remedies.ts`, so they
+name the upgrade rather than a pnpm script that is not a script inside a
+song project. The eight daemon error messages name `BUILD_DAEMON`, which
+is `field upgrade audiod`. `field --version` names `BUILD_CLI` for a
+stale build, and `field ui` names `BUILD_UI` for a missing client and
+`INSTALL_UI` for a missing app shell, each of which is
+`field upgrade cli`. On Windows each names its pnpm script in the
+checkout instead, because `field upgrade` refuses there (§7.6).
 
 ### 2.6 `status` compares what is installed with its source
 
@@ -147,6 +151,7 @@ there (§7.6).
 | --- | --- | --- |
 | Checkout | it is not behind its upstream after a fetch | `git rev-list --count HEAD..@{upstream}`, as Projector's installer does, and `@{upstream}..HEAD` for `repo-ahead` |
 | CLI | `dist/` was built from `HEAD` with the same number of uncommitted changes | `dist/build-info.json`, which `pnpm build` stamps and `field --version` already reads |
+| UI | no tracked file it may bundle is newer than `ui/dist/index.html`: anything under `ui/` or `src/` but a test, and `pnpm-lock.yaml` | file mtimes, because Vite rewrites `index.html` on every build (§8.1) |
 | Daemon | no tracked file under `native/audiod` is newer than the binary | file mtimes, with the binary touched after each build (§8.1) |
 | Workers | each one set up passes `uv sync --check --locked` | `field setup --check` |
 
@@ -161,7 +166,9 @@ there (§7.6).
 | `src/commands/generate.ts` | `selectWorkers`, `partitionExisting`, and `checkWorkers`; `setupWorker` takes `existing`. |
 | `src/cli.ts` | `field upgrade`, and `--existing` and `--check` on `field setup`. |
 | `scripts/gen-plan-limits.ts` | Writes the header only when it changes (§8.1). |
-| `src/audiod/client.ts` | `BUILD_DAEMON`, which the eight daemon error messages name. |
+| `src/remedies.ts` | New. `BUILD_CLI`, `BUILD_UI`, `INSTALL_UI`, and `BUILD_DAEMON`, the commands the CLI's messages name (§2.5). |
+| `src/audiod/client.ts`, `src/audio/plugins.ts`, `src/audio/render-daemon.ts`, `src/keys/helper.ts` | The daemon error messages name `BUILD_DAEMON`. |
+| `src/commands/version.ts`, `src/commands/ui.ts` | A stale build, a missing client, and a missing app shell name `field upgrade cli`. |
 | `docs/install.md` | New. How install and upgrade work, and every status row. |
 | `docs/cli.md` | The install section, `field upgrade`, and the new `field setup` options. |
 | `README.md`, `examples/bloom/README.md` | Lead with `./install.sh`. |
@@ -264,7 +271,8 @@ a private one. The website and the README then lead with this command.
   choice too.
 - **Build every time.** `pnpm install` builds through `prepare` only
   when it installed a dependency, so a second run after a `git pull`
-  would build nothing. The build takes about three seconds.
+  would build nothing. The CLI build takes about three seconds, and the
+  UI build about two.
 - **`--frozen-lockfile`.** An installer has no business rewriting the
   checkout's lockfile, and pnpm's error says which `package.json` moved
   ahead of it.
@@ -280,6 +288,11 @@ a private one. The website and the README then lead with this command.
 - **Releases ship built artifacts**, not a source archive (§3.1). The
   source archive is what Projector installs from, and for Field it would
   make every user install pnpm and a compiler and wait out a JUCE build.
+- **The UI builds with the CLI.** `field ui` serves `ui/dist`, which
+  bundles code from `src/`, so a CLI built without its UI leaves
+  `field ui` stale or refusing. The `cli` target builds both rather than
+  growing a `ui` target, because `field upgrade cli` is then the one
+  remedy for either.
 
 ## 5 Acceptance criteria
 
@@ -405,6 +418,16 @@ first platforms.
 - **`pnpm install` builds only when it installs.** Verified against pnpm
   11.15.1: a repeat `pnpm install` prints "Already up to date" and skips
   `prepare`. Hence §4's "build every time".
+- **The UI needs no install step of its own.** `ui/` is a pnpm
+  workspace member, so the root `pnpm install` already installs its
+  dependencies, the `electron` package included, and `build:ui` runs
+  `tsc --noEmit` and `vite build` in about two seconds. The installer
+  runs `build:ui` without checking for `ui/`: `package.json` names the
+  script and `pnpm-workspace.yaml` names the directory in the same commit
+  as the installer, so a checkout without `ui/` is broken, and the failed
+  build says so. The `status` row compares mtimes as the daemon's does,
+  over `ui/`, `src/`, and `pnpm-lock.yaml`, because the bundle imports
+  from `src/` and nothing cheaper names which files.
 - **pnpm refuses to link without its bin directory on PATH**, with
   "Run pnpm setup". The installer checks first, so its own message names
   the command to run again.

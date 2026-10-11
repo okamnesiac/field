@@ -32,9 +32,9 @@ pull`, `field upgrade` runs the same installer from any directory, and
 `field upgrade status` says what is out of date.
 [install.md](install.md) describes each step and each status row. On
 Windows the installer does not run yet: run `pnpm install`, `pnpm
-build`, `pnpm build:native`, and `pnpm add -g .` in the checkout. To run
-from source without installing, use `pnpm field <args>`. To remove it,
-`pnpm remove -g field`.
+build`, `pnpm build:ui`, `pnpm build:native`, and `pnpm add -g .` in the
+checkout. To run from source without installing, use `pnpm field
+<args>`. To remove it, `pnpm remove -g field`.
 
 Build the daemon before you build, play or record anything.
 `field-audiod` is the renderer as well as the player: every track's
@@ -333,13 +333,10 @@ as it picks up an edit you make in an editor. Solo is the exception: it
 changes what you hear and writes nothing. Ctrl-c, or closing the window,
 stops the transport and ends the session.
 
-The window is a web client served by `field` itself, so build it once
-first. `field ui` refuses with that command when the build is missing:
-
-```sh
-pnpm --dir ui build
-field ui tall-grass
-```
+The window is a web client served by `field` itself from `ui/dist`,
+which `./install.sh` and `field upgrade cli` build with the CLI. When the
+build is missing, `field ui` refuses and names `field upgrade cli`, or on
+Windows `pnpm build:ui` in the checkout.
 
 `field ui` prints the URL it serves on, then opens the app window. The
 URL carries a token that the server checks, and it serves only

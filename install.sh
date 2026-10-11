@@ -146,10 +146,12 @@ install_cli() {
   # checkout's lockfile; a checkout whose package.json moved ahead of it
   # gets pnpm's own error saying so.
   pnpm --dir "$REPO" install --frozen-lockfile
-  # `pnpm install` builds through `prepare` only when it installed
-  # something, so the build runs here too, every time: a checkout edited
-  # without a commit is as stale as one that moved.
+  # `pnpm install` builds the CLI through `prepare` only when it installed
+  # something, so both builds run here, every time: a checkout edited
+  # without a commit is as stale as one that moved. The UI builds with the
+  # CLI because it bundles code from src/.
   pnpm --dir "$REPO" run build
+  pnpm --dir "$REPO" run build:ui
   link_cli
 }
 
@@ -321,27 +323,45 @@ console.log(`${info.commit ?? "-"} ${info.dirtyFiles ?? 0}`);' 2>/dev/null) || t
   row cli-current "built from ${head:0:7}"
 }
 
-# The first tracked daemon source newer than the binary. install_audiod
-# touches the binary after each build, so this names a source changed
-# since the installer last built the daemon.
-audiod_changed() {
-  local file
+# The first tracked file under the given paths that is newer than the
+# build output $1, leaving out tests, which no build reads.
+newer_than() {
+  local built="$1" file
+  shift
   while IFS= read -r -d '' file; do
-    if [ "$REPO/$file" -nt "$1" ]; then
+    case "$file" in *.test.*) continue ;; esac
+    if [ "$REPO/$file" -nt "$built" ]; then
       printf '%s\n' "$file"
       return 0
     fi
-  done < <(git -C "$REPO" ls-files -z -- native/audiod 2>/dev/null)
+  done < <(git -C "$REPO" ls-files -z -- "$@" 2>/dev/null)
   return 1
 }
 
+# Vite rewrites ui/dist/index.html on every build. The UI bundles its own
+# sources, code it imports from src/, and the packages pnpm-lock.yaml
+# pins. Which files under src/ it imports is the bundler's to know, so
+# the comparison takes them all.
+report_ui() {
+  local index="$REPO/ui/dist/index.html" changed
+  if [ ! -f "$index" ]; then
+    warn_row ui-missing "ui/dist holds no build, so field ui cannot open — run $(rerun cli)"
+  elif changed="$(newer_than "$index" ui src pnpm-lock.yaml)"; then
+    warn_row ui-stale "$changed changed since the UI was built — run $(rerun cli)"
+  else
+    row ui-current "$(tilde "$REPO/ui/dist")"
+  fi
+}
+
+# install_audiod touches the binary after each build, so a daemon source
+# newer than it changed since the installer last built the daemon.
 report_audiod() {
   local binary="$REPO/$AUDIOD_RELATIVE" changed
   [ -z "${FIELD_AUDIOD:-}" ] ||
     row audiod-override "FIELD_AUDIOD is set, so field runs $(tilde "$FIELD_AUDIOD") instead of this build"
   if [ ! -x "$binary" ]; then
     warn_row audiod-missing "field-audiod is not built — run $(rerun audiod)"
-  elif changed="$(audiod_changed "$binary")"; then
+  elif changed="$(newer_than "$binary" native/audiod)"; then
     warn_row audiod-stale "$changed changed since field-audiod was built — run $(rerun audiod)"
   else
     row audiod-current "$(tilde "$binary")"
@@ -369,6 +389,7 @@ show_status() {
   report_checkout
   report_tools
   report_cli
+  report_ui
   report_audiod
   report_workers
 }

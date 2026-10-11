@@ -30,7 +30,7 @@ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): num
   if ((deps.platform ?? process.platform) === 'win32') {
     throw new Error(
       'field upgrade runs install.sh, which does not support Windows yet — in the field checkout, run ' +
-        'pnpm install --frozen-lockfile, pnpm build, and pnpm build:native',
+        'pnpm install --frozen-lockfile, pnpm build, pnpm build:ui, and pnpm build:native',
     );
   }
   const installer = deps.installer ?? installerPath();

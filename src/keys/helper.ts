@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
-import { BUILD_DAEMON, daemonBinary } from '../audiod/client.js';
+import { daemonBinary } from '../audiod/client.js';
+import { BUILD_DAEMON } from '../remedies.js';
 import type { KeyboardLayout } from './position.js';
 import type { MidiMessage } from './session.js';
 

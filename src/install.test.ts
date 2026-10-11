@@ -98,6 +98,10 @@ case "$1 \${2:-}" in
     mkdir -p "$dir/dist"
     node "$dir/scripts/stamp-build.mjs" > /dev/null
     cat "$FAKE_CLI" > "$dir/dist/cli.js" ;;
+  "run build:ui")
+    [ -z "\${FAKE_UI_FAILS:-}" ] || exit 2
+    mkdir -p "$dir/ui/dist"
+    printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
   "run build:native")
     [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
     # A daemon already built is left alone, as CMake leaves field-audiod
@@ -130,12 +134,14 @@ beforeEach(() => {
   log = join(root, 'log');
 
   // Only what the installer reads: itself, the marker that makes a
-  // checkout, the real build stamp, and daemon sources to be newer than.
+  // checkout, the real build stamp, and UI and daemon sources to be newer
+  // than.
   copyFileSync(join(packageRoot, 'install.sh'), join(root, 'install.sh'));
   write(join(upstream, 'install.sh'), readFileSync(join(root, 'install.sh'), 'utf8'), 0o755);
   write(join(upstream, 'src/cli.ts'), '');
   write(join(upstream, 'package.json'), '{ "name": "field" }\n');
   write(join(upstream, 'scripts/stamp-build.mjs'), readFileSync(join(packageRoot, 'scripts/stamp-build.mjs'), 'utf8'));
+  write(join(upstream, 'ui/src/main.tsx'), '');
   write(join(upstream, 'native/audiod/CMakeLists.txt'), '');
   write(join(upstream, 'native/audiod/src/main.cpp'), '');
   write(join(upstream, '.gitignore'), 'dist/\nnative/audiod/build/\n');
@@ -211,25 +217,33 @@ function linkTo(target: string): void {
 }
 
 posix('install.sh cli', () => {
-  it('installs, builds, and links the checkout, in that order', () => {
+  it('installs, builds the CLI and the UI, and links the checkout, in that order', () => {
     const run = install('cli');
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
     expect(changes(run)).toEqual([
       `pnpm --dir ${repo} install --frozen-lockfile`,
       `pnpm --dir ${repo} run build`,
+      `pnpm --dir ${repo} run build:ui`,
       `pnpm add -g ${repo}`,
     ]);
     expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(repo);
     expect(rows(run.stdout).get('linked')).toBe('~/pnpm/bin/field -> ~/checkout');
   });
 
-  it('leaves a link that already points here alone', () => {
+  it('leaves a link that already points here alone, and builds anyway', () => {
     linkTo(repo);
     const run = install('cli');
     expect(run.status).toBe(0);
     expect(run.log).not.toContain(`pnpm add -g ${repo}`);
     expect(run.log).toContain(`pnpm --dir ${repo} run build`);
+    expect(run.log).toContain(`pnpm --dir ${repo} run build:ui`);
+  });
+
+  it('stops before linking when the UI does not build', () => {
+    const run = install('cli', { FAKE_UI_FAILS: '1' });
+    expect(run.status).toBe(2);
+    expect(run.log.some((line) => line.startsWith('pnpm add'))).toBe(false);
   });
 
   it('moves a link from another checkout, and says so', () => {
@@ -362,6 +376,7 @@ posix('install.sh status', () => {
     expect(status.get('repo-current')).toBe('main matches origin/main');
     expect(status.get('cli-missing')).toBe('pnpm links no field — run ~/checkout/install.sh cli');
     expect(status.get('cli-unbuilt')).toContain('dist/ holds no build');
+    expect(status.get('ui-missing')).toBe('ui/dist holds no build, so field ui cannot open — run ~/checkout/install.sh cli');
     expect(status.get('audiod-missing')).toBe('field-audiod is not built — run ~/checkout/install.sh audiod');
     expect(status.get('workers')).toBe('unknown until the CLI is built');
     expect(status.get('cmake')).toBe('3.30.2');
@@ -372,6 +387,7 @@ posix('install.sh status', () => {
     const status = rows(install('status').stdout);
     expect(status.get('cli')).toBe('~/pnpm/bin/field -> ~/checkout');
     expect(status.get('cli-current')).toMatch(/^built from [0-9a-f]{7}$/);
+    expect(status.get('ui-current')).toBe('~/checkout/ui/dist');
     expect(status.get('audiod-current')).toBe(`~/checkout/${AUDIOD}`);
     expect(status.get('worker-current')).toBe('field-aced');
     expect(status.get('worker-stale')).toBe('field-voiced is out of date — run field setup voiced');
@@ -396,6 +412,27 @@ posix('install.sh status', () => {
     expect(rows(install('status').stdout).get('cli-stale')).toBe(
       'dist/ was built with 0 uncommitted changes, and the checkout has 1 — run field upgrade cli',
     );
+  });
+
+  it('names the file the UI bundles that changed since the UI was built', () => {
+    install();
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(join(repo, 'ui/dist/index.html'), past, past);
+    expect(rows(install('status').stdout).get('ui-stale')).toBe(
+      'src/cli.ts changed since the UI was built — run field upgrade cli',
+    );
+  });
+
+  it('leaves tests out of the UI comparison, because no build reads them', () => {
+    install();
+    const built = new Date(Date.now() - 30_000);
+    const sources = new Date(Date.now() - 60_000);
+    utimesSync(join(repo, 'ui/dist/index.html'), built, built);
+    for (const file of ['src/cli.ts', 'ui/src/main.tsx']) utimesSync(join(repo, file), sources, sources);
+    write(join(repo, 'src/cli.test.ts'), '');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '--quiet', '-m', 'a test');
+    expect(rows(install('status').stdout).get('ui-current')).toBe('~/checkout/ui/dist');
   });
 
   it('names the daemon source that changed since the daemon was built', () => {
