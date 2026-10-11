@@ -32,16 +32,33 @@ describe('sclangCommand', () => {
     expect(sclangCommand({ PATH: join(root, 'bin') }, 'linux')).toBe(sclang);
   });
 
-  it('finds sclang.exe on PATH on Windows, through PATHEXT', () => {
+  it('finds sclang.exe on PATH on Windows', () => {
     const sclang = executable(join(root, 'bin', 'sclang.exe'));
-    expect(sclangCommand({ PATH: join(root, 'bin'), PATHEXT: '.COM;.EXE;.BAT;.CMD' }, 'win32')).toBe(sclang);
+    expect(sclangCommand({ PATH: join(root, 'bin') }, 'win32')).toBe(sclang);
   });
 
   it('reads Windows variables without regard to case, as a copied environment spells them', () => {
     // Windows names PATH `Path`; a copy of process.env loses the
     // case-insensitive lookup, so the search must not depend on spelling.
     const sclang = executable(join(root, 'bin', 'sclang.exe'));
-    expect(sclangCommand({ Path: join(root, 'bin'), PathExt: '.EXE' }, 'win32')).toBe(sclang);
+    expect(sclangCommand({ Path: join(root, 'bin') }, 'win32')).toBe(sclang);
+  });
+
+  it('passes over a batch file on PATH on Windows, which a spawn without a shell cannot start', () => {
+    // Node refuses .bat and .cmd without a shell (spawn EINVAL), so a
+    // sclang.cmd shim must not shadow the installed sclang.exe.
+    executable(join(root, 'bin', 'sclang.cmd'));
+    const installed = executable(join(root, 'Program Files', 'SuperCollider-3.13.0', 'sclang.exe'));
+    expect(sclangCommand({ PATH: join(root, 'bin'), ProgramFiles: join(root, 'Program Files') }, 'win32')).toBe(
+      installed,
+    );
+  });
+
+  it('refuses a FIELD_SCLANG batch file on Windows, and says why', () => {
+    const wrapper = executable(join(root, 'bin', 'sclang-wrapper.cmd'));
+    expect(() => sclangCommand({ FIELD_SCLANG: wrapper, PATH: join(root, 'bin') }, 'win32')).toThrow(
+      'which Windows will not start without a shell',
+    );
   });
 
   it('does not take an extensionless sclang on Windows, which cannot run there', () => {
@@ -62,7 +79,7 @@ describe('sclangCommand', () => {
   });
 
   it('searches PATH for a bare FIELD_SCLANG name on Windows', () => {
-    const wrapper = executable(join(root, 'bin', 'sclang-wrapper.cmd'));
+    const wrapper = executable(join(root, 'bin', 'sclang-wrapper.exe'));
     expect(sclangCommand({ FIELD_SCLANG: 'sclang-wrapper', PATH: join(root, 'bin') }, 'win32')).toBe(wrapper);
   });
 

@@ -74,19 +74,19 @@ function variable(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platfor
   return key === undefined ? undefined : env[key];
 }
 
-// A command name as the platform's shell would find it on PATH. Windows
-// runs `sclang` as `sclang.exe`, so a name without an extension is tried
-// with each PATHEXT extension and never bare: an extensionless file there
+// The extensions a spawn without a shell can start on Windows. PATHEXT also
+// lists .bat and .cmd, but Node refuses those without a shell (spawn
+// EINVAL, since the CVE-2024-27980 releases), and both callers spawn
+// without one.
+const WINDOWS_EXECUTABLES = ['.com', '.exe'];
+
+// A command name found on PATH the way a spawn can start it. Windows runs
+// `sclang` as `sclang.exe`, so a name without an extension is tried with
+// each executable extension and never bare: an extensionless file there
 // cannot run.
 function onPath(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string | undefined {
   const windows = platform === 'win32';
-  const names =
-    windows && extname(name) === ''
-      ? (variable(env, 'PATHEXT', platform) ?? '.COM;.EXE;.BAT;.CMD')
-          .split(';')
-          .filter((ext) => ext !== '')
-          .map((ext) => name + ext.toLowerCase())
-      : [name];
+  const names = windows && extname(name) === '' ? WINDOWS_EXECUTABLES.map((ext) => name + ext) : [name];
   for (const dir of (variable(env, 'PATH', platform) ?? '').split(windows ? ';' : ':')) {
     if (dir === '') continue;
     for (const candidate of names.map((n) => join(dir, n))) {
@@ -146,6 +146,12 @@ export function sclangCommand(
         : undefined
       : onPath(override, env, platform);
     if (found === undefined) throw new Error(`FIELD_SCLANG points at a missing binary: ${override}`);
+    if (platform === 'win32' && !WINDOWS_EXECUTABLES.includes(extname(found).toLowerCase())) {
+      throw new Error(
+        `FIELD_SCLANG points at ${found}, which Windows will not start without a shell; ` +
+          'point it at sclang.exe or an .exe wrapper',
+      );
+    }
     return found;
   }
   const found = onPath('sclang', env, platform) ?? installedSclang(env, platform);
