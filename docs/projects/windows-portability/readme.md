@@ -454,12 +454,14 @@ Recorded so the next reader does not re-derive it.
    own retry knobs do not cover every op in its recursive walk. The
    guards this chunk owed are retired: the 9 in `version.test.ts` (its
    fake daemons now bind what `socketPathFor` answers), the serve-mode
-   describes, live-session's four socket tests, and the recording
-   guards from chunk 2's third amendment (three tests in `click-daemon`,
-   the describes in `punch-daemon` and `record-daemon`) — 8/8 protocol,
-   12/12 play-daemon, 25+1 hosting with live chains, on Windows. The
-   definition-of-done transcript, from a real session with a dirty
-   chain, steered from a second terminal:
+   describes, live-session's four socket tests, the recording guards
+   from chunk 2's third amendment (three tests in `click-daemon`, the
+   describes in `punch-daemon` and `record-daemon`), and
+   `record-midi-daemon`'s describe from its fourth, whose take tests
+   then skip on Windows for want of a virtual MIDI source (§7.2) —
+   8/8 protocol, 12/12 play-daemon, 25+1 hosting with live chains, on
+   Windows. The definition-of-done transcript, from a real session with
+   a dirty chain, steered from a second terminal:
 
    ```text
    playing  1.4.731 (0:01.9)
