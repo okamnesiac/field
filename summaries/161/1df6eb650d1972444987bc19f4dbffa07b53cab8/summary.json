@@ -1,0 +1,331 @@
+{
+ "version": 1,
+ "name": "Windows named-pipe transport",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 161,
+  "title": "The transport arrives: field plays live on Windows over a named pipe (windows-portability.md chunks 4-5)",
+  "head": "1df6eb650d1972444987bc19f4dbffa07b53cab8",
+  "headRef": "windows/transport",
+  "base": "c82062a9a61ed5709a279adbc5435b37e1cb4cfc",
+  "baseRef": "windows/build",
+  "basePr": 160
+ },
+ "overview": {
+  "summary": [
+   "<code>field-audiod</code> is the native audio daemon. The CLI spawns it on demand for each project and talks to it over a <b>control channel</b> that carries newline-delimited JSON requests and broadcast events. The daemon exits on its own when idle. On macOS and Linux that channel is a Unix domain socket at <code>.field/audiod.sock</code>. Node cannot open a Unix socket on Windows, and the daemon's socket code was POSIX-only, so until this change <code>field play</code>, <code>field transport</code> and live rendering could not run on Windows at all.",
+   "This pull request gives Windows its own transport: a <b>named pipe</b>, the Windows local IPC object that Node dials natively. The CLI derives the pipe's name from the project root and hands it to the daemon with <code>--socket</code>, so both ends use one string. The pipe admits only the user who runs the daemon, and only from the local machine. In the daemon, request handling moves above the I/O layer and is shared by both platforms. Only accepting, reading, writing and shutting down split per platform, and the POSIX arm moves unchanged.",
+   "Two small pieces of the same plan ride along. <code>field play</code> without a built daemon now refuses the <code>afplay</code> fallback on every platform except macOS, before it announces the fallback. CI also gains a <code>windows-latest</code> job. The tests that were skipped on Windows until the transport existed run there now, the recording tests included, with two exceptions the plan tracks: crash recovery fails on the Windows runner for a reason not yet found, and the MIDI take tests have no source to record, because Windows has no virtual MIDI ports for <code>field keys</code> to publish. The Python generation workers keep their POSIX transport, which is a later chunk of the plan.",
+   "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Concern</th><th>macOS and Linux</th><th>Windows, after this change</th></tr></thead><tbody><tr><td>Channel</td><td>Unix socket at <code>.field/audiod.sock</code>, relative to the project root</td><td>Named pipe <code>\\\\.\\pipe\\field-&lt;hash&gt;</code>, hashed from the lowercased project root</td></tr><tr><td>One daemon per project</td><td><code>flock</code> on <code>audiod.sock.lock</code></td><td><code>FILE_FLAG_FIRST_PIPE_INSTANCE</code>: a second daemon cannot create the first instance</td></tr><tr><td>Who may connect</td><td>The socket file's permissions</td><td>A DACL for the daemon's user only, and <code>PIPE_REJECT_REMOTE_CLIENTS</code></td></tr><tr><td>Waking readers at shutdown</td><td><code>shutdown(fd, SHUT_RD)</code>, a lasting state</td><td><code>CancelIoEx</code>, a one-time cancel, plus a <code>running</code> check before and after each read</td></tr></tbody></table></div>"
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Named pipe</b>: Windows local IPC, addressed as <code>\\\\.\\pipe\\name</code>. A server creates <b>instances</b>, and each client connection uses one instance.</li><li><b>Parked instance</b>: the one instance the daemon keeps ready for the next client.</li><li><b><code>ConnectNamedPipe</code></b>: the server call that waits for a client on an instance. With <b>overlapped</b> (asynchronous) I/O it returns at once and completes later through an <code>OVERLAPPED</code> record and an event.</li><li><b><code>FILE_FLAG_FIRST_PIPE_INSTANCE</code></b>: makes instance creation fail if the name already exists, which gives the one-owner guarantee.</li><li><b>DACL</b>: the access list on a Windows object, saying which accounts may open it and how.</li><li><b><code>CancelIoEx</code></b>: cancels the I/O pending on a handle at that moment. Later I/O is unaffected.</li><li><b><code>SHUT_RD</code></b>: the POSIX half-close the socket arm uses. Every later read returns end-of-file.</li><li><b>Idle exit</b>: the daemon quits when no client is connected, nothing plays, and it has been quiet for the idle period.</li><li><b><code>MessageManagerLock</code></b>: JUCE's lock on the daemon's message thread. Every request but <code>session</code> takes it.</li></ul>"
+   },
+   {
+    "id": "history",
+    "title": "Review history so far",
+    "html": "<ul class=\"tight\"><li>The author's own reviews on <code>a63ec97</code> found an <code>OVERLAPPED</code> record the kernel could write after its stack frame was gone, on the ordinary shutdown path. It is fixed: every accept iteration now reaps a pending connect before it exits.</li><li>The <code>afplay</code> guard widened from Windows to every non-macOS platform after #162's review, and the plan's §2.2 records why.</li><li>Projector's review on <code>1eff8a0</code> found that <code>field play</code> announced the <code>afplay</code> fallback before refusing it.</li><li>Projector's review on <code>6a529d1</code> found an accept-loop spin, a pipe readable by every local account, <code>docs/architecture.md</code> left behind, and wrong CI comments.</li><li>All five are fixed at <code>7355d7d</code>, along with the shutdown read gap that review listed as a suggestion. Projector's review there was clean.</li><li><code>0b26d94</code> merges the base and fixes or skips the tests that failed on the first <code>windows</code> CI run. Projector's review there was clean, and both CI jobs then passed on it, <code>windows</code> included.</li><li><code>beb3394</code> merges main's keyboard and MIDI work in through the base, and lifts <code>record-midi-daemon</code>'s guard. Main's MIDI requests ride the shared request handling, so the pipe serves them. Projector's review there was clean.</li><li><code>1df6eb6</code> only merges a base commit that rewrites a test comment outside this pull request, and this pull request's own change is unchanged. Projector's review there is clean, and a human approval is what remains. Every Projector review read the code without running it, because the pull request's author has no write access to the repository.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "The pipe name both ends agree on",
+   "kicker": "How the CLI names a project's pipe and tells the daemon",
+   "intro": [
+    "Every command that reaches the daemon asks <code>socketPathFor</code> where it is. On POSIX the answer stays a path relative to the current directory, which keeps it inside the 104-byte limit on socket paths. On Windows the function now returns a pipe name instead: <code>field-</code> followed by 24 hex characters of a SHA-256 over the resolved project root, lowercased, and the socket's relative path. Lowercasing matters because NTFS compares paths without regard to case, and two spellings of one root must reach one daemon.",
+    "When the CLI has to spawn the daemon, it passes the same string with <code>--socket</code>. POSIX keeps passing the relative path, which the daemon binds against its working directory, the project root."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "Every caller of <code>socketPathFor</code> hands the result to <code>net.connect</code> or <code>server.listen</code>, except <code>helloIfRunning</code> in <code>src/commands/version.ts</code>, which first calls <code>existsSync</code> on it. That file is not in this diff. On Windows the check stats a pipe name, and Node's <code>existsSync</code> stats by opening the path, so <code>field --version</code> opens and closes the pipe. The daemon's accept loop handles that client; see the next group."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/socketPath.ts",
+     "note": "The Windows branch of <code>socketPathFor</code>: a hashed pipe name per project root and socket.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Lowercasing covers case only. An 8.3 short name, a <code>subst</code> drive or a junction is another spelling of the same root and hashes to a different pipe. The review lists hashing <code>realpathSync.native(root)</code> as a suggestion.",
+       "line": 29
+      }
+     ]
+    },
+    {
+     "path": "src/audiod/client.ts",
+     "note": "The spawn passes the full pipe name on Windows and the relative socket path elsewhere.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "<code>path</code> here is the same value <code>tryConnect</code> dials, so on Windows the daemon binds exactly the name the client opens.",
+       "line": 133
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "daemon",
+   "title": "The daemon's Windows transport",
+   "kicker": "Shared request handling above, a named-pipe accept, read and shutdown loop below",
+   "intro": [
+    "<code>server.cpp</code> now has one copy of request handling for both platforms: <code>handleLine</code> parses a line, <code>dispatch</code> runs the operation, and <code>broadcast</code> sends an event to every open connection. Below that, an <code>#if defined(_WIN32)</code> arm implements the destructor, <code>start</code>, <code>acceptLoop</code>, <code>readLoop</code>, <code>send</code>, <code>beginShutdown</code> and <code>sweepClosedConnections</code> with Win32 handles. The <code>#else</code> arm is the POSIX code, moved as it was.",
+    "<h4>Who may connect</h4>",
+    "Every pipe instance gets the same security descriptor from <code>pipeSecurity()</code>: a protected DACL that grants access to the user running the daemon and to nobody else, which is what the POSIX socket's file permissions give. Every instance also rejects clients on other machines. Without these, Windows' default descriptor would let every local account read the pipe.",
+    "<h4>Accepting clients</h4>",
+    "<code>start</code> creates the first pipe instance with <code>FILE_FLAG_FIRST_PIPE_INSTANCE</code>, so a second daemon for the same project fails there. <code>acceptLoop</code> then runs one overlapped <code>ConnectNamedPipe</code> at a time on the parked instance. It polls every 200 ms rather than waiting forever, because the shutdown wake-up can be lost. When a client arrives, the loop parks a fresh instance, hands the connected one to a new reader thread, and goes round again. When no client arrives, it disconnects the instance before trying again.",
+    "<h4>Shutting down</h4>",
+    "The POSIX arm half-closes each socket with <code>SHUT_RD</code>, so readers see end-of-file and the drain loop in <code>main.cpp</code> can finish. Windows has no such state. <code>beginShutdown</code> uses <code>CancelIoEx</code> to cancel each pending read, and <code>readLoop</code> checks <code>running</code> both before and after it issues each read, so no read outlives shutdown. After the loop, a reader drains exactly the bytes buffered at that moment, which matches what <code>SHUT_RD</code> still delivers."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "The POSIX arm and the shared request handling match the base. The review extracted both halves from the base and the head at <code>6a529d1</code> and diffed them, and every later commit to <code>server.cpp</code> touches only the Windows arm. The only differences are blank lines and the <code>processId()</code> helper that replaces <code>::getpid()</code> in <code>hello</code>."
+    },
+    {
+     "kind": "context",
+     "text": "No Windows code here was compiled or run during the review, because the head is untrusted. CI was read instead. On <code>0b26d94</code> the <code>windows</code> job compiled this file under MSVC, access and accept-loop fixes included, and the whole suite passed over the pipe. The jobs on <code>1df6eb6</code> were still running when this summary was written."
+    },
+    {
+     "kind": "verify",
+     "text": "Main's change to this file, the <code>record-midi</code> feature and <code>arm</code>'s <code>kind: \"midi\"</code>, landed in the shared <code>dispatch</code> above the platform split, so the Windows arm serves it. The review read where the merge placed it."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/server.cpp",
+     "note": "Shared request handling, then the Windows arm (security, accept, read, write, shutdown on pipe handles), then the POSIX arm unchanged.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The descriptor is a protected DACL, <code>D:P(A;;GA;;;&lt;user SID&gt;)</code>, built once from the process token. <code>start()</code> refuses when it cannot be built rather than falling back to the default descriptor, which grants read to Everyone. Generic-all for the user includes <code>FILE_CREATE_PIPE_INSTANCE</code>, so the daemon can still create later instances. Checked by reading against Microsoft's <code>CreateNamedPipe</code> documentation.",
+       "line": 355
+      },
+      {
+       "kind": "context",
+       "text": "<code>PIPE_REJECT_REMOTE_CLIENTS</code> is set on both <code>CreateNamedPipeA</code> calls through this one constant. Each instance chooses its own remote-client mode, so both calls need it.",
+       "line": 392
+      },
+      {
+       "kind": "context",
+       "text": "The bounded poll. A <code>SetEvent</code> from <code>beginShutdown</code> can land before the <code>ResetEvent</code> at the top of the iteration and be lost, so the loop re-reads <code>running</code> every 200 ms.",
+       "line": 483
+      },
+      {
+       "kind": "verify",
+       "text": "Every exit from an accept iteration with a connect still pending passes this block. The block cancels the connect and waits for the kernel to finish with <code>ov</code> before the stack frame ends. The review traced the <code>break</code>, the <code>continue</code> and the accept path.",
+       "line": 501
+      },
+      {
+       "kind": "verify",
+       "text": "A client that opens the parked instance and closes it before <code>ConnectNamedPipe</code> leaves the call failing with <code>ERROR_NO_DATA</code> until the server disconnects the instance. This call does that, so the next <code>ConnectNamedPipe</code> pends as usual. On the other paths into this branch the instance has no client, and the call fails without effect. Checked against Microsoft's <code>ConnectNamedPipe</code> documentation.",
+       "line": 522
+      },
+      {
+       "kind": "verify",
+       "text": "<code>beginShutdown</code> clears <code>running</code> before it calls <code>CancelIoEx</code>, and this check runs after <code>ReadFile</code> is issued. Either the shutdown's cancel finds the read, or this check sees the flag and cancels the read through its own <code>OVERLAPPED</code>.",
+       "line": 589
+      },
+      {
+       "kind": "context",
+       "text": "The shutdown drain peeks once and reads exactly that many bytes, because peeking again would follow a client that keeps writing.",
+       "line": 604
+      },
+      {
+       "kind": "context",
+       "text": "A null <code>OVERLAPPED</code> cancels every I/O on the handle, so a write still waiting on a full pipe buffer is cancelled too. The comment says so.",
+       "line": 669
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/server.h",
+     "note": "Connection and Server state split per platform: a pipe handle, the parked instance and the accept event on Windows; the descriptors and the lock on POSIX."
+    }
+   ]
+  },
+  {
+   "id": "fallback",
+   "title": "No afplay fallback off macOS",
+   "kicker": "field play without a built daemon refuses on Windows and Linux",
+   "intro": [
+    "Without a built daemon, <code>field play</code> on macOS falls back to playing artifacts through <code>afplay</code>, a macOS command. On any other platform that spawn could only fail with an error that names a tool the machine never had. The <code>field play</code> action now throws the build hint first, before it prints that it is using <code>afplay</code>. Plan §2.2 decides there is no Windows fallback, and its amendment widens that to every platform but macOS."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/cli.ts",
+     "note": "The platform check opens the <code>!daemonBinary()</code> branch, and <code>playWithAfplay</code>'s comment says the caller refuses.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Off macOS the only output is the build hint: this check runs before the refusal for <code>--from</code> and the other daemon-only flags, and before the \"using afplay\" line. <code>playWithAfplay</code> has no other caller.",
+       "line": 735
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests that run on Windows now",
+   "kicker": "Retired skip guards, platform-neutral assertions, and a cleanup that waits for the daemon",
+   "intro": [
+    "Until the transport existed, every test that dialed the daemon or faked one was skipped on Windows. Those guards come off here. That covers the protocol, play-daemon and live-session suites, the live plugin-hosting chains, the click, punch and record tests, and the nine fake-daemon tests in <code>version.test.ts</code>, whose fakes now listen on whatever <code>socketPathFor</code> returns.",
+    "One Windows behaviour needed a helper. Windows cannot delete a directory that is a live process's working directory, and the daemon takes a few hundred milliseconds to exit after <code>quit</code>. <code>removeTempProject</code> in <code>src/testing/temp.ts</code> retries the whole removal for up to ten seconds, and returns on its first try on POSIX. The credentials test skips its POSIX mode-bit asserts on Windows, which reports no mode bits.",
+    "The first <code>windows</code> CI run, on <code>6a529d1</code>, failed in four groups, and this head answers each. The hosted-chain tests could not find their plugin, which the base's <code>FIELD_PLUGIN_PATH</code> fix answers. The clone, push and pull tests passed <code>file://C:\\…</code> to git-lfs, which could not parse it, so they now build the URL with <code>pathToFileURL</code>. The inventory-cache test rewrote a file inside one change-time tick, so it now waits one out on Windows. The crash-recovery test lost its connection for a reason not yet found, so it skips on Windows, and plan §7.2 tracks it.",
+    "Main's MIDI take tests come in through the base, guarded on Windows as serve-mode tests. This pull request lifts that guard. The tests that advertise <code>record-midi</code>, and that refuse to arm with no source, run over the pipe. The take tests skip on Windows, because they need <code>field-audiod --keys</code> to publish a virtual MIDI source and Windows has no virtual MIDI ports."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Each test file that drops an <code>rmSync</code> call still uses <code>rmSync</code> elsewhere or no longer imports it. The repository's <code>tsconfig.json</code> sets <code>noUnusedLocals</code>, so a stale import would fail <code>pnpm typecheck</code>. Checked by grep at this head."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/testing/temp.ts",
+     "note": "New helper: retries a recursive delete for up to ten seconds while a daemon exits.",
+     "collapsed": false
+    },
+    {
+     "path": "src/commands/version.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The fake daemon is a Node pipe server on Windows. Node keeps several instances listening, unlike the real daemon's one parked instance, so these tests cannot exercise the accept-loop behaviour in <code>server.cpp</code>.",
+       "line": 53
+      }
+     ]
+    },
+    {
+     "path": "src/commands/record-daemon.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This test decides the killed daemon is gone from <code>process.kill(pid, 0)</code>. The review offers one lead, inferred and not verified: on Windows that check can succeed before the dying process has closed its handles, so the fresh <code>connect</code> could reach the old daemon's pipe instance and see it close. Plan §7.2 names a different candidate in the capture code.",
+       "line": 295
+      }
+     ]
+    },
+    {
+     "path": "src/commands/record-midi-daemon.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Windows only. A <code>--keys</code> refusal there counts as no source available, the way a Linux machine without the ALSA sequencer already does, and the take test skips. A helper that cannot publish anywhere else still fails the test.",
+       "line": 159
+      }
+     ]
+    },
+    {
+     "path": "src/audio/plugin-hosting.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Windows only. The cache keys on size, mtime and ctime, and NTFS stamps ctime from a clock that advances in ticks of about 15.6 ms. The comment marks that cause as inferred.",
+       "line": 780
+      }
+     ]
+    },
+    {
+     "path": "src/commands/clone.test.ts",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "<code>pathToFileURL(bare).href</code> is <code>file:///tmp/…</code> on macOS and Linux, the same URL the old <code>file://${bare}</code> gave, and <code>file:///C:/…</code> on Windows, which git-lfs parses. The push and pull tests make the same change.",
+       "line": 104
+      }
+     ]
+    },
+    {
+     "path": "src/commands/push.test.ts"
+    },
+    {
+     "path": "src/commands/pull.test.ts"
+    },
+    {
+     "path": "src/audiod/client.test.ts"
+    },
+    {
+     "path": "src/commands/play-daemon.test.ts"
+    },
+    {
+     "path": "src/audiod/live-session.test.ts"
+    },
+    {
+     "path": "src/commands/click-daemon.test.ts"
+    },
+    {
+     "path": "src/commands/punch-daemon.test.ts"
+    },
+    {
+     "path": "src/remote/credentials.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "ci-docs",
+   "title": "CI, the architecture doc, and the plan's record",
+   "kicker": "A windows-latest job, docs/architecture.md on the pipe, and windows-portability.md marking chunks 4 and 5 implemented",
+   "intro": [
+    "The new <code>windows</code> job runs what the Linux job runs, except the Python type checks, because the workers stay on their POSIX transport. The workflow's header now describes both jobs and what the Windows job costs: twice the Linux per-minute rate, and a cold JUCE build whenever the cache is evicted.",
+    "<code>docs/architecture.md</code> describes the system as it is, so it now says that on Windows the daemon listens on a named pipe, that <code>FILE_FLAG_FIRST_PIPE_INSTANCE</code> keeps it to one per project, and that the pipe admits only its user.",
+    "The plan records chunk 4 and chunk 5 as implemented, amends §2.2 to cover every platform but macOS, and answers two of its §6 open questions. A third is mostly answered: one manual test, a physical unplug during playback, stays open. The plan stays at <code>in-progress</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": ".github/workflows/ci.yml",
+     "note": "Adds the <code>windows</code> job, and rewrites the header to cover both jobs.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The paragraph after this one still opens \"What that gives up\", meaning the dropped macOS job, but it now follows this Windows-cost paragraph. The review lists moving one of them as a suggestion.",
+       "line": 16
+      },
+      {
+       "kind": "verify",
+       "text": "This key is the Linux job's key character for character, and it already varies by <code>runner.os</code>, so the two jobs never share a cache. Checked against line 79.",
+       "line": 138
+      }
+     ]
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "The daemon section and the IPC section now cover the Windows named pipe.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The IPC passage also says the workers keep their Unix sockets, so they do not run on Windows. That matches plan §4.",
+       "line": 190
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Chunk 4 and 5 records, the §2.2 amendment, three §6 answers, and a §7.2 follow-up for crash recovery on Windows. The <code>field keys</code> follow-up beside it comes from the base.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This chunk 5 record says <code>playWithAfplay</code> fails \"on win32\". The §2.2 amendment and the code both refuse on every platform except macOS, and at this head the <code>field play</code> action refuses before it calls <code>playWithAfplay</code>. The review lists this as a suggestion.",
+       "line": 479
+      },
+      {
+       "kind": "context",
+       "text": "The follow-up for the skipped crash-recovery test. It is marked standalone and starts from the daemon log of one Windows run, which the test currently deletes with its temp project.",
+       "line": 640
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
