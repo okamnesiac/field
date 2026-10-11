@@ -59,6 +59,20 @@ function assertContinues(previous: Float32Array, next: Float32Array): void {
   expect(Math.abs(d - SAW_STEP) < 1e-6 || Math.abs(d - (SAW_STEP - 2)) < 1e-6).toBe(true);
 }
 
+// Polls status until `count` takes have landed. Every poll must still
+// report the loop, a recording record with its take count, because a
+// daemon that lost track of the pass it is on reports neither (#203).
+async function followLoop(client: AudiodClient, takes: AnyTake[], count: number, ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (takes.length < count) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} passes to land`);
+    const { record } = await client.status();
+    expect(record).toMatchObject({ state: 'recording', loop: true });
+    expect(record?.loop_takes).toBeTypeOf('number');
+    await sleep(50);
+  }
+}
+
 describe('the loop line', () => {
   it('names the pass, and says how many passes were lost whenever any were', () => {
     expect(passesNote({})).toBe('');
@@ -89,6 +103,7 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
 
   afterEach(async () => {
     delete process.env['FIELD_AUDIOD_NULL'];
+    delete process.env['FIELD_AUDIOD_SERVICE_STALL_MS'];
     try {
       const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
       await client.quit();
@@ -216,6 +231,73 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
       // transaction on disk is a finalized take, and the stop's partial
       // one reached the event stream like the rest.
       expect(takes.at(-1)!.id).toBe(partial.id);
+      const { recordings } = await client.recordings();
+      expect(recordings.every((r) => r.complete)).toBe(true);
+      expect(recordings).toHaveLength(takes.length);
+    } finally {
+      client.close();
+    }
+  });
+
+  // A pass the heartbeat could not open a take for ahead of its wrap is
+  // skipped whole and counted, and the loop goes on (recording.md §15.4).
+  // These two hold that when the message thread falls behind the wraps:
+  // once by a region shorter than the heartbeat's tick, once by the
+  // heartbeat stalling while it finalizes (#203).
+  it('a loop shorter than the heartbeat tick goes on landing whole passes, and counts the ones it skips', { timeout: 20_000 }, async () => {
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    const takes: AnyTake[] = [];
+    client.on('event', (e: AudiodEvent) => {
+      if (e.event === 'take') takes.push(e.take);
+    });
+    try {
+      const { session } = await compileSession(root, 'creek');
+      await client.session(session);
+      await client.arm('//songs/creek/track:main', 1);
+      // A tenth of a second from beat 2. The heartbeat ticks every 250
+      // ms, so at least two wraps fall between any two ticks.
+      await client.record(24000, undefined, 28800, true);
+      await followLoop(client, takes, 4, 10_000);
+      const status = await client.status();
+      expect(status.record?.missed).toBeGreaterThan(0);
+      expect(status.record?.loop_takes).toBeGreaterThanOrEqual(4);
+      await client.stop();
+      // Every take is a whole pass, never one begun mid-pass.
+      for (const take of takes.slice(0, 4)) {
+        expect(take.started_at_samples).toBe(24000);
+        expect(take.frames).toBe(4800);
+        assertGapless(readWav(join(root, take.file)).channels[0]!);
+      }
+      // The take opened for a pass the stop cut off before it began is
+      // not left behind.
+      const { recordings } = await client.recordings();
+      expect(recordings.every((r) => r.complete)).toBe(true);
+      expect(recordings).toHaveLength(takes.length);
+    } finally {
+      client.close();
+    }
+  });
+
+  it('a heartbeat that stalls across a wrap keeps the loop, its count, and whole passes', { timeout: 30_000 }, async () => {
+    // Longer than the region, so a wrap falls inside every finalize.
+    process.env['FIELD_AUDIOD_SERVICE_STALL_MS'] = '600';
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    const takes: AnyTake[] = [];
+    client.on('event', (e: AudiodEvent) => {
+      if (e.event === 'take') takes.push(e.take);
+    });
+    try {
+      const { session } = await compileSession(root, 'creek');
+      await client.session(session);
+      await client.arm('//songs/creek/track:main', 1);
+      await client.record(24000, undefined, 48000, true);
+      await followLoop(client, takes, 3, 20_000);
+      await client.stop();
+      for (const take of takes.slice(0, 3)) {
+        expect(take.started_at_samples).toBe(24000);
+        expect(take.frames).toBe(24000);
+        assertGapless(readWav(join(root, take.file)).channels[0]!);
+      }
       const { recordings } = await client.recordings();
       expect(recordings.every((r) => r.complete)).toBe(true);
       expect(recordings).toHaveLength(takes.length);

@@ -264,6 +264,11 @@ private:
     void removeHardwareListeners();
 
     const bool nullMode;
+    // A test seam, honoured only with null output: how long the heartbeat
+    // stalls between taking over a finished take and finalizing it, from
+    // FIELD_AUDIOD_SERVICE_STALL_MS. It makes a slow disk or a loaded
+    // runner exact, so a test can land a loop's wrap inside a finalize.
+    const int serviceStallMs;
     // True once device.select succeeds; cleared if that device vanishes.
     bool explicitSelection = false;
 #if JUCE_MAC

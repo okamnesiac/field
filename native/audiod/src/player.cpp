@@ -76,7 +76,11 @@ void retireOnMessageThread (std::unique_ptr<field::LiveSession> retired)
 }
 } // namespace
 
-Player::Player (bool useNullOutput) : nullMode (useNullOutput)
+Player::Player (bool useNullOutput)
+    : nullMode (useNullOutput),
+      serviceStallMs (useNullOutput
+                          ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_SERVICE_STALL_MS", "0").getIntValue()
+                          : 0)
 {
     formatManager.registerBasicFormats();
 }
@@ -2023,6 +2027,8 @@ void Player::serviceCapture()
         }
     }
     captureDone = false;
+    if (serviceStallMs > 0)
+        std::this_thread::sleep_for (std::chrono::milliseconds (serviceStallMs));
     juce::Array<juce::var> manifests;
     manifests.add (finalizeTake (*finished));
     finished.reset();
