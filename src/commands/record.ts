@@ -231,7 +231,9 @@ async function captureTakes(
   // feeds an input window on that track, so you hear it through its
   // inserts, its buses, and main, while the take stays dry.
   const monitored = options.monitoring === 'host' ? tracks.filter((t) => t.kind === 'audio') : [];
-  // Whether this call armed, so whatever throws after the arm releases it.
+  // Whether this call's arm succeeded, so whatever throws after it
+  // releases it; a refused arm, such as one under another terminal's
+  // take, holds nothing to release.
   let armedHere = false;
   try {
     if (!client.supports('record')) {
@@ -317,7 +319,6 @@ async function captureTakes(
           `field-audiod ${client.daemonVersion} predates recording several tracks — field transport quit, then record again`,
         );
       }
-      armedHere = true;
       const armed = await client.armTracks(
         tracks.map((t) =>
           t.kind === 'midi'
@@ -331,6 +332,7 @@ async function captureTakes(
         ),
         options.device,
       );
+      armedHere = true;
       armedRate = armed.sample_rate;
       // In the daemon's order, the primary first.
       const named = new Map(tracks.map((t) => [t.resolved.label, t.node.trackName]));
@@ -349,15 +351,15 @@ async function captureTakes(
           `field-audiod ${client.daemonVersion} predates MIDI recording — field transport quit, then record again`,
         );
       }
-      armedHere = true;
       const armed = await client.armMidi(resolved.label);
+      armedHere = true;
       armedRate = armed.sample_rate;
       hooks.onArmed?.(
         `armed   MIDI from ${armed.sources.join(', ')}  (${armed.sample_rate} Hz, latency out ${armed.output_latency} samples)`,
       );
     } else {
-      armedHere = true;
       const armed = await client.arm(resolved.label, tracks[0]!.input!, options.device);
+      armedHere = true;
       armedRate = armed.sample_rate;
       hooks.onArmed?.(
         `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +

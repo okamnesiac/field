@@ -367,14 +367,20 @@ must sit under `main`.
   take records, the take dry and gapless with `monitoring: host` on its
   row, and the song loaded again without the input, and refuses a file
   bed before arming. Criterion 6 by ear is still owed. Its first review
-  found three gaps, each now closed with a test: a track the loaded
-  solo or the arrangement kept from `main` failed only at the reload
-  after arming and left the input armed, and is now refused before
-  arming; a separate input device could open the pair at a rate the song
-  is not, silencing monitoring, and is now refused after the arm, which
-  is released; and the reload after the take put the song back over one
-  another terminal had loaded, as `field keys` did on quit, and now
-  happens only while the daemon still plays it.
+  found three gaps. A track the loaded solo or the arrangement kept from
+  `main` failed only at the reload after arming and left the input
+  armed; it is now refused before arming, with a test. A separate input
+  device could open the pair at a rate the song is not, silencing
+  monitoring; it is now refused after the arm, which is released. No
+  test reaches that refusal, because the null device runs only at 48 kHz
+  and a song at another rate is refused before arming, so it waits for
+  criterion 6's session on a real device pair. The reload after the take
+  put the song back over one another terminal had loaded, as
+  `field keys` did on quit; it now happens only while the daemon still
+  plays the song and no take records, with tests for both commands. The
+  second review found that a refused arm, such as one under another
+  terminal's take, still ran that reload; only an arm that succeeded is
+  released now, with a test.
 
 ## 11 FieldOut's license (DECIDED, 2026-10-11)
 
@@ -429,8 +435,9 @@ the song.
    still takes the dry channel after the render.
 6. When the take ends, `field record` disarms, which closes the capture
    inputs, and loads the song again without them while the daemon still
-   plays it (`reloadIfPlaying`), so a song another terminal loaded during
-   the take plays on; `field keys` closes the same way. A
+   plays it and no other take records (`reloadIfPlaying`), so a song
+   another terminal loaded during the take plays on, and another
+   terminal's take keeps its bed; `field keys` closes the same way. A
    `field record` that dies drops its connection, which closes them
    too; the arm itself stays, as it always has.
 

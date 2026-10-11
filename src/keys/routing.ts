@@ -131,10 +131,9 @@ export async function routeArmed(
         try {
           await closeOpened();
           // The song as it is now: without these inputs, with any others,
-          // while the daemon still plays it. A song that no longer compiles
-          // keeps the session it has, and so does one under a take, whose
-          // closed input reads silence.
-          if ((await client.status()).record?.state !== 'recording') await reloadIfPlaying(client, root, song);
+          // while the daemon still plays it and no take records. A song
+          // that no longer compiles keeps the session it has.
+          await reloadIfPlaying(client, root, song);
         } catch {
           // the daemon or the project went away; nothing is left to restore
         } finally {

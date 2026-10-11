@@ -56,9 +56,13 @@ export async function reloadWithInputs(client: AudiodClient, root: string, song:
 }
 
 // After closing inputs: loads `song` again without them only while the
-// daemon still plays it, so a song another terminal loaded meanwhile
-// plays on.
+// daemon still plays it and no take records, so a song another terminal
+// loaded meanwhile plays on, and a take another terminal records keeps
+// its bed and its loop region. Under a take, a closed input reads silence
+// until the next load.
 export async function reloadIfPlaying(client: AudiodClient, root: string, song: string): Promise<void> {
   const status = await client.status();
-  if (status.live === true && status.song === song) await reloadWithInputs(client, root, song);
+  if (status.live === true && status.song === song && status.record?.state !== 'recording') {
+    await reloadWithInputs(client, root, song);
+  }
 }

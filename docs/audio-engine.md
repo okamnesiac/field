@@ -69,9 +69,10 @@ travels the same way a [live input](#live-inputs) does: through the
 track's inserts, each bus above it, and `main`, beside the rendered
 song, playing or stopped. The capture tap still takes the dry channel.
 Disarming closes the capture inputs, and `field record` loads the song
-again without them, while the daemon still plays it. The bypass-and-report latency policy below is not
-built: what you hear is late by the input and output buffers and the
-limiters and hosted plugins on the path.
+again without them, while the daemon still plays it and no other take
+records. The bypass-and-report latency policy below is not built: what
+you hear is late by the input and output buffers and the limiters and
+hosted plugins on the path.
 
 **Decision — Console is configured manually in V1.** Console is the
 mixer in the Apollo's DSP and matters only on the input side (preamp

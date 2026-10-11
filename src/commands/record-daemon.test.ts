@@ -595,6 +595,36 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     other.close();
   });
 
+  it("a monitored field record refused under another terminal's take leaves that take's bed and loop alone", { timeout: 20_000 }, async () => {
+    await importTone('tone', NULL_RATE * 6);
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    const other = await AudiodClient.connect(root);
+    try {
+      // Another terminal loops a take over the song's first beat.
+      await other.session((await compileSession(root, 'creek')).session);
+      await other.arm('//songs/creek/track:main', 1);
+      await other.record(0, undefined, 24000, true);
+      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+        'cannot re-arm while recording',
+      );
+      await sleep(600);
+      expect(await other.status()).toMatchObject({
+        song: 'creek',
+        loop_from: 0,
+        loop_to: 24000,
+        record: { state: 'recording', loop: true },
+      });
+      await other.stop();
+    } finally {
+      other.close();
+    }
+  });
+
   it('field record --monitoring host refuses a file bed before arming', { timeout: 15_000 }, async () => {
     const tone = await importTone('tone', NULL_RATE * 2);
     createTrack(root, 'creek', 'lead-vocal');
