@@ -349,9 +349,9 @@ function publish(version: string, options: Publish = {}): void {
   git(upstream, 'archive', '--format=tar.gz', `--prefix=${options.prefix ?? `field-${version}`}/`, '-o', archive, `v${version}`);
 }
 
-// The downloaded installer, which is a release installer, with the release
+// A release installer, the downloaded one unless named, with the release
 // CLI and the bin directory on PATH.
-function release(target?: string, env: Record<string, string> = {}): Run {
+function release(target?: string, env: Record<string, string> = {}, script = downloaded): Run {
   return install(
     target,
     {
@@ -360,7 +360,7 @@ function release(target?: string, env: Record<string, string> = {}): Run {
       PATH: [join(pnpmHome, 'bin'), join(root, '.local', 'bin'), bin].join(delimiter),
       ...env,
     },
-    downloaded,
+    script,
   );
 }
 
@@ -1072,6 +1072,22 @@ posix('install.sh installs a release', () => {
     release(undefined, { FIELD_DATA_DIR: dataDir });
     const run = install('status', { FAKE_SERVE: serve, FAKE_CLI: join(root, 'release-cli.js') }, join(dataDir, '0.2.0', 'install.sh'));
     expect(rows(run.stdout).get('installed')).toBe('0.2.0 in ~/elsewhere/0.2.0');
+  });
+
+  it("leaves another program's current link alone beside a release unpacked as GitHub names it", () => {
+    publish('0.2.0');
+    const opt = join(root, 'opt');
+    write(join(opt, '2.0.1', 'bin', 'tool'), '');
+    symlinkSync('2.0.1', join(opt, 'current'));
+    const unpacked = join(opt, 'field-0.2.0');
+    write(join(unpacked, 'install.sh'), readFileSync(downloaded, 'utf8'));
+    write(join(unpacked, 'src/cli.ts'), '');
+    const run = release(undefined, {}, join(unpacked, 'install.sh'));
+    expect(run.status).toBe(0);
+    expect(readlinkSync(join(opt, 'current'))).toBe('2.0.1');
+    expect(existsSync(join(opt, 'release.conf'))).toBe(false);
+    expect(existsSync(join(opt, '0.2.0'))).toBe(false);
+    expect(current()).toBe('0.2.0');
   });
 });
 

@@ -478,15 +478,18 @@ recorded() {
 }
 
 # Where release installs live, and what they follow. FIELD_DATA_DIR names
-# the directory; without it, a version's own copy of this script finds the
+# the directory; without it, a version's own copy of this script, in a
+# directory named X.Y.Z with a `current` link beside it, finds the
 # directory it was unpacked into, and anything else uses the XDG data
-# directory. FIELD_REPO, FIELD_REF, and FIELD_BIN_DIR come ahead of what
+# directory. A `current` link beside any other directory, such as the
+# field-0.2.0 GitHub's archive unpacks to, is another program's.
+# FIELD_REPO, FIELD_REF, and FIELD_BIN_DIR come ahead of what
 # release.conf recorded, which comes ahead of the defaults, so an install
 # from a fork keeps upgrading from that fork.
 release_init() {
   if [ -n "${FIELD_DATA_DIR:-}" ]; then
     DATA_DIR="$FIELD_DATA_DIR"
-  elif [ -n "$SCRIPT_DIR" ] && [ -L "$(dirname -- "$SCRIPT_DIR")/current" ]; then
+  elif [ -n "$SCRIPT_DIR" ] && is_version "${SCRIPT_DIR##*/}" && [ -L "$(dirname -- "$SCRIPT_DIR")/current" ]; then
     DATA_DIR="$(dirname -- "$SCRIPT_DIR")"
   else
     case "${XDG_DATA_HOME:-}" in

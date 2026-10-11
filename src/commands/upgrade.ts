@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // `field upgrade [target]`: run an installer with the same target, output,
@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_REPO = 'okamnesiac/field';
 export const DEFAULT_REF = 'v0';
+// install.sh's VERSION_PATTERN.
+const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const RAW_URL = 'https://raw.githubusercontent.com';
 
 // Two levels up from src/commands/ and from dist/commands/ alike.
@@ -37,7 +39,9 @@ export interface ReleaseSource {
   repo: string;
   ref: string;
   // The directory holding the installed versions, when this package is one
-  // of them: the parent with a `current` link in it.
+  // of them: a directory named X.Y.Z, as install.sh names each version,
+  // with a `current` link beside it. A `current` beside any other
+  // directory, such as an unpacked field-0.2.0, is another program's.
   dataDir?: string | undefined;
 }
 
@@ -65,7 +69,7 @@ function isSymlink(path: string): boolean {
 // in. So an install from a fork upgrades from the fork.
 export function releaseSource(root: string, env: NodeJS.ProcessEnv): ReleaseSource {
   const parent = dirname(root);
-  const dataDir = isSymlink(join(parent, 'current')) ? parent : undefined;
+  const dataDir = VERSION.test(basename(root)) && isSymlink(join(parent, 'current')) ? parent : undefined;
   const record = dataDir === undefined ? new Map<string, string>() : readRecord(join(dataDir, 'release.conf'));
   return {
     repo: env['FIELD_REPO'] || record.get('repo') || DEFAULT_REPO,

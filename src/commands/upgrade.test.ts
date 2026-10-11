@@ -155,6 +155,20 @@ describe.skipIf(process.platform === 'win32')('field upgrade in a release instal
     expect(lines).toEqual([`+ ${realpathSync(data)}/0.2.0/install.sh status`]);
   });
 
+  it("takes no data directory or record from another program's current link", () => {
+    const opt = join(scratch, 'opt');
+    const unpacked = join(opt, 'field-0.2.0');
+    mkdirSync(join(opt, '2.0.1'), { recursive: true });
+    mkdirSync(unpacked);
+    symlinkSync('2.0.1', join(opt, 'current'));
+    writeFileSync(join(opt, 'release.conf'), 'repo=someone/field\nref=v9\n');
+    serveInstaller('okamnesiac/field', 'v0', 0);
+    const lines: string[] = [];
+    expect(upgrade('status', { root: unpacked, env: env(), err: (line) => lines.push(line) })).toBe(0);
+    expect(readFileSync(argsFile, 'utf8')).toBe('1:status\n\n');
+    expect(lines).toEqual([`+ curl -fsSL file://${raw}/okamnesiac/field/v0/install.sh | bash -s -- status`]);
+  });
+
   it('refuses with the URL when the installer does not download', () => {
     rmSync(raw, { recursive: true });
     expect(() => upgrade('status', { root: join(data, '0.2.0'), env: env(), err: () => {} })).toThrow(

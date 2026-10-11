@@ -259,7 +259,11 @@ this section put it after.
 
 The data directory is `FIELD_DATA_DIR`, then `$XDG_DATA_HOME/field` when
 that is an absolute path, then `~/.local/share/field`. A version's own
-`install.sh` infers it from the `current` link beside it.
+`install.sh` infers it from the `current` link beside the version's
+directory, and `field upgrade` does the same from its package's real
+path, but only when that directory is named `X.Y.Z`. A `current` link
+beside any other directory, such as the `field-0.2.0` that GitHub's
+archive unpacks to, belongs to another program, so the default applies.
 
 **The shim.** `field` is a two-line script in `FIELD_BIN_DIR` (default
 `~/.local/bin`) that runs `exec node '<data>/current/dist/cli.js' "$@"`,
