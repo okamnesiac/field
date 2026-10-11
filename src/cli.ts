@@ -758,7 +758,7 @@ program
           // afplay is a macOS binary: anywhere else the fallback could only
           // die with ENOENT naming a tool this machine never had, so the
           // build hint is the whole answer.
-          throw new Error(`field-audiod is not built, and the afplay fallback is macOS-only — run \`${BUILD_DAEMON}\``);
+          throw new Error(`field-audiod is not built, and the afplay fallback is macOS-only — run ${BUILD_DAEMON}`);
         }
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
           throw new Error(`--from, --device, --loop, --click, and --watch need field-audiod (${BUILD_DAEMON})`);

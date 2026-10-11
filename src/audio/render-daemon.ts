@@ -95,7 +95,7 @@ function requireBinary(): string {
   const binary = daemonBinary();
   if (binary === undefined) {
     throw new RenderUnavailableError(
-      `field-audiod is not built — run \`${BUILD_DAEMON}\`. Effects render in the daemon ` +
+      `field-audiod is not built — run ${BUILD_DAEMON}. Effects render in the daemon ` +
         'since render-pipeline.md chunk 2.',
     );
   }

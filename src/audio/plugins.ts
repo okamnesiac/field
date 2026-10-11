@@ -106,7 +106,7 @@ export function readInventory(root: string): PluginInventory | undefined {
 export function scanPlugins(root: string): PluginInventory {
   const binary = daemonBinary();
   if (binary === undefined) {
-    throw new Error(`field-audiod is not built — run \`${BUILD_DAEMON}\`; the daemon owns scanning`);
+    throw new Error(`field-audiod is not built — run ${BUILD_DAEMON}; the daemon owns scanning`);
   }
   const formats = process.platform === 'darwin' ? ['au', 'vst3'] : ['vst3'];
   const plugins: PluginInfo[] = [];
