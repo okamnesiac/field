@@ -1,10 +1,11 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped: committed vocals from text, and creek sings. Stays
-open until more songs have used it.
+**Outcome:** Shipped: committed vocals from text, and creek sings
+(#58–#61, #64, #65; a generative leaf track since #113). §2's timing
+clause, start-to-audio in seconds rather than minutes on the M3 Max,
+was never measured on record.
 
 # Plan: Voice generation
 

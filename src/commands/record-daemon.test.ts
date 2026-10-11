@@ -67,6 +67,17 @@ describe('record helpers', () => {
     expect(meterLine(0.001)).toMatch(/^▯{12} -60\.0 dBFS$/);
     expect(meterLine(0.25)).toMatch(/^▮{10}▯{2} -12\.0 dBFS$/);
   });
+
+  it('describes a MIDI take by its events, and its length once it is complete', () => {
+    const file = '.field/recording/take-20261010-100000/take.midi.ndjson';
+    const recording = { id: 'take-20261010-100000', file, kind: 'midi' as const, sample_rate: 48000 };
+    expect(describeTake({ ...recording, complete: false, active: true, frames_on_disk: 0, events_on_disk: 3 })).toBe(
+      `take-20261010-100000  incomplete, recording now  ${file} (3 events)`,
+    );
+    expect(
+      describeTake({ ...recording, complete: true, active: false, frames_on_disk: 0, events_on_disk: 1, frames: 96000, events: 1 }),
+    ).toBe(`take-20261010-100000  complete  ${file} (1 event, 96000 frames, 2.0 s)`);
+  });
 });
 
 // win32: serve mode refuses until the named-pipe transport

@@ -108,3 +108,10 @@ the part Field's declarative model sidesteps.
 4. **v1 parameter set.** Which parameters are automatable first — insert
    params, clip gain, mix faders — and what the action-key impact of
    each is.
+5. **Where the tempo map runs** (added 2026-10-10). Decision 5 has the
+   engine convert sample position to musical position every block, but
+   the daemon never learns what a bar is: positions arrive as samples
+   (playback.md §3.6, realtime.md §1). Realtime curves either compile
+   to the sample domain in the CLI, which matters for tempo-locked LFOs,
+   or a new decision admits the tempo map to the daemon. Settle this
+   before speccing, and amend decision 5 with the answer.

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
 import { AudiodClient, daemonBinary } from '../audiod/client.js';
-import type { AudiodEvent, Take } from '../audiod/protocol.js';
+import type { AnyTake, AudiodEvent } from '../audiod/protocol.js';
 import { compileSession } from '../graph/live.js';
 import { loadProject } from '../model/project.js';
 import { createSong, createTrack } from './create.js';
@@ -159,7 +159,7 @@ describe.skipIf(!binary || process.platform === 'win32')('punch-out and loop tak
       await waitFor(async () => (await client.status()).record?.state === 'armed', 5000, 'the take to end');
       const landed = events.find((e) => e.event === 'take');
       expect(landed?.event).toBe('take');
-      const take = (landed as { take: Take }).take;
+      const take = (landed as { take: AnyTake }).take;
       expect(take.started_at_samples).toBe(48000);
       expect(take.frames).toBe(24000); // exactly until − at
       expect((await client.status()).state).toBe('playing'); // the mix played on
@@ -174,7 +174,7 @@ describe.skipIf(!binary || process.platform === 'win32')('punch-out and loop tak
 
   it('a loop take lands one take per pass, gapless across the wrap', { timeout: 20_000 }, async () => {
     const client = await AudiodClient.connect(root, { nullOutput: true });
-    const takes: Take[] = [];
+    const takes: AnyTake[] = [];
     client.on('event', (e: AudiodEvent) => {
       if (e.event === 'take') takes.push(e.take);
     });

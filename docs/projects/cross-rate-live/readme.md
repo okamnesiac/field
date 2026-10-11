@@ -1,13 +1,15 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped whole: a foreign-rate dirty track evaluates live
-with the edge converting (byte-identical to the offline render, proven),
-a device that cannot switch gets converted delivery, and all three rate
-refusals are gone. Stays open until a session has actually played
-through a live cross-rate edge in anger, per multi- rate's precedent.
+**Outcome:** Shipped whole in #143: a foreign-rate dirty track
+evaluates live with the edge converting (byte-identical to the offline
+render, proven), a device that cannot switch gets converted delivery,
+and all three rate refusals are gone. Two §4 clauses stand short. The
+watch arc on a cross-rate edit has no end-to-end test; the dirty list
+it turns on is tested. And converted delivery has run on the null
+device only, because the hardware #143 played on switched to 44.1 kHz
+rather than converting.
 
 # Plan: Cross-rate live wiring
 

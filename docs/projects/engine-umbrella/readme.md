@@ -1,7 +1,12 @@
 ---
-status: draft
-priority: later
+status: completed
 ---
+
+**Outcome:** Abandoned. [audio-engine.md](../../audio-engine.md) uses
+"engine" for `field-audiod`, so a TypeScript `src/engine` would point a
+reader at the wrong process, and `src/` has since grown `audiod/`,
+`remote/`, `time/` and `workers/` beside `graph/` and `generators/`
+without anything needing them gathered.
 
 # Plan: src/engine umbrella
 

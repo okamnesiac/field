@@ -1,6 +1,6 @@
 ---
 status: in-progress
-priority: now
+priority: next
 ---
 
 # Plan: Remote — login, clone, push, and a read-through cache
@@ -623,6 +623,13 @@ what make a hosted project play — which put chunks 2–4 ahead of chunk
 1 rather than behind it. Chunk 1 is unstarted and rides when the site
 wants `--json`.
 
+Moved to `next` (2026-10-10), with chunks 2–4 shipped and chunk 1 the
+whole of what remains. The site's player computes `bar.beat` from its
+own copy of Field's tempo map (audiofield-io.md §13.9) rather than
+from `arrangement --json`, and the render worker that wants `--json`
+is moot for v1 (audiofield-io.md §10.14), so chunk 1 waits on that
+worker.
+
 ### 9.2 Keychain, or `~/.field/credentials` everywhere
 
 Decision 5 splits by platform. The alternative is the file everywhere
@@ -748,6 +755,10 @@ generate` — and the site labels such projects (audiofield-io.md §9.13)
 because it holds the author's render and the clone does not. For the
 sync: is by-label playback of a recipe-only clone wanted, or is the
 label enough?
+
+Settled (2026-09-08, audiofield-io.md §10.15): no, for v1. The label
+and `field generate` are the answer, and by-label playback is recorded
+in that plan's §11 for the sync to reopen.
 
 ### 9.12 Reading through in watch and live
 
