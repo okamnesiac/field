@@ -1,0 +1,89 @@
+{
+ "version": 1,
+ "name": "Windows export home path",
+ "project": "windows-portability",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 192,
+  "title": "Print a Windows home path with a tilde (windows-portability.md §7.2)",
+  "head": "fa16bea59a44987e6710d47deb90107691f1ac9a",
+  "headRef": "windows/paths",
+  "base": "a6c10315bfd2ec0bd7c2a9d3e36a31a28bf82dbc",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field export</code> builds labels and copies the results to <code>~/Desktop</code>, or to the folder <code>--to</code> names, and prints one line per file saying where it landed. To keep that line short, it prints a path under your home folder with <code>~</code> in place of the home folder, through <code>homeRelative</code> in <code>src/commands/export.ts</code>.",
+   "On Windows that shortening never happened. <code>homeRelative</code> checked for the home path followed by <code>/</code>, but Windows paths use <code>\\</code>, so every export printed its full <code>C:\\Users\\…</code> path. The Windows portability plan recorded this in its list of standalone defects (<code>windows-portability.md</code> §7.2).",
+   "This pull request gives <code>homeRelative</code> a <code>separator</code> parameter that defaults to <code>path.sep</code>, the platform's separator. A Windows path under the profile now prints as <code>~\\Desktop\\…</code>, and because Windows paths ignore case, <code>c:\\users\\me\\Music</code> prints as <code>~\\Music</code> too. A sibling folder such as <code>C:\\Users\\justinx</code> is still not treated as home, and macOS and Linux keep <code>/</code> and a case-sensitive comparison. The plan marks the item done."
+  ],
+  "cards": [
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>The first head, <code>ae05c15</code>, also ported the <code>sclang</code> lookup. The author removed that in <code>6d640ad</code> and left it to #186, so the two pull requests no longer overlap except in the plan file, where they edit different items.</li><li>The review of <code>6d640ad</code> found that the existing <code>homeRelative</code> test failed on the Windows CI job, because its POSIX assertions took the Windows default separator there. <code>fa16bea</code> passes <code>'/'</code> in those assertions, and the thread is resolved.</li><li><code>fa16bea</code> also took the review's suggestion to compare Windows paths without regard to case.</li></ul>"
+   },
+   {
+    "id": "later",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li>On a OneDrive-redirected profile, the Desktop you see lives under <code>OneDrive\\Desktop</code>, not where <code>defaultExportDir()</code> writes. The plan calls this a cosmetic wart, and it stays.</li><li>No Windows machine has run <code>field export</code> with this change. The unit test, which the Windows CI job also runs, is the only coverage.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "home-relative",
+   "title": "Shortening the home folder the way each platform compares paths",
+   "kicker": "How the export line decides whether a path is under your home folder",
+   "intro": [
+    "<code>homeRelative(path, home, separator)</code> returns <code>path</code> with <code>~</code> in place of <code>home</code> when the path is the home folder itself or sits inside it. A path is inside the home folder only when it starts with the home path followed by a separator, so <code>/Users/justinx</code> never becomes <code>~x</code>.",
+    "The change makes that separator a parameter. Its default is <code>path.sep</code>, which is <code>/</code> on macOS and Linux and <code>\\</code> on Windows, so the only caller, the export line in <code>src/cli.ts</code>, gets the right rule on each platform without passing anything. With <code>\\</code> as the separator, the home prefix also compares without regard to case, because Windows treats <code>C:\\Users</code> and <code>c:\\users</code> as the same folder. The part after the prefix prints exactly as given."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The function compares only the first <code>home.length</code> characters of the path and slices the rest at that same index. So a character whose lowercase form is longer than its original cannot shift where the printed rest begins."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/export.ts",
+     "note": "Adds the <code>separator</code> parameter, defaulting to <code>path.sep</code>, and splits the check into a prefix comparison, case-insensitive for <code>\\</code>, and a test that the rest is empty or starts with the separator.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "On macOS, mocking <code>node:path</code>'s <code>sep</code> to <code>\\</code> made <code>homeRelative</code> shorten <code>c:\\users\\justin\\Desktop\\x.wav</code> under the home <code>C:\\Users\\justin</code> to <code>~\\Desktop\\x.wav</code> with the default separator, as a Windows host would.",
+       "line": 76
+      }
+     ]
+    },
+    {
+     "path": "src/commands/export.test.ts",
+     "note": "Passes the separator explicitly in every assertion, so the test means the same on every host, and adds cases for Windows paths and for case: POSIX keeps it, Windows ignores it.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "This whole <code>homeRelative</code> block passes on macOS with <code>node:path</code>'s <code>sep</code> mocked to <code>\\</code>, as a Windows host sees it. With the lowercasing removed from <code>homeRelative</code>, only this assertion fails, so it pins the Windows rule.",
+       "line": 200
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The plan records the item as done",
+   "kicker": "The Windows portability plan's list of standalone defects",
+   "intro": [
+    "<code>windows-portability.md</code> §7.2 lists defects that the Windows sweep found outside any planned chunk. Each item stays in the list as a record, and a fixed one gains a dated <b>Done</b> note. This pull request adds that note to the <code>homeRelative</code> item and leaves the plan's status at <code>in-progress</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Marks the <code>homeRelative</code> item done and says that the OneDrive Desktop stays a wart. The note describes the separator, not the case-insensitive comparison."
+    }
+   ]
+  }
+ ]
+}
