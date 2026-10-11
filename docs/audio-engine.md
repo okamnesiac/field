@@ -198,6 +198,63 @@ the declared extent, `status` reports `loop_from` and `loop_to`, and a
 load or a fresh session clears it. `field play <song> --from 5 --loop`
 rides it now instead of being refused. A file bed loops only whole.
 
+## MIDI capture
+
+`arm` with `kind: "midi"` arms for a MIDI take
+([keyboard-instrument.md](projects/keyboard-instrument/readme.md)
+§12.4). The daemon opens every MIDI input the system lists and no audio
+input, so arming for MIDI never asks for the microphone, and answers
+`{kind: "midi", sources, sample_rate, output_latency}`, where `sources`
+names the inputs it opened. With no MIDI input to open, `arm` refuses
+and tells you to start `field keys` or connect a controller. `disarm`
+closes the inputs, and an `arm` of the other kind moves the arm. A
+daemon that does this lists `record-midi` in `hello.features`.
+
+Each message goes from JUCE's MIDI thread into a lock-free queue with
+its arrival time on the host's high-resolution clock. The callback
+notes the time each block begins and drains the queue there: a message
+lands at the block's position plus the time between the block's start
+and its arrival, at the device's rate. Because a message is drained at
+the start of the block after it arrives, it is placed no earlier than
+the previous block's start and no later than the current block's end,
+and messages keep their arrival order. A take records channel messages
+of one to three bytes; it leaves out system messages such as SysEx,
+clock, and active sensing.
+
+`record` starts a MIDI take with the same latch, `at`, `start`, and
+`until` as an audio take, and refuses `loop`: loop takes record audio
+only. The take counts the device's samples from its start, as an audio
+take counts frames, so each message's `at` is in `sample_rate`. Messages
+before the start, including during a count-in, and at or after `until`
+are left out. A take with `until` ends at the first block that begins
+at or past it, and `stop` lets one more block begin before it ends the
+take, so every message that arrived in time is placed.
+
+The transaction is a directory, `.field/recording/take-YYYYMMDD-HHMMSS/`,
+as for audio:
+
+- `take.midi.ndjson` — one line per message,
+  `{"at":<samples from the start>,"midi":[<bytes>]}`, in `at` order,
+  appended by the writer thread every 20 ms.
+- `journal.json` — the samples elapsed, the lines `fsync` has reached
+  the disk with as `events`, and `dropped`, rewritten once a second.
+- `manifest.json` — `kind: "midi"`, `sources`, the take's rate and the
+  bed's, `output_latency`, `started_at_samples`, and `complete: true`
+  with `frames` and `events` once finalized. `frames` is the samples
+  from the start to the stop or to `until`, and `events` is the lines
+  written. It has none of an audio take's fields: no `device`, `input`,
+  `channels`, `bit_depth`, `format`, or `input_latency`.
+
+While the daemon is armed for MIDI, `status.record` reports `kind` and
+`sources` in place of `device` and `input`, and `input_peak` is 0.
+During a take it adds `events`, the messages captured so far, and
+`frames` counts the samples elapsed. `recordings` lists a MIDI
+transaction with its whole lines as `events_on_disk` and
+`frames_on_disk: 0`. `recover` drops a partial last line, which is all
+a crash can leave behind, and marks the manifest `recovered`; its
+`frames` is the journal's count or one past the last message's `at`,
+whichever is larger.
+
 ## Landing a take
 
 When a take finalizes, `field record` lands it
