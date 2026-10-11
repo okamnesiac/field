@@ -1,0 +1,360 @@
+{
+ "version": 1,
+ "name": "Live SuperCollider input",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 201,
+  "title": "Play field keys through a track's effects, routed into the daemon through FieldOut (live-supercollider.md chunk 3)",
+  "head": "5a51b4fda39e1d950c2d6b72d7a5a89b734e8f9f",
+  "headRef": "live/keys",
+  "base": "2e6843836378eb13fceaa32400c53a34b576d57b",
+  "baseRef": "live/ring",
+  "basePr": 198
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> plays a SuperCollider instrument from the computer keyboard. Its sound comes from a <b>voice host</b>, <code>sclang</code> driving its own <code>scsynth</code>. A song's effects, the inserts on each track and on the tracks above it up to <code>main</code>, run in another process, the daemon <code>field-audiod</code>. So until now, playing a track's instrument with <code>field keys</code> sounded dry, and the instrument's line said so.",
+   "This pull request is chunk 3 of the live-supercollider plan, the chunk you hear. Chunk 1 (#196) taught a live session to read an <b>input</b> from outside the session and carry it up through every chain above its track. Chunk 2 (#198) added <b>FieldOut</b>, a SuperCollider plugin that writes audio into a shared-memory <b>ring</b> the daemon reads. This chunk connects the two. <code>field keys &lt;track&gt;</code> opens an input for each armed track, loads the song with those inputs, and has the voice host write each track's voice into its ring. With the transport stopped, the daemon now plays the inputs over silence.",
+   "The review of this head requested changes in five threads, and each one is flagged on the line it is about. Inputs stay open when <code>field keys</code> fails after routing, and the daemon then never exits. Another <code>field play</code> drops the input windows. Nothing ties the voice host to the daemon's device and rate. On Linux the plugin path loses SuperCollider's core UGens. And the voice contract still says <code>out</code> is bus 0."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Voice host</b>: <code>sc/voice-host.scd</code> running in <code>sclang</code>. It boots its own <code>scsynth</code> and turns MIDI into voices.</li><li><b>Input</b>: a named source the daemon reads each block. <code>field keys</code> names its inputs <code>keys:&lt;song&gt;/&lt;track&gt;</code>.</li><li><b>Ring</b>: the shared-memory buffer behind an input. FieldOut writes it and the daemon reads it.</li><li><b>FieldOut</b>: the <code>scsynth</code> plugin that writes into a ring.</li><li><b>Route</b>: the synth <code>field-route</code>, which carries one instrument's private bus into FieldOut.</li><li><b>Overlay</b>: a second instance of each chain on an input's path, which the daemon runs beside the song.</li><li><b>Idle path</b>: the overlay through a second instance of <code>main</code>'s chain, played while the transport is stopped.</li><li><b>Converted delivery</b>: the daemon resampling the song because the device cannot run at the song's rate.</li><li><b>Dry note</b>: the end of the instrument's line, <code>· dry: the effects on … are not heard</code>.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review of 5a51b4f: changes requested",
+    "html": "<ul class=\"tight\"><li><b>Orphaned inputs.</b> A <code>field keys</code> that fails after routing, or is killed, leaves its input open, and <code>inputsOpen()</code> then keeps the daemon from ever exiting idle.</li><li><b>Session loads drop the input.</b> <code>field play</code>, its watch, and <code>field ui</code> load sessions without the input window, which silences the routed voice.</li><li><b>Device and rate.</b> The voice host boots on <code>--device</code> or the system output, not on the daemon's device. Under converted delivery the routed voice is silent while the transport is stopped.</li><li><b>Linux plugins.</b> <code>ugenPluginsPath</code> replaces <code>scsynth</code>'s defaults and leaves out the core UGens.</li><li><b>Voice contract.</b> The docs still say the host sets <code>out</code> to bus 0.</li></ul><p class=\"note\">The first three were reproduced at this head against null-output daemons. The Linux one rests on SuperCollider's source.</p>"
+   },
+   {
+    "id": "later",
+    "title": "Left for later",
+    "html": "<ul class=\"tight\"><li><b>Criterion 3</b>, hearing a track through its effects, is the author's to check by ear.</li><li><b>Criteria 4 and 5</b>, the added latency and an hour without a dropout, need a real device.</li><li><b>A session swap under a playing input</b> rebuilds the overlay cold, a gap of the path's latency. §10 accepts that for now.</li><li><b>The end-to-end test</b> <code>routing-voice.test.ts</code> needs SuperCollider and an output device, so it skips on CI.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "contract",
+   "title": "What crosses between the processes",
+   "kicker": "The route SynthDef that Field writes, and the input's new peak in status",
+   "intro": [
+    "Three processes take part when you play a track: <code>field keys</code> in Node, the voice host, and the daemon. This group holds the two small contracts between them that change.",
+    "The <b>route</b> is a SynthDef, SuperCollider's compiled synth definition. It reads two channels from a bus and hands them to FieldOut. <code>sclang</code> has no FieldOut class to build that SynthDef from, so <code>routeSynthDef</code> writes its binary form directly.",
+    "Each open input in the daemon's <code>status</code> now reports <code>peak</code>, the loudest sample read since a client last asked. Every client <code>status</code> read resets it."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/synthdef.ts",
+     "note": "Adds <code>routeSynthDef</code>: <code>In.ar(in, 2)</code> into <code>FieldOut.ar(ring, …)</code>, with <code>in</code> and <code>ring</code> as controls.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Ran <code>src/audiod/live-ring.test.ts</code> at this head. A non-realtime <code>scsynth</code> loads this SynthDef, and a sine on private bus 20 reaches the daemon's ring through it.",
+       "line": 119
+      }
+     ]
+    },
+    {
+     "path": "src/audiod/protocol.ts",
+     "note": "<code>inputStatusSchema</code> gains a required <code>peak</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "<code>peak</code> is required, so this CLI rejects the status of a daemon that has <code>live-input</code> but no <code>peak</code>. Only builds of this stack's chunks 1 and 2 are such a daemon.",
+       "line": 309
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "daemon",
+   "title": "The daemon plays inputs while the song is stopped",
+   "kicker": "A second instance of the output chain, a pin against the idle exit, a peak meter, and a file-to-ring feeder",
+   "intro": [
+    "Chunk 1 gave a live session <b>input windows</b>: a track reads audio from outside the session each block. What an input reaches travels in the <b>overlay</b>, a second instance of each chain on the input's path, summed into <code>main</code>, the output track, before <code>main</code>'s own chain runs. Until now that happened only while the transport played.",
+    "With the transport stopped, <code>Player::pullAudio</code> now calls <code>LiveSession::renderIdle</code> when the session has inputs. It renders the overlay at the stopped position and runs it through <code>idleChain</code>, a second instance of the output track's chain. You hear what you play over silence, and the song's own chain and position stay where they were.",
+    "<b>Converted delivery</b> is how the daemon plays a song whose rate the device cannot run at: it resamples. It has no idle path, so a stopped session is silent then.",
+    "Three smaller pieces ride along. An open input keeps the daemon from exiting idle (<code>Player::inputsOpen</code>). Each input meters its <code>peak</code>. And <code>field-audiod --ring-feed &lt;ring&gt; &lt;file.wav&gt;</code> writes a file into a ring at real-time pace, as FieldOut would, so an input can be tested without SuperCollider."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A limiter or hosted plugin emits fewer samples than it takes while it fills its lookahead. Each chain's output therefore passes through a FIFO that starts with the chain's latency in zeros, so every block leaves whole and exactly that late (live-supercollider.md §9, step 4). <code>idleDelayed</code> is that FIFO for the idle chain."
+    }
+   ],
+   "files": [
+    {
+     "path": "native/audiod/src/live.h",
+     "note": "Declares <code>renderIdle</code>, <code>hasInputs</code>, and the idle chain's buffers."
+    },
+    {
+     "path": "native/audiod/src/live.cpp",
+     "note": "Builds the idle chain at load, and adds <code>renderIdle</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Traced <code>renderOverlay</code>: it skips the chain for the output track, so <code>overlay[slot].post</code> is the sum before <code>main</code>'s chain, and <code>renderIdle</code> applies that chain once. The FIFO starts with exactly the chain's latency, so a voice is as late with the transport stopped as playing.",
+       "line": 511
+      },
+      {
+       "kind": "verify",
+       "text": "Nothing here allocates on the audio thread. <code>idleBlock</code> and <code>idleDelayed</code> are reserved at load, 16384 frames plus the latency, and a block stays inside them. <code>buildOverlay</code> runs in the <code>LiveSession</code> constructor, so the idle chain's second instance of a hosted plugin is made off the audio thread.",
+       "line": 493
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.h",
+     "note": "Declares <code>inputsOpen</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The comment says <code>field keys</code> may play through an input with nothing else connected. But while <code>field keys</code> plays, the connection that <code>routeArmed</code> holds already keeps the daemon up. So the pin acts only after <code>field keys</code> has gone, which the flag on <code>src/commands/keys.ts</code> line 93 is about.",
+       "line": 99
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/player.cpp",
+     "note": "Plays a stopped live session's inputs through <code>renderIdle</code>, and passes <code>consumePeak</code> to each ring's stats.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The idle branch runs under the same <code>ScopedTryLock</code> on <code>liveLock</code> as the playing path, so it never reads a session in the middle of a swap.",
+       "line": 1009
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/ring_input.h",
+     "note": "Declares the peak and <code>runRingFeed</code>."
+    },
+    {
+     "path": "native/audiod/src/ring_input.cpp",
+     "note": "Tracks the loudest sample read, and adds <code>runRingFeed</code> for <code>--ring-feed</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "<code>peak</code> has one writer, the audio thread, and a <code>status</code> read exchanges it back to 0. Relaxed atomics are enough for a meter.",
+       "line": 128
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/src/main.cpp",
+     "note": "Adds <code>--ring-feed</code>, and keeps the daemon from exiting idle while an input is open.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "A ring that does not parse as a number reads as 0, and the daemon then starts as a server instead of failing. The review lists this as a suggestion.",
+       "line": 210
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "voicehost",
+   "title": "The voice host writes into rings",
+   "kicker": "Each routed instrument's voices play into a private bus that its route carries into the ring",
+   "intro": [
+    "The <b>voice host</b> is <code>sc/voice-host.scd</code> running in <code>sclang</code>. It boots its own <code>scsynth</code> and plays each armed instrument's voice from every MIDI source. Several instruments play in unison: each note sounds a voice from each.",
+    "<code>VoiceHost.start</code> now takes <code>rings</code>, one per instrument, each a ring number or <code>null</code> to play straight to the device. It also takes <code>fieldOut</code>, the directory that holds the built plugin. When any ring is set, it writes the route SynthDef to a temp file and passes <code>FIELD_RINGS</code>, <code>FIELD_FIELDOUT</code>, and <code>FIELD_ROUTE_DEF</code> to the host.",
+    "At each boot the host loads the route and gives each routed instrument a two-channel private <b>bus</b>. It then starts one route per bus at the tail of the default group, after every voice. A routed voice's <code>out</code> control is that bus, not bus 0.",
+    "<code>scsynth</code> crashes when it quits with a FieldOut still running, because it unloads plugins before it frees synths. So every way the host stops frees all nodes first. <code>VoiceHost.close</code> sends <code>/g_freeAll</code> before <code>/quit</code>, and both the rate restart and the parent-gone check call <code>stopRoutes</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "sc/voice-host.scd",
+     "note": "Starts and stops the routes, adds FieldOut to the plugin path, and sends each voice to its bus.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "On Linux the routed <code>scsynth</code> loads no core UGens, so the voice is silent. Setting <code>ugenPluginsPath</code> passes <code>-U</code>, and <code>scsynth</code> then searches only the listed paths. <code>Platform.resourceDir +/+ \"plugins\"</code> is <code>&lt;prefix&gt;/share/SuperCollider/plugins</code> on Linux, but the core UGens live in <code>&lt;prefix&gt;/lib/SuperCollider/plugins</code>. Adding FieldOut through <code>SC_PLUGIN_PATH</code> keeps the defaults.",
+       "line": 174
+      },
+      {
+       "kind": "flag",
+       "text": "Routing makes <code>out</code> a private bus, but <code>docs/keys.md</code> and keyboard-instrument.md §2.6 still tell instrument authors that the host sets <code>out</code> to bus 0. A voice that writes to bus 0 in voice mode bypasses the route and plays dry, while the line says the effects are heard.",
+       "line": 190
+      },
+      {
+       "kind": "verify",
+       "text": "A rate restart calls <code>stopRoutes</code> before <code>server.quit</code>. <code>boot</code> loads the route with <code>d_load</code> and runs <code>startRoutes</code> every time, so the routes come back on the new server with fresh buses.",
+       "line": 117
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.ts",
+     "note": "Takes <code>rings</code> and <code>fieldOut</code>, writes the route SynthDef, finds the built FieldOut with <code>fieldOutPluginDir</code>, and frees all nodes before <code>/quit</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Ran <code>src/keys/voice-host.test.ts</code> at this head. The host receives <code>FIELD_RINGS</code>, <code>FIELD_FIELDOUT</code>, and a route file that starts with <code>SCgf</code>, and <code>/g_freeAll</code> reaches the server before <code>/quit</code>.",
+       "line": 269
+      },
+      {
+       "kind": "context",
+       "text": "Each start leaves a <code>field-route-*</code> directory in the temp directory, and nothing removes it. The review lists this as a suggestion.",
+       "line": 216
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "routing",
+   "title": "<code>field keys</code> routes armed tracks through the daemon",
+   "kicker": "Open an input per track, load the song with them, and give the voice host the rings",
+   "intro": [
+    "<code>field keys creek/track:bass</code> arms the MIDI track <code>bass</code> and plays the instrument that the track names. Before this change, the voice always played straight to the device. The effects on <code>bass</code> and on the tracks above it were not heard, and the instrument's line ended with a <b>dry note</b>: <code>· dry: the effects on keys-bus are not heard yet</code>.",
+    "Now <code>play</code> calls <code>routeArmed</code> before the voice host starts, and it does three things:",
+    "<ol><li><b>Opens an input for each armed track.</b> It asks the daemon for an input named <code>keys:&lt;song&gt;/&lt;track&gt;</code>, which answers with a ring number.</li><li><b>Loads the song's live session with those inputs.</b> It compiles the song with an input window on each armed track and loads it, which replaces whatever the daemon had loaded.</li><li><b>Hands the rings to the voice host.</b> Each armed entry becomes its own instrument with its own ring, so two tracks that share an instrument still get separate voices. An instrument named without a track gets <code>null</code> and plays straight to the device.</li></ol>",
+    "When routing is not possible, <code>routeArmed</code> returns a reason, and the dry note shows it. The reasons are tracks in two songs, Windows, FieldOut not built, a daemon without <code>live-input</code>, or the first line of any error. On quit, <code>play</code> closes the voice host first, then the inputs, and then loads the song again without them."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/routing.ts",
+     "note": "New. <code>routeArmed</code> opens the inputs, loads the session, and returns the rings, or the reason it cannot.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "The input window exists only in the session that this function compiles. <code>field play creek</code> in another terminal, a structural edit under <code>field play --watch</code>, or <code>field ui</code> loads a session without it, and the daemon stops reading the ring. Reproduced at this head: after such a load, half a second of <code>--ring-feed</code> read 0 frames, stopped and playing.",
+       "line": 67
+      },
+      {
+       "kind": "context",
+       "text": "<code>AudiodClient.connect</code> sits outside the <code>try</code>. A daemon that never answers then ends <code>field keys</code> with an error instead of the dry fallback. The review lists this as a suggestion.",
+       "line": 42
+      }
+     ]
+    },
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Calls <code>routeArmed</code>, gives the voice host the rings, drops the dry note when routed, and closes the routing on quit.",
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "Only the quit path closes the routing. If <code>KeysHelper.start</code> or <code>VoiceHost.start</code> throws, or <code>field keys</code> is killed, <code>keys:&lt;song&gt;/&lt;track&gt;</code> stays open. <code>Player::inputsOpen()</code> then keeps the daemon up for good, and the next routed <code>field keys</code> on that track plays dry because the input is already open. Reproduced at this head.",
+       "line": 93
+      },
+      {
+       "kind": "flag",
+       "text": "The voice host still boots on <code>--device</code> or the system output, while the routed voice is heard on the daemon's device. When the two differ, the line names a device you are not hearing, and the ring crosses two clocks. When the device cannot run at the song's rate, the routed voice is silent while the transport is stopped. Reproduced at this head with a 44100 Hz song.",
+       "line": 146
+      },
+      {
+       "kind": "verify",
+       "text": "Ran <code>src/commands/keys.test.ts</code>: the line drops the dry note when routed, and gives the reason when routing was not possible.",
+       "line": 221
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests",
+   "kicker": "From the instrument line up to a note through real sclang and scsynth",
+   "intro": [
+    "<ul><li><b><code>routing.test.ts</code></b> runs <code>routeArmed</code> against a null-output daemon, with an empty <code>FieldOut.scx</code> standing in for the build. It opens <code>keys:creek/bass</code>, loads <code>creek</code> with it, puts the song back on close, and checks each reason it cannot route.</li><li><b><code>routing-voice.test.ts</code></b> runs the whole path through real <code>sclang</code> and <code>scsynth</code> with FieldOut: a note from a published MIDI source reaches the track's input. It needs SuperCollider and an output device, so it runs on a workstation and skips on CI.</li><li><b><code>live-ring.test.ts</code></b> feeds a ring with <code>--ring-feed</code> while the transport is stopped, reads the sine's 0.25 peak back through the idle path, and checks the route in a non-realtime <code>scsynth</code>.</li><li><b><code>voice-host.test.ts</code></b> and <b><code>keys.test.ts</code></b> check what the host receives, the free before <code>/quit</code>, and the dry note.</li></ul>"
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Ran <code>routing.test.ts</code>, <code>live-ring.test.ts</code>, <code>voice-host.test.ts</code>, and <code>keys.test.ts</code> at this head with <code>FIELD_AUDIOD</code> set: 32 passed. Every ring they opened was gone from shared memory afterward."
+    },
+    {
+     "kind": "context",
+     "text": "<code>routing-voice.test.ts</code> was read but not run in the review, because it opens the output device and connects every MIDI source."
+    },
+    {
+     "kind": "context",
+     "text": "On Windows CI, the two new voice-host tests fail the same way as the file's ten older ones, because the fake <code>sclang</code> is not an <code>.exe</code>. The base, #198, fails the same ten."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/keys/routing.test.ts"
+    },
+    {
+     "path": "src/keys/routing-voice.test.ts"
+    },
+    {
+     "path": "src/audiod/live-ring.test.ts"
+    },
+    {
+     "path": "src/keys/voice-host.test.ts"
+    },
+    {
+     "path": "src/commands/keys.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Documentation and plans",
+   "kicker": "The routed voice, the idle path, and chunk 3's progress entry",
+   "intro": [
+    "<code>docs/keys.md</code> now says a named track plays through its effects, and lists when the voice falls back to dry. <code>docs/audio-engine.md</code> describes the idle path, <code>peak</code>, the idle pin, and <code>--ring-feed</code>. The arming plan amends the dry note in §2.1, and the live-supercollider plan logs chunk 3 in §10."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "Replaces the \"not heard yet\" paragraph with how a track plays through its effects, and when it falls back.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This sentence counts only the latency of the limiters and plugins. The ring also holds a daemon block plus 256 frames. The review lists this as a suggestion.",
+       "line": 233
+      },
+      {
+       "kind": "context",
+       "text": "The voice contract table earlier in this file still says the host sets <code>out</code> to bus 0. The flag on <code>sc/voice-host.scd</code> line 190 is about it."
+      }
+     ]
+    },
+    {
+     "path": "docs/audio-engine.md",
+     "note": "Adds the idle path, <code>peak</code>, the idle pin, and <code>--ring-feed</code> to \"Live inputs\".",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Checked against <code>server.cpp</code>: every client <code>status</code> read passes <code>consumePeak</code>, so <code>peak</code> resets as this line says.",
+       "line": 121
+      }
+     ]
+    },
+    {
+     "path": "docs/architecture.md",
+     "note": "Says <code>field keys</code> on a track now routes through FieldOut."
+    },
+    {
+     "path": "docs/projects/arming/readme.md",
+     "note": "A dated amendment to §2.1: the dry note appears only when routing is not possible, with the reason."
+    },
+    {
+     "path": "docs/projects/live-supercollider/readme.md",
+     "note": "§10 logs chunk 3.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "§10 accepts a cold overlay across a session swap \"for now\", which answers the question §9 left to chunk 3. §9's sentence still says chunk 3 decides. The plan is <code>in-progress</code>, and this change opens no new question.",
+       "line": 308
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "project": "live-supercollider"
+}

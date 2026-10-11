@@ -1,0 +1,1367 @@
+diff --git a/docs/architecture.md b/docs/architecture.md
+index b65ce5a5..bf3d71fb 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -196,8 +196,9 @@ OSC over UDP, which TypeScript handles fine. Two modes:
+   The engine's half has landed: a live session carries an input up
+   through every chain above its track ([audio-engine.md](audio-engine.md)
+   "Live inputs"), fed from a shared-memory ring that FieldOut, a GPL-3.0
+-  scsynth plugin in `native/sc-fieldout`, writes. Pointing the voice host
+-  at FieldOut is next.
++  scsynth plugin in `native/sc-fieldout`, writes. `field keys` on a track
++  routes the voice host through FieldOut into that input, so the track's
++  effects and those above it process what you play.
+ 
+ SC source is tracked in Git and treated as code.
+ 
+diff --git a/docs/audio-engine.md b/docs/audio-engine.md
+index 7b800e20..ff1b312b 100644
+--- a/docs/audio-engine.md
++++ b/docs/audio-engine.md
+@@ -107,21 +107,31 @@ name and answers its number, which FieldOut takes:
+ ```
+ 
+ A session whose input window names an open input reads it every block;
+-one that names no open input is refused. The reader keeps a block plus
++one that names no open input is refused. With the transport stopped,
++the daemon still plays what the inputs reach, through a second instance
++of the output's chain, so you play over silence while the song's own
++chain and position stay where they were. That idle path needs the device
++at the session's rate; under converted delivery a stopped session is
++silent. The reader keeps a block plus
+ 256 frames in hand, drops the oldest frames when the writer runs fast
+ enough to hold twice that, and when the writer stops, plays what it
+ holds and waits to fill again. `status` lists each open input with its
+-counters: frames `written`, `read`, and `dropped` for want of room, and
+-the reader's `underruns` and `skipped` frames. `input_close` frees the
+-name; a session still reading the ring keeps it until the session goes.
++counters: frames `written`, `read`, and `dropped` for want of room, the
++reader's `underruns` and `skipped` frames, and the `peak` it read since
++a client last asked. `input_close` frees the name; a session still
++reading the ring keeps it until the session goes, and an open input
++keeps the daemon from exiting idle.
+ A daemon that does this lists `live-input` in `hello.features`. The ring
+ is POSIX shared memory, so Windows has no live inputs yet.
+ 
+-`field-audiod --render-live` feeds an input from a file instead, and
+-`--ring-selftest` checks the reader against the writer FieldOut runs:
++`field-audiod --render-live` feeds an input from a file instead,
++`--ring-feed` writes a file into an open input's ring at real-time pace
++as FieldOut would, and `--ring-selftest` checks the reader against the
++writer FieldOut runs:
+ 
+ ```sh
+ field-audiod --render-live session.json out.wav --input keys-voice=take.wav
++field-audiod --ring-feed 4213871 take.wav
+ field-audiod --ring-selftest
+ ```
+ 
+diff --git a/docs/keys.md b/docs/keys.md
+index 422d5ba0..a8050e20 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -218,12 +218,33 @@ naming a bus plays the part it carries. If more than one MIDI track is
+ under it, `field keys` lists them and stops, and you name the ones you
+ mean.
+ 
+-The instrument still plays straight to the device, so the inserts on
+-the track and on the tracks above it are not heard yet. When a track you
+-named has any, the instrument's line ends
+-`· dry: the effects on keys-bus are not heard yet`. Hearing them is the
+-work of
+-[the live-supercollider plan](projects/live-supercollider/readme.md).
++A track you name plays through its effects and the effects of every
++track above it, up to `main`'s, as the song would play it. `field keys`
++opens an input for the track in `field-audiod`, loads the song's live
++session with it, and the voice host writes the track's voice into that
++input through FieldOut, a SuperCollider plugin that ships with Field
++([audio-engine.md](audio-engine.md) "Live inputs"). With the song
++stopped, you play over silence; press play in another terminal
++(`field transport play`) and you play over the song. When you quit,
++`field keys` closes the inputs and loads the song again without them.
++
++Each track gets a voice of its own, even when two share an instrument.
++An instrument you name without a track still plays straight to the
++device. The voice reaches the speakers late by the latency of the
++limiters and hosted plugins on its way up, a few milliseconds for the
++built-in limiter.
++
++When a track's voice cannot go through the daemon, it plays straight to
++the device, and the instrument's line says which effects you are not
++hearing and why:
++
++```console
++keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, main are not heard (FieldOut is not built: run pnpm build:native)
++```
++
++That happens when FieldOut is not built, on Windows, which has no
++POSIX shared memory, when the daemon predates live inputs, or when the
++tracks you name are in two songs, because one session plays one song.
+ 
+ ## Record what you play
+ 
+diff --git a/docs/projects/arming/readme.md b/docs/projects/arming/readme.md
+index 88a024d8..784d06cb 100644
+--- a/docs/projects/arming/readme.md
++++ b/docs/projects/arming/readme.md
+@@ -66,6 +66,10 @@ getting the voice's audio into the daemon's graph; until then
+    `keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers`.
+    When a track you named has inserts on the way down to its MIDI track,
+    it ends `· dry: the effects on keys-bus are not heard yet`.
++   *Amended (2026-10-11, live-supercollider.md chunk 3):* the voices now
++   pass through the effects, and the note appears only when routing
++   them is not possible, as `· dry: the effects on keys-bus are not
++   heard (<why>)`.
+ 
+ ### 2.2 Recording armed tracks
+ 
+diff --git a/docs/projects/live-supercollider/readme.md b/docs/projects/live-supercollider/readme.md
+index b99bf3f8..9fce7916 100644
+--- a/docs/projects/live-supercollider/readme.md
++++ b/docs/projects/live-supercollider/readme.md
+@@ -287,6 +287,26 @@ must sit under `main`.
+   added latency and an hour without a dropout, need the real device and
+   wait for chunk 3.
+ 
++- 2026-10-11 — Chunk 3 (branch `live/keys`, stacked on chunk 2).
++  `field keys` on tracks opens an input per armed track, loads the song's
++  session with them, and starts the voice host with a ring per
++  instrument; each routed instrument's voices play into a private bus
++  that a route synth, `In` into `FieldOut`, carries to its ring.
++  `src/keys/synthdef.ts` writes the route because sclang has no
++  `FieldOut` class, and the host loads it by file. Every way the host
++  stops frees its nodes first, which chunk 2 found scsynth needs. With
++  the transport stopped the daemon plays the overlay through a second
++  instance of `main`'s chain (§7 question 2), so the song's chain and
++  position do not move; open inputs pin the daemon open as an arm does.
++  Each input now reports a `peak`, and `--ring-feed` writes a file into a
++  ring as FieldOut would. `src/keys/routing-voice.test.ts` runs the whole
++  path through real sclang and scsynth: a note from a published MIDI
++  source reaches the track's input in the daemon. When routing is not
++  possible, the line keeps the dry note and says why. Criterion 3 by ear,
++  and criteria 4 and 5 on the real device, are still owed; a swap under
++  a playing input, which §9 leaves to this chunk, rebuilds the overlay
++  cold, a gap of the path's latency, accepted for now.
++
+ ## 11 FieldOut's license (DECIDED, 2026-10-11)
+ 
+ FieldOut is GPL-3.0-or-later, in this repository, with its own
+diff --git a/native/audiod/src/live.cpp b/native/audiod/src/live.cpp
+index 478136db..c5c81baf 100644
+--- a/native/audiod/src/live.cpp
++++ b/native/audiod/src/live.cpp
+@@ -479,6 +479,49 @@ void LiveSession::buildOverlay()
+     }
+     if (! overlay.empty())
+         inputScratch.assign (2, std::vector<float> (8192, 0.0f));
++    if (overlayIndex[(size_t) outputTrack] >= 0)
++    {
++        const Track& output = tracks[(size_t) outputTrack];
++        buildStages (idleChain, output.chainSpecs, output.rate, 0);
++        juce::int64 latency = 0;
++        for (const auto& stage : idleChain)
++            if (stage.limiter != nullptr)
++                latency += stage.limiter->latencySamples();
++            else if (stage.plugin != nullptr)
++                latency += stage.plugin->latencySamples();
++        idleBlock.assign (2, std::vector<float>());
++        idleDelayed.assign (2, std::vector<float> ((size_t) latency, 0.0f));
++        reserveAll (idleBlock, 16384);
++        reserveAll (idleDelayed, (size_t) latency + 16384);
++    }
++}
++
++void LiveSession::renderIdle (float* const* out, int numChannels, int n)
++{
++    const int slot = overlay.empty() ? -1 : overlayIndex[(size_t) outputTrack];
++    if (slot < 0)
++    {
++        for (int c = 0; c < numChannels; ++c)
++            std::fill (out[c], out[c] + n, 0.0f);
++        return;
++    }
++    // Ramps evaluate at the stopped position: the song's clock does not
++    // move, and neither does any glide on it.
++    renderOverlay (n, clock);
++    const auto& mixed = overlay[(size_t) slot].post;
++    for (int c = 0; c < 2; ++c)
++        idleBlock[(size_t) c].assign (mixed[(size_t) c].begin(), mixed[(size_t) c].begin() + n);
++    runStages (idleChain, idleBlock, 0);
++    for (int c = 0; c < 2; ++c)
++    {
++        auto& delayed = idleDelayed[(size_t) c];
++        delayed.insert (delayed.end(), idleBlock[(size_t) c].begin(), idleBlock[(size_t) c].end());
++    }
++    for (int c = 0; c < numChannels; ++c)
++        for (int i = 0; i < n; ++i)
++            out[c][i] = c < 2 ? idleDelayed[(size_t) c][(size_t) i] : 0.0f;
++    for (auto& delayed : idleDelayed)
++        delayed.erase (delayed.begin(), delayed.begin() + n);
+ }
+ 
+ // A feed through its delay line: the block that leaves it now, which is
+diff --git a/native/audiod/src/live.h b/native/audiod/src/live.h
+index d414eb88..12e54c01 100644
+--- a/native/audiod/src/live.h
++++ b/native/audiod/src/live.h
+@@ -90,6 +90,13 @@ class LiveSession
+     // Channel counts beyond stereo are zero-filled.
+     void renderBlock (float* const* out, int numChannels, int n);
+ 
++    // Stopped, with an input (live-supercollider.md §7 question 2): the
++    // overlay alone, through a second instance of the output's chain, so
++    // what you play is heard over silence while the song's clock and
++    // chains stay where they are.
++    void renderIdle (float* const* out, int numChannels, int n);
++    bool hasInputs() const { return ! inputSources.empty(); }
++
+     void locate (juce::int64 sample);
+     // What has been delivered to the device — the honest transport
+     // position; the input clock runs ahead of it by any limiter window.
+@@ -330,6 +337,10 @@ class LiveSession
+     std::vector<OverlayTrack> overlay; // children before the tracks that read them
+     std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay
+     std::vector<std::vector<float>> inputScratch;
++    // renderIdle's instance of the output chain, its block, and the delay
++    // that keeps each block whole across a limiter's varying lag.
++    std::vector<ChainStage> idleChain;
++    std::vector<std::vector<float>> idleBlock, idleDelayed;
+     // Off while locate renders into the void: a source read there is
+     // consumed off the audio thread and heard by nobody.
+     bool overlayReadsInputs = true;
+diff --git a/native/audiod/src/main.cpp b/native/audiod/src/main.cpp
+index 5a278147..9d45bc02 100644
+--- a/native/audiod/src/main.cpp
++++ b/native/audiod/src/main.cpp
+@@ -125,7 +125,7 @@ class Heartbeat : public juce::Timer
+         // Armed or recording pins the daemon open (recording.md §5): an
+         // idle exit under a take would be the take dying to a timeout.
+         auto idle = server.connectionCount() == 0 && state != "playing"
+-                    && ! player.recordingPinned()
++                    && ! player.recordingPinned() && ! player.inputsOpen()
+                     && juce::Time::currentTimeMillis() - server.lastActivityMs() > idleMs;
+         if (server.quitRequested || idle)
+             wantExit = true;
+@@ -151,6 +151,8 @@ int main (int argc, char* argv[])
+     juce::String renderLiveClick;
+     std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
+     bool ringSelfTest = false;
++    int ringFeedId = 0;
++    std::string ringFeedWav;
+     juce::String scanFormat;
+     juce::String probeFormat;
+     juce::String probeCandidate;
+@@ -203,6 +205,11 @@ int main (int argc, char* argv[])
+             nullOutput = true;
+         else if (arg == "--ring-selftest")
+             ringSelfTest = true;
++        else if (arg == "--ring-feed" && i + 2 < argc)
++        {
++            ringFeedId = juce::String (argv[++i]).getIntValue();
++            ringFeedWav = argv[++i];
++        }
+         else if (arg == "--idle" && i + 1 < argc)
+             idleSeconds = juce::String (argv[++i]).getIntValue();
+         else
+@@ -218,6 +225,7 @@ int main (int argc, char* argv[])
+                           "       field-audiod --state-capture <au|vst3> <identifier> "
+                           "<paramsJson> <out>\n"
+                           "       field-audiod --ring-selftest\n"
++                          "       field-audiod --ring-feed <ring> <file.wav>\n"
+                           "       field-audiod --keys <name>\n"
+                           "       field-audiod --midi-monitor <name>\n");
+             return 2;
+@@ -323,6 +331,17 @@ int main (int argc, char* argv[])
+         return 0;
+     }
+ 
++    // An input without SuperCollider (ring_input.h): a file into a ring.
++    if (ringFeedId > 0)
++    {
++        if (auto error = field::runRingFeed ((uint32_t) ringFeedId, ringFeedWav); ! error.empty())
++        {
++            std::fprintf (stderr, "field-audiod: ring feed failed: %s\n", error.c_str());
++            return 1;
++        }
++        return 0;
++    }
++
+     // The golden instrument (live.h): a session evaluated offline, for
+     // byte-comparison against the stems the same graph renders. A
+     // subprocess for the same reasons --render is.
+diff --git a/native/audiod/src/player.cpp b/native/audiod/src/player.cpp
+index c5d20db2..462eabca 100644
+--- a/native/audiod/src/player.cpp
++++ b/native/audiod/src/player.cpp
+@@ -711,6 +711,12 @@ juce::var Player::openInput (const juce::String& name)
+     return juce::var (result.get());
+ }
+ 
++bool Player::inputsOpen()
++{
++    std::lock_guard<std::mutex> hold (inputsLock);
++    return ! rings.empty();
++}
++
+ juce::String Player::closeInput (const juce::String& name)
+ {
+     std::lock_guard<std::mutex> hold (inputsLock);
+@@ -735,7 +741,7 @@ juce::var Player::status (bool consumePeak)
+             juce::Array<juce::var> list;
+             for (const auto& [name, ring] : rings)
+             {
+-                auto stats = ring->stats();
++                auto stats = ring->stats (consumePeak);
+                 stats.getDynamicObject()->setProperty ("name", juce::String (name));
+                 list.add (stats);
+             }
+@@ -996,8 +1002,15 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
+                 }
+                 return position;
+             }
+-            for (int c = 0; c < numChannels; ++c)
+-                std::fill (out[c], out[c] + n, 0.0f);
++            // Stopped with a live input (live-supercollider.md §7
++            // question 2): what you play is heard over silence. Converted
++            // delivery has no idle path, because an input plays at the
++            // device's rate, which is then not the session's.
++            if (liveConverter == nullptr && liveSession->hasInputs())
++                liveSession->renderIdle (out, numChannels, n);
++            else
++                for (int c = 0; c < numChannels; ++c)
++                    std::fill (out[c], out[c] + n, 0.0f);
+             // A bed that is not rolling has no position to latch a take
+             // or a tick on: the first playing block is where both start.
+             return -1;
+diff --git a/native/audiod/src/player.h b/native/audiod/src/player.h
+index 8244a5c1..6c4fba4e 100644
+--- a/native/audiod/src/player.h
++++ b/native/audiod/src/player.h
+@@ -96,6 +96,9 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // closing one it still plays only frees the name.
+     juce::var openInput (const juce::String& name);
+     juce::String closeInput (const juce::String& name);
++    // An open input pins the daemon open, as an arm does: `field keys`
++    // may be playing through it with nothing else connected.
++    bool inputsOpen();
+     bool liveMode() const { return liveSession != nullptr; }
+ 
+     juce::String play();
+diff --git a/native/audiod/src/ring_input.cpp b/native/audiod/src/ring_input.cpp
+index 08ed6d62..ddf8e380 100644
+--- a/native/audiod/src/ring_input.cpp
++++ b/native/audiod/src/ring_input.cpp
+@@ -2,13 +2,17 @@
+ 
+ #include "field_ring.h"
+ 
++#include "dsp/wavfile.h"
++
+ #include <algorithm>
+ #include <cerrno>
++#include <cmath>
+ #include <cstring>
+ #include <new>
+ #include <random>
+ #include <stdexcept>
+ #include <string>
++#include <thread>
+ 
+ namespace field
+ {
+@@ -111,12 +115,17 @@ void RingInput::read (float* left, float* right, int n)
+         taken = (int) std::min<uint64_t> (held, (uint64_t) n);
+         const float* data = ring::data (header);
+         const uint64_t mask = frames - 1;
++        float loudest = 0.0f;
+         for (int i = 0; i < taken; ++i)
+         {
+             const size_t from = (size_t) ((at + (uint64_t) i) & mask) * ring::channels;
+             left[i] = data[from];
+             right[i] = data[from + 1];
++            loudest = std::max (loudest, std::max (std::abs (left[i]), std::abs (right[i])));
+         }
++        // One writer (this thread); status exchanges it back to zero.
++        if (loudest > peak.load (std::memory_order_relaxed))
++            peak.store (loudest, std::memory_order_relaxed);
+         at += (uint64_t) taken;
+         if (taken < n)
+         {
+@@ -131,7 +140,7 @@ void RingInput::read (float* left, float* right, int n)
+     std::fill (right + taken, right + n, 0.0f);
+ }
+ 
+-juce::var RingInput::stats() const
++juce::var RingInput::stats (bool consumePeak)
+ {
+     auto* object = new juce::DynamicObject();
+     object->setProperty ("ring", (int) ringId);
+@@ -143,9 +152,44 @@ juce::var RingInput::stats() const
+ #endif
+     object->setProperty ("underruns", (juce::int64) underruns.load (std::memory_order_relaxed));
+     object->setProperty ("skipped", (juce::int64) skipped.load (std::memory_order_relaxed));
++    object->setProperty ("peak", (double) (consumePeak ? peak.exchange (0.0f) : peak.load()));
+     return juce::var (object);
+ }
+ 
++std::string runRingFeed (uint32_t id, const std::string& wavPath)
++{
++#if defined(_WIN32)
++    juce::ignoreUnused (id, wavPath);
++    return "the ring needs POSIX shared memory";
++#else
++    try
++    {
++        const auto channels = dsp::readWav (wavPath).channels;
++        const char* error = nullptr;
++        auto mapping = ring::open (id, error);
++        if (mapping.header == nullptr)
++            return std::string ("ring ") + std::to_string (id) + ": " + error;
++        const auto& left = channels[0];
++        const auto& right = channels.size() > 1 ? channels[1] : channels[0];
++        const auto burst = std::chrono::microseconds ((long long) (128.0 * 1e6 / mapping.header->sampleRate));
++        auto due = std::chrono::steady_clock::now();
++        for (size_t at = 0; at < left.size(); at += 128)
++        {
++            const int n = (int) std::min<size_t> (128, left.size() - at);
++            ring::write (mapping.header, left.data() + at, right.data() + at, n);
++            due += burst;
++            std::this_thread::sleep_until (due);
++        }
++        ring::unmap (mapping);
++        return {};
++    }
++    catch (const std::exception& e)
++    {
++        return e.what();
++    }
++#endif
++}
++
+ std::string runRingSelfTest()
+ {
+ #if defined(_WIN32)
+diff --git a/native/audiod/src/ring_input.h b/native/audiod/src/ring_input.h
+index 50c24ced..7e5583e2 100644
+--- a/native/audiod/src/ring_input.h
++++ b/native/audiod/src/ring_input.h
+@@ -40,8 +40,10 @@ class RingInput final : public LiveInput
+     void read (float* left, float* right, int n) override;
+ 
+     // For `status`: frames written, read, and dropped by the writer, how
+-    // often the reader ran dry, and the frames it skipped for drift.
+-    juce::var stats() const;
++    // often the reader ran dry, the frames it skipped for drift, and the
++    // loudest sample it read since a client last read the peak, which
++    // `consumePeak` resets, as the armed input's meter does.
++    juce::var stats (bool consumePeak = false);
+ 
+     // What the reader keeps in hand beyond its block: one burst of the
+     // writer's, which the voice host runs at a 128-frame hardware buffer,
+@@ -58,6 +60,7 @@ class RingInput final : public LiveInput
+     bool primed = false;
+     std::atomic<uint64_t> underruns { 0 };
+     std::atomic<uint64_t> skipped { 0 };
++    std::atomic<float> peak { 0.0f };
+ };
+ 
+ // --ring-selftest: a RingInput and a writer through field_ring.h, the
+@@ -66,4 +69,9 @@ class RingInput final : public LiveInput
+ // nothing reading. Empty string when every scenario holds.
+ std::string runRingSelfTest();
+ 
++// --ring-feed: write a WAV into ring `id` as FieldOut would, in 128-frame
++// bursts at the ring's rate in real time, so a test or a person can hear
++// an input without SuperCollider. Empty string when the file went in.
++std::string runRingFeed (uint32_t id, const std::string& wavPath);
++
+ } // namespace field
+diff --git a/sc/voice-host.scd b/sc/voice-host.scd
+index 5b3a3555..2fcab9f8 100644
+--- a/sc/voice-host.scd
++++ b/sc/voice-host.scd
+@@ -10,6 +10,12 @@
+ // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
+ // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
+ // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
++// To play through the effects (live-supercollider.md chunk 3):
++// FIELD_RINGS (a JSON list beside FIELD_INSTRUMENTS, each the daemon ring
++// that instrument's voices go to, or null for the device), FIELD_FIELDOUT
++// (the directory holding the FieldOut plugin), and FIELD_ROUTE_DEF (the
++// route's SynthDef file, which Field writes because sclang has no
++// FieldOut class).
+ // sclang's own port, which Field also chooses (-u), takes /field/reload:
+ // load every program again, as one has changed (§14), keeping them all as
+ // they were if one does not load.
+@@ -21,6 +27,11 @@ var port = "FIELD_SC_PORT".getenv.asInteger;
+ var parentPid = "FIELD_PARENT_PID".getenv;
+ var device = "FIELD_DEVICE".getenv;
+ var trace = "FIELD_VOICE_TRACE".getenv.notNil;
++var rings = "FIELD_RINGS".getenv !? (_.parseJSON);
++var fieldOut = "FIELD_FIELDOUT".getenv;
++var routeDef = "FIELD_ROUTE_DEF".getenv;
++// Each routed instrument's private bus and its route, made at each boot.
++var buses = [], routes = [], startRoutes, stopRoutes;
+ // True until the server answers, at the first boot and at each restart:
+ // a note then has no server to sound on, so it is ignored.
+ var server, voiceDefs, problem, voicer, booting = true;
+@@ -36,9 +47,30 @@ emit = { |pairs|
+ 	var body = pairs.clump(2).collect { |kv| jsonValue.(kv[0]) ++ ":" ++ jsonValue.(kv[1]) }.join(",");
+ 	("@field {" ++ body ++ "}").postln;
+ };
++// A route per instrument with a ring: two channels from its private bus
++// into the ring, at the tail, after every voice. JSON's null arrives as
++// nil or as the string "null", depending on the parser.
++startRoutes = {
++	var ring = { |i| rings !? { |list| list[i] } };
++	buses = instruments.collect { |path, i|
++		var r = ring.(i);
++		if (r.notNil and: { r != "null" }) { Bus.audio(server, 2) }
++	};
++	routes = buses.collect { |bus, i|
++		bus !? { Synth.tail(server, 'field-route', [\in, bus.index, \ring, ring.(i).asInteger]) }
++	};
++};
++// At shutdown scsynth unloads its plugins before it frees the synths
++// still running, and a FieldOut among them would call a destructor that
++// is gone: free every node first.
++stopRoutes = {
++	if (server.notNil and: { server.serverRunning }) { server.freeAll };
++	routes = [];
++};
+ // A server that is still booting has not bound its port, so a /quit would
+ // miss it: the host stops its server by process.
+ stopServer = {
++	stopRoutes.();
+ 	server !? { |s| s.pid !? { |pid| ("kill " ++ pid ++ " 2>/dev/null").systemCmd } };
+ };
+ // exit does not stop the code that called it, so a failure is the last
+@@ -82,9 +114,13 @@ boot = {
+ 			{ server.serverRunning } {
+ 				waiting = false;
+ 				addAll.();
++				routeDef !? { |path| server.sendMsg(\d_load, path) };
++				server.sync;
++				startRoutes.();
+ 				server.sync;
+ 				booting = false;
+-				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
++				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger,
++					"routed", routes.count(_.notNil)]);
+ 			}
+ 			{ launched.notNil and: { server.pid.isNil } } {
+ 				waiting = false;
+@@ -122,6 +158,7 @@ restart = {
+ 	booting = true;
+ 	voicer.forgetVoices;
+ 	emit.(["restarting", true]);
++	stopRoutes.();
+ 	server.quit(onComplete: boot);
+ };
+ 
+@@ -131,6 +168,13 @@ run = {
+ 	server.options.numOutputBusChannels = 2;
+ 	server.options.hardwareBufferSize = 128;
+ 	server.options.sampleRate = nil;
++	// FieldOut beside every plugin scsynth would load anyway: naming any
++	// path replaces the defaults, so they are named too.
++	fieldOut !? { |dir|
++		server.options.ugenPluginsPath = [
++			Platform.resourceDir +/+ "plugins", Platform.systemExtensionDir, Platform.userExtensionDir, dir
++		].select { |path| File.exists(path) };
++	};
+ 	// Named for both directions: given no input device, scsynth on macOS
+ 	// opens the default one even with no input channels, and blocks on the
+ 	// microphone permission (keyboard-instrument.md §10.1).
+@@ -142,8 +186,9 @@ run = {
+ 
+ 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+ 		{ |note, velocity, freq, mod|
+-			voiceDefs.collect { |def|
+-				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod], server)
++			voiceDefs.collect { |def, i|
++				var out = buses[i] !? (_.index) ? 0;
++				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, out, \mod, mod], server)
+ 			}
+ 		},
+ 		{ |synths, control, value| synths.do(_.set(control, value)) },
+diff --git a/src/audiod/live-ring.test.ts b/src/audiod/live-ring.test.ts
+index e04244c6..1480cb93 100644
+--- a/src/audiod/live-ring.test.ts
++++ b/src/audiod/live-ring.test.ts
+@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { createSong, createTrack } from '../commands/create.js';
+ import { init } from '../commands/init.js';
+ import { compileSession } from '../graph/live.js';
+-import { nrtScore, oscBundle, oscMessage, synthDefFile } from '../keys/synthdef.js';
++import { writeWavFloat32 } from '../audio/wav.js';
++import { nrtScore, oscBundle, oscMessage, routeSynthDef, synthDefFile } from '../keys/synthdef.js';
+ import { removeTempProject } from '../testing/temp.js';
+ import { AudiodClient, daemonBinary } from './client.js';
+ 
+@@ -90,7 +91,7 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
+     await expect(client.openInput('mic')).rejects.toThrow('input "mic" is already open');
+     await expect(client.openInput('')).rejects.toThrow('input needs a name');
+     expect((await client.status()).inputs).toEqual([
+-      { name: 'mic', ring: opened.ring, written: 0, read: 0, dropped: 0, underruns: 0, skipped: 0 },
++      { name: 'mic', ring: opened.ring, written: 0, read: 0, dropped: 0, underruns: 0, skipped: 0, peak: 0 },
+     ]);
+     await client.closeInput('mic');
+     expect((await client.status()).inputs).toBeUndefined();
+@@ -116,6 +117,67 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
+     expect((await client.status()).state).toBe('playing');
+   });
+ 
++  it('plays an input while the transport is stopped (live-supercollider.md §7 question 2)', { timeout: 20_000 }, async () => {
++    scaffold(root);
++    client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
++    const { ring } = await client.openInput('mic');
++    const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'mic' }] });
++    await client.session(session);
++    // Half a second of a sine into the ring at its own pace, as FieldOut
++    // writes, with nothing playing.
++    const tone = new Float32Array(24000).map((_, i) => 0.25 * Math.sin((2 * Math.PI * 440 * i) / 48000));
++    writeWavFloat32(join(root, 'tone.wav'), 48000, [tone, tone]);
++    await execFileAsync(binary!, ['--ring-feed', String(ring), 'tone.wav'], { cwd: root });
++    const status = await client.status();
++    expect(status.state).toBe('stopped');
++    const fed = status.inputs![0]!;
++    expect(fed.written).toBe(24000);
++    expect(fed.dropped).toBe(0);
++    // The idle path read it as it came, keeping at most its block and
++    // margin in hand, and heard the sine's level.
++    expect(fed.read).toBeGreaterThan(24000 - 2048);
++    expect(fed.peak).toBeCloseTo(0.25, 2);
++  });
++
++  it.skipIf(!scsynth || !fieldOutBuilt)(
++    'the route the voice host plays through carries a bus into the ring through FieldOut',
++    { timeout: 30_000 },
++    async () => {
++      client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
++      const { ring, capacity } = await client.openInput('mic');
++      // A sine on private bus 20, where the voice host's voices play, and
++      // the route at the tail reading it into the ring.
++      const tone = synthDefFile({
++        name: 'field-bus-tone',
++        params: [],
++        ugens: [
++          { name: 'SinOsc', rate: 'audio', inputs: [{ constant: 440 }, { constant: 0 }], outputs: ['audio'] },
++          { name: 'BinaryOpUGen', rate: 'audio', special: 2, inputs: [{ ugen: 0 }, { constant: 0.25 }], outputs: ['audio'] },
++          { name: 'Out', rate: 'audio', inputs: [{ constant: 20 }, { ugen: 1 }, { ugen: 1 }], outputs: [] },
++        ],
++      });
++      writeFileSync(
++        join(root, 'score.osc'),
++        nrtScore([
++          oscBundle(0, [
++            oscMessage('/d_recv', tone),
++            oscMessage('/d_recv', routeSynthDef()),
++            oscMessage('/s_new', 'field-bus-tone', 1000, 0, 0),
++            oscMessage('/s_new', 'field-route', 1001, 1, 0, 'in', { float: 20 }, 'ring', { float: ring }),
++          ]),
++          oscBundle(1, [oscMessage('/n_free', 1000), oscMessage('/n_free', 1001), oscMessage('/c_set', 0, 0)]),
++        ]),
++      );
++      const { stdout } = await execFileAsync(
++        scsynth!.bin,
++        ['-N', 'score.osc', '_', 'out.aiff', '48000', 'AIFF', 'int16', '-o', '2', '-U', `${scsynth!.plugins}:${fieldOutDir}`],
++        { cwd: root },
++      );
++      expect(stdout).not.toContain('FieldOut: ring');
++      expect((await client.status()).inputs![0]).toMatchObject({ written: capacity, dropped: 48000 - capacity });
++    },
++  );
++
+   it.skipIf(!scsynth || !fieldOutBuilt)(
+     'FieldOut writes into the ring the daemon made, and a playing session reads it',
+     { timeout: 30_000 },
+diff --git a/src/audiod/protocol.ts b/src/audiod/protocol.ts
+index dcb0f68b..23304fb3 100644
+--- a/src/audiod/protocol.ts
++++ b/src/audiod/protocol.ts
+@@ -295,8 +295,9 @@ export const inputResponseSchema = z.object({
+ });
+ 
+ // An open input in status: frames FieldOut wrote, the daemon read, and
+-// FieldOut dropped for want of room; how often the reader ran dry; and
+-// the frames it skipped to hold its level against a fast writer.
++// FieldOut dropped for want of room; how often the reader ran dry; the
++// frames it skipped to hold its level against a fast writer; and the
++// loudest sample read since a client last asked, which the asking resets.
+ export const inputStatusSchema = z.object({
+   name: z.string(),
+   ring: z.number().int(),
+@@ -305,6 +306,7 @@ export const inputStatusSchema = z.object({
+   dropped: z.number().int(),
+   underruns: z.number().int(),
+   skipped: z.number().int(),
++  peak: z.number(),
+ });
+ 
+ export const statusResponseSchema = z.object({
+diff --git a/src/commands/keys.test.ts b/src/commands/keys.test.ts
+index 954c4e1b..3e23f540 100644
+--- a/src/commands/keys.test.ts
++++ b/src/commands/keys.test.ts
+@@ -88,13 +88,21 @@ describe('the instrument line', () => {
+     );
+   });
+ 
+-  it('ends with the effects not heard yet, each once', () => {
+-    const state = instrumentState([
++  it('ends with the effects not heard, each once, and why when routing them was not possible', () => {
++    const armed = [
+       { program: '/p/juno.scd', track: 'creek/keys', unheardEffects: ['keys-bus'] },
+       { program: '/p/bass.scd', track: 'creek/bass', unheardEffects: ['keys-bus', 'band'] },
+-    ])!;
++    ];
++    const state = instrumentState(armed)!;
+     expect(instrumentText({ ...state, status: live })).toBe(
+-      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard yet',
++      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard',
++    );
++    expect(instrumentText({ ...instrumentState(armed, false, 'FieldOut is not built: run pnpm build:native')!, status: live })).toBe(
++      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard (FieldOut is not built: run pnpm build:native)',
++    );
++    // Routed through the daemon, the voices pass through every effect.
++    expect(instrumentText({ ...instrumentState(armed, true, 'unused')!, status: live })).toBe(
++      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers',
+     );
+     expect(instrumentText({ ...state, status: live, reload: { failed: 'juno.scd does not compile' } })).toBe(
+       'keys (juno) + bass (bass) kept its last voice: juno.scd does not compile',
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index caa0d56e..0ec960b2 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -5,7 +5,9 @@ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardL
+ import { printKeymap, signed } from '../keys/print.js';
+ import { KeysSession, type MidiMessage } from '../keys/session.js';
+ import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
++import { routeArmed } from '../keys/routing.js';
+ import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
++import { findProjectRoot } from '../model/project.js';
+ import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
+ import { watchText } from '../keys/watch.js';
+ import type { Keymap } from '../schema/keymap.js';
+@@ -32,8 +34,9 @@ export async function keysCommand(targets: string[], options: KeysOptions): Prom
+   if (!stdin.isTTY || !stdout.isTTY) {
+     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
+   }
++  const root = findProjectRoot(process.cwd());
+   await withKittyKeyboard({ stdin, stdout }, (rest) =>
+-    play({ stdin, stdout }, { source, keymap, armed, device: options.device }, rest),
++    play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest),
+   );
+ }
+ 
+@@ -67,11 +70,15 @@ interface PlayOptions {
+   keymap: Keymap;
+   armed: ArmedInstrument[];
+   device: string | undefined;
++  root: string | undefined;
+ }
+ 
+ export type InstrumentState = {
+   name: string; // what is armed, as the line names it
+   dry: string[]; // tracks whose effects the voices do not pass through yet
++  // Why the voices do not pass through them (live-supercollider.md
++  // chunk 3), when routing them was not possible.
++  dryReason?: string;
+   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
+   // What the last save of the program did (keyboard-instrument.md §14).
+   reload?: { loaded: true } | { failed: string };
+@@ -79,12 +86,18 @@ export type InstrumentState = {
+ 
+ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
+   const { source, armed } = options;
+-  const programs = [...new Set(armed.map((a) => a.program))];
++  // Armed tracks play through their effects when the daemon can take
++  // their voices (live-supercollider.md chunk 3): each track then gets a
++  // voice of its own, writing into its own input. Otherwise each program
++  // plays once, straight to the device, and the line says why.
++  const routed = options.root !== undefined ? await routeArmed(armed, options.root) : undefined;
++  const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
++  const programs = routing?.programs ?? [...new Set(armed.map((a) => a.program))];
+   const session = new KeysSession(options.keymap);
+   let layout: KeyboardLayout | undefined;
+   let layoutPositions: ReadonlyMap<string, string> | undefined;
+   let reloadError: string | undefined;
+-  const instrument = instrumentState(armed);
++  const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
+ 
+   // An instrument has a line of its own above the status line: its state
+   // changes a few times a session, the status line with every key. That
+@@ -130,6 +143,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+       ? await VoiceHost.start({
+           instruments: programs,
+           ...(device !== undefined ? { device } : {}),
++          ...(routing !== undefined ? { rings: routing.rings, fieldOut: routing.fieldOut } : {}),
+           onStatus: (status) => {
+             if (status.state === 'voice') return;
+             if (status.state === 'reloaded') instrument!.reload = { loaded: true };
+@@ -190,27 +204,32 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+   stopWatching?.();
+   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
+   send(session.quit());
+-  // A host still booting closes too: quitting never waits for it.
++  // A host still booting closes too: quitting never waits for it. The
++  // inputs close after it, once nothing writes them.
+   await host?.close();
++  await routing?.close();
+   await helper.close();
+   tty.stdout.write('\n');
+   if (error !== undefined) throw error;
+ }
+ 
+ // What the instrument's line starts from: the armed tracks and
+-// instruments by name, and the tracks whose effects are not heard yet.
+-export function instrumentState(armed: ArmedInstrument[]): InstrumentState | undefined {
++// instruments by name, and the tracks whose effects are not heard, which
++// is none when the voices pass through them.
++export function instrumentState(armed: ArmedInstrument[], heard = false, dryReason?: string): InstrumentState | undefined {
+   if (armed.length === 0) return undefined;
++  const dry = heard ? [] : [...new Set(armed.flatMap((a) => a.unheardEffects))];
+   return {
+     name: armed.map(armedName).join(' + '),
+-    dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
++    dry,
++    ...(dry.length > 0 && dryReason !== undefined ? { dryReason } : {}),
+     status: { state: 'starting' },
+   };
+ }
+ 
+ // A save that did not load leads with why, so a narrow terminal keeps the
+ // error rather than the device; the voice that loaded last still plays.
+-export function instrumentText({ name, dry, status, reload }: InstrumentState): string {
++export function instrumentText({ name, dry, dryReason, status, reload }: InstrumentState): string {
+   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
+   const state =
+     status.state === 'live'
+@@ -219,8 +238,10 @@ export function instrumentText({ name, dry, status, reload }: InstrumentState):
+         ? `${name} restarting for a new sample rate`
+         : `${name} starting`;
+   // The voice plays straight to the device, so a track's inserts are not
+-  // heard yet (arming.md §2.1, live-supercollider.md).
+-  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard yet` : '';
++  // heard (arming.md §2.1); routing them was not possible, and the reason
++  // says why (live-supercollider.md chunk 3).
++  const why = dryReason !== undefined ? ` (${dryReason})` : '';
++  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard${why}` : '';
+   return `${state}${reload === undefined ? '' : ' · reloaded'}${unheard}`;
+ }
+ 
+diff --git a/src/keys/routing-voice.test.ts b/src/keys/routing-voice.test.ts
+new file mode 100644
+index 00000000..8fd5e996
+--- /dev/null
++++ b/src/keys/routing-voice.test.ts
+@@ -0,0 +1,113 @@
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { dirname, join } from 'node:path';
++import { createInterface } from 'node:readline';
++import { fileURLToPath } from 'node:url';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { AudiodClient, daemonBinary } from '../audiod/client.js';
++import { createSong, createTrack } from '../commands/create.js';
++import { init } from '../commands/init.js';
++import { sclangCommand } from '../generators/supercollider.js';
++import { removeTempProject } from '../testing/temp.js';
++import { routeArmed, type Routing } from './routing.js';
++import { fieldOutPluginDir, VoiceHost } from './voice-host.js';
++
++// The whole path of live-supercollider.md chunk 3 through real programs:
++// a track routed into the daemon, the voice host on sclang and scsynth
++// with FieldOut, and a note from a published MIDI source. The daemon must
++// hear the note on the track's input. It needs SuperCollider, the built
++// plugin, and an output device for scsynth, so it runs on a workstation.
++
++const binary = (() => {
++  try {
++    return daemonBinary();
++  } catch {
++    return undefined;
++  }
++})();
++const sclang = (() => {
++  try {
++    return sclangCommand();
++  } catch {
++    return undefined;
++  }
++})();
++const fieldOut = fieldOutPluginDir();
++const bloomPad = join(dirname(fileURLToPath(import.meta.url)), '../../examples/bloom/shared/instruments/pad.scd');
++
++const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
++
++describe.skipIf(!binary || !sclang || !fieldOut || process.platform === 'win32')(
++  'field keys through the effects, end to end',
++  () => {
++    let root: string;
++    let routing: Routing | undefined;
++    let host: VoiceHost | undefined;
++    let keys: ChildProcessWithoutNullStreams | undefined;
++
++    beforeEach(() => {
++      root = mkdtempSync(join(tmpdir(), 'field-routing-voice-'));
++      process.env['FIELD_AUDIOD_NULL'] = '1';
++      init({ dir: root, name: 'routing-voice' });
++      copyFileSync(bloomPad, join(root, 'shared/instruments/pad.scd'));
++      createSong(root, 'creek');
++      createTrack(root, 'creek', 'bass');
++      writeFileSync(join(root, 'songs/creek/tracks/bass.yaml'), 'name: bass\ninputs:\n  - record:\n      instrument: pad\n');
++      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), 'name: main\ninputs:\n  - track: bass\n');
++    });
++    afterEach(async () => {
++      keys?.kill('SIGKILL');
++      await host?.close();
++      await routing?.close();
++      try {
++        const client = await AudiodClient.connect(root);
++        await client.quit();
++        client.close();
++      } catch {
++        // never started
++      }
++      delete process.env['FIELD_AUDIOD_NULL'];
++      await removeTempProject(root);
++    });
++
++    it('carries a note from the voice host into the track\'s input in the daemon', { timeout: 90_000 }, async () => {
++      // A MIDI source first, so the host connects it as it boots.
++      const source = `Field Keys Routing ${process.pid}`;
++      keys = spawn(binary!, ['--keys', source], { stdio: 'pipe' });
++      await new Promise<void>((resolve, reject) => {
++        const timer = setTimeout(() => reject(new Error('--keys was not ready in 5 s')), 5000);
++        createInterface({ input: keys!.stdout }).on('line', (text) => {
++          const line = JSON.parse(text) as Record<string, unknown>;
++          if ('keyboard' in line) return;
++          clearTimeout(timer);
++          if ('error' in line) reject(new Error(String(line['error'])));
++          else resolve();
++        });
++      });
++
++      const program = join(root, 'shared/instruments/pad.scd');
++      routing = (await routeArmed([{ program, track: 'creek/bass', unheardEffects: [] }], root)) as Routing;
++      expect(routing.rings[0]).toBeGreaterThan(0);
++      host = await VoiceHost.start({ instruments: routing.programs, rings: routing.rings, fieldOut: routing.fieldOut });
++      await host.ready;
++
++      const client = await AudiodClient.connect(root);
++      try {
++        // Stopped, so the idle path plays the input.
++        expect((await client.status()).state).toBe('stopped');
++        await client.status(); // clears the peak
++        keys.stdin.write(`${JSON.stringify({ midi: [0x90, 60, 100] })}\n`);
++        let loudest = 0;
++        for (let i = 0; i < 30 && loudest < 0.01; i++) {
++          await sleep(100);
++          loudest = Math.max(loudest, (await client.status()).inputs![0]!.peak);
++        }
++        keys.stdin.write(`${JSON.stringify({ midi: [0x80, 60, 0] })}\n`);
++        expect(loudest).toBeGreaterThan(0.01);
++      } finally {
++        client.close();
++      }
++    });
++  },
++);
+diff --git a/src/keys/routing.test.ts b/src/keys/routing.test.ts
+new file mode 100644
+index 00000000..1a5a9abb
+--- /dev/null
++++ b/src/keys/routing.test.ts
+@@ -0,0 +1,106 @@
++import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { AudiodClient, daemonBinary } from '../audiod/client.js';
++import { createSong, createTrack } from '../commands/create.js';
++import { init } from '../commands/init.js';
++import { removeTempProject } from '../testing/temp.js';
++import { routeArmed, type Routing } from './routing.js';
++
++// Playing through the effects (live-supercollider.md chunk 3): an input
++// per armed track in the daemon, and the song's session loaded with them.
++// FieldOut itself is not needed here, only somewhere it would be, so a
++// directory holding an empty FieldOut.scx stands in for the build.
++
++const binary = (() => {
++  try {
++    return daemonBinary();
++  } catch {
++    return undefined;
++  }
++})();
++
++describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks through the daemon', () => {
++  let root: string;
++  let fieldOut: string;
++  let env: NodeJS.ProcessEnv;
++
++  beforeEach(() => {
++    root = mkdtempSync(join(tmpdir(), 'field-routing-'));
++    fieldOut = join(root, 'fieldout');
++    mkdirSync(fieldOut);
++    writeFileSync(join(fieldOut, 'FieldOut.scx'), '');
++    env = { ...process.env, FIELD_FIELDOUT: fieldOut };
++    process.env['FIELD_AUDIOD_NULL'] = '1';
++    init({ dir: root, name: 'routing' });
++    writeFileSync(join(root, 'shared/instruments/pad.scd'), '// a voice\n');
++    for (const song of ['creek', 'tall-grass']) {
++      createSong(root, song);
++      createTrack(root, song, 'bass');
++      writeFileSync(join(root, `songs/${song}/tracks/bass.yaml`), 'name: bass\ninputs:\n  - record:\n      instrument: pad\n');
++      writeFileSync(join(root, `songs/${song}/tracks/main.yaml`), 'name: main\ninputs:\n  - track: bass\n');
++    }
++  });
++  afterEach(async () => {
++    try {
++      const client = await AudiodClient.connect(root);
++      await client.quit();
++      client.close();
++    } catch {
++      // never started
++    }
++    delete process.env['FIELD_AUDIOD_NULL'];
++    await removeTempProject(root);
++  });
++
++  const pad = () => join(root, 'shared/instruments/pad.scd');
++
++  it("opens an input for each armed track, loads the song with them, and puts the song back on close", async () => {
++    const routed = (await routeArmed(
++      [
++        { program: pad(), track: 'creek/bass', unheardEffects: [] },
++        { program: pad(), unheardEffects: [] },
++      ],
++      root,
++      env,
++    )) as Routing;
++    expect(routed.programs).toEqual([pad(), pad()]);
++    expect(routed.rings[0]).toBeGreaterThan(0);
++    expect(routed.rings[1]).toBeNull();
++    expect(routed.fieldOut).toBe(fieldOut);
++
++    const client = await AudiodClient.connect(root);
++    try {
++      const status = await client.status();
++      expect(status).toMatchObject({ live: true, song: 'creek' });
++      expect(status.inputs).toEqual([expect.objectContaining({ name: 'keys:creek/bass', ring: routed.rings[0] })]);
++      await routed.close();
++      const after = await client.status();
++      expect(after.inputs).toBeUndefined();
++      expect(after).toMatchObject({ live: true, song: 'creek' });
++    } finally {
++      client.close();
++    }
++  });
++
++  it('says why it cannot route: tracks in two songs, FieldOut not built, or nothing but instruments', async () => {
++    expect(
++      await routeArmed(
++        [
++          { program: pad(), track: 'creek/bass', unheardEffects: [] },
++          { program: pad(), track: 'tall-grass/bass', unheardEffects: [] },
++        ],
++        root,
++        env,
++      ),
++    ).toEqual({ reason: 'the tracks are in creek and tall-grass, and one session plays one song' });
++    expect(
++      await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, {
++        ...process.env,
++        FIELD_FIELDOUT: join(root, 'songs'),
++      }),
++    ).toEqual({ reason: 'FieldOut is not built: run pnpm build:native' });
++    expect(await routeArmed([{ program: pad(), unheardEffects: [] }], root, env)).toBeUndefined();
++  });
++});
+diff --git a/src/keys/routing.ts b/src/keys/routing.ts
+new file mode 100644
+index 00000000..8b90e5ca
+--- /dev/null
++++ b/src/keys/routing.ts
+@@ -0,0 +1,91 @@
++import { AudiodClient } from '../audiod/client.js';
++import { compileSession } from '../graph/live.js';
++import type { ArmedInstrument } from './targets.js';
++import { fieldOutPluginDir } from './voice-host.js';
++
++// Playing through the effects (live-supercollider.md chunk 3): each armed
++// track gets an input in the daemon, the song's live session is loaded
++// with those inputs, and the voice host writes each track's voice into
++// its input's ring through FieldOut. An instrument armed by name, with no
++// track, still plays straight to the device.
++export interface Routing {
++  // One program per armed entry, in order: a track gets its own voice,
++  // even when it shares a program with another, because its voice goes to
++  // its own ring.
++  programs: string[];
++  // Each entry's ring, or null for one that plays straight to the device.
++  rings: (number | null)[];
++  fieldOut: string;
++  // Closes every input and loads the song again without them, so the
++  // daemon is not left reading rings nobody writes.
++  close(): Promise<void>;
++}
++
++// Why the voice plays dry instead, said on the instrument's line.
++export interface Unrouted {
++  reason: string;
++}
++
++export async function routeArmed(
++  armed: ArmedInstrument[],
++  root: string,
++  env: NodeJS.ProcessEnv = process.env,
++): Promise<Routing | Unrouted | undefined> {
++  const tracks = armed.filter((a) => a.track !== undefined);
++  if (tracks.length === 0) return undefined;
++  const songs = [...new Set(tracks.map((a) => a.track!.split('/')[0]!))];
++  if (songs.length > 1) return { reason: `the tracks are in ${songs.join(' and ')}, and one session plays one song` };
++  if (process.platform === 'win32') return { reason: 'live inputs need POSIX shared memory, which Windows does not have yet' };
++  const fieldOut = fieldOutPluginDir(env);
++  if (fieldOut === undefined) return { reason: 'FieldOut is not built: run pnpm build:native' };
++
++  const client = await AudiodClient.connect(root);
++  const opened: string[] = [];
++  const closeAll = async (): Promise<void> => {
++    for (const name of opened) await client.closeInput(name).catch(() => {});
++  };
++  try {
++    if (!client.supports('live-input')) {
++      client.close();
++      return { reason: `field-audiod ${client.daemonVersion} predates live inputs: run field transport quit, then play again` };
++    }
++    const song = songs[0]!;
++    const rings: (number | null)[] = [];
++    const inputs: { track: string; input: string }[] = [];
++    for (const entry of armed) {
++      if (entry.track === undefined) {
++        rings.push(null);
++        continue;
++      }
++      const name = `keys:${entry.track}`;
++      const { ring } = await client.openInput(name);
++      opened.push(name);
++      rings.push(ring);
++      inputs.push({ track: entry.track.split('/')[1]!, input: name });
++    }
++    const { session } = await compileSession(root, song, { inputs });
++    await client.session(session);
++    return {
++      programs: armed.map((a) => a.program),
++      rings,
++      fieldOut,
++      close: async () => {
++        try {
++          await closeAll();
++          // The song as it was, without the inputs; a song that no longer
++          // compiles keeps the session it has, which reads silence.
++          const { session: plain } = await compileSession(root, song);
++          await client.session(plain);
++        } catch {
++          // the daemon or the project went away; nothing is left to restore
++        } finally {
++          client.close();
++        }
++      },
++    };
++  } catch (err) {
++    await closeAll();
++    client.close();
++    return { reason: (err as Error).message.split('\n')[0]! };
++  }
++}
+diff --git a/src/keys/synthdef.ts b/src/keys/synthdef.ts
+index 1685848f..5be74846 100644
+--- a/src/keys/synthdef.ts
++++ b/src/keys/synthdef.ts
+@@ -110,6 +110,32 @@ export function synthDefFile(def: SynthDefSpec): Buffer {
+   return w.bytes();
+ }
+ 
++// The voice host's route (live-supercollider.md chunk 3): two channels
++// from the private bus an instrument's voices play into, written into the
++// daemon's ring by FieldOut. Freed before the server quits, which a
++// FieldOut still running at shutdown does not survive.
++export const ROUTE_DEF = 'field-route';
++
++export function routeSynthDef(): Buffer {
++  return synthDefFile({
++    name: ROUTE_DEF,
++    params: [
++      { name: 'in', value: 0 },
++      { name: 'ring', value: 0 },
++    ],
++    ugens: [
++      { name: 'Control', rate: 'control', inputs: [], outputs: ['control', 'control'] },
++      { name: 'In', rate: 'audio', inputs: [{ ugen: 0, output: 0 }], outputs: ['audio', 'audio'] },
++      {
++        name: 'FieldOut',
++        rate: 'audio',
++        inputs: [{ ugen: 0, output: 1 }, { ugen: 1, output: 0 }, { ugen: 1, output: 1 }],
++        outputs: [],
++      },
++    ],
++  });
++}
++
+ export type OscArg = number | string | Buffer | { float: number };
+ 
+ function oscString(s: string): Buffer {
+diff --git a/src/keys/voice-host.test.ts b/src/keys/voice-host.test.ts
+index 0ba60665..b4b27230 100644
+--- a/src/keys/voice-host.test.ts
++++ b/src/keys/voice-host.test.ts
+@@ -19,6 +19,9 @@ writeFileSync(log + '.env', JSON.stringify({
+   instruments: process.env.FIELD_INSTRUMENTS,
+   device: process.env.FIELD_DEVICE ?? null,
+   parent: process.env.FIELD_PARENT_PID,
++  rings: process.env.FIELD_RINGS ?? null,
++  fieldOut: process.env.FIELD_FIELDOUT ?? null,
++  routeDef: process.env.FIELD_ROUTE_DEF ?? null,
+ }));
+ const socket = require('node:dgram').createSocket('udp4');
+ socket.on('message', (msg) => appendFileSync(log, msg.toString('latin1') + '\\n'));
+@@ -188,6 +191,33 @@ describe('the voice host process', () => {
+     expect(readFileSync(log, 'latin1')).toContain('/quit');
+   });
+ 
++  it('hands the host the rings and the route to play through the effects, and frees every node before /quit', async () => {
++    const host = await VoiceHost.start({
++      instruments: ['/p/juno.scd', '/p/pad.scd'],
++      rings: [4213871, null],
++      fieldOut: '/opt/fieldout',
++      env: env('ready'),
++    });
++    await host.ready;
++    const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
++    expect(seen).toMatchObject({ rings: '[4213871,null]', fieldOut: '/opt/fieldout' });
++    // The route's SynthDef, which Field writes because sclang has no
++    // FieldOut class.
++    expect(readFileSync(seen.routeDef).subarray(0, 4).toString('latin1')).toBe('SCgf');
++    await host.close();
++    // A FieldOut still running when scsynth quits crashes it on the way out.
++    const sent = readFileSync(log, 'latin1');
++    expect(sent.indexOf('/g_freeAll')).toBeGreaterThanOrEqual(0);
++    expect(sent.indexOf('/g_freeAll')).toBeLessThan(sent.indexOf('/quit'));
++  });
++
++  it('routes nothing when no instrument has a ring', async () => {
++    const host = await VoiceHost.start({ instruments: ['/p/pad.scd'], rings: [null], fieldOut: '/opt/fieldout', env: env('ready') });
++    await host.ready;
++    expect(JSON.parse(readFileSync(`${log}.env`, 'utf8'))).toMatchObject({ rings: null, fieldOut: null, routeDef: null });
++    await host.close();
++  });
++
+   it('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
+     const statuses: VoiceHostStatus[] = [];
+     const host = await VoiceHost.start({
+diff --git a/src/keys/voice-host.ts b/src/keys/voice-host.ts
+index bde44993..9d30976e 100644
+--- a/src/keys/voice-host.ts
++++ b/src/keys/voice-host.ts
+@@ -1,14 +1,29 @@
+ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+ import { createSocket } from 'node:dgram';
+-import { isAbsolute, resolve } from 'node:path';
++import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { dirname, isAbsolute, join, resolve } from 'node:path';
++import { fileURLToPath } from 'node:url';
+ import { createInterface } from 'node:readline';
+ import { z } from 'zod';
+ import { instrumentProgram, sclangCommand, scScript } from '../generators/supercollider.js';
++import { oscMessage as oscWith, routeSynthDef } from './synthdef.js';
+ 
+ export function voiceHostScript(): string {
+   return scScript('voice-host.scd');
+ }
+ 
++// Where the built FieldOut plugin is (live-supercollider.md chunk 2):
++// FIELD_FIELDOUT when it names a directory holding it, else the checkout's
++// build, else undefined.
++export function fieldOutPluginDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
++  const holds = (dir: string): boolean => ['FieldOut.scx', 'FieldOut.so'].some((name) => existsSync(join(dir, name)));
++  const override = env['FIELD_FIELDOUT'];
++  if (override !== undefined && override !== '') return holds(override) ? override : undefined;
++  const built = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'native', 'sc-fieldout', 'build', 'plugins');
++  return holds(built) ? built : undefined;
++}
++
+ // An instrument name resolves exactly as a supercollider: entry's source
+ // does, after `.scd` is added to a name without an extension
+ // (keyboard-instrument.md §2.1).
+@@ -40,10 +55,11 @@ export function oscMessage(address: string): Buffer {
+   return Buffer.concat([pad(address), pad(',')]);
+ }
+ 
+-function sendOsc(address: string, port: number): Promise<void> {
++function sendOsc(address: string | Buffer, port: number): Promise<void> {
+   return new Promise((done) => {
+     const socket = createSocket('udp4');
+-    socket.send(oscMessage(address), port, '127.0.0.1', () => socket.close(() => done()));
++    const message = typeof address === 'string' ? oscMessage(address) : address;
++    socket.send(message, port, '127.0.0.1', () => socket.close(() => done()));
+   });
+ }
+ 
+@@ -104,6 +120,11 @@ export interface VoiceHostOptions {
+   onExit?: (reason: string) => void;
+   trace?: boolean;
+   env?: NodeJS.ProcessEnv;
++  // Playing through the effects (live-supercollider.md chunk 3): for
++  // each instrument, the daemon ring its voices go to, or null to play
++  // straight to the device; and the directory holding FieldOut.
++  rings?: (number | null)[];
++  fieldOut?: string;
+ }
+ 
+ const OUTPUT_TAIL = 15;
+@@ -187,6 +208,20 @@ export class VoiceHost {
+     const port = await freeUdpPort();
+     // sclang's own port, where `reload` reaches it.
+     const langPort = await freeUdpPort();
++    // The route the host loads by file: sclang has no FieldOut class, so
++    // Field writes the SynthDef itself.
++    const routing =
++      options.rings !== undefined && options.fieldOut !== undefined && options.rings.some((r) => r !== null)
++        ? (() => {
++            const routeDef = join(mkdtempSync(join(tmpdir(), 'field-route-')), 'field-route.scsyndef');
++            writeFileSync(routeDef, routeSynthDef());
++            return {
++              FIELD_RINGS: JSON.stringify(options.rings),
++              FIELD_FIELDOUT: options.fieldOut!,
++              FIELD_ROUTE_DEF: routeDef,
++            };
++          })()
++        : {};
+     const child = spawn(sclangCommand(env), ['-u', String(langPort), '-D', voiceHostScript()], {
+       stdio: ['pipe', 'pipe', 'pipe'],
+       env: {
+@@ -197,6 +232,7 @@ export class VoiceHost {
+         FIELD_PARENT_PID: String(process.pid),
+         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
+         ...(options.trace === true ? { FIELD_VOICE_TRACE: '1' } : {}),
++        ...routing,
+       },
+     });
+     return new VoiceHost(child, port, langPort, options);
+@@ -227,6 +263,10 @@ export class VoiceHost {
+   }
+ 
+   private async stopServer(): Promise<void> {
++    // Every node first: at shutdown scsynth unloads its plugins before it
++    // frees the synths still running, and a FieldOut among them would
++    // call a destructor that is gone.
++    await sendOsc(oscWith('/g_freeAll', 0), this.port);
+     await sendOsc('/quit', this.port);
+     const pid = this.serverPid;
+     if (pid === undefined || (await exited(pid, 500))) return;
