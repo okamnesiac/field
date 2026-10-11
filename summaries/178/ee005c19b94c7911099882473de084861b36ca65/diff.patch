@@ -1,0 +1,3452 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d2cbafa..53b0f0d 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -82,7 +82,7 @@ jobs:
+       # it. With setup-uv below the tests, that skip was unconditional in
+       # CI and the test only ever ran on the author's machine.
+       - uses: astral-sh/setup-uv@v5
+-      # One test skips here: the sclang integration case in
++      # One test always skips here: the sclang integration case in
+       # src/graph/build.test.ts, on a `!sclangPresent` probe rather than
+       # by excluding its file. Not the nine that linux-portability.md
+       # decision 4 describes — `say` and `afconvert` both retired in
+@@ -92,6 +92,12 @@ jobs:
+       # not installed on the runner, and it skipped on macOS for the same
+       # reason back when there was a macOS runner to skip on. The
+       # daemon's protocol tests run here, in null-output mode.
++      #
++      # The native MIDI round trip, src/keys/helper-native.test.ts, also
++      # skips on a runner without the ALSA sequencer at /dev/snd/seq,
++      # where `field-audiod --keys` cannot publish a virtual source. Each
++      # of its cases skips by name, saying so, and fails rather than skips
++      # on any other machine where `--keys` reports an error.
+       - run: pnpm test
+       # Python workers: pyright strict is the gate (ace-generation.md §3.4).
+       # Only the dev group installs — the model environment (torch, mlx)
+diff --git a/AGENTS.md b/AGENTS.md
+index 81529e7..0c07970 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -19,7 +19,8 @@ list` groups by priority, `project show <name>` prints one plan, and
+ The docs are [overview](docs/README.md),
+ [architecture](docs/architecture.md), [tracks](docs/tracks.md),
+ [project model](docs/project-model.md), [build graph](docs/build-graph.md),
+-[audio engine](docs/audio-engine.md), [remote](docs/remote.md).
++[audio engine](docs/audio-engine.md), [remote](docs/remote.md),
++[keys](docs/keys.md).
+ 
+ Where code does not exist yet these describe how the system is *designed* to
+ work and are the source of truth for it, which is less of the repo than it
+diff --git a/README.md b/README.md
+index ce72f84..d650b25 100644
+--- a/README.md
++++ b/README.md
+@@ -134,6 +134,16 @@ The CLI looks for the binary inside the checkout it was linked from, so
+ one build serves every project directory. `FIELD_AUDIOD` overrides that
+ path. It builds on macOS and Linux, and CI builds it on both.
+ 
++### Playing the keyboard
++
++`field keys` turns the computer keyboard into the MIDI source `Field
++Keys`, which Logic or any other MIDI application can play from. It
++needs `field-audiod` and a terminal that reports key releases through
++the kitty keyboard protocol: Ghostty, iTerm2 3.5 or later, kitty, or
++WezTerm. Keys are read by physical position, so Dvorak, AZERTY, and
++other layouts play the same notes, and a keymap of your own is a YAML
++file away. See [docs/keys.md](docs/keys.md).
++
+ ## Status
+ 
+ The offline half is real and in daily use: nested tracks, per-track
+diff --git a/docs/README.md b/docs/README.md
+index c5ddd96..de1d863 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -112,4 +112,5 @@ The current build order lives in [projects/](projects/README.md).
+ - [Build graph](build-graph.md) — targets, caching, freezing, determinism
+ - [Audio engine](audio-engine.md) — the real-time daemon that plays, records, and hosts plugins
+ - [Remote](remote.md) — login, clone, push and pull, and the read-through cache against an audiofield remote
++- [Keys](keys.md) — the computer keyboard as a MIDI instrument, and how to write a keymap
+ - [Projects](projects/README.md) — work in progress, next, and later
+diff --git a/docs/architecture.md b/docs/architecture.md
+index a1c23a3..9940bfe 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -100,6 +100,14 @@ engine, editor windows, routing, metering beyond the armed input's
+ peak — is future work whose settled decisions live in
+ [audio-engine.md](audio-engine.md).
+ 
++MIDI is hardware-facing too, so it lives here as well
++([keys.md](keys.md)). `field keys` reads the keyboard in TypeScript and
++spawns `field-audiod --keys`, a short-lived mode separate from the
++daemon that owns the `Field Keys` virtual MIDI source and, on macOS,
++reports the active keyboard layout. `--midi-monitor` prints what a
++named MIDI source sends. Neither touches the transport or the control
++socket.
++
+ The real-time audio callback never depends on TypeScript or Python: GC
+ pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives
+ you about 0.7ms.
+diff --git a/docs/keys.md b/docs/keys.md
+new file mode 100644
+index 0000000..0337670
+--- /dev/null
++++ b/docs/keys.md
+@@ -0,0 +1,227 @@
++# Keys: the computer keyboard as an instrument
++
++`field keys` turns your computer keyboard into a MIDI instrument. It
++publishes a virtual MIDI source named `Field Keys`, so Logic, the
++SuperCollider IDE, or any other application that lists MIDI inputs can
++play from it. A *keymap* decides what each key plays: a note, a chord,
++or a control such as transpose or sustain. Logic Pro's Musical Typing is
++the default keymap, and you can write your own.
++
++```console
++$ field keys
++Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
++Field Keys · musical-typing · transpose 0 · velocity 100 · C4 E4 G4
++```
++
++Playing a SuperCollider instrument from `field keys` directly, and
++recording what you play, are the later chunks of
++[the keyboard-instrument plan](projects/keyboard-instrument/readme.md).
++
++## Before you start
++
++- **A terminal with the kitty keyboard protocol.** A terminal normally
++  reports only key presses, and a note needs its release. Ghostty,
++  iTerm2 3.5 and later, kitty, and WezTerm report releases through the
++  kitty keyboard protocol. Apple's Terminal does not, and `field keys`
++  refuses to start there with a message that says so.
++- **`field-audiod`.** The virtual MIDI source belongs to the native
++  binary, so build it first with `pnpm build:native`.
++- **macOS or Linux.** On Linux the virtual source needs the ALSA
++  sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
++  `field keys` reports that.
++
++You do not need to be inside a Field project.
++
++If `field keys` says it cannot create a virtual MIDI source on macOS,
++run it again. CoreMIDI has refused the first source a new process asked
++for, once, and a new process gets a new MIDI client.
++
++## Play
++
++1. Run `field keys` in a supported terminal.
++2. In the application you want to play, choose `Field Keys` as the MIDI
++   input. In Logic, `Field Keys` appears with your other MIDI inputs.
++3. Play. The status line shows the keymap, the transpose, the velocity,
++   and the notes sounding.
++4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
++   every held note and then All Notes Off, so nothing is left sounding,
++   and `Field Keys` disappears.
++
++Holding a key holds its note; the terminal's key repeat does nothing.
++When the terminal loses focus, `field keys` releases every held note,
++because a terminal that has lost focus never reports the release.
++
++To check that notes go out, watch the source from another terminal.
++`field-audiod` is not on your `PATH`, because installing Field links
++only `field`; run it from your Field checkout, or through
++`$FIELD_AUDIOD` if you set that:
++
++```console
++$ native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor "Field Keys"
++{"ready":true,"name":"Field Keys"}
++{"midi":[144,60,100]}
++{"midi":[128,60,0]}
++```
++
++The monitor prints every MIDI message from the source you name, so it
++also checks a USB controller: give it the controller's name.
++
++## Keys are read by position
++
++A keymap binds *positions*: physical keys, named by their W3C
++`KeyboardEvent.code` value, such as `KeyA`, `Semicolon`, `Digit1`, or
++`Space`. The name comes from the key a US keyboard has in that place,
++but it means the place, whatever your keyboard layout types there. On
++Dvorak, `KeyS` types `o`; on AZERTY, `KeyA` types `q`. Both still play
++what `KeyS` and `KeyA` play on QWERTY, so you never switch layouts to
++play.
++
++`field keys` finds the position from the terminal's *base layout key*
++when the terminal sends one, which Ghostty does. Otherwise, on macOS, it
++reads your keyboard layout and works back from the character typed. It
++follows a layout switch while you play. On Linux it relies on the
++terminal alone.
++
++A dead key types nothing on its own and waits for the next key, such as
++`'` on U.S. International. The terminal holds it for composition, so it
++may never reach `field keys`. When your layout has a dead key where the
++keymap binds one, the status line names that position as one that
++cannot play.
++
++## The default keymap
++
++`field keys --print` draws a keymap as a keyboard, with the note or
++control in each key's place, and lists what each control does. Notes are
++in scientific pitch notation, where MIDI note 60 is C4. Logic names the
++same note C3.
++
++```console
++$ field keys --print
++musical-typing: Logic Pro's Musical Typing. White keys on the home row, black keys above.
++
++·     B-1   B+1   cc1   cc1   cc1   cc1   cc1   cc1   ·     ·     ·     ·
++   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·
++          C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5
++             T-12  T+12  V-20  V+20  ·     ·     ·     ·     ·     ·
++```
++
++| Keys | What they do |
++| --- | --- |
++| `A S D F G H J K L ; '` | White keys, C4 up to F5 |
++| `W E`, `T Y U`, `O P` | Black keys |
++| `Z`, `X` | Transpose down or up an octave |
++| `C`, `V` | Velocity down or up by 20, between 1 and 127 |
++| `Tab` | Sustain (CC 64) while held |
++| `1`, `2` | Pitch bend fully down or up while held |
++| `3` to `8` | Modulation (CC 1): off, then five steps up to 127 |
++| `Esc`, `Ctrl-C` | Quit |
++
++Logic's guide describes `Tab` as turning sustain on or off. This keymap
++holds sustain only while `Tab` is down, as a pedal does.
++
++## Choose a keymap
++
++| You give | `field keys` loads |
++| --- | --- |
++| Nothing | `musical-typing` |
++| `--keymap musical-typing` | The built-in of that name. A bare name only ever names a built-in. |
++| `--keymap ~/keymaps/mine.yaml` | That file. A value with a `/`, or ending in `.yaml`, is a path, and a leading `~/` means your home directory. |
++| `FIELD_KEYMAP=<name or path>` | The same, when there is no `--keymap`. |
++
++To make your own keymap the default, set it in your shell profile:
++
++```sh
++export FIELD_KEYMAP=~/keymaps/mine.yaml
++```
++
++## Write a keymap
++
++A keymap is a YAML file. This one plays C and E on two keys, a C major
++chord on a third, and toggles sustain with the space bar:
++
++```yaml
++name: mine
++base: 60
++notes:
++  KeyA: 0
++  KeyS: 4
++  KeyF: [0, 4, 7]
++controls:
++  Space: { cc: 64, mode: toggle }
++```
++
++Run it with `field keys --keymap ~/keymaps/mine.yaml`. While it runs,
++saving the file reloads it: the next key press uses the new keymap, and
++notes already sounding finish as they started. A controller you toggled
++on, such as this example's sustain, goes back to 0 on the reload, so the
++notes it was holding end. If the saved file has an error, `field keys`
++keeps the keymap it has and shows the error in the status line.
++`field keys --keymap ~/keymaps/mine.yaml --print` draws it without a
++supported terminal, which helps while you design one.
++
++### Fields
++
++| Field | Default | Meaning |
++| --- | --- | --- |
++| `name` | Required | Shown in the status line. |
++| `description` | None | One line, shown by `--print`. |
++| `base` | 60 | The MIDI note that offset 0 plays before any transpose. |
++| `velocity` | 100 | The starting velocity. |
++| `channel` | 1 | The MIDI channel, 1 to 16. |
++| `notes` | None | Each position to an offset in semitones from `base`, or to a list of offsets, which plays a chord. |
++| `grid` | None | Offsets for whole rows by a rule. An entry in `notes` or `controls` overrides the grid at that position. |
++| `controls` | None | Each position to an action. |
++
++### Grids
++
++A grid writes an isomorphic keymap, where every interval has the same
++shape everywhere, in one line. This one puts a semitone between
++neighboring keys and a perfect fourth between rows:
++
++```yaml
++name: fourths
++base: 48
++grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
++controls:
++  ArrowLeft: { transpose: -12 }
++  ArrowRight: { transpose: 12 }
++```
++
++| Grid field | Meaning |
++| --- | --- |
++| `rows` | The rows, lowest first. Each is a named row, or a list of positions in which `null` skips a column so you can align rows. The named rows are `bottom` (`KeyZ` to `Slash`), `home` (`KeyA` to `Quote`), `top` (`KeyQ` to `BracketRight`), and `number` (`Digit1` to `Equal`). |
++| `column` | Semitones per key to the right. |
++| `row` | Semitones per row up. |
++
++A position's offset is `column` times its index in its row, plus `row`
++times its row's index. In the example, `KeyZ` plays 48, `KeyA` 53,
++`KeyQ` 58, and `Digit1` 63.
++
++### Actions
++
++| Action | Effect |
++| --- | --- |
++| `{ transpose: <n> }` | Shifts every new note by n semitones, and stays shifted. A transpose that would move any note outside 0 to 127 is refused. |
++| `{ velocity: <n> }` | Changes the velocity by n, kept between 1 and 127. |
++| `{ bend: <x> }` | Pitch bend to x, from -1 to 1, while held; back to center on release. |
++| `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0, and goes back to 0 when you quit, press `panic`, or reload the keymap. `value` defaults to 127. |
++| `panic` | Releases every note and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
++
++### Rules
++
++`field keys` checks a keymap before it plays, and names the position
++and the rule each error breaks:
++
++- **Every position is one a keymap can bind.** That is the four named
++  rows, `Backquote`, `Backslash`, `IntlBackslash`, `Space`, `Tab`, and
++  the four arrows.
++- **A position is a note or a control, never both.**
++- **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so no
++  keymap can trap you.
++- **Every note is in MIDI's range** at `base`, and the keymap plays at
++  least one note.
++- **Modifiers do not bind.** A key pressed with `Ctrl`, `Alt`, or `Cmd`
++  held does nothing, and `Shift` plays as without it. A release always
++  ends the notes its press started.
++- **Two keys can share a note.** The note sounds from the first press
++  until the last of those keys is released.
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index 16f9951..7c52961 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -1,5 +1,5 @@
+ ---
+-status: ready
++status: in-progress
+ priority: now
+ ---
+ 
+@@ -204,6 +204,9 @@ and reacts to changes to the keymap's name. Many editors save by
+ writing a temporary file and renaming it over the original. On macOS
+ and Linux, Node's `fs.watch` on a file keeps watching the original
+ file, so a watch on the keymap itself would end at the first such save.
++`field keys` reloads only when the file's text has changed, because
++macOS can report a write made just before the watch began, or an event
++with no file name.
+ 
+ `field keys --print` prints the keymap as a keyboard-shaped diagram,
+ one line per keyboard row, with the note or control in each key's
+@@ -296,7 +299,7 @@ The offset of a position is `column` times its index in its row, plus
+ | `velocity: <n>` | Changes the velocity by n, kept between 1 and 127. |
+ | `bend: <x>` | Pitch bend to x, from -1 to 1 of the full range, while held. Back to center on release. |
+ | `cc: <n>`, `value: <v>`, `mode: <m>` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0 at each press. `value` defaults to 127. |
+-| `panic` | Releases every note and sends All Notes Off. |
++| `panic` | Releases every note and sends All Notes Off. It is written as a bare word: `Backquote: panic`. |
+ 
+ The schema enforces these rules, and an error names the position and
+ the rule it breaks:
+@@ -317,6 +320,8 @@ the rule it breaks:
+   `Shift` or another held key switches to are an open question (§7).
+ - **Every note is in MIDI's range.** Each note at `base` is between 0
+   and 127.
++- **A keymap plays at least one note.** One with only controls is
++  rejected, because it would start a source that can never sound.
+ 
+ Musical Typing's `KeyA` plays MIDI note 60, which Logic names C3 and
+ most other tools name C4. Its velocity steps by 20, as Ableton Live's
+@@ -462,9 +467,10 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
+ | --- | --- |
+ | `src/keys/terminal.ts` (new) | Probes, enables, and restores the kitty protocol and focus reports, and decodes key events, with their base layout keys, from stdin bytes. The decoder is a pure function over bytes. |
+ | `src/keys/position.ts` (new) | Finds a key event's position from its base layout key or, failing that, the keyboard layout the helper reported, and finds the dead-key positions the status line names (§2.3). |
+-| `src/schema/keymap.ts` (new) | The zod schema for keymap files: the fields, the grid, the actions, and the rules in §2.4. |
+-| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, expands a grid into offsets, and watches the directory of a keymap given by path to reload it. |
++| `src/schema/keymap.ts` (new) | The zod schema for keymap files: the fields, the grid, the actions, and the rules in §2.4. It also expands a grid into offsets, because the range rule needs the expanded notes. |
++| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, and watches the directory of a keymap given by path to reload it. |
+ | `src/keys/print.ts` (new) | The `--print` diagram. |
++| `src/commands/keys.ts` (new) | The interactive shell: probes the terminal and gives it back on every exit, starts the helper, plays key events through positions and the session, draws the status line, and reloads a keymap given by path. |
+ | `keymaps/musical-typing.yaml` (new) | The default keymap. |
+ | `keymaps/tracker.yaml`, `keymaps/fourths.yaml` (new, chunk 3) | The other built-ins. Chunk 1's schema tests carry both as fixtures, so the format is known to express them before they ship. |
+ | `src/keys/session.ts` (new) | The note state: which position holds which notes, transpose, velocity, controller modes, pitch bend, and releasing every note on focus-out and on quit. Emits MIDI bytes. |
+@@ -617,7 +623,7 @@ Chunk 1, the MIDI device and keymaps:
+ 
+ | # | Do | Expect |
+ | --- | --- | --- |
+-| 1 | In Ghostty, run `field keys`. In another terminal, run `field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
++| 1 | In Ghostty, run `field keys`. In another terminal, from the Field checkout, run `native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
+ | 2 | Hold `KeyA`, press `KeyX`, release `KeyA`. | Note-off 60, not 72. |
+ | 3 | Hold `KeyA` for two seconds. | One note-on, no repeats. |
+ | 4 | Hold `KeyA`, then switch to another window. | Note-off 60 when focus leaves. |
+@@ -832,3 +838,62 @@ Each chunk is one pull request, in order:
+   D-minor chord from twelve sine voices under `Env.linen`, a fixed-length
+   envelope. Its voice is already one SynthDef, and a gated envelope
+   makes it playable.
++
++## 9 Chunk 1 as built (2026-10-10)
++
++`field keys` plays the computer keyboard as the MIDI source `Field
++Keys`, through any keymap, built-in or yours. The built-in is
++`musical-typing`; `tracker` and `fourths` wait for chunk 3 as planned.
++
++### 9.1 What implementation settled
++
++- **A release takes the position its press resolved to.** An
++  end-to-end run through CoreMIDI under a ColemakC keyboard layout
++  showed the problem: a release resolved afresh can land on another
++  position when its base layout key is missing or the input source
++  changes while the key is held, and the note sounds until focus-out
++  or quit. `PressedKeys` in `src/keys/position.ts` remembers each
++  pressed key's position by the key the terminal reported.
++- **The grid expands in the schema file.** `src/schema/keymap.ts`
++  expands grids because the range rule needs the expanded notes, and
++  `src/keys/keymap.ts` resolves, loads, and watches.
++- **The interactive shell is `src/commands/keys.ts`.** §2.8 gains the
++  row.
++- **`panic` is a bare word**, and **a keymap plays at least one note**
++  (§2.4).
++- **Reload happens only when the keymap's text changes**, because macOS
++  can report a write made just before the watch began (§2.4).
++- **The probe waits two seconds** for the terminal's answers. Every
++  terminal answers the device-attributes query, so the wait matters
++  only for one that answers nothing, and a slow SSH link needs more
++  than one second.
++- **The helper's modes are subprocesses in `native/audiod/src/keys.cpp`
++  and `keyboard-layout.cpp`.** The layout code includes no JUCE headers,
++  so Carbon's and JUCE's never meet.
++
++### 9.2 What was verified, and how
++
++| Check | Result |
++| --- | --- |
++| The vitest tests §4 lists for chunk 1 | Pass: schema 13, keymap 10, print 3, terminal 13, position 11, session 20, helper 6. |
++| The native round trip, `src/keys/helper-native.test.ts` | 8 pass on macOS against the built binary. It fails against a binary without `--keys`. |
++| `field keys` in a pseudo-terminal, against a stub helper that reports a Dvorak layout | Eleven scripted key events sent exactly the predicted MIDI, including the note a transpose left under a held key, the focus-out release, sustain, bend, an ignored Ctrl-chord, and All Notes Off. The protocol flags were pushed at start and popped at exit. |
++| `field keys` in a pseudo-terminal with the real helper, under this Mac's ColemakC layout, heard by `--midi-monitor` through CoreMIDI | `o` played E5 through the layout report, `r` with base layout key `d` played E4, and `e` played C5, each with its own note-off, then All Notes Off. `Field Keys` was gone the moment the command exited. |
++| The layout change report | `--keys` printed a new report when the input source switched from ColemakC to U.S. and back. macOS posted the switch twice, so a switch can produce two reports. |
++| Dead keys | A read-only `UCKeyTranslate` check of U.S. International – PC marks `Quote` and `Backquote` dead. `musical-typing` binds `Quote` and not `Backquote`, so criterion 11 holds as written. |
++
++### 9.3 What is still owed
++
++- **Criteria 1 to 20 by hand at a real keyboard.** The runs above typed
++  the protocol's bytes into a pseudo-terminal, so they prove the
++  decoding, the positions, the session, and the helper, but not how
++  Ghostty, iTerm2, and Apple's Terminal behave with real keys. Criteria
++  6, 9, and 10 decide whether iTerm2 sends base layout keys and whether
++  the layout report reaches `field keys` in time.
++- **Linux.** `--keys` has not run on Linux; CI's runner has no ALSA
++  sequencer, so the round trip skips there by name.
++- **A one-off CoreMIDI failure.** The first `--keys` start on this Mac
++  printed `CoreMIDI error: 580` (`MIDIClientCreate` returned -304) and
++  could not create the source; about sixty later starts did not. JUCE
++  keeps a failed client for the life of the process, so the remedy is
++  to run `field keys` again, which `docs/keys.md` says.
+diff --git a/keymaps/musical-typing.yaml b/keymaps/musical-typing.yaml
+new file mode 100644
+index 0000000..e435c41
+--- /dev/null
++++ b/keymaps/musical-typing.yaml
+@@ -0,0 +1,36 @@
++name: musical-typing
++description: Logic Pro's Musical Typing. White keys on the home row, black keys above.
++base: 60
++notes:
++  KeyA: 0
++  KeyW: 1
++  KeyS: 2
++  KeyE: 3
++  KeyD: 4
++  KeyF: 5
++  KeyT: 6
++  KeyG: 7
++  KeyY: 8
++  KeyH: 9
++  KeyU: 10
++  KeyJ: 11
++  KeyK: 12
++  KeyO: 13
++  KeyL: 14
++  KeyP: 15
++  Semicolon: 16
++  Quote: 17
++controls:
++  KeyZ: { transpose: -12 }
++  KeyX: { transpose: 12 }
++  KeyC: { velocity: -20 }
++  KeyV: { velocity: 20 }
++  Tab: { cc: 64, value: 127, mode: hold }
++  Digit1: { bend: -1 }
++  Digit2: { bend: 1 }
++  Digit3: { cc: 1, value: 0 }
++  Digit4: { cc: 1, value: 25 }
++  Digit5: { cc: 1, value: 51 }
++  Digit6: { cc: 1, value: 76 }
++  Digit7: { cc: 1, value: 102 }
++  Digit8: { cc: 1, value: 127 }
+diff --git a/native/audiod/CMakeLists.txt b/native/audiod/CMakeLists.txt
+index 3ef86ea..2977646 100644
+--- a/native/audiod/CMakeLists.txt
++++ b/native/audiod/CMakeLists.txt
+@@ -31,6 +31,8 @@ target_sources(field-audiod PRIVATE
+   src/hosting.cpp
+   src/capture.cpp
+   src/click.cpp
++  src/keys.cpp
++  src/keyboard-layout.cpp
+   src/dsp/biquad.cpp
+   src/dsp/limiter.cpp
+   src/dsp/hall.cpp
+@@ -64,9 +66,10 @@ target_compile_definitions(field-audiod PRIVATE
+ )
+ 
+ # AU hosting references AUGenericView (CoreAudioKit), which JUCE's module
+-# metadata does not link for a console target.
++# metadata does not link for a console target. Carbon carries the Text
++# Input Sources API that keyboard-layout.cpp reads the layout through.
+ if(APPLE)
+-  target_link_libraries(field-audiod PRIVATE "-framework CoreAudioKit")
++  target_link_libraries(field-audiod PRIVATE "-framework CoreAudioKit" "-framework Carbon")
+ endif()
+ 
+ target_link_libraries(field-audiod PRIVATE
+diff --git a/native/audiod/src/keyboard-layout.cpp b/native/audiod/src/keyboard-layout.cpp
+new file mode 100644
+index 0000000..4f6734f
+--- /dev/null
++++ b/native/audiod/src/keyboard-layout.cpp
+@@ -0,0 +1,181 @@
++#include "keyboard-layout.h"
++
++#if defined(__APPLE__)
++#include <Carbon/Carbon.h>
++
++#include <iterator>
++#include <memory>
++#include <type_traits>
++#endif
++
++namespace field
++{
++#if defined(__APPLE__)
++namespace
++{
++struct Position
++{
++    const char* code;
++    UInt16 keyCode;
++};
++
++// Every position a keymap can bind, by the macOS key code at that place
++// on the keyboard. A key code names a position on every layout.
++constexpr Position bindablePositions[] = {
++    { "Backquote", kVK_ANSI_Grave },
++    { "Digit1", kVK_ANSI_1 },
++    { "Digit2", kVK_ANSI_2 },
++    { "Digit3", kVK_ANSI_3 },
++    { "Digit4", kVK_ANSI_4 },
++    { "Digit5", kVK_ANSI_5 },
++    { "Digit6", kVK_ANSI_6 },
++    { "Digit7", kVK_ANSI_7 },
++    { "Digit8", kVK_ANSI_8 },
++    { "Digit9", kVK_ANSI_9 },
++    { "Digit0", kVK_ANSI_0 },
++    { "Minus", kVK_ANSI_Minus },
++    { "Equal", kVK_ANSI_Equal },
++    { "KeyQ", kVK_ANSI_Q },
++    { "KeyW", kVK_ANSI_W },
++    { "KeyE", kVK_ANSI_E },
++    { "KeyR", kVK_ANSI_R },
++    { "KeyT", kVK_ANSI_T },
++    { "KeyY", kVK_ANSI_Y },
++    { "KeyU", kVK_ANSI_U },
++    { "KeyI", kVK_ANSI_I },
++    { "KeyO", kVK_ANSI_O },
++    { "KeyP", kVK_ANSI_P },
++    { "BracketLeft", kVK_ANSI_LeftBracket },
++    { "BracketRight", kVK_ANSI_RightBracket },
++    { "Backslash", kVK_ANSI_Backslash },
++    { "KeyA", kVK_ANSI_A },
++    { "KeyS", kVK_ANSI_S },
++    { "KeyD", kVK_ANSI_D },
++    { "KeyF", kVK_ANSI_F },
++    { "KeyG", kVK_ANSI_G },
++    { "KeyH", kVK_ANSI_H },
++    { "KeyJ", kVK_ANSI_J },
++    { "KeyK", kVK_ANSI_K },
++    { "KeyL", kVK_ANSI_L },
++    { "Semicolon", kVK_ANSI_Semicolon },
++    { "Quote", kVK_ANSI_Quote },
++    { "KeyZ", kVK_ANSI_Z },
++    { "KeyX", kVK_ANSI_X },
++    { "KeyC", kVK_ANSI_C },
++    { "KeyV", kVK_ANSI_V },
++    { "KeyB", kVK_ANSI_B },
++    { "KeyN", kVK_ANSI_N },
++    { "KeyM", kVK_ANSI_M },
++    { "Comma", kVK_ANSI_Comma },
++    { "Period", kVK_ANSI_Period },
++    { "Slash", kVK_ANSI_Slash },
++    { "IntlBackslash", kVK_ISO_Section },
++};
++
++struct CFReleaser
++{
++    void operator() (CFTypeRef ref) const { CFRelease (ref); }
++};
++
++template <typename Ref>
++using CFOwned = std::unique_ptr<std::remove_pointer_t<Ref>, CFReleaser>;
++
++std::string toUtf8 (CFStringRef text)
++{
++    const auto range = CFRangeMake (0, CFStringGetLength (text));
++    CFIndex size = 0;
++    CFStringGetBytes (text, range, kCFStringEncodingUTF8, 0, false, nullptr, 0, &size);
++    std::string utf8 ((size_t) size, '\0');
++    CFStringGetBytes (text, range, kCFStringEncodingUTF8, 0, false,
++                      reinterpret_cast<UInt8*> (utf8.data()), size, nullptr);
++    return utf8;
++}
++
++std::string toUtf8 (const UniChar* characters, UniCharCount length)
++{
++    const CFOwned<CFStringRef> text { CFStringCreateWithCharacters (kCFAllocatorDefault,
++                                                                    characters,
++                                                                    (CFIndex) length) };
++    return text != nullptr ? toUtf8 (text.get()) : std::string();
++}
++
++void selectedInputSourceChanged (CFNotificationCenterRef,
++                                 void* observer,
++                                 CFNotificationName,
++                                 const void*,
++                                 CFDictionaryRef)
++{
++    (*static_cast<std::function<void()>*> (observer))();
++}
++} // namespace
++
++std::optional<KeyboardLayout> readKeyboardLayout()
++{
++    const CFOwned<TISInputSourceRef> source { TISCopyCurrentKeyboardLayoutInputSource() };
++    if (source == nullptr)
++        return std::nullopt;
++
++    const auto layoutData = static_cast<CFDataRef> (
++        TISGetInputSourceProperty (source.get(), kTISPropertyUnicodeKeyLayoutData));
++    if (layoutData == nullptr)
++        return std::nullopt;
++    const auto* unicodeLayout = reinterpret_cast<const UCKeyboardLayout*> (CFDataGetBytePtr (layoutData));
++
++    KeyboardLayout layout;
++    if (const auto name = static_cast<CFStringRef> (
++            TISGetInputSourceProperty (source.get(), kTISPropertyLocalizedName)))
++        layout.name = toUtf8 (name);
++
++    const auto keyboardType = LMGetKbdType();
++    for (const auto& position : bindablePositions)
++    {
++        UInt32 deadKeyState = 0;
++        UniChar typed[8];
++        UniCharCount length = 0;
++        if (UCKeyTranslate (unicodeLayout, position.keyCode, kUCKeyActionDown, 0, keyboardType,
++                            0, &deadKeyState, std::size (typed), &length, typed)
++            != noErr)
++            continue;
++
++        if (deadKeyState != 0 && length == 0)
++            layout.dead.emplace_back (position.code);
++        else
++            layout.keys.emplace_back (position.code, toUtf8 (typed, length));
++    }
++    return layout;
++}
++
++KeyboardLayoutWatcher::KeyboardLayoutWatcher (std::function<void()> callback)
++    : onChange (std::move (callback))
++{
++    // NSApplication holds distributed notifications back while its process
++    // is inactive, and a console process never becomes active.
++    CFNotificationCenterAddObserver (CFNotificationCenterGetDistributedCenter(),
++                                     &onChange,
++                                     selectedInputSourceChanged,
++                                     kTISNotifySelectedKeyboardInputSourceChanged,
++                                     nullptr,
++                                     CFNotificationSuspensionBehaviorDeliverImmediately);
++}
++
++KeyboardLayoutWatcher::~KeyboardLayoutWatcher()
++{
++    CFNotificationCenterRemoveObserver (CFNotificationCenterGetDistributedCenter(),
++                                        &onChange,
++                                        kTISNotifySelectedKeyboardInputSourceChanged,
++                                        nullptr);
++}
++#else
++std::optional<KeyboardLayout> readKeyboardLayout()
++{
++    return std::nullopt;
++}
++
++KeyboardLayoutWatcher::KeyboardLayoutWatcher (std::function<void()> callback)
++    : onChange (std::move (callback))
++{
++}
++
++KeyboardLayoutWatcher::~KeyboardLayoutWatcher() = default;
++#endif
++} // namespace field
+diff --git a/native/audiod/src/keyboard-layout.h b/native/audiod/src/keyboard-layout.h
+new file mode 100644
+index 0000000..eed82c6
+--- /dev/null
++++ b/native/audiod/src/keyboard-layout.h
+@@ -0,0 +1,43 @@
++// The active keyboard layout, for `field keys` (keyboard-instrument.md
++// §2.3): what each bindable position types, and which positions are dead
++// keys. Read on macOS through the Text Input Sources API; elsewhere there
++// is nothing to report and nothing to watch.
++#pragma once
++
++#include <functional>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace field
++{
++struct KeyboardLayout
++{
++    std::string name;
++    // Position, as a KeyboardEvent.code, to the UTF-8 text it types with
++    // no modifiers.
++    std::vector<std::pair<std::string, std::string>> keys;
++    std::vector<std::string> dead;
++};
++
++// Call on the main thread: macOS traps a Text Input Sources call made
++// from any other.
++std::optional<KeyboardLayout> readKeyboardLayout();
++
++// Calls onChange whenever the selected keyboard input source changes, for
++// as long as the watcher lives. Construct it on the main thread and run
++// that thread's run loop, which is where the change is delivered.
++class KeyboardLayoutWatcher
++{
++public:
++    explicit KeyboardLayoutWatcher (std::function<void()> onChange);
++    ~KeyboardLayoutWatcher();
++
++    KeyboardLayoutWatcher (const KeyboardLayoutWatcher&) = delete;
++    KeyboardLayoutWatcher& operator= (const KeyboardLayoutWatcher&) = delete;
++
++private:
++    [[maybe_unused]] std::function<void()> onChange;
++};
++} // namespace field
+diff --git a/native/audiod/src/keys.cpp b/native/audiod/src/keys.cpp
+new file mode 100644
+index 0000000..2adae3b
+--- /dev/null
++++ b/native/audiod/src/keys.cpp
+@@ -0,0 +1,222 @@
++#include "keys.h"
++
++#include "keyboard-layout.h"
++
++#include <juce_audio_devices/juce_audio_devices.h>
++#include <juce_events/juce_events.h>
++
++#include <poll.h>
++#include <unistd.h>
++
++#include <atomic>
++#include <csignal>
++#include <cstdio>
++#include <initializer_list>
++#include <iostream>
++#include <memory>
++#include <mutex>
++#include <string>
++#include <thread>
++#include <utility>
++
++namespace field
++{
++namespace
++{
++std::mutex stdoutLock;
++
++void printLine (const juce::var& value)
++{
++    const auto line = juce::JSON::toString (value,
++                                            juce::JSON::FormatOptions{}.withSpacing (
++                                                juce::JSON::Spacing::none))
++                      + "\n";
++    const std::scoped_lock lock (stdoutLock);
++    std::fputs (line.toRawUTF8(), stdout);
++    std::fflush (stdout);
++}
++
++juce::var jsonObject (std::initializer_list<std::pair<juce::Identifier, juce::var>> properties)
++{
++    juce::DynamicObject::Ptr object = new juce::DynamicObject();
++    for (const auto& [name, value] : properties)
++        object->setProperty (name, value);
++    return juce::var (object.get());
++}
++
++void printError (const juce::String& message)
++{
++    printLine (jsonObject ({ { "error", message } }));
++}
++
++juce::String fromUtf8 (const std::string& text)
++{
++    return juce::String::fromUTF8 (text.data(), (int) text.size());
++}
++
++void printKeyboardLayout()
++{
++    const auto layout = readKeyboardLayout();
++    if (! layout)
++        return;
++
++    juce::DynamicObject::Ptr keys = new juce::DynamicObject();
++    for (const auto& [position, typed] : layout->keys)
++        keys->setProperty (juce::Identifier (position.c_str()), fromUtf8 (typed));
++
++    juce::Array<juce::var> dead;
++    for (const auto& position : layout->dead)
++        dead.add (fromUtf8 (position));
++
++    printLine (jsonObject ({ { "keyboard", jsonObject ({ { "name", fromUtf8 (layout->name) },
++                                                         { "keys", juce::var (keys.get()) },
++                                                         { "dead", dead } }) } }));
++}
++
++// Reads one {"midi":[...]} line into message, or returns why it is not one.
++juce::String readMidiLine (const juce::String& line, juce::MidiMessage& message)
++{
++    juce::var parsed;
++    if (juce::JSON::parse (line, parsed).failed() || parsed.getDynamicObject() == nullptr
++        || parsed.getDynamicObject()->getProperties().size() != 1
++        || ! parsed["midi"].isArray())
++        return "expected a line like {\"midi\":[144,60,100]}, got " + line;
++
++    const auto& bytes = *parsed["midi"].getArray();
++    if (bytes.isEmpty() || bytes.size() > 3)
++        return "a MIDI message is 1 to 3 bytes, got " + juce::String (bytes.size()) + " in " + line;
++
++    juce::uint8 data[3] {};
++    for (int i = 0; i < bytes.size(); ++i)
++    {
++        const auto& byte = bytes.getReference (i);
++        if (! (byte.isInt() || byte.isInt64()) || (juce::int64) byte < 0 || (juce::int64) byte > 255)
++            return "a MIDI byte is an integer from 0 to 255, got " + juce::JSON::toString (byte, true)
++                   + " in " + line;
++        data[i] = (juce::uint8) (int) byte;
++    }
++    if (data[0] < 0x80)
++        return "a MIDI message starts with a status byte, 128 or above, got "
++               + juce::String (data[0]) + " in " + line;
++
++    message = juce::MidiMessage (data, bytes.size());
++    return {};
++}
++
++class MidiPrinter final : public juce::MidiInputCallback
++{
++public:
++    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override
++    {
++        juce::Array<juce::var> bytes;
++        for (int i = 0; i < message.getRawDataSize(); ++i)
++            bytes.add ((int) message.getRawData()[i]);
++        printLine (jsonObject ({ { "midi", bytes } }));
++    }
++};
++
++std::unique_ptr<juce::MidiInput> openSource (const juce::String& name, juce::MidiInputCallback& callback)
++{
++    for (const auto& device : juce::MidiInput::getAvailableDevices())
++        if (device.name == name)
++            return juce::MidiInput::openDevice (device.identifier, &callback);
++    return nullptr;
++}
++
++// Drains whatever stdin holds without blocking, and says whether it has
++// reached end of input.
++bool stdinEnded()
++{
++    pollfd stdinPoll { STDIN_FILENO, POLLIN, 0 };
++    while (poll (&stdinPoll, 1, 0) > 0)
++    {
++        char discarded[256];
++        if (read (STDIN_FILENO, discarded, sizeof (discarded)) <= 0)
++            return true;
++    }
++    return false;
++}
++
++std::atomic<bool> stopRequested { false };
++} // namespace
++
++int runKeys (const juce::String& name)
++{
++    juce::ScopedJuceInitialiser_GUI juceInit;
++
++    // Watching starts before the first report, so a switch between the two
++    // still produces a report.
++    const KeyboardLayoutWatcher watcher (printKeyboardLayout);
++    printKeyboardLayout();
++
++    auto source = juce::MidiOutput::createNewDevice (name);
++    if (source == nullptr)
++    {
++        printError ("cannot create a virtual MIDI source named " + name + " on this system");
++        return 1;
++    }
++    printLine (jsonObject ({ { "ready", true }, { "name", name } }));
++
++    // Lines are read off the main thread, whose run loop delivers the
++    // keyboard layout changes, and each message is sent as its line
++    // arrives.
++    std::atomic<int> exitCode { -1 };
++    std::thread reader ([&]
++    {
++        std::string line;
++        while (std::getline (std::cin, line))
++        {
++            const auto text = fromUtf8 (line).trim();
++            if (text.isEmpty())
++                continue;
++
++            juce::MidiMessage message;
++            if (const auto error = readMidiLine (text, message); error.isNotEmpty())
++            {
++                printError (error);
++                exitCode = 1;
++                return;
++            }
++            source->sendMessageNow (message);
++        }
++        exitCode = 0;
++    });
++
++    while (exitCode < 0)
++        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
++    reader.join();
++    source.reset();
++    return exitCode;
++}
++
++int runMidiMonitor (const juce::String& name)
++{
++    juce::ScopedJuceInitialiser_GUI juceInit;
++    auto* messageManager = juce::MessageManager::getInstance();
++
++    MidiPrinter printer;
++    const auto giveUpAt = juce::Time::currentTimeMillis() + 5000;
++    auto input = openSource (name, printer);
++    while (input == nullptr && juce::Time::currentTimeMillis() < giveUpAt)
++    {
++        messageManager->runDispatchLoopUntil (100);
++        input = openSource (name, printer);
++    }
++    if (input == nullptr)
++    {
++        printError ("no MIDI source named " + name);
++        return 1;
++    }
++
++    std::signal (SIGTERM, [] (int) { stopRequested = true; });
++    std::signal (SIGINT, [] (int) { stopRequested = true; });
++    input->start();
++    printLine (jsonObject ({ { "ready", true }, { "name", name } }));
++
++    while (! stopRequested && ! stdinEnded())
++        messageManager->runDispatchLoopUntil (100);
++
++    input->stop();
++    return 0;
++}
++} // namespace field
+diff --git a/native/audiod/src/keys.h b/native/audiod/src/keys.h
+new file mode 100644
+index 0000000..b2a0db6
+--- /dev/null
++++ b/native/audiod/src/keys.h
+@@ -0,0 +1,19 @@
++// The native half of `field keys` (keyboard-instrument.md §2.5): a
++// virtual MIDI source driven by NDJSON on stdin, and a monitor that
++// prints what a named source sends. Both are short-lived subprocesses,
++// apart from the daemon's transport and socket, and both speak NDJSON on
++// stdout and nothing else.
++#pragma once
++
++#include <juce_core/juce_core.h>
++
++namespace field
++{
++// Reports the keyboard layout (macOS), publishes the source, sends each
++// {"midi":[...]} line from stdin, and closes the source at end of input.
++int runKeys (const juce::String& name);
++
++// Prints each message from the source named `name` until end of input,
++// SIGTERM, or SIGINT.
++int runMidiMonitor (const juce::String& name);
++} // namespace field
+diff --git a/native/audiod/src/main.cpp b/native/audiod/src/main.cpp
+index 456d322..e59829c 100644
+--- a/native/audiod/src/main.cpp
++++ b/native/audiod/src/main.cpp
+@@ -1,6 +1,7 @@
+ #include "player.h"
+ #include "capture.h"
+ #include "hosting.h"
++#include "keys.h"
+ #include "live.h"
+ #include "render.h"
+ #include "server.h"
+@@ -8,6 +9,7 @@
+ #include <juce_events/juce_events.h>
+ 
+ #include <csignal>
++#include <optional>
+ 
+ // field-audiod: the playback daemon (playback.md). Spawned on demand by the
+ // CLI with its working directory at the project root, serves the NDJSON
+@@ -154,6 +156,8 @@ int main (int argc, char* argv[])
+     juce::String captureIdentifier;
+     juce::String captureParams;
+     juce::String captureOut;
++    std::optional<juce::String> keysName;
++    std::optional<juce::String> monitorName;
+     bool nullOutput = false;
+     int idleSeconds = 300;
+ 
+@@ -186,6 +190,10 @@ int main (int argc, char* argv[])
+             captureParams = argv[++i];
+             captureOut = argv[++i];
+         }
++        else if (arg == "--keys" && i + 1 < argc)
++            keysName = juce::String::fromUTF8 (argv[++i]);
++        else if (arg == "--midi-monitor" && i + 1 < argc)
++            monitorName = juce::String::fromUTF8 (argv[++i]);
+         else if (arg == "--null-output")
+             nullOutput = true;
+         else if (arg == "--idle" && i + 1 < argc)
+@@ -201,11 +209,22 @@ int main (int argc, char* argv[])
+                           "       field-audiod --scan <au|vst3>\n"
+                           "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
+                           "       field-audiod --state-capture <au|vst3> <identifier> "
+-                          "<paramsJson> <out>\n");
++                          "<paramsJson> <out>\n"
++                          "       field-audiod --keys <name>\n"
++                          "       field-audiod --midi-monitor <name>\n");
+             return 2;
+         }
+     }
+ 
++    // The helper behind `field keys` and its monitor
++    // (keyboard-instrument.md §2.5) are subprocesses for the reason --render
++    // is: they return before any socket or audio device exists, so playing
++    // keys never contends with the transport.
++    if (keysName)
++        return field::runKeys (*keysName);
++    if (monitorName)
++        return field::runMidiMonitor (*monitorName);
++
+     // Scanning is a subprocess tree for the same isolation reasons as
+     // --render: the parent iterates candidates and spawns itself with
+     // --scan-probe per candidate, so a plugin that crashes while being
+diff --git a/src/cli.ts b/src/cli.ts
+index 8e0ae77..d58c832 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1005,6 +1005,20 @@ program
+     }
+   });
+ 
++program
++  .command('keys')
++  .description('play the computer keyboard as the MIDI source "Field Keys" (needs a terminal with the kitty keyboard protocol; Esc quits)')
++  .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
++  .option('--print', 'print the keymap as a keyboard diagram and exit')
++  .action(async (opts: { keymap?: string; print?: boolean }) => {
++    try {
++      const { keysCommand } = await import('./commands/keys.js');
++      await keysCommand(opts);
++    } catch (err) {
++      fail(err);
++    }
++  });
++
+ program
+   .command('query <expr>')
+   .description("query the graph: a pattern, or deps(creek/track:drums)")
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+new file mode 100644
+index 0000000..a789049
+--- /dev/null
++++ b/src/commands/keys.ts
+@@ -0,0 +1,152 @@
++import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
++import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
++import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
++import { printKeymap, signed } from '../keys/print.js';
++import { KeysSession, type MidiMessage } from '../keys/session.js';
++import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
++import type { Keymap } from '../schema/keymap.js';
++
++export const UNSUPPORTED_TERMINAL =
++  'field keys needs a terminal that reports key releases through the kitty keyboard protocol: ' +
++  'Ghostty, iTerm2 3.5 or later, kitty, or WezTerm. This terminal did not answer the protocol probe.';
++
++export interface KeysOptions {
++  keymap?: string;
++  print?: boolean;
++}
++
++export async function keysCommand(options: KeysOptions): Promise<void> {
++  const source = resolveKeymapSource(options.keymap);
++  const keymap = loadKeymap(source.path);
++  if (options.print === true) {
++    process.stdout.write(printKeymap(keymap));
++    return;
++  }
++  const { stdin, stdout } = process;
++  if (!stdin.isTTY || !stdout.isTTY) {
++    throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
++  }
++  await withKittyKeyboard({ stdin, stdout }, (rest) => play({ stdin, stdout }, source, keymap, rest));
++}
++
++// Raw mode and the protocol flags are the terminal's state, not ours, so
++// every way out gives them back: a return, a throw, and a crash.
++async function withKittyKeyboard(tty: Tty, run: (rest: string) => Promise<void>): Promise<void> {
++  let enabled = false;
++  const restore = (): void => {
++    if (enabled) tty.stdout.write(RESTORE);
++    enabled = false;
++    if (tty.stdin.isRaw) tty.stdin.setRawMode(false);
++    tty.stdin.pause();
++  };
++  process.once('exit', restore);
++  try {
++    tty.stdin.setRawMode(true);
++    tty.stdin.resume();
++    const probe = await probeKittyProtocol(tty);
++    if (!probe.supported) throw new Error(UNSUPPORTED_TERMINAL);
++    tty.stdout.write(ENABLE);
++    enabled = true;
++    await run(probe.rest);
++  } finally {
++    restore();
++    process.removeListener('exit', restore);
++  }
++}
++
++async function play(tty: Tty, source: KeymapSource, initial: Keymap, carried: string): Promise<void> {
++  const session = new KeysSession(initial);
++  let layout: KeyboardLayout | undefined;
++  let layoutPositions: ReadonlyMap<string, string> | undefined;
++  let reloadError: string | undefined;
++
++  const draw = (): void => {
++    // A terminal that reports no size reports 0 columns.
++    const width = Math.max(20, (tty.stdout.columns || 80) - 1);
++    tty.stdout.write(`\r\x1b[K${statusText(session, layout, reloadError).slice(0, width)}`);
++  };
++
++  let stop!: (error?: Error) => void;
++  const stopped = new Promise<Error | undefined>((resolve) => {
++    stop = resolve;
++  });
++
++  // Before the helper starts, because its first keyboard layout report
++  // draws the status line.
++  tty.stdout.write(`Playing ${initial.name} as the MIDI source "${SOURCE_NAME}". Esc or Ctrl-C quits.\n`);
++  if (source.kind === 'file') tty.stdout.write(`Saving ${source.path} reloads it.\n`);
++
++  const helper = await KeysHelper.start(SOURCE_NAME, {
++    onKeyboard: (reported) => {
++      layout = reported;
++      layoutPositions = charactersToPositions(reported);
++      draw();
++    },
++    onExit: (reason) => stop(new Error(`the MIDI helper stopped: ${reason}`)),
++  });
++  const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
++
++  const stopWatching =
++    source.kind === 'file'
++      ? watchKeymap(source.path, (result) => {
++          if ('error' in result) {
++            reloadError = result.error.problems[0];
++          } else {
++            reloadError = undefined;
++            send(session.setKeymap(result.keymap));
++            session.message ??= `reloaded ${result.keymap.name}`;
++          }
++          draw();
++        })
++      : undefined;
++
++  const pressed = new PressedKeys();
++  let pending = carried;
++  const onData = (chunk: Buffer): void => {
++    const { events, rest } = decodeTerminal(pending + chunk.toString('utf8'));
++    pending = rest;
++    for (const event of events) {
++      if (isQuit(event)) return stop();
++      if (event.kind === 'focus' && !event.focused) {
++        send(session.releaseAll());
++        pressed.clear();
++      }
++      if (event.kind === 'key') {
++        const position = pressed.resolve(event, layoutPositions);
++        if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
++      }
++    }
++    draw();
++  };
++  const onSignal = (): void => stop();
++
++  draw();
++  tty.stdin.on('data', onData);
++  for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(signal, onSignal);
++
++  const error = await stopped;
++
++  tty.stdin.removeListener('data', onData);
++  for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
++  stopWatching?.();
++  send(session.quit());
++  await helper.close();
++  tty.stdout.write('\n');
++  if (error !== undefined) throw error;
++}
++
++function statusText(session: KeysSession, layout: KeyboardLayout | undefined, reloadError: string | undefined): string {
++  const notes = session.soundingNotes();
++  const parts = [
++    SOURCE_NAME,
++    session.keymap.name,
++    `transpose ${signed(session.transpose)}`,
++    `velocity ${session.velocity}`,
++    notes.length > 0 ? notes.join(' ') : '–',
++  ];
++  const unplayable = unplayablePositions(layout, session.keymap);
++  if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
++  if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
++  if (session.message !== undefined) parts.push(session.message);
++  return parts.join(' · ');
++}
+diff --git a/src/keys/helper-native.test.ts b/src/keys/helper-native.test.ts
+new file mode 100644
+index 0000000..ee8f675
+--- /dev/null
++++ b/src/keys/helper-native.test.ts
+@@ -0,0 +1,176 @@
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import { existsSync } from 'node:fs';
++import { createInterface } from 'node:readline';
++import { afterEach, describe, expect, it, type TestContext } from 'vitest';
++import { daemonBinary } from '../audiod/client.js';
++import { TEXT_POSITIONS } from '../schema/keymap.js';
++
++// The native round trip (keyboard-instrument.md §4): `field-audiod --keys`
++// publishes a virtual MIDI source and `--midi-monitor` reads it back. The
++// probe for a MIDI service is `--keys` itself, and the only error allowed
++// to skip is a Linux machine without the ALSA sequencer, so a green run
++// without a MIDI service never reads as coverage.
++
++const binary = (() => {
++  try {
++    return daemonBinary();
++  } catch {
++    return undefined;
++  }
++})();
++
++// What `keyboard-layout.cpp` must report: every position a keymap binds
++// that types a character. A position added to the schema fails here until
++// the helper reports it.
++const BINDABLE_POSITIONS = TEXT_POSITIONS;
++
++const LINE_TIMEOUT_MS = 5000;
++
++type Line = Record<string, unknown>;
++
++interface Helper {
++  args: string[];
++  child: ChildProcessWithoutNullStreams;
++  stdout: string[];
++  stderr: string;
++  ended: boolean;
++  closed: Promise<number | null>;
++}
++
++const running: Helper[] = [];
++
++function spawnHelper(...args: string[]): Helper {
++  const child = spawn(binary!, args, { stdio: 'pipe' });
++  const helper: Helper = {
++    args,
++    child,
++    stdout: [],
++    stderr: '',
++    ended: false,
++    closed: new Promise((resolve) => {
++      child.on('close', (code) => {
++        helper.ended = true;
++        resolve(code);
++      });
++    }),
++  };
++  child.on('error', (error) => {
++    helper.stderr += String(error);
++  });
++  // A write to a helper that has already exited shows up in its exit
++  // code and output; without a listener the EPIPE would kill the worker.
++  child.stdin.on('error', () => {});
++  child.stderr.on('data', (chunk) => {
++    helper.stderr += String(chunk);
++  });
++  createInterface({ input: child.stdout }).on('line', (line) => helper.stdout.push(line));
++  running.push(helper);
++  return helper;
++}
++
++function parse(helper: Helper, index: number): Line {
++  const raw = helper.stdout[index]!;
++  try {
++    return JSON.parse(raw) as Line;
++  } catch {
++    throw new Error(`${helper.args.join(' ')}: stdout line ${index + 1} is not JSON: ${raw}`);
++  }
++}
++
++function sleep(ms: number): Promise<void> {
++  return new Promise((resolve) => setTimeout(resolve, ms));
++}
++
++async function lineAt(helper: Helper, index: number): Promise<Line> {
++  const deadline = Date.now() + LINE_TIMEOUT_MS;
++  while (helper.stdout.length <= index) {
++    const said = `${helper.args.join(' ')} printed ${helper.stdout.length} lines; stderr: ${helper.stderr}`;
++    if (helper.ended) throw new Error(`exited before stdout line ${index + 1}: ${said}`);
++    if (Date.now() > deadline) throw new Error(`timed out waiting for stdout line ${index + 1}: ${said}`);
++    await sleep(10);
++  }
++  return parse(helper, index);
++}
++
++function linesFrom(helper: Helper, index: number): Line[] {
++  return helper.stdout.slice(index).map((_, offset) => parse(helper, index + offset));
++}
++
++function withoutLayoutReports(lines: Line[]): Line[] {
++  return lines.filter((line) => !('keyboard' in line));
++}
++
++function expectFullLayoutReport(line: Line): void {
++  expect(Object.keys(line)).toEqual(['keyboard']);
++  const report = line['keyboard'] as { name: unknown; keys: Record<string, unknown>; dead: string[] };
++  expect(typeof report.name).toBe('string');
++  expect(report.name).not.toBe('');
++  for (const typed of Object.values(report.keys)) expect(typeof typed).toBe('string');
++  expect([...Object.keys(report.keys), ...report.dead].sort()).toEqual([...BINDABLE_POSITIONS].sort());
++}
++
++// Starts `--keys <name>` and returns it with the index of the first line
++// after `ready`. On macOS the layout report must come first.
++async function startKeys(ctx: TestContext, name: string): Promise<{ keys: Helper; afterReady: number }> {
++  const keys = spawnHelper('--keys', name);
++  let index = 0;
++  if (process.platform === 'darwin') expectFullLayoutReport(await lineAt(keys, index++));
++
++  const published = await lineAt(keys, index++);
++  if ('error' in published && process.platform === 'linux' && !existsSync('/dev/snd/seq')) {
++    const reason =
++      `no MIDI service: this Linux machine has no ALSA sequencer at /dev/snd/seq, ` +
++      `and --keys said ${JSON.stringify(published['error'])}`;
++    console.warn(`skipping the native MIDI round trip: ${reason}`);
++    ctx.skip(reason);
++  }
++  expect(published).toEqual({ ready: true, name });
++  return { keys, afterReady: index };
++}
++
++describe.skipIf(!binary)('field-audiod --keys and --midi-monitor (native round trip)', () => {
++  const base = `Field Keys Test ${process.pid}`;
++
++  afterEach(async () => {
++    const left = running.splice(0);
++    for (const helper of left) if (!helper.ended) helper.child.kill('SIGKILL');
++    await Promise.all(left.map((helper) => helper.closed));
++  });
++
++  it(
++    'delivers each message to a monitor in order, and exits 0 at the end of its input',
++    { timeout: 20_000 },
++    async (ctx) => {
++      const { keys, afterReady } = await startKeys(ctx, base);
++      const monitor = spawnHelper('--midi-monitor', base);
++      expect(await lineAt(monitor, 0)).toEqual({ ready: true, name: base });
++
++      keys.child.stdin.write('{"midi":[144,60,100]}\n\n  \n{"midi":[128,60,0]}\n');
++      expect(await lineAt(monitor, 1)).toEqual({ midi: [144, 60, 100] });
++      expect(await lineAt(monitor, 2)).toEqual({ midi: [128, 60, 0] });
++
++      keys.child.stdin.end();
++      expect(await keys.closed).toBe(0);
++      expect(withoutLayoutReports(linesFrom(keys, afterReady))).toEqual([]);
++
++      monitor.child.kill('SIGTERM');
++      expect(await monitor.closed).toBe(0);
++      expect(linesFrom(monitor, 3)).toEqual([]);
++    },
++  );
++
++  it.for([
++    ['not JSON', 'note on 60'],
++    ['a JSON array', '[144,60,100]'],
++    ['no bytes', '{"midi":[]}'],
++    ['four bytes', '{"midi":[144,60,100,0]}'],
++    ['no status byte', '{"midi":[60,100]}'],
++    ['a byte above 255', '{"midi":[144,60,256]}'],
++    ['a property besides midi', '{"midi":[144,60,100],"at":0}'],
++  ] as const)('answers a line with %s with an error and exit 1', { timeout: 20_000 }, async ([what, line], ctx) => {
++    const { keys, afterReady } = await startKeys(ctx, `${base} ${what}`);
++    keys.child.stdin.write(`${line}\n`);
++    expect(await keys.closed).toBe(1);
++    expect(withoutLayoutReports(linesFrom(keys, afterReady))).toEqual([{ error: expect.any(String) }]);
++  });
++});
+diff --git a/src/keys/helper.test.ts b/src/keys/helper.test.ts
+new file mode 100644
+index 0000000..ec7dcd3
+--- /dev/null
++++ b/src/keys/helper.test.ts
+@@ -0,0 +1,113 @@
++import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { KeysHelper } from './helper.js';
++import type { KeyboardLayout } from './position.js';
++
++// A stand-in for `field-audiod --keys`, scripted per test: it prints the
++// lines it is given, records every line it reads, and exits 0 at the end
++// of its input, as the real helper does.
++const STUB = `
++const { appendFileSync } = require('node:fs');
++const [, , log, ...lines] = process.argv;
++for (const line of lines) {
++  if (line.startsWith('exit:')) process.exit(Number(line.slice(5)));
++  if (line.startsWith('laterexit:')) setTimeout(() => process.exit(Number(line.slice(10))), 200);
++  else if (line.startsWith('later:')) setTimeout(() => console.log(line.slice(6)), 100);
++  else console.log(line);
++}
++require('node:readline').createInterface({ input: process.stdin })
++  .on('line', (l) => appendFileSync(log, l + '\\n'))
++  .on('close', () => process.exit(0));
++`;
++
++let dir: string;
++let stub: string;
++let log: string;
++
++beforeEach(() => {
++  dir = mkdtempSync(join(tmpdir(), 'field-keys-helper-'));
++  stub = join(dir, 'stub.cjs');
++  log = join(dir, 'received.log');
++  writeFileSync(stub, STUB);
++  writeFileSync(log, '');
++});
++
++afterEach(() => {
++  rmSync(dir, { recursive: true, force: true });
++});
++
++function command(...lines: string[]) {
++  return { file: process.execPath, args: [stub, log, ...lines] };
++}
++
++const KEYBOARD = { name: 'Dvorak', keys: { KeyA: 'a', KeyS: 'o' }, dead: [] };
++
++describe('the keys helper', () => {
++  it('reports the keyboard layout before ready, sends MIDI, and ends at end of input', async () => {
++    const layouts: KeyboardLayout[] = [];
++    const helper = await KeysHelper.start('Field Keys', {
++      command: command(JSON.stringify({ keyboard: KEYBOARD }), JSON.stringify({ ready: true, name: 'Field Keys' })),
++      onKeyboard: (layout) => layouts.push(layout),
++    });
++    expect(layouts).toEqual([KEYBOARD]);
++    helper.send([144, 60, 100]);
++    helper.send([128, 60, 0]);
++    expect(await helper.close()).toBe(0);
++    expect(readFileSync(log, 'utf8')).toBe('{"midi":[144,60,100]}\n{"midi":[128,60,0]}\n');
++  });
++
++  it('passes on a keyboard layout that changes mid-session', async () => {
++    const layouts: KeyboardLayout[] = [];
++    const french = { name: 'French', keys: { KeyA: 'q' }, dead: [] };
++    const helper = await KeysHelper.start('Field Keys', {
++      command: command(
++        JSON.stringify({ keyboard: KEYBOARD }),
++        JSON.stringify({ ready: true, name: 'Field Keys' }),
++        `later:${JSON.stringify({ keyboard: french })}`,
++      ),
++      onKeyboard: (layout) => layouts.push(layout),
++    });
++    await new Promise((r) => setTimeout(r, 300));
++    expect(layouts).toEqual([KEYBOARD, french]);
++    await helper.close();
++  });
++
++  it('rejects with the helper error when it cannot start', async () => {
++    await expect(
++      KeysHelper.start('Field Keys', {
++        command: command(JSON.stringify({ error: 'cannot create a virtual MIDI source named Field Keys on this system' }), 'exit:1'),
++      }),
++    ).rejects.toThrow('cannot create a virtual MIDI source named Field Keys on this system');
++  });
++
++  it('rejects with the exit code when the helper dies silently', async () => {
++    await expect(KeysHelper.start('Field Keys', { command: command('exit:3') })).rejects.toThrow(/exited with code 3/);
++  });
++
++  it('reports a helper that exits on its own after it was ready, with its error', async () => {
++    const reasons: string[] = [];
++    const helper = await KeysHelper.start('Field Keys', {
++      command: command(
++        JSON.stringify({ ready: true, name: 'Field Keys' }),
++        `later:${JSON.stringify({ error: 'the MIDI server went away' })}`,
++        'laterexit:1',
++      ),
++      onExit: (reason) => reasons.push(reason),
++    });
++    await new Promise((r) => setTimeout(r, 400));
++    expect(reasons).toEqual(['the MIDI server went away']);
++    helper.send([144, 60, 100]);
++  });
++
++  it('does not report its own close as an exit', async () => {
++    const reasons: string[] = [];
++    const helper = await KeysHelper.start('Field Keys', {
++      command: command(JSON.stringify({ ready: true, name: 'Field Keys' })),
++      onExit: (reason) => reasons.push(reason),
++    });
++    expect(await helper.close()).toBe(0);
++    expect(reasons).toEqual([]);
++  });
++});
+diff --git a/src/keys/helper.ts b/src/keys/helper.ts
+new file mode 100644
+index 0000000..be0f30e
+--- /dev/null
++++ b/src/keys/helper.ts
+@@ -0,0 +1,97 @@
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import { createInterface } from 'node:readline';
++import { z } from 'zod';
++import { daemonBinary } from '../audiod/client.js';
++import type { KeyboardLayout } from './position.js';
++import type { MidiMessage } from './session.js';
++
++export const SOURCE_NAME = 'Field Keys';
++
++// The helper's lines (keyboard-instrument.md §2.5).
++const helperLine = z.union([
++  z.object({ keyboard: z.object({ name: z.string(), keys: z.record(z.string(), z.string()), dead: z.array(z.string()) }) }),
++  z.object({ ready: z.literal(true), name: z.string() }),
++  z.object({ error: z.string() }),
++]);
++
++export interface HelperOptions {
++  onKeyboard?: (layout: KeyboardLayout) => void;
++  // Called when the helper exits on its own after it was ready.
++  onExit?: (reason: string) => void;
++  // Replaces `field-audiod --keys <name>`, for tests.
++  command?: { file: string; args: string[] };
++}
++
++// `field-audiod --keys`: the native half of `field keys`, which owns the
++// virtual MIDI source and reads the keyboard layout. Closing its input
++// removes the source, so the source never outlives this process.
++export class KeysHelper {
++  private closing = false;
++
++  private constructor(private readonly child: ChildProcessWithoutNullStreams) {
++    // A write after the helper died must not kill this process; the exit
++    // handler reports why the helper went.
++    child.stdin.on('error', () => {});
++  }
++
++  static start(name: string, options: HelperOptions = {}): Promise<KeysHelper> {
++    const command = options.command ?? { file: requireDaemon(), args: ['--keys', name] };
++    const child = spawn(command.file, command.args, { stdio: ['pipe', 'pipe', 'pipe'] });
++    const helper = new KeysHelper(child);
++    let stderr = '';
++    child.stderr.on('data', (chunk: Buffer) => {
++      stderr = (stderr + chunk.toString('utf8')).slice(-2000);
++    });
++
++    return new Promise((resolve, reject) => {
++      let ready = false;
++      let lastError: string | undefined;
++      const why = (code: number | null, signal: NodeJS.Signals | null): string =>
++        lastError ?? (stderr.trim() || `field-audiod --keys exited ${signal !== null ? `on ${signal}` : `with code ${code}`}`);
++
++      child.on('error', (err) => reject(new Error(`could not start field-audiod --keys: ${err.message}`)));
++      child.on('exit', (code, signal) => {
++        if (!ready) reject(new Error(why(code, signal)));
++        else if (!helper.closing) options.onExit?.(why(code, signal));
++      });
++
++      createInterface({ input: child.stdout }).on('line', (line) => {
++        if (line.trim() === '') return;
++        let parsed: z.infer<typeof helperLine>;
++        try {
++          parsed = helperLine.parse(JSON.parse(line));
++        } catch {
++          lastError = `field-audiod --keys printed an unexpected line: ${line}`;
++          return;
++        }
++        if ('keyboard' in parsed) options.onKeyboard?.(parsed.keyboard);
++        else if ('error' in parsed) lastError = parsed.error;
++        else if (!ready) {
++          ready = true;
++          resolve(helper);
++        }
++      });
++    });
++  }
++
++  send(message: MidiMessage): void {
++    if (!this.closing) this.child.stdin.write(`${JSON.stringify({ midi: message })}\n`);
++  }
++
++  close(): Promise<number | null> {
++    this.closing = true;
++    if (this.child.exitCode !== null || this.child.signalCode !== null) return Promise.resolve(this.child.exitCode);
++    return new Promise((resolve) => {
++      this.child.once('exit', (code) => resolve(code));
++      this.child.stdin.end();
++    });
++  }
++}
++
++function requireDaemon(): string {
++  const binary = daemonBinary();
++  if (binary === undefined) {
++    throw new Error('field keys needs field-audiod, which is not built (pnpm build:native, or set FIELD_AUDIOD)');
++  }
++  return binary;
++}
+diff --git a/src/keys/keymap.test.ts b/src/keys/keymap.test.ts
+new file mode 100644
+index 0000000..0270308
+--- /dev/null
++++ b/src/keys/keymap.test.ts
+@@ -0,0 +1,150 @@
++import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import {
++  builtinKeymapDir,
++  builtinKeymapNames,
++  KeymapError,
++  loadKeymap,
++  resolveKeymapSource,
++  watchKeymap,
++  type ReloadResult,
++} from './keymap.js';
++
++let dir: string;
++
++beforeEach(() => {
++  dir = mkdtempSync(join(tmpdir(), 'field-keymap-'));
++});
++
++afterEach(() => {
++  rmSync(dir, { recursive: true, force: true });
++});
++
++describe('resolving a keymap', () => {
++  it('defaults to musical-typing', () => {
++    expect(resolveKeymapSource(undefined, {})).toEqual({
++      kind: 'builtin',
++      name: 'musical-typing',
++      path: join(builtinKeymapDir(), 'musical-typing.yaml'),
++    });
++  });
++
++  it('lists the built-ins', () => {
++    expect(builtinKeymapNames()).toContain('musical-typing');
++  });
++
++  it('resolves a bare name only to a built-in', () => {
++    writeFileSync(join(dir, 'mine.yaml'), 'name: mine\nnotes: { KeyA: 0 }\n');
++    expect(() => resolveKeymapSource('mine', {}, { cwd: dir })).toThrow(
++      /no built-in keymap named "mine" \(built-ins: .*musical-typing.*\); .*give a path .*\.\/mine\.yaml/,
++    );
++  });
++
++  it('treats a value with a slash, or ending in .yaml, as a path', () => {
++    expect(resolveKeymapSource('./mine.yaml', {}, { cwd: dir })).toEqual({ kind: 'file', path: join(dir, 'mine.yaml') });
++    expect(resolveKeymapSource('mine.yaml', {}, { cwd: dir })).toEqual({ kind: 'file', path: join(dir, 'mine.yaml') });
++    expect(resolveKeymapSource('maps/mine', {}, { cwd: dir })).toEqual({ kind: 'file', path: join(dir, 'maps/mine') });
++  });
++
++  it('expands a leading ~/ to the home directory', () => {
++    expect(resolveKeymapSource('~/keymaps/mine.yaml', {}, { home: dir })).toEqual({
++      kind: 'file',
++      path: join(dir, 'keymaps/mine.yaml'),
++    });
++  });
++
++  it('takes FIELD_KEYMAP when no flag is given, and the flag over it', () => {
++    expect(resolveKeymapSource(undefined, { FIELD_KEYMAP: '~/mine.yaml' }, { home: dir })).toEqual({
++      kind: 'file',
++      path: join(dir, 'mine.yaml'),
++    });
++    expect(resolveKeymapSource('musical-typing', { FIELD_KEYMAP: '~/mine.yaml' }, { home: dir }).kind).toBe('builtin');
++    expect(resolveKeymapSource(undefined, { FIELD_KEYMAP: '' }).kind).toBe('builtin');
++  });
++});
++
++describe('loading a keymap', () => {
++  it('names the file and each problem', () => {
++    const path = join(dir, 'bad.yaml');
++    writeFileSync(path, 'name: bad\nnotes: { KeyA: 0 }\ncontrols: { KeyA: panic, Escape: panic }\n');
++    expect(() => loadKeymap(path)).toThrow(KeymapError);
++    try {
++      loadKeymap(path);
++    } catch (err) {
++      const problems = (err as KeymapError).problems;
++      expect(problems.some((p) => p.startsWith('controls.KeyA: KeyA is both a note and a control'))).toBe(true);
++      expect(problems.some((p) => p.startsWith('controls.Escape: Escape is reserved'))).toBe(true);
++      expect((err as KeymapError).message.startsWith(`${path}:\n`)).toBe(true);
++    }
++  });
++
++  it('reports YAML syntax errors and a missing file', () => {
++    const broken = join(dir, 'broken.yaml');
++    writeFileSync(broken, 'name: [unclosed\n');
++    expect(() => loadKeymap(broken)).toThrow(KeymapError);
++    expect(() => loadKeymap(join(dir, 'absent.yaml'))).toThrow(/no such file/);
++  });
++});
++
++describe('reloading a keymap on save', () => {
++  function nextReload(results: ReloadResult[], count: number): Promise<void> {
++    return new Promise((resolve, reject) => {
++      const deadline = Date.now() + 5000;
++      const poll = (): void => {
++        if (results.length >= count) resolve();
++        else if (Date.now() > deadline) reject(new Error(`no reload ${count} within 5 s`));
++        else setTimeout(poll, 20);
++      };
++      poll();
++    });
++  }
++
++  // Many editors write a temporary file and rename it over the keymap;
++  // a watch on the file itself would end at the first such save.
++  function saveByRename(path: string, text: string): void {
++    const temp = `${path}.tmp-${Math.random().toString(36).slice(2)}`;
++    writeFileSync(temp, text);
++    renameSync(temp, path);
++  }
++
++  it('applies two rename-on-save edits in a row, and keeps the keymap through an invalid one', async () => {
++    const path = join(dir, 'mine.yaml');
++    writeFileSync(path, 'name: mine\nnotes: { KeyA: 0 }\n');
++    const results: ReloadResult[] = [];
++    const stop = watchKeymap(path, (r) => results.push(r), 20);
++    try {
++      saveByRename(path, 'name: mine\nnotes: { KeyA: 2 }\n');
++      await nextReload(results, 1);
++      const first = results.at(-1)!;
++      expect('keymap' in first && first.keymap.notes.get('KeyA')).toEqual([2]);
++
++      saveByRename(path, 'name: mine\nnotes: { KeyA: 4 }\n');
++      await nextReload(results, 2);
++      const second = results.at(-1)!;
++      expect('keymap' in second && second.keymap.notes.get('KeyA')).toEqual([4]);
++
++      saveByRename(path, 'name: mine\nnotes: { KeyA: 0 }\ncontrols: { KeyA: { transpose: 12 } }\n');
++      await nextReload(results, 3);
++      const third = results.at(-1)!;
++      expect('error' in third && third.error.problems.join('\n')).toMatch(/KeyA is both a note and a control/);
++    } finally {
++      stop();
++    }
++  });
++
++  it('ignores changes to other files in the directory', async () => {
++    const path = join(dir, 'mine.yaml');
++    writeFileSync(path, 'name: mine\nnotes: { KeyA: 0 }\n');
++    const results: ReloadResult[] = [];
++    const stop = watchKeymap(path, (r) => results.push(r), 20);
++    try {
++      writeFileSync(join(dir, 'other.yaml'), 'name: other\nnotes: { KeyA: 0 }\n');
++      await new Promise((r) => setTimeout(r, 300));
++      expect(results).toEqual([]);
++    } finally {
++      stop();
++    }
++  });
++});
+diff --git a/src/keys/keymap.ts b/src/keys/keymap.ts
+new file mode 100644
+index 0000000..dff9434
+--- /dev/null
++++ b/src/keys/keymap.ts
+@@ -0,0 +1,121 @@
++import { existsSync, readdirSync, readFileSync, watch } from 'node:fs';
++import { homedir } from 'node:os';
++import { basename, dirname, join, resolve } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { parseDocument } from 'yaml';
++import { keymapSchema, toKeymap, type Keymap } from '../schema/keymap.js';
++
++export const KEYMAP_ENV = 'FIELD_KEYMAP';
++export const DEFAULT_KEYMAP = 'musical-typing';
++
++export type KeymapSource = { kind: 'builtin'; name: string; path: string } | { kind: 'file'; path: string };
++
++export function builtinKeymapDir(): string {
++  return join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'keymaps');
++}
++
++export function builtinKeymapNames(dir = builtinKeymapDir()): string[] {
++  return readdirSync(dir)
++    .filter((file) => file.endsWith('.yaml'))
++    .map((file) => file.slice(0, -'.yaml'.length))
++    .sort();
++}
++
++// A bare name only ever names a built-in, and anything else is a path,
++// the rule programPath() applies to instruments plus one test: a name
++// ending in .yaml is a path too (keyboard-instrument.md §3). No search
++// path, so a keymap of yours can never shadow a built-in or be shadowed
++// by one an upgrade adds.
++export function resolveKeymapSource(
++  spec: string | undefined,
++  env: NodeJS.ProcessEnv = process.env,
++  options: { home?: string; cwd?: string; builtinDir?: string } = {},
++): KeymapSource {
++  const chosen = spec ?? (env[KEYMAP_ENV] !== undefined && env[KEYMAP_ENV] !== '' ? env[KEYMAP_ENV] : DEFAULT_KEYMAP);
++  if (chosen.includes('/') || chosen.endsWith('.yaml')) {
++    const expanded = chosen.startsWith('~/') ? join(options.home ?? homedir(), chosen.slice(2)) : chosen;
++    return { kind: 'file', path: resolve(options.cwd ?? process.cwd(), expanded) };
++  }
++  const dir = options.builtinDir ?? builtinKeymapDir();
++  const path = join(dir, `${chosen}.yaml`);
++  if (!existsSync(path)) {
++    throw new Error(
++      `no built-in keymap named "${chosen}" (built-ins: ${builtinKeymapNames(dir).join(', ')}); ` +
++        `a bare name names a built-in, so give a path for a keymap of your own, such as ./${chosen}.yaml`,
++    );
++  }
++  return { kind: 'builtin', name: chosen, path };
++}
++
++export class KeymapError extends Error {
++  constructor(
++    readonly path: string,
++    readonly problems: string[],
++  ) {
++    super(`${path}:\n${problems.map((p) => `  ${p}`).join('\n')}`);
++  }
++}
++
++export function parseKeymap(text: string, path: string): Keymap {
++  const doc = parseDocument(text);
++  if (doc.errors.length > 0) throw new KeymapError(path, doc.errors.map((e) => e.message.split('\n')[0]!));
++  const parsed = keymapSchema.safeParse(doc.toJS());
++  if (!parsed.success) {
++    throw new KeymapError(
++      path,
++      parsed.error.issues.map((issue) => (issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message)),
++    );
++  }
++  return toKeymap(parsed.data);
++}
++
++export function loadKeymap(path: string): Keymap {
++  let text: string;
++  try {
++    text = readFileSync(path, 'utf8');
++  } catch (err) {
++    throw new KeymapError(path, [(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (err as Error).message]);
++  }
++  return parseKeymap(text, path);
++}
++
++export type ReloadResult = { keymap: Keymap } | { error: KeymapError };
++
++// Watches the keymap's directory, not the file: many editors save by
++// renaming a temporary file over the original, and fs.watch on a file
++// keeps following the original inode, so the watch would end at the
++// first such save (keyboard-instrument.md §2.4).
++// Reloads only when the text changes: macOS can deliver an event for a
++// write made just before the watch began, or one with no filename.
++export function watchKeymap(path: string, onReload: (result: ReloadResult) => void, settleMs = 50): () => void {
++  const name = basename(path);
++  const read = (): string | undefined => {
++    try {
++      return readFileSync(path, 'utf8');
++    } catch {
++      return undefined;
++    }
++  };
++  let loaded = read();
++  let timer: NodeJS.Timeout | undefined;
++  const watcher = watch(dirname(path), (_event, filename) => {
++    if (filename !== null && filename !== name) return;
++    clearTimeout(timer);
++    timer = setTimeout(() => {
++      // A rename-on-save can fire between the unlink and the rename; the
++      // event that follows reloads the finished file.
++      const text = read();
++      if (text === undefined || text === loaded) return;
++      loaded = text;
++      try {
++        onReload({ keymap: parseKeymap(text, path) });
++      } catch (err) {
++        onReload({ error: err instanceof KeymapError ? err : new KeymapError(path, [(err as Error).message]) });
++      }
++    }, settleMs);
++  });
++  return () => {
++    clearTimeout(timer);
++    watcher.close();
++  };
++}
+diff --git a/src/keys/position.test.ts b/src/keys/position.test.ts
+new file mode 100644
+index 0000000..ffe737f
+--- /dev/null
++++ b/src/keys/position.test.ts
+@@ -0,0 +1,103 @@
++import { describe, expect, it } from 'vitest';
++import { parseKeymap } from './keymap.js';
++import {
++  charactersToPositions,
++  positionOf,
++  PressedKeys,
++  unplayablePositions,
++  type KeyboardLayout,
++} from './position.js';
++
++const DVORAK: KeyboardLayout = {
++  name: 'Dvorak',
++  keys: { KeyA: 'a', KeyS: 'o', KeyD: 'e', KeyF: 'u', KeyQ: "'", KeyZ: ';', KeyO: 'r', Quote: '-' },
++  dead: [],
++};
++
++const AZERTY: KeyboardLayout = {
++  name: 'French',
++  keys: { KeyA: 'q', KeyQ: 'a', KeyZ: 'w', KeyW: 'z', Semicolon: 'm', KeyM: ',' },
++  dead: [],
++};
++
++function press(key: number, base?: number) {
++  return { kind: 'key' as const, key, ...(base !== undefined ? { base } : {}), mods: 0, type: 'press' as const };
++}
++
++const code = (character: string) => character.codePointAt(0)!;
++
++describe('finding a key event position', () => {
++  it('takes the base layout key over the keyboard layout', () => {
++    expect(positionOf(press(code('o'), code('s')), charactersToPositions(AZERTY))).toBe('KeyS');
++  });
++
++  it('reverses the keyboard layout when there is no base layout key', () => {
++    expect(positionOf(press(code('o')), charactersToPositions(DVORAK))).toBe('KeyS');
++    expect(positionOf(press(code('q')), charactersToPositions(AZERTY))).toBe('KeyA');
++    expect(positionOf(press(code('w')), charactersToPositions(AZERTY))).toBe('KeyZ');
++    expect(positionOf(press(code(';')), charactersToPositions(DVORAK))).toBe('KeyZ');
++  });
++
++  it('reads a character as its own US position with no layout report', () => {
++    expect(positionOf(press(code('o')))).toBe('KeyO');
++    expect(positionOf(press(code("'")))).toBe('Quote');
++    expect(positionOf(press(code('1')))).toBe('Digit1');
++  });
++
++  it('names Space, Tab, and the arrows whatever the layout', () => {
++    expect(positionOf(press(32), charactersToPositions(DVORAK))).toBe('Space');
++    expect(positionOf(press(9))).toBe('Tab');
++    expect(positionOf({ kind: 'key', key: 'ArrowUp', mods: 0, type: 'press' })).toBe('ArrowUp');
++  });
++
++  it('applies a new layout report to the next event', () => {
++    let positions = charactersToPositions(DVORAK);
++    expect(positionOf(press(code('a')), positions)).toBe('KeyA');
++    positions = charactersToPositions(AZERTY);
++    expect(positionOf(press(code('a')), positions)).toBe('KeyQ');
++  });
++
++  it('returns nothing for a key no position types', () => {
++    expect(positionOf(press(code('ß')))).toBeUndefined();
++  });
++});
++
++describe('a release follows its press', () => {
++  const release = (key: number, base?: number) => ({ ...press(key, base), type: 'release' as const });
++
++  it('releases the position the press resolved to after the keyboard layout changes', () => {
++    const keys = new PressedKeys();
++    expect(keys.resolve(press(code('o')), charactersToPositions(DVORAK))).toBe('KeyS');
++    expect(keys.resolve(release(code('o')), charactersToPositions(AZERTY))).toBe('KeyS');
++  });
++
++  it('releases the base layout key position even when the release omits it', () => {
++    const keys = new PressedKeys();
++    expect(keys.resolve(press(code('r'), code('d')))).toBe('KeyD');
++    expect(keys.resolve(release(code('r')))).toBe('KeyD');
++  });
++
++  it('keeps a repeat on its press and forgets the key once released', () => {
++    const keys = new PressedKeys();
++    keys.resolve(press(code('o')), charactersToPositions(DVORAK));
++    expect(keys.resolve({ ...press(code('o')), type: 'repeat' }, charactersToPositions(AZERTY))).toBe('KeyS');
++    keys.resolve(release(code('o')));
++    expect(keys.resolve(press(code('o')))).toBe('KeyO');
++  });
++
++  it('resolves a release afresh after clear, as after focus-out', () => {
++    const keys = new PressedKeys();
++    keys.resolve(press(code('o')), charactersToPositions(DVORAK));
++    keys.clear();
++    expect(keys.resolve(release(code('o')))).toBe('KeyO');
++  });
++});
++
++describe('dead keys', () => {
++  it('names the bound positions a keyboard layout makes dead', () => {
++    const keymap = parseKeymap('name: t\nnotes: { KeyA: 0, Quote: 17 }\n', 't.yaml');
++    const international: KeyboardLayout = { name: 'U.S. International – PC', keys: { KeyA: 'a' }, dead: ['Quote', 'Backquote'] };
++    expect(unplayablePositions(international, keymap)).toEqual(['Quote']);
++    expect(unplayablePositions(undefined, keymap)).toEqual([]);
++  });
++});
+diff --git a/src/keys/position.ts b/src/keys/position.ts
+new file mode 100644
+index 0000000..7f8c56d
+--- /dev/null
++++ b/src/keys/position.ts
+@@ -0,0 +1,91 @@
++import type { Keymap } from '../schema/keymap.js';
++import type { TerminalEvent } from './terminal.js';
++
++// What the helper reports (keyboard-instrument.md §2.5): the character
++// each text position types under the active keyboard layout, and the
++// positions that are dead keys there.
++export interface KeyboardLayout {
++  name: string;
++  keys: Record<string, string>;
++  dead: string[];
++}
++
++// What each text position types on a US keyboard, which is how the kitty
++// protocol names a base layout key and how a QWERTY layout reads with no
++// report at all.
++const US_POSITIONS: Record<string, string> = {
++  '`': 'Backquote',
++  '-': 'Minus',
++  '=': 'Equal',
++  '[': 'BracketLeft',
++  ']': 'BracketRight',
++  '\\': 'Backslash',
++  ';': 'Semicolon',
++  "'": 'Quote',
++  ',': 'Comma',
++  '.': 'Period',
++  '/': 'Slash',
++};
++for (const digit of '0123456789') US_POSITIONS[digit] = `Digit${digit}`;
++for (const letter of 'abcdefghijklmnopqrstuvwxyz') US_POSITIONS[letter] = `Key${letter.toUpperCase()}`;
++
++const FUNCTIONAL_KEYS: Record<number, string> = { 9: 'Tab', 32: 'Space' };
++
++// Inverts a layout report once, keeping the first position for a
++// character two positions type.
++export function charactersToPositions(layout: KeyboardLayout): Map<string, string> {
++  const positions = new Map<string, string>();
++  for (const [position, character] of Object.entries(layout.keys)) {
++    if (!positions.has(character)) positions.set(character, position);
++  }
++  return positions;
++}
++
++// The terminal's base layout key wins when it sends one. Otherwise the
++// character goes through the helper's report of the keyboard layout, and
++// with no report it reads as QWERTY (keyboard-instrument.md §2.3).
++export function positionOf(
++  event: Extract<TerminalEvent, { kind: 'key' }>,
++  layoutPositions?: ReadonlyMap<string, string>,
++): string | undefined {
++  if (typeof event.key === 'string') return event.key;
++  const functional = FUNCTIONAL_KEYS[event.key];
++  if (functional !== undefined) return functional;
++  if (event.base !== undefined) return US_POSITIONS[String.fromCodePoint(event.base)];
++  const character = String.fromCodePoint(event.key);
++  return layoutPositions?.get(character) ?? US_POSITIONS[character];
++}
++
++// A release takes the position its press resolved to, not one resolved
++// afresh: an input source switched while a key is held, or a release
++// reported without the base layout key its press carried, would otherwise
++// resolve elsewhere and leave the note sounding.
++export class PressedKeys {
++  private readonly positions = new Map<number | string, string>();
++
++  resolve(
++    event: Extract<TerminalEvent, { kind: 'key' }>,
++    layoutPositions?: ReadonlyMap<string, string>,
++  ): string | undefined {
++    const remembered = this.positions.get(event.key);
++    if (event.type === 'release') {
++      this.positions.delete(event.key);
++      return remembered ?? positionOf(event, layoutPositions);
++    }
++    if (remembered !== undefined) return remembered;
++    const position = positionOf(event, layoutPositions);
++    if (position !== undefined) this.positions.set(event.key, position);
++    return position;
++  }
++
++  clear(): void {
++    this.positions.clear();
++  }
++}
++
++// The positions this keymap binds that the keyboard layout makes dead
++// keys, which the terminal may hold for composition and never report.
++export function unplayablePositions(layout: KeyboardLayout | undefined, keymap: Keymap): string[] {
++  if (layout === undefined) return [];
++  return layout.dead.filter((position) => keymap.notes.has(position) || keymap.controls.has(position));
++}
+diff --git a/src/keys/print.test.ts b/src/keys/print.test.ts
+new file mode 100644
+index 0000000..25cdec9
+--- /dev/null
++++ b/src/keys/print.test.ts
+@@ -0,0 +1,58 @@
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { builtinKeymapDir, loadKeymap, parseKeymap } from './keymap.js';
++import { noteName, printKeymap } from './print.js';
++
++describe('printing a keymap', () => {
++  it('names notes in scientific pitch notation', () => {
++    expect(noteName(60)).toBe('C4');
++    expect(noteName(61)).toBe('C#4');
++    expect(noteName(0)).toBe('C-1');
++    expect(noteName(127)).toBe('G9');
++  });
++
++  it('draws musical-typing as a keyboard', () => {
++    const keymap = loadKeymap(join(builtinKeymapDir(), 'musical-typing.yaml'));
++    expect(printKeymap(keymap)).toBe(
++      [
++        "musical-typing: Logic Pro's Musical Typing. White keys on the home row, black keys above.",
++        '',
++        '·     B-1   B+1   cc1   cc1   cc1   cc1   cc1   cc1   ·     ·     ·     ·',
++        '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·',
++        '          C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5',
++        '             T-12  T+12  V-20  V+20  ·     ·     ·     ·     ·     ·',
++        '',
++        'KeyZ    transpose -12',
++        'KeyX    transpose +12',
++        'KeyC    velocity -20',
++        'KeyV    velocity +20',
++        'Tab     cc 64 = 127 while held',
++        'Digit1  pitch bend -1 while held',
++        'Digit2  pitch bend +1 while held',
++        'Digit3  cc 1 = 0',
++        'Digit4  cc 1 = 25',
++        'Digit5  cc 1 = 51',
++        'Digit6  cc 1 = 76',
++        'Digit7  cc 1 = 102',
++        'Digit8  cc 1 = 127',
++        '',
++        'Notes are in scientific pitch notation: MIDI note 60 is C4. Channel 1, velocity 100.',
++        '',
++      ].join('\n'),
++    );
++  });
++
++  it('marks chords, draws the ISO key and the extra keys only when bound', () => {
++    const keymap = parseKeymap(
++      'name: extras\nbase: 48\nnotes: { KeyF: [0, 4, 7], IntlBackslash: 1 }\ncontrols: { Space: { cc: 64, mode: toggle }, ArrowUp: panic }\n',
++      'extras.yaml',
++    );
++    const lines = printKeymap(keymap).split('\n');
++    expect(lines[5]).toBe('       C#3   ·     ·     ·     ·     ·     ·     ·     ·     ·     ·');
++    expect(lines[4]).toContain('C3+');
++    expect(lines).toContain('Space cc64   ↑ !!');
++    expect(lines).toContain('KeyF     chord C3 E3 G3');
++    expect(lines).toContain('Space    cc 64 = 127, toggled');
++    expect(lines).toContain('ArrowUp  panic: release every note and send All Notes Off');
++  });
++});
+diff --git a/src/keys/print.ts b/src/keys/print.ts
+new file mode 100644
+index 0000000..00f9ca8
+--- /dev/null
++++ b/src/keys/print.ts
+@@ -0,0 +1,98 @@
++import { NAMED_ROWS, type Keymap, type KeymapAction } from '../schema/keymap.js';
++
++const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
++
++// Scientific pitch notation, where MIDI note 60 is C4.
++export function noteName(note: number): string {
++  return `${NOTE_NAMES[((note % 12) + 12) % 12]}${Math.floor(note / 12) - 1}`;
++}
++
++const CELL = 6;
++
++function isBound(keymap: Keymap, position: string): boolean {
++  return keymap.notes.has(position) || keymap.controls.has(position);
++}
++
++// Each row's keys and how far it sits to the right of the number row, in
++// characters, so the diagram keeps a keyboard's stagger. The ISO key left
++// of KeyZ is drawn only when bound, because most keyboards here lack it.
++function diagramRows(keymap: Keymap): { indent: number; positions: readonly string[] }[] {
++  return [
++    { indent: 0, positions: ['Backquote', ...NAMED_ROWS.number] },
++    { indent: 3, positions: ['Tab', ...NAMED_ROWS.top, 'Backslash'] },
++    { indent: 10, positions: NAMED_ROWS.home },
++    isBound(keymap, 'IntlBackslash')
++      ? { indent: 7, positions: ['IntlBackslash', ...NAMED_ROWS.bottom] }
++      : { indent: 13, positions: NAMED_ROWS.bottom },
++  ];
++}
++
++const EXTRA_POSITIONS: { position: string; label: string }[] = [
++  { position: 'Space', label: 'Space' },
++  { position: 'ArrowLeft', label: '←' },
++  { position: 'ArrowRight', label: '→' },
++  { position: 'ArrowUp', label: '↑' },
++  { position: 'ArrowDown', label: '↓' },
++];
++
++export function signed(n: number): string {
++  return n > 0 ? `+${n}` : `${n}`;
++}
++
++function actionTag(action: KeymapAction): string {
++  if (action === 'panic') return '!!';
++  if ('transpose' in action) return `T${signed(action.transpose)}`;
++  if ('velocity' in action) return `V${signed(action.velocity)}`;
++  if ('bend' in action) return `B${signed(action.bend)}`;
++  return `cc${action.cc}`;
++}
++
++export function describeAction(action: KeymapAction): string {
++  if (action === 'panic') return 'panic: release every note and send All Notes Off';
++  if ('transpose' in action) return `transpose ${signed(action.transpose)}`;
++  if ('velocity' in action) return `velocity ${signed(action.velocity)}`;
++  if ('bend' in action) return `pitch bend ${signed(action.bend)} while held`;
++  const how = { set: '', hold: ' while held', toggle: ', toggled' }[action.mode];
++  return `cc ${action.cc} = ${action.value}${how}`;
++}
++
++function cellLabel(keymap: Keymap, position: string): string {
++  const action = keymap.controls.get(position);
++  if (action !== undefined) return actionTag(action);
++  const offsets = keymap.notes.get(position);
++  if (offsets === undefined) return '·';
++  const root = noteName(keymap.base + offsets[0]!);
++  return offsets.length > 1 ? `${root}+` : root;
++}
++
++export function printKeymap(keymap: Keymap): string {
++  const lines: string[] = [];
++  lines.push(keymap.description !== undefined ? `${keymap.name}: ${keymap.description}` : keymap.name);
++  lines.push('');
++
++  for (const { indent, positions } of diagramRows(keymap)) {
++    lines.push((' '.repeat(indent) + positions.map((p) => cellLabel(keymap, p).padEnd(CELL)).join('')).trimEnd());
++  }
++
++  const extras = EXTRA_POSITIONS.filter(({ position }) => isBound(keymap, position));
++  if (extras.length > 0) {
++    lines.push('');
++    lines.push(extras.map(({ position, label }) => `${label} ${cellLabel(keymap, position)}`).join('   '));
++  }
++
++  const chords = [...keymap.notes].filter(([, offsets]) => offsets.length > 1);
++  if (keymap.controls.size > 0 || chords.length > 0) {
++    lines.push('');
++    const width = Math.max(...[...keymap.controls.keys(), ...chords.map(([p]) => p)].map((p) => p.length));
++    for (const [position, offsets] of chords) {
++      lines.push(`${position.padEnd(width)}  chord ${offsets.map((o) => noteName(keymap.base + o)).join(' ')}`);
++    }
++    for (const [position, action] of keymap.controls) {
++      lines.push(`${position.padEnd(width)}  ${describeAction(action)}`);
++    }
++  }
++
++  lines.push('');
++  lines.push(`Notes are in scientific pitch notation: MIDI note 60 is C4. Channel ${keymap.channel}, velocity ${keymap.velocity}.`);
++  return lines.join('\n') + '\n';
++}
+diff --git a/src/keys/session.test.ts b/src/keys/session.test.ts
+new file mode 100644
+index 0000000..63075d3
+--- /dev/null
++++ b/src/keys/session.test.ts
+@@ -0,0 +1,239 @@
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { builtinKeymapDir, loadKeymap, parseKeymap } from './keymap.js';
++import { bendValue, KeysSession } from './session.js';
++import { MOD_ALT, MOD_CAPS_LOCK, MOD_CTRL, MOD_NUM_LOCK, MOD_SHIFT, MOD_SUPER } from './terminal.js';
++
++const ON = 0x90;
++const OFF = 0x80;
++const CC = 0xb0;
++const BEND = 0xe0;
++
++function musicalTyping(): KeysSession {
++  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical-typing.yaml')));
++}
++
++describe('playing notes', () => {
++  it('sends a note-on at press and a note-off at release', () => {
++    const session = musicalTyping();
++    expect(session.press('KeyA')).toEqual([[ON, 60, 100]]);
++    expect(session.soundingNotes()).toEqual(['C4']);
++    expect(session.release('KeyA')).toEqual([[OFF, 60, 0]]);
++    expect(session.soundingNotes()).toEqual([]);
++  });
++
++  it('ignores repeats, so a held key holds one note', () => {
++    const session = musicalTyping();
++    expect(session.handleKey('KeyA', 'press', 0)).toHaveLength(1);
++    expect(session.handleKey('KeyA', 'repeat', 0)).toEqual([]);
++    expect(session.handleKey('KeyA', 'repeat', 0)).toEqual([]);
++    expect(session.handleKey('KeyA', 'release', 0)).toEqual([[OFF, 60, 0]]);
++  });
++
++  it('releases the note a key started even after a transpose', () => {
++    const session = musicalTyping();
++    session.press('KeyA');
++    expect(session.press('KeyX')).toEqual([]);
++    expect(session.transpose).toBe(12);
++    expect(session.release('KeyA')).toEqual([[OFF, 60, 0]]);
++    expect(session.press('KeyA')).toEqual([[ON, 72, 100]]);
++  });
++
++  it('plays and releases a chord from one key', () => {
++    const session = new KeysSession(parseKeymap('name: c\nnotes: { KeyF: [0, 4, 7] }\n', 'c.yaml'));
++    expect(session.press('KeyF')).toEqual([
++      [ON, 60, 100],
++      [ON, 64, 100],
++      [ON, 67, 100],
++    ]);
++    expect(session.release('KeyF')).toEqual([
++      [OFF, 60, 0],
++      [OFF, 64, 0],
++      [OFF, 67, 0],
++    ]);
++  });
++
++  it('pairs a shared note with one note-off, whichever key is released first', () => {
++    for (const order of [
++      ['KeyA', 'KeyK'],
++      ['KeyK', 'KeyA'],
++    ]) {
++      const session = musicalTyping();
++      expect(session.press('KeyA')).toEqual([[ON, 60, 100]]);
++      session.press('KeyZ');
++      expect(session.press('KeyK')).toEqual([]);
++      expect(session.release(order[0]!)).toEqual([]);
++      expect(session.release(order[1]!)).toEqual([[OFF, 60, 0]]);
++    }
++  });
++
++  it('shares a note between a chord and a single key the same way', () => {
++    const session = new KeysSession(parseKeymap('name: c\nnotes: { KeyF: [0, 4, 7], KeyA: 4 }\n', 'c.yaml'));
++    session.press('KeyF');
++    expect(session.press('KeyA')).toEqual([]);
++    expect(session.release('KeyF')).toEqual([
++      [OFF, 60, 0],
++      [OFF, 67, 0],
++    ]);
++    expect(session.release('KeyA')).toEqual([[OFF, 64, 0]]);
++  });
++});
++
++describe('modifiers', () => {
++  it('plays a key pressed with Shift or a lock bit as without it', () => {
++    const session = musicalTyping();
++    expect(session.press('KeyA', MOD_SHIFT)).toEqual([[ON, 60, 100]]);
++    expect(session.press('KeyS', MOD_CAPS_LOCK | MOD_NUM_LOCK)).toEqual([[ON, 62, 100]]);
++  });
++
++  it('ignores a key pressed with Ctrl, Alt, or Cmd', () => {
++    const session = musicalTyping();
++    for (const mod of [MOD_CTRL, MOD_ALT, MOD_SUPER]) expect(session.press('KeyA', mod)).toEqual([]);
++    expect(session.release('KeyA')).toEqual([]);
++  });
++
++  it('ends a note on a release that carries Ctrl', () => {
++    const session = musicalTyping();
++    session.press('KeyA');
++    expect(session.handleKey('KeyA', 'release', MOD_CTRL)).toEqual([[OFF, 60, 0]]);
++  });
++});
++
++describe('controls', () => {
++  it('bends while held and returns to center on release', () => {
++    const session = musicalTyping();
++    expect(session.press('Digit2')).toEqual([[BEND, 0x7f, 0x7f]]);
++    expect(session.release('Digit2')).toEqual([[BEND, 0, 64]]);
++    expect(session.press('Digit1')).toEqual([[BEND, 0, 0]]);
++    expect([bendValue(1), bendValue(0), bendValue(-1), bendValue(0.5)]).toEqual([16383, 8192, 0, 12288]);
++  });
++
++  it('sets a controller in set mode', () => {
++    const session = musicalTyping();
++    expect(session.press('Digit5')).toEqual([[CC, 1, 51]]);
++    expect(session.release('Digit5')).toEqual([]);
++    expect(session.press('Digit3')).toEqual([[CC, 1, 0]]);
++  });
++
++  it('holds a controller in hold mode', () => {
++    const session = musicalTyping();
++    expect(session.press('Tab')).toEqual([[CC, 64, 127]]);
++    expect(session.release('Tab')).toEqual([[CC, 64, 0]]);
++  });
++
++  it('alternates a controller in toggle mode', () => {
++    const session = new KeysSession(
++      parseKeymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Space: { cc: 64, mode: toggle } }\n', 't.yaml'),
++    );
++    expect(session.press('Space')).toEqual([[CC, 64, 127]]);
++    expect(session.release('Space')).toEqual([]);
++    expect(session.press('Space')).toEqual([[CC, 64, 0]]);
++  });
++
++  it('turns a toggled controller off at quit, at panic, and on reload', () => {
++    const keymap = parseKeymap(
++      'name: t\nnotes: { KeyA: 0 }\ncontrols: { Space: { cc: 64, mode: toggle }, Backquote: panic }\n',
++      't.yaml',
++    );
++    const atQuit = new KeysSession(keymap);
++    atQuit.press('Space');
++    expect(atQuit.quit()).toEqual([
++      [CC, 64, 0],
++      [CC, 123, 0],
++    ]);
++
++    const atPanic = new KeysSession(keymap);
++    atPanic.press('Space');
++    expect(atPanic.press('Backquote')).toEqual([
++      [CC, 64, 0],
++      [CC, 123, 0],
++    ]);
++    expect(atPanic.quit()).toEqual([[CC, 123, 0]]);
++
++    const atReload = new KeysSession(keymap);
++    atReload.press('Space');
++    expect(atReload.setKeymap(keymap)).toEqual([[CC, 64, 0]]);
++    expect(atReload.press('Space')).toEqual([[CC, 64, 127]]);
++  });
++
++  it('changes velocity within 1 to 127', () => {
++    const session = musicalTyping();
++    session.press('KeyV');
++    session.press('KeyV');
++    expect(session.velocity).toBe(127);
++    expect(session.press('KeyA')).toEqual([[ON, 60, 127]]);
++    for (let i = 0; i < 10; i++) session.press('KeyC');
++    expect(session.velocity).toBe(1);
++  });
++
++  it('refuses a transpose that would move a note outside MIDI range', () => {
++    const session = musicalTyping();
++    for (let i = 0; i < 4; i++) session.press('KeyX');
++    expect(session.transpose).toBe(48);
++    session.press('KeyX');
++    expect(session.transpose).toBe(48);
++    expect(session.message).toMatch(/transpose \+60 would move a note outside MIDI's range/);
++    for (let i = 0; i < 10; i++) session.press('KeyZ');
++    expect(session.transpose).toBe(-60);
++  });
++
++  it('panics: every note off, then All Notes Off', () => {
++    const session = new KeysSession(
++      parseKeymap('name: p\nnotes: { KeyA: 0, KeyS: 2 }\ncontrols: { Backquote: panic }\n', 'p.yaml'),
++    );
++    session.press('KeyA');
++    session.press('KeyS');
++    expect(session.press('Backquote')).toEqual([
++      [OFF, 60, 0],
++      [OFF, 62, 0],
++      [CC, 123, 0],
++    ]);
++    expect(session.release('KeyA')).toEqual([]);
++  });
++});
++
++describe('releasing everything', () => {
++  it('releases held notes and held controls on focus-out', () => {
++    const session = musicalTyping();
++    session.press('KeyA');
++    session.press('Tab');
++    session.press('Digit2');
++    expect(session.releaseAll()).toEqual([
++      [OFF, 60, 0],
++      [CC, 64, 0],
++      [BEND, 0, 64],
++    ]);
++    expect(session.release('KeyA')).toEqual([]);
++  });
++
++  it('quits with note-offs, then All Notes Off', () => {
++    const session = musicalTyping();
++    session.press('KeyA');
++    session.press('KeyS');
++    session.press('KeyD');
++    expect(session.quit()).toEqual([
++      [OFF, 60, 0],
++      [OFF, 62, 0],
++      [OFF, 64, 0],
++      [CC, 123, 0],
++    ]);
++  });
++});
++
++describe('reloading the keymap', () => {
++  it('finishes sounding notes on their old channel and plays the new keymap next', () => {
++    const session = new KeysSession(parseKeymap('name: a\nnotes: { KeyA: 0 }\n', 'a.yaml'));
++    session.press('KeyA');
++    session.setKeymap(parseKeymap('name: a\nchannel: 2\nnotes: { KeyA: 2 }\n', 'a.yaml'));
++    expect(session.release('KeyA')).toEqual([[OFF, 60, 0]]);
++    expect(session.press('KeyA')).toEqual([[0x91, 62, 100]]);
++  });
++
++  it('resets a transpose the reloaded keymap cannot hold', () => {
++    const session = musicalTyping();
++    for (let i = 0; i < 4; i++) session.press('KeyX');
++    session.setKeymap(parseKeymap('name: high\nbase: 100\nnotes: { KeyA: 0 }\n', 'high.yaml'));
++    expect(session.transpose).toBe(0);
++    expect(session.message).toMatch(/transpose reset/);
++  });
++});
+diff --git a/src/keys/session.ts b/src/keys/session.ts
+new file mode 100644
+index 0000000..6deecf4
+--- /dev/null
++++ b/src/keys/session.ts
+@@ -0,0 +1,188 @@
++import type { Keymap, KeymapAction } from '../schema/keymap.js';
++import { noteName, signed } from './print.js';
++import { MOD_ALT, MOD_CTRL, MOD_HYPER, MOD_META, MOD_SUPER, type KeyEventType } from './terminal.js';
++
++export type MidiMessage = number[];
++
++// A key pressed with any of these held does nothing. Shift plays as
++// without it, and the lock bits, which the protocol sets on every key
++// while a lock is on, change nothing (keyboard-instrument.md §2.4).
++const BLOCKING_MODS = MOD_ALT | MOD_CTRL | MOD_SUPER | MOD_HYPER | MOD_META;
++
++const BEND_CENTER = 8192;
++const BEND_MAX = 16383;
++const ALL_NOTES_OFF = 123;
++
++function noteOn(channel: number, note: number, velocity: number): MidiMessage {
++  return [0x90 | (channel - 1), note, velocity];
++}
++
++function noteOff(channel: number, note: number): MidiMessage {
++  return [0x80 | (channel - 1), note, 0];
++}
++
++function controlChange(channel: number, cc: number, value: number): MidiMessage {
++  return [0xb0 | (channel - 1), cc, value];
++}
++
++function pitchBend(channel: number, value: number): MidiMessage {
++  return [0xe0 | (channel - 1), value & 0x7f, value >> 7];
++}
++
++export function bendValue(x: number): number {
++  return Math.min(BEND_MAX, Math.max(0, Math.round(BEND_CENTER + x * BEND_CENTER)));
++}
++
++// The note state behind `field keys`. Two keys can hold the same note,
++// through a shared chord note or a transpose, so the session counts the
++// keys holding each note: the first press sends the note-on and the last
++// release the note-off, so every note-on gets exactly one note-off
++// (keyboard-instrument.md §2.1). A release ends the notes its own press
++// started, on the channel they started on, whatever has changed since.
++export class KeysSession {
++  keymap: Keymap;
++  transpose = 0;
++  velocity: number;
++  message: string | undefined;
++  private readonly held = new Map<string, { channel: number; notes: number[] }>();
++  private readonly holders = new Map<number, number>();
++  private readonly heldControls = new Map<string, { channel: number; action: KeymapAction }>();
++  private readonly toggledOn = new Map<string, { channel: number; cc: number }>();
++
++  constructor(keymap: Keymap) {
++    this.keymap = keymap;
++    this.velocity = keymap.velocity;
++  }
++
++  handleKey(position: string, type: KeyEventType, mods: number): MidiMessage[] {
++    if (type === 'repeat') return [];
++    return type === 'press' ? this.press(position, mods) : this.release(position);
++  }
++
++  press(position: string, mods = 0): MidiMessage[] {
++    if ((mods & BLOCKING_MODS) !== 0) return [];
++    if (this.held.has(position) || this.heldControls.has(position)) return [];
++    this.message = undefined;
++    const action = this.keymap.controls.get(position);
++    if (action !== undefined) return this.control(position, action);
++    const offsets = this.keymap.notes.get(position);
++    if (offsets === undefined) return [];
++
++    const channel = this.keymap.channel;
++    const notes = [...new Set(offsets.map((o) => this.keymap.base + this.transpose + o))];
++    this.held.set(position, { channel, notes });
++    const messages: MidiMessage[] = [];
++    for (const note of notes) {
++      const key = channel * 128 + note;
++      const count = this.holders.get(key) ?? 0;
++      this.holders.set(key, count + 1);
++      if (count === 0) messages.push(noteOn(channel, note, this.velocity));
++    }
++    return messages;
++  }
++
++  release(position: string): MidiMessage[] {
++    const control = this.heldControls.get(position);
++    if (control !== undefined) {
++      this.heldControls.delete(position);
++      const { action, channel } = control;
++      if (action !== 'panic' && 'bend' in action) return [pitchBend(channel, BEND_CENTER)];
++      if (action !== 'panic' && 'cc' in action) return [controlChange(channel, action.cc, 0)];
++      return [];
++    }
++    const held = this.held.get(position);
++    if (held === undefined) return [];
++    this.held.delete(position);
++    const messages: MidiMessage[] = [];
++    for (const note of held.notes) {
++      const key = held.channel * 128 + note;
++      const count = this.holders.get(key) ?? 0;
++      if (count <= 1) {
++        this.holders.delete(key);
++        messages.push(noteOff(held.channel, note));
++      } else {
++        this.holders.set(key, count - 1);
++      }
++    }
++    return messages;
++  }
++
++  // Focus-out: a terminal that has lost focus never reports the release.
++  releaseAll(): MidiMessage[] {
++    return [...this.held.keys(), ...this.heldControls.keys()].flatMap((position) => this.release(position));
++  }
++
++  quit(): MidiMessage[] {
++    return [...this.releaseAll(), ...this.untoggleAll(), controlChange(this.keymap.channel, ALL_NOTES_OFF, 0)];
++  }
++
++  // A reloaded keymap applies to the next press; notes sounding finish
++  // with the notes and channel they started with. Controllers toggled on
++  // go back to 0, because the keymap that could toggle them off is gone.
++  setKeymap(keymap: Keymap): MidiMessage[] {
++    if (keymap.velocity !== this.keymap.velocity) this.velocity = keymap.velocity;
++    this.keymap = keymap;
++    if (!this.transposeFits(this.transpose)) {
++      this.transpose = 0;
++      this.message = 'transpose reset to 0 for the reloaded keymap';
++    }
++    return this.untoggleAll();
++  }
++
++  // A toggled sustain left on would hold the receiver's notes after
++  // `field keys` has gone.
++  private untoggleAll(): MidiMessage[] {
++    const messages = [...this.toggledOn.values()].map(({ channel, cc }) => controlChange(channel, cc, 0));
++    this.toggledOn.clear();
++    return messages;
++  }
++
++  soundingNotes(): string[] {
++    return [...this.holders.keys()].sort((a, b) => a - b).map((key) => noteName(key % 128));
++  }
++
++  private transposeFits(transpose: number): boolean {
++    for (const offsets of this.keymap.notes.values()) {
++      for (const o of offsets) {
++        const note = this.keymap.base + transpose + o;
++        if (note < 0 || note > 127) return false;
++      }
++    }
++    return true;
++  }
++
++  private control(position: string, action: KeymapAction): MidiMessage[] {
++    const channel = this.keymap.channel;
++    if (action === 'panic') {
++      return [...this.releaseAll(), ...this.untoggleAll(), controlChange(channel, ALL_NOTES_OFF, 0)];
++    }
++    if ('transpose' in action) {
++      const next = this.transpose + action.transpose;
++      if (this.transposeFits(next)) this.transpose = next;
++      else this.message = `transpose ${signed(next)} would move a note outside MIDI's range`;
++      return [];
++    }
++    if ('velocity' in action) {
++      this.velocity = Math.min(127, Math.max(1, this.velocity + action.velocity));
++      return [];
++    }
++    if ('bend' in action) {
++      this.heldControls.set(position, { channel, action });
++      return [pitchBend(channel, bendValue(action.bend))];
++    }
++    if (action.mode === 'hold') {
++      this.heldControls.set(position, { channel, action });
++      return [controlChange(channel, action.cc, action.value)];
++    }
++    if (action.mode === 'toggle') {
++      const on = this.toggledOn.get(position);
++      if (on !== undefined) {
++        this.toggledOn.delete(position);
++        return [controlChange(on.channel, on.cc, 0)];
++      }
++      this.toggledOn.set(position, { channel, cc: action.cc });
++      return [controlChange(channel, action.cc, action.value)];
++    }
++    return [controlChange(channel, action.cc, action.value)];
++  }
++}
+diff --git a/src/keys/terminal.test.ts b/src/keys/terminal.test.ts
+new file mode 100644
+index 0000000..b27fc8d
+--- /dev/null
++++ b/src/keys/terminal.test.ts
+@@ -0,0 +1,143 @@
++import { PassThrough } from 'node:stream';
++import { describe, expect, it } from 'vitest';
++import {
++  decodeTerminal,
++  isQuit,
++  MOD_CAPS_LOCK,
++  MOD_CTRL,
++  MOD_SHIFT,
++  PROBE,
++  probeKittyProtocol,
++  type Tty,
++} from './terminal.js';
++
++const CSI = '\x1b[';
++
++describe('decoding kitty key events', () => {
++  it('reads press, repeat, and release of a letter', () => {
++    expect(decodeTerminal(`${CSI}97u${CSI}97;1:2u${CSI}97;1:3u`).events).toEqual([
++      { kind: 'key', key: 97, mods: 0, type: 'press' },
++      { kind: 'key', key: 97, mods: 0, type: 'repeat' },
++      { kind: 'key', key: 97, mods: 0, type: 'release' },
++    ]);
++  });
++
++  it('reads the base layout key of a Dvorak o', () => {
++    expect(decodeTerminal(`${CSI}111::115u`).events).toEqual([
++      { kind: 'key', key: 111, base: 115, mods: 0, type: 'press' },
++    ]);
++  });
++
++  it('reads modifiers alongside a shifted key', () => {
++    expect(decodeTerminal(`${CSI}97:65;2u${CSI}97;${1 + MOD_CAPS_LOCK}:3u`).events).toEqual([
++      { kind: 'key', key: 97, mods: MOD_SHIFT, type: 'press' },
++      { kind: 'key', key: 97, mods: MOD_CAPS_LOCK, type: 'release' },
++    ]);
++  });
++
++  it('reads Space, Tab, and the arrows', () => {
++    expect(decodeTerminal(`${CSI}32u${CSI}9;1:3u${CSI}D${CSI}1;1:3A`).events).toEqual([
++      { kind: 'key', key: 32, mods: 0, type: 'press' },
++      { kind: 'key', key: 9, mods: 0, type: 'release' },
++      { kind: 'key', key: 'ArrowLeft', mods: 0, type: 'press' },
++      { kind: 'key', key: 'ArrowUp', mods: 0, type: 'release' },
++    ]);
++  });
++
++  it('reads focus reports and probe answers', () => {
++    expect(decodeTerminal(`${CSI}O${CSI}I${CSI}?15u${CSI}?62;22c`).events).toEqual([
++      { kind: 'focus', focused: false },
++      { kind: 'focus', focused: true },
++      { kind: 'flags', flags: 15 },
++      { kind: 'attributes' },
++    ]);
++  });
++
++  it('carries a sequence split across chunks over to the next one', () => {
++    const first = decodeTerminal(`${CSI}97u${CSI}97;1`);
++    expect(first.events).toHaveLength(1);
++    expect(first.rest).toBe(`${CSI}97;1`);
++    expect(decodeTerminal(`${first.rest}:3u`).events).toEqual([
++      { kind: 'key', key: 97, mods: 0, type: 'release' },
++    ]);
++    expect(decodeTerminal('\x1b')).toEqual({ events: [], rest: '\x1b' });
++  });
++
++  it('ignores sequences it does not know and plain text', () => {
++    expect(decodeTerminal(`${CSI}15~${CSI}200~abc`).events).toEqual([]);
++  });
++
++  it('passes a modifier key through as a key no position types', () => {
++    // Under flag 8 the left Shift key reports itself as 57441.
++    expect(decodeTerminal(`${CSI}57441u`).events).toEqual([{ kind: 'key', key: 57441, mods: 0, type: 'press' }]);
++  });
++});
++
++describe('quitting', () => {
++  it('quits on Escape, on Ctrl-C, and on a raw Ctrl-C byte', () => {
++    for (const input of [`${CSI}27u`, `${CSI}99;${1 + MOD_CTRL}u`, '\x03']) {
++      const [event] = decodeTerminal(input).events;
++      expect(isQuit(event!)).toBe(true);
++    }
++  });
++
++  it('quits on Ctrl at the c position under a layout with no c', () => {
++    // Russian: the key at the US c position types с (U+0441).
++    const [russian] = decodeTerminal(`${CSI}1089::99;${1 + MOD_CTRL}u`).events;
++    expect(isQuit(russian!)).toBe(true);
++  });
++
++  it('does not take Ctrl at the c position for Ctrl-C where that key types ASCII', () => {
++    // Dvorak: the key at the US c position types j.
++    const [dvorak] = decodeTerminal(`${CSI}106::99;${1 + MOD_CTRL}u`).events;
++    expect(isQuit(dvorak!)).toBe(false);
++  });
++
++  it('does not quit on a plain c, on a release, or on a repeat', () => {
++    for (const input of [`${CSI}99u`, `${CSI}27;1:3u`, `${CSI}99;5:2u`]) {
++      const [event] = decodeTerminal(input).events;
++      expect(isQuit(event!)).toBe(false);
++    }
++  });
++});
++
++describe('probing for the protocol', () => {
++  function fakeTty(): { tty: Tty; written: string[]; reply: (text: string) => void } {
++    const stdin = new PassThrough();
++    const written: string[] = [];
++    const stdout = { write: (text: string) => written.push(text) };
++    return {
++      tty: { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream },
++      written,
++      reply: (text) => stdin.write(text),
++    };
++  }
++
++  it('is supported when the flags answer comes before the attributes answer', async () => {
++    const { tty, written, reply } = fakeTty();
++    const result = probeKittyProtocol(tty);
++    expect(written).toEqual([PROBE]);
++    reply(`${CSI}?0u`);
++    reply(`${CSI}?62c`);
++    expect(await result).toEqual({ supported: true, rest: '' });
++  });
++
++  it('is unsupported when only the attributes answer comes', async () => {
++    const { tty, reply } = fakeTty();
++    const result = probeKittyProtocol(tty);
++    reply(`${CSI}?62;22c`);
++    expect((await result).supported).toBe(false);
++  });
++
++  it('drops complete key events that arrive during the probe, and returns only a cut-off sequence', async () => {
++    const { tty, reply } = fakeTty();
++    const result = probeKittyProtocol(tty);
++    reply(`${CSI}97u${CSI}?15u${CSI}?62c${CSI}115u${CSI}1`);
++    expect(await result).toEqual({ supported: true, rest: `${CSI}1` });
++  });
++
++  it('is unsupported when the terminal answers nothing', async () => {
++    const { tty } = fakeTty();
++    expect((await probeKittyProtocol(tty, 30)).supported).toBe(false);
++  });
++});
+diff --git a/src/keys/terminal.ts b/src/keys/terminal.ts
+new file mode 100644
+index 0000000..3666303
+--- /dev/null
++++ b/src/keys/terminal.ts
+@@ -0,0 +1,150 @@
++// The terminal side of `field keys` (keyboard-instrument.md §2.2): the
++// kitty keyboard protocol, which reports press, repeat, and release
++// events for a program that asks, and focus reports so a lost release
++// cannot leave a note stuck.
++
++const CSI = '\x1b[';
++
++// Flags 1, 2, 4, and 8: disambiguate, report event types, report
++// alternate keys (the base layout key), and report every key as an
++// escape code, which is what gives letter keys release events.
++export const KITTY_FLAGS = 1 | 2 | 4 | 8;
++
++export const PROBE = `${CSI}?u${CSI}c`;
++export const ENABLE = `${CSI}>${KITTY_FLAGS}u${CSI}?1004h`;
++export const RESTORE = `${CSI}<u${CSI}?1004l`;
++
++export const MOD_SHIFT = 1;
++export const MOD_ALT = 2;
++export const MOD_CTRL = 4;
++export const MOD_SUPER = 8;
++export const MOD_HYPER = 16;
++export const MOD_META = 32;
++export const MOD_CAPS_LOCK = 64;
++export const MOD_NUM_LOCK = 128;
++
++export type KeyEventType = 'press' | 'repeat' | 'release';
++
++export type TerminalEvent =
++  | {
++      kind: 'key';
++      // The key's Unicode code point in the active keyboard layout,
++      // unshifted, or a name for a key that types nothing.
++      key: number | 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight';
++      base?: number;
++      mods: number;
++      type: KeyEventType;
++    }
++  | { kind: 'focus'; focused: boolean }
++  | { kind: 'flags'; flags: number }
++  | { kind: 'attributes' }
++  | { kind: 'interrupt' };
++
++const ARROWS = { A: 'ArrowUp', B: 'ArrowDown', C: 'ArrowRight', D: 'ArrowLeft' } as const;
++const EVENT_TYPES: Record<string, KeyEventType> = { '1': 'press', '2': 'repeat', '3': 'release' };
++
++function modifiersField(field: string | undefined): { mods: number; type: KeyEventType } {
++  const [mods, type] = (field ?? '').split(':');
++  // The protocol encodes modifiers as one plus their bits.
++  const encoded = mods === undefined || mods === '' ? 1 : Number(mods);
++  return { mods: Math.max(0, encoded - 1), type: EVENT_TYPES[type ?? ''] ?? 'press' };
++}
++
++function decodeSequence(params: string, final: string): TerminalEvent | undefined {
++  if (final === 'u') {
++    if (params.startsWith('?')) return { kind: 'flags', flags: Number(params.slice(1)) || 0 };
++    const [keyField, modField] = params.split(';');
++    const [code, , base] = (keyField ?? '').split(':');
++    const key = Number(code);
++    if (!Number.isInteger(key) || key <= 0) return undefined;
++    const { mods, type } = modifiersField(modField);
++    const event: TerminalEvent = { kind: 'key', key, mods, type };
++    if (base !== undefined && base !== '') event.base = Number(base);
++    return event;
++  }
++  if (final === 'c' && params.startsWith('?')) return { kind: 'attributes' };
++  if ((final === 'I' || final === 'O') && params === '') return { kind: 'focus', focused: final === 'I' };
++  if (final in ARROWS) {
++    const { mods, type } = modifiersField(params.split(';')[1]);
++    return { kind: 'key', key: ARROWS[final as keyof typeof ARROWS], mods, type };
++  }
++  return undefined;
++}
++
++// Decodes what stdin delivered so far. An escape sequence cut off at the
++// end of the input comes back as `rest`, to be prefixed to the next
++// chunk. Under the protocol every key arrives as an escape sequence, so
++// plain bytes are ignored, except Ctrl-C, which raw mode delivers as a
++// byte before the protocol is on or if the terminal drops it.
++export function decodeTerminal(input: string): { events: TerminalEvent[]; rest: string } {
++  const events: TerminalEvent[] = [];
++  let i = 0;
++  while (i < input.length) {
++    if (input[i] === '\x1b') {
++      if (i + 1 >= input.length) return { events, rest: input.slice(i) };
++      if (input[i + 1] !== '[') {
++        i += 2;
++        continue;
++      }
++      let j = i + 2;
++      while (j < input.length && /[0-9;:?<>=]/.test(input[j]!)) j++;
++      if (j >= input.length) return { events, rest: input.slice(i) };
++      const event = decodeSequence(input.slice(i + 2, j), input[j]!);
++      if (event !== undefined) events.push(event);
++      i = j + 1;
++    } else {
++      if (input[i] === '\x03') events.push({ kind: 'interrupt' });
++      i++;
++    }
++  }
++  return { events, rest: '' };
++}
++
++const QUIT_KEYS = { escape: 27, c: 99 };
++
++// Escape always quits, and so does Ctrl-C, so no keymap can trap you
++// (keyboard-instrument.md §2.4). Ctrl-C is the key that types `c`; on a
++// layout with no `c`, such as Russian or Greek, it is the key at the US
++// `c` position, which the base layout key names. A layout that does type
++// ASCII there, such as Dvorak's `j`, keeps its own Ctrl-C.
++export function isQuit(event: TerminalEvent): boolean {
++  if (event.kind === 'interrupt') return true;
++  if (event.kind !== 'key' || event.type !== 'press') return false;
++  if (event.key === QUIT_KEYS.escape) return true;
++  if ((event.mods & MOD_CTRL) === 0 || typeof event.key !== 'number') return false;
++  return event.key === QUIT_KEYS.c || (event.key > 127 && event.base === QUIT_KEYS.c);
++}
++
++export interface Tty {
++  stdin: NodeJS.ReadStream;
++  stdout: NodeJS.WriteStream;
++}
++
++// Asks the terminal for its protocol flags, then its primary device
++// attributes, which every terminal answers. A terminal with the protocol
++// answers the first before the second (keyboard-instrument.md §2.2).
++// Complete key events that arrive during the probe are dropped, since
++// nothing plays until the protocol is on; only a sequence cut off at the
++// end of the input comes back as `rest`, for the next chunk.
++export function probeKittyProtocol(tty: Tty, timeoutMs = 2000): Promise<{ supported: boolean; rest: string }> {
++  return new Promise((resolve) => {
++    let buffered = '';
++    let supported = false;
++    const finish = (result: boolean): void => {
++      clearTimeout(timer);
++      tty.stdin.removeListener('data', onData);
++      resolve({ supported: result, rest: buffered });
++    };
++    const onData = (chunk: Buffer): void => {
++      const { events, rest } = decodeTerminal(buffered + chunk.toString('utf8'));
++      buffered = rest;
++      for (const event of events) {
++        if (event.kind === 'flags') supported = true;
++        if (event.kind === 'attributes') return finish(supported);
++      }
++    };
++    const timer = setTimeout(() => finish(false), timeoutMs);
++    tty.stdin.on('data', onData);
++    tty.stdout.write(PROBE);
++  });
++}
+diff --git a/src/schema/keymap.test.ts b/src/schema/keymap.test.ts
+new file mode 100644
+index 0000000..e22687e
+--- /dev/null
++++ b/src/schema/keymap.test.ts
+@@ -0,0 +1,201 @@
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { parseDocument } from 'yaml';
++import { builtinKeymapDir } from '../keys/keymap.js';
++import { keymapSchema, toKeymap } from './keymap.js';
++
++// The tracker and fourths keymaps ship in chunk 3 (keyboard-instrument.md
++// §6); carrying them here proves the format expresses both before then.
++const TRACKER = `
++name: tracker
++description: Two piano octaves on the bottom and top rows, black keys on the row above each.
++base: 48
++notes:
++  KeyZ: 0
++  KeyS: 1
++  KeyX: 2
++  KeyD: 3
++  KeyC: 4
++  KeyV: 5
++  KeyG: 6
++  KeyB: 7
++  KeyH: 8
++  KeyN: 9
++  KeyJ: 10
++  KeyM: 11
++  Comma: 12
++  KeyL: 13
++  Period: 14
++  Semicolon: 15
++  Slash: 16
++  KeyQ: 12
++  Digit2: 13
++  KeyW: 14
++  Digit3: 15
++  KeyE: 16
++  KeyR: 17
++  Digit5: 18
++  KeyT: 19
++  Digit6: 20
++  KeyY: 21
++  Digit7: 22
++  KeyU: 23
++  KeyI: 24
++  Digit9: 25
++  KeyO: 26
++  Digit0: 27
++  KeyP: 28
++  BracketLeft: 29
++  Equal: 30
++  BracketRight: 31
++controls:
++  ArrowLeft: { transpose: -12 }
++  ArrowRight: { transpose: 12 }
++  ArrowDown: { velocity: -20 }
++  ArrowUp: { velocity: 20 }
++  Space: { cc: 64, value: 127, mode: hold }
++`;
++
++const FOURTHS = `
++name: fourths
++description: One semitone per key, each row a fourth above the row below.
++base: 48
++grid: { rows: [bottom, home, top, number], column: 1, row: 5 }
++controls:
++  ArrowLeft: { transpose: -12 }
++  ArrowRight: { transpose: 12 }
++  ArrowDown: { velocity: -20 }
++  ArrowUp: { velocity: 20 }
++  Space: { cc: 64, value: 127, mode: hold }
++`;
++
++function parse(text: string) {
++  return keymapSchema.safeParse(parseDocument(text).toJS());
++}
++
++function keymap(text: string) {
++  const result = parse(text);
++  if (!result.success) throw new Error(result.error.issues.map((i) => i.message).join('; '));
++  return toKeymap(result.data);
++}
++
++function messages(text: string): string[] {
++  const result = parse(text);
++  expect(result.success).toBe(false);
++  return result.success ? [] : result.error.issues.map((i) => i.message);
++}
++
++function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
++  return new Set([...map.notes.values()].flat().map((o) => map.base + o));
++}
++
++describe('keymap schema', () => {
++  it('accepts musical-typing with its 18 notes and the defaults', () => {
++    const map = keymap(readFileSync(join(builtinKeymapDir(), 'musical-typing.yaml'), 'utf8'));
++    expect(map.notes.get('KeyA')).toEqual([0]);
++    expect(map.notes.get('Quote')).toEqual([17]);
++    expect(notesPlayed(map).size).toBe(18);
++    expect(map.velocity).toBe(100);
++    expect(map.channel).toBe(1);
++    expect(map.controls.get('Tab')).toEqual({ cc: 64, value: 127, mode: 'hold' });
++    expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
++  });
++
++  it('accepts the tracker fixture with 32 notes', () => {
++    const map = keymap(TRACKER);
++    expect(notesPlayed(map).size).toBe(32);
++    expect(map.base + map.notes.get('KeyZ')![0]!).toBe(48);
++    expect(map.base + map.notes.get('KeyQ')![0]!).toBe(60);
++    expect(map.base + map.notes.get('KeyI')![0]!).toBe(72);
++  });
++
++  it('expands the fourths grid', () => {
++    const map = keymap(FOURTHS);
++    const at = (p: string) => map.base + map.notes.get(p)![0]!;
++    expect(at('KeyZ')).toBe(48);
++    expect(at('KeyA')).toBe(53);
++    expect(at('KeyQ')).toBe(58);
++    expect(at('Digit1')).toBe(63);
++    expect([at('KeyZ'), at('KeyB'), at('KeyD')]).toEqual([48, 52, 55]);
++    expect([at('KeyX'), at('KeyN'), at('KeyF')]).toEqual([49, 53, 56]);
++    expect(notesPlayed(map).size).toBe(27);
++  });
++
++  it('lets notes override the grid and controls take positions back from it', () => {
++    const map = keymap(`
++name: mixed
++grid: { rows: [bottom], column: 2, row: 0 }
++notes: { KeyX: 9 }
++controls: { KeyZ: { transpose: 12 } }
++`);
++    expect(map.notes.get('KeyX')).toEqual([9]);
++    expect(map.notes.has('KeyZ')).toBe(false);
++    expect(map.notes.get('KeyC')).toEqual([4]);
++  });
++
++  it('skips a column where a grid row lists null', () => {
++    const map = keymap(`
++name: aligned
++grid: { rows: [[KeyZ, KeyX], [null, KeyS]], column: 1, row: 5 }
++`);
++    expect(map.notes.get('KeyX')).toEqual([1]);
++    expect(map.notes.get('KeyS')).toEqual([6]);
++  });
++
++  it('rejects a position twice in the grid, named rows included', () => {
++    expect(messages('name: twice\ngrid: { rows: [home, home], column: 1, row: 5 }\n').join('\n')).toMatch(
++      /KeyA appears twice in the grid/,
++    );
++    expect(messages('name: twice\ngrid: { rows: [home, [KeyA]], column: 1, row: 5 }\n').join('\n')).toMatch(
++      /KeyA appears twice in the grid/,
++    );
++  });
++
++  it('plays a list of offsets as a chord', () => {
++    const map = keymap('name: chords\nnotes: { KeyF: [0, 4, 7] }\n');
++    expect(map.notes.get('KeyF')).toEqual([0, 4, 7]);
++  });
++
++  it('rejects an unknown position by name', () => {
++    expect(messages('name: bad\nnotes: { KeyAA: 0 }\n').join('\n')).toMatch(/KeyAA is not a position a keymap can bind/);
++    expect(messages('name: bad\ngrid: { rows: [[KeyA, Enter]], column: 1, row: 5 }\n').join('\n')).toMatch(
++      /Enter is not a position/,
++    );
++  });
++
++  it('rejects a position that is both a note and a control', () => {
++    expect(messages('name: bad\nnotes: { KeyA: 0 }\ncontrols: { KeyA: { transpose: 12 } }\n').join('\n')).toMatch(
++      /KeyA is both a note and a control/,
++    );
++  });
++
++  it('keeps Escape reserved', () => {
++    expect(messages('name: bad\nnotes: { KeyA: 0 }\ncontrols: { Escape: panic }\n').join('\n')).toMatch(
++      /Escape is reserved/,
++    );
++  });
++
++  it('rejects a note outside 0 to 127', () => {
++    expect(messages('name: bad\nbase: 120\nnotes: { KeyA: 0, KeyS: 8 }\n').join('\n')).toMatch(
++      /KeyS plays MIDI note 128 at base 120/,
++    );
++    expect(messages('name: bad\nbase: 0\ngrid: { rows: [bottom], column: -1, row: 0 }\n').join('\n')).toMatch(
++      /plays MIDI note -1/,
++    );
++  });
++
++  it('rejects a keymap that plays nothing', () => {
++    expect(messages('name: silent\ncontrols: { KeyZ: panic }\n').join('\n')).toMatch(/at least one note/);
++  });
++
++  it('rejects unknown fields rather than ignoring them', () => {
++    expect(parse('name: typo\nnote: { KeyA: 0 }\n').success).toBe(false);
++    expect(parse('name: typo\nnotes: { KeyA: 0 }\ncontrols: { KeyZ: { transpose: 12, by: 1 } }\n').success).toBe(false);
++  });
++
++  it('defaults a cc action to value 127 in set mode', () => {
++    const map = keymap('name: cc\nnotes: { KeyA: 0 }\ncontrols: { Space: { cc: 64, mode: toggle } }\n');
++    expect(map.controls.get('Space')).toEqual({ cc: 64, value: 127, mode: 'toggle' });
++  });
++});
+diff --git a/src/schema/keymap.ts b/src/schema/keymap.ts
+new file mode 100644
+index 0000000..edff820
+--- /dev/null
++++ b/src/schema/keymap.ts
+@@ -0,0 +1,183 @@
++import { z } from 'zod';
++
++// A keymap (keyboard-instrument.md §2.4): what each physical key plays in
++// `field keys`. Positions are W3C KeyboardEvent.code values, named after
++// the key a US keyboard has in that place, so a keymap plays the same
++// under any keyboard layout (§2.3).
++
++export const NAMED_ROWS = {
++  bottom: ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma', 'Period', 'Slash'],
++  home: ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote'],
++  top: ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'BracketLeft', 'BracketRight'],
++  number: ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'],
++} as const;
++
++export type RowName = keyof typeof NAMED_ROWS;
++
++// The keys that type a character, whose position a terminal can only
++// report through the character or its base layout key.
++export const TEXT_POSITIONS: readonly string[] = [
++  'Backquote',
++  ...NAMED_ROWS.number,
++  ...NAMED_ROWS.top,
++  'Backslash',
++  ...NAMED_ROWS.home,
++  'IntlBackslash',
++  ...NAMED_ROWS.bottom,
++];
++
++export const FUNCTIONAL_POSITIONS: readonly string[] = [
++  'Space',
++  'Tab',
++  'ArrowLeft',
++  'ArrowRight',
++  'ArrowUp',
++  'ArrowDown',
++];
++
++export const BINDABLE_POSITIONS: ReadonlySet<string> = new Set([...TEXT_POSITIONS, ...FUNCTIONAL_POSITIONS]);
++
++const midiNote = z.number().int().min(0).max(127);
++const offset = z.number().int();
++
++const ccAction = z
++  .object({
++    cc: z.number().int().min(0).max(127),
++    value: z.number().int().min(0).max(127).default(127),
++    mode: z.enum(['set', 'hold', 'toggle']).default('set'),
++  })
++  .strict();
++
++const action = z.union([
++  z.object({ transpose: z.number().int() }).strict(),
++  z.object({ velocity: z.number().int() }).strict(),
++  z.object({ bend: z.number().min(-1).max(1) }).strict(),
++  ccAction,
++  z.literal('panic'),
++]);
++
++export type KeymapAction = z.infer<typeof action>;
++
++const gridRow = z.union([z.enum(['bottom', 'home', 'top', 'number']), z.array(z.string().nullable()).min(1)]);
++
++const grid = z
++  .object({
++    rows: z.array(gridRow).min(1),
++    column: z.number().int(),
++    row: z.number().int(),
++  })
++  .strict();
++
++export type KeymapGrid = z.infer<typeof grid>;
++
++export const keymapSchema = z
++  .object({
++    name: z.string().min(1),
++    description: z.string().optional(),
++    base: midiNote.default(60),
++    velocity: z.number().int().min(1).max(127).default(100),
++    channel: z.number().int().min(1).max(16).default(1),
++    notes: z.record(z.string(), z.union([offset, z.array(offset).min(1)])).optional(),
++    grid: grid.optional(),
++    controls: z.record(z.string(), action).optional(),
++  })
++  .strict()
++  .superRefine((keymap, ctx) => {
++    const checkPosition = (position: string, path: (string | number)[]): void => {
++      if (position === 'Escape') {
++        ctx.addIssue({ code: 'custom', path, message: 'Escape is reserved: it always quits' });
++      } else if (!BINDABLE_POSITIONS.has(position)) {
++        ctx.addIssue({
++          code: 'custom',
++          path,
++          message: `${position} is not a position a keymap can bind (positions are KeyboardEvent.code values, such as KeyA or Semicolon)`,
++        });
++      }
++    };
++
++    for (const position of Object.keys(keymap.notes ?? {})) checkPosition(position, ['notes', position]);
++    for (const position of Object.keys(keymap.controls ?? {})) checkPosition(position, ['controls', position]);
++
++    const gridPositions = new Set<string>();
++    keymap.grid?.rows.forEach((row, rowIndex) => {
++      const named = typeof row === 'string';
++      const positions: readonly (string | null)[] = named ? NAMED_ROWS[row] : row;
++      positions.forEach((position, column) => {
++        if (position === null) return;
++        const path = named ? ['grid', 'rows', rowIndex] : ['grid', 'rows', rowIndex, column];
++        if (!named) checkPosition(position, path);
++        if (gridPositions.has(position)) {
++          ctx.addIssue({ code: 'custom', path, message: `${position} appears twice in the grid` });
++        }
++        gridPositions.add(position);
++      });
++    });
++
++    for (const position of Object.keys(keymap.notes ?? {})) {
++      if (keymap.controls?.[position] !== undefined) {
++        ctx.addIssue({
++          code: 'custom',
++          path: ['controls', position],
++          message: `${position} is both a note and a control; a position is one or the other`,
++        });
++      }
++    }
++
++    const notes = expandNotes(keymap);
++    if (notes.size === 0) {
++      ctx.addIssue({ code: 'custom', message: 'a keymap must play at least one note (give notes or a grid)' });
++    }
++    for (const [position, offsets] of notes) {
++      for (const o of offsets) {
++        const note = keymap.base + o;
++        if (note < 0 || note > 127) {
++          ctx.addIssue({
++            code: 'custom',
++            path: keymap.notes?.[position] !== undefined ? ['notes', position] : ['grid'],
++            message: `${position} plays MIDI note ${note} at base ${keymap.base}, outside 0 to 127`,
++          });
++        }
++      }
++    }
++  });
++
++export type KeymapFile = z.infer<typeof keymapSchema>;
++
++// What a position plays once the grid is laid down, `notes` overrides it,
++// and `controls` takes its positions back from both.
++export function expandNotes(keymap: Pick<KeymapFile, 'grid' | 'notes' | 'controls'>): Map<string, number[]> {
++  const notes = new Map<string, number[]>();
++  keymap.grid?.rows.forEach((row, rowIndex) => {
++    const positions: readonly (string | null)[] = typeof row === 'string' ? NAMED_ROWS[row] : row;
++    positions.forEach((position, column) => {
++      if (position !== null) notes.set(position, [column * keymap.grid!.column + rowIndex * keymap.grid!.row]);
++    });
++  });
++  for (const [position, binding] of Object.entries(keymap.notes ?? {})) {
++    notes.set(position, typeof binding === 'number' ? [binding] : binding);
++  }
++  for (const position of Object.keys(keymap.controls ?? {})) notes.delete(position);
++  return notes;
++}
++
++export interface Keymap {
++  name: string;
++  description?: string;
++  base: number;
++  velocity: number;
++  channel: number;
++  notes: ReadonlyMap<string, readonly number[]>;
++  controls: ReadonlyMap<string, KeymapAction>;
++}
++
++export function toKeymap(file: KeymapFile): Keymap {
++  return {
++    name: file.name,
++    ...(file.description !== undefined ? { description: file.description } : {}),
++    base: file.base,
++    velocity: file.velocity,
++    channel: file.channel,
++    notes: expandNotes(file),
++    controls: new Map(Object.entries(file.controls ?? {})),
++  };
++}
