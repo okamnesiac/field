@@ -158,6 +158,17 @@ describe('the voice host protocol', () => {
 });
 
 describe('the voice host process', () => {
+  // These start the stub above as FIELD_SCLANG: an extensionless Node
+  // script with a #! line, which Windows cannot start, so sclangCommand
+  // refuses it there before anything spawns. What they exercise (the
+  // spawn, the host's lines, /quit, the reload port) is platform-
+  // independent; the stub is not, so they skip on Windows rather than
+  // growing a second stub dialect, as build.test.ts's #!/bin/sh sclang
+  // stubs do. sclangCommand's Windows rules are covered in
+  // generators/supercollider.test.ts, and the missing-binary refusal
+  // below runs everywhere.
+  const itStartsTheStub = it.skipIf(process.platform === 'win32');
+
   function stopStrayServer(): void {
     try {
       process.kill(Number(readFileSync(`${log}.server`, 'utf8')), 'SIGKILL');
@@ -166,7 +177,7 @@ describe('the voice host process', () => {
     }
   }
 
-  it('starts sclang on the host script in voice mode and is ready when the host says so', async () => {
+  itStartsTheStub('starts sclang on the host script in voice mode and is ready when the host says so', async () => {
     const statuses: VoiceHostStatus[] = [];
     const host = await VoiceHost.start({
       instruments: ['/p/pad.scd'],
@@ -188,7 +199,7 @@ describe('the voice host process', () => {
     expect(readFileSync(log, 'latin1')).toContain('/quit');
   });
 
-  it('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
+  itStartsTheStub('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
     const statuses: VoiceHostStatus[] = [];
     const host = await VoiceHost.start({
       instruments: ['/p/pad.scd'],
@@ -211,18 +222,18 @@ describe('the voice host process', () => {
     await host.close();
   });
 
-  it('rejects ready with the host error and what sclang printed after its banner', async () => {
+  itStartsTheStub('rejects ready with the host error and what sclang printed after its banner', async () => {
     const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('error') });
     await expect(host.ready).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
     await expect(host.ready).rejects.not.toThrow(/compiling class library/);
   });
 
-  it('rejects ready when sclang exits before it is ready', async () => {
+  itStartsTheStub('rejects ready when sclang exits before it is ready', async () => {
     const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('silent') });
     await expect(host.ready).rejects.toThrow(/exited with code 0 before the voice host was ready/);
   });
 
-  it('closes a host that is still booting, without waiting for it to be ready', async () => {
+  itStartsTheStub('closes a host that is still booting, without waiting for it to be ready', async () => {
     const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('hang') });
     const deadline = Date.now() + 5000;
     while (!existsSync(log) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
@@ -231,7 +242,7 @@ describe('the voice host process', () => {
     expect(readFileSync(log, 'latin1')).toContain('/quit');
   });
 
-  it('stops the server the host launched by process, when /quit cannot reach it', async () => {
+  itStartsTheStub('stops the server the host launched by process, when /quit cannot reach it', async () => {
     const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: { ...env('hang'), STUB_SERVER: '1' } });
     try {
       const deadline = Date.now() + 5000;
@@ -246,7 +257,7 @@ describe('the voice host process', () => {
     }
   });
 
-  it('reports a restart, then a host that dies on its own, with its error', async () => {
+  itStartsTheStub('reports a restart, then a host that dies on its own, with its error', async () => {
     const statuses: VoiceHostStatus[] = [];
     const reasons: string[] = [];
     const host = await VoiceHost.start({
