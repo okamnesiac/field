@@ -78,10 +78,9 @@ writes them at the take's first sample.
 1. In `examples/bloom`, you run `field keys juno`. `field keys`
    resolves `juno` to `shared/instruments/juno.scd`, reads
    `juno.knobs.yaml` beside it, and checks it before the voice host
-   starts (§2.2). It loads
-   `musical`, builds its knob list, `mod` and then `juno`'s knobs in
-   the file's order, and draws the knob line with `mod` chosen. A knob
-   you have not changed shows its default.
+   starts (§2.2). It loads `musical`, builds its knob list, `mod` and
+   then `juno`'s knobs in the file's order, and draws the knob line
+   with `mod` chosen. A knob you have not changed shows its default.
 2. You press `ArrowRight`, bound to `{ knob: 1 }`. The choice moves to
    `cutoff`. Nothing is sent.
 3. You hold a chord and press `ArrowUp`, bound to `{ turn: 1 }`.
@@ -153,10 +152,12 @@ and every path that hands a file to an instrument runs it first. A file
 that fails stops `field keys` at start with its errors, as a keymap
 does, before the voice host starts. A save that fails keeps the last
 good list, names the error on the status line, and reloads no voice. A
-take's render runs the same check and fails with the schema's errors,
-and `field check` reports them first, for the instrument of every
-record entry. §2.4 says how a SuperCollider voice reads only a file
-that passed. The rules:
+take's render runs the same check in its `validate` and fails with the
+schema's errors. `field check` already validates every record entry's
+instrument through that `validate`, so it reports the same errors
+first, and the check and the build share one rule, as they do for the
+program. §2.4 says how a SuperCollider voice reads only a file that
+passed. The rules:
 
 - **The controller is free.** It is from 2 to 119, and not 6, 32, 38,
   64, or 96 to 101. Those are bank select (0 and 32), data entry,
@@ -307,9 +308,8 @@ controller messages in a take reach the voice as they did live. The
 knob file is now part of how a take sounds, so it becomes one of the
 render's cache inputs when it exists, and a render refuses to cache
 when the file changed while it ran, as it refuses for the program. A
-hardware controller's knob that
-sends CC 74 turns `juno`'s cutoff too, because to the voicer it is the
-same controller.
+hardware controller's knob that sends CC 74 turns `juno`'s cutoff too,
+because to the voicer it is the same controller.
 
 ### 2.5 `field keys` shows the knobs
 
@@ -492,12 +492,11 @@ keyboard-instrument.md §14.5's gap for the wheel.
 | `src/commands/keys.ts` | The knob line; the timer that ticks turns and glides; `--knobs`; checking each instrument's knob file and writing the copy its voice reads, in a directory of its own that it removes on exit, before the host starts and before each reload, and reloading nothing after a save that fails; `Esc` cancelling an entry or naming `Ctrl-C`; and `.field/keys.json` (chunk 3). |
 | `src/keys/voice-host.ts` | Passes each program in `FIELD_INSTRUMENTS` with the path of its knob copy, if it has one. |
 | `sc/voicer.scd`, `sc/voice-host.scd`, `sc/voice-render.scd`, `sc/voice-load.scd` | The voicer keeps every controller from 2 to 119 except 64 and hands it to voices as `cc<n>`; the host and the render pass those values into each new synth. The loader sets `FIELD_KNOBS` for each program from the copy Field names for it. Nothing here reads or checks a knob file. |
-| `src/generators/voice-render.ts` | Checks the instrument's knob file with the schema, and fails the render with its errors before `sclang` runs; writes the copy it checked beside the events file and names it in `FIELD_KNOBS`. The file is a cache input, and `verifyAfterRun` refuses to cache when it changed during the render. |
-| `src/model/project.ts` | `field check` checks the knob file of each record entry's instrument with the same schema. |
+| `src/generators/voice-render.ts` | Its `validate` checks the instrument's knob file with the schema, so a failing file stops the render before `sclang` runs, and `field check`, which validates each record entry's instrument through this `validate`, reports the same errors. It writes the copy it checked beside the events file and names it in `FIELD_KNOBS`. The file is a cache input, and `verifyAfterRun` refuses to cache when it changed during the render. |
 | `examples/bloom/shared/instruments/juno.knobs.yaml`, `bass.knobs.yaml` (new); `juno.scd`, `bass.scd` | The knob files, and voices that map `cc<n>` through them. The render branches keep their code and their bytes, and `bass.scd`'s comment names `musical`. |
 | `src/commands/record.ts`, `src/audiod/protocol.ts`, `src/audiod/client.ts` | Read `.field/keys.json` and pass `controllers` in `arm` (chunk 3). |
 | `native/audiod/src/player.cpp`, `player.h`, `server.cpp` | The chase: seeded from `arm`, updated before the start, written at the start; and the `midi-chase` feature (chunk 3). |
-| `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls under "Make an instrument playable"; and how a take starts (chunk 3). |
+| `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls and `FIELD_KNOBS`, the checked copy of the knob file a voice reads, under "Make an instrument playable"; and how a take starts (chunk 3). |
 | `docs/build-graph.md` | The voice contract gains the `cc<n>` controls and `FIELD_KNOBS`, and the knob file joins a take's render inputs. |
 | `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 3). |
 | `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits and at §3's choice of Musical Typing as the default, each pointing here. |
@@ -751,10 +750,11 @@ These vitest tests fail before the change:
 - **`src/generators/voice-render.test.ts`, through real `sclang`.** A
   take with CC 74 renders differently from the same take without it
   through a voice that reads `cc74`, and editing the knob file renders
-  the take again. A knob file the schema rejects fails the render with
-  the schema's errors before `sclang` runs.
+  the take again. A knob file the schema rejects fails `validate` with
+  the schema's errors, so the render stops before `sclang` runs.
 - **`src/model/project.test.ts`.** `field check` reports a record
-  entry's instrument whose knob file fails the schema.
+  entry's instrument whose knob file fails the schema, with the errors
+  the render's `validate` gives.
 - **`src/commands/record-midi-daemon.test.ts` and
   `src/commands/record-plan.test.ts`, chunk 3.** A seeded controller
   lands at `at: 0`. A control change sent after the arm and before the
