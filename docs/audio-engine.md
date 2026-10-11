@@ -281,7 +281,8 @@ when every take has ended. `loop` refuses a set of more than one track.
 `take`, the primary's, and each take is its own `take` event.
 With more than one track armed, `status.record` adds `armed`: each
 track's kind, its input and meter, and while recording its transaction
-and progress.
+and progress. When any of them records MIDI, `status.record` also lists
+the MIDI `sources` they all hear.
 
 ## Landing a take
 

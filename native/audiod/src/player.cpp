@@ -783,6 +783,15 @@ juce::var Player::status (bool consumePeak)
                 item (companion.track, companion.midi.load(), companion.input, peak, companion.take.get());
             }
             rec->setProperty ("armed", list);
+            // An audio primary's MIDI companions listen to the arm's
+            // sources, named here as a MIDI primary's are above.
+            if (! armedMidi.load() && ! midiSources.isEmpty())
+            {
+                juce::Array<juce::var> sources;
+                for (const auto& source : midiSources)
+                    sources.add (source);
+                rec->setProperty ("sources", sources);
+            }
         }
         result->setProperty ("record", juce::var (rec.get()));
     }
@@ -1443,20 +1452,11 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
     }
     inputs.sort();
 
-    // Open what the set listens to. A failure puts the device back as it
-    // was, so a bad arm leaves playback, and the arm before it, alone.
-    juce::String name = device;
-    int channels = 0, inputLatency = 0, outputLatency = 0;
-    if (! audio.empty())
-    {
-        if (auto error = openAudioInputs (device, inputs, name, channels, inputLatency, outputLatency); error.isNotEmpty())
-            return fail (error);
-    }
-    else if (! nullMode)
-    {
-        if (auto* opened = deviceManager.getCurrentAudioDevice())
-            outputLatency = opened->getOutputLatencyInSamples();
-    }
+    // Open what the set listens to, MIDI first: its sources open without
+    // starting, so a MIDI refusal returns before the device changes, and
+    // an audio failure, which puts the device back as it was, drops only
+    // those unstarted inputs. A bad arm leaves playback, and the arm
+    // before it, alone.
     std::vector<std::unique_ptr<juce::MidiInput>> opened;
     juce::StringArray sources;
     if (! midi.empty())
@@ -1478,14 +1478,27 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
             return fail ("cannot open any MIDI source: " + listed.joinIntoString (", "));
         }
     }
+    juce::String name = device;
+    int channels = 0, inputLatency = 0, outputLatency = 0;
+    if (! audio.empty())
+    {
+        if (auto error = openAudioInputs (device, inputs, name, channels, inputLatency, outputLatency); error.isNotEmpty())
+            return fail (error);
+    }
+    else if (! nullMode)
+    {
+        if (auto* current = deviceManager.getCurrentAudioDevice())
+            outputLatency = current->getOutputLatencyInSamples();
+    }
 
     // The set replaces the arm before it: what it no longer needs closes
-    // now that what it does need has opened.
-    liveCompanions = 0;
+    // now that what it does need has opened. The companions stop being
+    // read only once nothing can fail, so a refused close keeps them.
     const bool hadAudio = armed.load() && ! armedInputs.isEmpty();
     if (audio.empty() && hadAudio)
         if (auto error = closeAudioInput(); error.isNotEmpty())
             return fail (error);
+    liveCompanions = 0;
     closeMidiInputs();
     if (! midi.empty())
     {

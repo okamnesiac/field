@@ -302,7 +302,7 @@ daemon: field-audiod 0.14.0
 
 | Command | Does |
 | --- | --- |
-| `field transport status` | state, position, file, and device |
+| `field transport status` | state, position, file, device, and every armed track |
 | `field transport play` | starts or resumes the transport |
 | `field transport pause` | pauses, holding position |
 | `field transport stop` | stops the transport |
@@ -403,6 +403,11 @@ give none; `--loop` records one track only:
 ```sh
 field record tall-grass/track:vocal tall-grass/track:guitar tall-grass/track:keys --input 1,2
 ```
+
+`field transport status` in another terminal lists every armed track. If
+one track's take never arrives while the others land, `field record`
+exits with an error that names the track and the `--recover <id>` that
+finalizes it.
 
 Every take is a transaction under `.field/recording/` until it lands, so
 a crash loses nothing that reached the disk. `field record --list`

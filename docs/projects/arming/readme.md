@@ -91,7 +91,7 @@ getting the voice's audio into the daemon's graph; until then
 | `field keys` | `[instrument]` | `[targets...]`: instruments and tracks, mixed |
 | `field record` | `[target]`, `--input <n>` | `[targets...]`, `--input <n>[,<n>...]` |
 | `arm` request | `{track, input, device?}` or `{track, kind: "midi"}` | adds `{tracks: [{track, kind: "audio", input} \| {track, kind: "midi"}], device?}`; the one-track forms stay |
-| `status.record` | one armed track's fields | adds `armed`, a list with each track's kind, input or sources, and level or events |
+| `status.record` | one armed track's fields | adds `armed`, a list with each track's kind, its input when audio, and its level or events; the MIDI sources stay on `status.record`, shared by every MIDI track |
 | `take` event and `stop` response | one take | one per armed track, each naming its `track` |
 
 ### 2.4 Files
@@ -249,7 +249,7 @@ in order, so a test can tell input 1's sawtooth from input 2's constant.
 
 | Check | Result |
 | --- | --- |
-| `src/commands/record-tracks-daemon.test.ts`, against the daemon in null mode | Two audio tracks on inputs 1 and 2: one take holds the sawtooth, the other the constant, with the same start and length; an input or a track armed twice is refused, and so is a loop over two. An audio and a MIDI track: both takes start together, and the MIDI one holds the note. A punch-out at 24000 over a live session: the audio take is 24000 frames, the MIDI take ends a block later at 24000, and both land. Two MIDI tracks hold the same notes. `field record` with an audio and a MIDI track lands both, each on its own track, and `field check` is clean. |
+| `src/commands/record-tracks-daemon.test.ts`, against the daemon in null mode | Two audio tracks on inputs 1 and 2: one take holds the sawtooth, the other the constant, with the same start and length; an input or a track armed twice is refused, and so is a loop over two; a set the daemon refuses leaves the arm before it as it was. An audio and a MIDI track: both takes start together, and the MIDI one holds the note. A punch-out at 24000 over a live session: the audio take is 24000 frames, the MIDI take ends a block later at 24000, and both land. Two MIDI tracks hold the same notes. `field record` with an audio and a MIDI track lands both, each on its own track, `field transport status` names both while they record, and `field check` is clean. The MIDI cases skip on Windows, which has no virtual MIDI ports. |
 | `src/commands/record-plan.test.ts` | Inputs 1, 2, and on by default, `--input` in order, and each refusal. |
 | The existing daemon tests (`record-daemon`, `punch-daemon`, `record-midi-daemon`, `click-daemon`, `play-daemon`) | All pass against the reworked daemon: one track records exactly as before. |
 
@@ -258,5 +258,5 @@ Found along the way, and not this chunk's: an audio punch-out against a
 with one track as with several. A live session's position is exact, so
 the punch-out tests, which use one, never saw it. A file bed's position
 comes from JUCE's transport, which reports a few samples ahead of what it
-has delivered. Still owed: criteria 6 to 8 by hand, on a real interface
+has delivered. okamnesiac/field#194 tracks it. Still owed: criteria 6 to 8 by hand, on a real interface
 with two inputs and a controller.

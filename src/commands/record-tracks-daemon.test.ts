@@ -14,13 +14,15 @@ import { importAsset } from './import.js';
 import { init } from './init.js';
 import { recordTake } from './record.js';
 import { loadProject } from '../model/project.js';
+import { removeTempProject } from '../testing/temp.js';
+import { transportStatusLines } from './transport.js';
 
 // Several armed tracks in one pass (arming.md §2.2), against the daemon in
 // null-output mode. Its null input presents channel 1 as a sawtooth and
 // channel 2 as a constant 0.25, so a take can show which input it holds.
 // MIDI cases publish a source with `field-audiod --keys`, as
-// record-midi-daemon.test.ts does, and skip only where Linux has no ALSA
-// sequencer.
+// record-midi-daemon.test.ts does, and skip where Linux has no ALSA
+// sequencer and on Windows, which has no virtual MIDI ports.
 
 const binary = (() => {
   try {
@@ -59,7 +61,8 @@ describe.skipIf(!binary)('several armed tracks through the daemon', () => {
         // already gone
       }
     }
-    rmSync(root, { recursive: true, force: true });
+    // Windows refuses to delete what the dying daemon still holds.
+    await removeTempProject(root);
   });
 
   async function connect(): Promise<AudiodClient> {
@@ -68,7 +71,8 @@ describe.skipIf(!binary)('several armed tracks through the daemon', () => {
   }
 
   // Publishes a MIDI source and resolves once it is ready, or skips the
-  // test where Linux has no MIDI service. CoreMIDI can refuse a new source
+  // test where there is no virtual MIDI source to publish: Linux with no
+  // ALSA sequencer, and Windows by design. CoreMIDI can refuse a new source
   // for a moment after another test's helper died, so a refusal on macOS
   // is tried again, as record-midi-daemon.test.ts does.
   async function publish(ctx: TestContext, name: string, retries = 4): Promise<ChildProcessWithoutNullStreams> {
@@ -86,6 +90,7 @@ describe.skipIf(!binary)('several armed tracks through the daemon', () => {
     });
     if ('error' in line) {
       if (process.platform === 'linux' && !existsSync('/dev/snd/seq')) ctx.skip('no ALSA sequencer');
+      if (process.platform === 'win32') ctx.skip('no virtual MIDI ports on Windows');
       if (process.platform === 'darwin' && retries > 0) {
         await sleep(250);
         return publish(ctx, name, retries - 1);
@@ -144,6 +149,21 @@ describe.skipIf(!binary)('several armed tracks through the daemon', () => {
         { track: '//songs/creek/track:b', kind: 'audio', input: 2 },
       ],
     });
+    // A set the daemon refuses, here for an input the null device lacks
+    // or for the MIDI it cannot open, leaves the arm before it as it was.
+    await expect(
+      daemon.armTracks([
+        { track: '//songs/creek/track:c', kind: 'audio', input: 3 },
+        { track: '//songs/creek/track:keys', kind: 'midi' },
+      ]),
+    ).rejects.toThrow(/the null input has 2 channels|no MIDI sources|cannot open any MIDI source/);
+    const kept = (await daemon.status()).record!;
+    expect(kept.state).toBe('armed');
+    expect(kept.sources).toBeUndefined();
+    expect(kept.armed?.map((a) => [a.track, a.kind, a.input])).toEqual([
+      ['//songs/creek/track:a', 'audio', 1],
+      ['//songs/creek/track:b', 'audio', 2],
+    ]);
     await expect(daemon.record(0, undefined, 24000, true)).rejects.toThrow('a loop take records one track');
 
     const events: AudiodEvent[] = [];
@@ -300,9 +320,13 @@ describe.skipIf(!binary)('several armed tracks through the daemon', () => {
 
       const lines: string[] = [];
       let played = false;
+      // A second terminal's `field transport status` names every armed
+      // track; the take runs until it has been read.
+      const project = loadProject(root);
+      let transportLines: string[] | undefined;
       const { takes } = await recordTake(
         root,
-        loadProject(root),
+        project,
         ['creek/track:vox', 'creek/track:keys'],
         { at: '1.2.1' },
         {
@@ -310,14 +334,21 @@ describe.skipIf(!binary)('several armed tracks through the daemon', () => {
           onStarted: (line) => {
             lines.push(line);
             send(keys, NOTE_ON);
+            void transportStatusLines(root, project).then((l) => (transportLines = l));
             void sleep(300).then(() => {
               send(keys, NOTE_OFF);
               played = true;
             });
           },
           onPosition: (line) => lines.push(line),
-          interrupted: () => played,
+          interrupted: () => played && transportLines !== undefined,
         },
+      );
+      expect(transportLines!.find((l) => l.startsWith('recording: '))).toMatch(
+        new RegExp(
+          `^recording: take-\\S+( \\(\\d+ frames\\))? on null input 1 → //songs/creek/track:vox, ` +
+            `MIDI from .*${source}.* → //songs/creek/track:keys$`,
+        ),
       );
       expect(lines[0]).toMatch(new RegExp(`^armed {3}vox: null input 1, keys: MIDI from .*${source}.* {2}\\(48000 Hz, latency in 0 / out 0 samples\\)$`));
       expect(lines.some((line) => / vox (silent|▮).* · keys \d+ events? /.test(line))).toBe(true);

@@ -400,6 +400,16 @@ async function captureTakes(
         );
       }
       await queue;
+      // With several tracks armed, a take that never arrived sits beside
+      // the ones that landed; each is named with the way to finalize it,
+      // as one track's take that never arrived throws below.
+      const unlanded = (started.takes?.length ?? 0) > 1 ? started.takes!.filter((t) => !seen.has(t.transaction)) : [];
+      if (unlanded.length > 0) {
+        throw new Error(
+          `${seen.size} of ${started.takes!.length} takes landed; ` +
+            unlanded.map((t) => `${t.track} never arrived (field record --recover ${t.transaction})`).join(', '),
+        );
+      }
     } finally {
       client.removeListener('event', onEvent);
       // Release the input whatever happened; the microphone is not ours
