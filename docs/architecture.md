@@ -140,12 +140,16 @@ you about 0.7ms.
   real-time threading bugs at the FFI boundary. Not worth borrow
   checking in roughly 30% of one contained process.
 
-**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial. Field uses
-AGPL while personal/open-source; if productized closed-source, a
-commercial license (about $130/month Pro tier, or perpetual) resolves
-it. JUCE stays **quarantined inside the daemon** — it never leaks into
-other components, so licensing exposure is one process and the hosting
-layer stays swappable.
+**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial, and the
+daemon also compiles in Steinberg's VST3 SDK to host VST3 plugins,
+which JUCE 8.0.4 bundles under GPLv3 or Steinberg's proprietary VST3
+license. A daemon built from this repository takes the copyleft option
+of each (see the README's License section). A closed-source build would
+need a commercial JUCE license and Steinberg's proprietary VST3 license
+both; the JUCE license alone does not cover the SDK. JUCE and the SDK
+stay **quarantined inside the daemon** — they never leak into other
+components, so licensing exposure is one process and the hosting layer
+stays swappable.
 
 ## SuperCollider
 
