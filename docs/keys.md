@@ -39,7 +39,7 @@ To keep what you play, record it into a track; see
   `field keys` reports that.
 - **SuperCollider, to play an instrument.** `field keys` finds `sclang`
   the way `field build` does: `FIELD_SCLANG`, then your `PATH`, then
-  where SuperCollider installs.
+  the macOS app bundle.
 
 You do not need to be inside a Field project.
 
