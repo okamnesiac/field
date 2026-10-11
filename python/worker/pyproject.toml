@@ -11,6 +11,7 @@
 name = "field-worker"
 version = "0.1.0"
 description = "Field's shared generation-worker lifecycle: NDJSON over a unix socket"
+license = "MIT"
 requires-python = ">=3.11,<3.13"
 dependencies = []
 
