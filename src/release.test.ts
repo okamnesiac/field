@@ -148,6 +148,13 @@ describe('tagging a release', () => {
     expect(tag(checkout, { githubRelease: false })).toContain('tagged v0.1.0');
   });
 
+  it('pushes both tags or neither', () => {
+    // The bare repository refuses the major tag alone.
+    writeFileSync(join(origin, 'hooks', 'update'), '#!/bin/sh\ntest "$1" != refs/tags/v0\n', { mode: 0o755 });
+    expect(() => tag(checkout, { githubRelease: false })).toThrow('hook declined');
+    expect(git(origin, 'tag', '--list')).toBe('');
+  });
+
   it('refuses a version that is already tagged', () => {
     tag(checkout, { githubRelease: false });
     expect(() => tag(checkout, { githubRelease: false })).toThrow('v0.1.0 already exists; set a new version first');

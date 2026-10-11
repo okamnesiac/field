@@ -196,7 +196,7 @@ has four commands:
 | `bump patch\|minor\|major` | Raises one part of the version, writes it to `package.json`, and prints it. |
 | `set X.Y.Z` | Writes an exact version. Both refuse a version that does not go up. |
 | `released` | Exits 0 when the version on `origin/main` is tagged, and 3 when it is not. With `--since COMMIT`, it also exits 0 when that version is not above `COMMIT`'s. |
-| `tag` | Tags that version `vX.Y.Z`, force-moves the major tag `v0` to the same commit, pushes both, and creates the GitHub release with generated notes. `--no-release` skips the GitHub release. |
+| `tag` | Tags that version `vX.Y.Z`, force-moves the major tag `v0` to the same commit, pushes both in one atomic push, and creates the GitHub release with generated notes. `--no-release` skips the GitHub release. |
 
 `.github/workflows/release.yml` runs them as Projector's Release
 workflow does. Started by hand with `patch`, `minor`, or `major`, its
@@ -548,6 +548,10 @@ install would build the daemon with MSVC, as a Windows checkout does.
 - **Tags are fetched with `--force`.** Every release moves `v0`, and a
   local copy of the old one would otherwise refuse the fetch that
   `released` and `tag` start with.
+- **Both tags go in one atomic push.** Projector pushes them one at a
+  time. A failure between the two would leave `vX.Y.Z` on the remote
+  without `v0`, and `released` would then report the version released,
+  so no later run would move `v0` or create the GitHub release.
 - **Only a push that raises the version releases.** Projector's publish
   job asks only whether the merged version is tagged, which holds there
   because its version was tagged when its workflow landed. Field's
@@ -576,6 +580,7 @@ install would build the daemon with MSVC, as a Windows checkout does.
   still reach `origin` and never the decoy the rules point at. The file
   also covers each `bump` part, `set` refusing a version that does not
   go up, `tag` pushing both tags and moving `v0` on the next release,
+  a remote that refuses one tag receiving neither,
   tagging what `origin/main` holds rather than an unpushed bump,
   refusing a tagged version, a remote that is not GitHub, the GitHub
   repository read from a remote's configured URL, a failed GitHub

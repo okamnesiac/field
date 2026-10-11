@@ -155,8 +155,10 @@ export function tag(root: string, options: TagOptions = {}): string {
   if (tagged) throw new ReleaseError(`${release} already exists; set a new version first`);
   git(root, 'tag', '-a', release, commit, '-m', `Field ${version}`);
   git(root, 'tag', '-f', '-a', major, commit, '-m', `Field ${version}`);
-  git(root, 'push', '--quiet', remote, `refs/tags/${release}`);
-  git(root, 'push', '--quiet', '--force', remote, `refs/tags/${major}`);
+  // One atomic push: the release tag alone on the remote would make
+  // `released` report the version released, so no later run would move
+  // the major tag or create the GitHub release.
+  git(root, 'push', '--quiet', '--atomic', remote, `refs/tags/${release}`, `+refs/tags/${major}`);
   const done = `tagged ${release} and moved ${major} to ${commit.slice(0, 9)} on ${remote}/${branch}`;
   if (options.githubRelease === false) return done;
   try {

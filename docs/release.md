@@ -47,13 +47,13 @@ node scripts/release.ts tag                        # tag main's version, move v0
 
 The publish job runs `released --since` with the commit that `main` held
 before the merge, and `tag` only when that exits 3. `bump` and `set`
-refuse a version that does not go up. `tag` reads the
-version from `origin/main`, not from your checkout, so an unmerged bump
-cannot name a release, and it refuses a version that is already tagged.
-It needs an authenticated `gh` for the GitHub release, and
-`tag --no-release` pushes the tags alone. If the GitHub release fails
-after the tags are pushed, the error prints the `gh release create`
-command that finishes it.
+refuse a version that does not go up. `tag` reads the version from
+`origin/main`, not from your checkout, so an unmerged bump cannot name a
+release, and it refuses a version that is already tagged. It pushes both
+tags in one atomic push, so the remote gets both or neither. It needs an
+authenticated `gh` for the GitHub release, and `tag --no-release` pushes
+the tags alone. If the GitHub release fails after the tags are pushed,
+the error prints the `gh release create` command that finishes it.
 
 ## Versions a release leaves alone
 
