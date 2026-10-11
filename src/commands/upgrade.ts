@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 // - A release install downloads the newest installer, install.sh at the ref
 //   its install recorded in the repository it recorded, and runs that
 //   (install.md §3.2), as Projector's `project upgrade` does. The copy
-//   inside the installed version is as old as the version.
+//   inside the installed version is as old as the version, so it runs only
+//   under FIELD_OFFLINE, when nothing newer can download.
 
 export const DEFAULT_REPO = 'okamnesiac/field';
 export const DEFAULT_REF = 'v0';
@@ -152,20 +153,24 @@ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): num
   } catch {
     // a root that does not exist fails below with the path it was given
   }
-  if (deps.installer !== undefined || isCheckout(root)) {
-    const installer = deps.installer ?? join(root, 'install.sh');
+  const runHere = (installer: string, installerEnv: NodeJS.ProcessEnv): number => {
     if (!existsSync(installer)) throw new Error(`cannot upgrade: ${installer} does not exist`);
     // The command it runs, as you would type it, so the output that follows
     // has a name and the step can be repeated by hand.
     err(`+ ${[installer, ...args].map(displayQuote).join(' ')}`);
-    return run(installer, args, env);
-  }
+    return run(installer, args, installerEnv);
+  };
+  if (deps.installer !== undefined || isCheckout(root)) return runHere(deps.installer ?? join(root, 'install.sh'), env);
   const source = releaseSource(root, env);
   const url = installerUrl(source, env);
   // The installer reads the data directory from FIELD_DATA_DIR, so one
   // installed somewhere other than the default upgrades in place.
   const childEnv: NodeJS.ProcessEnv = { ...env };
   if (source.dataDir !== undefined && !env['FIELD_DATA_DIR']) childEnv['FIELD_DATA_DIR'] = source.dataDir;
+  // Offline, the installed version's own installer stands in for the
+  // newest one, which cannot download. FIELD_OFFLINE keeps it from
+  // downloading anything either (install.md §3.2).
+  if (env['FIELD_OFFLINE']) return runHere(join(root, 'install.sh'), childEnv);
   const scratch = mkdtempSync(join(tmpdir(), 'field-upgrade-'));
   try {
     const script = join(scratch, 'install.sh');

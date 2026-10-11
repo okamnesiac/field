@@ -279,7 +279,8 @@ It downloads `install.sh` at that ref from
 `raw.githubusercontent.com`, prints `+ curl -fsSL <url> | bash -s --
 <target>`, and runs it with `FIELD_DATA_DIR` set. It never asks
 `field.one`, which serves only the upstream's `v0`, and a fork must
-upgrade from the fork.
+upgrade from the fork. Under `FIELD_OFFLINE` it downloads nothing, and
+runs the installed version's own `install.sh` instead.
 
 **The targets in a release install.** `all` installs the release the ref
 names, or, when that version is installed, builds any missing piece,

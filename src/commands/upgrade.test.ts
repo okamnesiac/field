@@ -145,6 +145,16 @@ describe.skipIf(process.platform === 'win32')('field upgrade in a release instal
     expect(readFileSync(argsFile, 'utf8')).toBe('1:status\n\n');
   });
 
+  it("runs the installed version's own installer offline, and downloads nothing", () => {
+    rmSync(raw, { recursive: true });
+    writeFileSync(join(data, '0.2.0', 'install.sh'), `printf '%s\\n' "$#:$*" "\${FIELD_DATA_DIR:-}" > "$UPGRADE_ARGS"\nexit 5\n`);
+    const lines: string[] = [];
+    const status = upgrade('status', { root: join(data, 'current'), env: env({ FIELD_OFFLINE: '1' }), err: (line) => lines.push(line) });
+    expect(status).toBe(5);
+    expect(readFileSync(argsFile, 'utf8')).toBe(`1:status\n${realpathSync(data)}\n`);
+    expect(lines).toEqual([`+ ${realpathSync(data)}/0.2.0/install.sh status`]);
+  });
+
   it('refuses with the URL when the installer does not download', () => {
     rmSync(raw, { recursive: true });
     expect(() => upgrade('status', { root: join(data, '0.2.0'), env: env(), err: () => {} })).toThrow(
