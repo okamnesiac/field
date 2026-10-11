@@ -1,5 +1,5 @@
-name: musical-typing
-description: Logic Pro's Musical Typing. White keys on the home row, black keys above.
+name: musical
+description: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
 base: 60
 notes:
   KeyA: 0
@@ -25,12 +25,10 @@ controls:
   KeyX: { transpose: 12 }
   KeyC: { velocity: -20 }
   KeyV: { velocity: 20 }
+  Comma: { bend: -1 }
+  Period: { bend: 1 }
   Tab: { cc: 64, value: 127, mode: hold }
-  Digit1: { bend: -1 }
-  Digit2: { bend: 1 }
-  Digit3: { cc: 1, value: 0 }
-  Digit4: { cc: 1, value: 25 }
-  Digit5: { cc: 1, value: 51 }
-  Digit6: { cc: 1, value: 76 }
-  Digit7: { cc: 1, value: 102 }
-  Digit8: { cc: 1, value: 127 }
+  ArrowLeft: { knob: -1 }
+  ArrowRight: { knob: 1 }
+  ArrowUp: { turn: 1 }
+  ArrowDown: { turn: -1 }

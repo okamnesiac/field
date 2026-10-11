@@ -1071,10 +1071,17 @@ program
       'or tracks (creek/track:keys) to play the instrument each MIDI track names, all at once ' +
       '(needs a terminal with the kitty keyboard protocol; Esc quits)',
   )
-  .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
+  .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical)')
+  .option(
+    '--knobs <name or path>',
+    "a knob file to show and turn, for any instrument listening to Field Keys: a bare name is the project's " +
+      'shared/instruments/<name>.knobs.yaml, anything else a path (repeatable)',
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[],
+  )
   .option('--device <name>', 'output device for the instrument (field devices lists them; default: the system output)')
   .option('--print', 'print the keymap as a keyboard diagram and exit')
-  .action(async (targets: string[], opts: { keymap?: string; print?: boolean; device?: string }) => {
+  .action(async (targets: string[], opts: { keymap?: string; print?: boolean; device?: string; knobs?: string[] }) => {
     try {
       const { keysCommand } = await import('./commands/keys.js');
       await keysCommand(targets, opts);

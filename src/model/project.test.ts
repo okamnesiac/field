@@ -1662,6 +1662,15 @@ describe('record entries (recording.md §3–§4)', () => {
     createTrack(root, 'opener', 'vox');
   });
 
+  it('reports an instrument whose knob file fails its schema, as the take\'s render would', async () => {
+    writeVox(['  - record:', '      instrument: pad']);
+    writeFileSync(join(root, 'shared/instruments/pad.scd'), 'Out.ar(0, Silent.ar(2));\n');
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), 'knobs:\n  - { name: cutoff, cc: 64 }\n');
+    expect((await diagnostics()).join('\n')).toContain('shared/instruments/pad.knobs.yaml: knobs.0.cc: cutoff: cc 64 is the sustain pedal');
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), 'knobs:\n  - { name: cutoff, cc: 74 }\n');
+    expect((await diagnostics()).filter((d) => d.includes('knobs'))).toEqual([]);
+  });
+
   it('a bare `- record:` is the spelling, and no takes yet is a warning, not a gate', async () => {
     writeVox();
     const project = loadProject(root);

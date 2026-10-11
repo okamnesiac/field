@@ -23,16 +23,19 @@ afterEach(() => {
 });
 
 describe('resolving a keymap', () => {
-  it('defaults to musical-typing', () => {
+  it('defaults to musical', () => {
     expect(resolveKeymapSource(undefined, {})).toEqual({
       kind: 'builtin',
-      name: 'musical-typing',
-      path: join(builtinKeymapDir(), 'musical-typing.yaml'),
+      name: 'musical',
+      path: join(builtinKeymapDir(), 'musical.yaml'),
     });
   });
 
-  it('lists the built-ins', () => {
-    expect(builtinKeymapNames()).toEqual(['fourths', 'musical-typing', 'tracker']);
+  it('lists the built-ins, which no longer include musical-typing', () => {
+    expect(builtinKeymapNames()).toEqual(['fourths', 'musical', 'tracker']);
+    expect(() => resolveKeymapSource('musical-typing', {})).toThrow(
+      /no built-in keymap named "musical-typing" \(built-ins: fourths, musical, tracker\)/,
+    );
   });
 
   it('resolves and loads every built-in by its bare name', () => {
@@ -46,7 +49,7 @@ describe('resolving a keymap', () => {
   it('resolves a bare name only to a built-in', () => {
     writeFileSync(join(dir, 'mine.yaml'), 'name: mine\nnotes: { KeyA: 0 }\n');
     expect(() => resolveKeymapSource('mine', {}, { cwd: dir })).toThrow(
-      /no built-in keymap named "mine" \(built-ins: .*musical-typing.*\); .*give a path .*\.\/mine\.yaml/,
+      /no built-in keymap named "mine" \(built-ins: .*musical.*\); .*give a path .*\.\/mine\.yaml/,
     );
   });
 
@@ -68,7 +71,7 @@ describe('resolving a keymap', () => {
       kind: 'file',
       path: join(dir, 'mine.yaml'),
     });
-    expect(resolveKeymapSource('musical-typing', { FIELD_KEYMAP: '~/mine.yaml' }, { home: dir }).kind).toBe('builtin');
+    expect(resolveKeymapSource('musical', { FIELD_KEYMAP: '~/mine.yaml' }, { home: dir }).kind).toBe('builtin');
     expect(resolveKeymapSource(undefined, { FIELD_KEYMAP: '' }).kind).toBe('builtin');
   });
 });

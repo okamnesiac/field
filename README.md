@@ -157,9 +157,11 @@ needs `field-audiod` and a terminal that reports key releases through
 the kitty keyboard protocol: Ghostty, iTerm2 3.5 or later, kitty, or
 WezTerm. Keys are read by physical position, so Dvorak, AZERTY, and
 other layouts play the same notes, and a keymap of your own is a YAML
-file away. Name an instrument, as in `field keys pad` inside
+file away. Name an instrument, as in `field keys juno` inside
 `examples/bloom`, and it plays that SuperCollider instrument live too.
-See [docs/keys.md](docs/keys.md).
+The arrows choose and turn its knobs, such as `juno`'s filter cutoff,
+each one a MIDI controller, so a take you record keeps every turn. See
+[docs/keys.md](docs/keys.md).
 
 ## Status
 

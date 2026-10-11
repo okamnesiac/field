@@ -5,8 +5,9 @@
 // swept by the LFO, a slow attack, a long release, and the chorus on.
 //
 // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
-// juno` plays, with vibrato from the mod wheel (§14), and a record
-// entry with `instrument: juno` renders (keyboard-instrument.md §2.6).
+// juno` plays, with vibrato from the mod wheel (§14) and the knobs in
+// juno.knobs.yaml, and a record entry with `instrument: juno` renders
+// (keyboard-instrument.md §2.6).
 // Otherwise it runs under Field's sc-render contract and renders a held
 // C minor ninth chord for FIELD_DURATION.
 (
@@ -22,9 +23,12 @@ var pad = (
 );
 var level = 0.12; // a voice's gain: room for chords under 0 dBFS
 
-// One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
-// ends after the gate closes. The knobs are fixed per instrument, so they
-// shape the graph rather than arriving as controls. `mod`, the mod wheel
+// One JU-06A voice for the settings in `k`, stereo, freed when its
+// envelope ends after the gate closes. A render fixes every setting, so
+// they shape the graph. A voice takes four of them, the cutoff, the
+// resonance, the attack, and the release, as signals from its knobs; the
+// rest stay fixed, and those the graph tests with `if`, such as chorusOn,
+// must. `mod`, the mod wheel
 // from 0 to 1, comes only in voice mode: it adds vibrato of up to
 // modVibrato semitones and opens the filter by up to modOpen times its
 // cutoff. A render passes none, so its graph is the one without them.
@@ -53,8 +57,24 @@ var ju06a = { |freq, gate, k, mod|
 };
 
 if ("FIELD_MODE".getenv == "voice") {
+	// Each knob in juno.knobs.yaml, as the signal its controller sets: cc74
+	// from 0 to 1, mapped through the knob's range from the copy of the file
+	// that Field checked (keys.md, "Knobs"), starting at the knob's default.
+	var knobs = ("FIELD_KNOBS".getenv ?? {
+		Error("juno maps its knobs from juno.knobs.yaml, whose checked copy Field names in FIELD_KNOBS").throw
+	}).parseYAMLFile["knobs"];
+	var knob = { |name|
+		var each = knobs.detect { |knob| knob["name"] == name };
+		var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
+		spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+	};
 	SynthDef(\junoKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
-		Out.ar(out, ju06a.(freq, gate, pad, mod.lag(0.05)) * amp * level);
+		var k = pad.copy;
+		k[\vcfFreq] = knob.("cutoff");
+		k[\vcfRes] = knob.("res");
+		k[\atk] = knob.("attack");
+		k[\rel] = knob.("release");
+		Out.ar(out, ju06a.(freq, gate, k, mod.lag(0.05)) * amp * level);
 	})
 } {
 	var seed = "FIELD_SEED".getenv.asInteger;

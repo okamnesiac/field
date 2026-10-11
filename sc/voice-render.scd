@@ -4,6 +4,8 @@
 // sc-render contract, plus the take:
 //
 // FIELD_INSTRUMENT  the instrument program, loaded under FIELD_MODE=voice
+// FIELD_KNOBS       the checked copy of its knob file, when it has one
+//                   (instrument-knobs.md §2.4)
 // FIELD_EVENTS      a JSON file: {"events": [[seconds, kind, ...], ...]},
 //                   in time order, where kind is "on" (channel, note,
 //                   velocity), "off" (channel, note), "cc" (channel,
@@ -11,6 +13,7 @@
 // FIELD_OUTPUT, FIELD_SAMPLE_RATE, FIELD_CHANNELS, FIELD_DURATION
 (
 var instrument = "FIELD_INSTRUMENT".getenv;
+var knobs = "FIELD_KNOBS".getenv;
 var eventsPath = "FIELD_EVENTS".getenv;
 var out = "FIELD_OUTPUT".getenv;
 var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
@@ -23,7 +26,7 @@ var voiceDef, problem, take, score, voicer, now = 0.0, nextNode = 1000;
 // render variables are absent, here as live (keys.md).
 ["FIELD_OUTPUT", "FIELD_SEED", "FIELD_DURATION", "FIELD_SAMPLE_RATE", "FIELD_CHANNELS"].do(_.unsetenv);
 
-# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument);
+# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument, knobs);
 if (problem.notNil) {
 	("ERROR: " ++ problem).postln;
 	1.exit;
@@ -33,10 +36,10 @@ if (problem.notNil) {
 	score.add([0.0, ['/d_recv', voiceDef.asBytes]]);
 
 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
-		{ |note, velocity, freq, mod|
+		{ |note, velocity, freq, controls|
 			var node = nextNode;
 			nextNode = nextNode + 1;
-			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod]]);
+			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0] ++ controls]);
 			node
 		},
 		{ |node, control, value| score.add([now, [\n_set, node, control, value]]) },

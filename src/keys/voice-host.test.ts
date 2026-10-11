@@ -204,7 +204,8 @@ describe('the voice host process', () => {
     expect(seen.args[2]).toBe('-D');
     expect(seen.args[3]).toMatch(/sc\/voice-host\.scd$/);
     expect(existsSync(seen.args[3])).toBe(true);
-    expect(seen).toMatchObject({ mode: 'voice', instruments: '["/p/pad.scd"]', device: 'Test Out', parent: String(process.pid) });
+    expect(seen).toMatchObject({ mode: 'voice', device: 'Test Out', parent: String(process.pid) });
+    expect(JSON.parse(seen.instruments)).toEqual([{ program: '/p/pad.scd' }]);
     await host.close();
     expect(readFileSync(log, 'latin1')).toContain('/quit');
   });
@@ -229,6 +230,21 @@ describe('the voice host process', () => {
     const sent = readFileSync(log, 'latin1');
     expect(sent.indexOf('/g_freeAll')).toBeGreaterThanOrEqual(0);
     expect(sent.indexOf('/g_freeAll')).toBeLessThan(sent.indexOf('/quit'));
+  });
+
+  itStartsTheStub('hands each program the checked copy of its knob file, and a program without one none', async () => {
+    const host = await VoiceHost.start({
+      instruments: ['/p/juno.scd', '/p/pad.scd'],
+      knobs: new Map([['/p/juno.scd', '/tmp/field-knobs-x/0-juno.knobs.yaml']]),
+      env: env('ready'),
+    });
+    await host.ready;
+    const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
+    expect(JSON.parse(seen.instruments)).toEqual([
+      { program: '/p/juno.scd', knobs: '/tmp/field-knobs-x/0-juno.knobs.yaml' },
+      { program: '/p/pad.scd' },
+    ]);
+    await host.close();
   });
 
   itStartsTheStub('routes nothing when no instrument has a ring', async () => {

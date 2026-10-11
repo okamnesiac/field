@@ -1,51 +1,67 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { builtinKeymapDir, loadKeymap, parseKeymap } from '../keys/keymap.js';
+import { KnobsError, knobList, loadKnobs, parseKnobs } from '../keys/knobs.js';
 import { KeysSession } from '../keys/session.js';
 import { BUILD_DAEMON } from '../remedies.js';
-import { instrumentState, instrumentText, statusText } from './keys.js';
+import { instrumentState, instrumentText, KnobFiles, KnobLine, loadKnobSources, redrawAbove, statusText } from './keys.js';
 
 // field keys' status line: the sounding notes come last, so playing
 // changes only the end of the line, and a narrow terminal shortens what
 // comes before them instead of the notes.
 
-function musicalTyping(): KeysSession {
-  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical-typing.yaml')));
+function musical(): KeysSession {
+  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')));
+}
+
+const shelf = join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments');
+const juno = loadKnobs(join(shelf, 'juno.knobs.yaml'));
+
+// What a line shows, without the escapes that put a knob in reverse video.
+const plain = (line: string): string => line.replace(/\x1b\[\d+m/g, '');
+
+function tap(session: KeysSession, position: string, times = 1): void {
+  for (let i = 0; i < times; i++) {
+    session.press(position);
+    session.release(position);
+  }
 }
 
 describe('the status line', () => {
   it('ends with the sounding notes, after anything else it has to say', () => {
-    const session = musicalTyping();
-    expect(statusText(session, undefined, undefined, 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · –',
-    );
+    const session = musical();
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · musical · transpose 0 · velocity 100 · bend +0 · –');
     session.press('KeyA');
     session.press('KeyD');
-    expect(statusText(session, undefined, 'KeyA is both a note and a control', 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
+    expect(statusText(session, undefined, 'KeyA is both a note and a control', 300, 'juno.knobs.yaml: knobs.1.cc: res: cc 1 is the modulation wheel')).toBe(
+      'Field Keys · musical · transpose 0 · velocity 100 · bend +0 · keymap not reloaded: KeyA is both a note and a control · ' +
+        'knobs not reloaded: juno.knobs.yaml: knobs.1.cc: res: cc 1 is the modulation wheel · C4 E4',
     );
   });
 
-  it('shows the modulation wheel where the keymap can set it', () => {
-    const session = musicalTyping();
+  it('shows the modulation wheel where the keymap can set it and has no knob line to show it', () => {
+    const session = new KeysSession(parseKeymap('name: wheel\nnotes: { KeyA: 0 }\ncontrols: { Digit6: { cc: 1, value: 76 } }\n', 'w.yaml'));
     session.press('Digit6');
     session.release('Digit6');
-    expect(statusText(session, undefined, undefined, 200)).toBe(
-      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 76 · –',
-    );
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · wheel · transpose 0 · velocity 100 · mod 76 · –');
     const tracker = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')));
     expect(statusText(tracker, undefined, undefined, 200)).not.toMatch(/bend|mod/);
+    const turned = musical();
+    turned.press('ArrowUp');
+    expect(statusText(turned, undefined, undefined, 200)).not.toMatch(/mod/);
   });
 
   it('shows the pitch bend while a bend key is held, at the same width', () => {
-    const session = musicalTyping();
+    const session = musical();
     session.press('KeyA');
     const rest = statusText(session, undefined, undefined, 200);
-    session.press('Digit1');
+    session.press('Comma');
     const bent = statusText(session, undefined, undefined, 200);
-    expect(bent).toBe('Field Keys · musical-typing · transpose 0 · velocity 100 · bend -1 · mod 0 · C4');
+    expect(bent).toBe('Field Keys · musical · transpose 0 · velocity 100 · bend -1 · C4');
     expect(bent).toHaveLength(rest.length);
-    session.release('Digit1');
+    session.release('Comma');
     expect(statusText(session, undefined, undefined, 200)).toBe(rest);
   });
 
@@ -66,12 +82,12 @@ describe('the status line', () => {
   });
 
   it('shortens the text before the notes to fit, never the notes', () => {
-    const session = musicalTyping();
+    const session = musical();
     session.press('KeyA');
     session.press('KeyD');
-    const line = statusText(session, undefined, undefined, 30);
-    expect(line).toBe('Field Keys · musical-… · C4 E4');
-    expect(line).toHaveLength(30);
+    const line = statusText(session, undefined, undefined, 26);
+    expect(line).toBe('Field Keys · musi… · C4 E4');
+    expect(line).toHaveLength(26);
   });
 });
 
@@ -122,5 +138,141 @@ describe('the instrument line', () => {
     expect(instrumentText({ ...state, status: live, reload: { failed: 'juno.scd does not compile' } })).toBe(
       'keys (juno) + bass (bass) kept its last voice: juno.scd does not compile',
     );
+  });
+});
+
+describe('the knob line', () => {
+  const withJuno = (): KeysSession => new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
+
+  it('shows every knob at its default, with the chosen one in reverse video', () => {
+    const line = new KnobLine().text(withJuno(), 200);
+    expect(line).toBe('\x1b[7mmod   0\x1b[27m  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s');
+  });
+
+  it('keeps its length through a turn, and moves the reverse video with the choice', () => {
+    const session = withJuno();
+    const knobLine = new KnobLine();
+    const rest = plain(knobLine.text(session, 200));
+    tap(session, 'ArrowRight');
+    tap(session, 'ArrowDown', 100);
+    const turned = knobLine.text(session, 200);
+    expect(turned).toBe('mod   0  \x1b[7mcutoff  50.0 Hz\x1b[27m  res 0.300  attack  800 ms  release  1.50 s');
+    expect(plain(turned)).toHaveLength(rest.length);
+    tap(session, 'ArrowUp');
+    expect(plain(knobLine.text(session, 200))).toBe('mod   0  cutoff  52.3 Hz  res 0.300  attack  800 ms  release  1.50 s');
+  });
+
+  it('names each knob after its source when knobs come from several', () => {
+    const session = new KeysSession(
+      loadKeymap(join(builtinKeymapDir(), 'musical.yaml')),
+      knobList([
+        { name: 'keys', knobs: juno.slice(0, 1) },
+        { name: 'bass', knobs: loadKnobs(join(shelf, 'bass.knobs.yaml')).slice(0, 1) },
+      ]),
+    );
+    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  keys.cutoff 2.00 kHz  bass.cutoff 1.20 kHz');
+    tap(session, 'ArrowRight');
+    tap(session, 'ArrowUp');
+    // Two knobs on one controller share its value, each through its own range.
+    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  keys.cutoff 2.08 kHz  bass.cutoff 2.08 kHz');
+  });
+
+  it('shows a window of whole knobs on a narrow terminal, which moves only when the choice leaves it', () => {
+    const session = withJuno();
+    const knobLine = new KnobLine();
+    expect(plain(knobLine.text(session, 40))).toBe('mod   0  cutoff 2.00 kHz  res 0.300 ›');
+    tap(session, 'ArrowRight', 2);
+    expect(plain(knobLine.text(session, 40))).toBe('mod   0  cutoff 2.00 kHz  res 0.300 ›');
+    tap(session, 'ArrowRight');
+    expect(plain(knobLine.text(session, 40))).toBe('‹ res 0.300  attack  800 ms ›');
+    tap(session, 'ArrowUp', 5);
+    expect(plain(knobLine.text(session, 40))).toBe('‹ res 0.300  attack  1.02 s ›');
+    tap(session, 'ArrowLeft');
+    expect(plain(knobLine.text(session, 40))).toBe('‹ res 0.300  attack  1.02 s ›');
+    tap(session, 'ArrowLeft');
+    expect(plain(knobLine.text(session, 40))).toBe('‹ cutoff 2.00 kHz  res 0.300 ›');
+    tap(session, 'ArrowLeft', 2);
+    expect(plain(knobLine.text(session, 40))).toBe('‹ attack  1.02 s  release  1.50 s');
+  });
+});
+
+describe('redrawing the lines above the status line', () => {
+  it('draws them all the first time, then only from the first that changed', () => {
+    expect(redrawAbove([], ['juno starting', 'mod   0'])).toBe('\r\x1b[Kjuno starting\n\r\x1b[Kmod   0\n');
+    expect(redrawAbove(['juno starting', 'mod   0'], ['juno starting', 'mod   0'])).toBe('');
+    expect(redrawAbove(['juno starting', 'mod   0'], ['juno starting', 'mod   1'])).toBe('\x1b[1A\r\x1b[Kmod   1\n');
+    expect(redrawAbove(['juno starting', 'mod   0'], ['juno live', 'mod   0'])).toBe('\x1b[2A\r\x1b[Kjuno live\n\r\x1b[Kmod   0\n');
+  });
+
+  it('clears what is left below when a line goes', () => {
+    expect(redrawAbove(['juno live', 'mod   0'], ['juno live'])).toBe('\x1b[1A\x1b[J');
+    expect(redrawAbove(['juno live'], ['juno live', 'mod   0'])).toBe('\r\x1b[Kmod   0\n');
+  });
+});
+
+describe('knob files in a session', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'field-keys-knobs-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('reads an armed instrument’s knob file beside its program, and each --knobs file', () => {
+    writeFileSync(join(dir, 'juno.scd'), '');
+    writeFileSync(join(dir, 'juno.knobs.yaml'), readFileSync(join(shelf, 'juno.knobs.yaml')));
+    writeFileSync(join(dir, 'pad.scd'), '');
+    writeFileSync(join(dir, 'ju-06a.yaml'), 'knobs:\n  - { name: cutoff, cc: 74 }\n');
+    const sources = loadKnobSources(
+      [
+        { program: join(dir, 'juno.scd'), track: 'creek/keys', unheardEffects: [] },
+        { program: join(dir, 'pad.scd'), unheardEffects: [] },
+      ],
+      [join(dir, 'ju-06a.yaml')],
+      undefined,
+    );
+    expect(sources.map(({ name, program }) => ({ name, program }))).toEqual([
+      { name: 'keys', program: join(dir, 'juno.scd') },
+      { name: 'ju-06a', program: undefined },
+    ]);
+    expect(sources[0]!.knobs).toEqual(juno);
+    expect(() => loadKnobSources([], [join(dir, 'missing.yaml')], undefined)).toThrow(/no such file/);
+    writeFileSync(join(dir, 'juno.knobs.yaml'), 'knobs:\n  - { name: cutoff, cc: 1 }\n');
+    expect(() => loadKnobSources([{ program: join(dir, 'juno.scd'), unheardEffects: [] }], [], undefined)).toThrow(KnobsError);
+  });
+
+  it('keeps the voice’s copy after a save that fails and asks for no reload, and rewrites it before one that passes', () => {
+    const path = join(dir, 'juno.knobs.yaml');
+    const files = new KnobFiles([
+      { name: 'juno', path, program: '/p/juno.scd', knobs: juno },
+      { name: 'ju-06a', path: join(dir, 'ju-06a.yaml'), knobs: juno.slice(0, 1) },
+    ]);
+    try {
+      const copy = files.copies.get('/p/juno.scd')!;
+      expect(parseKnobs(readFileSync(copy, 'utf8'), copy)).toEqual(juno);
+      expect([...files.copies.keys()]).toEqual(['/p/juno.scd']);
+
+      let failed: KnobsError | undefined;
+      try {
+        parseKnobs('knobs:\n  - { name: res, cc: 1 }\n', path);
+      } catch (err) {
+        failed = err as KnobsError;
+      }
+      expect(files.saved(path, { error: failed! })).toBe(false);
+      expect(files.errors.get(path)).toBe('juno.knobs.yaml: knobs.0.cc: res: cc 1 is the modulation wheel, which is the knob mod');
+      expect(parseKnobs(readFileSync(copy, 'utf8'), copy)).toEqual(juno);
+      expect(files.list().map((k) => k.label)).toContain('juno.release');
+
+      expect(files.saved(path, { knobs: juno.slice(0, 2) })).toBe(true);
+      expect(files.errors.size).toBe(0);
+      expect(parseKnobs(readFileSync(copy, 'utf8'), copy)).toEqual(juno.slice(0, 2));
+      expect(files.list().map((k) => k.label)).toEqual(['mod', 'juno.cutoff', 'juno.res', 'ju-06a.cutoff']);
+
+      // A --knobs file reaches no voice, so its save reloads none.
+      expect(files.saved(join(dir, 'ju-06a.yaml'), { knobs: juno.slice(1, 2) })).toBe(false);
+      expect(files.list().map((k) => k.label)).toEqual(['mod', 'juno.cutoff', 'juno.res', 'ju-06a.res']);
+    } finally {
+      files.remove();
+    }
+    expect(existsSync(files.copies.get('/p/juno.scd')!)).toBe(false);
   });
 });
