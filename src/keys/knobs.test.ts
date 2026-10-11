@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocument } from 'yaml';
 import type { Knob } from '../schema/knobs.js';
@@ -37,10 +37,10 @@ describe('finding knob files', () => {
   });
 
   it('resolves --knobs by bare name on the shelf, and by path', () => {
-    expect(resolveKnobsPath('juno', '/p')).toBe('/p/shared/instruments/juno.knobs.yaml');
-    expect(resolveKnobsPath('~/knobs/ju-06a.yaml', '/p', { home: '/home/j' })).toBe('/home/j/knobs/ju-06a.yaml');
-    expect(resolveKnobsPath('ju-06a.yaml', undefined, { cwd: '/here' })).toBe('/here/ju-06a.yaml');
-    expect(resolveKnobsPath('./k', undefined, { cwd: '/here' })).toBe('/here/k');
+    expect(resolveKnobsPath('juno', '/p')).toBe(join('/p', 'shared', 'instruments', 'juno.knobs.yaml'));
+    expect(resolveKnobsPath('~/knobs/ju-06a.yaml', '/p', { home: '/home/j' })).toBe(resolve('/home/j', 'knobs', 'ju-06a.yaml'));
+    expect(resolveKnobsPath('ju-06a.yaml', undefined, { cwd: '/here' })).toBe(resolve('/here', 'ju-06a.yaml'));
+    expect(resolveKnobsPath('./k', undefined, { cwd: '/here' })).toBe(resolve('/here', 'k'));
     expect(() => resolveKnobsPath('juno', undefined)).toThrow(/not inside a Field project/);
   });
 
