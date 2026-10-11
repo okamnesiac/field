@@ -190,10 +190,15 @@ juce::String Player::initialise()
                     saw[(size_t) i] = (float) ((double) ((inputClock + i) % 48000) / 48000.0 * 2.0 - 1.0);
                 inputClock += nullBlockSize;
                 // Presented the way a real duplex open presents it: only
-                // the active channel, only while armed.
-                const float* ins[1] = { nullInputChannel.load() == 2 ? flat.data() : saw.data() };
-                processBlock (ins, armed.load() && ! armedMidi.load() ? 1 : 0,
-                              scratch.getArrayOfWritePointers(), 2, nullBlockSize);
+                // the armed channels, in channel order, only while armed.
+                const int mask = nullInputMask.load();
+                const float* ins[2] {};
+                int count = 0;
+                if ((mask & 1) != 0)
+                    ins[count++] = saw.data();
+                if ((mask & 2) != 0)
+                    ins[count++] = flat.data();
+                processBlock (ins, count, scratch.getArrayOfWritePointers(), 2, nullBlockSize);
                 // Real-time pace, so position and end-of-stream behave as
                 // they would against a device. Against an absolute
                 // deadline rather than a relative sleep: the relative
@@ -745,6 +750,49 @@ juce::var Player::status (bool consumePeak)
             }
             capture->describeProgress (*rec);
         }
+        // With more than one track armed (arming.md §2.2), every one, the
+        // primary first: its kind, its input and meter, and its take's
+        // progress. One armed track reports as it always has.
+        if (armed.load() && companionCount > 0)
+        {
+            juce::Array<juce::var> list;
+            const auto item = [&] (const juce::String& track, bool midi, int input, double peak,
+                                   const field::Transaction* take)
+            {
+                auto entry = obj();
+                entry->setProperty ("track", track);
+                entry->setProperty ("kind", midi ? "midi" : "audio");
+                if (! midi)
+                {
+                    entry->setProperty ("input", input);
+                    entry->setProperty ("input_peak", peak);
+                }
+                if (take != nullptr)
+                {
+                    entry->setProperty ("transaction", take->id());
+                    take->describeProgress (*entry);
+                }
+                list.add (juce::var (entry.get()));
+            };
+            item (armedTrack, armedMidi.load(), armedInput,
+                  (double) rec->getProperty ("input_peak").operator double(), capture.get());
+            for (int c = 0; c < companionCount; ++c)
+            {
+                auto& companion = companions[(size_t) c];
+                const double peak = consumePeak ? companion.peak.exchange (0.0f) : companion.peak.load();
+                item (companion.track, companion.midi.load(), companion.input, peak, companion.take.get());
+            }
+            rec->setProperty ("armed", list);
+            // An audio primary's MIDI companions listen to the arm's
+            // sources, named here as a MIDI primary's are above.
+            if (! armedMidi.load() && ! midiSources.isEmpty())
+            {
+                juce::Array<juce::var> sources;
+                for (const auto& source : midiSources)
+                    sources.add (source);
+                rec->setProperty ("sources", sources);
+            }
+        }
         result->setProperty ("record", juce::var (rec.get()));
     }
     result->setProperty ("click_ticks", click.tickCount());
@@ -929,14 +977,39 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
             inputPeak.store (peak);
     }
 
+    // Each armed companion's input has its own meter.
+    const int live = liveCompanions.load();
+    for (int c = 0; c < live; ++c)
+    {
+        auto& companion = companions[(size_t) c];
+        const int own = companion.channel.load();
+        if (companion.midi.load() || in == nullptr || own < 0 || own >= numInputs)
+            continue;
+        float peak = 0.0f;
+        for (int i = 0; i < n; ++i)
+            peak = std::max (peak, std::fabs (in[own][i]));
+        if (peak > companion.peak.load())
+            companion.peak.store (peak);
+    }
+
     if (auto* midiTake = activeMidiCapture.load())
     {
         recordMidiBlock (*midiTake, position, freeBefore, n, blockStartMs);
         return;
     }
-    // No MIDI take: what arrived belongs to none.
-    drainMidiArrivals ([] (const MidiArrival&) {});
+    recordAudioBlock (in, numInputs, input, position, freeBefore, n);
+    // An audio primary's MIDI companions stamp what arrived on the clock
+    // its latch set; otherwise what arrived belongs to no take.
+    if (companionMidiRunning.load())
+        recordMidiCompanions (n, blockStartMs);
+    else
+        drainMidiArrivals ([] (const MidiArrival&) {});
+}
 
+void Player::recordAudioBlock (const float* const* in, int numInputs, const float* input, juce::int64 position,
+                               juce::int64 freeBefore, int n)
+{
+    const int live = liveCompanions.load();
     auto* target = activeCapture.load();
     if (target == nullptr && captureLoop.load() && captureStartRequested.load())
     {
@@ -969,6 +1042,27 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
         }
         captureStartRequested = false;
         target->setStartedAt (here + from);
+        // The companions start on the same sample (arming.md §2.2). Its
+        // MIDI ones run on the MIDI clock, which starts here too.
+        bool midiCompanion = false;
+        for (int c = 0; c < live; ++c)
+        {
+            if (auto* take = companions[(size_t) c].audio.load())
+                take->setStartedAt (here + from);
+            if (auto* take = companions[(size_t) c].midiTake.load())
+            {
+                take->setStartedAt (here + from);
+                midiCompanion = true;
+            }
+        }
+        if (midiCompanion)
+        {
+            midiTakeClock = -from;
+            midiFloor = std::numeric_limits<juce::int64>::min();
+            midiLastAt = 0;
+            midiArrivalsLost = 0;
+            companionMidiRunning = true;
+        }
         captureStarted = true;
     }
     if (! captureStarted.load())
@@ -991,7 +1085,19 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
     if (source == nullptr)
         return;
     if (cut > from)
+    {
         target->push (source + from, cut - from);
+        // Each audio companion takes the same span of its own input.
+        for (int c = 0; c < live; ++c)
+            if (auto* take = companions[(size_t) c].audio.load())
+            {
+                const int own = companions[(size_t) c].channel.load();
+                const bool present = in != nullptr && own >= 0 && own < numInputs;
+                const float* ownSource = present ? in[own] : ((int) silence.size() >= n ? silence.data() : nullptr);
+                if (ownSource != nullptr)
+                    take->push (ownSource + from, cut - from);
+            }
+    }
     if (! ending)
         return;
     if (captureDone.load())
@@ -1024,8 +1130,13 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
     {
         activeCapture = nullptr;
         captureStarted = false;
+        for (int c = 0; c < live; ++c)
+            companions[(size_t) c].audio = nullptr;
     }
-    captureDone = true;
+    // MIDI companions end a block later, as a MIDI take ends
+    // (recordMidiCompanions); the pass is done when they are.
+    if (! companionMidiRunning.load())
+        captureDone = true;
 }
 
 template <typename Handle>
@@ -1053,6 +1164,16 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
         return;
     const auto discard = [] (const MidiArrival&) {};
     const juce::int64 here = position == -2 ? freeBefore : position;
+    // A MIDI primary's companions are MIDI too, since armSet makes an
+    // audio track the primary whenever one is armed, and they record
+    // exactly what it records (arming.md §2.2).
+    const int live = liveCompanions.load();
+    const auto eachCompanion = [&] (auto&& use)
+    {
+        for (int c = 0; c < live; ++c)
+            if (auto* companion = companions[(size_t) c].midiTake.load())
+                use (*companion);
+    };
     if (captureStartRequested.load())
     {
         int from = 0;
@@ -1068,6 +1189,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
         }
         captureStartRequested = false;
         take.setStartedAt (here + from);
+        eachCompanion ([&] (field::MidiCapture& companion) { companion.setStartedAt (here + from); });
         midiTakeClock = -from;
         midiFloor = std::numeric_limits<juce::int64>::min();
         midiLastAt = 0;
@@ -1079,22 +1201,60 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
         drainMidiArrivals (discard);
         return;
     }
-    // The take's clock counts the device's samples from its start, as an
-    // audio take's frames do, so `at` stays in sample_rate's units and
-    // runs on through a bed that wraps. `until` and the start are on the
-    // bed's timeline, in the bed's samples, so the span between them
-    // changes rate when the two differ, as a 44.1 kHz song on a 48 kHz
-    // device does.
+    const juce::int64 untilFrames = midiUntilFrames (take);
+    const juce::int64 blockStart = stampMidiBlock (
+        untilFrames, n, blockStartMs,
+        [&] (juce::int64 at, const juce::uint8* bytes, int size)
+        {
+            take.push (at, bytes, size);
+            eachCompanion ([&] (field::MidiCapture& companion) { companion.push (at, bytes, size); });
+        },
+        [&] (juce::int64 frames, int lost)
+        {
+            take.setFrames (frames);
+            eachCompanion ([&] (field::MidiCapture& companion) { companion.setFrames (frames); });
+            if (lost > 0)
+            {
+                take.addDropped (lost);
+                eachCompanion ([&] (field::MidiCapture& companion) { companion.addDropped (lost); });
+            }
+        });
+    // The take ends at the first block that begins at or past `until`,
+    // not the block `until` falls inside: a message is drained at the
+    // start of the block after it arrives, so only then has every
+    // message before `until` been stamped.
+    if (blockStart < untilFrames)
+        return;
+    activeMidiCapture = nullptr;
+    for (int c = 0; c < live; ++c)
+        companions[(size_t) c].midiTake = nullptr;
+    captureStarted = false;
+    captureDone = true;
+}
+
+juce::int64 Player::midiUntilFrames (const field::Transaction& take) const
+{
+    // `until` and the start are on the bed's timeline, in the bed's
+    // samples, and the take's clock counts the device's, so the span
+    // between them changes rate when the two differ, as a 44.1 kHz song
+    // on a 48 kHz device does.
     const double rate = currentDeviceRate();
     const double bedRate = take.timelineRate() > 0.0 ? take.timelineRate() : rate;
     const juce::int64 untilAt = captureUntil.load();
-    const juce::int64 untilFrames = untilAt >= 0
-        ? std::llround ((double) (untilAt - take.startedAt()) * rate / bedRate)
-        : std::numeric_limits<juce::int64>::max();
+    return untilAt >= 0 ? std::llround ((double) (untilAt - take.startedAt()) * rate / bedRate)
+                        : std::numeric_limits<juce::int64>::max();
+}
+
+template <typename Push, typename Frames>
+juce::int64 Player::stampMidiBlock (juce::int64 untilFrames, int n, double blockStartMs, Push&& push, Frames&& frames)
+{
+    // The take's clock counts the device's samples from its start, as an
+    // audio take's frames do, so `at` stays in sample_rate's units and
+    // runs on through a bed that wraps.
     const juce::int64 blockStart = midiTakeClock;
     const juce::int64 blockEnd = blockStart + n;
-    if (const int lost = midiArrivalsLost.exchange (0); lost > 0)
-        take.addDropped (lost);
+    const double rate = currentDeviceRate();
+    const int lost = midiArrivalsLost.exchange (0);
     drainMidiArrivals ([&] (const MidiArrival& arrival)
     {
         auto at = blockStart + (juce::int64) std::llround ((arrival.ms - blockStartMs) * rate / 1000.0);
@@ -1108,21 +1268,57 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
         at = std::max (at, midiLastAt);
         if (at >= untilFrames)
             return;
-        take.push (at, arrival.bytes, arrival.size);
+        push (at, arrival.bytes, arrival.size);
         midiLastAt = at;
     });
-    take.setFrames (std::max<juce::int64> (0, std::min (blockEnd, untilFrames)));
+    frames (std::max<juce::int64> (0, std::min (blockEnd, untilFrames)), lost);
     midiFloor = blockStart;
     midiTakeClock = blockEnd;
-    // The take ends at the first block that begins at or past `until`,
-    // not the block `until` falls inside: a message is drained at the
-    // start of the block after it arrives, so only then has every
-    // message before `until` been stamped.
+    return blockStart;
+}
+
+void Player::recordMidiCompanions (int n, double blockStartMs)
+{
+    const int live = liveCompanions.load();
+    field::MidiCapture* first = nullptr;
+    for (int c = 0; c < live && first == nullptr; ++c)
+        first = companions[(size_t) c].midiTake.load();
+    if (first == nullptr)
+    {
+        // A stop detached them.
+        companionMidiRunning = false;
+        drainMidiArrivals ([] (const MidiArrival&) {});
+        return;
+    }
+    const auto eachCompanion = [&] (auto&& use)
+    {
+        for (int c = 0; c < live; ++c)
+            if (auto* companion = companions[(size_t) c].midiTake.load())
+                use (*companion);
+    };
+    const juce::int64 untilFrames = midiUntilFrames (*first);
+    const juce::int64 blockStart = stampMidiBlock (
+        untilFrames, n, blockStartMs,
+        [&] (juce::int64 at, const juce::uint8* bytes, int size)
+        { eachCompanion ([&] (field::MidiCapture& companion) { companion.push (at, bytes, size); }); },
+        [&] (juce::int64 frames, int lost)
+        {
+            eachCompanion ([&] (field::MidiCapture& companion)
+            {
+                companion.setFrames (frames);
+                if (lost > 0)
+                    companion.addDropped (lost);
+            });
+        });
+    // A block after the audio, as recordMidiBlock ends a MIDI take.
     if (blockStart < untilFrames)
         return;
-    activeMidiCapture = nullptr;
-    captureStarted = false;
-    captureDone = true;
+    for (int c = 0; c < live; ++c)
+        companions[(size_t) c].midiTake = nullptr;
+    companionMidiRunning = false;
+    // The pass is done once the audio has ended too.
+    if (activeCapture.load() == nullptr)
+        captureDone = true;
 }
 
 void Player::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
@@ -1186,111 +1382,23 @@ void Player::audioDeviceStopped()
 
 juce::var Player::arm (const juce::String& track, const juce::String& device, int input)
 {
-    auto result = obj();
-    auto fail = [&] (const juce::String& error)
-    {
-        result->setProperty ("error", error);
-        return juce::var (result.get());
-    };
-    if (capture != nullptr)
-        return fail ("cannot re-arm while recording (stop first)");
-    if (input < 1)
-        return fail ("input channels count from 1");
-
-    juce::String name = device;
-    int channels = 0;
-    int inputLatency = 0;
-    int outputLatency = 0;
-    if (nullMode)
-    {
-        if (device.isNotEmpty() && device != "null")
-            return fail ("no devices in null-output mode");
-        channels = 2;
-        if (input > channels)
-            return fail ("the null input has 2 channels");
-        name = "null";
-        // The clock presents the named channel as the one active input,
-        // exactly as a real duplex open would, so the tap reads index 0
-        // in both modes.
-        nullInputChannel = input;
-        captureChannel = 0;
-    }
-    else
-    {
-        auto* type = deviceManager.getCurrentDeviceTypeObject();
-        if (type == nullptr)
-            return fail ("no audio device type");
-        type->scanForDevices();
-        auto names = type->getDeviceNames (true);
-        if (names.isEmpty())
-            return fail ("no input devices");
-        if (name.isEmpty())
-            name = names[juce::jmax (0, type->getDefaultDeviceIndex (true))];
-        if (! names.contains (name))
-            return fail ("unknown input device: " + name);
-
-        // The duplex open (recording.md §5): the same device manager,
-        // now with one input channel active. Playback-only sessions
-        // never reach here, which is what keeps the microphone prompt
-        // for the first arm rather than the first play. A failure puts
-        // the previous setup back, so a bad arm leaves playback as it
-        // was.
-        const auto previous = deviceManager.getAudioDeviceSetup();
-        auto setup = previous;
-        setup.inputDeviceName = name;
-        setup.useDefaultInputChannels = false;
-        setup.inputChannels.clear();
-        setup.inputChannels.setBit (input - 1);
-        if (auto error = deviceManager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
-        {
-            deviceManager.setAudioDeviceSetup (previous, true);
-            return fail (error);
-        }
-        auto* opened = deviceManager.getCurrentAudioDevice();
-        if (opened == nullptr)
-        {
-            deviceManager.setAudioDeviceSetup (previous, true);
-            return fail ("the device did not open with an input");
-        }
-        channels = opened->getInputChannelNames().size();
-        // JUCE clears a channel bit the device does not have rather than
-        // erroring, so the callback would simply arrive with no input.
-        if (input > channels || ! opened->getActiveInputChannels()[input - 1])
-        {
-            deviceManager.setAudioDeviceSetup (previous, true);
-            return fail (name + " has " + juce::String (channels) + " input channel"
-                         + (channels == 1 ? "" : "s") + "; input " + juce::String (input)
-                         + " does not exist");
-        }
-        // The callback's input array holds active channels only, and
-        // exactly one is active.
-        captureChannel = 0;
-        inputLatency = opened->getInputLatencyInSamples();
-        outputLatency = opened->getOutputLatencyInSamples();
-    }
-
-    // Re-arming moves the arm, and the duplex open has succeeded: a MIDI
-    // arm it replaces lets go of its inputs only now.
-    closeMidiInputs();
-    armedMidi = false;
-    armedTrack = track;
-    armedDevice = name;
-    armedInput = input;
-    inputPeak = 0.0f;
-    freeClock = 0;
-    armed = true;
-
-    result->setProperty ("device", name);
-    result->setProperty ("input", input);
-    result->setProperty ("channels", channels);
-    result->setProperty ("sample_rate", currentDeviceRate());
-    result->setProperty ("input_latency", inputLatency);
-    result->setProperty ("output_latency", outputLatency);
-    return juce::var (result.get());
+    auto entry = obj();
+    entry->setProperty ("track", track);
+    entry->setProperty ("kind", "audio");
+    entry->setProperty ("input", input);
+    return armSet ({ juce::var (entry.get()) }, device);
 }
 
 juce::var Player::armMidi (const juce::String& track)
 {
+    auto entry = obj();
+    entry->setProperty ("track", track);
+    entry->setProperty ("kind", "midi");
+    return armSet ({ juce::var (entry.get()) }, {});
+}
+
+juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device)
+{
     auto result = obj();
     auto fail = [&] (const juce::String& error)
     {
@@ -1299,61 +1407,250 @@ juce::var Player::armMidi (const juce::String& track)
     };
     if (capture != nullptr)
         return fail ("cannot re-arm while recording (stop first)");
+    if (tracks.isEmpty())
+        return fail ("arm needs a track");
+    if (tracks.size() > maxCompanions + 1)
+        return fail ("at most " + juce::String (maxCompanions + 1) + " tracks can be armed at once");
 
-    const auto available = juce::MidiInput::getAvailableDevices();
-    if (available.isEmpty())
-        return fail ("no MIDI sources to record from: start field keys or connect a controller first");
-    std::vector<std::unique_ptr<juce::MidiInput>> opened;
-    juce::StringArray names;
-    for (const auto& device : available)
-        if (auto input = juce::MidiInput::openDevice (device.identifier, this))
-        {
-            opened.push_back (std::move (input));
-            names.add (device.name);
-        }
-    if (opened.empty())
+    struct Entry
     {
-        juce::StringArray listed;
-        for (const auto& device : available)
-            listed.add (device.name);
-        return fail ("cannot open any MIDI source: " + listed.joinIntoString (", "));
+        juce::String track;
+        bool midi = false;
+        int input = 0;
+    };
+    std::vector<Entry> audio, midi;
+    juce::StringArray named;
+    juce::Array<int> inputs;
+    for (const auto& item : tracks)
+    {
+        Entry entry;
+        entry.track = item.getProperty ("track", juce::var()).toString();
+        const auto kind = item.getProperty ("kind", "audio").toString();
+        if (entry.track.isEmpty())
+            return fail ("each armed track needs a track");
+        if (named.contains (entry.track))
+            return fail (entry.track + " is armed twice");
+        named.add (entry.track);
+        if (kind == "midi")
+        {
+            entry.midi = true;
+            midi.push_back (entry);
+            continue;
+        }
+        if (kind != "audio")
+            return fail ("arm's kind is \"midi\", or absent for an audio input");
+        const auto input = item.getProperty ("input", juce::var (1));
+        if (! input.isInt() && ! input.isInt64() && ! input.isDouble())
+            return fail ("arm needs an input channel number");
+        entry.input = (int) input;
+        if (entry.input < 1)
+            return fail ("input channels count from 1");
+        if (inputs.contains (entry.input))
+            return fail ("input " + juce::String (entry.input) + " is armed for two tracks");
+        inputs.add (entry.input);
+        audio.push_back (entry);
+    }
+    inputs.sort();
+
+    // Open what the set listens to, MIDI first: its sources open without
+    // starting, so a MIDI refusal returns before the device changes, and
+    // an audio failure, which puts the device back as it was, drops only
+    // those unstarted inputs. A bad arm leaves playback, and the arm
+    // before it, alone.
+    std::vector<std::unique_ptr<juce::MidiInput>> opened;
+    juce::StringArray sources;
+    if (! midi.empty())
+    {
+        const auto available = juce::MidiInput::getAvailableDevices();
+        if (available.isEmpty())
+            return fail ("no MIDI sources to record from: start field keys or connect a controller first");
+        for (const auto& source : available)
+            if (auto input = juce::MidiInput::openDevice (source.identifier, this))
+            {
+                opened.push_back (std::move (input));
+                sources.add (source.name);
+            }
+        if (opened.empty())
+        {
+            juce::StringArray listed;
+            for (const auto& source : available)
+                listed.add (source.name);
+            return fail ("cannot open any MIDI source: " + listed.joinIntoString (", "));
+        }
+    }
+    juce::String name = device;
+    int channels = 0, inputLatency = 0, outputLatency = 0;
+    if (! audio.empty())
+    {
+        if (auto error = openAudioInputs (device, inputs, name, channels, inputLatency, outputLatency); error.isNotEmpty())
+            return fail (error);
+    }
+    else if (! nullMode)
+    {
+        if (auto* current = deviceManager.getCurrentAudioDevice())
+            outputLatency = current->getOutputLatencyInSamples();
     }
 
-    // Re-arming moves the arm: an audio arm gives the microphone back.
-    if (armed.load() && ! armedMidi.load())
+    // The set replaces the arm before it: what it no longer needs closes
+    // now that what it does need has opened. The companions stop being
+    // read only once nothing can fail, so a refused close keeps them.
+    const bool hadAudio = armed.load() && ! armedInputs.isEmpty();
+    if (audio.empty() && hadAudio)
         if (auto error = closeAudioInput(); error.isNotEmpty())
             return fail (error);
+    liveCompanions = 0;
     closeMidiInputs();
-    midiInputs = std::move (opened);
-    midiSources = names;
-    for (auto& input : midiInputs)
-        input->start();
+    if (! midi.empty())
+    {
+        midiInputs = std::move (opened);
+        midiSources = sources;
+        for (auto& input : midiInputs)
+            input->start();
+    }
+    armedInputs = audio.empty() ? juce::Array<int>() : inputs;
+    if (nullMode)
+    {
+        int mask = 0;
+        for (const auto input : armedInputs)
+            mask |= 1 << (input - 1);
+        nullInputMask = mask;
+    }
 
-    armedTrack = track;
-    armedDevice.clear();
-    armedInput = 0;
+    // An audio track is the primary whenever one is armed, so a punch-out
+    // cuts the audio exactly; MIDI companions take their block after it.
+    std::vector<Entry> ordered (audio);
+    ordered.insert (ordered.end(), midi.begin(), midi.end());
+    const auto& primary = ordered.front();
+    armedTrack = primary.track;
+    armedDevice = primary.midi ? juce::String() : name;
+    armedInput = primary.input;
+    captureChannel = primary.midi ? 0 : channelIndex (primary.input);
+    companionCount = (int) ordered.size() - 1;
+    for (int c = 0; c < companionCount; ++c)
+    {
+        const auto& entry = ordered[(size_t) c + 1];
+        auto& companion = companions[(size_t) c];
+        companion.track = entry.track;
+        companion.input = entry.input;
+        companion.take.reset();
+        companion.audio = nullptr;
+        companion.midiTake = nullptr;
+        companion.peak = 0.0f;
+        companion.midi = entry.midi;
+        companion.channel = entry.midi ? 0 : channelIndex (entry.input);
+    }
+    liveCompanions = companionCount;
     inputPeak = 0.0f;
     freeClock = 0;
-    // MIDI first, so the null clock never presents an input to this arm.
-    armedMidi = true;
+    // The kind before the flag, so the null clock never presents an input
+    // to a MIDI arm.
+    armedMidi = primary.midi;
     armed = true;
 
-    result->setProperty ("kind", "midi");
-    juce::Array<juce::var> sources;
-    for (const auto& name : midiSources)
-        sources.add (name);
-    result->setProperty ("sources", sources);
+    juce::Array<juce::var> armedList;
+    for (const auto& entry : ordered)
+    {
+        auto item = obj();
+        item->setProperty ("track", entry.track);
+        item->setProperty ("kind", entry.midi ? "midi" : "audio");
+        if (! entry.midi)
+            item->setProperty ("input", entry.input);
+        armedList.add (juce::var (item.get()));
+    }
+    result->setProperty ("armed", armedList);
+    if (! audio.empty())
+    {
+        result->setProperty ("device", name);
+        result->setProperty ("input", primary.midi ? juce::var() : juce::var (primary.input));
+        result->setProperty ("channels", channels);
+        result->setProperty ("input_latency", inputLatency);
+    }
+    if (! midi.empty())
+    {
+        if (ordered.size() == 1)
+            result->setProperty ("kind", "midi");
+        juce::Array<juce::var> sourceList;
+        for (const auto& source : midiSources)
+            sourceList.add (source);
+        result->setProperty ("sources", sourceList);
+    }
     result->setProperty ("sample_rate", currentDeviceRate());
-    int outputLatency = 0;
-    if (! nullMode)
-        if (auto* device = deviceManager.getCurrentAudioDevice())
-            outputLatency = device->getOutputLatencyInSamples();
     result->setProperty ("output_latency", outputLatency);
     return juce::var (result.get());
 }
 
+int Player::channelIndex (int input) const
+{
+    // The callback's array holds only the active channels, in order.
+    return juce::jmax (0, armedInputs.indexOf (input));
+}
+
+juce::String Player::openAudioInputs (const juce::String& device, const juce::Array<int>& inputs, juce::String& name,
+                                      int& channels, int& inputLatency, int& outputLatency)
+{
+    if (nullMode)
+    {
+        if (device.isNotEmpty() && device != "null")
+            return "no devices in null-output mode";
+        channels = 2;
+        for (const auto input : inputs)
+            if (input > channels)
+                return "the null input has 2 channels";
+        name = "null";
+        return {};
+    }
+    auto* type = deviceManager.getCurrentDeviceTypeObject();
+    if (type == nullptr)
+        return "no audio device type";
+    type->scanForDevices();
+    auto names = type->getDeviceNames (true);
+    if (names.isEmpty())
+        return "no input devices";
+    if (name.isEmpty())
+        name = names[juce::jmax (0, type->getDefaultDeviceIndex (true))];
+    if (! names.contains (name))
+        return "unknown input device: " + name;
+
+    // The duplex open (recording.md §5): the same device manager, now
+    // with the armed input channels active. Playback-only sessions never
+    // reach here, which is what keeps the microphone prompt for the first
+    // arm rather than the first play.
+    const auto previous = deviceManager.getAudioDeviceSetup();
+    auto setup = previous;
+    setup.inputDeviceName = name;
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    for (const auto input : inputs)
+        setup.inputChannels.setBit (input - 1);
+    if (auto error = deviceManager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+    {
+        deviceManager.setAudioDeviceSetup (previous, true);
+        return error;
+    }
+    auto* opened = deviceManager.getCurrentAudioDevice();
+    if (opened == nullptr)
+    {
+        deviceManager.setAudioDeviceSetup (previous, true);
+        return "the device did not open with an input";
+    }
+    channels = opened->getInputChannelNames().size();
+    // JUCE clears a channel bit the device does not have rather than
+    // erroring, so the callback would simply arrive without that input.
+    for (const auto input : inputs)
+        if (input > channels || ! opened->getActiveInputChannels()[input - 1])
+        {
+            deviceManager.setAudioDeviceSetup (previous, true);
+            return name + " has " + juce::String (channels) + " input channel" + (channels == 1 ? "" : "s")
+                   + "; input " + juce::String (input) + " does not exist";
+        }
+    inputLatency = opened->getInputLatencyInSamples();
+    outputLatency = opened->getOutputLatencyInSamples();
+    return {};
+}
+
 juce::String Player::closeAudioInput()
 {
+    nullInputMask = 0;
     if (nullMode)
         return {};
     // Back to the output-only open playback has always had; the
@@ -1380,10 +1677,16 @@ juce::String Player::disarm()
     if (! armed.load())
         return {};
     armed = false;
-    if (armedMidi.exchange (false))
-        closeMidiInputs();
-    else if (auto error = closeAudioInput(); error.isNotEmpty())
-        return error;
+    armedMidi = false;
+    liveCompanions = 0;
+    companionCount = 0;
+    closeMidiInputs();
+    if (! armedInputs.isEmpty())
+    {
+        armedInputs.clear();
+        if (auto error = closeAudioInput(); error.isNotEmpty())
+            return error;
+    }
     armedTrack.clear();
     armedDevice.clear();
     armedInput = 0;
@@ -1392,10 +1695,15 @@ juce::String Player::disarm()
 
 field::Transaction::Facts Player::takeFacts() const
 {
+    return takeFacts (armedTrack, armedInput);
+}
+
+field::Transaction::Facts Player::takeFacts (const juce::String& track, int input) const
+{
     field::Transaction::Facts facts;
-    facts.track = armedTrack;
-    facts.device = armedDevice;
-    facts.input = armedInput;
+    facts.track = track;
+    facts.device = input > 0 ? armedDevice : juce::String();
+    facts.input = input;
     facts.sources = midiSources;
     // The take is at the device's rate — the bytes are what the
     // converter produced (recording.md §3) — while started_at_samples is
@@ -1433,6 +1741,8 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
         return fail ("already recording");
     if (loop && armedMidi.load())
         return fail ("loop takes record audio only");
+    if (loop && companionCount > 0)
+        return fail ("a loop take records one track; arm only the track to loop");
 
     const bool bed = liveSession != nullptr || readerSource != nullptr;
     const bool preRoll = ! start.isVoid();
@@ -1504,11 +1814,36 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
         // it ready; serviceCapture opens each one after that.
         if (loop)
             standby = openCapture();
+        // Each companion's take, on its own track (arming.md §2.2). The
+        // callback reaches them only from the primary's latch.
+        for (int c = 0; c < companionCount; ++c)
+        {
+            auto& companion = companions[(size_t) c];
+            const auto root = juce::File::getCurrentWorkingDirectory();
+            if (companion.midi.load())
+            {
+                auto take = std::make_unique<field::MidiCapture> (root, takeFacts (companion.track, 0));
+                companion.midiTake = take.get();
+                companion.take = std::move (take);
+            }
+            else
+            {
+                auto take = std::make_unique<field::Capture> (root, takeFacts (companion.track, companion.input));
+                companion.audio = take.get();
+                companion.take = std::move (take);
+            }
+        }
     }
     catch (const std::exception& e)
     {
         capture.reset();
         standby.reset();
+        for (int c = 0; c < companionCount; ++c)
+        {
+            companions[(size_t) c].audio = nullptr;
+            companions[(size_t) c].midiTake = nullptr;
+            companions[(size_t) c].take.reset();
+        }
         return fail (e.what());
     }
 
@@ -1524,6 +1859,7 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
     captureStartAt = at.isVoid() ? -1 : (juce::int64) at;
     captureUntil = punchOut ? (juce::int64) until : -1;
     captureLoop = loop;
+    companionMidiRunning = false;
     standbyCapture = standby.get();
     activeCapture = audioTake;
     activeMidiCapture = midiTake;
@@ -1537,6 +1873,12 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
             captureStartRequested = false;
             capture.reset();
             standby.reset();
+            for (int c = 0; c < companionCount; ++c)
+            {
+                companions[(size_t) c].audio = nullptr;
+                companions[(size_t) c].midiTake = nullptr;
+                companions[(size_t) c].take.reset();
+            }
             return fail (error);
         }
     // Wait for the callback to latch the start — a block or two, unless
@@ -1550,13 +1892,27 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
     result->setProperty ("transaction", capture->id());
     result->setProperty ("file", capture->file());
     result->setProperty ("started_at_samples", capture->startedAt());
+    // Every armed track's take, the primary's first.
+    juce::Array<juce::var> takes;
+    const auto describe = [&] (const juce::String& track, const field::Transaction& take)
+    {
+        auto item = obj();
+        item->setProperty ("track", track);
+        item->setProperty ("transaction", take.id());
+        item->setProperty ("file", take.file());
+        takes.add (juce::var (item.get()));
+    };
+    describe (armedTrack, *capture);
+    for (int c = 0; c < companionCount; ++c)
+        describe (companions[(size_t) c].track, *companions[(size_t) c].take);
+    result->setProperty ("takes", takes);
     return juce::var (result.get());
 }
 
-juce::var Player::stopRecording()
+juce::Array<juce::var> Player::stopRecording()
 {
     // A pass the callback already ended is finalized on its own terms
-    // first, so its manifest reaches onTake before the stop's.
+    // first, so its manifests reach onTake before the stop's.
     serviceCapture();
     if (capture == nullptr)
         return {};
@@ -1566,7 +1922,10 @@ juce::var Player::stopRecording()
     // block drains MIDI, so one epoch is not enough: a detach between that
     // block's count and its drain would skip it. The second epoch's block
     // begins only after the first has returned.
-    if (activeMidiCapture.load() != nullptr)
+    bool midi = activeMidiCapture.load() != nullptr;
+    for (int c = 0; c < companionCount; ++c)
+        midi = midi || companions[(size_t) c].midiTake.load() != nullptr;
+    if (midi)
     {
         const auto epoch = callbackEpoch.load();
         for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 2; ++i)
@@ -1581,6 +1940,11 @@ juce::var Player::stopRecording()
     activeCapture = nullptr;
     activeMidiCapture = nullptr;
     standbyCapture = nullptr;
+    for (int c = 0; c < companionCount; ++c)
+    {
+        companions[(size_t) c].audio = nullptr;
+        companions[(size_t) c].midiTake = nullptr;
+    }
     captureStartRequested = false;
     captureStartAt = -1;
     captureUntil = -1;
@@ -1590,19 +1954,17 @@ juce::var Player::stopRecording()
         std::this_thread::sleep_for (std::chrono::milliseconds (1));
     captureStarted = false;
     captureDone = false;
+    companionMidiRunning = false;
 
-    juce::var manifest;
-    try
-    {
-        manifest = capture->finalize();
-    }
-    catch (const std::exception& e)
-    {
-        auto o = obj();
-        o->setProperty ("error", juce::String (e.what()));
-        manifest = juce::var (o.get());
-    }
+    juce::Array<juce::var> manifests;
+    manifests.add (finalizeTake (*capture));
     capture.reset();
+    for (int c = 0; c < companionCount; ++c)
+        if (auto& take = companions[(size_t) c].take; take != nullptr)
+        {
+            manifests.add (finalizeTake (*take));
+            take.reset();
+        }
     // A standby that never took a sample is not a take.
     if (standby != nullptr)
     {
@@ -1616,11 +1978,32 @@ juce::var Player::stopRecording()
         liveSession->setLoopRegion (0, 0);
     }
     loopTakes = 0;
-    if (onTake && manifest.isObject() && ! manifest.hasProperty ("error"))
-        onTake (manifest);
+    announceTakes (manifests);
     // Default-follow waited for the take (refreshAudioDevice); catch up.
     refreshAudioDevice();
-    return manifest;
+    return manifests;
+}
+
+juce::var Player::finalizeTake (field::Transaction& take)
+{
+    try
+    {
+        return take.finalize();
+    }
+    catch (const std::exception& e)
+    {
+        auto o = obj();
+        o->setProperty ("error", juce::String (e.what()));
+        return juce::var (o.get());
+    }
+}
+
+void Player::announceTakes (const juce::Array<juce::var>& manifests)
+{
+    if (onTake)
+        for (const auto& manifest : manifests)
+            if (manifest.isObject() && ! manifest.hasProperty ("error"))
+                onTake (manifest);
 }
 
 void Player::serviceCapture()
@@ -1640,18 +2023,16 @@ void Player::serviceCapture()
         }
     }
     captureDone = false;
-    juce::var manifest;
-    try
-    {
-        manifest = finished->finalize();
-    }
-    catch (const std::exception& e)
-    {
-        auto o = obj();
-        o->setProperty ("error", juce::String (e.what()));
-        manifest = juce::var (o.get());
-    }
+    juce::Array<juce::var> manifests;
+    manifests.add (finalizeTake (*finished));
     finished.reset();
+    // The companions ended with the pass (arming.md §2.2); a loop has none.
+    for (int c = 0; c < companionCount; ++c)
+        if (auto& take = companions[(size_t) c].take; take != nullptr)
+        {
+            manifests.add (finalizeTake (*take));
+            take.reset();
+        }
     if (captureLoop.load())
     {
         // The next standby, ready well before the next wrap.
@@ -1674,8 +2055,7 @@ void Player::serviceCapture()
         captureUntil = -1;
         captureStarted = false;
     }
-    if (onTake && manifest.isObject() && ! manifest.hasProperty ("error"))
-        onTake (manifest);
+    announceTakes (manifests);
 }
 
 juce::String Player::setLoopRegion (juce::int64 from, juce::int64 to)
@@ -1706,14 +2086,23 @@ juce::String Player::recordState() const
 
 juce::var Player::recordings() const
 {
-    return field::Transaction::list (juce::File::getCurrentWorkingDirectory(),
-                                     capture != nullptr ? capture->id() : juce::String());
+    juce::StringArray active;
+    if (capture != nullptr)
+        active.add (capture->id());
+    for (int c = 0; c < companionCount; ++c)
+        if (const auto& take = companions[(size_t) c].take; take != nullptr)
+            active.add (take->id());
+    return field::Transaction::list (juce::File::getCurrentWorkingDirectory(), active);
 }
 
 juce::var Player::recover (const juce::String& id) const
 {
     auto result = obj();
-    if (capture != nullptr && capture->id() == id)
+    bool active = capture != nullptr && capture->id() == id;
+    for (int c = 0; c < companionCount; ++c)
+        if (const auto& take = companions[(size_t) c].take; take != nullptr)
+            active = active || take->id() == id;
+    if (active)
     {
         result->setProperty ("error", id + " is still being recorded");
         return juce::var (result.get());

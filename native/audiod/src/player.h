@@ -4,6 +4,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_events/juce_events.h>
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -121,6 +122,17 @@ public:
     // the microphone. Returns {error} or {kind, sources, sample_rate,
     // output_latency}. Like arm, it moves an existing arm of either kind.
     juce::var armMidi (const juce::String& track);
+    // Arms several tracks at once (arming.md §2.2): each entry is
+    // {track, kind: "audio", input} or {track, kind: "midi"}. An audio
+    // entry takes its own input channel on `device`; a MIDI entry hears
+    // every MIDI source. The first audio entry, or the first entry when
+    // none is audio, is the primary that every capture rule runs on; the
+    // rest are companions that start on its latch and end with its pass.
+    // arm and armMidi are this with one entry. Returns {error} or
+    // {armed, sample_rate, output_latency}, plus the audio side's
+    // {device, input, channels, input_latency} and the MIDI side's
+    // {sources}, and {kind: "midi"} when the one entry is MIDI.
+    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device);
     // Closes the input side again. Empty string on success.
     juce::String disarm();
     // Start a take: locate to `at` when given (a source must be loaded
@@ -160,10 +172,10 @@ public:
     int clickTicks() const { return click.tickCount(); }
     // Finalize the take in progress: the callback stops pushing, the
     // writer drains, the header is patched, the manifest is final.
-    // Returns the manifest, or void when nothing was recording. stop()
-    // and pause() call this first; a natural end of stream reaches it
-    // through stop() too.
-    juce::var stopRecording();
+    // Returns every armed track's manifest, the primary's first, or none
+    // when nothing was recording. stop() and pause() call this first; a
+    // natural end of stream reaches it through stop() too.
+    juce::Array<juce::var> stopRecording();
     // "idle" | "armed" | "recording" — drives record events (main.cpp).
     juce::String recordState() const;
     // An armed or recording daemon must not idle-exit (recording.md §5):
@@ -212,6 +224,34 @@ private:
     // the block began, the samples elapsed, and the end at `until`.
     void recordMidiBlock (field::MidiCapture& take, juce::int64 position, juce::int64 freeBefore, int n,
                           double blockStartMs);
+    // The audio take's share of a block: the start latch, the push of the
+    // primary's input and each audio companion's, punch-out, and the loop
+    // hand-off.
+    void recordAudioBlock (const float* const* in, int numInputs, const float* input, juce::int64 position,
+                           juce::int64 freeBefore, int n);
+    // The MIDI clock's share of a block, for whichever takes `push` hands
+    // the messages to: stamp what arrived since the last block, advance
+    // the clock, and count the samples. Returns the block's start on the
+    // clock, which the end at `until` is tested against.
+    template <typename Push, typename Frames>
+    juce::int64 stampMidiBlock (juce::int64 untilFrames, int n, double blockStartMs, Push&& push, Frames&& frames);
+    // An audio primary's MIDI companions: the shared stamping, and their
+    // end a block after the audio's, as a MIDI take ends.
+    void recordMidiCompanions (int n, double blockStartMs);
+    // The span the MIDI clock runs to: `until` on the bed's timeline,
+    // converted to the device's samples from `take`'s start.
+    juce::int64 midiUntilFrames (const field::Transaction& take) const;
+    // The callback array index of a 1-based device input, given the armed
+    // inputs: the array holds only active channels, in channel order.
+    int channelIndex (int input) const;
+    // armSet's duplex open of the armed inputs. Returns an error, empty on
+    // success, and leaves the device as it was on one.
+    juce::String openAudioInputs (const juce::String& device, const juce::Array<int>& inputs, juce::String& name,
+                                  int& channels, int& inputLatency, int& outputLatency);
+    // A take's final manifest, or {error} when finalize threw.
+    juce::var finalizeTake (field::Transaction& take);
+    // Hands each manifest that is not an error to onTake, in order.
+    void announceTakes (const juce::Array<juce::var>& manifests);
     // Hands each queued arrival to `handle` in arrival order and empties
     // the queue; audio thread only.
     template <typename Handle>
@@ -314,8 +354,11 @@ private:
     // clock presents the selected null channel the same way.
     std::atomic<int> captureChannel { 0 };
     // Null mode only: which of the null input's two channels the clock
-    // presents as the one active channel (1-based, as arm names it).
-    std::atomic<int> nullInputChannel { 1 };
+    // presents, a bit per 1-based input, in channel order, as a real
+    // duplex open presents the active ones.
+    std::atomic<int> nullInputMask { 0 };
+    // The 1-based inputs open on the device, ascending (message thread).
+    juce::Array<int> armedInputs;
     std::atomic<bool> captureStartRequested { false };
     std::atomic<bool> captureStarted { false };
     // The position the requested take waits for (record's `at` when a
@@ -338,7 +381,33 @@ private:
     // Everything a new transaction needs, kept for the standbys a loop
     // opens after the first.
     field::Transaction::Facts takeFacts() const;
+    field::Transaction::Facts takeFacts (const juce::String& track, int input) const;
     std::unique_ptr<field::Capture> openCapture();
+
+    // Arming several tracks (arming.md §2.2). The companions are the armed
+    // tracks after the primary; they start on its latch and end with its
+    // pass, and loop takes refuse them. The callback reads the first
+    // liveCompanions slots, and only through atomics, so the message
+    // thread can set a slot's other fields while it is not live. Slots
+    // never move.
+    struct Companion
+    {
+        juce::String track;
+        int input = 0; // audio: the 1-based device input
+        std::unique_ptr<field::Transaction> take; // message thread
+        std::atomic<bool> midi { false };
+        std::atomic<int> channel { 0 }; // audio: the callback array index
+        std::atomic<field::Capture*> audio { nullptr };
+        std::atomic<field::MidiCapture*> midiTake { nullptr };
+        std::atomic<float> peak { 0.0f };
+    };
+    static constexpr int maxCompanions = 15;
+    std::array<Companion, maxCompanions> companions;
+    int companionCount = 0;
+    std::atomic<int> liveCompanions { 0 };
+    // An audio primary's MIDI companions are taking: set by the latch,
+    // cleared when they end a block after the audio, or by a stop.
+    std::atomic<bool> companionMidiRunning { false };
     field::Click click;
     std::atomic<juce::uint64> callbackEpoch { 0 };
     // Largest |sample| on the armed input since status last read it; the

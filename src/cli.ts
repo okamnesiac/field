@@ -16,7 +16,7 @@ import {
   parseExportBitDepth,
   parseExportRate,
   parseCountIn,
-  parseInputChannel,
+  parseInputChannels,
   parseSeed,
   parseVariantNumber,
   parseVariants,
@@ -863,9 +863,9 @@ program
   });
 
 program
-  .command('record [target]')
+  .command('record [targets...]')
   .description('record a take on a track through field-audiod: arms an input, or MIDI when the record entry names an instrument, takes against what is playing, ctrl-c stops and finalizes')
-  .option('--input <n>', 'input channel on the device, counting from 1 (default 1); audio takes only', parseInputChannel)
+  .option('--input <n,...>', 'input channel on the device, counting from 1, one per audio track in the order named (default 1, 2, ...); audio takes only', parseInputChannels)
   .option('--device <name>', 'input device (field devices lists them; default: the system input); audio takes only')
   .option('--at <position>', 'start at bar[.beat[.tick]] of the loaded song')
   .option('--click', 'a metronome through the take, synthesized in the engine against the song\'s map')
@@ -879,9 +879,9 @@ program
   .option('--land <id>', 'land a finalized transaction nothing landed, instead of recording')
   .action(
     async (
-      target: string | undefined,
+      targets: string[],
       opts: {
-        input?: number;
+        input?: number[];
         device?: string;
         at?: string;
         click?: boolean;
@@ -934,7 +934,7 @@ program
           process.stdout.write(`${landedLine(landed)}\n`);
           return;
         }
-        if (target === undefined) {
+        if (targets.length === 0) {
           throw new Error(
             'record needs a track to record (creek/track:lead-vocal), or --list / --recover <id> / --land <id>',
           );
@@ -957,7 +957,7 @@ program
         const { takes, missed } = await recordTake(
           root,
           project,
-          target,
+          targets,
           {
             ...(opts.input !== undefined ? { input: opts.input } : {}),
             ...(opts.device !== undefined ? { device: opts.device } : {}),
