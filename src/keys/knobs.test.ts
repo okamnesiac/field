@@ -148,6 +148,13 @@ describe('printing a value', () => {
     expect(formatKnobValue({ name: 'p', cc: 20, min: -1, max: 1, curve: 'lin', step: 0, default: 0 }, -0.0001)).toBe('0.00');
   });
 
+  it('prints a lin knob with a fractional step to at least the step’s places', () => {
+    const quarters: Knob = { name: 'p', cc: 20, min: 0, max: 100, curve: 'lin', step: 2.5, default: 0 };
+    expect(formatKnobValue(quarters, 2.5)).toBe('2.5');
+    expect(printed(quarters)[127]).toBe('100.0');
+    expect(formatKnobValue({ ...quarters, max: 1, step: 0.5 }, 0.5)).toBe('0.50');
+  });
+
   it('gives each knob one width across its default and all its values', () => {
     expect(knobValueWidth(MOD_KNOB)).toBe(3);
     expect(knobValueWidth(knob('cutoff'))).toBe(8);

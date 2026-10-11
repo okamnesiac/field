@@ -153,7 +153,8 @@ export function formatKnobValue(knob: Knob, value: number): string {
   if (Number.isInteger(knob.step) && knob.step >= 1) return withUnits(String(Math.round(value)), knob.units);
   if (knob.curve === 'lin') {
     const farthest = Math.max(Math.abs(knob.min), Math.abs(knob.max));
-    return withUnits(fixed(value, Math.max(0, 2 - Math.floor(Math.log10(farthest)))), knob.units);
+    const places = Math.max(0, 2 - Math.floor(Math.log10(farthest)), decimalPlaces(knob.step));
+    return withUnits(fixed(value, places), knob.units);
   }
   const shown = Math.abs(Number(significant(value)));
   if (shown >= 1000) return withUnits(significant(value / 1000), knob.units, 'k');
@@ -180,6 +181,14 @@ function significant(x: number): string {
   if (x === 0) return fixed(0, 2);
   const places = (y: number): number => Math.max(0, 2 - Math.floor(Math.log10(Math.abs(y))));
   return fixed(x, places(Number(x.toFixed(places(x)))));
+}
+
+// The decimal places a step is written with, as 1 for 2.5, so every value
+// it rounds to prints distinctly.
+function decimalPlaces(step: number): number {
+  let places = 0;
+  while (places < 10 && Math.abs(step * 10 ** places - Math.round(step * 10 ** places)) > 1e-9) places++;
+  return places;
 }
 
 // toFixed, without the sign it leaves on a value that rounds to zero.

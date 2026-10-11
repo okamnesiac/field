@@ -336,11 +336,13 @@ the instrument's line.
   knob in seconds, in thousandths with `m` below 1 (`800 ms`). A `lin`
   knob prints the decimal places that give the end of its range
   farthest from zero three significant digits, so `res`, whose range
-  ends at 0.95, prints `0.000` to `0.950`. `mod`, and a knob whose step
-  is whole, print whole numbers. Units follow after a space. Each value
-  is padded on the left to the widest that its default or any of its
-  128 controller values prints. The places are fixed per knob, as the
-  bend's are per keymap.
+  ends at 0.95, prints `0.000` to `0.950`. *Amended (2026-10-11, chunk
+  1):* a `lin` knob with a fractional `step` prints at least the step's
+  places, so a `step` of 2.5 on 0 to 100 prints `2.5` rather than `3`.
+  `mod`, and a knob whose step is whole, print whole numbers. Units
+  follow after a space. Each value is padded on the left to the widest
+  that its default or any of its 128 controller values prints. The
+  places are fixed per knob, as the bend's are per keymap.
 - **A glide shows as it moves.** The value runs to its target at its
   fixed width.
 - **An entry takes the value's place.** While you type (§2.7), the

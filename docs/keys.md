@@ -162,8 +162,9 @@ rounded to `step`: SuperCollider's `ControlSpec.map` for its warps of
 the same names. An `exp` knob prints three significant digits, with `k`
 from 1000 up and, for a knob in seconds, `m` below 1, as in `2.00 kHz`
 and `800 ms`. A `lin` knob prints the decimal places that give the end
-of its range farthest from zero three significant digits, and a knob
-with a whole `step` prints whole numbers.
+of its range farthest from zero three significant digits, or its
+`step`'s places when it has more, so a `step` of 2.5 prints `2.5`. A
+knob with a whole `step` prints whole numbers.
 
 `field keys` checks a knob file before it plays, as it checks a keymap,
 and names each error:
