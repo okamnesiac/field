@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import { daemonBinary } from '../audiod/client.js';
+import { BUILD_DAEMON } from '../remedies.js';
 import type { KeyboardLayout } from './position.js';
 import type { MidiMessage } from './session.js';
 
@@ -94,7 +95,7 @@ export class KeysHelper {
 function requireDaemon(): string {
   const binary = daemonBinary();
   if (binary === undefined) {
-    throw new Error('field keys needs field-audiod, which is not built (pnpm build:native, or set FIELD_AUDIOD)');
+    throw new Error(`field keys needs field-audiod, which is not built (${BUILD_DAEMON}, or set FIELD_AUDIOD)`);
   }
   return binary;
 }

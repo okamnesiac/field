@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
+import { BUILD_CLI } from '../remedies.js';
 import { fileStore } from '../remote/credentials.js';
 import { git } from '../git.js';
 import { socketPathFor } from '../socketPath.js';
@@ -260,7 +261,7 @@ describe('formatVersionReport with a drifted checkout', () => {
       },
       process.cwd(),
     );
-    expect(text).toContain('aaaa111 on feature/x; checkout now at bbbb222 — pnpm build to update');
+    expect(text).toContain(`aaaa111 on feature/x; checkout now at bbbb222 — ${BUILD_CLI} to update`);
   });
 });
 
@@ -280,7 +281,7 @@ describe('formatVersionReport with post-build edits', () => {
       process.cwd(),
     );
     expect(text).toContain(
-      'aaaa111 on main; checkout has changed since the build — pnpm build to update',
+      `aaaa111 on main; checkout has changed since the build — ${BUILD_CLI} to update`,
     );
   });
 
@@ -303,7 +304,7 @@ describe('formatVersionReport with post-build edits', () => {
       process.cwd(),
     );
     expect(text).toContain(
-      'aaaa111 on main, 1 file uncommitted; checkout has changed since the build — pnpm build to update',
+      `aaaa111 on main, 1 file uncommitted; checkout has changed since the build — ${BUILD_CLI} to update`,
     );
   });
 });

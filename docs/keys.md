@@ -33,7 +33,7 @@ To keep what you play, record it into a track; see
   kitty keyboard protocol. Apple's Terminal does not, and `field keys`
   refuses to start there with a message that says so.
 - **`field-audiod`.** The virtual MIDI source belongs to the native
-  binary, so build it first with `pnpm build:native`.
+  binary, so build it first with `field upgrade audiod`.
 - **macOS or Linux.** On Linux the virtual source needs the ALSA
   sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
   `field keys` reports that.

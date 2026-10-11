@@ -17,7 +17,12 @@ import { promisify } from 'node:util';
 import { Document, parseDocument } from 'yaml';
 import { AcedClient, ACED_SPEC } from '../aced/client.js';
 import { VoicedClient, VOICED_SPEC } from '../voiced/client.js';
-import { workerPackagePresent } from '../workers/client.js';
+import {
+  probeEnvironment,
+  workerPackagePresent,
+  workerScriptInstalled,
+  type ProbeRun,
+} from '../workers/client.js';
 import type { WorkerSpec } from '../workers/protocol.js';
 import { sha256File } from '../hash.js';
 import { isSlug } from '../ids.js';
@@ -756,18 +761,40 @@ export async function chooseVariant(
 // read it rather than keep a copy in step by hand (#67 review).
 export const SETUP_SPECS: WorkerSpec[] = [ACED_SPEC, VOICED_SPEC];
 
-export async function setupWorker(
-  onLine: (line: string) => void,
-  which?: string | undefined,
-): Promise<void> {
-  const specs =
-    which === undefined
-      ? SETUP_SPECS
-      : SETUP_SPECS.filter((s) => s.packageDir === which || s.name === which);
-  if (specs.length === 0) {
+// Every worker, or the one named by its package directory or its daemon name.
+export function selectWorkers(which?: string | undefined): WorkerSpec[] {
+  if (which === undefined) return SETUP_SPECS;
+  const named = SETUP_SPECS.filter((s) => s.packageDir === which || s.name === which);
+  if (named.length === 0) {
     throw new Error(
       `unknown worker "${which}" — try ${SETUP_SPECS.map((s) => s.packageDir).join(' or ')}`,
     );
+  }
+  return named;
+}
+
+// What `field setup --existing` syncs and skips. Set up means the worker's
+// console script is installed, the test `field generate` gates on, and
+// not that a `.venv` exists: a dev-only sync makes one with no worker in it.
+export function partitionExisting(specs: WorkerSpec[]): { sync: WorkerSpec[]; skip: WorkerSpec[] } {
+  const sync = specs.filter((spec) => workerScriptInstalled(spec));
+  return { sync, skip: specs.filter((spec) => !sync.includes(spec)) };
+}
+
+// `existing` re-syncs only the workers already set up and sets up none,
+// which is what an upgrade wants (install.md §2.4): keep current what
+// someone chose to install, and never choose for them.
+export async function setupWorker(
+  onLine: (line: string) => void,
+  which?: string | undefined,
+  options: { existing?: boolean | undefined } = {},
+): Promise<void> {
+  let specs = selectWorkers(which);
+  if (options.existing === true) {
+    const { sync, skip } = partitionExisting(specs);
+    for (const spec of skip) onLine(`skipping ${spec.name}: not set up (field setup ${spec.packageDir})`);
+    if (sync.length === 0) return;
+    specs = sync;
   }
   for (const spec of specs) {
     // The package, not the environment: creating the environment is what
@@ -785,8 +812,40 @@ export async function setupWorker(
     });
     for (const line of stderr.split('\n').slice(-5)) if (line.trim()) onLine(line);
   }
+  // A worker already set up has its weights, or downloaded them once.
+  if (options.existing === true) return;
   onLine(
     'ready — the first `field generate` of each kind downloads that model’s weights ' +
       '(ACE-Step ~10 GB, Chatterbox ~2 GB)',
   );
+}
+
+// `field setup --check`: one row per worker, changing nothing, in the
+// format `install.sh status` prints (install.md §2.4), which reads these
+// rows and passes them through. The probe is the one `field generate`
+// gates on, so a row here and a refusal there cannot disagree. `ok` is
+// false when a worker someone set up cannot run as it stands; a worker
+// nobody set up is not a problem.
+export function checkWorkers(
+  specs: WorkerSpec[] = SETUP_SPECS,
+  run?: ProbeRun | undefined,
+): { lines: string[]; ok: boolean } {
+  const row = (label: string, text: string): string => `${label.padEnd(14)} ${text}`;
+  const lines: string[] = [];
+  let ok = true;
+  for (const spec of specs) {
+    const probe = probeEnvironment(spec, run);
+    if (!probe.scriptInstalled) {
+      lines.push(row('worker-absent', `${spec.name} is not set up — field setup ${spec.packageDir} sets it up`));
+    } else if (!probe.uvPresent) {
+      ok = false;
+      lines.push(row('worker-no-uv', `${spec.name} is set up, and uv is not installed (brew install uv)`));
+    } else if (probe.synced === true) {
+      lines.push(row('worker-current', spec.name));
+    } else {
+      ok = false;
+      lines.push(row('worker-stale', `${spec.name} is out of date — run field setup ${spec.packageDir}`));
+    }
+  }
+  return { lines, ok };
 }

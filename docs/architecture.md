@@ -56,11 +56,12 @@ reads its stamp.
 
 When the checkout has moved since the build, the report says so beside
 the baked identity instead of impersonating it: a new HEAD prints
-`checkout now at <sha> — pnpm build to update`, and edits without a
-commit print `checkout has changed since the build — pnpm build to
-update`. Running from source (tsx, vitest) keeps the live git read,
-because there the checkout is the code; an unstamped dist falls back to
-the live read.
+`checkout now at <sha> — field upgrade cli to update`, and edits without
+a commit print `checkout has changed since the build — field upgrade cli
+to update`. On Windows, where `field upgrade` does not run, both name
+`pnpm build` in the checkout instead. Running from source (tsx, vitest)
+keeps the live git read, because there the checkout is the code; an
+unstamped dist falls back to the live read.
 
 **The remote is a second cache, reached over HTTPS with no new
 dependency.** `field login`, `field clone`, and the read-through in
