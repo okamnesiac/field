@@ -258,6 +258,32 @@ describe('import', () => {
   });
 });
 
+describe('loadProject with an override', () => {
+  it('validates one file as it would be, and leaves the file on disk alone', () => {
+    // field ui asks this before every write: a move that puts `at:` on a
+    // receiver's path is refused by the cable rules, which span files.
+    createSong(root, 'opener');
+    writeFileSync(
+      join(root, 'songs/opener/tracks/keys.yaml'),
+      ['name: keys', 'sends:', '  verb:', '    gain_db: -6', 'inputs: []', ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/opener/tracks/room.yaml'), ['name: room', 'inputs:', '  - receive: verb', ''].join('\n'));
+    const main = join(root, 'songs/opener/tracks/main.yaml');
+    const valid = ['name: main', 'inputs:', '  - track: keys', '  - track: room', ''].join('\n');
+    writeFileSync(main, valid);
+    expect(loadProject(root).diagnostics.filter((d) => d.severity !== 'warning')).toEqual([]);
+
+    const moved = ['name: main', 'inputs:', '  - track: keys', '  - track: room', '    at: 960', ''].join('\n');
+    const errors = loadProject(root, { override: { path: main, text: moved } }).diagnostics.filter(
+      (d) => d.severity !== 'warning',
+    );
+    expect(errors.map((d) => d.message).join('\n')).toContain('a receive is legal only where that path is a single unshifted pass');
+    expect(readFileSync(main, 'utf8')).toBe(valid);
+    // The override lasts one load.
+    expect(loadProject(root).diagnostics.filter((d) => d.severity !== 'warning')).toEqual([]);
+  });
+});
+
 describe('check', () => {
   it('flags a track whose name does not match its filename', async () => {
     createSong(root, 'opener');

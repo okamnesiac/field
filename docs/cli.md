@@ -312,6 +312,44 @@ daemon: field-audiod 0.14.0
 `quit` is how you pick up a new build: the daemon respawns on the next
 `field play`, running the binary you just compiled.
 
+## Open a song in the UI
+
+`field ui <song>` opens a window on a song: the transport, a timeline
+with one lane per placement, levels, mute and solo, clip edits, and the
+selected track's insert chain. Every gesture in the window ends as an
+edit to the project's YAML, which the running session picks up exactly
+as it picks up an edit you make in an editor. Solo is the exception: it
+changes what you hear and writes nothing. Ctrl-c, or closing the window,
+stops the transport and ends the session.
+
+The window is a web client served by `field` itself, so build it once
+first. `field ui` refuses with that command when the build is missing:
+
+```sh
+pnpm --dir ui build
+field ui tall-grass
+```
+
+`field ui` prints the URL it serves on, then opens the app window. The
+URL carries a token that the server checks, and it serves only
+`127.0.0.1`:
+
+```console
+$ field ui creek --no-open
+field ui: http://127.0.0.1:53581/?t=ec78bbed68e25fb16cfba087facc6f0b
+```
+
+| Option | Does |
+| --- | --- |
+| `--port <port>` | serves on this port instead of a random one |
+| `--no-open` | prints the URL and opens nothing |
+| `--browser` | opens a browser tab instead of the app window |
+
+The app window is an Electron shell from the `ui/` workspace. When it
+is not installed, or exits before its window opens, `field ui` opens a
+browser instead and keeps the session running. [ui.md](projects/ui/readme.md)
+§6 records what the window does and why.
+
 ## Record a take
 
 `field record <track>` records a performance onto a track that asks for
@@ -583,6 +621,7 @@ amended. Porting the rest is tracked there and in
 | `field play <patterns...>` | play a song live, or audition artifacts |
 | `field devices` | list output and input devices |
 | `field transport <op>` | drive the running daemon |
+| `field ui <song>` | open a song in the UI window, served on `127.0.0.1` |
 | `field record <track>` | record a take onto a track's `record:` entry |
 | `field login` | log in to a remote and store the token |
 | `field logout` | forget the stored token |

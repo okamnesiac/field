@@ -40,12 +40,12 @@
 import { join } from 'node:path';
 import { wavFrameCount } from '../audio/wav.js';
 import { SESSION_VERSION, insertGrowth, insertLatency, type Session, type SessionInsert, type SessionTrack } from '../audiod/session.js';
-import { buildLabels } from '../commands/build.js';
 import { formatLabel } from '../labels.js';
 import { formatDiagnostic, loadProject, projectPath } from '../model/project.js';
+import { applySolo } from '../model/solo.js';
 import type { SpecInsert } from '../generators/stem.js';
 import { toPluginWire } from '../audio/plugins.js';
-import { explain, type Explanation } from './build.js';
+import { build, explain, type Explanation } from './build.js';
 import { buildGraph, type Graph, type GraphNode } from './graph.js';
 
 interface TrackShape {
@@ -125,7 +125,7 @@ export interface CompiledSession {
 export async function compileSession(
   root: string,
   songName: string,
-  options: { loop?: boolean } = {},
+  options: { loop?: boolean; solo?: string } = {},
 ): Promise<CompiledSession> {
   const project = loadProject(root);
   const errors = project.diagnostics.filter((d) => d.severity !== 'warning');
@@ -139,6 +139,12 @@ export async function compileSession(
   }
   const song = project.songs.find((s) => s.name === songName);
   if (!song) throw new Error(`no such song "${songName}"`);
+  // Solo is session-only (model/solo.ts): the loaded copy is filtered
+  // before the graph is built, the files never change, and the un-soloed
+  // session comes back by compiling without the option. Validation ran
+  // above on the real project, so a red project refuses identically
+  // soloed or not.
+  if (options.solo !== undefined) applySolo(song, options.solo);
   const graph: Graph = buildGraph(project);
 
   // The song's track nodes, keyed by name; their deps aligned to sources.
@@ -277,7 +283,16 @@ export async function compileSession(
   ];
   const fileByLabel = new Map<string, { path: string; sha256: string }>();
   if (toBuild.length > 0) {
-    for (const outcome of await buildLabels(root, toBuild)) {
+    // Built from this compile's own project and graph, not by label from
+    // a fresh load: under a solo the graph is the soloed one, and a track
+    // frozen because its soloed spec is cached must be served that stem.
+    // Reloading would answer with the un-soloed track's stem instead.
+    const nodes = toBuild.map((label) => {
+      const node = graph.nodes.get(label);
+      if (node === undefined) throw new Error(`no node for ${label}`);
+      return node;
+    });
+    for (const outcome of await build(project, graph, nodes)) {
       if (outcome.outputPath !== undefined)
         fileByLabel.set(outcome.label, {
           // Slash-separated like every path in the session JSON: the

@@ -328,10 +328,16 @@ export function checkCables(
 
   const cables: Cable[] = [];
   const displacedDiagnosed = new Set<string>();
+  // Only a song with a muted placement needs the audible pass.
+  const muted = [...childEdges.values()].some((edges) => edges.some((e) => e.entry.mute));
   for (const { label, send, receive } of complete) {
     if (cyclic.has(label)) continue;
     const receiverRate = clocks.get(receive.track)?.rate;
     if (receiverRate === undefined) continue;
+
+    // Set for the second, audible pass below: muted placements are
+    // skipped, and diagnostics are left to the first pass.
+    let audibleOnly = false;
 
     // Sender placements inside `x`'s subtree, as arrivals in x's clock
     // (receiver-rate samples — the clocks align wherever the answer is
@@ -356,6 +362,7 @@ export function checkCables(
       downStack.add(x);
       const out: Arrivals = new Map();
       for (const edge of childEdges.get(x) ?? []) {
+        if (audibleOnly && edge.entry.mute) continue;
         const sub = down(edge.child);
         if (sub.size === 0) continue;
         compose(out, edge, sub);
@@ -374,6 +381,7 @@ export function checkCables(
       const out: Arrivals = new Map();
       for (const edge of childEdges.get(x) ?? []) {
         if (via !== undefined && edge.child === via) continue;
+        if (audibleOnly && edge.entry.mute) continue;
         const sub = down(edge.child);
         if (sub.size === 0) continue;
         compose(out, edge, sub);
@@ -408,7 +416,7 @@ export function checkCables(
         const fields = displacingFields(edge.entry);
         if (fields.length > 0 && up.size > 0) {
           const dkey = `${label}|${edge.file}|${edge.index}`;
-          if (!displacedDiagnosed.has(dkey)) {
+          if (!audibleOnly && !displacedDiagnosed.has(dkey)) {
             displacedDiagnosed.add(dkey);
             push(
               edge.file,
@@ -430,7 +438,7 @@ export function checkCables(
           above = up;
           aboveVia = edge.parent;
         } else if (spell(up) !== spell(above)) {
-          if (!divergenceReported) {
+          if (!audibleOnly && !divergenceReported) {
             divergenceReported = true;
             push(
               receive.file,
@@ -457,6 +465,24 @@ export function checkCables(
       throw err;
     }
     if (anyError) continue;
+    // The pass above answers the structure: whether the cable joins at
+    // all, and every diagnostic, with muted placements counted so a mute
+    // never hides or invents an error. What sounds is a second pass
+    // without them: a muted placement is absent from the mix (graph.ts
+    // planFor), so its sends are absent too. A cable whose every sender
+    // placement is muted is joined but silent, not dangling.
+    let audible: Arrivals = raw;
+    if (raw.size > 0 && muted) {
+      audibleOnly = true;
+      downMemo.clear();
+      upMemo.clear();
+      try {
+        audible = arrive(receive.track, undefined);
+      } catch (err) {
+        if (!(err instanceof SkipCable)) throw err;
+        audible = new Map();
+      }
+    }
     if (raw.size === 0) {
       push(
         receive.file,
@@ -472,7 +498,7 @@ export function checkCables(
       receiver: receive.track,
       gainDb: send.gainDb,
       tap: send.tap,
-      arrivals: finish(raw),
+      arrivals: finish(audible),
     });
   }
   return cables;

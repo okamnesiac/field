@@ -1,0 +1,525 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: #14161a;
+  color: #d7dae0;
+}
+main {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem;
+}
+.empty {
+  opacity: 0.6;
+  padding: 3rem;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #2a2e36;
+}
+.song {
+  font-weight: 600;
+}
+header button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+header button {
+  background: #22262e;
+  color: inherit;
+  border: 1px solid #343945;
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.state.playing {
+  color: #6fd08c;
+}
+.position {
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+header select {
+  background: #22262e;
+  color: inherit;
+  border: 1px solid #343945;
+  border-radius: 4px;
+  padding: 0.2rem;
+  max-width: 16rem;
+}
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: #3a2226;
+  border: 1px solid #6b3038;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.75rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+.error span {
+  flex: 1;
+}
+.error .dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0.7;
+  padding: 0;
+}
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 0.75rem;
+}
+.lane {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #1b1e24;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+}
+.lane.muted .name,
+.lane.dimmed {
+  opacity: 0.45;
+}
+.lane .name {
+  width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane button {
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 4px;
+  border: 1px solid #343945;
+  background: #22262e;
+  color: inherit;
+  cursor: pointer;
+}
+.lane button.mute.on {
+  background: #7a4048;
+  border-color: #a05560;
+}
+.lane button.solo.on {
+  background: #6f6430;
+  border-color: #998a45;
+}
+.gain {
+  flex: 1;
+}
+.db {
+  width: 4.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pan {
+  width: 6rem;
+}
+.inserts {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+footer {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  opacity: 0.5;
+}
+
+.empty-tag {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.5;
+  border: 1px solid #3a3f4a;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+
+/* --- timeline ------------------------------------
+   One scroller, two sticky axes: the header column sticks left, the
+   ruler row sticks top, so vertical scroll moves both halves and no
+   sync handler can drift. */
+.tl {
+  margin-top: 0.75rem;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  overflow: hidden;
+  /* The timeline is the window's body: whatever height the header and
+     footer leave belongs to it. */
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tl-scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  /* Scrolling is the trackpad's job in both axes; the bars themselves
+     are chrome the view does not need. */
+  scrollbar-width: none;
+}
+.tl-scroll::-webkit-scrollbar {
+  display: none;
+}
+.tl-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+}
+.tl-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  background: #1b1e24;
+  border-right: 1px solid #262a32;
+  border-bottom: 1px solid #262a32;
+}
+.tl-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 26px;
+  background: #1b1e24;
+  border-bottom: 1px solid #262a32;
+  cursor: pointer;
+}
+.tl-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid #333945;
+  padding-left: 3px;
+  font-size: 0.7rem;
+  opacity: 0.65;
+  line-height: 26px;
+}
+.tl-header {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #1b1e24;
+  border-right: 1px solid #262a32;
+  border-bottom: 1px solid #23272f;
+  display: flex;
+  align-items: center;
+  height: 64px;
+  box-sizing: border-box;
+  /* Nothing in the header column may bleed over the lanes beside it. */
+  overflow: hidden;
+}
+.tl-lane {
+  position: relative;
+  /* Its own stacking context, so nothing inside a lane (the edge grips
+     sit at z-index 1) can rise above the sticky header column and take
+     a press meant for a fader. */
+  isolation: isolate;
+  border-bottom: 1px solid #23272f;
+  cursor: pointer;
+  height: 64px;
+  box-sizing: border-box;
+}
+.tl-block {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: #223042;
+  border: 1px solid #2f4258;
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: grab;
+}
+.tl-block.selected {
+  border-color: #e8c35a;
+  box-shadow: 0 0 0 1px rgba(232, 195, 90, 0.45);
+}
+.tl-block.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+.tl-block.stretching {
+  cursor: ew-resize;
+}
+/* The window's own edges, grabbable: drag one and the clip trims short
+   or plays longer, snapped to the grid a move lands on. Visible on
+   hover rather than always, so a lane of clips reads as clips. */
+.tl-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 1;
+  cursor: ew-resize;
+}
+.tl-grip.start {
+  left: 0;
+}
+.tl-grip.end {
+  right: 0;
+}
+.tl-grip:hover {
+  background: rgba(232, 195, 90, 0.4);
+}
+.tl-wave {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.tl-wave path {
+  fill: #5b8fc7;
+  opacity: 0.85;
+}
+.tl-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-left: 1px solid #6d86a8;
+  pointer-events: none;
+}
+.tl-clip.inexact {
+  border-left-style: dashed;
+}
+.tl-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #e8c35a;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.twirl {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  width: 1.1rem;
+  padding: 0;
+  opacity: 0.75;
+  font-size: 0.8rem;
+}
+.twirl-spacer {
+  display: inline-block;
+  width: 1.1rem;
+}
+.tl-header .lane {
+  background: none;
+  border: none;
+  padding: 0.25rem 0.4rem;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+}
+.tl-header .lane .name {
+  width: auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane-ctl {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.lane-ctl button {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  font-size: 0.75rem;
+}
+.tl-header .lane .gain {
+  flex: 1;
+  min-width: 0;
+}
+.tl-header .lane .db {
+  flex: none;
+  width: 2.4rem;
+  font-size: 0.75rem;
+}
+.tl-block.muted {
+  opacity: 0.3;
+}
+.tl-block.d1 { background: #24313d; }
+.tl-block.d2 { background: #26303a; }
+.tl-block.d3 { background: #272f36; }
+
+/* --- inserts panel -------------------------------
+   The selected track's chain, at the bottom. Appears with selection,
+   leaves with Escape; the timeline above keeps the rest of the window. */
+.ins {
+  flex: none;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  background: #171a1f;
+  padding: 0.5rem 0.75rem;
+  scrollbar-width: none;
+}
+.ins::-webkit-scrollbar {
+  display: none;
+}
+.ins-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.ins-track {
+  font-weight: 600;
+}
+.ins-path {
+  font-size: 0.75rem;
+  opacity: 0.5;
+}
+.ins-add {
+  margin-left: auto;
+  display: flex;
+  gap: 0.3rem;
+}
+.ins-add button,
+.eq-strip button,
+.eq-strip select {
+  background: #22262e;
+  color: inherit;
+  border: 1px solid #343945;
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.ins-none {
+  opacity: 0.5;
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}
+.ins-row {
+  border-top: 1px solid #23272f;
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+}
+.ins-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ins-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ins-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 0.2rem;
+}
+.ins-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  padding: 0.3rem 0;
+}
+.knob {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+.knob input[type='range'] {
+  width: 110px;
+}
+.knob-name {
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.knob-value {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.6rem;
+}
+
+/* --- the EQ editor -------------------------------- */
+.eq-view {
+  width: 100%;
+  max-width: 720px;
+  height: 150px;
+  display: block;
+  background: #14161a;
+  border: 1px solid #262a32;
+  border-radius: 4px;
+  touch-action: none;
+}
+.eq-grid {
+  stroke: #23272f;
+  stroke-width: 1;
+}
+.eq-zero {
+  stroke: #343945;
+  stroke-width: 1;
+}
+.eq-curve {
+  fill: none;
+  stroke: #5b8fc7;
+  stroke-width: 2;
+}
+.eq-handle {
+  fill: #22262e;
+  stroke: #6d86a8;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.eq-handle.picked {
+  fill: #e8c35a;
+  stroke: #e8c35a;
+}
+.eq-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.35rem 0;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+.eq-norm {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  opacity: 0.85;
+}
+.eq-comp {
+  font-variant-numeric: tabular-nums;
+  color: #e8c35a;
+}

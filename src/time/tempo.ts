@@ -140,7 +140,11 @@ export class MeterMap {
     return i;
   }
 
-  format(ticks: number): string {
+  // The ordinal position of a tick — [bar, beat, tick], 1-indexed — as
+  // numbers, for a writer that needs the array spelling rather than the
+  // display string. positionTicks's inverse: for any non-negative
+  // integer T, positionTicks(...position(T)) === T.
+  position(ticks: number): [number, number, number] {
     if (ticks < 0 || !Number.isInteger(ticks)) throw new Error(`invalid tick ${ticks}`);
     const i = this.segmentFor(ticks);
     const meter = this.events[i]!;
@@ -149,6 +153,11 @@ export class MeterMap {
     const inBar = rel % barTicks(meter);
     const beat = Math.floor(inBar / beatTicks(meter.denominator)) + 1;
     const tick = (inBar % beatTicks(meter.denominator)) + 1;
+    return [bar, beat, tick];
+  }
+
+  format(ticks: number): string {
+    const [bar, beat, tick] = this.position(ticks);
     return `${bar}.${beat}.${tick}`;
   }
 
@@ -172,6 +181,36 @@ export class MeterMap {
       (beat - 1) * beatTicks(meter.denominator) +
       (tick - 1)
     );
+  }
+
+  // Tick count → cardinal span from an anchor — spanTicks's inverse,
+  // and anchored for the same reason spanTicks is: a meter change
+  // inside the span changes what a bar is worth, so the same tick
+  // count spells differently from different starting points. Greedy —
+  // whole bars, then whole beats, then ticks — which walks exactly the
+  // steps spanTicks adds back: spanTicks(from, ...span(from, T)) === T
+  // for every non-negative integer T.
+  span(from: number, ticks: number): [number, number, number] {
+    if (ticks < 0 || !Number.isInteger(ticks)) throw new Error(`invalid span ${ticks}`);
+    let at = from;
+    let remaining = ticks;
+    let bars = 0;
+    let beats = 0;
+    for (;;) {
+      const bar = barTicks(this.events[this.segmentFor(at)]!);
+      if (remaining < bar) break;
+      remaining -= bar;
+      at += bar;
+      bars++;
+    }
+    for (;;) {
+      const beat = beatTicks(this.events[this.segmentFor(at)]!.denominator);
+      if (remaining < beat) break;
+      remaining -= beat;
+      at += beat;
+      beats++;
+    }
+    return [bars, beats, remaining];
   }
 
   // Cardinal span → tick count from an anchor: [bars, beats?, ticks?],

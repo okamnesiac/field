@@ -847,6 +847,22 @@ for (const op of ['play', 'pause', 'stop', 'quit'] as const) {
 }
 
 program
+  .command('ui <song>')
+  .description('open the web face on a song: transport, lanes, levels, mute and solo (ctrl-c stops)')
+  .option('--port <port>', 'bind this port instead of a random one', (v) => parseInt(v, 10))
+  .option('--no-open', 'print the URL without opening anything')
+  .option('--browser', 'open a browser tab instead of the app window')
+  .action(async (song: string, opts: { port?: number; open?: boolean; browser?: boolean }) => {
+    try {
+      const root = requireRoot();
+      const { runUi } = await import('./commands/ui.js');
+      await runUi(root, song, { ...(opts.port !== undefined ? { port: opts.port } : {}), open: opts.open !== false, browser: opts.browser === true });
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('record [target]')
   .description('record a take on a track through field-audiod: arms an input, or MIDI when the record entry names an instrument, takes against what is playing, ctrl-c stops and finalizes')
   .option('--input <n>', 'input channel on the device, counting from 1 (default 1); audio takes only', parseInputChannel)

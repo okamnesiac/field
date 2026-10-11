@@ -137,6 +137,42 @@ describe('build', () => {
     expect(state.runs).toBe(2); // key changed, rule re-ran
   });
 
+  it('a muted placement leaves the plan, and the toggle re-keys the stem', async () => {
+    // Mute is spec-borne (ui.md §3 via planFor): the placement is absent
+    // from the plan, so the action key moves on every toggle — and
+    // re-muting is a cache HIT on the first muted key, which is what
+    // proves the exclusion is deterministic rather than a gain hack.
+    const { state, runner } = countingRunner();
+    const twoPads = (muted: boolean) =>
+      [
+        'name: two-pads',
+        'inputs:',
+        '  - audio: pad',
+        '  - audio: pad',
+        '    anchor: absolute',
+        '    at: 96000',
+        ...(muted ? ['    mute: true'] : []),
+        '',
+      ].join('\n');
+    writeTrack('two-pads', twoPads(true));
+    await buildLabels(root, ['//songs/creek/track:two-pads'], runner);
+    expect(state.runs).toBe(1);
+
+    writeTrack('two-pads', twoPads(false));
+    await buildLabels(root, ['//songs/creek/track:two-pads'], runner);
+    expect(state.runs).toBe(2); // the placement returned to the plan
+
+    writeTrack('two-pads', twoPads(true));
+    await buildLabels(root, ['//songs/creek/track:two-pads'], runner);
+    expect(state.runs).toBe(2); // back to the first muted key: a hit
+  });
+
+  it('a source consumed only by muted placements drops out of the deps', async () => {
+    writeTrack('solo-mute', ['name: solo-mute', 'inputs:', '  - audio: pad', '    mute: true', ''].join('\n'));
+    const deps = queryDeps(root, 'deps(//songs/creek/track:solo-mute)');
+    expect(deps.some((d) => d.endsWith('asset:pad'))).toBe(false);
+  });
+
   it('committed outcomes name their file path (#35 review)', async () => {
     const { runner } = countingRunner();
     const outcomes = await buildLabels(root, ['//songs/creek/asset:pad'], runner);
@@ -160,9 +196,16 @@ describe('build', () => {
     expect(rule.outputPath!).toContain(join('.field', 'out')); // materialized, not committed
   });
 
-  it('materializes by rename, never in place (watch.md §1.6)', async () => {
-    const { runner } = countingRunner();
-    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+  it('materializes changed bytes by rename, never in place (watch.md §1.6)', async () => {
+    // A runner whose output tracks the spec, so a parameter change moves
+    // the bytes: the previous shape of this test used countingRunner,
+    // which copies its input and therefore produced identical bytes on
+    // both passes — it asserted the rename against a rebuild that had
+    // nothing new to write.
+    const varying: GeneratorRunner = async (node, _inputs, outputPath) => {
+      writeFileSync(outputPath, JSON.stringify(node.spec));
+    };
+    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], varying);
     const out = first.find((o) => o.label.endsWith(':pad-eq'))!.outputPath!;
     const before = statSync(out).ino;
 
@@ -170,8 +213,30 @@ describe('build', () => {
     // path; a rebuild must land on a fresh inode so an open reader keeps
     // its bytes — an in-place copy would truncate under it.
     writeTrack('pad-eq', eqTrackYaml(400));
-    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], varying);
     expect(statSync(out).ino).not.toBe(before);
+  });
+
+  it('leaves an already-correct artifact untouched, rather than replacing it', async () => {
+    // The other half of §1.6's guarantee, and the half Windows enforces:
+    // re-materializing bytes that are already there must not disturb the
+    // path at all. POSIX tolerates renaming over a file a daemon holds
+    // open (the reader keeps its inode); Windows refuses with EPERM, so
+    // a re-materialize that "moved" an identical artifact broke every
+    // rebuild-behind-the-play there. Nothing to write is nothing to do.
+    const { runner } = countingRunner();
+    const first = await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    const out = first.find((o) => o.label.endsWith(':pad-eq'))!.outputPath!;
+    const before = statSync(out);
+
+    // A re-key with an identical result: the rule re-runs (countingRunner
+    // copies its input), and the bytes it produces are the ones already
+    // materialized.
+    writeTrack('pad-eq', eqTrackYaml(400));
+    await buildLabels(root, ['//songs/creek/track:pad-eq'], runner);
+    const after = statSync(out);
+    expect(after.ino).toBe(before.ino);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
   it('expands wildcards, including the everything pattern', async () => {

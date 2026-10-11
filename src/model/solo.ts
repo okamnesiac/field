@@ -1,0 +1,134 @@
+import type { LoadedSong } from './project.js';
+
+// Solo as an alternate output feed (ui.md §3 as amended): a soloed
+// session is the same song with every input that cannot be heard
+// through the soloed track filtered out — computed at session compile,
+// held nowhere. Solo is a listening gesture, so it lives where
+// play/pause does: in the running session, never in a file. Two views
+// of one project cannot disagree about it any more than they can about
+// the playhead, and closing the session ends it.
+//
+// The walk keeps three families audible:
+// - the soloed track's own subtree — everything it needs to render;
+// - its carriers — every track it is heard *through* on the way to
+//   `main`, kept with their inserts and levels but with the sibling
+//   inputs that do not lead to the solo filtered out;
+// - its sends — a receiver fed by any kept track stays audible (the
+//   shared-reverb case: soloing drums keeps the room drums feed), along
+//   with that receiver's own subtree and carriers, transitively.
+//
+// Muted placements are invisible to the walk for the same reason they
+// are invisible to the plan: a placement the plan excludes cannot carry
+// the soloed signal anywhere.
+
+interface SoloView {
+  // Track name -> the input indexes that survive. A track absent from
+  // the map is unreferenced once `main` is filtered and needs no entry.
+  keptInputs: Map<string, Set<number>>;
+  // Cables whose sender remains audible.
+  keptCables: Set<string>; // `${sender}\0${label}`
+}
+
+const cableKey = (sender: string, label: string): string => `${sender}\0${label}`;
+
+export function soloView(song: LoadedSong, solo: string): SoloView {
+  const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
+  if (!byName.has(solo)) throw new Error(`no such track "${solo}" to solo`);
+
+  // Downward reachability over unmuted track placements.
+  const down = (start: string): Set<string> => {
+    const seen = new Set<string>();
+    const stack = [start];
+    while (stack.length > 0) {
+      const name = stack.pop()!;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const track = byName.get(name);
+      if (!track) continue;
+      for (const entry of track.inputs) {
+        if (entry.track !== undefined && !entry.mute) stack.push(entry.track);
+      }
+    }
+    return seen;
+  };
+
+  // Audible set: the soloed subtree, then send receivers of anything
+  // audible, transitively — a receiver is a new root whose subtree comes
+  // along, and whose own sends chain further.
+  const audible = new Set<string>();
+  const keptCables = new Set<string>();
+  const roots = [solo];
+  while (roots.length > 0) {
+    const root = roots.pop()!;
+    for (const name of down(root)) audible.add(name);
+    for (const cable of song.cables) {
+      if (!audible.has(cable.sender)) continue;
+      if (keptCables.has(cableKey(cable.sender, cable.label))) continue;
+      keptCables.add(cableKey(cable.sender, cable.label));
+      if (!audible.has(cable.receiver)) roots.push(cable.receiver);
+    }
+  }
+
+  // Carriers: tracks that reach something audible through unmuted track
+  // placements — the paths the solo is heard through. (A carrier's own
+  // sends stay: its post-insert sum is now solo-only signal.)
+  const carriers = new Set<string>();
+  for (const track of song.tracks) {
+    const name = track.data.name;
+    if (audible.has(name)) continue;
+    if ([...down(name)].some((d) => audible.has(d))) carriers.add(name);
+  }
+  for (const cable of song.cables) {
+    if (carriers.has(cable.sender) && !keptCables.has(cableKey(cable.sender, cable.label))) {
+      keptCables.add(cableKey(cable.sender, cable.label));
+    }
+  }
+
+  const keptInputs = new Map<string, Set<number>>();
+  for (const track of song.tracks) {
+    const name = track.data.name;
+    const kept = new Set<number>();
+    track.data.inputs.forEach((entry, i) => {
+      if (entry.receive !== undefined) {
+        // A receive survives with its cable; the cable's sender check
+        // above already decided audibility.
+        const cable = song.cables.find((c) => c.receiver === name && c.label === entry.receive);
+        if (cable && keptCables.has(cableKey(cable.sender, cable.label))) kept.add(i);
+        return;
+      }
+      if (audible.has(name)) {
+        kept.add(i); // inside an audible subtree everything plays
+        return;
+      }
+      if (carriers.has(name)) {
+        // A carrier keeps only the inputs that lead to the solo (or to a
+        // kept receiver's subtree): its own audio and its other children
+        // are the siblings solo exists to silence.
+        if (
+          entry.track !== undefined &&
+          !entry.mute &&
+          (audible.has(entry.track) || carriers.has(entry.track))
+        ) {
+          kept.add(i);
+        }
+        return;
+      }
+      // Unreferenced once main filters: keep nothing.
+    });
+    if (audible.has(name) || carriers.has(name) || kept.size > 0) keptInputs.set(name, kept);
+  }
+
+  return { keptInputs, keptCables };
+}
+
+// Applies the view to a loaded song in place — callers hand it a fresh
+// loadProject result, which is the same contract compileSession already
+// has with the files.
+export function applySolo(song: LoadedSong, solo: string): void {
+  const view = soloView(song, solo);
+  for (const track of song.tracks) {
+    const kept = view.keptInputs.get(track.data.name);
+    track.data.inputs = track.data.inputs.filter((_, i) => kept?.has(i) ?? false);
+  }
+  song.cables = song.cables.filter((c) => view.keptCables.has(cableKey(c.sender, c.label)));
+}
