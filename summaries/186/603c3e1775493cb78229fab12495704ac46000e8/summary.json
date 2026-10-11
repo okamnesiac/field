@@ -1,0 +1,164 @@
+{
+ "version": 1,
+ "name": "sclang lookup on Windows",
+ "project": "windows-portability",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 186,
+  "title": "Find sclang on Windows",
+  "head": "603c3e1775493cb78229fab12495704ac46000e8",
+  "headRef": "windows/sclang-lookup",
+  "base": "6a628173793bd9d84311808706899d3473326195",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field runs SuperCollider's language interpreter, <code>sclang</code>, in two places: to render every <code>supercollider:</code> entry in <code>field build</code>, and to run the voice host that <code>field keys</code> plays an instrument through. Both find <code>sclang</code> with one function, <code>sclangCommand</code> in <code>src/generators/supercollider.ts</code>. On Windows that function could not find a real <code>sclang</code> even with SuperCollider installed, so renders and <code>field keys</code> stopped there.",
+   "This pull request makes the lookup platform-aware. On Windows it searches <code>PATH</code> for <code>sclang</code> with each <code>PATHEXT</code> extension, reads a native <code>FIELD_SCLANG</code> such as <code>C:\\Program Files\\SuperCollider-3.13.0\\sclang.exe</code> as a path, and falls back to the newest <code>SuperCollider-&lt;version&gt;</code> folder under Program Files. macOS and Linux keep the lookup they had. The platform becomes a parameter of <code>sclangCommand</code>, so a new test file runs the Windows rules on any machine.",
+   "The review found two problems, both on Windows. The lookup can return a <code>.cmd</code> or <code>.bat</code> script, which Node refuses to start without a shell. And two of the new tests build fixtures that a Windows file system cannot hold, so the <code>windows</code> CI job fails them."
+  ],
+  "cards": [
+   {
+    "id": "order",
+    "title": "Where the lookup looks, in order",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Step</th><th>macOS and Linux</th><th>Windows</th></tr></thead><tbody><tr><td><code>FIELD_SCLANG</code> set</td><td>A value with <code>/</code> is a path; a bare name is searched on <code>PATH</code></td><td>A value with <code>\\</code>, <code>/</code>, or <code>:</code> is a path; a bare name is searched on <code>PATH</code> with each <code>PATHEXT</code> extension</td></tr><tr><td><code>PATH</code></td><td><code>sclang</code> in each <code>:</code>-separated directory</td><td><code>sclang</code> plus each <code>PATHEXT</code> extension in each <code>;</code>-separated directory, never the bare name</td></tr><tr><td>Installed copy</td><td>The app bundle, on macOS only</td><td>The newest <code>SuperCollider-&lt;version&gt;\\sclang.exe</code> under <code>ProgramFiles</code></td></tr></tbody></table></div><p class=\"note\">A <code>FIELD_SCLANG</code> that names nothing is an error, never a fall through to the installed copy, so a mistyped wrapper cannot silently run a different <code>sclang</code>.</p>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>One review at <code>603c3e1</code>: changes requested, with two open findings.</li><li><b>The lookup returns scripts Node cannot start.</b> <code>PATHEXT</code> includes <code>.BAT</code> and <code>.CMD</code>, and both callers spawn without a shell.</li><li><b>Two new tests fail on Windows.</b> Their fixtures hold a drive path that a POSIX rule or a Windows file system cannot.</li><li>The <code>linux</code> CI job passes. The <code>windows</code> job fails 13 tests: the two new ones, and 11 that also fail on <code>main</code>.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "lookup",
+   "title": "The sclang lookup",
+   "kicker": "One function decides which sclang a render and the voice host run, now per platform.",
+   "intro": [
+    "<code>sclangCommand</code> returns the path of the <code>sclang</code> to run. <code>runScProgram</code> starts it with <code>execFile</code> for a render, and <code>VoiceHost.start</code> starts it with <code>spawn</code> for <code>field keys</code>. Neither caller uses a shell, so the path must name a program Windows can start directly.",
+    "Three helpers carry the Windows rules. <code>variable</code> reads an environment variable without regard to case on Windows, because Windows spells <code>PATH</code> as <code>Path</code> and a copied environment loses the case-insensitive lookup that <code>process.env</code> has. <code>onPath</code> searches <code>PATH</code>, trying each <code>PATHEXT</code> extension on Windows. <code>installedSclang</code> finds the copy the SuperCollider installer put in place: the app bundle on macOS, or the newest versioned folder under Program Files on Windows."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "<code>PATHEXT</code> is the Windows list of extensions that the command shell treats as runnable, by default <code>.COM;.EXE;.BAT;.CMD</code>. Node can start only <code>.com</code> and <code>.exe</code> without a shell."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/generators/supercollider.ts",
+     "note": "The platform-aware lookup: three new helpers and a <code>platform</code> parameter on <code>sclangCommand</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "macOS and Linux keep their behavior. I called the built <code>sclangCommand</code> with <code>linux</code> and <code>darwin</code> against temporary files, and it returned what <code>main</code> returns: a <code>FIELD_SCLANG</code> with <code>/</code> is a path, a bare name is searched on a <code>:</code>-split <code>PATH</code>, and only macOS falls back to the app bundle. The one difference is that Linux no longer checks the macOS bundle path, which cannot exist there."
+      },
+      {
+       "kind": "verify",
+       "text": "Copied environments work. With the keys spelled <code>Path</code>, <code>PathExt</code>, and <code>programfiles</code>, the lookup still found <code>sclang.exe</code> in my probe.",
+       "line": 71
+      },
+      {
+       "kind": "flag",
+       "text": "<b>The lookup can return a script field cannot start.</b> The default <code>PATHEXT</code> includes <code>.BAT</code> and <code>.CMD</code>, so <code>FIELD_SCLANG=sclang-wrapper</code> resolves to <code>sclang-wrapper.cmd</code>, and a <code>sclang.cmd</code> on <code>PATH</code> wins over the Program Files fallback. Node refuses to start a <code>.bat</code> or <code>.cmd</code> without a shell and throws <code>spawn EINVAL</code>, so a render fails with <code>sclang failed for &lt;program&gt;: spawn EINVAL</code> where <code>main</code> said <code>FIELD_SCLANG points at a missing binary</code>. The review asks to try only <code>.com</code> and <code>.exe</code> on Windows.",
+       "line": 85
+      },
+      {
+       "kind": "verify",
+       "text": "Versions sort as numbers. Under a fake Program Files holding <code>SuperCollider-3.9</code>, <code>3.10</code>, <code>3.13.0</code>, and an empty <code>3.14.0</code>, the lookup returned <code>3.13.0</code>; with only <code>3.9</code> and <code>3.10</code>, it returned <code>3.10</code>.",
+       "line": 126
+      },
+      {
+       "kind": "context",
+       "text": "<code>ProgramW6432</code> is not read. Node publishes no 32-bit Windows build from version 23 on, so for field's process <code>ProgramFiles</code> already names the 64-bit folder.",
+       "line": 117
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests for each platform's rules",
+   "kicker": "A new test file runs the Windows rules on any machine; one comment in the build tests catches up.",
+   "intro": [
+    "Because <code>sclangCommand</code> takes the platform as a parameter, <code>src/generators/supercollider.test.ts</code> passes <code>'win32'</code> or <code>'linux'</code> and checks the result against real files in a temporary directory. That lets the macOS and Linux CI jobs run the Windows rules too.",
+    "The catch is the other direction. On the <code>windows</code> CI job, the platform parameter does not change the host's own paths, so a fixture built for a POSIX rule or a POSIX file system can fail there."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/generators/supercollider.test.ts",
+     "note": "Eight lookup tests, one per rule. Six pass on Windows; two fail there.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "flag",
+       "text": "<b>Two tests fail on the Windows CI job.</b> This one passes a <code>C:\\…\\bin</code> directory as <code>PATH</code> under the <code>linux</code> rule, which splits it at the colon, so it throws <code>sclang not found on PATH</code>. The test at line 54 writes its decoy under a directory named <code>C:</code>, which Windows refuses with <code>ENOENT</code>. The review asks to skip both on Windows, as <code>build.test.ts</code> skips its POSIX stubs.",
+       "line": 30
+      },
+      {
+       "kind": "context",
+       "text": "This test asserts that the lookup returns <code>sclang-wrapper.cmd</code>, the result that the flag on <code>supercollider.ts</code> line 85 says Node cannot start.",
+       "line": 65
+      },
+      {
+       "kind": "verify",
+       "text": "On macOS all eight tests pass: <code>pnpm exec vitest run src/generators/supercollider.test.ts</code>."
+      }
+     ]
+    },
+    {
+     "path": "src/graph/build.test.ts",
+     "note": "A comment stops saying that a real <code>sclang</code> cannot reach this spawn on Windows.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The <code>supercollider</code> and <code>runScProgram edges</code> tests pass on macOS: 7 run, with the real-sclang integration test left out."
+      },
+      {
+       "kind": "context",
+       "text": "Just below this hunk, <code>sclangPresent</code> still decides with the POSIX rules whether to run the real-sclang integration test, so that test skips on a Windows machine with SuperCollider installed. The review lists switching it to <code>sclangCommand()</code> as a suggestion."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Docs and the plan",
+   "kicker": "The CLI manual, the keys guide, and the Windows plan describe the new order.",
+   "intro": [
+    "<code>docs/cli.md</code> and <code>docs/keys.md</code> say where <code>field build</code> and <code>field keys</code> find <code>sclang</code>, now including <code>sclang.exe</code> and the Program Files folder. The Windows portability plan marks its §7.2 item, <code>sclangCommand</code> cannot find <code>sclang</code> on Windows, as ported."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "I read each doc change against <code>sclangCommand</code> at this head, and each matches the code. The plan stays <code>in-progress</code>, and <code>project check</code> passes."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/cli.md",
+     "note": "The lookup order for renders, and the <code>FIELD_SCLANG</code> row of the environment table."
+    },
+    {
+     "path": "docs/keys.md",
+     "note": "The same order for <code>field keys</code>."
+    },
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "§7.2 records the item as ported, with the rules it now follows.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "This note says the search tries each <code>PATHEXT</code> extension. If the lookup changes to try only <code>.com</code> and <code>.exe</code>, this sentence changes with it.",
+       "line": 636
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
