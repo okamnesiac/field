@@ -71,9 +71,10 @@ Decided elsewhere, restated here as constraints:
   Said precisely: the action key stays computable from the repository
   alone, so any machine *holding the artifact* serves it without the
   plugin — today that means the machine that rendered it, because the
-  cache is local and unversioned, and the remote asset store
-  ([remote-asset-store](../remote-asset-store/readme.md)) is what
-  turns this into a cross-machine story. Freezing
+  cache is local and unversioned, and the remote
+  ([remote.md](../remote/readme.md) §1, which took this role from the
+  remote asset store this line first named) is what turns this into
+  a cross-machine story. Freezing
   is the collaboration story, not an optimization.
 
 ## 3 Decisions (DECIDED, 2026-08-11)
@@ -357,7 +358,7 @@ these; the two discriminants coexist in one chain.
    keys per decision 8; the fixture plugin and its CI suite,
    tempo-reading behavior included (decision 13);
    RENDER_PLAN_VERSION bump with existing songs proven pure cache
-   hits.
+   hits. *Shipped in #148.*
 2. **Live.** A hosted insert in the live chain: delay compensation
    from declared latency (the stream lags and flushes, the limiter's
    contract), warmup at locate under the chain's existing −60 dB
@@ -386,12 +387,18 @@ these; the two discriminants coexist in one chain.
    the rebuild runs under the engine lock, where its cost is dropped
    audio rather than latency, so the "correct first, fast later"
    sequencing never applied (minjudd on #150); the warmup bound
-   carries hosted state correctness exactly as before.
+   carries hosted state correctness exactly as before. *Shipped in
+   #150; #151 and #152 followed.*
 3. **Editor sessions and write-back.** `field open <track>/<handle>`,
    the `param_changed` protocol message, gesture-quantum file
    writes, blob recapture on non-param signals, id re-binding, the
    owner-attached window rule. The demo is decision 7's flow run
-   under `field play creek --watch`.
+   under `field play creek --watch`. Two obligations arrive from
+   add-insert, which completed before this chunk: `field open` takes
+   the same `<song>/<track>` qualification `field insert add` refuses
+   with on a name collision (add-insert.md §2), and `field insert add`
+   runs `field open` on the insert it wrote instead of printing the
+   line (add-insert.md §5).
 4. **`realtime-bounce`.** The 1× capture path for plugins that
    cannot render offline (UAD-2 DSP hardware is the motivating
    case), flagged per build-graph.md's render strategies.
@@ -459,9 +466,9 @@ open` shows the editor, a knob twist is heard immediately and lands
 as a one-line YAML diff that re-freezes behind the play; a stateful
 plugin captures a blob a fresh clone resolves by hash, and the
 rendering machine with that plugin removed still builds the song as
-pure cache hits — the cross-machine version of that story waits on
-the remote asset store
-([remote-asset-store](../remote-asset-store/readme.md)); the
+pure cache hits — the cross-machine version of that story rides the
+remote ([remote.md](../remote/readme.md) §1), not the remote asset
+store this line first named; the
 fixture-plugin suite is green
 in CI (VST3 on Linux; AU on the local gate, per decision 12); and
 every existing project rebuilds as pure cache hits.

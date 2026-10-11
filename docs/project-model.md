@@ -41,9 +41,10 @@ project/
 
 Designed but not yet built, arriving with the features that write them:
 `field.lock` (the locked plugin and model environment), `markers.yaml`,
-`automation/`, `monitoring/`, the scanned plugin inventory and AU state
-blobs, and `hardware/apollo.yaml`. Recorded takes are deliberately not
-on that list — they add no directory (see "Takes" below).
+`automation/`, `monitoring/`, and `hardware/apollo.yaml`. Recorded takes
+are deliberately not on that list — they add no directory (see "Takes"
+below) — and neither is hosted plugins' state, whose blobs live under
+`shared/plugins/` as described below.
 
 Exact schemas are designed in
 [projects/project-core/readme.md](projects/project-core/readme.md); the layout
@@ -202,6 +203,19 @@ is a pluggable detail: **Git LFS is backend #1**, and a remote store
 (S3-backed) is a manifest-preserving migration later, when LFS
 storage/bandwidth costs hurt.
 
+field hashes files as they sit on disk, not as Git stores them: a
+`.scd` program's content hash is an input to its render, and `check`
+compares each manifest byte for byte with its canonical form. A
+checkout that rewrites line endings changes those answers while
+`git status` stays clean, and Git for Windows does that by default
+(`core.autocrlf=true`). So the `.gitattributes` that `field init`
+writes opens with `* text=auto eol=lf`, which checks text out with LF
+on every platform. The LFS rules for audio and `*.state binary` for
+plugin state blobs follow it and override it, because Git applies the
+last matching rule. `init` keeps a `.gitattributes` that already
+exists, so in a project created before `init` wrote the LF rule, add
+`* text=auto eol=lf` by hand above the LFS lines.
+
 Generated variants are committed with their request and provenance,
 never silently regenerated — and pinned by their own takes file's
 per-variant hashes rather than the ledger (project-layout.md §4.8), so
@@ -269,11 +283,12 @@ beside the audio say which performances exist and which one plays.
 
 ### The entry
 
-The entry carries nothing — bare `- record:` — because the device and
-input you record through are facts about your machine, not the song
-(recording.md §4). It places like every other entry: `at`, `duration`,
-`gain_db`, and the rest apply to the window the takes fill. It never
-loops.
+The entry carries no device or input — bare `- record:` — because the
+device and input you record through are facts about your machine, not
+the song (recording.md §4). The one thing it may name is an instrument,
+which makes it record MIDI instead of audio (see "MIDI takes" below).
+It places like every other entry: `at`, `duration`, `gain_db`, and the
+rest apply to the window the takes fill. It never loops.
 
 ```yaml
 # songs/creek/tracks/lead-vocal.yaml
@@ -329,6 +344,56 @@ your machine did. The takes sit *inside* the audio directory so one
 decision governs both — ignore the audio and its pins go too, commit the
 audio and the provenance comes with it (bloom-in-tree.md §7). The split
 is on disk only; the loader merges them.
+
+### MIDI takes
+
+A record entry that names an instrument records what you play on
+`field keys` or a controller, and you hear it through that instrument
+([projects/keyboard-instrument/readme.md](projects/keyboard-instrument/readme.md)
+§12). The instrument resolves as `field keys` resolves one: a name
+without `.scd` gets it, and a name without a `/` is under
+`shared/instruments/`. Its program must answer `FIELD_MODE=voice`.
+
+```yaml
+# songs/creek/tracks/keys.yaml
+name: keys
+inputs:
+  - record:
+      instrument: still-water-pad
+```
+
+A MIDI take is a notes file, `audio/<name>/<take>.notes.yaml`, pinned
+in the ledger like any take, with one flow row per note, controller
+change, and pitch bend, in samples at the capture's rate:
+
+```yaml
+# songs/creek/audio/keys/take-20261010-143012.notes.yaml
+sample_rate: 48000
+length: 96000
+notes:
+  - { at: 0, length: 24000, note: 60, velocity: 100 }
+  - { at: 12000, length: 84000, note: 64, velocity: 90 }
+controls:
+  - { at: 6000, cc: 64, value: 127 }
+bends: []
+```
+
+A note still held when the take stopped lasts to its end, and
+`channel` appears only when it is not 1. Its row carries `sources`, the
+MIDI inputs the take listened to, where an audio row carries `device`
+and `input`, and its `latency` is the output latency alone: you play
+in time with what you hear, which runs behind the playhead by that
+much.
+
+The build renders the chosen take through the instrument as a `gen:`
+node named like the record node, and the entry places that render. A
+take of the other kind than its entry records is an error in `field
+check`, as is an instrument whose program is missing or outside the
+project: it resolves by the rule a `supercollider:` entry's `source:`
+does. The notes file has one
+writer, `field record`. Editing it by hand changes its hash, and the
+build then refuses it, as it refuses any pinned file whose bytes
+changed.
 
 ### Generating and choosing
 

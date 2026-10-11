@@ -1,10 +1,11 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped: all three chunks (#4–#6). Stays open until real
-use (bloom, new phases) stops surfacing surprises.
+**Outcome:** Shipped: all three chunks (#4–#6), which meet §4. One §6
+commitment never landed — `field track rename` and its siblings,
+rewriting every reference atomically — and carries over to
+[track-rename](../track-rename/readme.md).
 
 # Plan: Project core — format, CLI, build graph skeleton
 

@@ -88,15 +88,28 @@ real binary in null-output mode. Hosting arrived with
 each, `--render` instantiates pinned plugins offline, and live sessions
 host them in their chains — child chains on the load thread, the master
 chain in the callback, delay compensation from declared latency.
-Recording's input side arrived with
-[recording.md](projects/recording/readme.md) chunk 1: the daemon opens
-the device duplex only when something arms, captures one input channel
-into a crash-safe transaction under `.field/recording/`, and recovers a
-transaction a dead daemon left behind
-([audio-engine.md](audio-engine.md) "Capture as built"). The rest —
-landing takes in the project, monitoring, editor windows, routing,
-metering beyond the armed input's peak — is future work whose settled
-decisions live in [audio-engine.md](audio-engine.md).
+Recording arrived with [recording.md](projects/recording/readme.md):
+the daemon opens the device duplex only when something arms, captures
+one input channel into a crash-safe transaction under
+`.field/recording/`, and recovers a transaction a dead daemon left
+behind ([audio-engine.md](audio-engine.md) "Capture as built"); a
+stopped take lands in the project and builds in place, the metronome
+and count-in run in the engine, and punch-out and loop takes ride the
+live session's region loop. The rest — comping, monitoring through the
+engine, editor windows, routing, metering beyond the armed input's
+peak — is future work whose settled decisions live in
+[audio-engine.md](audio-engine.md).
+
+MIDI is hardware-facing too, so it lives here as well
+([keys.md](keys.md)). `field keys` reads the keyboard in TypeScript and
+spawns `field-audiod --keys`, a short-lived mode separate from the
+daemon that owns the `Field Keys` virtual MIDI source and, on macOS,
+reports the active keyboard layout. `--midi-monitor` prints what a
+named MIDI source sends. Neither touches the transport or the control
+socket. The daemon itself records MIDI: armed for a MIDI take, it
+listens to every MIDI source and stamps each message on the clock the
+audio callback keeps, so a MIDI take lines up with the song as an
+audio take does.
 
 The real-time audio callback never depends on TypeScript or Python: GC
 pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives
@@ -139,9 +152,16 @@ OSC over UDP, which TypeScript handles fine. Two modes:
 
 - **Offline (NRT)** — the default: an SC program plus an explicit seed
   renders an asset via scsynth's non-realtime mode. Deterministic,
-  cacheable, and the first real build rule.
-- **Live** — scsynth as a node in the real-time graph, receiving
-  timestamped OSC. Arrives with the real-time runtime.
+  cacheable, and the first real build rule. A recorded MIDI take renders
+  the same way, through its instrument's voice
+  ([build-graph.md](build-graph.md) "`voice-render`").
+- **Live** — `field keys <instrument>` runs a voice host: `sclang` on
+  `sc/voice-host.scd`, which boots its own scsynth on the output device
+  and plays the instrument's voice from every MIDI source
+  ([keys.md](keys.md)). Its sound goes straight to the device, beside
+  the daemon's rather than through the session graph; scsynth as a node
+  in that graph, receiving timestamped OSC, is
+  [live-supercollider](projects/live-supercollider/readme.md)'s work.
 
 SC source is tracked in Git and treated as code.
 

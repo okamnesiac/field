@@ -30,7 +30,7 @@ import {
 } from '../audio/plugins.js';
 import { TempoMap } from '../time/tempo.js';
 import type { Asset, InputEntry, Track } from '../schema/index.js';
-import { isHostedInsert } from '../schema/index.js';
+import { isHostedInsert, isMidiTakeRow } from '../schema/index.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 
 // The dependency graph, derived from the project model by convention
@@ -270,6 +270,22 @@ export function buildGraph(project: LoadedProject): Graph {
               choice: { chosen: takes.chosen, takes: variants.length },
             });
             sha256BySource.set(genRef(name), variant.sha256);
+          }
+        } else if (entry.record?.instrument !== undefined) {
+          // A chosen MIDI take renders through the entry's instrument at
+          // the track's rate (keyboard-instrument.md §12.3), and withTakes
+          // places the render where the take was played.
+          const name = generatorName(entry, file.data.name);
+          const take = chosenTake(song.recordTakes.get(name)?.data);
+          if (take !== undefined && isMidiTakeRow(take)) {
+            scEntryRate.set(name, trackRate(file.data));
+            addRule(
+              { pkg: `${pkgBase}/gen`, name },
+              song.dir,
+              { name, type: 'voice-render', take: take.asset, instrument: entry.record.instrument },
+              refLabel,
+              trackRate(file.data),
+            );
           }
         }
       }
@@ -534,13 +550,17 @@ export function withTakes(
     if (take === undefined) return [];
     const window = placedWindow(entry, local);
     const at = window.start + take.started_at_samples - take.latency;
-    const takeRate = sourceRate(take.asset) ?? trackRate;
+    // A MIDI take sounds through its render, the gen node the graph minted
+    // for the entry (keyboard-instrument.md §12.3); an audio take is its
+    // own bytes.
+    const source = isMidiTakeRow(take) ? genRef(name) : take.asset;
+    const takeRate = sourceRate(source) ?? trackRate;
     const readInto = at < 0 ? Math.round((-at * takeRate) / trackRate) : 0;
     const { record: _record, ...placement } = entry;
     return [
       {
         ...placement,
-        audio: take.asset,
+        audio: source,
         anchor: 'absolute',
         at: Math.max(0, at),
         ...(window.duration !== undefined ? { duration: window.duration } : { duration: undefined }),

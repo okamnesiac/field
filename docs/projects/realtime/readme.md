@@ -1,12 +1,13 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped: all four chunks, and `field play <song>` *is* live
-evaluation now. Stays open until live-default playback has soaked on
-real sessions; the recorded follow-ups (streaming rings before large
-sessions, cross-rate wiring) are where an edit would land.
+**Outcome:** Shipped: all four chunks (#137–#140), and
+`field play <song>` *is* live evaluation now; the cross-rate wiring
+follow-up shipped as its own plan (#143). §5's last clause is half met:
+a session costs the engine one live chain, but sources preload whole
+rather than streaming. Streaming rings, owed before large sessions
+(§7), carry over to [streaming-rings](../streaming-rings/readme.md).
 
 # Plan: Realtime
 

@@ -1,5 +1,6 @@
 import type { ResampleSpec } from './resample.js';
 import type { StemSpec } from './stem.js';
+import type { VoiceRenderSpec } from './voice-render.js';
 
 // A Generator owns everything type-specific about realizing one spec
 // kind — wiring, validation, inputs, execution, post-run integrity —
@@ -27,7 +28,7 @@ export interface SupercolliderSound {
   channels: 1 | 2;
 }
 
-export type GeneratorSpec = SupercolliderSound | StemSpec | ResampleSpec;
+export type GeneratorSpec = SupercolliderSound | StemSpec | ResampleSpec | VoiceRenderSpec;
 
 export interface RunContext {
   root: string; // absolute project root
