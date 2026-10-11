@@ -1,6 +1,6 @@
 import type { Knob } from '../schema/knobs.js';
 import type { Keymap, KeymapAction } from '../schema/keymap.js';
-import { controllerOf, knobList, knobValue, stepFrom, type ShownKnob } from './knobs.js';
+import { CC_MAX, controllerOf, knobList, knobValue, nearestController, stepFrom, type ShownKnob } from './knobs.js';
 import { noteName, signed } from './print.js';
 import { MOD_ALT, MOD_CTRL, MOD_HYPER, MOD_META, MOD_SUPER, type KeyEventType } from './terminal.js';
 
@@ -67,8 +67,14 @@ export class KeysSession {
   knobs: ShownKnob[];
   chosen = 0;
   message: string | undefined;
+  // The value being typed for the chosen knob, while an entry is open
+  // (instrument-knobs.md §2.7).
+  entry: { label: string; text: string } | undefined;
   // The turn key held now, if any: the one pressed last.
   private turning: { position: string; steps: number; since: number } | undefined;
+  // Each controller gliding to a typed value: one glide per controller,
+  // moving `perMs` controller values a millisecond from `from` at `since`.
+  private readonly glides = new Map<number, { channel: number; from: number; to: number; since: number; perMs: number }>();
   private readonly held = new Map<string, { channel: number; notes: number[] }>();
   private readonly holders = new Map<number, number>();
   private readonly heldControls = new Map<string, { channel: number; action: KeymapAction }>();
@@ -95,6 +101,23 @@ export class KeysSession {
     if ((mods & BLOCKING_MODS) !== 0) return [];
     if (this.held.has(position) || this.heldControls.has(position)) return [];
     this.message = undefined;
+    if (position === 'Enter') return this.complete(now);
+    if (position === 'Backspace') {
+      if (this.entry !== undefined) this.entry.text = this.entry.text.slice(0, -1);
+      if (this.entry?.text === '') this.entry = undefined;
+      return [];
+    }
+    if (position === 'Escape') {
+      if (this.entry !== undefined) this.entry = undefined;
+      else this.message = 'Ctrl-C quits';
+      return [];
+    }
+    // The decimal point is Period's only while an entry is open; otherwise
+    // the key does what the keymap binds there.
+    if (position === 'Period' && this.entry !== undefined) {
+      this.type('.');
+      return [];
+    }
     const action = this.keymap.controls.get(position);
     if (action !== undefined) return this.control(position, action, now);
     const offsets = this.keymap.notes.get(position);
@@ -152,6 +175,7 @@ export class KeysSession {
   }
 
   quit(): MidiMessage[] {
+    this.glides.clear();
     return [...this.releaseAll(), ...this.untoggleAll(), this.cc(this.keymap.channel, ALL_NOTES_OFF, 0)];
   }
 
@@ -160,6 +184,8 @@ export class KeysSession {
   // go back to 0, because the keymap that could toggle them off is gone.
   setKeymap(keymap: Keymap): MidiMessage[] {
     if (keymap.velocity !== this.keymap.velocity) this.velocity = keymap.velocity;
+    this.entry = undefined;
+    this.glides.clear();
     this.keymap = keymap;
     if (!this.transposeFits(this.transpose)) {
       this.transpose = 0;
@@ -176,16 +202,28 @@ export class KeysSession {
     return messages;
   }
 
-  // A held turn key turns again on each tick, faster the longer it is held.
+  // A held turn key turns again on each tick, faster the longer it is
+  // held, and each glide moves on: one control change per controller a
+  // tick at most.
   tick(now: number): MidiMessage[] {
-    if (this.turning === undefined) return [];
-    const held = now - this.turning.since;
-    const rate = TURN_RATES.find(({ from }) => held >= from);
-    return rate === undefined ? [] : this.turn(this.turning.steps * rate.steps);
+    const messages: MidiMessage[] = [];
+    if (this.turning !== undefined) {
+      const held = now - this.turning.since;
+      const rate = TURN_RATES.find(({ from }) => held >= from);
+      if (rate !== undefined) messages.push(...this.turn(this.turning.steps * rate.steps));
+    }
+    for (const [cc, glide] of this.glides) {
+      const distance = Math.abs(glide.to - glide.from);
+      const moved = Math.min(distance, Math.floor((now - glide.since) * glide.perMs));
+      const at = glide.from + Math.sign(glide.to - glide.from) * moved;
+      if (at === glide.to) this.glides.delete(cc);
+      if (at !== this.controllers.get(cc)) messages.push(this.cc(glide.channel, cc, at));
+    }
+    return messages;
   }
 
   ticking(): boolean {
-    return this.turning !== undefined;
+    return this.turning !== undefined || this.glides.size > 0;
   }
 
   // A new knob list, from a knob file saved: each knob keeps the value its
@@ -195,6 +233,8 @@ export class KeysSession {
     const same = knobs.findIndex((k) => k.label === label);
     this.knobs = knobs;
     this.chosen = same >= 0 ? same : Math.min(this.chosen, knobs.length - 1);
+    // An entry for a knob that is gone closes without completing.
+    if (same < 0) this.entry = undefined;
   }
 
   // A knob's value: what its controller was last sent as, or its default.
@@ -215,7 +255,7 @@ export class KeysSession {
   }
 
   bindsKnobs(): boolean {
-    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a));
+    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a || 'type' in a));
   }
 
   soundingNotes(): string[] {
@@ -237,19 +277,58 @@ export class KeysSession {
     return controlChange(channel, cc, value);
   }
 
-  // Turns the chosen knob `steps` steps, from where its controller was
-  // last sent, or from its default before that, and sends the result once.
+  // Where a knob's controller is: where it was last sent, or before that,
+  // its default's controller value.
+  private controllerAt(knob: Knob): number {
+    return this.controllers.get(knob.cc) ?? controllerOf(knob, knob.default);
+  }
+
+  // Turns the chosen knob `steps` steps and sends the result once. A turn
+  // stops the knob's glide where it is.
   private turn(steps: number): MidiMessage[] {
     const { knob } = this.knobs[this.chosen]!;
-    const from = this.controllers.get(knob.cc) ?? controllerOf(knob, knob.default);
+    this.glides.delete(knob.cc);
+    const from = this.controllerAt(knob);
     let to = from;
     for (let i = 0; i < Math.abs(steps); i++) to = stepFrom(knob, to, steps > 0 ? 1 : -1);
     return to === from ? [] : [this.cc(this.keymap.channel, knob.cc, to)];
   }
 
+  // Types one character of the chosen knob's value, opening an entry for
+  // it: digits, one decimal point, and a minus sign only first. A
+  // character that breaks that does nothing, and a decimal point cannot
+  // open an entry.
+  private type(character: string): void {
+    if (this.entry === undefined) {
+      if (character === '.') return;
+      this.entry = { label: this.knobs[this.chosen]!.label, text: '' };
+    }
+    const { text } = this.entry;
+    if ((character === '-' && text !== '') || (character === '.' && text.includes('.'))) return;
+    this.entry.text = text + character;
+  }
+
+  // Completes the entry: the knob glides to the controller value nearest
+  // the typed number, at the keymap's speed, or with `glide: 0` goes there
+  // at once. An entry with no digit completes nothing.
+  private complete(now: number): MidiMessage[] {
+    const entry = this.entry;
+    this.entry = undefined;
+    if (entry === undefined || !/\d/.test(entry.text)) return [];
+    const { knob } = this.knobs[this.chosen]!;
+    const channel = this.keymap.channel;
+    const from = this.controllerAt(knob);
+    const to = nearestController(knob, Number(entry.text));
+    this.glides.delete(knob.cc);
+    if (this.keymap.glide === 0 || to === from) return [this.cc(channel, knob.cc, to)];
+    this.glides.set(knob.cc, { channel, from, to, since: now, perMs: CC_MAX / (this.keymap.glide * 1000) });
+    return [];
+  }
+
   private control(position: string, action: KeymapAction, now: number): MidiMessage[] {
     const channel = this.keymap.channel;
     if (action === 'panic') {
+      this.glides.clear();
       return [...this.releaseAll(), ...this.untoggleAll(), this.cc(channel, ALL_NOTES_OFF, 0)];
     }
     if ('transpose' in action) {
@@ -267,15 +346,23 @@ export class KeysSession {
       this.bend = action.bend;
       return [pitchBend(channel, bendValue(action.bend))];
     }
-    if ('knob' in action) {
-      const count = this.knobs.length;
-      this.chosen = (((this.chosen + action.knob) % count) + count) % count;
+    if ('type' in action) {
+      this.type(String(action.type));
       return [];
     }
+    // A knob action completes an open entry first, as moving off a cell
+    // completes it in a spreadsheet.
+    if ('knob' in action) {
+      const completed = this.complete(now);
+      const count = this.knobs.length;
+      this.chosen = (((this.chosen + action.knob) % count) + count) % count;
+      return completed;
+    }
     if ('turn' in action) {
+      const completed = this.complete(now);
       this.heldControls.set(position, { channel, action });
       this.turning = { position, steps: action.turn, since: now };
-      return this.turn(action.turn);
+      return [...completed, ...this.turn(action.turn)];
     }
     if (action.mode === 'hold') {
       this.heldControls.set(position, { channel, action });

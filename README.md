@@ -160,7 +160,8 @@ other layouts play the same notes, and a keymap of your own is a YAML
 file away. Name an instrument, as in `field keys juno` inside
 `examples/bloom`, and it plays that SuperCollider instrument live too.
 The arrows choose and turn its knobs, such as `juno`'s filter cutoff,
-each one a MIDI controller, so a take you record keeps every turn. See
+and the number row types a value they glide to. Each knob is a MIDI
+controller, so a take you record keeps every turn. See
 [docs/keys.md](docs/keys.md).
 
 ## Status

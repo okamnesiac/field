@@ -524,12 +524,19 @@ export class KnobLine {
   private readonly widths = new WeakMap<Knob, number>();
 
   text(session: KeysSession, width: number): string {
-    const cells = session.knobs.map(({ label, knob }) => {
+    const chosen = session.chosen;
+    const cells = session.knobs.map(({ label, knob }, i) => {
       let valueWidth = this.widths.get(knob);
       if (valueWidth === undefined) this.widths.set(knob, (valueWidth = knobValueWidth(knob)));
-      return `${label} ${formatKnobValue(knob, session.knobValue(knob)).padStart(valueWidth)}`;
+      // An entry takes the value's place, in the units it is typed in,
+      // and widens the knob only once it outgrows the value.
+      const entry = i === chosen ? session.entry : undefined;
+      const value =
+        entry !== undefined
+          ? `${entry.text}_${knob.units !== undefined ? ` ${knob.units}` : ''}`
+          : formatKnobValue(knob, session.knobValue(knob));
+      return `${label} ${value.padStart(valueWidth)}`;
     });
-    const chosen = session.chosen;
     const span = (from: number, to: number): number =>
       cells.slice(from, to + 1).reduce((sum, cell) => sum + cell.length, 0) +
       KNOB_GAP.length * (to - from) +

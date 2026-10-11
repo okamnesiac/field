@@ -136,6 +136,18 @@ export function controllerOf(knob: Knob, value: number): number {
   return Math.min(CC_MAX, Math.max(0, Math.round(x * CC_MAX)));
 }
 
+// Where a typed value lands (§2.7): clamped to the knob's range, ends
+// included, then the controller value whose value is nearest it, since a
+// controller carries only 128 values.
+export function nearestController(knob: Knob, value: number): number {
+  const target = Math.min(Math.max(knob.min, knob.max), Math.max(Math.min(knob.min, knob.max), value));
+  let nearest = 0;
+  for (let cc = 1; cc <= CC_MAX; cc++) {
+    if (Math.abs(knobValue(knob, cc) - target) < Math.abs(knobValue(knob, nearest) - target)) nearest = cc;
+  }
+  return nearest;
+}
+
 // One step up or down from controller value `cc`: the next value, or on a
 // knob with a step, the next that maps to a different value, so a knob
 // with two positions moves in one press. Stays at `cc` at either end.

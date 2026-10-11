@@ -1,6 +1,7 @@
 name: musical
-description: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
+description: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.
 base: 60
+glide: 1
 notes:
   KeyA: 0
   KeyW: 1
@@ -32,3 +33,14 @@ controls:
   ArrowRight: { knob: 1 }
   ArrowUp: { turn: 1 }
   ArrowDown: { turn: -1 }
+  Digit1: { type: 1 }
+  Digit2: { type: 2 }
+  Digit3: { type: 3 }
+  Digit4: { type: 4 }
+  Digit5: { type: 5 }
+  Digit6: { type: 6 }
+  Digit7: { type: 7 }
+  Digit8: { type: 8 }
+  Digit9: { type: 9 }
+  Digit0: { type: 0 }
+  Minus: { type: "-" }

@@ -41,7 +41,7 @@ describe('keymap schema', () => {
     expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
   });
 
-  it('binds the arrows to the knobs and the bend to Comma and Period in musical, and leaves the number row free', () => {
+  it('binds the arrows to the knobs, the bend to Comma and Period, and the number row to typing in musical', () => {
     const map = keymap(builtin('musical'));
     expect(map.controls.get('ArrowLeft')).toEqual({ knob: -1 });
     expect(map.controls.get('ArrowRight')).toEqual({ knob: 1 });
@@ -49,7 +49,26 @@ describe('keymap schema', () => {
     expect(map.controls.get('ArrowDown')).toEqual({ turn: -1 });
     expect(map.controls.get('Comma')).toEqual({ bend: -1 });
     expect(map.controls.get('Period')).toEqual({ bend: 1 });
-    for (let digit = 0; digit <= 9; digit++) expect(map.controls.has(`Digit${digit}`)).toBe(false);
+    for (let digit = 0; digit <= 9; digit++) expect(map.controls.get(`Digit${digit}`)).toEqual({ type: digit });
+    expect(map.controls.get('Minus')).toEqual({ type: '-' });
+    expect(map.glide).toBe(1);
+  });
+
+  it('accepts type with a digit or a minus sign, and glide defaults to 0', () => {
+    const map = keymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { type: 1 }, Minus: { type: "-" } }\n');
+    expect(map.controls.get('Digit1')).toEqual({ type: 1 });
+    expect(map.controls.get('Minus')).toEqual({ type: '-' });
+    expect(map.glide).toBe(0);
+    for (const bad of ['{ type: "." }', '{ type: 10 }', '{ type: "a" }', '{ type: "1" }', '{ type: -1 }']) {
+      expect(parse(`name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: ${bad} }\n`).success, bad).toBe(false);
+    }
+    expect(parse('name: t\nglide: -1\nnotes: { KeyA: 0 }\n').success).toBe(false);
+  });
+
+  it('reserves Escape, which cancels a typed value', () => {
+    expect(messages('name: t\nnotes: { KeyA: 0 }\ncontrols: { Escape: panic }\n')).toEqual([
+      'Escape is reserved: it cancels a typed value, and Ctrl-C quits',
+    ]);
   });
 
   it('accepts knob and turn by any whole number but 0', () => {

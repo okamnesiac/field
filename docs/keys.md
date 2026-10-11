@@ -74,9 +74,11 @@ for, once, and a new process gets a new MIDI client.
    sent; a USB controller's bender and knobs do not change them. On a
    narrow terminal the text before the notes is shortened, and the notes
    only when they alone are wider than the terminal.
-4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
-   every held note and then All Notes Off, so nothing is left sounding,
-   and `Field Keys` disappears.
+4. Press `Ctrl-C` to quit. `field keys` sends a note-off for every held
+   note and then All Notes Off, so nothing is left sounding, and
+   `Field Keys` disappears. `Esc` does not quit: it cancels a value
+   you are typing ([Type a value](#type-a-value)), and with none open
+   it puts `Ctrl-C quits` on the status line.
 
 Holding a key holds its note; the terminal's key repeat does nothing.
 When the terminal loses focus, `field keys` releases every held note,
@@ -125,12 +127,57 @@ Each value keeps its width as it changes, so turning a knob never moves
 the knobs after it or the notes. On a terminal too narrow for every
 knob, the line shows the knobs around the chosen one, with `‹` or `›`
 where knobs are hidden; the window moves only when the choice leaves
-it. The knob line appears whenever the keymap binds `knob` or `turn`
-([Actions](#actions)), which `musical` does.
+it. The knob line appears whenever the keymap binds `knob`, `turn`, or
+`type` ([Actions](#actions)), which `musical` does.
 
 The knobs are MIDI, so they turn whatever listens to `Field Keys`: an
 instrument `field keys` plays, Logic, or a hardware synth. A take you
 record keeps every turn ([Record what you play](#record-what-you-play)).
+
+### Type a value
+
+To move a knob far, type where you want it. In `musical` the number row
+types; it plays no notes.
+
+1. Choose the knob, then type its value in the units its knob file
+   names: `800` for 800 Hz on `cutoff`, or `0.8` for 800 ms on
+   `attack`. `mod` takes 0 to 127. The knob shows what you have typed in
+   place of its value, as in `cutoff  800_ Hz`, and nothing is sent yet.
+2. Press `Enter`. `field keys` clamps the number to the knob's range and
+   takes the controller value whose value is nearest it, because a
+   controller carries only 128 values: `800` on `cutoff` lands on
+   `810 Hz`, `99999` on `15.0 kHz`, and `20` on `50.0 Hz`.
+3. The knob glides there. `musical` crosses a knob's whole range in one
+   second, so 15.0 kHz to 810 Hz takes about half a second, sending one
+   control change every 40 ms. A keymap with `glide: 0` sets the value
+   at once.
+
+While you type:
+
+- **`.` types the decimal point.** With no value open, `.` does what
+  the keymap binds there, which in `musical` is the bend up, so a value
+  cannot start with it: type `0.5`, not `.5`. `-` types a minus sign,
+  only first. A key that would make the number malformed, such as a
+  second `.`, does nothing.
+- **`Backspace` deletes the last character**, and closes an empty value.
+- **`Esc` cancels the value** and leaves the knob as it was.
+- **A knob key completes the value first.** `ArrowLeft` or `ArrowRight`
+  completes it, and then moves the choice while the knob glides on.
+  `ArrowUp` or `ArrowDown` completes it and then turns, which stops the
+  glide it started.
+- **Every other key plays as usual.** Notes sound and the octave,
+  velocity, sustain, and bend keys work, so you can type over a held
+  chord. A value stays open until you close it.
+
+A glide runs on its own, one per knob, so you can type a value on
+another knob while the first glides. Turning the gliding knob stops its
+glide where it is and turns from there, and a new value on it glides
+from where it is. A panic, a keymap reload, and quitting stop every
+glide.
+
+Typing keys are positions, as every key in a keymap is, so `.` and `-`
+are where QWERTY has them whatever your layout prints there. The
+numeric keypad does not type.
 
 ### Knob files
 
@@ -508,9 +555,9 @@ same note C3.
 
 ```console
 $ field keys --print
-musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
+musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.
 
-·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·
+·     1     2     3     4     5     6     7     8     9     0     -     ·
    cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·
           C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5
              T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·
@@ -528,17 +575,19 @@ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row,
 | `Tab` | Sustain (CC 64) while held |
 | `←`, `→` | Choose a knob |
 | `↑`, `↓` | Turn the chosen knob, faster while held |
-| `Esc`, `Ctrl-C` | Quit |
+| `1` to `0`, `-` | Type the chosen knob's value; `.` types the decimal point while you type |
+| `Enter`, `Backspace`, `Esc` | Complete, edit, or cancel the value you are typing |
+| `Ctrl-C` | Quit |
 
 `musical` plays every note where Musical Typing does, and keeps its
 octave, velocity, and sustain keys. Logic's guide describes `Tab` as
 turning sustain on or off; this keymap holds sustain only while `Tab` is
 down, as a pedal does. The bend moves to `,` and `.`, the keys that show
-`<` and `>`, and the modulation wheel is the knob `mod`, which the
-arrows turn. To bend on `1` and `2` and set the wheel in steps on `3` to
-`8`, as Logic does, copy `musical` into a keymap of your own
-([Write a keymap](#write-a-keymap)) with these controls in place of the
-bend's:
+`<` and `>`, the modulation wheel is the knob `mod`, which the arrows
+turn, and the number row types a knob's value. To bend on `1` and `2`
+and set the wheel in steps on `3` to `8`, as Logic does, copy `musical`
+into a keymap of your own ([Write a keymap](#write-a-keymap)) with these
+controls in place of the bend's and the typing keys:
 
 ```yaml
   Digit1: { bend: -1 }
@@ -619,6 +668,7 @@ supported terminal, which helps while you design one.
 | `base` | 60 | The MIDI note that offset 0 plays before any transpose. |
 | `velocity` | 100 | The starting velocity. |
 | `channel` | 1 | The MIDI channel, 1 to 16. |
+| `glide` | 0 | The seconds a typed value takes to cross a knob's whole range; a shorter move takes its share. 0 sets a typed value at once. |
 | `notes` | None | Each position to an offset in semitones from `base`, or to a list of offsets, which plays a chord. |
 | `grid` | None | Offsets for whole rows by a rule. An entry in `notes` or `controls` overrides the grid at that position. |
 | `controls` | None | Each position to an action. |
@@ -657,11 +707,12 @@ times its row's index. In the example, `KeyZ` plays 48, `KeyA` 53,
 | `{ bend: <x> }` | Pitch bend to x, from -1 to 1, while held; back to center on release. |
 | `{ knob: <n> }` | Moves the knob choice n knobs to the right, or to the left when n is negative, wrapping past either end. |
 | `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning faster while held ([Turn knobs](#turn-knobs)). Pressing a second turn key turns with it and stops the first. |
+| `{ type: <c> }` | Types c into the chosen knob's value ([Type a value](#type-a-value)): a digit, written as a number from 0 to 9 as in `type: 1`, or `"-"`. The decimal point is no action: `Period` types it while a value is open, in every keymap. |
 | `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0, and goes back to 0 when you quit, press `panic`, or reload the keymap. `value` defaults to 127. |
 | `panic` | Releases every note, stops a held turn, and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
 
 `knob` and `turn` take a whole number other than 0. A keymap that binds
-either one shows the knob line.
+`knob`, `turn`, or `type` shows the knob line.
 
 ### Rules
 
@@ -672,8 +723,9 @@ and the rule each error breaks:
   rows, `Backquote`, `Backslash`, `IntlBackslash`, `Space`, `Tab`, and
   the four arrows.
 - **A position is a note or a control, never both.**
-- **`Escape` is reserved.** It always quits, and so does `Ctrl-C`, so no
-  keymap can trap you.
+- **`Escape` is reserved.** It cancels a typed value, and `Ctrl-C`
+  always quits, so no keymap can trap you. `Enter` and `Backspace` act
+  only on a typed value and are not positions a keymap binds either.
 - **Every note is in MIDI's range** at `base`, and the keymap plays at
   least one note.
 - **Modifiers do not bind.** A key pressed with `Ctrl`, `Alt`, or `Cmd`

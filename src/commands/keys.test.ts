@@ -208,6 +208,57 @@ describe('the knob line', () => {
   });
 });
 
+describe('typing on the knob line', () => {
+  const onCutoff = (): KeysSession => {
+    const session = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
+    tap(session, 'ArrowRight');
+    return session;
+  };
+
+  it('shows an entry in the value’s place, in the knob’s units, at the value’s width', () => {
+    const session = onCutoff();
+    const knobLine = new KnobLine();
+    const rest = plain(knobLine.text(session, 200));
+    tap(session, 'Digit8');
+    tap(session, 'Digit0');
+    tap(session, 'Digit0');
+    const typing = knobLine.text(session, 200);
+    expect(typing).toBe('mod   0  \x1b[7mcutoff  800_ Hz\x1b[27m  res 0.300  attack  800 ms  release  1.50 s');
+    expect(plain(typing)).toHaveLength(rest.length);
+  });
+
+  it('widens the knob only while an entry outgrows its value', () => {
+    const session = onCutoff();
+    for (let i = 0; i < 6; i++) tap(session, 'Digit1');
+    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  cutoff 111111_ Hz  res 0.300  attack  800 ms  release  1.50 s');
+    tap(session, 'Escape');
+    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s');
+  });
+
+  it('keeps its length through a glide', () => {
+    const session = onCutoff();
+    const knobLine = new KnobLine();
+    const rest = plain(knobLine.text(session, 200));
+    tap(session, 'Digit5');
+    tap(session, 'Digit0');
+    tap(session, 'Enter');
+    const lengths = new Set<number>();
+    let now = performance.now();
+    while (session.ticking()) {
+      session.tick((now += 40));
+      lengths.add(plain(knobLine.text(session, 200)).length);
+    }
+    expect([...lengths]).toEqual([rest.length]);
+    expect(plain(knobLine.text(session, 200))).toBe('mod   0  cutoff  50.0 Hz  res 0.300  attack  800 ms  release  1.50 s');
+  });
+
+  it('says Ctrl-C quits on Escape with no entry open', () => {
+    const session = onCutoff();
+    tap(session, 'Escape');
+    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · musical · transpose 0 · velocity 100 · bend +0 · Ctrl-C quits · –');
+  });
+});
+
 describe('redrawing the lines above the status line', () => {
   it('draws them all the first time, then only from the first that changed', () => {
     expect(redrawAbove([], ['juno starting', 'mod   0'])).toBe('\r\x1b[Kjuno starting\n\r\x1b[Kmod   0\n');

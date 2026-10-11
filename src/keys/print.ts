@@ -46,6 +46,7 @@ function actionTag(action: KeymapAction): string {
   if ('bend' in action) return `B${signed(action.bend)}`;
   if ('knob' in action) return `K${signed(action.knob)}`;
   if ('turn' in action) return `R${signed(action.turn)}`;
+  if ('type' in action) return String(action.type);
   return `cc${action.cc}`;
 }
 
@@ -62,6 +63,7 @@ export function describeAction(action: KeymapAction): string {
     const steps = Math.abs(action.turn);
     return `turn the chosen knob ${steps} step${steps === 1 ? '' : 's'} ${action.turn > 0 ? 'up' : 'down'}, faster while held`;
   }
+  if ('type' in action) return `type ${action.type} into the chosen knob's value`;
   const how = { set: '', hold: ' while held', toggle: ', toggled' }[action.mode];
   return `cc ${action.cc} = ${action.value}${how}`;
 }
