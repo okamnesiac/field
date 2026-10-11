@@ -140,6 +140,10 @@ export interface UiTimelineLane {
   trackFile: string | null;
   trackSha256: string | null;
   inserts: UiInsert[] | null;
+  // The rate the placed track renders at — its own `rate:`, or the
+  // song's — which is the rate its EQ designs its filters at. Null when
+  // the placement is not a track.
+  trackRate: number | null;
   // Null when this lane places audio rather than a track: there is
   // nothing underneath, so no twirl is offered.
   children: UiTimelineLane[] | null;

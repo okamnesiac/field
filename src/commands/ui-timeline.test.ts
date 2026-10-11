@@ -77,6 +77,22 @@ describe('timeline lanes', () => {
     expect(harmony?.children?.map((l) => l.name)).toEqual(['harmony']);
   });
 
+  it("carries each placed track's own rate, which its EQ designs at", () => {
+    createTrack(root, 'creek', 'hi');
+    writeFileSync(join(root, 'songs/creek/tracks/hi.yaml'), ['name: hi', 'rate: 96000', 'inputs: []', ''].join('\n'));
+    createTrack(root, 'creek', 'plain');
+    writeFileSync(join(root, 'songs/creek/tracks/plain.yaml'), ['name: plain', 'inputs: []', ''].join('\n'));
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - track: hi', '  - track: plain', '  - audio: riff', ''].join('\n'),
+    );
+    expect(lanesOf().map((l) => [l.name, l.trackRate])).toEqual([
+      ['hi', 96000],
+      ['plain', 48000],
+      ['riff', null],
+    ]);
+  });
+
   it('draws an open window as long as its source plays, not to the song end', () => {
     // riff is 4800 frames; the song here is 96000 samples long. An open
     // window plays the source from its read offset to its end.

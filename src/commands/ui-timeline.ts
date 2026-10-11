@@ -230,6 +230,9 @@ export function projectTimeline(
       canSolo: placedName !== undefined,
       trackFile: placed?.path ?? null,
       trackSha256: placed ? sha256Text(placed.raw) : null,
+      // A track renders at its own rate, or the song's (graph.ts
+      // trackRate), and its filters are designed at that rate.
+      trackRate: placed ? (placed.data.rate ?? song.song?.data.rate ?? sessionRate) : null,
       inserts: placed
         ? placed.data.inserts.map(
             (ins, i): UiInsert => ({
