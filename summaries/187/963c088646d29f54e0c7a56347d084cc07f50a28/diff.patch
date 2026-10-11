@@ -1,0 +1,1651 @@
+diff --git a/docs/build-graph.md b/docs/build-graph.md
+index 430d868..c22562d 100644
+--- a/docs/build-graph.md
++++ b/docs/build-graph.md
+@@ -192,16 +192,16 @@ entry kinds, placement, nesting, levels, local time and rate, sends — is
+ 
+ The stem places its entries through the tempo map (`at`, source offset,
+ slip, entry gain and pan, linear fades) and sums them into a pre-fader
+-Float32 stereo stem in the render daemon. A muted entry (`mute: true`)
+-is left out before planning, so it is absent from the stem's spec, its
+-action key, and its dependencies, and a cable whose every sender
+-placement is muted carries nothing (`src/model/cables.ts`)
+-([projects/mix-assembly/readme.md](projects/mix-assembly/readme.md) §1). A
+-placed track is one more source in the same list, so a track→track edge
+-is an ordinary graph edge, and a track placed three times is one render
+-placed three times. The song's output track additionally renders the
+-song's declared `length`, with `loop:` folding the overhang back onto
+-the start.
++Float32 stereo stem in the render daemon
++([projects/mix-assembly/readme.md](projects/mix-assembly/readme.md) §1).
++A muted entry (`mute: true`) is left out before planning, so it is
++absent from the stem's spec, its action key, and its dependencies, and a
++cable whose every sender placement is muted carries nothing
++(`src/model/cables.ts`). A placed track is one more source in the same
++list, so a track→track edge is an ordinary graph edge, and a track
++placed three times is one render placed three times. The song's output
++track additionally renders the song's declared `length`, with `loop:`
++folding the overhang back onto the start.
+ 
+ The action key hashes the *resolved placement plan* in samples, not the
+ raw YAML:
+diff --git a/docs/cli.md b/docs/cli.md
+index c5a540f..0ca88bf 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -350,6 +350,14 @@ is not installed, or exits before its window opens, `field ui` opens a
+ browser instead and keeps the session running. [ui.md](projects/ui/readme.md)
+ §6 records what the window does and why.
+ 
++The app window receives the session URL in its environment, out of
++sight of other users. A browser does not: `--browser`, and the fallback
++to a browser, hand the URL with its token to `open`, `xdg-open`, or
++`start` on the command line, where another user on a shared machine can
++read it, and a browser that starts for it can keep it in its own
++command line while it runs. Use the app window, or `--no-open` and paste
++the URL yourself, where that matters.
++
+ ## Record a take
+ 
+ `field record <track>` records a performance onto a track that asks for
+diff --git a/docs/tracks.md b/docs/tracks.md
+index 9f22dd1..cab671d 100644
+--- a/docs/tracks.md
++++ b/docs/tracks.md
+@@ -91,7 +91,9 @@ every other field, in the file: the stem plans as though the entry were
+ absent, so its sends go silent too, and `mute: false` brings it back
+ exactly as it was. It lives on the placement rather than on the track,
+ so a track placed twice can be muted in one home and heard in the
+-other.
++other. `field explain` keeps a path through a muted placement and marks
++it "muted on this path", and `field arrangement` labels a muted
++placement `muted`, so both still show where the track is placed.
+ 
+ Time fields take two spellings — a scalar is ticks, an array is musical
+ (`at: [9, 2]` is bar 9, beat 2) — described in
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 9e5279f..29eb2c7 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -54,16 +54,16 @@ importers:
+         version: 18.3.7(@types/react@18.3.31)
+       '@vitejs/plugin-react':
+         specifier: ^4.3.0
+-        version: 4.7.0(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))
++        version: 4.7.0(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))
+       electron:
+-        specifier: ^43.4.1
+-        version: 43.4.1
++        specifier: ^43.7.9
++        version: 43.7.9
+       typescript:
+         specifier: ^5.9.0
+         version: 5.9.3
+       vite:
+-        specifier: ^6.0.0
+-        version: 6.4.3(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0)
++        specifier: ^7.3.6
++        version: 7.3.6(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0)
+ 
+ packages:
+ 
+@@ -158,312 +158,156 @@ packages:
+     resolution: {integrity: sha512-3kSBtG8ObcTVfXanm5vVJ6UnBLEVmVsRk1M+vGqCuMBV+XLCbJYuWQful+yIy0GQDsSlK0kHEriEHn7SPk4EnA==}
+     engines: {node: '>=22.12.0'}
+ 
+-  '@esbuild/aix-ppc64@0.25.12':
+-    resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
+-    engines: {node: '>=18'}
+-    cpu: [ppc64]
+-    os: [aix]
+-
+   '@esbuild/aix-ppc64@0.28.1':
+     resolution: {integrity: sha512-Svl7tq8k/08+p6CXPpRjQ1fKX+1odH/BQbb48fV6fj3CWHhsoIOoY87w1oHXm0qEpkIK3ZfVgp0hed3XBXzXMQ==}
+     engines: {node: '>=18'}
+     cpu: [ppc64]
+     os: [aix]
+ 
+-  '@esbuild/android-arm64@0.25.12':
+-    resolution: {integrity: sha512-6AAmLG7zwD1Z159jCKPvAxZd4y/VTO0VkprYy+3N2FtJ8+BQWFXU+OxARIwA46c5tdD9SsKGZ/1ocqBS/gAKHg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [android]
+-
+   '@esbuild/android-arm64@0.28.1':
+     resolution: {integrity: sha512-34EGEbCIAgosYz6goLcopX6Mo7NyGv9tfwEM2/7Ce2VcVRk568iSvniGWcUXIy7wEDR1wzolcxcriFVrWYcwBg==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [android]
+ 
+-  '@esbuild/android-arm@0.25.12':
+-    resolution: {integrity: sha512-VJ+sKvNA/GE7Ccacc9Cha7bpS8nyzVv0jdVgwNDaR4gDMC/2TTRc33Ip8qrNYUcpkOHUT5OZ0bUcNNVZQ9RLlg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm]
+-    os: [android]
+-
+   '@esbuild/android-arm@0.28.1':
+     resolution: {integrity: sha512-0k2F129Xdio1TdJfzJ8sy1Q47vUD2NnwdhiAf7drUN1EBTfPf4hsFCtmMgu/6m8JSzsBrlmVjudMBQqOfG8usQ==}
+     engines: {node: '>=18'}
+     cpu: [arm]
+     os: [android]
+ 
+-  '@esbuild/android-x64@0.25.12':
+-    resolution: {integrity: sha512-5jbb+2hhDHx5phYR2By8GTWEzn6I9UqR11Kwf22iKbNpYrsmRB18aX/9ivc5cabcUiAT/wM+YIZ6SG9QO6a8kg==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [android]
+-
+   '@esbuild/android-x64@0.28.1':
+     resolution: {integrity: sha512-dbwY7ltSMDWsRatcRpCnES4F+im88OCUgGZjy52shC7GqHRE/cYlxNbB4Z4UpJswpcc4Qxd2oE/ufM0p61IKng==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [android]
+ 
+-  '@esbuild/darwin-arm64@0.25.12':
+-    resolution: {integrity: sha512-N3zl+lxHCifgIlcMUP5016ESkeQjLj/959RxxNYIthIg+CQHInujFuXeWbWMgnTo4cp5XVHqFPmpyu9J65C1Yg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [darwin]
+-
+   '@esbuild/darwin-arm64@0.28.1':
+     resolution: {integrity: sha512-TZbWkQY7kvTAXbXUT7uVACR5cMHsDiSz9z7ZKAX/RTq/WJEk3QyRr0wZpNhBDX+/0CtdqUIJlOiodQcta6tY3Q==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [darwin]
+ 
+-  '@esbuild/darwin-x64@0.25.12':
+-    resolution: {integrity: sha512-HQ9ka4Kx21qHXwtlTUVbKJOAnmG1ipXhdWTmNXiPzPfWKpXqASVcWdnf2bnL73wgjNrFXAa3yYvBSd9pzfEIpA==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [darwin]
+-
+   '@esbuild/darwin-x64@0.28.1':
+     resolution: {integrity: sha512-zfdzgK9ACBNZLI/CyHTOx81SyNbM6YXn7rxSgX97VjyiPl9W1i4Ka4fgKECEoFCKGpvBj5qArWIGgQjOwkgskQ==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [darwin]
+ 
+-  '@esbuild/freebsd-arm64@0.25.12':
+-    resolution: {integrity: sha512-gA0Bx759+7Jve03K1S0vkOu5Lg/85dou3EseOGUes8flVOGxbhDDh/iZaoek11Y8mtyKPGF3vP8XhnkDEAmzeg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [freebsd]
+-
+   '@esbuild/freebsd-arm64@0.28.1':
+     resolution: {integrity: sha512-wG2EA8ENdEI0qhkSZMjfqrdY+ziCYCPMmtZjjIwOmXFjmyzEHn+UUxk5of+SYsjtfs3VpnlC7QLzSI5hY/rOAw==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [freebsd]
+ 
+-  '@esbuild/freebsd-x64@0.25.12':
+-    resolution: {integrity: sha512-TGbO26Yw2xsHzxtbVFGEXBFH0FRAP7gtcPE7P5yP7wGy7cXK2oO7RyOhL5NLiqTlBh47XhmIUXuGciXEqYFfBQ==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [freebsd]
+-
+   '@esbuild/freebsd-x64@0.28.1':
+     resolution: {integrity: sha512-i7dZ9vQgnvSCzi/rYCXNgtF/U+eKZNJBzu3eTQbRgHnM7tNSizLOkRFAl3qzVc/Op/u5YkHHa4pf/3DOYHthLQ==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [freebsd]
+ 
+-  '@esbuild/linux-arm64@0.25.12':
+-    resolution: {integrity: sha512-8bwX7a8FghIgrupcxb4aUmYDLp8pX06rGh5HqDT7bB+8Rdells6mHvrFHHW2JAOPZUbnjUpKTLg6ECyzvas2AQ==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [linux]
+-
+   '@esbuild/linux-arm64@0.28.1':
+     resolution: {integrity: sha512-yHs+0uc8+nvEAfAfxrWQKK5peSNzBc4PegcMO0EJ2hT71uA7vB8Ihg2e77R2P7SG5uYjPbHlLLmve4LLLRCf0g==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [linux]
+ 
+-  '@esbuild/linux-arm@0.25.12':
+-    resolution: {integrity: sha512-lPDGyC1JPDou8kGcywY0YILzWlhhnRjdof3UlcoqYmS9El818LLfJJc3PXXgZHrHCAKs/Z2SeZtDJr5MrkxtOw==}
+-    engines: {node: '>=18'}
+-    cpu: [arm]
+-    os: [linux]
+-
+   '@esbuild/linux-arm@0.28.1':
+     resolution: {integrity: sha512-qVXBOHQS+d5Y722GwJzJUtOLlX7km3CraOaGormF1pDtPd2C/l1SHRPgjLunLGe51Sh5YYWKMFDyV4SxgMQYTQ==}
+     engines: {node: '>=18'}
+     cpu: [arm]
+     os: [linux]
+ 
+-  '@esbuild/linux-ia32@0.25.12':
+-    resolution: {integrity: sha512-0y9KrdVnbMM2/vG8KfU0byhUN+EFCny9+8g202gYqSSVMonbsCfLjUO+rCci7pM0WBEtz+oK/PIwHkzxkyharA==}
+-    engines: {node: '>=18'}
+-    cpu: [ia32]
+-    os: [linux]
+-
+   '@esbuild/linux-ia32@0.28.1':
+     resolution: {integrity: sha512-d1z4ZuP0ajrfz/FhGT4vv278rX8KnPPJx8i5+AtK7TYbx9Le9F1hyzurZpkEyjkGa9dUGhQow4C1NmeGvqxN2w==}
+     engines: {node: '>=18'}
+     cpu: [ia32]
+     os: [linux]
+ 
+-  '@esbuild/linux-loong64@0.25.12':
+-    resolution: {integrity: sha512-h///Lr5a9rib/v1GGqXVGzjL4TMvVTv+s1DPoxQdz7l/AYv6LDSxdIwzxkrPW438oUXiDtwM10o9PmwS/6Z0Ng==}
+-    engines: {node: '>=18'}
+-    cpu: [loong64]
+-    os: [linux]
+-
+   '@esbuild/linux-loong64@0.28.1':
+     resolution: {integrity: sha512-M5sRjUVZrkm1OAPR3dlOYzNmN+loZKGVi1VUQGrwuqLcbR6qeAz+famMhjASeH3YVKvZz+zT1jlh/keC3Rj/lg==}
+     engines: {node: '>=18'}
+     cpu: [loong64]
+     os: [linux]
+ 
+-  '@esbuild/linux-mips64el@0.25.12':
+-    resolution: {integrity: sha512-iyRrM1Pzy9GFMDLsXn1iHUm18nhKnNMWscjmp4+hpafcZjrr2WbT//d20xaGljXDBYHqRcl8HnxbX6uaA/eGVw==}
+-    engines: {node: '>=18'}
+-    cpu: [mips64el]
+-    os: [linux]
+-
+   '@esbuild/linux-mips64el@0.28.1':
+     resolution: {integrity: sha512-mRObBZeHh2OxcBFPWE/FjylkRgZdYuiTR3vaTozquCGOH14iP9oN4x4Ge81CoIDYQrXmIxpFumJBu5MtZpnQJQ==}
+     engines: {node: '>=18'}
+     cpu: [mips64el]
+     os: [linux]
+ 
+-  '@esbuild/linux-ppc64@0.25.12':
+-    resolution: {integrity: sha512-9meM/lRXxMi5PSUqEXRCtVjEZBGwB7P/D4yT8UG/mwIdze2aV4Vo6U5gD3+RsoHXKkHCfSxZKzmDssVlRj1QQA==}
+-    engines: {node: '>=18'}
+-    cpu: [ppc64]
+-    os: [linux]
+-
+   '@esbuild/linux-ppc64@0.28.1':
+     resolution: {integrity: sha512-slScBsMAb3GFDcdrCgLwZtPYRoH2H/youv10QiZyRjmsP48fznoveWytSgCI/R0ZcUgpc0ZhIUEx6LHts8yrfQ==}
+     engines: {node: '>=18'}
+     cpu: [ppc64]
+     os: [linux]
+ 
+-  '@esbuild/linux-riscv64@0.25.12':
+-    resolution: {integrity: sha512-Zr7KR4hgKUpWAwb1f3o5ygT04MzqVrGEGXGLnj15YQDJErYu/BGg+wmFlIDOdJp0PmB0lLvxFIOXZgFRrdjR0w==}
+-    engines: {node: '>=18'}
+-    cpu: [riscv64]
+-    os: [linux]
+-
+   '@esbuild/linux-riscv64@0.28.1':
+     resolution: {integrity: sha512-kw0owk1o0GFETUJyW0jc0G4Yzs0BHZn0JDZ8JRT088vjJYX777BAs1fDGxAC+q831qOs2DTC96mNsG2opdfyyQ==}
+     engines: {node: '>=18'}
+     cpu: [riscv64]
+     os: [linux]
+ 
+-  '@esbuild/linux-s390x@0.25.12':
+-    resolution: {integrity: sha512-MsKncOcgTNvdtiISc/jZs/Zf8d0cl/t3gYWX8J9ubBnVOwlk65UIEEvgBORTiljloIWnBzLs4qhzPkJcitIzIg==}
+-    engines: {node: '>=18'}
+-    cpu: [s390x]
+-    os: [linux]
+-
+   '@esbuild/linux-s390x@0.28.1':
+     resolution: {integrity: sha512-/lAIjX8aYFRByhh6L5rYtPEDRqa9de/4V/juOXcta5frjvzXO4/sqEtyytse0g3zZFuWu5cDN0MkLz2qRDD2Ag==}
+     engines: {node: '>=18'}
+     cpu: [s390x]
+     os: [linux]
+ 
+-  '@esbuild/linux-x64@0.25.12':
+-    resolution: {integrity: sha512-uqZMTLr/zR/ed4jIGnwSLkaHmPjOjJvnm6TVVitAa08SLS9Z0VM8wIRx7gWbJB5/J54YuIMInDquWyYvQLZkgw==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [linux]
+-
+   '@esbuild/linux-x64@0.28.1':
+     resolution: {integrity: sha512-u/anNYF2mmVOEDwLtnQ1wOr3EZ9sTNGLWrsYGYwHWzGA3Si84IOkHXlbWTD1NB+9/1lcnweYKO54uhxZydNzfA==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [linux]
+ 
+-  '@esbuild/netbsd-arm64@0.25.12':
+-    resolution: {integrity: sha512-xXwcTq4GhRM7J9A8Gv5boanHhRa/Q9KLVmcyXHCTaM4wKfIpWkdXiMog/KsnxzJ0A1+nD+zoecuzqPmCRyBGjg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [netbsd]
+-
+   '@esbuild/netbsd-arm64@0.28.1':
+     resolution: {integrity: sha512-oks0DYbLwWMmaakTsCb+zL4E+aHRVLom9IJZOAthMQEPiQmydXHkziYEsGYRx0uNV/IjEKGAV941JzH02pflqw==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [netbsd]
+ 
+-  '@esbuild/netbsd-x64@0.25.12':
+-    resolution: {integrity: sha512-Ld5pTlzPy3YwGec4OuHh1aCVCRvOXdH8DgRjfDy/oumVovmuSzWfnSJg+VtakB9Cm0gxNO9BzWkj6mtO1FMXkQ==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [netbsd]
+-
+   '@esbuild/netbsd-x64@0.28.1':
+     resolution: {integrity: sha512-aeL6lAnN89Hz43Mlh1G8ARasbuoYvSITDEx0tHh5b7jJnHcssqgjy9Yx430GDpmCa6OyrKoS0aNRjKundRizGg==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [netbsd]
+ 
+-  '@esbuild/openbsd-arm64@0.25.12':
+-    resolution: {integrity: sha512-fF96T6KsBo/pkQI950FARU9apGNTSlZGsv1jZBAlcLL1MLjLNIWPBkj5NlSz8aAzYKg+eNqknrUJ24QBybeR5A==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [openbsd]
+-
+   '@esbuild/openbsd-arm64@0.28.1':
+     resolution: {integrity: sha512-MEFJe5C3R8pwXdZ5Y21oo6m7ePiS0d9pWucn99O/wvyJZChoIQKrQDxKrGeW8F5+T0okTHesAmDeiHDTIq0V/Q==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [openbsd]
+ 
+-  '@esbuild/openbsd-x64@0.25.12':
+-    resolution: {integrity: sha512-MZyXUkZHjQxUvzK7rN8DJ3SRmrVrke8ZyRusHlP+kuwqTcfWLyqMOE3sScPPyeIXN/mDJIfGXvcMqCgYKekoQw==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [openbsd]
+-
+   '@esbuild/openbsd-x64@0.28.1':
+     resolution: {integrity: sha512-i/ZLIOafE0Z8cI/XANJAixoJL/uRAoS2xOA3rb0xN+KK0K177cMAsQYkzHtBrtMXAKuAc7HGgcWiZ/sRC1Nxgw==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [openbsd]
+ 
+-  '@esbuild/openharmony-arm64@0.25.12':
+-    resolution: {integrity: sha512-rm0YWsqUSRrjncSXGA7Zv78Nbnw4XL6/dzr20cyrQf7ZmRcsovpcRBdhD43Nuk3y7XIoW2OxMVvwuRvk9XdASg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [openharmony]
+-
+   '@esbuild/openharmony-arm64@0.28.1':
+     resolution: {integrity: sha512-ge+Z7EXFNt2BO1oAMsVpiQ8EwndV9i1xXerAeTIK7AtPs3bKFXQM7nlRxDSIUIMeueR1CNXxqztLzdNeReKBJg==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [openharmony]
+ 
+-  '@esbuild/sunos-x64@0.25.12':
+-    resolution: {integrity: sha512-3wGSCDyuTHQUzt0nV7bocDy72r2lI33QL3gkDNGkod22EsYl04sMf0qLb8luNKTOmgF/eDEDP5BFNwoBKH441w==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [sunos]
+-
+   '@esbuild/sunos-x64@0.28.1':
+     resolution: {integrity: sha512-BEjgtECkL3vY+SaSQ6nzVfiALUeFxpawyp8Jmf5PtYhf1Ug40N1h/hxlhts+f1FvSvarEigdxS3BlSMI2PJLcQ==}
+     engines: {node: '>=18'}
+     cpu: [x64]
+     os: [sunos]
+ 
+-  '@esbuild/win32-arm64@0.25.12':
+-    resolution: {integrity: sha512-rMmLrur64A7+DKlnSuwqUdRKyd3UE7oPJZmnljqEptesKM8wx9J8gx5u0+9Pq0fQQW8vqeKebwNXdfOyP+8Bsg==}
+-    engines: {node: '>=18'}
+-    cpu: [arm64]
+-    os: [win32]
+-
+   '@esbuild/win32-arm64@0.28.1':
+     resolution: {integrity: sha512-lCv9eK/H6ZJWbE7bh2nw54CZ9M2nupBxJcTsdk/QQnWkdSjKGuxmmH8/GWrlT1eMmZfn4dGcCjRte397WqfQXA==}
+     engines: {node: '>=18'}
+     cpu: [arm64]
+     os: [win32]
+ 
+-  '@esbuild/win32-ia32@0.25.12':
+-    resolution: {integrity: sha512-HkqnmmBoCbCwxUKKNPBixiWDGCpQGVsrQfJoVGYLPT41XWF8lHuE5N6WhVia2n4o5QK5M4tYr21827fNhi4byQ==}
+-    engines: {node: '>=18'}
+-    cpu: [ia32]
+-    os: [win32]
+-
+   '@esbuild/win32-ia32@0.28.1':
+     resolution: {integrity: sha512-zvb/mB2bSCoJOpoCBgYKKpX6YM6mJBlBUVUtVj41DlZJVEB6/0CKlRYxP5wWl1C1ILiCoAU5wZZ4q1P3qeS6Eg==}
+     engines: {node: '>=18'}
+     cpu: [ia32]
+     os: [win32]
+ 
+-  '@esbuild/win32-x64@0.25.12':
+-    resolution: {integrity: sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA==}
+-    engines: {node: '>=18'}
+-    cpu: [x64]
+-    os: [win32]
+-
+   '@esbuild/win32-x64@0.28.1':
+     resolution: {integrity: sha512-bm4Mowrv+GXMlpWX++EcXw/iLyd1o3+bJkC2DkWXYVvgZCqD/bSj9ctZeAMC3cIxgjRVR2Dufaiu4YPxr5gW1A==}
+     engines: {node: '>=18'}
+@@ -762,8 +606,8 @@ packages:
+   electron-to-chromium@1.5.408:
+     resolution: {integrity: sha512-SLoprcYpJ/OH2v2ps0+N5biv9H4/KBT3+YmmDew64TwK5y9j2wv7pMOFY7IorVkyMtEyLSCRlXKLsNlakeAlPw==}
+ 
+-  electron@43.4.1:
+-    resolution: {integrity: sha512-5b+EuiwkgG5iRcsEL34rimgRpkYp15SsfZOa0pC5kXs0Tb82TH4n95rpQzTZa7yRCbA7tm0WoEbuBL6NaAhAcA==}
++  electron@43.7.9:
++    resolution: {integrity: sha512-wZkQ/R9F5Bv8dM5vX6vWboNo5ZCBC/IYQV195dtG9JvFAlNbebzlkWWSE5esgpCVy3rVYQ/g09GeknJwvQnS9A==}
+     engines: {node: '>= 22.12.0'}
+     hasBin: true
+ 
+@@ -774,11 +618,6 @@ packages:
+   es-module-lexer@1.7.0:
+     resolution: {integrity: sha512-jEQoCwk8hyb2AZziIOLhDqpm5+2ww5uIE6lkO/6jcOCusfk6LhMHpXXfBLXTZ7Ydyt0j4VoUQv6uGNYbdW+kBA==}
+ 
+-  esbuild@0.25.12:
+-    resolution: {integrity: sha512-bbPBYYrtZbkt6Os6FiTLCTFxvq4tt3JKall1vRwshA3fdVztsLAatFaZobhkBC8/BrPetoa0oksYoKXoG4ryJg==}
+-    engines: {node: '>=18'}
+-    hasBin: true
+-
+   esbuild@0.28.1:
+     resolution: {integrity: sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==}
+     engines: {node: '>=18'}
+@@ -848,8 +687,8 @@ packages:
+   ms@2.1.3:
+     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+ 
+-  nanoid@3.3.17:
+-    resolution: {integrity: sha512-xQLf0A3HOMlgHq0n247/LRuAOYmB7dXJ/DvAxGvsSBij45XtBSmQycu+F8ODbHwns/XyFZagyL1+J0Offw1E0g==}
++  nanoid@3.3.20:
++    resolution: {integrity: sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ==}
+     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+     hasBin: true
+ 
+@@ -912,8 +751,8 @@ packages:
+   siginfo@2.0.0:
+     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
+ 
+-  source-map-js@1.2.1:
+-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
++  source-map-js@1.2.2:
++    resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
+     engines: {node: '>=0.10.0'}
+ 
+   stackback@0.0.2:
+@@ -964,8 +803,8 @@ packages:
+   undici-types@7.18.2:
+     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+ 
+-  undici@7.29.0:
+-    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
++  undici@7.30.0:
++    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
+     engines: {node: '>=20.18.1'}
+ 
+   update-browserslist-db@1.3.1:
+@@ -979,46 +818,6 @@ packages:
+     engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
+     hasBin: true
+ 
+-  vite@6.4.3:
+-    resolution: {integrity: sha512-NTKlcQjlAK7MlQoyb6LgaqHc8sso/pVyUJYWMws3jg21uTJw/LddqIFPcPqP6PzpgbIcZyKI85sFE4HBrQDA8A==}
+-    engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
+-    hasBin: true
+-    peerDependencies:
+-      '@types/node': ^18.0.0 || ^20.0.0 || >=22.0.0
+-      jiti: '>=1.21.0'
+-      less: '*'
+-      lightningcss: ^1.21.0
+-      sass: '*'
+-      sass-embedded: '*'
+-      stylus: '*'
+-      sugarss: '*'
+-      terser: ^5.16.0
+-      tsx: ^4.8.1
+-      yaml: ^2.4.2
+-    peerDependenciesMeta:
+-      '@types/node':
+-        optional: true
+-      jiti:
+-        optional: true
+-      less:
+-        optional: true
+-      lightningcss:
+-        optional: true
+-      sass:
+-        optional: true
+-      sass-embedded:
+-        optional: true
+-      stylus:
+-        optional: true
+-      sugarss:
+-        optional: true
+-      terser:
+-        optional: true
+-      tsx:
+-        optional: true
+-      yaml:
+-        optional: true
+-
+   vite@7.3.6:
+     resolution: {integrity: sha512-4XP60spRGjSZFf1qYH+dJIkK2znL3zQfl9KkOV9MkkRR/3Dls0dxaBsQPTloEc5BLXWPL9vsOxopxyKoMmDueg==}
+     engines: {node: ^20.19.0 || >=22.12.0}
+@@ -1240,163 +1039,85 @@ snapshots:
+       semver: 7.8.5
+       sumchecker: 3.0.1
+     optionalDependencies:
+-      undici: 7.29.0
++      undici: 7.30.0
+     transitivePeerDependencies:
+       - supports-color
+ 
+-  '@esbuild/aix-ppc64@0.25.12':
+-    optional: true
+-
+   '@esbuild/aix-ppc64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/android-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/android-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/android-arm@0.25.12':
+-    optional: true
+-
+   '@esbuild/android-arm@0.28.1':
+     optional: true
+ 
+-  '@esbuild/android-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/android-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/darwin-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/darwin-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/darwin-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/darwin-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/freebsd-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/freebsd-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/freebsd-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/freebsd-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-arm@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-arm@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-ia32@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-ia32@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-loong64@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-loong64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-mips64el@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-mips64el@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-ppc64@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-ppc64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-riscv64@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-riscv64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-s390x@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-s390x@0.28.1':
+     optional: true
+ 
+-  '@esbuild/linux-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/linux-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/netbsd-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/netbsd-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/netbsd-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/netbsd-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/openbsd-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/openbsd-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/openbsd-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/openbsd-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/openharmony-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/openharmony-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/sunos-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/sunos-x64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/win32-arm64@0.25.12':
+-    optional: true
+-
+   '@esbuild/win32-arm64@0.28.1':
+     optional: true
+ 
+-  '@esbuild/win32-ia32@0.25.12':
+-    optional: true
+-
+   '@esbuild/win32-ia32@0.28.1':
+     optional: true
+ 
+-  '@esbuild/win32-x64@0.25.12':
+-    optional: true
+-
+   '@esbuild/win32-x64@0.28.1':
+     optional: true
+ 
+@@ -1548,7 +1269,7 @@ snapshots:
+     dependencies:
+       '@types/node': 24.13.3
+ 
+-  '@vitejs/plugin-react@4.7.0(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))':
++  '@vitejs/plugin-react@4.7.0(vite@7.3.6(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))':
+     dependencies:
+       '@babel/core': 7.29.7
+       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
+@@ -1556,7 +1277,7 @@ snapshots:
+       '@rolldown/pluginutils': 1.0.0-beta.27
+       '@types/babel__core': 7.20.5
+       react-refresh: 0.17.0
+-      vite: 6.4.3(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0)
++      vite: 7.3.6(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0)
+     transitivePeerDependencies:
+       - supports-color
+ 
+@@ -1642,7 +1363,7 @@ snapshots:
+ 
+   electron-to-chromium@1.5.408: {}
+ 
+-  electron@43.4.1:
++  electron@43.7.9:
+     dependencies:
+       '@electron-internal/extract-zip': 1.0.5
+       '@electron/get': 5.1.0
+@@ -1654,35 +1375,6 @@ snapshots:
+ 
+   es-module-lexer@1.7.0: {}
+ 
+-  esbuild@0.25.12:
+-    optionalDependencies:
+-      '@esbuild/aix-ppc64': 0.25.12
+-      '@esbuild/android-arm': 0.25.12
+-      '@esbuild/android-arm64': 0.25.12
+-      '@esbuild/android-x64': 0.25.12
+-      '@esbuild/darwin-arm64': 0.25.12
+-      '@esbuild/darwin-x64': 0.25.12
+-      '@esbuild/freebsd-arm64': 0.25.12
+-      '@esbuild/freebsd-x64': 0.25.12
+-      '@esbuild/linux-arm': 0.25.12
+-      '@esbuild/linux-arm64': 0.25.12
+-      '@esbuild/linux-ia32': 0.25.12
+-      '@esbuild/linux-loong64': 0.25.12
+-      '@esbuild/linux-mips64el': 0.25.12
+-      '@esbuild/linux-ppc64': 0.25.12
+-      '@esbuild/linux-riscv64': 0.25.12
+-      '@esbuild/linux-s390x': 0.25.12
+-      '@esbuild/linux-x64': 0.25.12
+-      '@esbuild/netbsd-arm64': 0.25.12
+-      '@esbuild/netbsd-x64': 0.25.12
+-      '@esbuild/openbsd-arm64': 0.25.12
+-      '@esbuild/openbsd-x64': 0.25.12
+-      '@esbuild/openharmony-arm64': 0.25.12
+-      '@esbuild/sunos-x64': 0.25.12
+-      '@esbuild/win32-arm64': 0.25.12
+-      '@esbuild/win32-ia32': 0.25.12
+-      '@esbuild/win32-x64': 0.25.12
+-
+   esbuild@0.28.1:
+     optionalDependencies:
+       '@esbuild/aix-ppc64': 0.28.1
+@@ -1755,7 +1447,7 @@ snapshots:
+ 
+   ms@2.1.3: {}
+ 
+-  nanoid@3.3.17: {}
++  nanoid@3.3.20: {}
+ 
+   node-releases@2.0.53: {}
+ 
+@@ -1769,9 +1461,9 @@ snapshots:
+ 
+   postcss@8.5.25:
+     dependencies:
+-      nanoid: 3.3.17
++      nanoid: 3.3.20
+       picocolors: 1.1.1
+-      source-map-js: 1.2.1
++      source-map-js: 1.2.2
+ 
+   progress@2.0.3: {}
+ 
+@@ -1829,7 +1521,7 @@ snapshots:
+ 
+   siginfo@2.0.0: {}
+ 
+-  source-map-js@1.2.1: {}
++  source-map-js@1.2.2: {}
+ 
+   stackback@0.0.2: {}
+ 
+@@ -1870,7 +1562,7 @@ snapshots:
+ 
+   undici-types@7.18.2: {}
+ 
+-  undici@7.29.0:
++  undici@7.30.0:
+     optional: true
+ 
+   update-browserslist-db@1.3.1(browserslist@4.28.8):
+@@ -1900,20 +1592,6 @@ snapshots:
+       - tsx
+       - yaml
+ 
+-  vite@6.4.3(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0):
+-    dependencies:
+-      esbuild: 0.25.12
+-      fdir: 6.5.0(picomatch@4.0.5)
+-      picomatch: 4.0.5
+-      postcss: 8.5.25
+-      rollup: 4.62.4
+-      tinyglobby: 0.2.17
+-    optionalDependencies:
+-      '@types/node': 24.13.3
+-      fsevents: 2.3.3
+-      tsx: 4.23.5
+-      yaml: 2.9.0
+-
+   vite@7.3.6(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0):
+     dependencies:
+       esbuild: 0.28.1
+diff --git a/src/commands/arrangement.test.ts b/src/commands/arrangement.test.ts
+index 8fe05f8..0215e79 100644
+--- a/src/commands/arrangement.test.ts
++++ b/src/commands/arrangement.test.ts
+@@ -70,6 +70,18 @@ describe('field arrangement', () => {
+     ]);
+   });
+ 
++  it('says which placements are muted, since they are placed but silent', () => {
++    threePasses();
++    writeFileSync(
++      join(root, 'songs/creek/tracks/main.yaml'),
++      readFileSync(join(root, 'songs/creek/tracks/main.yaml'), 'utf8').replace(
++        '    gain_db: 3\n',
++        '    gain_db: 3\n    mute: true\n',
++      ),
++    );
++    expect(arrangement(root, 'creek')).toContain('  5.1.1 0:08.0  vox  (muted, +3 dB, pan 0.2)');
++  });
++
+   it('reports the song length as a span, not the downbeat after it', () => {
+     // `length: [12]` is twelve bars. Formatting it as bar.beat.tick gives
+     // "13.1.1" — the position *after* the song — which is exactly the
+diff --git a/src/commands/arrangement.ts b/src/commands/arrangement.ts
+index 20c5706..707e004 100644
+--- a/src/commands/arrangement.ts
++++ b/src/commands/arrangement.ts
+@@ -28,6 +28,7 @@ export interface Placement {
+   absolute: boolean; // pinned to time rather than to the grid
+   gainDb: number;
+   pan: number;
++  muted: boolean; // `mute: true`: placed, and left out of the mix
+ }
+ 
+ export interface ArrangementView {
+@@ -69,6 +70,7 @@ export function songArrangement(project: LoadedProject, songName: string): Arran
+       absolute,
+       gainDb: entry.gain_db,
+       pan: entry.pan,
++      muted: entry.mute,
+     });
+   }
+   // Reading order is time order — the file's order is authoring order, and
+@@ -115,7 +117,7 @@ export function formatArrangement(view: ArrangementView, project: LoadedProject)
+       .join(', ');
+     // An absolute placement is pinned to time, so its bar reading moves if
+     // the tempo map does. Saying which it is costs four characters.
+-    const note = [p.absolute ? 'absolute' : '', level].filter(Boolean).join(', ');
++    const note = [p.muted ? 'muted' : '', p.absolute ? 'absolute' : '', level].filter(Boolean).join(', ');
+     lines.push(`  ${p.bars.padEnd(width)}${seconds}  ${p.track}${note ? `  (${note})` : ''}`);
+   }
+   return lines.join('\n');
+diff --git a/src/commands/ui-edits.test.ts b/src/commands/ui-edits.test.ts
+index 2107fd7..157fd23 100644
+--- a/src/commands/ui-edits.test.ts
++++ b/src/commands/ui-edits.test.ts
+@@ -20,6 +20,22 @@ import {
+ 
+ const track = (lines: string[]) => lines.join('\n') + '\n';
+ 
++// One song clock for every placement test: 120 bpm in 4/4 at 48 kHz, so
++// a bar is 96000 samples and 3840 ticks.
++const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
++const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
++const barSamples = 96000;
++const barTicks = 3840;
++
++// A parsed entry with every default the schema fills, as the server
++// hands the edit functions; tests name only what they set.
++const full = (over: Record<string, unknown>) =>
++  ({
++    at: 0, anchor: 'musical', source_offset: 0, slip: 0,
++    gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
++    ...over,
++  }) as unknown as InputEntry;
++
+ describe('placement edits', () => {
+   it('writes a set value and deletes a default, leaving the file minimal', () => {
+     const raw = track(['name: main', 'inputs:', '  - track: bass']);
+@@ -40,14 +56,10 @@ describe('placement edits', () => {
+ });
+ 
+ describe('placement moves', () => {
+-  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
+-  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+-  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
+   const entry = (at: number) => ({ track: 'hats', at, anchor: 'musical' }) as InputEntry;
+ 
+   it('keeps a musical array spelling, and the comment on its line', () => {
+     const raw = track(['name: drums', 'inputs:', '  - track: hats', '    at: [2] # pickup wants the second bar']);
+-    const barTicks = tempo.samplesToTicks(barSamples);
+     const moved = applyMove(raw, 0, entry(barTicks), barSamples, tempo, meter);
+     if (!moved.ok) throw new Error(moved.message);
+     expect(moved.text).toContain('at: [3] # pickup wants the second bar');
+@@ -76,17 +88,6 @@ describe('placement moves', () => {
+ });
+ 
+ describe('placement splits', () => {
+-  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
+-  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+-  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
+-  const barTicks = 3840;
+-  const full = (over: Record<string, unknown>) =>
+-    ({
+-      at: 0, anchor: 'musical', source_offset: 0, slip: 0,
+-      gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
+-      ...over,
+-    }) as unknown as InputEntry;
+-
+   it('cuts a windowed musical clip into two that add back up', () => {
+     const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
+     const parsed = full({ audio: 'riff', duration: barTicks * 2 });
+@@ -215,17 +216,6 @@ describe('placement splits', () => {
+ });
+ 
+ describe('placement stretches', () => {
+-  const tempo = new TempoMap([{ at: 0, bpm: 120 }], 48000);
+-  const meter = new MeterMap([{ at: 0, numerator: 4, denominator: 4 }]);
+-  const barSamples = 96000; // one 4/4 bar at 120 BPM, 48 kHz
+-  const barTicks = 3840;
+-  const full = (over: Record<string, unknown>) =>
+-    ({
+-      at: 0, anchor: 'musical', source_offset: 0, slip: 0,
+-      gain_db: 0, pan: 0, mute: false, fade_in: 0, fade_out: 0,
+-      ...over,
+-    }) as unknown as InputEntry;
+-
+   it('trims the end to the length the drag drew, and touches nothing else', () => {
+     const raw = track(['name: main', 'inputs:', '  - audio: riff', `    duration: ${barTicks * 2}`]);
+     const parsed = full({ audio: 'riff', duration: barTicks * 2 });
+diff --git a/src/commands/ui-protocol.ts b/src/commands/ui-protocol.ts
+index 3180dc8..5e69a53 100644
+--- a/src/commands/ui-protocol.ts
++++ b/src/commands/ui-protocol.ts
+@@ -19,21 +19,6 @@ export interface UiDevice {
+   default: boolean;
+ }
+ 
+-export interface UiLane {
+-  entry: number; // index into main's inputs — the edit locator
+-  kind: 'track' | 'audio' | 'other';
+-  name: string;
+-  gain_db: number;
+-  pan: number;
+-  mute: boolean;
+-  canSolo: boolean;
+-  inserts: string[];
+-  // A placed track that contains nothing. tall-grass ships two of
+-  // them, and a silent lane that looks identical to a loud one reads
+-  // as the UI being broken rather than the track being empty.
+-  empty: boolean;
+-}
+-
+ export interface UiStatus {
+   state: string;
+   sample: number;
+@@ -64,8 +49,9 @@ export interface UiClock {
+ export interface UiSnapshot {
+   type: 'snapshot';
+   song: string;
+-  lanes: UiLane[];
+-  file: { path: string; sha256: string };
++  // The song's main file, named in the view's footer. Edits carry each
++  // lane's own file and hash (UiTimelineLane), not this.
++  file: { path: string };
+   soloed: string | null;
+   devices: { devices: UiDevice[]; null_output: boolean };
+   status: UiStatus;
+@@ -140,6 +126,10 @@ export interface UiTimelineLane {
+   trackFile: string | null;
+   trackSha256: string | null;
+   inserts: UiInsert[] | null;
++  // The rate the placed track renders at — its own `rate:`, or the
++  // song's — which is the rate its EQ designs its filters at. Null when
++  // the placement is not a track.
++  trackRate: number | null;
+   // Null when this lane places audio rather than a track: there is
+   // nothing underneath, so no twirl is offered.
+   children: UiTimelineLane[] | null;
+diff --git a/src/commands/ui-timeline.test.ts b/src/commands/ui-timeline.test.ts
+index 1088c1d..c003941 100644
+--- a/src/commands/ui-timeline.test.ts
++++ b/src/commands/ui-timeline.test.ts
+@@ -60,6 +60,51 @@ describe('timeline lanes', () => {
+     expect(keys?.children?.map((l) => [l.name, l.entry])).toEqual([['pad', 1]]);
+   });
+ 
++  it('names a record entry by its generator name, not by its position', () => {
++    createTrack(root, 'creek', 'vocal');
++    writeFileSync(
++      join(root, 'songs/creek/tracks/vocal.yaml'),
++      ['name: vocal', 'inputs:', '  - id: lead', '    record:', '  - id: dub', '    record:', ''].join('\n'),
++    );
++    createTrack(root, 'creek', 'harmony');
++    writeFileSync(join(root, 'songs/creek/tracks/harmony.yaml'), ['name: harmony', 'inputs:', '  - record:', ''].join('\n'));
++    writeFileSync(
++      join(root, 'songs/creek/tracks/main.yaml'),
++      ['name: main', 'inputs:', '  - track: vocal', '  - track: harmony', ''].join('\n'),
++    );
++    const [vocal, harmony] = lanesOf();
++    expect(vocal?.children?.map((l) => l.name)).toEqual(['vocal-lead', 'vocal-dub']);
++    expect(harmony?.children?.map((l) => l.name)).toEqual(['harmony']);
++  });
++
++  it("carries each placed track's own rate, which its EQ designs at", () => {
++    createTrack(root, 'creek', 'hi');
++    writeFileSync(join(root, 'songs/creek/tracks/hi.yaml'), ['name: hi', 'rate: 96000', 'inputs: []', ''].join('\n'));
++    createTrack(root, 'creek', 'plain');
++    writeFileSync(join(root, 'songs/creek/tracks/plain.yaml'), ['name: plain', 'inputs: []', ''].join('\n'));
++    writeFileSync(
++      join(root, 'songs/creek/tracks/main.yaml'),
++      ['name: main', 'inputs:', '  - track: hi', '  - track: plain', '  - audio: riff', ''].join('\n'),
++    );
++    expect(lanesOf().map((l) => [l.name, l.trackRate])).toEqual([
++      ['hi', 96000],
++      ['plain', 48000],
++      ['riff', null],
++    ]);
++  });
++
++  it('names supercollider entries by their generator name too', () => {
++    createTrack(root, 'creek', 'synth');
++    const sc = (id: string) => [`  - id: ${id}`, '    supercollider:', '      source: pad', '      seed: 1', '      duration: 1'];
++    writeFileSync(
++      join(root, 'songs/creek/tracks/synth.yaml'),
++      ['name: synth', 'inputs:', ...sc('low'), ...sc('high'), ''].join('\n'),
++    );
++    writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: synth', ''].join('\n'));
++    const [synth] = lanesOf();
++    expect(synth?.children?.map((l) => l.name)).toEqual(['synth-low', 'synth-high']);
++  });
++
+   it('draws an open window as long as its source plays, not to the song end', () => {
+     // riff is 4800 frames; the song here is 96000 samples long. An open
+     // window plays the source from its read offset to its end.
+diff --git a/src/commands/ui-timeline.ts b/src/commands/ui-timeline.ts
+index 4e75593..064cefe 100644
+--- a/src/commands/ui-timeline.ts
++++ b/src/commands/ui-timeline.ts
+@@ -1,7 +1,7 @@
+ import { existsSync, statSync } from 'node:fs';
+ import { join } from 'node:path';
+ import { readWav, readWavHeader } from '../audio/wav.js';
+-import { placedWindow } from '../generators/stem.js';
++import { generatorName, placedWindow } from '../generators/stem.js';
+ import type { LoadedSong } from '../model/project.js';
+ import { barTicks, MeterMap, TempoMap } from '../time/tempo.js';
+ import { sha256Text } from '../hash.js';
+@@ -131,6 +131,21 @@ function placements(inputs: InputEntry[]): Array<[InputEntry, number]> {
+   return inputs.flatMap((entry, i): Array<[InputEntry, number]> => (entry.receive === undefined ? [[entry, i]] : []));
+ }
+ 
++// An owner track's clock, for the view and for the edits made through
++// it: the track's own tempo and meter, else the song's (nested-tracks.md
++// §13), built at the session rate because every position the view draws
++// and every offset an edit carries is in session samples.
++export function ownerClock(
++  owner: { data: { time?: TrackTime | undefined } },
++  song: Pick<LoadedSong, 'time'>,
++  rate: number,
++): { tempo: TempoMap; meter: MeterMap } {
++  return {
++    tempo: new TempoMap(owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }], rate),
++    meter: new MeterMap(owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }]),
++  };
++}
++
+ export function projectTimeline(
+   root: string,
+   song: LoadedSong,
+@@ -167,9 +182,7 @@ export function projectTimeline(
+   ): UiTimelineLane => {
+     // Everything in a track file is in that track's own time
+     // (nested-tracks.md §13), falling back to the song's.
+-    const localTempo = owner.data.time?.tempo
+-      ? new TempoMap(owner.data.time.tempo, sessionRate)
+-      : songTempo;
++    const localTempo = ownerClock(owner, song, sessionRate).tempo;
+     const w = placedWindow(entry, localTempo);
+     const startSample = originSample + w.start;
+ 
+@@ -211,8 +224,13 @@ export function projectTimeline(
+       entry: index,
+       file: owner.path,
+       sha256: sha256Text(owner.raw),
++      // A generator entry (record, supercollider, generative) is named as
++      // the graph names it, by its generator name: the track's own name,
++      // or `<track>-<id>` when it has an id, so two in one track differ.
+       name: placedName ?? entry.audio ?? entry.receive ??
+-        (entry.supercollider ? 'supercollider' : entry.generative ? 'generative' : `input ${index + 1}`),
++        (entry.record !== undefined || entry.supercollider !== undefined || entry.generative !== undefined
++          ? generatorName(entry, owner.data.name)
++          : `input ${index + 1}`),
+       start: startSample,
+       duration,
+       depth,
+@@ -222,6 +240,9 @@ export function projectTimeline(
+       canSolo: placedName !== undefined,
+       trackFile: placed?.path ?? null,
+       trackSha256: placed ? sha256Text(placed.raw) : null,
++      // A track renders at its own rate, or the song's (graph.ts
++      // trackRate), and its filters are designed at that rate.
++      trackRate: placed ? (placed.data.rate ?? song.song?.data.rate ?? sessionRate) : null,
+       inserts: placed
+         ? placed.data.inserts.map(
+             (ins, i): UiInsert => ({
+diff --git a/src/commands/ui.test.ts b/src/commands/ui.test.ts
+index 4f23e5c..0fdeadf 100644
+--- a/src/commands/ui.test.ts
++++ b/src/commands/ui.test.ts
+@@ -1,6 +1,12 @@
++import { mkdtempSync, rmSync } from 'node:fs';
++import { createServer } from 'node:http';
++import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+-import { staticFile } from './ui.js';
++import { AudiodClient } from '../audiod/client.js';
++import { createSong } from './create.js';
++import { init } from './init.js';
++import { runUi, staticFile } from './ui.js';
+ 
+ // `field ui` serves the client's build output over loopback HTTP. A request
+ // path resolves inside that directory or not at all.
+@@ -19,3 +25,27 @@ describe('static files', () => {
+     expect(staticFile(dist, '/..')).toBeUndefined();
+   });
+ });
++
++describe('starting field ui', () => {
++  it('refuses a taken --port before it touches the daemon', async () => {
++    // Loading the session replaces whatever the daemon is playing, so a
++    // port that cannot be bound has to be found before that, not after.
++    const root = mkdtempSync(join(tmpdir(), 'field-ui-port-'));
++    const taken = createServer();
++    await new Promise<void>((resolve) => taken.listen(0, '127.0.0.1', resolve));
++    const address = taken.address();
++    const port = typeof address === 'object' && address !== null ? address.port : 0;
++    try {
++      init({ dir: root, name: 'album' });
++      createSong(root, 'creek');
++      await expect(runUi(root, 'creek', { port, open: false })).rejects.toThrow(
++        `port ${port} is already in use`,
++      );
++      // No daemon was spawned for this project.
++      await expect(AudiodClient.connect(root, { spawnIfNeeded: false })).rejects.toThrow('not running');
++    } finally {
++      taken.close();
++      rmSync(root, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/src/commands/ui.ts b/src/commands/ui.ts
+index df28608..a85c50f 100644
+--- a/src/commands/ui.ts
++++ b/src/commands/ui.ts
+@@ -1,5 +1,6 @@
+ import { randomBytes } from 'node:crypto';
+-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
++import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
+ import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+ import { dirname, extname, join, normalize, sep } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+@@ -22,10 +23,9 @@ import {
+   applySplit,
+   applyStretch,
+ } from './ui-edits.js';
+-import type { UiLane, UiSnapshot } from './ui-protocol.js';
+-import { projectTimeline } from './ui-timeline.js';
++import type { UiSnapshot } from './ui-protocol.js';
++import { ownerClock, projectTimeline } from './ui-timeline.js';
+ import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
+-import { MeterMap, TempoMap } from '../time/tempo.js';
+ import { watchLiveSession } from './watch-live.js';
+ 
+ // `field ui <song>` (ui.md): a local web face over what already exists —
+@@ -187,13 +187,50 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+         `(field play ${songName} fails the same way, for the same reason.)`,
+     );
+   }
+-  const client = await AudiodClient.connect(root);
+-  if (!client.supports('session') || !client.supports('swap')) {
+-    throw new Error(
+-      `field-audiod ${client.daemonVersion} predates live sessions — field transport quit, then retry`,
+-    );
++  // Everything that can refuse without touching the daemon refuses
++  // first: the client build, and the port. Loading the session replaces
++  // whatever the daemon is playing, so a taken --port found after that
++  // would cost the playing session and then crash.
++  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
++  const distDir = join(packageRoot, 'ui', 'dist');
++  const http = createServer();
++  await new Promise<void>((resolve, reject) => {
++    const refuse = (err: NodeJS.ErrnoException) =>
++      reject(
++        err.code === 'EADDRINUSE'
++          ? new Error(`field ui: port ${options.port} is already in use — pick another with --port, or omit it`)
++          : err,
++      );
++    http.once('error', refuse);
++    http.listen(options.port ?? 0, '127.0.0.1', () => {
++      http.off('error', refuse);
++      resolve();
++    });
++  });
++  if (!existsSync(join(distDir, 'index.html'))) {
++    http.close();
++    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
++  }
++
++  // From here a failure must not leave the port bound behind it.
++  const connectAndLoad = async () => {
++    const connected = await AudiodClient.connect(root);
++    if (!connected.supports('session') || !connected.supports('swap')) {
++      connected.close();
++      throw new Error(
++        `field-audiod ${connected.daemonVersion} predates live sessions — field transport quit, then retry`,
++      );
++    }
++    return { client: connected, loaded: await connected.session(compiled.session) };
++  };
++  let client: AudiodClient;
++  let loaded: Awaited<ReturnType<AudiodClient['session']>>;
++  try {
++    ({ client, loaded } = await connectAndLoad());
++  } catch (err) {
++    http.close();
++    throw err;
+   }
+-  const loaded = await client.session(compiled.session);
+   ctx = musicalContext(loadProject(root), `songs/${songName}`, loaded.sample_rate);
+ 
+   const mainFile = () => {
+@@ -206,29 +243,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+ 
+   const snapshot = async (): Promise<UiSnapshot> => {
+     const { song, main } = mainFile();
+-    const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
+-    const lanes: UiLane[] = main.data.inputs.map((entry, i) => {
+-      const kind = entry.track !== undefined ? 'track' : entry.audio !== undefined ? 'audio' : 'other';
+-      const placed = entry.track !== undefined ? byName.get(entry.track) : undefined;
+-      return {
+-        entry: i,
+-        kind,
+-        name: entry.track ?? entry.audio ?? entry.receive ?? `input ${i + 1}`,
+-        gain_db: entry.gain_db,
+-        pan: entry.pan,
+-        mute: entry.mute,
+-        canSolo: kind === 'track',
+-        empty: placed !== undefined && placed.inputs.length === 0,
+-        inserts: placed?.inserts.map((ins) => ('effect' in ins ? String(ins.effect) : 'plugin')) ?? [],
+-      };
+-    });
+-    const raw = readFileSync(join(root, main.path), 'utf8');
+     const status = await client.status();
+     return {
+       type: 'snapshot' as const,
+       song: songName,
+-      lanes,
+-      file: { path: main.path, sha256: sha256Text(raw) },
++      file: { path: main.path },
+       soloed,
+       devices: await client.devices(),
+       status: {
+@@ -440,15 +459,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+   // The owner's own time, falling back to the song's — the same rule the
+   // timeline renders by (nested-tracks.md §13), so a clip lands exactly
+   // where the drag showed it.
+-  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) => ({
+-    tempo: new TempoMap(
+-      owner.data.time?.tempo ?? song.time?.tempo ?? [{ at: 0, bpm: 120 }],
+-      loaded.sample_rate,
+-    ),
+-    meter: new MeterMap(
+-      owner.data.time?.meter ?? song.time?.meter ?? [{ at: 0, numerator: 4, denominator: 4 }],
+-    ),
+-  });
++  const localMaps = ({ owner, song }: Pick<Resolved, 'owner' | 'song'>) =>
++    ownerClock(owner, song, loaded.sample_rate);
+ 
+   // `source_offset` addresses the source's own samples, and both the
+   // split and the front-trim advance it by a distance measured in
+@@ -742,9 +754,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+     }
+   };
+ 
+-  // Static assets: the client's build output, shipped with the package.
+-  const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+-  const distDir = join(packageRoot, 'ui', 'dist');
++  // Static assets: the client's build output in distDir, shipped with
++  // the package.
+   const MIME: Record<string, string> = {
+     '.html': 'text/html; charset=utf-8',
+     '.js': 'text/javascript',
+@@ -762,11 +773,7 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+     res.end(readFileSync(file));
+   };
+ 
+-  if (!existsSync(join(distDir, 'index.html'))) {
+-    throw new Error('the UI is not built — run `pnpm --dir ui build` (or `pnpm build:ui`)');
+-  }
+-
+-  const http = createServer(serveStatic);
++  http.on('request', serveStatic);
+   const wss = new WebSocketServer({ noServer: true });
+   http.on('upgrade', (req, socket, head) => {
+     const url = new URL(req.url ?? '/', 'http://localhost');
+@@ -822,7 +829,6 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+     });
+   });
+ 
+-  await new Promise<void>((resolve) => http.listen(options.port ?? 0, '127.0.0.1', resolve));
+   const address = http.address();
+   const port = typeof address === 'object' && address !== null ? address.port : 0;
+   const url = `http://127.0.0.1:${port}/?t=${token}`;
+@@ -838,6 +844,8 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+   // works. The dependency's weight is recorded in project-core.md §5.
+   const { spawn } = await import('node:child_process');
+   let shell: ReturnType<typeof spawn> | undefined;
++  // Settles once the shell has exited and its profile is removed.
++  let shellGone: Promise<void> = Promise.resolve();
+   const openInBrowser = () => {
+     const opener =
+       process.platform === 'darwin'
+@@ -859,8 +867,30 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+         // stderr inherited on purpose: the shell mirrors the page's
+         // console here, which is the only place a blank window can
+         // explain itself.
+-        shell = spawn(process.execPath, [electron, shellEntry, url], {
++        // The URL rides in the environment: it carries the session
++        // token, and argv is readable by other users on a shared machine.
++        //
++        // The shell's profile is made here, fresh by mkdtemp so no other
++        // user can have made it first, and removed here once the shell
++        // has exited. The shell cannot remove it itself: Electron's quit
++        // fires while Chromium still holds the profile's files open, and
++        // Windows refuses to delete an open file.
++        const profile = mkdtempSync(join(tmpdir(), 'field-ui-profile-'));
++        const launched = spawn(process.execPath, [electron, shellEntry], {
+           stdio: ['ignore', 'ignore', 'inherit'],
++          env: { ...process.env, FIELD_UI_URL: url, FIELD_UI_PROFILE: profile },
++        });
++        shell = launched;
++        shellGone = new Promise<void>((resolve) => {
++          launched.once('exit', () => {
++            try {
++              rmSync(profile, { recursive: true, force: true });
++            } catch {
++              // An orphaned Electron can still hold it on Windows after
++              // a kill; the temp directory is the OS's to clear then.
++            }
++            resolve();
++          });
+         });
+         shell.on('error', () => {
+           process.stderr.write('field ui: could not start the app shell; opening a browser\n');
+@@ -897,6 +927,9 @@ export async function runUi(root: string, songName: string, options: UiOptions =
+     });
+   });
+   if (shell !== undefined && shell.exitCode === null) shell.kill();
++  // The profile goes when the shell has exited, which a kill only asks
++  // for; wait a moment for it rather than leave the directory behind.
++  await Promise.race([shellGone, new Promise((resolve) => setTimeout(resolve, 2000))]);
+   watchAbort.abort();
+   // Ending the session ends the playback it started: the daemon stops
+   // only at the end of the stream and stays up while playing, so closing
+diff --git a/src/model/cables.test.ts b/src/model/cables.test.ts
+index 58ddf40..caf0fbe 100644
+--- a/src/model/cables.test.ts
++++ b/src/model/cables.test.ts
+@@ -724,6 +724,19 @@ describe('cables render (nested-tracks.md §19 chunk 4)', () => {
+       'receive "verb" ← track:keys, -6.0 dB (tap post), arrives at sample 0',
+     );
+   });
++
++  it('explain says a cable is silent when every sender placement is muted', async () => {
++    track('keys', ['sends:', '  verb:', '    gain_db: -6']);
++    track('space', ['inputs:', '  - receive: verb']);
++    track('main', ['inputs:', '  - track: keys', '    mute: true', '  - track: space']);
++    const cable = (await explainLabel(root, '//songs/opener/track:space')).levels!.cables[0]!;
++    expect(formatCable(cable, 'space')).toBe(
++      'receive "verb" ← track:keys, -6.0 dB (tap post), silent: every placement of track:keys that reaches here is muted',
++    );
++    expect(formatCable(cable, 'keys')).toBe(
++      'send "verb" → track:space, -6.0 dB (tap post), silent: every placement of this track is muted',
++    );
++  });
+ });
+ 
+ describe('warnings hold no gate', () => {
+diff --git a/src/model/cables.ts b/src/model/cables.ts
+index 26441aa..a372d3c 100644
+--- a/src/model/cables.ts
++++ b/src/model/cables.ts
+@@ -510,14 +510,19 @@ export function checkCables(
+ // shows in full.
+ export function formatCable(cable: Cable, from: string): string {
+   const level = `${fmtDb(cable.gainDb)} dB (tap ${cable.tap})`;
++  // A joined cable with no arrivals has every sender placement muted:
++  // checkCables only keeps a cable that joins, and the audible pass drops
++  // muted placements. Said in words, because "0 arrivals" reads as a bug.
++  const silent = cable.arrivals.length === 0;
+   if (cable.sender === from) {
+-    return `send "${cable.label}" → track:${cable.receiver}, ${level}`;
++    return `send "${cable.label}" → track:${cable.receiver}, ${level}${silent ? ', silent: every placement of this track is muted' : ''}`;
+   }
+   // A count above one marks identical placements landing together —
+   // rendered as one clip at +20·log₁₀(count) dB.
+   const spellArrival = (a: CableArrival): string => `${a.at}${a.count > 1 ? `×${a.count}` : ''}`;
+-  const arrivals =
+-    cable.arrivals.length === 1
++  const arrivals = silent
++    ? `silent: every placement of track:${cable.sender} that reaches here is muted`
++    : cable.arrivals.length === 1
+       ? `arrives at sample ${spellArrival(cable.arrivals[0]!)}`
+       : `${cable.arrivals.length} arrivals at samples ${cable.arrivals.map(spellArrival).join(', ')}`;
+   return `receive "${cable.label}" ← track:${cable.sender}, ${level}, ${arrivals}`;
+diff --git a/src/model/levels.test.ts b/src/model/levels.test.ts
+index 6ac0da6..33d15f9 100644
+--- a/src/model/levels.test.ts
++++ b/src/model/levels.test.ts
+@@ -81,6 +81,19 @@ describe('effective levels', () => {
+     ]);
+   });
+ 
++  it('marks a path through a muted placement, and only that path', () => {
++    creek();
++    // phrase is placed in main and in bed; mute it in main only.
++    track(
++      'main',
++      ['name: main', 'inputs:', '  - track: phrase', '    at: [1]', '    mute: true', ''].join('\n'),
++    );
++    expect(reaches(song(), 'keys').map((r) => [r.to, r.muted])).toEqual([
++      ['bed', false],
++      ['main', true],
++    ]);
++  });
++
+   it('sums every hop, not just the nearest one', () => {
+     creek();
+     // creek itself cannot catch this: `phrase` is placed at 0 dB, so
+@@ -216,6 +229,7 @@ describe('formatting a reach', () => {
+     pans: [],
+     via: [],
+     paths: 1,
++    muted: false,
+     ...over,
+   });
+ 
+@@ -227,6 +241,12 @@ describe('formatting a reach', () => {
+     expect(formatReach(reach({ gainDb: -0.04 }))).toBe('track:main 0.0 dB');
+   });
+ 
++  it('says a muted path is silent, ahead of the other notes', () => {
++    expect(formatReach(reach({ gainDb: -4, via: ['phrase'], muted: true }))).toBe(
++      'track:main -4.0 dB (via track:phrase) — muted on this path, so it is silent here',
++    );
++  });
++
+   it('says the route only when there is one', () => {
+     expect(formatReach(reach({ via: ['phrase'], paths: 3 }))).toBe(
+       'track:main 0.0 dB (via track:phrase, 3 placements)',
+diff --git a/src/model/levels.ts b/src/model/levels.ts
+index 167cad9..7b54cbf 100644
+--- a/src/model/levels.ts
++++ b/src/model/levels.ts
+@@ -34,6 +34,11 @@ export interface Reach {
+   pans: PanHop[];
+   via: string[]; // tracks between this one and the root, nearest first
+   paths: number; // identical paths collapsed into this one
++  // A placement on the path carries `mute: true`, so nothing travels it:
++  // the graph leaves a muted placement out of the plan. Listed rather
++  // than dropped, because "placed, but muted" is the answer to "why is
++  // this silent", and dropping the path would read as "nothing places it".
++  muted: boolean;
+ }
+ 
+ // Every path from `trackName` up to a root, where a root is a track
+@@ -61,12 +66,12 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
+   // One list (nested-tracks.md §18): the entries that create parent
+   // edges are exactly the ones that place a track — audio and generator
+   // entries are leaves of this walk, not hops on it.
+-  const parents = new Map<string, { in: string; gainDb: number; pan: number }[]>();
++  const parents = new Map<string, { in: string; gainDb: number; pan: number; mute: boolean }[]>();
+   for (const track of song.tracks) {
+     for (const entry of track.data.inputs ?? []) {
+       if (entry.track === undefined) continue;
+       const list = parents.get(entry.track) ?? [];
+-      list.push({ in: track.data.name, gainDb: entry.gain_db, pan: entry.pan });
++      list.push({ in: track.data.name, gainDb: entry.gain_db, pan: entry.pan, mute: entry.mute });
+       parents.set(entry.track, list);
+     }
+   }
+@@ -83,7 +88,7 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
+     const up = parents.get(name) ?? [];
+     if (up.length === 0) {
+       // A root: the path ends here, having accumulated nothing.
+-      const root: Reach[] = [{ to: name, gainDb: 0, pans: [], via: [], paths: 1 }];
++      const root: Reach[] = [{ to: name, gainDb: 0, pans: [], via: [], paths: 1, muted: false }];
+       memo.set(name, root);
+       return root;
+     }
+@@ -101,6 +106,7 @@ export function reaches(song: LoadedSong, trackName: string): Reach[] {
+           // it is the destination rather than a stop along the way.
+           via: above.to === edge.in ? [] : [edge.in, ...above.via],
+           paths: above.paths,
++          muted: edge.mute || above.muted,
+         });
+       }
+     }
+@@ -124,6 +130,7 @@ function collapse(found: Reach[]): Reach[] {
+       reach.gainDb,
+       reach.via.join('>'),
+       reach.pans.map((p) => `${p.in}/${p.track}@${p.pan}`).join(','),
++      reach.muted,
+     ].join('|');
+     const existing = byShape.get(shape);
+     if (existing) existing.paths += reach.paths;
+@@ -157,7 +164,9 @@ export function formatReach(reach: Reach): string {
+   // it aside — two parenthetical groups back to back read as though the
+   // second belonged to the first (#92 review).
+   const caveat = reach.pans.length > 1 ? ' — balances compose per channel, not into one pan' : '';
+-  return `track:${reach.to} ${parts.join(', ')}${where}${caveat}`;
++  // Muted first among the notes: it overrides every level on the line.
++  const muted = reach.muted ? ' — muted on this path, so it is silent here' : '';
++  return `track:${reach.to} ${parts.join(', ')}${where}${muted}${caveat}`;
+ }
+ 
+ // A root track is either the song's output or something nothing consumes.
+diff --git a/ui/package.json b/ui/package.json
+index 3e0fc4d..62f5738 100644
+--- a/ui/package.json
++++ b/ui/package.json
+@@ -16,8 +16,8 @@
+     "@types/react": "^18.3.0",
+     "@types/react-dom": "^18.3.0",
+     "@vitejs/plugin-react": "^4.3.0",
+-    "electron": "^43.4.1",
++    "electron": "^43.7.9",
+     "typescript": "^5.9.0",
+-    "vite": "^6.0.0"
++    "vite": "^7.3.6"
+   }
+ }
+diff --git a/ui/shell.cjs b/ui/shell.cjs
+index fadd397..db76252 100644
+--- a/ui/shell.cjs
++++ b/ui/shell.cjs
+@@ -10,22 +10,30 @@
+ // in a shell has no devtools to open, so the diagnosis has to come out
+ // somewhere a person is already looking.
+ const { app, BrowserWindow, shell } = require('electron');
+-const { join } = require('node:path');
+-const { tmpdir } = require('node:os');
+ 
+ // Its own profile directory, so Chromium's caches land somewhere
+ // writable instead of failing noisily against a default path this
+ // process may not own — the "Unable to move the cache" spew is the
+ // symptom, and it drowns the page console this shell exists to surface.
+-// Per-user, because tmpdir() is shared on Linux: a fixed name there
+-// belongs to whoever launches first, and the second user's failure
+-// arrives as exactly the cache noise this line exists to remove.
+-app.setPath('userData', join(tmpdir(), `field-ui-profile-${process.getuid?.() ?? 'win'}`));
++// `field ui` makes it fresh with mkdtemp, hands it over as
++// FIELD_UI_PROFILE, and removes it after this process exits: removing it
++// here, on quit, would race Chromium, which still holds its files open
++// then, and Windows refuses to delete an open file.
++const profile = process.env.FIELD_UI_PROFILE;
++if (!profile) {
++  process.stderr.write('field ui shell: FIELD_UI_PROFILE is not set\n');
++  app.exit(1);
++} else {
++  app.setPath('userData', profile);
++}
+ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+ 
+-const url = process.argv[2];
++// The session URL arrives in the environment, not on the command line:
++// it carries the session token, and a process's arguments are readable
++// by other users on a shared machine (/proc on Linux, ps everywhere).
++const url = process.env.FIELD_UI_URL;
+ if (!url) {
+-  process.stderr.write('field ui shell: no URL argument\n');
++  process.stderr.write('field ui shell: FIELD_UI_URL is not set\n');
+   app.exit(1);
+ }
+ 
+diff --git a/ui/src/App.tsx b/ui/src/App.tsx
+index 1c01957..b1a198d 100644
+--- a/ui/src/App.tsx
++++ b/ui/src/App.tsx
+@@ -332,7 +332,7 @@ export function App() {
+       {selLane && selLane.trackFile !== null ? (
+         <Inserts
+           lane={selLane}
+-          sampleRate={snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
++          sampleRate={selLane.trackRate ?? snap.clock?.sampleRate ?? snap.timeline?.rate ?? 48000}
+           send={send}
+         />
+       ) : null}
+diff --git a/ui/src/Timeline.tsx b/ui/src/Timeline.tsx
+index dac34ab..1da193d 100644
+--- a/ui/src/Timeline.tsx
++++ b/ui/src/Timeline.tsx
+@@ -285,6 +285,31 @@ export function Timeline({ snap, playSample, selected, onSelect, onLocate, onMov
+   );
+ }
+ 
++// A lane's waveform as an SVG path, built once per envelope. Every row
++// re-renders on each frame while playing, because the playhead moves,
++// and rebuilding a 1,200-bucket path string per row per frame is most of
++// that frame's work. The envelope array is the same object until a
++// snapshot replaces it, so a WeakMap keyed on it hands back the same
++// string, and React leaves the DOM attribute alone.
++const wavePaths = new WeakMap<number[], string>();
++function wavePath(peaks: number[]): string {
++  let d = wavePaths.get(peaks);
++  if (d === undefined) {
++    d =
++      `M0,50 ` +
++      peaks.map((p, i) => `L${i},${50 - p * 46}`).join(' ') +
++      peaks
++        .map((_, i) => {
++          const j = peaks.length - 1 - i;
++          return `L${j},${50 + (peaks[j] ?? 0) * 46}`;
++        })
++        .join(' ') +
++      ' Z';
++    wavePaths.set(peaks, d);
++  }
++  return d;
++}
++
+ function Row({
+   lane, open, onToggle, width, x, playSample, selected, drag,
+   onGrab, onDragMove, onDrop, onDragCancel, onDeselect, locateAt, controls,
+@@ -372,17 +397,7 @@ function Row({
+             <svg className="tl-wave" viewBox={`0 0 ${peaks.length} 100`} preserveAspectRatio="none">
+               {/* Mirrored envelope: the shape of the render, not a claim
+                   about individual samples. */}
+-              <path
+-                d={
+-                  `M0,50 ` +
+-                  peaks.map((p, i) => `L${i},${50 - p * 46}`).join(' ') +
+-                  peaks.map((_, i) => {
+-                    const j = peaks.length - 1 - i;
+-                    return `L${j},${50 + (peaks[j] ?? 0) * 46}`;
+-                  }).join(' ') +
+-                  ' Z'
+-                }
+-              />
++              <path d={wavePath(peaks)} />
+             </svg>
+           )}
+         </div>
