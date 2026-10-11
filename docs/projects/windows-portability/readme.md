@@ -617,6 +617,11 @@ land as its own diff whenever.
   OneDrive-redirected profile is not the Desktop the user sees (the
   real one lives under `OneDrive\Desktop`); the export still lands and
   prints its path, so this is a wart rather than a break. **Standalone.**
+  **Done** (2026-10-11): `homeRelative` takes the platform's separator,
+  so a path under the profile prints as `~\Desktop\…`, and with `\` it
+  compares the home prefix without regard to case, as Windows does, so
+  `c:\users\me\Music` prints as `~\Music` too. The OneDrive Desktop
+  stays the wart it was.
 - **`sclangCommand` cannot find `sclang` on Windows**
   (`sclangCommand` in `generators/supercollider.ts`, re-checked
   2026-10-10 after #179). Since the keyboard instrument's voice host
