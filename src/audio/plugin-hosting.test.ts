@@ -751,6 +751,10 @@ describe('inventory cache', () => {
     expect(sameSize.length).toBe(
       JSON.stringify({ plugins: [entry('one'), entry('two')], failed: [] }).length,
     );
+    // On Windows this rewrite can land in the same timestamp tick as the
+    // write above, so no timestamp moves and the cache serves 'two'. The
+    // next test gives the inferred cause and waits out a tick the same way.
+    if (process.platform === 'win32') await new Promise((done) => setTimeout(done, 50));
     writeFileSync(path, sameSize);
     const third = readInventory(root);
     expect(third).not.toBe(second);
