@@ -22,7 +22,7 @@ import {
   applySplit,
   applyStretch,
 } from './ui-edits.js';
-import type { UiLane, UiSnapshot } from './ui-protocol.js';
+import type { UiSnapshot } from './ui-protocol.js';
 import { projectTimeline } from './ui-timeline.js';
 import { formatPosition, musicalContext, type MusicalContext } from './transport.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
@@ -243,29 +243,11 @@ export async function runUi(root: string, songName: string, options: UiOptions =
 
   const snapshot = async (): Promise<UiSnapshot> => {
     const { song, main } = mainFile();
-    const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
-    const lanes: UiLane[] = main.data.inputs.map((entry, i) => {
-      const kind = entry.track !== undefined ? 'track' : entry.audio !== undefined ? 'audio' : 'other';
-      const placed = entry.track !== undefined ? byName.get(entry.track) : undefined;
-      return {
-        entry: i,
-        kind,
-        name: entry.track ?? entry.audio ?? entry.receive ?? `input ${i + 1}`,
-        gain_db: entry.gain_db,
-        pan: entry.pan,
-        mute: entry.mute,
-        canSolo: kind === 'track',
-        empty: placed !== undefined && placed.inputs.length === 0,
-        inserts: placed?.inserts.map((ins) => ('effect' in ins ? String(ins.effect) : 'plugin')) ?? [],
-      };
-    });
-    const raw = readFileSync(join(root, main.path), 'utf8');
     const status = await client.status();
     return {
       type: 'snapshot' as const,
       song: songName,
-      lanes,
-      file: { path: main.path, sha256: sha256Text(raw) },
+      file: { path: main.path },
       soloed,
       devices: await client.devices(),
       status: {

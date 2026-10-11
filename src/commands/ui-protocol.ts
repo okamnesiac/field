@@ -19,21 +19,6 @@ export interface UiDevice {
   default: boolean;
 }
 
-export interface UiLane {
-  entry: number; // index into main's inputs — the edit locator
-  kind: 'track' | 'audio' | 'other';
-  name: string;
-  gain_db: number;
-  pan: number;
-  mute: boolean;
-  canSolo: boolean;
-  inserts: string[];
-  // A placed track that contains nothing. tall-grass ships two of
-  // them, and a silent lane that looks identical to a loud one reads
-  // as the UI being broken rather than the track being empty.
-  empty: boolean;
-}
-
 export interface UiStatus {
   state: string;
   sample: number;
@@ -64,8 +49,9 @@ export interface UiClock {
 export interface UiSnapshot {
   type: 'snapshot';
   song: string;
-  lanes: UiLane[];
-  file: { path: string; sha256: string };
+  // The song's main file, named in the view's footer. Edits carry each
+  // lane's own file and hash (UiTimelineLane), not this.
+  file: { path: string };
   soloed: string | null;
   devices: { devices: UiDevice[]; null_output: boolean };
   status: UiStatus;
