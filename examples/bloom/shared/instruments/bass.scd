@@ -62,20 +62,23 @@ if ("FIELD_MODE".getenv == "voice") {
 	// Each knob in bass.knobs.yaml, as the signal its controller sets: cc74
 	// from 0 to 1, mapped through the knob's range from the copy of the file
 	// that Field checked (keys.md, "Knobs"), starting at the knob's default.
+	// A knob the file leaves out keeps the setting's fixed value.
 	var knobs = ("FIELD_KNOBS".getenv ?? {
 		Error("bass maps its knobs from bass.knobs.yaml, whose checked copy Field names in FIELD_KNOBS").throw
 	}).parseYAMLFile["knobs"];
-	var knob = { |name|
+	var knob = { |name, fixed|
 		var each = knobs.detect { |knob| knob["name"] == name };
-		var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
-		spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+		if (each.isNil) { fixed } {
+			var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
+			spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+		}
 	};
 	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
 		var k = bass.copy;
-		k[\vcfFreq] = knob.("cutoff");
-		k[\vcfRes] = knob.("res");
-		k[\atk] = knob.("attack");
-		k[\rel] = knob.("release");
+		k[\vcfFreq] = knob.("cutoff", k[\vcfFreq]);
+		k[\vcfRes] = knob.("res", k[\vcfRes]);
+		k[\atk] = knob.("attack", k[\atk]);
+		k[\rel] = knob.("release", k[\rel]);
 		Out.ar(out, ju06a.(freq, gate, k, mod.lag(0.05)) * amp * level);
 	})
 } {

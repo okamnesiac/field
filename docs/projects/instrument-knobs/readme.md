@@ -913,6 +913,11 @@ and the glide wait for chunk 2, and the starting positions for chunk 3.
   `bass.scd` throw `juno maps its knobs from juno.knobs.yaml, whose
   checked copy Field names in FIELD_KNOBS` when `FIELD_KNOBS` is unset,
   which the voice host reports as the program's error.
+- **A voice keeps a setting's fixed value for a knob its file leaves
+  out.** The schema accepts any set of knobs, and criterion 11 deletes
+  two of `juno`'s, so the helper in `juno.scd` and `bass.scd` takes the
+  fixed value as its second argument, as `knob.("attack", k[\atk])`,
+  and returns it when the copy has no knob of that name.
 - **`FIELD_INSTRUMENTS` lists objects.** Each is `{ "program": …,
   "knobs": … }`, with `knobs` absent for a program without a knob file,
   and `voice-load.scd` takes the copy's path beside the program's and
@@ -948,7 +953,7 @@ and the glide wait for chunk 2, and the starting positions for chunk 3.
 | The full suite, against a `field-audiod` and FieldOut built from this branch | 90 files: 1167 tests pass, and 1 skips. |
 | `src/keys/routing-voice.test.ts` | The real voice host, given `FIELD_INSTRUMENTS` as objects, carries a note through FieldOut into the track's input in the daemon. |
 | `src/keys/voicer.test.ts` through `sclang` 3.14.1 | CC 74 at 127 sets `cc74` to 1.0 on the sounding voice and starts a new voice with it; CC 64, CC 0, and CC 120 never become controls; CC 1 still arrives as `mod`. |
-| `src/generators/voice-render.test.ts` through `sclang` | A take with CC 74 renders a voice whose level is its knob, silent without it; halving the knob's `max` in the knob file renders the take again at half the level. The knob file is a cache input, and one that fails the schema fails the build before the render runs. |
+| `src/generators/voice-render.test.ts` through `sclang` | A take with CC 74 renders a voice whose level is its knob, silent without it; halving the knob's `max` in the knob file renders the take again at half the level. The knob file is a cache input, and one that fails the schema fails the build before the render runs. Bloom's `juno` and `bass` render a take from a knob file with `cutoff` alone. |
 | Criterion 10 | `field keys --keymap musical-typing` exits 1: `no built-in keymap named "musical-typing" (built-ins: fourths, musical, tracker)`. |
 | Criterion 19 | `field sc render` of `juno.scd` and `bass.scd` with `--seed 1 --duration 4`, before and after: `cmp` finds both pairs identical. |
 | Criterion 22 | With a `record:` entry for `juno` on `creek`'s `keys` and `min: 0` on `cutoff`, `field check` exits 1 naming `shared/instruments/juno.knobs.yaml: knobs.0.min: cutoff: an exp curve needs min and max of one sign and neither 0, not 0 and 15000`, and `field build creek` fails with the same line. |

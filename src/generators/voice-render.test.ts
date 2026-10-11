@@ -247,4 +247,25 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
     const outcome = built(await buildLabels(root, [GEN]), GEN);
     expect(existsSync(outcome.outputPath!)).toBe(true);
   });
+
+  it.each(['juno', 'bass'])(
+    'renders bloom\'s %s from a knob file without some of the knobs it maps',
+    { timeout: 120_000 },
+    async (instrument) => {
+      // The schema accepts any set of knobs, so a voice keeps a setting's
+      // fixed value for a knob its file leaves out.
+      const shelf = join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments');
+      copyFileSync(join(shelf, `${instrument}.scd`), join(root, 'shared/instruments', `${instrument}.scd`));
+      writeFileSync(
+        join(root, 'shared/instruments', `${instrument}.knobs.yaml`),
+        'knobs:\n  - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 2000 }\n',
+      );
+      writeFileSync(
+        join(root, 'songs/creek/tracks/keys.yaml'),
+        `name: keys\ninputs:\n  - record:\n      instrument: ${instrument}\n`,
+      );
+      const wav = readWav(built(await buildLabels(root, [GEN]), GEN).outputPath!);
+      expect(wav.channels[0]!.some((s) => s !== 0)).toBe(true);
+    },
+  );
 });

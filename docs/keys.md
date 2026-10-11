@@ -310,18 +310,22 @@ reads it this way:
 
 ```supercollider
 var knobs = "FIELD_KNOBS".getenv.parseYAMLFile["knobs"];
-var knob = { |name|
+var knob = { |name, fixed|
 	var each = knobs.detect { |knob| knob["name"] == name };
-	var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
-	spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+	if (each.isNil) { fixed } {
+		var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
+		spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
+	}
 };
 ```
 
-Inside the SynthDef, `knob.("cutoff")` is then the cutoff as a signal,
-from 50 Hz to 15 kHz, starting at its default. `parseYAMLFile` reads
-every number as a string, hence `asFloat`, and the lag smooths the steps
-between controller values. A knob must be a value the graph uses as a
-signal; a setting the graph tests with `if` stays a constant.
+Inside the SynthDef, `knob.("cutoff", k[\vcfFreq])` is then the cutoff
+as a signal, from 50 Hz to 15 kHz, starting at its default. A knob file
+can leave out any knob, so when it has no `cutoff`, the voice keeps
+`k[\vcfFreq]`, the fixed cutoff. `parseYAMLFile` reads every number as a
+string, hence `asFloat`, and the lag smooths the steps between
+controller values. A knob must be a value the graph uses as a signal; a
+setting the graph tests with `if` stays a constant.
 
 Saving the program while `field keys` plays loads it again. The next
 note plays the new voice, and notes already sounding finish as they
