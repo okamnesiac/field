@@ -464,7 +464,7 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
           ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
         );
         createTrack(root, 'creek', 'keys');
-        writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninputs:\n  - record: { instrument: pad }\n');
+        writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninputs:\n  - record:\n      instrument: pad\n');
         writeFileSync(join(root, 'shared/instruments/pad.scd'), '// a voice\n');
         const project = loadProject(root);
 

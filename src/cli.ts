@@ -965,7 +965,11 @@ program
         }
         for (const { take } of takes) {
           if (take.dropped !== undefined && take.dropped > 0) {
-            say(`warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`);
+            say(
+              'kind' in take
+                ? `warning: ${take.id}: ${take.dropped} MIDI messages were lost before they reached the take; notes may be missing, or held to the take's end`
+                : `warning: ${take.id}: ${take.dropped} frames were dropped (the disk writer fell behind); the take has gaps`,
+            );
           }
         }
       } catch (err) {

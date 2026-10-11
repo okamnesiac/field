@@ -25,7 +25,7 @@ beforeEach(async () => {
   createSong(root, 'creek');
   createTrack(root, 'creek', 'keys');
   writeFileSync(join(root, 'shared/instruments/pad.scd'), VOICE);
-  writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninputs:\n  - record: { instrument: pad }\n');
+  writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninputs:\n  - record:\n      instrument: pad\n');
   await landMidiTake(root, midiTransaction());
 });
 

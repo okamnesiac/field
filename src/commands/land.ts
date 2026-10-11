@@ -177,7 +177,7 @@ function beginLanding(root: string, take: AnyTake): Landing {
   if (midi && entry.record?.instrument === undefined) {
     throw new Error(
       `${take.id} is a MIDI take, and ${trackName}'s record entry names no instrument to play it — ` +
-        `give it one, as record: { instrument: <name> }`,
+        'give it one with `instrument: <name>` under `record:`',
     );
   }
   if (!midi && entry.record?.instrument !== undefined) {

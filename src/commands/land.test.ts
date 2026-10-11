@@ -383,7 +383,7 @@ describe('landMidiTake', () => {
     // 128 samples pull it back, because the player kept time with what
     // they heard.
     writeTrack('main', ['inputs:', '  - track: keys', '    at: [5]']);
-    writeTrack('keys', ['inputs:', '  - record: { instrument: pad }']);
+    writeTrack('keys', ['inputs:', '  - record:', '      instrument: pad']);
     const manifest = writeMidiTransaction(
       'take-20261010-100000',
       { track: '//songs/creek/track:keys', started_at_samples: 432000, output_latency: 128 },
@@ -441,17 +441,17 @@ describe('landMidiTake', () => {
     const midi = writeMidiTransaction('take-20261010-100100', { track: '//songs/creek/track:keys' }, []);
     await expect(landAnyTake(root, midi)).rejects.toThrow('names no instrument to play it');
 
-    writeTrack('keys', ['inputs:', '  - record: { instrument: pad }']);
+    writeTrack('keys', ['inputs:', '  - record:', '      instrument: pad']);
     const audio = writeTransaction('take-20261010-100200', { track: '//songs/creek/track:keys' });
     await expect(landAnyTake(root, audio)).rejects.toThrow('records MIDI for pad');
   });
 
   it('check refuses a missing instrument and a take of the wrong kind', async () => {
     createTrack(root, 'creek', 'keys');
-    writeTrack('keys', ['inputs:', '  - record: { instrument: pad }']);
+    writeTrack('keys', ['inputs:', '  - record:', '      instrument: pad']);
     await landAnyTake(root, writeMidiTransaction('take-20261010-100300', { track: '//songs/creek/track:keys' }, []));
 
-    writeTrack('keys', ['inputs:', '  - record: { instrument: ghost }']);
+    writeTrack('keys', ['inputs:', '  - record:', '      instrument: ghost']);
     expect((await check(root)).diagnostics.map((d) => d.message)).toContainEqual(
       expect.stringContaining('instrument ghost has no program at shared/instruments/ghost.scd'),
     );
