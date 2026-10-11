@@ -458,6 +458,9 @@ DEFAULT_REF=v0
 RAW_URL="${FIELD_RAW_URL:-https://raw.githubusercontent.com}"
 ARCHIVE_URL="${FIELD_ARCHIVE_URL:-https://github.com}"
 SHIM_MARKER="# Field's release shim, written by install.sh."
+# The versions this installer installs, and so the only directory names
+# in the data directory it lists or removes as versions.
+VERSION_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+$'
 DATA_DIR=""
 RECORD=""
 RELEASE_REPO=""
@@ -514,11 +517,11 @@ release_init() {
   esac
 }
 
-# curl, sending GITHUB_TOKEN to GitHub's hosts when it is set, so a
-# maintainer can install from the repository while it is private. The
-# token travels in curl's config on stdin rather than on its command line,
-# where any process on the machine could read it, and never to a host
-# FIELD_RAW_URL or FIELD_ARCHIVE_URL names.
+# curl, sending GITHUB_TOKEN to GitHub's hosts when it is set, which
+# matters only for a private fork. The token travels in curl's config on
+# stdin rather than on its command line, where any process on the machine
+# could read it, and never to a host FIELD_RAW_URL or FIELD_ARCHIVE_URL
+# names.
 fetch() {
   local url="$1"
   shift
@@ -534,8 +537,8 @@ fetch() {
   curl -fsSL --retry 2 "$@" "$url"
 }
 
-# What to try when GitHub will not answer: the repository is private until
-# chunk 4, and a private one answers 404 without a token.
+# What to try when GitHub will not answer: a private fork answers 404
+# without a token.
 token_hint() {
   [ -n "${GITHUB_TOKEN:-}" ] || printf ' — for a private repository, set GITHUB_TOKEN'
 }
@@ -552,10 +555,10 @@ package_version() {
 # Projector's installer learns the version it installs. The version becomes
 # a directory name, so anything but X.Y.Z is refused.
 release_version() {
-  local text version semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+  local text version
   text="$(fetch "$RAW_URL/$RELEASE_REPO/$RELEASE_REF/package.json")" || return 1
   version="$(printf '%s\n' "$text" | package_version)"
-  if ! [[ $version =~ $semver ]]; then
+  if ! is_version "$version"; then
     echo "install.sh: $RELEASE_REPO at $RELEASE_REF names version '$version', which is not X.Y.Z" >&2
     return 1
   fi
@@ -571,16 +574,16 @@ current_version() {
   if [ -n "$target" ] && [ -d "$DATA_DIR/$target" ]; then printf '%s\n' "$target"; fi
 }
 
+is_version() { [[ $1 =~ $VERSION_PATTERN ]]; }
+
 # The versions installed beside current, which prune has kept.
 kept_versions() {
   local entry name current="$1"
   for entry in "$DATA_DIR"/*; do
     name="${entry##*/}"
     [ -d "$entry" ] && [ ! -L "$entry" ] || continue
-    case "$name" in
-      "$current") ;;
-      [0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$name" ;;
-    esac
+    [ "$name" != "$current" ] && is_version "$name" || continue
+    printf '%s\n' "$name"
   done
 }
 
@@ -606,13 +609,17 @@ require_fetch_tools() {
 }
 
 # The shim replaces only itself: a `field` someone else put in the bin
-# directory stops the installer before anything changes.
+# directory stops the installer before anything changes. So does a bin
+# directory it cannot write, because the shim is written after the switch.
 require_shim_free() {
-  local shim="$BIN_DIR/field"
+  local shim="$BIN_DIR/field" dir="$BIN_DIR"
   if [ -e "$shim" ] || [ -L "$shim" ]; then
     is_release_shim "$shim" ||
       die "$(tilde "$shim") exists and is not Field's release shim — move it aside, or set FIELD_BIN_DIR to install the shim somewhere else" 69
   fi
+  while [ ! -d "$dir" ]; do dir="$(dirname -- "$dir")"; done
+  [ -w "$dir" ] ||
+    die "the shim goes in $(tilde "$BIN_DIR"), and you cannot write to $(tilde "$dir") — set FIELD_BIN_DIR to a directory you can write" 69
 }
 
 require_installed() {
@@ -737,10 +744,12 @@ prune() {
     name="${entry##*/}"
     case "$name" in
       "$1" | "${2:-$1}") ;;
-      .download-*) rm -rf "$entry" ;;
-      [0-9]*.[0-9]*.[0-9]*)
-        rm -rf "$entry"
-        row removed "$name"
+      .download-*) if is_version "${name#.download-}"; then rm -rf "$entry"; fi ;;
+      *)
+        if is_version "$name"; then
+          rm -rf "$entry"
+          row removed "$name"
+        fi
         ;;
     esac
   done
@@ -893,7 +902,19 @@ install_release() {
   report_shim
 }
 
+# A Windows installer belongs to windows-portability.md (install.md §7.6),
+# so a Windows shell such as Git Bash stops here, as `field upgrade` stops
+# on Windows, rather than trying a release install nobody has run there.
+require_not_windows() {
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      die "installing a release does not support Windows yet — clone Field, and in the checkout run pnpm install --frozen-lockfile, pnpm build, pnpm build:ui, pnpm build:native, and pnpm add -g ." 69
+      ;;
+  esac
+}
+
 release_main() {
+  require_not_windows
   release_init
   case "$TARGET" in
     all)

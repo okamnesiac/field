@@ -242,7 +242,9 @@ Without a checkout, `install.sh` installs a release by building it.
    replaces (§7.5).
 5. It switches `<data>/current`, a relative symlink, to the new version
    atomically, writes the `field` shim, records `release.conf`, and
-   removes every version but the new one and the one it replaced.
+   removes every version but the new one and the one it replaced. Only
+   a directory named `X.Y.Z` is a version, so a data directory shared
+   with other files loses none of them.
 
 Steps 1 to 4 leave the installed version alone, so a failed download,
 build, or worker setup leaves it current, and an exit trap says so and
@@ -259,10 +261,11 @@ that is an absolute path, then `~/.local/share/field`. A version's own
 with a marker comment that identifies it. Switching `current` moves
 `field` with nothing to relink, and a release install needs no pnpm
 global bin directory. The installer refuses, with exit status 69, to
-replace a `field` there that is not its shim. A bin directory missing
-from PATH is a `not-on-path` warning that names the line to add, not a
-stop, and `cli-shadowed` reports a `field` that comes first on PATH in
-either direction.
+replace a `field` there that is not its shim, and to start when it
+cannot write the bin directory, because the shim is written after the
+switch. A bin directory missing from PATH is a `not-on-path` warning
+that names the line to add, not a stop, and `cli-shadowed` reports a
+`field` that comes first on PATH in either direction.
 
 **JUCE's download.** `native/audiod/CMakeLists.txt` reads
 `$ENV{FIELD_FETCHCONTENT_BASE_DIR}` into CMake's cache as
@@ -339,7 +342,7 @@ a private one. The website and the README then lead with this command.
     installs (chunk 3) were to use `~/.local/bin` because they would not
     need pnpm. Since §7.1 they build with pnpm too, and chunk 3 settled
     it the original way for another reason: the shim moves with
-    `current` (the release-install bullet at the end of this list).
+    `current` (the bullet on linking a release install through a shim).
     `status` reports `cli-shadowed` when two `field` commands exist and
     the wrong one is first on PATH.
 - **Never pull, never switch branches.** The checkout may hold work in
@@ -565,7 +568,8 @@ packages while the new one ran.
 `install.sh` is bash, and Field's Windows support is
 [windows-portability.md](../windows-portability/readme.md). Windows
 installs from a checkout by hand for now, `field upgrade` refuses there
-with the steps, and the installer's tests skip there.
+with the steps, a release install refuses in a Windows shell such as Git
+Bash, and the installer's tests skip there.
 
 **Decided: this plan builds no `install.ps1`.** A checkout on Windows
 installs with the four commands in `docs/install.md`, but a release
@@ -775,11 +779,15 @@ building it found.
   stand-ins for pnpm, cmake, curl's targets, and the CLI, for both
   modes: the release version read from `package.json`, the archive's
   checks, the switch, the shim and its refusal to replace another
-  `field`, `release.conf`, pruning, the workers set up again, a failure
-  at each step leaving the old version current, and every status row.
+  `field` or to start in a bin directory it cannot write, `release.conf`,
+  pruning only `X.Y.Z` directories, the workers set up again, a failure
+  at each step leaving the old version current and removing the new
+  one, the refusals of a version from before release installs and of a
+  Windows shell, and every status row in each mode.
   `src/commands/upgrade.test.ts` covers `field upgrade` downloading the
   installer at the recorded ref, `FIELD_REPO` and `FIELD_REF` ahead of
-  the record, and `GITHUB_TOKEN` going only to GitHub in curl's
+  the record, running the installed version's own installer under
+  `FIELD_OFFLINE`, and `GITHUB_TOKEN` going only to GitHub in curl's
   configuration.
 - By hand, on macOS with stand-in releases cut from this branch and
   served from `file://` URLs through `FIELD_RAW_URL` and

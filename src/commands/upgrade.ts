@@ -151,7 +151,8 @@ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): num
   try {
     root = realpathSync(root);
   } catch {
-    // a root that does not exist fails below with the path it was given
+    // a root that does not exist stays as given: no checkout, and no data
+    // directory beside it, so a downloaded installer uses its default
   }
   const runHere = (installer: string, installerEnv: NodeJS.ProcessEnv): number => {
     if (!existsSync(installer)) throw new Error(`cannot upgrade: ${installer} does not exist`);

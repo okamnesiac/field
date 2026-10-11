@@ -26,9 +26,10 @@ The installer tells the two apart by where it runs. In a git work tree
 with Field's source beside it, it installs that checkout. Anywhere else,
 piped from curl or downloaded by `field upgrade`, it installs a release.
 
-The installer is bash and does not support Windows yet, and
-`field upgrade` refuses there. On Windows, install from a checkout and
-run the steps by hand in it:
+The installer is bash and does not support Windows yet. A release
+install refuses in a Windows shell such as Git Bash, and `field upgrade`
+refuses on Windows. On Windows, install from a checkout and run the
+steps by hand in it:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -42,8 +43,8 @@ pnpm add -g .
 
 Before it changes anything, the installer checks for the tools the
 target needs, and stops with exit status 69 and a message naming the one
-that is missing or too old. It does not look for a C++ compiler or the
-Linux development headers. When either is missing, the daemon build
+that is missing or too old. It does not look for git, a C++ compiler,
+or the Linux development headers. When one is missing, the daemon build
 fails and says so. A checkout's `all` has installed the CLI by then; a
 release install has changed nothing.
 
@@ -58,6 +59,8 @@ release install has changed nothing.
   `.github/workflows/ci.yml` installs the packages it needs on Ubuntu.
 - **curl and tar**, for a release install, which downloads the release's
   source.
+- **git**, for a release install too, because the daemon build clones
+  JUCE with it. A checkout has it already.
 
 `field build` also needs [SuperCollider](https://supercollider.github.io/),
 and `field generate` needs [uv](https://docs.astral.sh/uv/). The
@@ -129,7 +132,8 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 The installer replaces only its own shim. If `~/.local/bin/field` is
-something else, it stops before changing anything.
+something else, or you cannot write to `~/.local/bin`, it stops before
+changing anything.
 
 ### Upgrade a release
 
@@ -269,6 +273,14 @@ applies before it starts one.
 $ field setup --existing
 skipping field-voiced: not set up (field setup voiced)
 syncing the field-aced environment (uv)…
+```
+
+### Remove a checkout install
+
+Unlink pnpm's global `field`. The checkout stays where it is.
+
+```sh
+pnpm remove -g field
 ```
 
 ## Read the status

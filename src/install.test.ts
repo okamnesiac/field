@@ -806,6 +806,17 @@ posix('install.sh installs a release', () => {
     expect(rows(run.stdout).get('removed')).toBe('0.2.0');
   });
 
+  it('leaves a directory that only looks like a version alone', () => {
+    const photos = join(data, '2024.01.15 photos');
+    mkdirSync(photos, { recursive: true });
+    publish('0.2.0');
+    release();
+    publish('0.3.0');
+    expect(release().status).toBe(0);
+    expect(existsSync(photos)).toBe(true);
+    expect(release('status').stdout).not.toContain('photos');
+  });
+
   it('leaves the installed version current when the download fails', () => {
     publish('0.2.0');
     release();
@@ -990,6 +1001,28 @@ posix('install.sh installs a release', () => {
     expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho mine\n');
   });
 
+  it('refuses a bin directory it cannot write before anything changes', () => {
+    publish('0.2.0');
+    const locked = join(root, 'locked');
+    mkdirSync(locked, { mode: 0o555 });
+    const run = release(undefined, { FIELD_BIN_DIR: join(locked, 'bin') });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('the shim goes in ~/locked/bin, and you cannot write to ~/locked');
+    expect(run.log).toEqual([]);
+    expect(existsSync(data)).toBe(false);
+  });
+
+  it('refuses in a Windows shell, naming the steps for a checkout', () => {
+    publish('0.2.0');
+    rmSync(join(bin, 'uname'), { force: true });
+    write(join(bin, 'uname'), `#!${BASH}\necho MINGW64_NT-10.0-19045\n`, 0o755);
+    const run = release();
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('installing a release does not support Windows yet');
+    expect(run.log).toEqual([]);
+    expect(existsSync(data)).toBe(false);
+  });
+
   it('refuses to install offline', () => {
     const run = release(undefined, { FIELD_OFFLINE: '1' });
     expect(run.status).toBe(69);
@@ -1082,6 +1115,31 @@ posix('install.sh status in a release install', () => {
     const status = rows(release('status').stdout);
     expect(status.get('release')).toBe('okamnesiac/field v0 is at 0.3.0');
     expect(status.get('release-behind')).toBe('0.2.0 is installed, and v0 is at 0.3.0 — run field upgrade all');
+  });
+
+  it('says when the installed version is newer than the one its ref names', () => {
+    publish('0.3.0');
+    release();
+    write(join(serve, 'raw/okamnesiac/field/v0/package.json'), '{\n  "version": "0.2.0"\n}\n');
+    expect(rows(release('status').stdout).get('release-ahead')).toBe('0.3.0 is installed, newer than 0.2.0 at v0');
+  });
+
+  it('names the missing piece of the installed version, and the upgrade that builds it', () => {
+    publish('0.2.0');
+    release();
+    const version = join(data, '0.2.0');
+    rmSync(join(version, 'dist', 'cli.js'));
+    rmSync(join(version, 'ui', 'dist', 'index.html'));
+    rmSync(join(version, AUDIOD));
+    const status = rows(release('status', { FIELD_AUDIOD: '/opt/field-audiod' }).stdout);
+    expect(status.get('cli-unbuilt')).toBe('~/.local/share/field/0.2.0/dist holds no build — run field upgrade cli');
+    expect(status.get('ui-missing')).toBe('ui/dist holds no build, so field ui cannot open — run field upgrade cli');
+    expect(status.get('audiod-override')).toBe('FIELD_AUDIOD is set, so field runs /opt/field-audiod instead of this build');
+    expect(status.get('audiod-missing')).toBe('field-audiod is not built — run field upgrade audiod');
+    rmSync(shim);
+    expect(rows(release('status').stdout).get('cli-missing')).toBe(
+      'no field shim in ~/.local/bin — run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash',
+    );
   });
 
   it('names the version kept after an upgrade', () => {
