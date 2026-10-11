@@ -1,0 +1,710 @@
+diff --git a/docs/audio-engine.md b/docs/audio-engine.md
+index a4cd7eb5..404116c8 100644
+--- a/docs/audio-engine.md
++++ b/docs/audio-engine.md
+@@ -185,11 +185,24 @@ same block: the pass that ends and the pass that begins meet on
+ consecutive samples, which the suite proves on the null clock's
+ sawtooth. Each take reaches every client as a `take` event as it
+ finalizes, and `field record --loop` lands them as they arrive, the last
+-one chosen, until ctrl-c — whose partial pass is a take too. A pass that
+-begins before the previous one was serviced is counted in
+-`record.missed` rather than recorded twice; regions shorter than a
+-heartbeat tick are where that would happen, and `field record` says so
+-on its live line and in its closing tally.
++one chosen, until ctrl-c — whose partial pass is a take too.
++
++The heartbeat finalizes each take the callback has ended since its
++last tick, however many there are. It opens the next pass's
++transaction before it finalizes, so a slow finalize costs no pass. A
++pass that begins with no transaction open is skipped whole and counted
++in `record.missed`. That happens when the region is shorter than a
++heartbeat tick, or when the message thread falls behind. The
++transaction opened late begins at the following wrap, and `status`
++reports it as `pending` until then, so every take is a whole pass that
++starts at `at`. `field record` reports the skipped passes on its live
++line and in its closing tally.
++
++A `session` swap during a loop take, such as the one `field play
++--watch` sends after an edit, carries the take's region onto the
++incoming session, as it carries the transport. The daemon refuses a
++session that the region does not fit, and the take goes on against the
++session already playing.
+ 
+ The region loop is the live session's own (`loop {from, to}`, `to`
+ defaulting to the content's extent): the clock wraps from `to` back to
+diff --git a/docs/projects/recording/readme.md b/docs/projects/recording/readme.md
+index bbac36eb..3664bc62 100644
+--- a/docs/projects/recording/readme.md
++++ b/docs/projects/recording/readme.md
+@@ -582,6 +582,23 @@ What landed, and the decisions it made:
+    and skipped rather than half-recorded. Stop finalizes the partial
+    pass as a take, discards the unused standby (its directory goes;
+    `recordings` never lists it), and clears the region.
++
++   *Amended 2026-10-11 (#203):* as first built, the code kept this
++   decision only while the heartbeat kept up with the wraps. A wrap that
++   came before the heartbeat had serviced the last pass stopped the loop
++   for good. A wrap during a finalize found no standby, so the callback
++   took the late one over a block after it opened, in the middle of the
++   pass. When the heartbeat ran again before that block, the daemon held
++   no take while the callback recorded one, and it crashed at the next
++   pass. The callback now takes a standby over only at a wrap. The done
++   flag is `capturesEnded`, a count of the takes the callback has ended,
++   and the heartbeat hands ownership over by that count rather than by
++   reading the standby slot. It also opens the next standby before it
++   finalizes the last pass. A take still waiting for its wrap reports as
++   `pending`, and stop discards it as it discards an unused standby. A
++   `session` swap also dropped the take's region, so the clock ran on
++   past `until`. A swap now carries the region onto the incoming
++   session, and the daemon refuses a session the region does not fit.
+ 5. **`field record --loop` lands takes as they arrive**, each `take`
+    event landing in order while the next pass records, the last one
+    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs
+diff --git a/native/audiod/src/player.cpp b/native/audiod/src/player.cpp
+index 37dc5015..b6133303 100644
+--- a/native/audiod/src/player.cpp
++++ b/native/audiod/src/player.cpp
+@@ -76,7 +76,11 @@ void retireOnMessageThread (std::unique_ptr<field::LiveSession> retired)
+ }
+ } // namespace
+ 
+-Player::Player (bool useNullOutput) : nullMode (useNullOutput)
++Player::Player (bool useNullOutput)
++    : nullMode (useNullOutput),
++      serviceStallMs (useNullOutput
++                          ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_SERVICE_STALL_MS", "0").getIntValue()
++                          : 0)
+ {
+     formatManager.registerBasicFormats();
+ }
+@@ -402,11 +406,18 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
+                 if (liveSession != nullptr)
+                     predicted = liveSession->position();
+             }
++            // A loop take's region goes on first, so the chain warms on
++            // it. The take can start or stop while this runs, so the
++            // check under the lock below is the one that decides.
++            carryTakeRegion (*next);
+             if (predicted >= 0)
+             {
+-                if (next->looping() && next->lengthSamples() > 0)
++                // The position counts every pass of a region, which wraps
++                // it itself; a session's own loop wraps at its length.
++                const bool region = next->loopRegionTo() > next->loopRegionFrom();
++                if (! region && next->looping() && next->lengthSamples() > 0)
+                     predicted %= next->lengthSamples();
+-                else if (next->lengthSamples() > 0)
++                else if (! region && next->lengthSamples() > 0)
+                     predicted = std::min (predicted, next->lengthSamples());
+                 next->locate (predicted);
+             }
+@@ -416,6 +427,14 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
+         // to the end of the install this thread holds its lock, exactly
+         // what every other request gets from handleLine.
+         const juce::MessageManagerLock mml;
++        if (auto error = carryTakeRegion (*next); error.isNotEmpty())
++        {
++            // Refused: the session dies on the message thread, as a
++            // retired one does (retireOnMessageThread).
++            retireOnMessageThread (std::move (next));
++            result->setProperty ("error", error);
++            return juce::var (result.get());
++        }
+         // Prefer running the device at the session's rate (bit-perfect
+         // delivery); when it cannot switch, the prepared converter below
+         // sets up converted delivery instead of refusing
+@@ -483,9 +502,11 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
+             liveSession = std::move (next);
+             if (hadSession)
+             {
+-                if (liveLoop && liveLength > 0)
++                // As at the pre-roll: a carried region wraps the position.
++                const bool region = liveSession->loopRegionTo() > liveSession->loopRegionFrom();
++                if (! region && liveLoop && liveLength > 0)
+                     carry %= liveLength;
+-                else if (liveLength > 0)
++                else if (! region && liveLength > 0)
+                     carry = std::min (carry, liveLength);
+                 liveSession->locate (carry);
+                 livePlaying = wasPlaying;
+@@ -739,7 +760,9 @@ juce::var Player::status (bool consumePeak)
+             rec->setProperty ("file", capture->file());
+             rec->setProperty ("started_at_samples", capture->startedAt());
+             // Counting in: the take exists and has not reached its position.
+-            rec->setProperty ("pending", ! captureStarted.load());
++            // A loop's take is pending too while the pass before it is
++            // skipped, until the wrap that begins it.
++            rec->setProperty ("pending", ! captureStarted.load() || capture->startedAt() < 0);
+             if (captureUntil.load() >= 0)
+                 rec->setProperty ("until", captureUntil.load());
+             if (captureLoop.load())
+@@ -1011,18 +1034,15 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
+ {
+     const int live = liveCompanions.load();
+     auto* target = activeCapture.load();
+-    if (target == nullptr && captureLoop.load() && captureStartRequested.load())
+-    {
+-        // A pass began with no standby ready and was skipped; the next
+-        // standby takes over at the next block, a block late.
+-        target = standbyCapture.exchange (nullptr);
+-        if (target != nullptr)
+-            activeCapture = target;
+-    }
+-    if (target == nullptr)
++    // A loop pass that began with no standby ready has no take and is
++    // skipped whole (recording.md §15.4). Its blocks still run to the
++    // wrap below, because that is where a standby opened meanwhile takes
++    // over: at a pass's first sample, never in the middle of one.
++    const bool skipping = target == nullptr && captureLoop.load() && captureStarted.load();
++    if (target == nullptr && ! skipping)
+         return;
+     int from = 0; // the first frame of this block the take includes
+-    if (captureStartRequested.load())
++    if (target != nullptr && captureStartRequested.load())
+     {
+         // A missed live lock made this block silence with no position to
+         // latch; the take starts on the next block instead, so the latch
+@@ -1084,7 +1104,7 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
+     const float* source = input != nullptr ? input : ((int) silence.size() >= n ? silence.data() : nullptr);
+     if (source == nullptr)
+         return;
+-    if (cut > from)
++    if (target != nullptr && cut > from)
+     {
+         target->push (source + from, cut - from);
+         // Each audio companion takes the same span of its own input.
+@@ -1100,17 +1120,11 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
+     }
+     if (! ending)
+         return;
+-    if (captureDone.load())
+-    {
+-        // The heartbeat has not serviced the last pass yet (a region
+-        // shorter than its tick): this pass is lost, the count says so.
+-        activeCapture = nullptr;
+-        captureStarted = false;
+-        captureMissed.fetch_add (1);
+-        return;
+-    }
+     if (captureLoop.load())
+     {
++        // Whether or not the heartbeat has finalized the last take, the
++        // standby it opened takes over here, and with none ready the pass
++        // that begins here is skipped and counted.
+         auto* next = standbyCapture.exchange (nullptr);
+         activeCapture = next;
+         if (next != nullptr)
+@@ -1120,11 +1134,7 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
+                 next->push (source + cut, n - cut);
+         }
+         else
+-        {
+-            captureStarted = false;
+-            captureStartRequested = true;
+             captureMissed.fetch_add (1);
+-        }
+     }
+     else
+     {
+@@ -1133,10 +1143,11 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
+         for (int c = 0; c < live; ++c)
+             companions[(size_t) c].audio = nullptr;
+     }
+-    // MIDI companions end a block later, as a MIDI take ends
+-    // (recordMidiCompanions); the pass is done when they are.
+-    if (! companionMidiRunning.load())
+-        captureDone = true;
++    // A skipped pass ended no take. MIDI companions end a block later,
++    // as a MIDI take ends (recordMidiCompanions); the pass is done when
++    // they are.
++    if (target != nullptr && ! companionMidiRunning.load())
++        capturesEnded.fetch_add (1);
+ }
+ 
+ template <typename Handle>
+@@ -1229,7 +1240,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
+     for (int c = 0; c < live; ++c)
+         companions[(size_t) c].midiTake = nullptr;
+     captureStarted = false;
+-    captureDone = true;
++    capturesEnded.fetch_add (1);
+ }
+ 
+ juce::int64 Player::midiUntilFrames (const field::Transaction& take) const
+@@ -1318,7 +1329,7 @@ void Player::recordMidiCompanions (int n, double blockStartMs)
+     companionMidiRunning = false;
+     // The pass is done once the audio has ended too.
+     if (activeCapture.load() == nullptr)
+-        captureDone = true;
++        capturesEnded.fetch_add (1);
+ }
+ 
+ void Player::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
+@@ -1848,7 +1859,7 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
+     }
+ 
+     captureStarted = false;
+-    captureDone = false;
++    capturesEnded = 0;
+     captureMissed = 0;
+     loopTakes = 0;
+     // An `at` is where the take begins, exactly: the callback latches on
+@@ -1871,6 +1882,7 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
+             activeMidiCapture = nullptr;
+             standbyCapture = nullptr;
+             captureStartRequested = false;
++            captureLoop = false; // or every later stop would end a loop that never ran
+             capture.reset();
+             standby.reset();
+             for (int c = 0; c < companionCount; ++c)
+@@ -1914,7 +1926,10 @@ juce::Array<juce::var> Player::stopRecording()
+     // A pass the callback already ended is finalized on its own terms
+     // first, so its manifests reach onTake before the stop's.
+     serviceCapture();
+-    if (capture == nullptr)
++    // A loop is stopped even with no take open, as when opening its next
++    // one failed: the callback would otherwise go on skipping passes.
++    const bool wasLoop = captureLoop.load();
++    if (capture == nullptr && ! wasLoop)
+         return {};
+     // A MIDI message is drained in the block after it arrives, so that
+     // block must finish before the detach for every message that arrived
+@@ -1936,7 +1951,6 @@ juce::Array<juce::var> Player::stopRecording()
+     // counter advances only after a block's push is done. Two epochs
+     // covers that block and one more; the timeout covers a device that
+     // is not running at all, where nothing can be pushing.
+-    const bool wasLoop = captureLoop.load();
+     activeCapture = nullptr;
+     activeMidiCapture = nullptr;
+     standbyCapture = nullptr;
+@@ -1952,30 +1966,58 @@ juce::Array<juce::var> Player::stopRecording()
+     const auto epoch = callbackEpoch.load();
+     for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 2; ++i)
+         std::this_thread::sleep_for (std::chrono::milliseconds (1));
++    // Under a loop, the block in flight at those stores can have taken
++    // the standby over just before them and stored activeCapture just
++    // after. No later block takes one over, so a second detach and wait
++    // leave nothing pushing.
++    if (wasLoop && activeCapture.exchange (nullptr) != nullptr)
++    {
++        const auto again = callbackEpoch.load();
++        for (int i = 0; i < 300 && callbackEpoch.load() < again + 2; ++i)
++            std::this_thread::sleep_for (std::chrono::milliseconds (1));
++    }
+     captureStarted = false;
+-    captureDone = false;
++    capturesEnded = 0;
+     companionMidiRunning = false;
+ 
+     juce::Array<juce::var> manifests;
+-    manifests.add (finalizeTake (*capture));
+-    capture.reset();
++    if (capture != nullptr)
++    {
++        // A take that never took a sample is not one when it is a loop's
++        // next pass, still waiting for its wrap, as an unused standby is
++        // not. The loop's first take, which is `capture` until it is
++        // finalized and so while loopTakes is 0, is a take however soon
++        // the stop came, as any other take a stop ends is.
++        if (wasLoop && loopTakes > 0 && capture->startedAt() < 0)
++            capture->discard();
++        else
++            manifests.add (finalizeTake (*capture));
++        capture.reset();
++    }
+     for (int c = 0; c < companionCount; ++c)
+         if (auto& take = companions[(size_t) c].take; take != nullptr)
+         {
+             manifests.add (finalizeTake (*take));
+             take.reset();
+         }
+-    // A standby that never took a sample is not a take.
++    // A standby is a take only when a wrap just before the stop began
++    // its pass; one the callback never reached is not.
+     if (standby != nullptr)
+     {
+-        standby->discard();
++        if (standby->startedAt() >= 0)
++            manifests.add (finalizeTake (*standby));
++        else
++            standby->discard();
+         standby.reset();
+     }
+     if (wasLoop && liveSession != nullptr)
+     {
+-        // The region was the take's; the session stops looping it.
++        // The region was the take's; the session stops looping it. A swap
++        // during the take installed the session looping, so the copy
++        // converted delivery reads follows it back.
+         const juce::ScopedLock guard (liveLock);
+         liveSession->setLoopRegion (0, 0);
++        liveLoop = liveSession->looping();
+     }
+     loopTakes = 0;
+     announceTakes (manifests);
+@@ -2008,24 +2050,55 @@ void Player::announceTakes (const juce::Array<juce::var>& manifests)
+ 
+ void Player::serviceCapture()
+ {
+-    if (! captureDone.load())
+-        return;
+-    // The callback ended `capture` at its until and, under a loop, moved
+-    // on to the standby; the message thread owns the pointers, so the
+-    // hand-over of ownership happens here, after the fact.
+-    finished = std::move (capture);
+-    if (captureLoop.load())
++    // The callback ended `capture` at its until and, under a loop, may
++    // have ended the standby it took over at that wrap too; the message
++    // thread owns the pointers, so the hand-over of ownership happens
++    // here, after the fact. The count says how many ended, and they
++    // ended in the order they were opened, so each moves the next take
++    // up into `capture`: recording, ended, or under a loop, waiting for
++    // the wrap that begins it.
++    std::vector<std::unique_ptr<field::Transaction>> ended;
++    for (int count = capturesEnded.exchange (0); count > 0 && capture != nullptr; --count)
++    {
++        ended.push_back (std::move (capture));
++        capture = std::move (standby);
++    }
++    const bool loop = captureLoop.load();
++    // Under a loop, the next pass's take opens before the last one
++    // finalizes, so a slow finalize does not cost a pass. One take waits
++    // in the slot at a time: an empty slot means the callback took the
++    // last one over, or none could be opened.
++    if (loop && standby == nullptr && standbyCapture.load() == nullptr)
+     {
+-        if (standbyCapture.load() == nullptr && standby != nullptr)
++        try
+         {
+-            capture = std::move (standby); // the callback took it
+-            ++loopTakes;
++            auto next = openCapture();
++            standbyCapture = next.get();
++            // With no take left, the callback is skipping a pass, and this
++            // one begins at its end.
++            if (capture == nullptr)
++                capture = std::move (next);
++            else
++                standby = std::move (next);
++        }
++        catch (const std::exception&)
++        {
++            // The passes go on being skipped and counted; the next
++            // heartbeat tries again.
+         }
+     }
+-    captureDone = false;
++    if (ended.empty())
++        return;
++    if (serviceStallMs > 0)
++        std::this_thread::sleep_for (std::chrono::milliseconds (serviceStallMs));
+     juce::Array<juce::var> manifests;
+-    manifests.add (finalizeTake (*finished));
+-    finished.reset();
++    for (const auto& take : ended)
++    {
++        manifests.add (finalizeTake (*take));
++        if (loop)
++            ++loopTakes;
++    }
++    ended.clear();
+     // The companions ended with the pass (arming.md §2.2); a loop has none.
+     for (int c = 0; c < companionCount; ++c)
+         if (auto& take = companions[(size_t) c].take; take != nullptr)
+@@ -2033,23 +2106,7 @@ void Player::serviceCapture()
+             manifests.add (finalizeTake (*take));
+             take.reset();
+         }
+-    if (captureLoop.load())
+-    {
+-        // The next standby, ready well before the next wrap.
+-        if (standby == nullptr)
+-        {
+-            try
+-            {
+-                standby = openCapture();
+-                standbyCapture = standby.get();
+-            }
+-            catch (const std::exception&)
+-            {
+-                standby.reset();
+-            }
+-        }
+-    }
+-    else
++    if (! loop)
+     {
+         captureStartAt = -1;
+         captureUntil = -1;
+@@ -2058,6 +2115,26 @@ void Player::serviceCapture()
+     announceTakes (manifests);
+ }
+ 
++juce::String Player::carryTakeRegion (field::LiveSession& session) const
++{
++    // Outside a loop take, the incoming session starts with no region.
++    if (! captureLoop.load())
++    {
++        session.setLoopRegion (0, 0);
++        return {};
++    }
++    try
++    {
++        session.setLoopRegion (captureStartAt.load(), captureUntil.load());
++    }
++    catch (const std::exception& e)
++    {
++        return "a loop take is recording, and its region does not fit this session (stop first): "
++               + juce::String (e.what());
++    }
++    return {};
++}
++
+ juce::String Player::setLoopRegion (juce::int64 from, juce::int64 to)
+ {
+     if (liveSession == nullptr)
+diff --git a/native/audiod/src/player.h b/native/audiod/src/player.h
+index db67df30..5b6cbdb3 100644
+--- a/native/audiod/src/player.h
++++ b/native/audiod/src/player.h
+@@ -158,8 +158,9 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // Armed for MIDI, the take is a MidiCapture and the same latch starts
+     // it; loop takes stay audio only.
+     juce::var record (const juce::var& at, const juce::var& start, const juce::var& until, bool loop);
+-    // Heartbeat: finalize a take the callback ended at its `until`, hand
+-    // it to onTake, and open the next standby when looping.
++    // Heartbeat: finalize each take the callback ended at its `until`,
++    // hand it to onTake, and when looping, keep the next pass's take
++    // open ahead of its wrap.
+     void serviceCapture();
+     // The live session's region loop (recording.md §10.4): the clock
+     // wraps from `to` back to `from`. Equal bounds clear it. Empty
+@@ -264,6 +265,11 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     void removeHardwareListeners();
+ 
+     const bool nullMode;
++    // A test seam, honoured only with null output: how long the heartbeat
++    // stalls between taking over a finished take and finalizing it, from
++    // FIELD_AUDIOD_SERVICE_STALL_MS. It makes a slow disk or a loaded
++    // runner exact, so a test can land a loop's wrap inside a finalize.
++    const int serviceStallMs;
+     // True once device.select succeeds; cleared if that device vanishes.
+     bool explicitSelection = false;
+ #if JUCE_MAC
+@@ -367,17 +373,32 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // Punch-out and loop takes (recording.md §10.4). captureUntil is
+     // where the callback ends the active take (-1: never); captureLoop
+     // says the next pass is a take too, read from standbyCapture — the
+-    // transaction the message thread opened ahead of the wrap — and
+-    // captureDone tells the heartbeat a take is waiting to finalize.
+-    // captureMissed counts passes that began with no standby ready.
++    // transaction the message thread opened ahead of the wrap, which the
++    // callback takes over only at a wrap — and capturesEnded counts the
++    // takes the callback has ended that the heartbeat has not finalized
++    // yet: a loop can end two between ticks. captureMissed counts passes
++    // that began with no standby ready, each skipped whole.
++    //
++    // Under a loop, `capture` is the oldest take not yet finalized: the
++    // one recording, one the callback has ended, or the next pass's,
++    // waiting in standbyCapture for the wrap that begins it. `standby`
++    // is the one after it, if any. The callback begins and ends takes
++    // in the order they were opened, so the heartbeat hands ownership
++    // over by counting ends, never by reading the slot the callback can
++    // empty at any moment.
+     std::atomic<juce::int64> captureUntil { -1 };
+     std::atomic<bool> captureLoop { false };
+-    std::atomic<bool> captureDone { false };
++    std::atomic<int> capturesEnded { 0 };
+     std::atomic<field::Capture*> standbyCapture { nullptr };
+     std::atomic<int> captureMissed { 0 };
+     std::unique_ptr<field::Capture> standby;
+-    std::unique_ptr<field::Transaction> finished; // ended by the callback, awaiting finalize
+     int loopTakes = 0; // takes finalized in the current loop
++    // A loop take's region is the take itself, so a session swap carries
++    // it onto the incoming session as it carries the transport; without
++    // it the clock would run on past `until` and every block would end a
++    // pass. Outside a loop take it clears the incoming session's region.
++    // Returns an error, empty on success, when the region does not fit.
++    juce::String carryTakeRegion (field::LiveSession& session) const;
+     // Everything a new transaction needs, kept for the standbys a loop
+     // opens after the first.
+     field::Transaction::Facts takeFacts() const;
+diff --git a/src/audiod/protocol.ts b/src/audiod/protocol.ts
+index b01b1e1c..4afd9e04 100644
+--- a/src/audiod/protocol.ts
++++ b/src/audiod/protocol.ts
+@@ -69,7 +69,9 @@ export const recordStatusSchema = z.object({
+   transaction: z.string().optional(),
+   file: z.string().optional(), // project-root-relative take.wav or take.midi.ndjson
+   started_at_samples: z.number().int().optional(), // -1 until the callback latches
+-  pending: z.boolean().optional(), // a pre-rolled take waiting for its position (daemon >= 0.13)
++  // A pre-rolled take waiting for its position (daemon >= 0.13), or a
++  // loop's next take waiting for the wrap that begins it.
++  pending: z.boolean().optional(),
+   // Punch-out and loop takes (daemon >= 0.14): where the take ends,
+   // whether every pass is a take, how many have finalized, and how many
+   // passes began with no transaction ready.
+diff --git a/src/commands/punch-daemon.test.ts b/src/commands/punch-daemon.test.ts
+index ea5d8ae9..42898df3 100644
+--- a/src/commands/punch-daemon.test.ts
++++ b/src/commands/punch-daemon.test.ts
+@@ -59,6 +59,20 @@ function assertContinues(previous: Float32Array, next: Float32Array): void {
+   expect(Math.abs(d - SAW_STEP) < 1e-6 || Math.abs(d - (SAW_STEP - 2)) < 1e-6).toBe(true);
+ }
+ 
++// Polls status until `count` takes have landed. Every poll must still
++// report the loop, a recording record with its take count, because a
++// daemon that lost track of the pass it is on reports neither (#203).
++async function followLoop(client: AudiodClient, takes: AnyTake[], count: number, ms: number): Promise<void> {
++  const deadline = Date.now() + ms;
++  while (takes.length < count) {
++    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} passes to land`);
++    const { record } = await client.status();
++    expect(record).toMatchObject({ state: 'recording', loop: true });
++    expect(record?.loop_takes).toBeTypeOf('number');
++    await sleep(50);
++  }
++}
++
+ describe('the loop line', () => {
+   it('names the pass, and says how many passes were lost whenever any were', () => {
+     expect(passesNote({})).toBe('');
+@@ -89,6 +103,7 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
+ 
+   afterEach(async () => {
+     delete process.env['FIELD_AUDIOD_NULL'];
++    delete process.env['FIELD_AUDIOD_SERVICE_STALL_MS'];
+     try {
+       const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
+       await client.quit();
+@@ -224,6 +239,130 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
+     }
+   });
+ 
++  // A pass the heartbeat could not open a take for ahead of its wrap is
++  // skipped whole and counted, and the loop goes on (recording.md §15.4).
++  // These two hold that when the message thread falls behind the wraps:
++  // once by a region shorter than the heartbeat's tick, once by the
++  // heartbeat stalling while it finalizes (#203).
++  it('a loop shorter than the heartbeat tick goes on landing whole passes, and counts the ones it skips', { timeout: 20_000 }, async () => {
++    const client = await AudiodClient.connect(root, { nullOutput: true });
++    const takes: AnyTake[] = [];
++    client.on('event', (e: AudiodEvent) => {
++      if (e.event === 'take') takes.push(e.take);
++    });
++    try {
++      const { session } = await compileSession(root, 'creek');
++      await client.session(session);
++      await client.arm('//songs/creek/track:main', 1);
++      // A tenth of a second from beat 2. The heartbeat ticks every 250
++      // ms, so at least two wraps fall between any two ticks.
++      await client.record(24000, undefined, 28800, true);
++      await followLoop(client, takes, 4, 10_000);
++      const status = await client.status();
++      expect(status.record?.missed).toBeGreaterThan(0);
++      expect(status.record?.loop_takes).toBeGreaterThanOrEqual(4);
++      await client.stop();
++      // Every take is a whole pass, never one begun mid-pass.
++      for (const take of takes.slice(0, 4)) {
++        expect(take.started_at_samples).toBe(24000);
++        expect(take.frames).toBe(4800);
++        assertGapless(readWav(join(root, take.file)).channels[0]!);
++      }
++      // The take opened for a pass the stop cut off before it began is
++      // not left behind.
++      const { recordings } = await client.recordings();
++      expect(recordings.every((r) => r.complete)).toBe(true);
++      expect(recordings).toHaveLength(takes.length);
++    } finally {
++      client.close();
++    }
++  });
++
++  it('a heartbeat that stalls across a wrap keeps the loop, its count, and whole passes', { timeout: 30_000 }, async () => {
++    // Longer than the region, so a wrap falls inside every finalize.
++    process.env['FIELD_AUDIOD_SERVICE_STALL_MS'] = '600';
++    const client = await AudiodClient.connect(root, { nullOutput: true });
++    const takes: AnyTake[] = [];
++    client.on('event', (e: AudiodEvent) => {
++      if (e.event === 'take') takes.push(e.take);
++    });
++    try {
++      const { session } = await compileSession(root, 'creek');
++      await client.session(session);
++      await client.arm('//songs/creek/track:main', 1);
++      await client.record(24000, undefined, 48000, true);
++      await followLoop(client, takes, 3, 20_000);
++      await client.stop();
++      for (const take of takes.slice(0, 3)) {
++        expect(take.started_at_samples).toBe(24000);
++        expect(take.frames).toBe(24000);
++        assertGapless(readWav(join(root, take.file)).channels[0]!);
++      }
++      const { recordings } = await client.recordings();
++      expect(recordings.every((r) => r.complete)).toBe(true);
++      expect(recordings).toHaveLength(takes.length);
++    } finally {
++      client.close();
++    }
++  });
++
++  // `field play --watch` swaps the session on an edit, and landing a
++  // loop take is one. The region is the take's, so the swap must carry
++  // it, or the clock runs past `until` and every block ends a pass.
++  it('a session swap mid-loop carries the take region, and one it does not fit is refused', { timeout: 20_000 }, async () => {
++    // A second song whose bed, three quarters of a second, ends before
++    // the region does.
++    createSong(root, 'rill');
++    const src = join(root, '..', `field-punch-short-${Math.random()}.wav`);
++    writeWavFloat32(src, NULL_RATE, [new Float32Array(36000).fill(0.1)]);
++    await importAsset(root, 'rill', src, 'bed');
++    rmSync(src);
++    writeFileSync(
++      join(root, 'songs/rill/tracks/main.yaml'),
++      ['name: main', 'inputs:', '  - audio: bed', '    anchor: absolute', '    at: 0', ''].join('\n'),
++    );
++    const client = await AudiodClient.connect(root, { nullOutput: true });
++    const takes: AnyTake[] = [];
++    client.on('event', (e: AudiodEvent) => {
++      if (e.event === 'take') takes.push(e.take);
++    });
++    try {
++      const { session } = await compileSession(root, 'creek');
++      const { session: short } = await compileSession(root, 'rill');
++      await client.session(session);
++      await client.arm('//songs/creek/track:main', 1);
++      await client.record(24000, undefined, 48000, true);
++      await followLoop(client, takes, 1, 6000);
++      await expect(client.session(short)).rejects.toThrow('does not fit');
++      await client.session(session);
++      const landed = takes.length;
++      const status = await client.status();
++      expect(status.loop_from).toBe(24000);
++      expect(status.loop_to).toBe(48000);
++      // The swap fell in pass `landed`, or in the next one when its wrap
++      // had not been serviced yet, so the pass after those is wholly the
++      // swapped session's.
++      await followLoop(client, takes, landed + 3, 8000);
++      const passes = [...takes]; // whole passes; the stop's partial one lands after
++      await client.stop();
++      for (const take of passes) {
++        expect(take.started_at_samples).toBe(24000);
++        expect(take.frames).toBeGreaterThanOrEqual(24000);
++        assertGapless(readWav(join(root, take.file)).channels[0]!);
++      }
++      // A block the callback misses while the swap holds the session's
++      // lock still records, so only the passes clear of the swap are
++      // held to the region's length exactly.
++      expect(passes[0]!.frames).toBe(24000);
++      expect(passes[landed + 2]!.frames).toBe(24000);
++      const { recordings } = await client.recordings();
++      expect(recordings.every((r) => r.complete)).toBe(true);
++      expect(recordings).toHaveLength(takes.length);
++    } finally {
++      client.close();
++    }
++  });
++
+   it('field record --until lands the take and stops; --loop lands one per pass until ctrl-c', { timeout: 30_000 }, async () => {
+     createTrack(root, 'creek', 'lead-vocal');
+     writeFileSync(
