@@ -4,10 +4,11 @@
 // per sounding note, the sustain pedal (CC 64), All Notes Off (CC 123),
 // and pitch bend of up to two semitones on every sounding voice.
 //
-// Its value is a function of three callbacks:
+// Its value is a function of three callbacks and an optional fourth:
 //   start.(note, velocity, freq) -> a voice
 //   setFreq.(voice, freq)
 //   release.(voice)
+//   onVoice.(note, sounding), told as each voice starts and ends
 // and returns an Event that takes noteOn, noteOff, cc, bend, and
 // forgetVoices. No entry may share a name with a method Event already has,
 // such as clear (Set.clear): the method runs instead, and empties the Event.

@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Document, isSeq, parseDocument } from 'yaml';
 import { readWavHeader } from '../audio/wav.js';
 import { anyTakeSchema, midiTakeLineSchema, type AnyTake, type MidiTake, type Take } from '../audiod/protocol.js';
@@ -288,18 +288,36 @@ function landed(landing: Landing, file: string, row: RecordedTake, frames: numbe
   };
 }
 
+// The take's file under the record node's directory, written by `write`,
+// with what the ledger pins it by.
+async function placeFile(
+  landing: Landing,
+  extension: string,
+  write: (dest: string) => void,
+): Promise<{ file: string; dest: string; sha256: string; bytes: number }> {
+  const file = `audio/${landing.node.node}/${landing.take.id}${extension}`;
+  const dest = join(landing.songDir, file);
+  mkdirSync(dirname(dest), { recursive: true });
+  write(dest);
+  return { file, dest, sha256: await sha256File(dest), bytes: statSync(dest).size };
+}
+
+// The row's fields every take has; each kind adds its own.
+function sharedRow(landing: Landing, latency: number) {
+  return {
+    asset: landing.take.id,
+    started_at_samples: landing.startedAt,
+    ...(landing.position !== undefined ? { musical_position: landing.position } : {}),
+    latency,
+    recorded_at: landing.take.started_wall,
+  };
+}
+
 export async function landTake(root: string, take: Take, options: LandOptions = {}): Promise<LandedTake> {
   const landing = beginLanding(root, take);
-  const { node } = landing.node;
-
   // The bytes, into the song's ledger under the record node's directory.
-  const file = `audio/${node}/${take.id}.wav`;
-  const dest = join(landing.songDir, 'audio', node, `${take.id}.wav`);
-  mkdirSync(join(landing.songDir, 'audio', node), { recursive: true });
-  copyFileSync(join(root, take.file), dest);
+  const { file, dest, sha256, bytes } = await placeFile(landing, '.wav', (to) => copyFileSync(join(root, take.file), to));
   const header = readWavHeader(dest);
-  const sha256 = await sha256File(dest);
-  const bytes = statSync(dest).size;
 
   // Latency is the device's declared round trip (recording.md §12.3 —
   // input plus output, which is what a performer hearing the interface's
@@ -307,15 +325,11 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
   // track's.
   const latency = Math.round(((take.input_latency + take.output_latency) * landing.trackRate) / take.sample_rate);
   const row: RecordedTake = {
-    asset: take.id,
-    started_at_samples: landing.startedAt,
-    ...(landing.position !== undefined ? { musical_position: landing.position } : {}),
-    latency,
+    ...sharedRow(landing, latency),
     device: take.device,
     input: take.input,
     ...(options.monitoring !== undefined ? { monitoring: options.monitoring } : {}),
     ...(options.consolePreset !== undefined ? { console_preset: options.consolePreset } : {}),
-    recorded_at: take.started_wall,
   };
   finishLanding(landing, { name: take.id, file, sha256, bytes, header }, row);
   return landed(landing, file, row, header.frames, header.sampleRate);
@@ -328,27 +342,16 @@ export async function landTake(root: string, take: Take, options: LandOptions = 
 // hear, which runs behind the playhead by that much.
 export async function landMidiTake(root: string, take: MidiTake): Promise<LandedTake> {
   const landing = beginLanding(root, take);
-  const { node } = landing.node;
   const messages: CapturedMessage[] = readFileSync(join(root, take.file), 'utf8')
     .split('\n')
     .filter((line) => line.trim() !== '')
     .map((line) => midiTakeLineSchema.parse(JSON.parse(line)));
   const notes = notesFromMessages(messages, take.frames!, take.sample_rate);
-
-  const file = `audio/${node}/${take.id}.notes.yaml`;
-  const dest = join(landing.songDir, 'audio', node, `${take.id}.notes.yaml`);
-  mkdirSync(join(landing.songDir, 'audio', node), { recursive: true });
-  writeFileSync(dest, formatNotesFile(notes));
-  const sha256 = await sha256File(dest);
-  const bytes = statSync(dest).size;
+  const { file, sha256, bytes } = await placeFile(landing, '.notes.yaml', (to) => writeFileSync(to, formatNotesFile(notes)));
 
   const row: RecordedTake = {
-    asset: take.id,
-    started_at_samples: landing.startedAt,
-    ...(landing.position !== undefined ? { musical_position: landing.position } : {}),
-    latency: Math.round((take.output_latency * landing.trackRate) / take.sample_rate),
+    ...sharedRow(landing, Math.round((take.output_latency * landing.trackRate) / take.sample_rate)),
     sources: take.sources,
-    recorded_at: take.started_wall,
   };
   finishLanding(landing, { name: take.id, file, sha256, bytes }, row);
   return { ...landed(landing, file, row, take.frames!, take.sample_rate), events: messages.length };

@@ -9,6 +9,10 @@ import { createSong, createTrack } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { landMidiTake } from '../commands/land.js';
 import type { GeneratorRunner } from '../graph/build.js';
+import { withTakes } from '../graph/graph.js';
+import { genRef } from '../labels.js';
+import { loadProject } from '../model/project.js';
+import { TempoMap } from '../time/tempo.js';
 import { RELEASE_TAIL_SECONDS } from './voice-render.js';
 
 // A recorded MIDI take in the build (keyboard-instrument.md §12.3): the
@@ -35,8 +39,7 @@ afterEach(() => {
 
 // Half a second of take at 48 kHz: an A held for a quarter second, then
 // a C still held when the take stopped.
-function midiTransaction(): MidiTake {
-  const id = 'take-20261010-120000';
+function midiTransaction(id = 'take-20261010-120000', placed: Partial<MidiTake> = {}): MidiTake {
   const dir = join(root, '.field', 'recording', id);
   mkdirSync(dir, { recursive: true });
   const lines = [
@@ -54,6 +57,7 @@ function midiTransaction(): MidiTake {
     sample_rate: 48000,
     output_latency: 0,
     started_at_samples: 0,
+    ...placed,
     started_wall: '2026-10-10T12:00:00.000-04:00',
     daemon: '0.14.0',
     complete: true,
@@ -84,6 +88,18 @@ describe('voice-render in the graph', () => {
       'shared/instruments/pad.scd',
       'sc/voice-render.scd',
       'sc/voicer.scd',
+    ]);
+  });
+
+  it('places the render where the take was played, less the output latency', async () => {
+    // Half a second into the track, with 128 samples of output latency:
+    // the render starts 128 samples earlier, where the player heard it.
+    await landMidiTake(root, midiTransaction('take-20261010-120100', { started_at_samples: 24000, output_latency: 128 }));
+    const song = loadProject(root).songs.find((s) => s.name === 'creek')!;
+    const track = song.tracks.find((t) => t.data.name === 'keys')!.data;
+    const placed = withTakes(track, song, new TempoMap(song.time!.tempo, 48000), 48000, () => 48000);
+    expect(placed.inputs).toEqual([
+      expect.objectContaining({ audio: genRef('keys'), anchor: 'absolute', at: 24000 - 128, source_offset: 0 }),
     ]);
   });
 

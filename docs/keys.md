@@ -181,8 +181,10 @@ changes every take recorded for it.
 4. `field build creek` renders the take through the instrument, and
    `field play creek` plays it in the mix.
 
-A MIDI take listens to every MIDI source on the machine, so a
-controller records too. `--at`, `--until`, `--click`, and `--count-in`
+A MIDI take listens to every MIDI source on the machine when
+`field record` arms, so a controller records too. Start `field keys`
+and connect controllers first: a source that appears after the arm is
+not heard. `--at`, `--until`, `--click`, and `--count-in`
 work as they do for audio; `--input`, `--device`, and `--loop` are for
 audio takes only. The take is placed by the output latency alone,
 because you play in time with what you hear. `field choose` picks

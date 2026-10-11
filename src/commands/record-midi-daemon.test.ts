@@ -24,8 +24,9 @@ import { recordTake } from './record.js';
 //
 // Arming for MIDI opens every source on the machine, so a controller or
 // another test's helper can add messages to a take. The messages these
-// tests send are on channel 16, note 7, which nothing else here plays,
-// and the assertions about order and timing read those lines.
+// tests send are on channel 16, on a note chosen by this run's pid, so
+// two runs on one machine do not read each other's, and the
+// assertions about order and timing read those lines.
 
 const binary = (() => {
   try {
@@ -36,8 +37,9 @@ const binary = (() => {
 })();
 
 const NULL_RATE = 48000;
-const NOTE_ON = [0x9f, 7, 77];
-const NOTE_OFF = [0x8f, 7, 0];
+const NOTE = 1 + (process.pid % 120);
+const NOTE_ON = [0x9f, NOTE, 77];
+const NOTE_OFF = [0x8f, NOTE, 0];
 const BLOCK_SLACK = 2048; // the null clock's 512-frame blocks, and scheduling
 const TRACK = '//songs/creek/track:keys';
 
@@ -62,7 +64,7 @@ interface Helper {
 }
 
 function isMine(line: MidiTakeLine): boolean {
-  return (line.midi[0]! & 0x0f) === 0x0f && line.midi[1] === 7;
+  return (line.midi[0]! & 0x0f) === 0x0f && line.midi[1] === NOTE;
 }
 
 function readLines(root: string, file: string): MidiTakeLine[] {
@@ -523,7 +525,7 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
               });
             },
             onPosition: (line) => positions.push(line),
-            interrupted: () => played && positions.some((line) => /  [2-9]\d* events /.test(line)),
+            interrupted: () => played && positions.some((line) => Number(/  (\d+) events? /.exec(line)?.[1] ?? 0) >= 2),
           },
         );
         expect(lines[0]).toMatch(/^armed {3}MIDI from .*Field Keys Capture.* {2}\(48000 Hz, latency out 0 samples\)$/);
@@ -543,7 +545,7 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
         expect(landed.row).toHaveProperty('sources', expect.arrayContaining([name]));
         expect(landed.row).not.toHaveProperty('device');
         const notes = readFileSync(join(root, 'songs/creek', landed.file), 'utf8');
-        expect(notes).toMatch(/\{ at: \d+, length: \d+, note: 7, velocity: 77, channel: 16 \}/);
+        expect(notes).toMatch(new RegExp(`\\{ at: \\d+, length: \\d+, note: ${NOTE}, velocity: 77, channel: 16 \\}`));
         expect(existsSync(join(root, '.field/recording', take.id))).toBe(false);
         expect((await check(root)).diagnostics).toEqual([]);
       } finally {

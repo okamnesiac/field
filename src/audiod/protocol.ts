@@ -162,8 +162,8 @@ export type Take = z.infer<typeof takeSchema>;
 
 // A MIDI take's manifest (keyboard-instrument.md §12.4): the messages
 // are in `file`, take.midi.ndjson, one midiTakeLineSchema line each.
-// `frames` is the samples from the start to the stop or `until`, and
-// `events` the lines written, both at `sample_rate`, the device's.
+// `frames` is the samples from the start to the stop or `until`, at
+// `sample_rate`, the device's, and `events` the lines written.
 export const midiTakeSchema = z.object({
   id: z.string(),
   file: z.string(), // project-root-relative

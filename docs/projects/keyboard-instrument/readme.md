@@ -458,10 +458,10 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 3. On stop, the take lands as an audio take does: a timestamp-named
    file under `audio/<track>/`, a row in `takes.yaml`, and `chosen`,
    which `field choose` moves.
-4. The build renders the chosen take offline. The voice host runs in
-   NRT mode, builds a score from the take's notes with the same voice,
-   and writes audio that the build caches like a `supercollider:`
-   render.
+4. The build renders the chosen take offline. `sc/voice-render.scd`
+   builds a score from the take's notes with the voicing the voice host
+   plays, runs it in NRT mode, and writes audio that the build caches
+   like a `supercollider:` render (§12.3).
 
 ### 2.8 Files
 
@@ -1011,8 +1011,9 @@ pseudo-terminal, as §9.3 explains for criteria 1 to 20.
 ## 12 Chunk 4: recording the keys (DECIDED, 2026-10-10)
 
 Justin asked for the whole plan to be built without stopping, so this
-section answers §7 questions 1 to 3 with the recommendations §7 made,
-and records each as a decision with the alternative it beat. Merging
+section answers §7 questions 1 to 3, with §7's recommendation where
+it made one, and records each as a decision with the alternative it
+beat. Merging
 the chunk is his review of them, and any of the three can be overturned
 before that.
 
@@ -1230,7 +1231,10 @@ record entry has `instrument: still-water-pad`.
   to the kernel, so a daemon crash loses at most a partial line. The
   instrument resolves through the `supercollider:` path rule in
   `field check`. A take render unsets the render variables before it
-  loads the instrument, so voice mode looks the same as live.
+  loads the instrument, so voice mode looks the same as live. From its
+  suggestions, a MIDI stop waits two callback blocks before it detaches,
+  so a message that arrived before the stop is never skipped, and the
+  docs say a take hears only the sources that exist when it arms.
 - **CoreMIDI can refuse a new source for a moment.** Run whole,
   `src/commands/record-midi-daemon.test.ts` saw its last
   `field-audiod --keys` refused every time, right after earlier tests

@@ -138,8 +138,8 @@ export async function recordTake(
   // give before the performance, not after it (recording.md §4).
   const node = recordNodeFor(project, resolved.label);
   // A record entry with an instrument records MIDI (keyboard-instrument.md
-  // §12.2), which has no input channel or device to choose, and whose
-  // takes stay audio-only under a loop.
+  // §12.2), which has no input channel or device to choose; and loop
+  // takes record audio only.
   const kind = node.entry.record?.instrument !== undefined ? 'midi' : 'audio';
   if (kind === 'midi' && (options.input !== undefined || options.device !== undefined || options.loop === true)) {
     throw new Error(

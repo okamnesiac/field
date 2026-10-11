@@ -125,7 +125,9 @@ export async function runScProgram(
   // but the schema admits hour-long renders, and the ceiling exists to catch
   // hangs, not to race legitimate work.
   const timeout = params.timeoutMs ?? Math.max(180_000, 60_000 + params.duration * 10_000);
-  const options = { env, timeout };
+  // scsynth prints a line per score bundle in NRT, about 20 bytes, so a
+  // long take's render outgrows Node's 1 MiB default and is killed.
+  const options = { env, timeout, maxBuffer: 64 * 1024 * 1024 };
   const sclang = sclangCommand();
   try {
     await execFileAsync(sclang, [programPath], options);

@@ -1560,13 +1560,16 @@ juce::var Player::stopRecording()
     serviceCapture();
     if (capture == nullptr)
         return {};
-    // A MIDI message is drained at the start of the block after it
-    // arrives, so one more block must begin before the detach for every
-    // message that arrived before this stop to be in the take.
+    // A MIDI message is drained in the block after it arrives, so that
+    // block must finish before the detach for every message that arrived
+    // before this stop to be in the take. The epoch advances before a
+    // block drains MIDI, so one epoch is not enough: a detach between that
+    // block's count and its drain would skip it. The second epoch's block
+    // begins only after the first has returned.
     if (activeMidiCapture.load() != nullptr)
     {
         const auto epoch = callbackEpoch.load();
-        for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 1; ++i)
+        for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 2; ++i)
             std::this_thread::sleep_for (std::chrono::milliseconds (1));
     }
     // Detach first, then wait out the callback: the block that read

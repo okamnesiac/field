@@ -202,8 +202,10 @@ rides it now instead of being refused. A file bed loops only whole.
 
 `arm` with `kind: "midi"` arms for a MIDI take
 ([keyboard-instrument.md](projects/keyboard-instrument/readme.md)
-§12.4). The daemon opens every MIDI input the system lists and no audio
-input, so arming for MIDI never asks for the microphone, and answers
+§12.4). The daemon opens every MIDI input the system lists at that
+moment and no audio input, so arming for MIDI never asks for the
+microphone; a source that appears later, such as a restarted
+`field keys`, is not heard until the next arm. It answers
 `{kind: "midi", sources, sample_rate, output_latency}`, where `sources`
 names the inputs it opened. With no MIDI input to open, `arm` refuses
 and tells you to start `field keys` or connect a controller. `disarm`
