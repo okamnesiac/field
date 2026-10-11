@@ -113,6 +113,7 @@ The current build order lives in [projects/](projects/README.md).
 
 ## Documentation
 
+- [CLI](cli.md) — the command-line manual: labels, building, playing, exporting
 - [Architecture](architecture.md) — layers, processes, and language decisions
 - [Tracks](tracks.md) — the structural primitive: the track file, nesting, and cables
 - [Project model](project-model.md) — the canonical on-disk representation
