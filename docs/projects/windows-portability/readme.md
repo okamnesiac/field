@@ -647,6 +647,10 @@ land as its own diff whenever.
   Files, and `PATH` and `ProgramFiles` are read without regard to case,
   as a copied environment spells them. `generators/supercollider.test.ts`
   covers each rule with the platform passed in, so it runs everywhere.
+  The refusal reaches the voice host's own tests: seven in
+  `keys/voice-host.test.ts` start an extensionless Node stub as
+  `FIELD_SCLANG`, so they skip on win32 as `build.test.ts`'s two
+  `#!/bin/sh` stubs do, and only a second stub dialect would unskip them.
 - **`git lfs install --local` failure advice** (`commands/init.ts:71`):
   the catch prints a warning and moves on, which is right; unverified
   whether the probe succeeds under a Windows CI shell where `git`
