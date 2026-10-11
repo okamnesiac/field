@@ -10,6 +10,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # So clangd sees the real flags rather than guessing an older standard.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# A release install builds each version in a directory of its own and
+# sets FIELD_FETCHCONTENT_BASE_DIR to a cache outside all of them, so an
+# upgrade does not download JUCE again (install.md §3.2). CMake reads no
+# environment variable for FETCHCONTENT_BASE_DIR, and `pnpm build:native`
+# passes no -D, so this reads one into the cache, where a later
+# reconfigure without it keeps it. A checkout leaves it unset, and JUCE
+# stays under build/_deps.
+if(NOT "$ENV{FIELD_FETCHCONTENT_BASE_DIR}" STREQUAL "")
+  set(FETCHCONTENT_BASE_DIR "$ENV{FIELD_FETCHCONTENT_BASE_DIR}" CACHE PATH
+    "Directory under which FetchContent downloads JUCE" FORCE)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
   JUCE
