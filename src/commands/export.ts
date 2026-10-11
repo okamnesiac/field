@@ -69,9 +69,12 @@ export function defaultExportDir(): string {
 // path that is $HOME or sits beneath it qualifies — `/Users/justinx`
 // must not become `~x`. The separator is the platform's, so a Windows
 // path under the profile prints as `~\Desktop\…` (windows-portability.md
-// §7.2).
+// §7.2), and Windows paths compare without regard to case.
 export function homeRelative(path: string, home = homedir(), separator = sep): string {
-  return path === home || path.startsWith(`${home}${separator}`) ? `~${path.slice(home.length)}` : path;
+  const prefix = path.slice(0, home.length);
+  const rest = path.slice(home.length);
+  const isHome = separator === '\\' ? prefix.toLowerCase() === home.toLowerCase() : prefix === home;
+  return isHome && (rest === '' || rest.startsWith(separator)) ? `~${rest}` : path;
 }
 
 // `//songs/creek/mix:main` → `creek-mix-main`: the whole label with the

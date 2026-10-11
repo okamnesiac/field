@@ -181,18 +181,23 @@ describe('writeVersion', () => {
 
 describe('homeRelative', () => {
   it('abbreviates $HOME and only $HOME', () => {
-    expect(homeRelative('/Users/justin/Desktop/creek-mix-main-v1.wav', '/Users/justin')).toBe(
+    // The separator is explicit, so each case means the same on every host.
+    expect(homeRelative('/Users/justin/Desktop/creek-mix-main-v1.wav', '/Users/justin', '/')).toBe(
       '~/Desktop/creek-mix-main-v1.wav',
     );
-    expect(homeRelative('/Users/justin', '/Users/justin')).toBe('~');
+    expect(homeRelative('/Users/justin', '/Users/justin', '/')).toBe('~');
     // A sibling whose name merely starts with the home path is not home.
-    expect(homeRelative('/Users/justinx/Desktop', '/Users/justin')).toBe('/Users/justinx/Desktop');
-    expect(homeRelative('/tmp/elsewhere.wav', '/Users/justin')).toBe('/tmp/elsewhere.wav');
+    expect(homeRelative('/Users/justinx/Desktop', '/Users/justin', '/')).toBe('/Users/justinx/Desktop');
+    expect(homeRelative('/tmp/elsewhere.wav', '/Users/justin', '/')).toBe('/tmp/elsewhere.wav');
+    // POSIX paths keep their case.
+    expect(homeRelative('/users/justin/Desktop', '/Users/justin', '/')).toBe('/users/justin/Desktop');
     // With Windows' separator (windows-portability.md §7.2).
     expect(homeRelative('C:\\Users\\justin\\Desktop\\creek-mix-main-v1.wav', 'C:\\Users\\justin', '\\')).toBe(
       '~\\Desktop\\creek-mix-main-v1.wav',
     );
     expect(homeRelative('C:\\Users\\justinx\\Desktop', 'C:\\Users\\justin', '\\')).toBe('C:\\Users\\justinx\\Desktop');
+    // Windows paths compare without regard to case, and print as given.
+    expect(homeRelative('c:\\users\\justin\\Music', 'C:\\Users\\justin', '\\')).toBe('~\\Music');
   });
 });
 
