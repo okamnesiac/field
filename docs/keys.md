@@ -38,8 +38,10 @@ To keep what you play, record it into a track; see
   sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
   `field keys` reports that.
 - **SuperCollider, to play an instrument.** `field keys` finds `sclang`
-  the way `field build` does: `FIELD_SCLANG`, then your `PATH`, then
-  the macOS app bundle.
+  the way `field build` does: `FIELD_SCLANG`, then your `PATH`
+  (`sclang.exe` on Windows), then where the SuperCollider installer put
+  it, which is the macOS app bundle or the newest
+  `SuperCollider-<version>` folder under Program Files on Windows.
 
 You do not need to be inside a Field project.
 

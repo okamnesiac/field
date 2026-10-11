@@ -43,8 +43,11 @@ to capture a take; only plain artifact playback has a fallback (see
 [Platform notes](#platform-notes)).
 
 SuperCollider renders every `supercollider:` entry. `field build` runs
-`sclang` from your `PATH`, from the macOS app bundle, or from
-`FIELD_SCLANG` — see [Environment variables](#environment-variables).
+the `sclang` that `FIELD_SCLANG` names, or else the one on your `PATH`
+(`sclang.exe` on Windows), or else the one the SuperCollider installer
+put in place: the macOS app bundle, or the newest
+`SuperCollider-<version>` folder under Program Files on Windows. See
+[Environment variables](#environment-variables).
 
 To see what you have, ask the version:
 
@@ -568,7 +571,7 @@ somewhere other than `<program>.wav` in the current directory.
 
 | Variable | Does |
 | --- | --- |
-| `FIELD_SCLANG` | path to `sclang`, ahead of `PATH` and the macOS app bundle |
+| `FIELD_SCLANG` | path to `sclang`, ahead of `PATH` and the installed SuperCollider |
 | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
 | `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
 | `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
