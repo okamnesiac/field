@@ -39,7 +39,10 @@ function findInterpreter(): string | undefined {
 
 const interpreter = findInterpreter();
 
-describe.skipIf(!interpreter)('field-aced protocol (live daemon)', () => {
+// win32: the worker serves on an AF_UNIX socket CPython does not bind on
+// Windows; the workers keep their POSIX transport until their own chunk
+// (windows-portability.md §4).
+describe.skipIf(!interpreter || process.platform === 'win32')('field-aced protocol (live daemon)', () => {
   let root: string;
   let client: AcedClient;
   let savedPythonPath: string | undefined;

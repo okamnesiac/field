@@ -41,9 +41,12 @@ afterEach(() => {
 });
 
 // The two layouts that matter: a worker uv has installed, and the
-// `uv sync --only-group dev` environment CI builds for pyright.
+// `uv sync --only-group dev` environment CI builds for pyright. The venv
+// script directory is what uv writes on each platform — the same branch
+// workerScriptInstalled probes, or the helper builds a layout the probe
+// never looks at.
 function devOnlyWorker(): string {
-  const binDir = join(tempProject, '.venv', 'bin');
+  const binDir = join(tempProject, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin');
   rmSync(tempProject, { recursive: true, force: true });
   mkdirSync(binDir, { recursive: true });
   writeFileSync(join(tempProject, 'pyproject.toml'), '[project]\nname = "x"\n');

@@ -22,7 +22,9 @@ const binary = (() => {
   }
 })();
 
-describe.skipIf(!binary)('field play through the daemon', () => {
+// win32: serve mode refuses until the named-pipe transport
+// (windows-portability.md chunk 4).
+describe.skipIf(!binary || process.platform === 'win32')('field play through the daemon', () => {
   let root: string;
   let project: LoadedProject;
 

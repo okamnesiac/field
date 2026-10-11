@@ -332,6 +332,86 @@ Recorded so the next reader does not re-derive it.
    `--render-live` directly by the tests that exercise it — both plain
    subprocess runs of the compiled binary, no socket — so **the whole
    offline render path works** once the binary exists.
+
+   **Amended on implementation (2026-08-17).** The first red run found
+   the largest Windows defect in a place this plan never looked, because
+   the assessment grepped for includes and APIs rather than for
+   separator leaks: label pkgs derive from `song.dir`, which was raw
+   `relative()` output — `songs\creek` on Windows — so **no typed label
+   or pattern could ever match** and ~70 tests failed with "no such
+   label". The fix states an invariant the model half-enforced already
+   (its schemas reject `\` in YAML paths): project-relative paths are
+   slash-separated wherever they are *data* — `song.dir`, diagnostics,
+   the session JSON handed to the daemon, `projectRelative`'s output —
+   and native only where they are genuinely local (absolute paths,
+   `BuildOutcome.outputPath`). Also discovered, all small: `pnpm` is a
+   `.cmd` shim `execFile` cannot spawn (the one test that shells it gets
+   `shell` on win32); the stub worker is a shebang script Windows cannot
+   exec, so a `.js`/`.mjs` interpreter override now runs through
+   `process.execPath` (more hermetic everywhere); a test helper built
+   `.venv/bin` where the probe reads `.venv/Scripts`; and four path
+   assertions, two in `watch.test.ts` and two in `build.test.ts`,
+   compared native paths against `/`-joined strings. The
+   `server.cpp` chunk-4 stub earns its place here rather than there:
+   without it the binary does not link, and chunk 2's milestone is the
+   binary. Transport-bound tests (fake daemons on `.sock` paths, the
+   stub worker's AF_UNIX serve, two `#!/bin/sh` sclang fakes) are
+   guarded per test with the reason beside them, decision-4-of-
+   linux-portability style — 9 in `version.test.ts` naming chunk 4; 21
+   in `generate.test.ts` plus three describes in `aced`/`voiced` naming
+   the workers' §4, which is not chunk 4; 2 in `build.test.ts` naming
+   nothing, since only a second stub dialect removes them (#158 review
+   corrected an earlier version of this sentence).
+
+   **Amended again when the compiler arrived (2026-08-18).** MSVC found
+   two defects in the daemon that no amount of reading had: `M_PI` is
+   not standard C++ (glibc and Apple's libc++ hand it out, MSVC does
+   not), used six times across `biquad.cpp`, `mixdown.cpp` and
+   `resample.cpp` — now `std::numbers::pi`, the same double bit for
+   bit; and `LiveSession::Track`'s *implicit* copy constructor, which
+   clang never instantiates because nothing uses it, but MSVC's STL
+   compiles eagerly and rejects over the chain's `unique_ptr`s — Track
+   is now explicitly move-only, which is what it always was. One more
+   guard family joined at verification: the serve-mode describes
+   (`audiod/client`, `play-daemon`, plugin-hosting's live chains, and
+   four socket tests in `live-session`) run now that the binary exists
+   and refuse at the chunk-2 stub, so they skip on win32 naming chunk 4
+   — while `--render`, `--render-live` and `--scan` subprocess tests
+   run and pass. Verified in batches on the Windows machine: every
+   test file passes; `field-dsp-check` reports all block partitions
+   bit-identical, resampler included, which is chunk 3's first good
+   omen. The one caveat worth keeping: under full parallel load this
+   particular machine (OneDrive checkout, Defender re-scanning the
+   fresh exe per spawn) drops an occasional spawn — every such failure
+   re-ran green in isolation, and a CI runner shares none of those
+   conditions.
+
+   **Amended when recording arrived from `main` (2026-10-10).** The
+   merge of recording chunks 1 to 4 (#166, #167, #169, #170) brought one
+   more POSIX-only daemon file and three more socket test files.
+   `capture.cpp` now spells `fsync` and `ftruncate` as the CRT's
+   `_commit` and `_chsize_s` on Windows. The socket tests in
+   `click-daemon`, `punch-daemon`, and `record-daemon` skip on win32
+   naming chunk 4, the same serve-mode guard as above: three
+   `itOverSocket` tests in `click-daemon`, and the whole daemon describe
+   in each of the other two. `click-daemon`'s `--render-live` test runs
+   everywhere.
+
+   **Amended when the keyboard instrument arrived from `main`
+   (2026-10-10).** The merge of keyboard-instrument chunks 1 to 4 (#178,
+   #179, #181, #182) brought `keys.cpp`, the helper behind `field keys`,
+   with two things MSVC rejects. Its non-blocking stdin check used
+   `poll` and `read` from `<poll.h>` and `<unistd.h>`; on Windows it asks
+   `PeekNamedPipe` instead. And it publishes its source with
+   `MidiOutput::createNewDevice`, which JUCE declares only on macOS and
+   Linux, because Windows has no virtual MIDI ports; there the helper
+   refuses with the message it gives any failed publish (§7.2 records
+   the gap). `capture.cpp`'s MIDI takes reach the disk through the same
+   `syncToDisk` and `truncateTo` helpers as audio takes. The native round
+   trip in `keys/helper-native.test.ts` skips on win32 for want of a
+   virtual port, as it skips on Linux without ALSA, and
+   `record-midi-daemon`'s daemon describe takes the serve-mode guard,
+   naming chunk 4.
 3. **Determinism** (§1.4). Measure a Windows render against macOS and
    Linux; the toolchain floor or `clang-cl` depending on what the
    measurement says, and the UCRT — the unmeasured third libm — is where
@@ -412,8 +492,12 @@ land as its own diff whenever.
   `shutdown(SHUT_RD)`, single-owner via `FILE_FLAG_FIRST_PIPE_INSTANCE`
   replacing `flock`), `socketPathFor`'s pipe-name branch (§2.3), and
   `audiod/client.ts` connecting to `\\.\pipe\…`. Removes the chunk-2
-  serve-mode stub in `server.cpp` and the 9 guards in
-  `version.test.ts` — the ones whose comment names chunk 4. The other
+  serve-mode stub in `server.cpp` and every guard whose comment names
+  chunk 4: the 9 in `version.test.ts`, and the serve-mode guards §5's
+  chunk 2 amendments list — the describes in `audiod/client`,
+  `play-daemon`, plugin-hosting's live chains, `punch-daemon`,
+  `record-daemon`, and `record-midi-daemon`, the 4 `itOverSocket` tests
+  in `live-session`, and the 3 in `click-daemon`. The other
   guards chunk 2 planted are not chunk 4's to remove: the 21 in
   `generate.test.ts` and 3 describes in `aced`/`voiced` are the workers
   chunk's (§7.3 carries them), and `build.test.ts`'s 2 sclang stubs are
@@ -483,6 +567,15 @@ land as its own diff whenever.
   whether the probe succeeds under a Windows CI shell where `git`
   resolves but the LFS subcommand may not. One CI run answers it, with
   the `windows-latest` job (chunk 5).
+- **`field keys` cannot publish a source on Windows**
+  (`native/audiod/src/keys.cpp`): the helper publishes the computer
+  keyboard as a virtual MIDI source, and Windows has no virtual MIDI
+  ports, so JUCE offers no `createNewDevice` there and the helper
+  refuses (chunk 2's amendment). Recording from a hardware controller
+  is unaffected. Playing keys on Windows needs a different route: a
+  loopback driver such as loopMIDI, Windows MIDI Services, or feeding
+  the voice host without a MIDI port at all. **Standalone**, and a
+  design question before it is a port.
 
 ### 7.3 The workers chunk, when it opens (§4 stands)
 

@@ -5,8 +5,14 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_events/juce_events.h>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <poll.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <csignal>
@@ -127,6 +133,26 @@ std::unique_ptr<juce::MidiInput> openSource (const juce::String& name, juce::Mid
 // reached end of input.
 bool stdinEnded()
 {
+#if defined(_WIN32)
+    // Windows has no poll on a pipe; PeekNamedPipe is its non-blocking
+    // question. The monitor's stdin is the pipe its parent spawned it with,
+    // and a closed write end reads as ERROR_BROKEN_PIPE. Any other handle,
+    // a console included, is never "ended" here, as poll would say.
+    const HANDLE in = GetStdHandle (STD_INPUT_HANDLE);
+    for (;;)
+    {
+        DWORD available = 0;
+        if (PeekNamedPipe (in, nullptr, 0, nullptr, &available, nullptr) == 0)
+            return GetLastError() == ERROR_BROKEN_PIPE;
+        if (available == 0)
+            return false;
+        char discarded[256];
+        DWORD got = 0;
+        const DWORD want = available < sizeof (discarded) ? available : (DWORD) sizeof (discarded);
+        if (ReadFile (in, discarded, want, &got, nullptr) == 0 || got == 0)
+            return true;
+    }
+#else
     pollfd stdinPoll { STDIN_FILENO, POLLIN, 0 };
     while (poll (&stdinPoll, 1, 0) > 0)
     {
@@ -135,6 +161,7 @@ bool stdinEnded()
             return true;
     }
     return false;
+#endif
 }
 
 // The system output's name, which the voice host names as scsynth's input
@@ -168,7 +195,14 @@ int runKeys (const juce::String& name)
     const KeyboardLayoutWatcher watcher (printKeyboardLayout);
     printKeyboardLayout();
 
+    // JUCE declares createNewDevice only where the OS lets a process
+    // publish a MIDI port (macOS, Linux); Windows has no virtual ports, so
+    // there the helper refuses below with the same message as a failure.
+#if JUCE_WINDOWS
+    std::unique_ptr<juce::MidiOutput> source;
+#else
     auto source = juce::MidiOutput::createNewDevice (name);
+#endif
     if (source == nullptr)
     {
         printError ("cannot create a virtual MIDI source named " + name + " on this system");

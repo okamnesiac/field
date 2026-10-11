@@ -1,7 +1,11 @@
 #include "capture.h"
 
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -19,6 +23,28 @@ constexpr long factFramesAt = 46;
 constexpr long dataSizeAt = 54;
 constexpr int fifoCapacity = 1 << 20; // ~22 s at 48 kHz: the writer wakes every 20 ms
 constexpr double journalEverySeconds = 1.0;
+
+// The two calls crash safety rides on, spelled per platform: push a
+// file's bytes to the device, and cut it to a length. MSVC's CRT has
+// neither fsync nor ftruncate; _commit is FlushFileBuffers, and
+// _chsize_s takes the 64-bit size a long take needs.
+int syncToDisk (std::FILE* f)
+{
+#if defined(_WIN32)
+    return _commit (_fileno (f));
+#else
+    return ::fsync (fileno (f));
+#endif
+}
+
+int truncateTo (std::FILE* f, juce::int64 bytes)
+{
+#if defined(_WIN32)
+    return _chsize_s (_fileno (f), bytes) == 0 ? 0 : -1;
+#else
+    return ::ftruncate (fileno (f), (off_t) bytes);
+#endif
+}
 
 void putTag (uint8_t* at, const char* tag) { std::memcpy (at, tag, 4); }
 void putU16 (uint8_t* at, uint16_t v)
@@ -118,14 +144,14 @@ void truncateAndSync (const juce::File& file, juce::int64 bytes, Patch&& patch)
     std::FILE* f = std::fopen (file.getFullPathName().toRawUTF8(), "r+b");
     if (f == nullptr)
         throw std::runtime_error ("cannot open " + file.getFullPathName().toStdString());
-    if (::ftruncate (fileno (f), (off_t) bytes) != 0)
+    if (truncateTo (f, bytes) != 0)
     {
         std::fclose (f);
         throw std::runtime_error ("cannot truncate " + file.getFullPathName().toStdString());
     }
     patch (f);
     std::fflush (f);
-    ::fsync (fileno (f));
+    syncToDisk (f);
     std::fclose (f);
 }
 
@@ -222,7 +248,7 @@ void Transaction::joinWriter()
 void Transaction::syncData()
 {
     std::fflush (data);
-    ::fsync (fileno (data));
+    syncToDisk (data);
 }
 
 void Transaction::closeData()

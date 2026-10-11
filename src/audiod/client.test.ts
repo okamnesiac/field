@@ -27,7 +27,10 @@ describe('event schema', () => {
   });
 });
 
-describe.skipIf(!binary)('field-audiod protocol', () => {
+// win32: the binary exists but serve mode refuses until the named-pipe
+// transport (windows-portability.md chunk 4); every test here dials the
+// socket.
+describe.skipIf(!binary || process.platform === 'win32')('field-audiod protocol', () => {
   let root: string;
   let client: AudiodClient;
 

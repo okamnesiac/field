@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BuildOutcome, GeneratorRunner } from '../graph/build.js';
 import { sha256Text } from '../hash.js';
@@ -288,7 +288,9 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     const first = await until(() => events.find((e) => e.kind === 'outcomes'));
     if (first.kind !== 'outcomes') return;
     const base = first.outcomes.find((o) => o.label === '//songs/creek/gen:gen1')!;
-    expect(base.outputPath!.endsWith('audio/gen1/1.wav')).toBe(true);
+    // outputPath is a native absolute path; compare the suffix in the
+    // platform separator.
+    expect(base.outputPath!.endsWith(['audio', 'gen1', '1.wav'].join(sep))).toBe(true);
 
     // field choose is exactly this YAML edit (watch.md §1.5): the label's
     // hash moves and the report carries the newly chosen committed file —
@@ -299,7 +301,7 @@ describe('watchBuild', { timeout: 20_000 }, () => {
     );
     if (moved.kind !== 'outcomes') return;
     const repointed = moved.changed.find((o) => o.label === '//songs/creek/gen:gen1')!;
-    expect(repointed.outputPath!.endsWith('audio/gen1/2.wav')).toBe(true);
+    expect(repointed.outputPath!.endsWith(['audio', 'gen1', '2.wav'].join(sep))).toBe(true);
     expect(repointed.sha256).toBe(sha256Text('variant two bytes'));
 
     abort.abort();

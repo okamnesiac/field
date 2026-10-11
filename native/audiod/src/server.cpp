@@ -2,6 +2,36 @@
 #include "player.h"
 #include "version.h"
 
+#if defined(_WIN32)
+
+// The control socket does not exist on Windows yet: this transport is
+// AF_UNIX by hand (see the header), and windows-portability.md chunk 4
+// replaces it with a named pipe behind the same interface. Until then
+// the daemon still earns its keep as a subprocess — --render,
+// --render-live and --scan never construct a Server — and serve mode
+// refuses at start() with a pointer, instead of the file failing to
+// compile. The private loop methods stay declared and undefined; nothing
+// on this path can reach them.
+
+Server::Server (Player& p, juce::String relativeSocketPath)
+    : player (p), socketPath (std::move (relativeSocketPath))
+{
+}
+
+Server::~Server() = default;
+
+juce::String Server::start()
+{
+    return "the control socket is not implemented on Windows yet (windows-portability.md chunk 4)";
+}
+
+void Server::beginShutdown() {}
+void Server::broadcast (const juce::String&) {}
+void Server::sweepClosedConnections() {}
+int Server::connectionCount() { return 0; }
+
+#else
+
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/socket.h>
@@ -475,3 +505,5 @@ int Server::connectionCount()
             ++open;
     return open;
 }
+
+#endif // !defined(_WIN32)
