@@ -67,7 +67,10 @@ gain move ramps in the next block, and anything structural swaps the
 session at a block boundary with the transport carried — no wrap to
 wait for (realtime.md chunk 3). The compile is where the cache pays
 twice (realtime.md decision 4): a track whose stem action is cached is
-served as that stem — automatic freezing, no live chain to run — and
+served as that stem — automatic freezing, no live chain to run, except
+for a track carrying a live input and every track above it, which keep
+their chains for the input ([audio-engine.md](audio-engine.md) "Live
+inputs") — and
 under watch the dirty stems rebuild behind the play and freeze on the
 next compile, a swap with nothing to hear because live and offline are
 bit-identical. The compile still runs `build` for the session's file

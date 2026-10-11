@@ -7,13 +7,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 
 namespace field
 {
 namespace
 {
-constexpr int liveSessionVersion = 3; // session.ts SESSION_VERSION
+constexpr int liveSessionVersion = 4; // session.ts SESSION_VERSION
 constexpr int engineBlock = 512; // internal granularity; output is block-size invariant
 
 double requireNumber (const juce::var& object, const char* key, const char* what)
@@ -42,9 +43,52 @@ const juce::Array<juce::var>& requireArray (const juce::var& object,
     return *array;
 }
 
+// The mixInputBlock arithmetic for a whole block: double accumulation,
+// the same balance law, so an input window adds exactly what a file
+// window with the same samples would.
+void addScaled (std::vector<std::vector<float>>& block,
+                const float* left,
+                const float* right,
+                int n,
+                double gainDb,
+                double pan)
+{
+    const double gain = std::pow (10.0, gainDb / 20.0);
+    double balanceL = 1.0, balanceR = 1.0;
+    dsp::balanceGains (pan, balanceL, balanceR);
+    for (int i = 0; i < n; ++i)
+    {
+        block[0][(size_t) i] = (float) ((double) block[0][(size_t) i] + (double) left[i] * gain * balanceL);
+        block[1][(size_t) i] = (float) ((double) block[1][(size_t) i] + (double) right[i] * gain * balanceR);
+    }
+}
+
+// A file played as an input: what --render-live feeds an input window,
+// then silence.
+class FileInput final : public LiveInput
+{
+public:
+    explicit FileInput (std::vector<std::vector<float>> channelsIn) : channels (std::move (channelsIn)) {}
+
+    void read (float* left, float* right, int n) override
+    {
+        const auto& l = channels[0];
+        const auto& r = channels.size() > 1 ? channels[1] : channels[0];
+        for (int i = 0; i < n; ++i, ++at)
+        {
+            left[i] = at < l.size() ? l[at] : 0.0f;
+            right[i] = at < r.size() ? r[at] : 0.0f;
+        }
+    }
+
+private:
+    std::vector<std::vector<float>> channels;
+    size_t at = 0;
+};
+
 } // namespace
 
-LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoot)
+LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoot, const LiveInputs& inputs)
 {
     if ((int) requireNumber (session, "version", "session") != liveSessionVersion)
         throw std::runtime_error ("session version mismatch — rebuild the daemon (pnpm build:native)");
@@ -74,6 +118,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
 
     // Second pass: windows, chains, buffers.
     std::map<std::string, int> fileIndex;
+    std::set<std::string> inputNames;
     for (int t = 0; t < (int) trackArray.size(); ++t)
     {
         const auto& entry = trackArray.getReference (t);
@@ -82,6 +127,31 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
         for (const auto& input : requireArray (entry, "inputs", "track"))
         {
             Window window;
+            const auto inputName = input.getProperty ("input", juce::var());
+            if (! inputName.isVoid())
+            {
+                // A live input (live-supercollider.md §2): a gain and a
+                // pan, and no place on the timeline — the overlay
+                // carries it (§9).
+                window.kind = Window::input;
+                window.gainDb = requireNumber (input, "gain_db", "input window");
+                const auto inputPan = input.getProperty ("pan", juce::var());
+                window.pan = inputPan.isVoid() ? 0.0 : (double) inputPan;
+                const auto name = inputName.toString().toStdString();
+                const auto fed = inputs.find (name);
+                if (fed == inputs.end() || fed->second == nullptr)
+                    throw std::runtime_error ("session names input \"" + name + "\", which nothing feeds");
+                if (! inputNames.insert (name).second)
+                    throw std::runtime_error ("input \"" + name + "\" is named twice");
+                if (track.rate != rate)
+                    throw std::runtime_error ("input \"" + name + "\" is on \"" + track.name + "\" at "
+                                              + std::to_string (track.rate) + " Hz; an input plays at the session's "
+                                              + std::to_string (rate) + " Hz");
+                window.source = (int) inputSources.size();
+                inputSources.push_back (fed->second);
+                track.windows.push_back (window);
+                continue;
+            }
             window.start = (juce::int64) requireNumber (input, "start", "window");
             window.duration = (juce::int64) requireNumber (input, "duration", "window");
             window.readOffset = (juce::int64) requireNumber (input, "read_offset", "window");
@@ -281,7 +351,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
     // After load, mixInputBlock's ensure is a map lookup.
     for (const auto& track : tracks)
         for (const auto& window : track.windows)
-            if (window.kind != Window::file
+            if (window.kind != Window::file && window.kind != Window::input
                 && tracks[(size_t) window.source].rate != track.rate)
                 ensureConverted (window.source, track.rate,
                                  window.kind == Window::receivePre);
@@ -294,6 +364,155 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
     }
     outputPending.assign (2, std::vector<float>());
     primeOutput();
+    buildOverlay();
+}
+
+void LiveSession::buildOverlay()
+{
+    const int count = (int) tracks.size();
+    const auto reads = [this] (const Window& window, const std::vector<bool>& set)
+    {
+        return window.kind != Window::file && window.kind != Window::input
+               && set[(size_t) window.source];
+    };
+    // What an input reaches: its track, then upward to a fixed point
+    // through every window that places or receives a track on it.
+    std::vector<bool> live ((size_t) count, false);
+    for (int t = 0; t < count; ++t)
+        for (const auto& window : tracks[(size_t) t].windows)
+            if (window.kind == Window::input)
+                live[(size_t) t] = true;
+    for (bool grew = true; grew;)
+    {
+        grew = false;
+        for (int t = 0; t < count; ++t)
+            if (! live[(size_t) t])
+                for (const auto& window : tracks[(size_t) t].windows)
+                    if (reads (window, live))
+                    {
+                        live[(size_t) t] = grew = true;
+                        break;
+                    }
+    }
+
+    // Children before the tracks that read them: a track joins once
+    // every live track it reads has. Placement cycles never validate,
+    // so every live track joins.
+    overlayIndex.assign ((size_t) count, -1);
+    std::vector<bool> joined ((size_t) count, false);
+    for (bool grew = true; grew;)
+    {
+        grew = false;
+        for (int t = 0; t < count; ++t)
+        {
+            if (! live[(size_t) t] || joined[(size_t) t])
+                continue;
+            Track& track = tracks[(size_t) t];
+            bool ready = true;
+            for (const auto& window : track.windows)
+                if (reads (window, live) && ! joined[(size_t) window.source])
+                    ready = false;
+            if (! ready)
+                continue;
+
+            OverlayTrack slot;
+            slot.track = t;
+            std::set<std::pair<int, bool>> placed;
+            for (int w = 0; w < (int) track.windows.size(); ++w)
+            {
+                const auto& window = track.windows[(size_t) w];
+                if (window.kind == Window::input)
+                {
+                    slot.inputWindows.push_back (w);
+                    continue;
+                }
+                if (! reads (window, live))
+                    continue;
+                // Once per child and tap: the input is heard once,
+                // through the first window placing its track (§9).
+                const bool pre = window.kind == Window::receivePre;
+                if (! placed.insert ({ window.source, pre }).second)
+                    continue;
+                if (tracks[(size_t) window.source].rate != track.rate)
+                    throw std::runtime_error ("a live input crosses from \""
+                                              + tracks[(size_t) window.source].name + "\" into \""
+                                              + track.name + "\" at another rate; an input's path needs one rate");
+                slot.edges.push_back ({ window.source, w, pre });
+            }
+            juce::int64 latency = 0;
+            if (t != outputTrack)
+            {
+                buildStages (slot.chain, track.chainSpecs, track.rate, 0);
+                for (const auto& stage : slot.chain)
+                    if (stage.limiter != nullptr)
+                        latency += stage.limiter->latencySamples();
+                    else if (stage.plugin != nullptr)
+                        latency += stage.plugin->latencySamples();
+            }
+            slot.pre.assign (2, std::vector<float>());
+            slot.post.assign (2, std::vector<float>());
+            slot.delayed.assign (2, std::vector<float> ((size_t) latency, 0.0f));
+            for (int c = 0; c < 2; ++c)
+            {
+                slot.pre[(size_t) c].reserve (8192);
+                slot.post[(size_t) c].reserve (8192);
+                slot.delayed[(size_t) c].reserve ((size_t) latency + 16384);
+            }
+            overlayIndex[(size_t) t] = (int) overlay.size();
+            overlay.push_back (std::move (slot));
+            joined[(size_t) t] = grew = true;
+        }
+    }
+    if (! overlay.empty())
+        inputScratch.assign (2, std::vector<float> (8192, 0.0f));
+}
+
+void LiveSession::renderOverlay (int n)
+{
+    if (inputScratch[0].size() < (size_t) n)
+        for (auto& channel : inputScratch)
+            channel.resize ((size_t) n, 0.0f);
+    for (auto& slot : overlay)
+    {
+        Track& track = tracks[(size_t) slot.track];
+        for (auto& channel : slot.post)
+            channel.assign ((size_t) n, 0.0f);
+        float* left = inputScratch[0].data();
+        float* right = inputScratch[1].data();
+        for (const int w : slot.inputWindows)
+        {
+            const Window& window = track.windows[(size_t) w];
+            if (overlayReadsInputs)
+                inputSources[(size_t) window.source]->read (left, right, n);
+            else
+            {
+                std::fill (left, left + n, 0.0f);
+                std::fill (right, right + n, 0.0f);
+            }
+            addScaled (slot.post, left, right, n, window.gainDb, window.pan);
+        }
+        for (const auto& edge : slot.edges)
+        {
+            const auto& from = overlay[(size_t) overlayIndex[(size_t) edge.child]];
+            const auto& source = edge.pre ? from.pre : from.post;
+            const Window& window = track.windows[(size_t) edge.window];
+            addScaled (slot.post, source[0].data(), source[1].data(), n, window.gainDb, window.pan);
+        }
+        // The output track's own chain runs on the true sum in renderBlock.
+        if (slot.track == outputTrack)
+            continue;
+        for (int c = 0; c < 2; ++c)
+            slot.pre[(size_t) c].assign (slot.post[(size_t) c].begin(), slot.post[(size_t) c].end());
+        runStages (slot.chain, slot.post, 0);
+        for (int c = 0; c < 2; ++c)
+        {
+            auto& delayed = slot.delayed[(size_t) c];
+            auto& post = slot.post[(size_t) c];
+            delayed.insert (delayed.end(), post.begin(), post.end());
+            post.assign (delayed.begin(), delayed.begin() + n);
+            delayed.erase (delayed.begin(), delayed.begin() + n);
+        }
+    }
 }
 
 void LiveSession::primeOutput()
@@ -336,6 +555,14 @@ void LiveSession::primeOutput()
 
 void LiveSession::buildChain (Track& track, juce::int64 startClock) const
 {
+    buildStages (track.chain, track.chainSpecs, track.rate, startClock);
+}
+
+void LiveSession::buildStages (std::vector<ChainStage>& chain,
+                               const std::vector<ChainSpec>& specs,
+                               int trackRate,
+                               juce::int64 startClock) const
+{
     // Hosted stages survive the rebuild: a locate runs under liveLock,
     // where reinstantiation — binary load, state blob from disk,
     // prepareToPlay — is measured in dropped audio, not milliseconds
@@ -345,12 +572,12 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
     // order; reset() zeroes processing state, and the far-seek warmup
     // carries the same −60 dB claim it always made for hosted arms.
     std::vector<std::unique_ptr<LivePluginStage>> surviving;
-    for (auto& stage : track.chain)
+    for (auto& stage : chain)
         if (stage.plugin != nullptr)
             surviving.push_back (std::move (stage.plugin));
     size_t reused = 0;
-    track.chain.clear();
-    for (const auto& spec : track.chainSpecs)
+    chain.clear();
+    for (const auto& spec : specs)
     {
         ChainStage stage;
         if (spec.kind == 0)
@@ -358,7 +585,7 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
             // track's chain runs on its own clock, exactly as its
             // offline stem does.
             stage.eq = std::make_unique<dsp::Eq> (spec.bands, spec.normalize,
-                                                  (double) track.rate, (size_t) 2);
+                                                  (double) trackRate, (size_t) 2);
         else if (spec.kind == 1)
             stage.limiter = std::make_unique<dsp::Limiter> (spec.limiter, (size_t) 2,
                                                             spec.horizonDb);
@@ -392,11 +619,11 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
                 // `latency:` was pinned under (#150 review) — and the
                 // stage splits any larger block down to it.
                 stage.plugin = std::make_unique<LivePluginStage> (spec.plugin,
-                                                                  (double) track.rate, 512);
+                                                                  (double) trackRate, 512);
             }
             stage.plugin->startAt (startClock);
         }
-        track.chain.push_back (std::move (stage));
+        chain.push_back (std::move (stage));
     }
 }
 
@@ -411,6 +638,8 @@ void LiveSession::mixInputBlock (Track& track,
 
     for (auto& window : track.windows)
     {
+        if (window.kind == Window::input)
+            continue; // the overlay carries it (§9)
         const juce::int64 overlapStart = std::max (from, window.start);
         const juce::int64 overlapEnd = std::min (from + n, window.start + window.duration);
         if (overlapEnd <= overlapStart)
@@ -562,9 +791,16 @@ void LiveSession::produceUntil (int trackIndexArg, juce::int64 outputSamples)
 
 void LiveSession::runChain (Track& track, std::vector<std::vector<float>>& working, size_t fromStage)
 {
-    for (size_t k = fromStage; k < track.chain.size(); ++k)
+    runStages (track.chain, working, fromStage);
+}
+
+void LiveSession::runStages (std::vector<ChainStage>& chain,
+                             std::vector<std::vector<float>>& working,
+                             size_t fromStage)
+{
+    for (size_t k = fromStage; k < chain.size(); ++k)
     {
-        auto& stage = track.chain[k];
+        auto& stage = chain[k];
         if (stage.eq != nullptr)
             stage.eq->process (working);
         else if (stage.reverb != nullptr)
@@ -646,6 +882,18 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
         for (auto& channel : mixed)
             channel.assign ((size_t) step, 0.0f);
         mixInputBlock (output, t, step, mixed, clock);
+        if (! overlay.empty())
+        {
+            // What the inputs reach, added before the output's chain so
+            // its inserts hear the true sum (§9).
+            renderOverlay (step);
+            if (const int slot = overlayIndex[(size_t) outputTrack]; slot >= 0)
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < step; ++i)
+                        mixed[(size_t) c][(size_t) i]
+                            = (float) ((double) mixed[(size_t) c][(size_t) i]
+                                       + (double) overlay[(size_t) slot].post[(size_t) c][(size_t) i]);
+        }
         runChain (output, mixed, 0);
 
         for (int c = 0; c < 2; ++c)
@@ -712,8 +960,11 @@ void LiveSession::discardUntil (juce::int64 sample)
 {
     std::vector<std::vector<float>> sink (2, std::vector<float> ((size_t) engineBlock, 0.0f));
     float* outs[2] = { sink[0].data(), sink[1].data() };
+    const bool reading = overlayReadsInputs;
+    overlayReadsInputs = false;
     while (delivered < sample)
         renderBlock (outs, 2, (int) std::min<juce::int64> (engineBlock, sample - delivered));
+    overlayReadsInputs = reading;
 }
 
 void LiveSession::locate (juce::int64 sample)
@@ -802,7 +1053,8 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb, 
 std::string runRenderLive (const std::string& sessionPath,
                            const std::string& outputPath,
                            const std::string& rootPath,
-                           const std::string& clickPath)
+                           const std::string& clickPath,
+                           const std::vector<std::string>& inputFiles)
 {
     try
     {
@@ -821,7 +1073,19 @@ std::string runRenderLive (const std::string& sessionPath,
             click.setSchedule (juce::JSON::parse (clickFile.loadFileAsString()));
         }
 
-        LiveSession live (session, juce::File (juce::String (rootPath)));
+        LiveInputs inputs;
+        for (const auto& spec : inputFiles)
+        {
+            const auto equals = spec.find ('=');
+            if (equals == std::string::npos || equals == 0)
+                return "--input wants name=file.wav, not \"" + spec + "\"";
+            const auto path = juce::File (juce::String (rootPath))
+                                  .getChildFile (juce::String (spec.substr (equals + 1)))
+                                  .getFullPathName()
+                                  .toStdString();
+            inputs[spec.substr (0, equals)] = std::make_shared<FileInput> (dsp::readWav (path).channels);
+        }
+        LiveSession live (session, juce::File (juce::String (rootPath)), inputs);
         // One pass of the declared length. Looping playback is a
         // transport behaviour; the golden compares one pass, and a
         // session without an extent has no "one pass" to compare.

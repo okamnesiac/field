@@ -17,7 +17,9 @@ import { z } from 'zod';
 // samples must refuse, which the version check is.
 // 3: hosted plugin inserts join live chains (plugin-hosting.md
 // chunk 2); an older engine has no way to run one.
-export const SESSION_VERSION = 3;
+// 4: input windows (live-supercollider.md chunk 1); an older engine
+// would refuse the window's shape, and must refuse the session first.
+export const SESSION_VERSION = 4;
 
 // One placed window, mirroring the render plan's clip exactly — same
 // fields, same units, same omit-when-centred pan rule — except that the
@@ -69,6 +71,18 @@ export const receiveWindowSchema = z.strictObject({
   tap: z.enum(['pre', 'post']),
   ...windowFields,
   comp_delay: z.number().int().min(0),
+});
+
+// A live input (live-supercollider.md §2): a source outside the
+// session that the daemon reads each block — the voice `field keys`
+// plays. It has no place on the timeline, so it carries no start,
+// duration, or fades: it passes up through every track that places this
+// one, with each window's gain and pan, and through a second instance
+// of each track's chain beside the song (§9).
+export const inputWindowSchema = z.strictObject({
+  input: z.string().min(1), // the source's name, which the daemon resolves
+  gain_db: z.number(),
+  pan: z.number().min(-1).max(1).optional(),
 });
 
 export const sessionInsertSchema = z.discriminatedUnion('effect', [
@@ -203,8 +217,12 @@ export function insertGrowth(insert: SessionInsert, rate: number): number {
 export function insertLatency(insert: SessionInsert, rate: number): number {
   if (insert.effect === 'plugin') return insert.latency;
   if (insert.effect !== 'limit') return 0;
-  const window = Math.max(1, Math.round((insert.lookahead_ms / 1000) * rate));
-  return Math.ceil((insert.horizon_db / 60) * window);
+  // The engine's pending window (dsp/limiter.cpp), in its own operations
+  // and order: the horizon at the attack slope, plus the sample being
+  // pushed. A live input's overlay runs late by exactly this
+  // (live-supercollider.md §9), so it has to be the engine's number.
+  const window = Math.max(1, (insert.lookahead_ms / 1000) * rate);
+  return Math.ceil(insert.horizon_db / (60 / window)) + 1;
 }
 
 export const sessionTrackSchema = z.strictObject({
@@ -215,7 +233,9 @@ export const sessionTrackSchema = z.strictObject({
   // group delay in the consumer's comp_delay arithmetic.
   rate: z.number().int().positive(),
   chain: z.array(sessionInsertSchema).default([]),
-  inputs: z.array(z.union([fileWindowSchema, trackWindowSchema, receiveWindowSchema])).default([]),
+  inputs: z
+    .array(z.union([fileWindowSchema, trackWindowSchema, receiveWindowSchema, inputWindowSchema]))
+    .default([]),
   // This track's accumulated latency at its output ring, compiler
   // computed: max over inputs of (input latency + edge delays) plus the
   // chain's own. Carried so `status` can report it and so the engine

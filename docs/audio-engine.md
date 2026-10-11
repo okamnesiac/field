@@ -75,6 +75,35 @@ reportable. A latency policy can bypass or substitute high-latency
 plugins (look-ahead limiters, linear-phase EQ) when entering record
 mode; any changes made for low-latency mode are clearly reported.
 
+## Live inputs
+
+A live session can carry an *input*: a source outside the session that
+the daemon reads every block, such as the voice `field keys` plays. An
+input window names its source and has a gain and a pan, but no place on
+the timeline:
+
+```json
+{ "input": "keys-voice", "gain_db": 0 }
+```
+
+The song still renders as before. The input travels beside it: its
+track and each track above it run a second instance of their chain on
+what the input carries, and `main` adds the result to its own mix before
+its own chain. The input reaches each track once, however many times
+the arrangement places its track, and runs late by the latency of the
+limiters and hosted plugins on its path.
+[live-supercollider.md](projects/live-supercollider/readme.md) §9
+describes the overlay and what it gives up.
+
+Today only `field-audiod --render-live` feeds an input, from a file:
+
+```sh
+field-audiod --render-live session.json out.wav --input keys-voice=take.wav
+```
+
+The `session` op refuses a session with an input window, because nothing
+in the daemon feeds one yet.
+
 ## Crash-safe recording
 
 Recording is transactional: a `.field/recording/<transaction-id>/`

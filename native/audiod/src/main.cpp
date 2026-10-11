@@ -148,6 +148,7 @@ int main (int argc, char* argv[])
     juce::String renderLiveSession;
     juce::String renderLiveOut;
     juce::String renderLiveClick;
+    std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
     juce::String scanFormat;
     juce::String probeFormat;
     juce::String probeCandidate;
@@ -175,6 +176,8 @@ int main (int argc, char* argv[])
         }
         else if (arg == "--click" && i + 1 < argc)
             renderLiveClick = argv[++i]; // with --render-live: a click schedule to add
+        else if (arg == "--input" && i + 1 < argc)
+            renderLiveInputs.push_back (argv[++i]); // with --render-live: name=file.wav
         else if (arg == "--scan" && i + 1 < argc)
             scanFormat = argv[++i];
         else if (arg == "--scan-probe" && i + 3 < argc)
@@ -205,7 +208,7 @@ int main (int argc, char* argv[])
                           "[--idle <seconds>]\n"
                           "       field-audiod --render <plan.json>\n"
                           "       field-audiod --render-live <session.json> <out.wav> "
-                          "[--click <schedule.json>]\n"
+                          "[--click <schedule.json>] [--input <name>=<file.wav>]...\n"
                           "       field-audiod --scan <au|vst3>\n"
                           "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
                           "       field-audiod --state-capture <au|vst3> <identifier> "
@@ -312,7 +315,8 @@ int main (int argc, char* argv[])
                                                juce::File::getCurrentWorkingDirectory()
                                                    .getFullPathName()
                                                    .toStdString(),
-                                               renderLiveClick.toStdString());
+                                               renderLiveClick.toStdString(),
+                                               renderLiveInputs);
             ! error.empty())
         {
             std::fprintf (stderr, "field-audiod: render-live failed: %s\n", error.c_str());

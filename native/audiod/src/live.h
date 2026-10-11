@@ -41,13 +41,29 @@
 namespace field
 {
 
+// A source outside the session (live-supercollider.md §2): what an
+// `input` window plays, read once per block on the audio thread — the
+// voice `field keys` plays. read() must not block, lock, or allocate,
+// and fills silence for whatever it does not have.
+class LiveInput
+{
+public:
+    virtual ~LiveInput() = default;
+    virtual void read (float* left, float* right, int n) = 0;
+};
+
+// The sources a session's input windows name, by name.
+using LiveInputs = std::map<std::string, std::shared_ptr<LiveInput>>;
+
 class LiveSession
 {
 public:
     // Parses fail-closed (plan.cpp's discipline): any missing field,
     // unknown effect, unknown track ref, or negative live delay throws,
     // and nothing renders under a shape the two sides disagree about.
-    LiveSession (const juce::var& session, const juce::File& projectRoot);
+    // An input window must name a source in `inputs`.
+    LiveSession (const juce::var& session, const juce::File& projectRoot,
+                 const LiveInputs& inputs = {});
 
     int sessionRate() const { return rate; }
     juce::int64 lengthSamples() const { return length; } // 0 = unbounded
@@ -118,8 +134,8 @@ private:
 
     struct Window
     {
-        enum Kind { file, track, receivePre } kind = file;
-        int source = 0; // files[] or tracks[] index by kind
+        enum Kind { file, track, receivePre, input } kind = file;
+        int source = 0; // files[], tracks[], or inputSources[] index by kind
         juce::int64 start = 0;
         juce::int64 duration = 0;
         juce::int64 readOffset = 0;
@@ -188,6 +204,13 @@ private:
     // the plate's LFO phase is a pure function of it (reverbs.md
     // decision 4).
     void buildChain (Track& track, juce::int64 startClock = 0) const;
+    // The stages for `specs` at `trackRate`, reusing any hosted instance
+    // already in `chain` (buildChain's rule) — the song's chain for a
+    // track, or the overlay's second instance of it.
+    void buildStages (std::vector<ChainStage>& chain,
+                      const std::vector<ChainSpec>& specs,
+                      int trackRate,
+                      juce::int64 startClock) const;
     // The history the output chain must hear for its state at a
     // position to be right within the design's audibility threshold —
     // what locate renders and discards after a rebuild.
@@ -208,6 +231,9 @@ private:
     // re-points working at what it emitted (which may be shorter while
     // its window primes).
     static void runChain (Track& track, std::vector<std::vector<float>>& working, size_t fromStage);
+    static void runStages (std::vector<ChainStage>& chain,
+                           std::vector<std::vector<float>>& working,
+                           size_t fromStage);
     // End of input: flush each limiter and cascade what emerges through
     // the stages after it, appending to `working`.
     static void flushChain (Track& track, std::vector<std::vector<float>>& working);
@@ -241,6 +267,43 @@ private:
     std::vector<std::vector<std::vector<float>>> files; // preloaded, 1–2 ch
     std::vector<Track> tracks;
     std::map<std::string, int> trackIndex;
+
+    // The overlay (live-supercollider.md §9): what an input reaches. A
+    // track with an input window, and every track that places or
+    // receives one, carries the input up through a second instance of
+    // its chain, beside the song it pre-renders as before; the output
+    // track adds what reaches it to its own mix before its own chain,
+    // so the output's inserts hear the true sum. An input has no place
+    // on the timeline, so it passes through each window's gain and pan
+    // but not its start, duration, or fades, and reaches each consumer
+    // once however often the arrangement places its track.
+    struct OverlayEdge
+    {
+        int child = 0; // tracks[] index of the live track read
+        int window = 0; // the consumer's first window reading it
+        bool pre = false; // a pre-tap cable reads the child's pre-chain block
+    };
+    struct OverlayTrack
+    {
+        int track = 0;
+        std::vector<int> inputWindows;
+        std::vector<OverlayEdge> edges;
+        std::vector<ChainStage> chain; // empty for the output track
+        // This block: the mix before the chain, and after it. The chain's
+        // emission runs through `delayed`, preloaded with the chain's
+        // latency in zeros, so `post` is always exactly one block, late
+        // by that latency — a limiter's lag varies block to block.
+        std::vector<std::vector<float>> pre, post, delayed;
+    };
+    void buildOverlay();
+    void renderOverlay (int n);
+    std::vector<std::shared_ptr<LiveInput>> inputSources;
+    std::vector<OverlayTrack> overlay; // children before the tracks that read them
+    std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay
+    std::vector<std::vector<float>> inputScratch;
+    // Off while locate renders into the void: a source read there is
+    // consumed off the audio thread and heard by nobody.
+    bool overlayReadsInputs = true;
 };
 
 // --render-live: run a session offline, faster than realtime, into a
@@ -252,9 +315,14 @@ private:
 // With a click schedule (recording.md §7), the same Click layer the
 // callback runs is added block by block at the session rate — never for
 // a golden, only so a test can prove where the ticks land.
+//
+// Each of `inputFiles`, as `name=path.wav`, feeds the input window of
+// that name from the file and then silence — the synthetic source
+// live-supercollider.md chunk 1's goldens use.
 std::string runRenderLive (const std::string& sessionPath,
                            const std::string& outputPath,
                            const std::string& rootPath,
-                           const std::string& clickPath = {});
+                           const std::string& clickPath = {},
+                           const std::vector<std::string>& inputFiles = {});
 
 } // namespace field
