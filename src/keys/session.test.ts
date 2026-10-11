@@ -407,7 +407,7 @@ describe('typing a knob\'s value', () => {
   it('opens an entry on the first typing key and sends nothing until it completes', () => {
     const session = onCutoff();
     expect(type(session, ['Digit8', 'Digit0', 'Digit0'])).toEqual([]);
-    expect(session.entry).toEqual({ label: 'cutoff', text: '800' });
+    expect(session.entry).toEqual({ text: '800' });
     expect(session.ticking()).toBe(false);
   });
 

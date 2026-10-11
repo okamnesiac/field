@@ -69,7 +69,7 @@ export class KeysSession {
   message: string | undefined;
   // The value being typed for the chosen knob, while an entry is open
   // (instrument-knobs.md §2.7).
-  entry: { label: string; text: string } | undefined;
+  entry: { text: string } | undefined;
   // The turn key held now, if any: the one pressed last.
   private turning: { position: string; steps: number; since: number } | undefined;
   // Each controller gliding to a typed value: one glide per controller,
@@ -301,7 +301,7 @@ export class KeysSession {
   private type(character: string): void {
     if (this.entry === undefined) {
       if (character === '.') return;
-      this.entry = { label: this.knobs[this.chosen]!.label, text: '' };
+      this.entry = { text: '' };
     }
     const { text } = this.entry;
     if ((character === '-' && text !== '') || (character === '.' && text.includes('.'))) return;
