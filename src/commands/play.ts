@@ -437,13 +437,14 @@ export async function playLiveSession(
       );
     }
     if (options.device !== undefined) await client.selectDevice(options.device);
-    // A `field keys` routed into this song (live-supercollider.md chunk
-    // 3) keeps its inputs through this load, or its voice goes silent.
-    const { keysInputsFor } = await import('../keys/routing.js');
-    const keysInputs = await keysInputsFor(client, song);
-    if (keysInputs.length > 0) {
+    // A `field keys` routed into this song, or a monitored take
+    // (live-supercollider.md chunk 3 and §12), keeps its inputs through
+    // this load, or it goes silent.
+    const { liveInputsFor } = await import('../audiod/live-inputs.js');
+    const liveInputs = await liveInputsFor(client, song);
+    if (liveInputs.length > 0) {
       session = (
-        await compileSession(root, song, { ...(options.loop === true ? { loop: true } : {}), inputs: keysInputs })
+        await compileSession(root, song, { ...(options.loop === true ? { loop: true } : {}), inputs: liveInputs })
       ).session;
     }
     const loaded = await client.session(session);
@@ -501,7 +502,7 @@ export async function playLiveSession(
         {
           signal: watchAbort.signal,
           ...(options.loop === true ? { loop: true } : {}),
-          inputs: () => keysInputsFor(client, song),
+          inputs: () => liveInputsFor(client, song),
         },
         {
           onEdit: async (edit, fresh) => {

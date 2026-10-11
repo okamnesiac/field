@@ -10,7 +10,8 @@ import { createSong, createTrack } from '../commands/create.js';
 import { init } from '../commands/init.js';
 import { removeTempProject } from '../testing/temp.js';
 import { compileSession } from '../graph/live.js';
-import { keysInputsFor, routeArmed, type Routing } from './routing.js';
+import { liveInputsFor } from '../audiod/live-inputs.js';
+import { routeArmed, type Routing } from './routing.js';
 
 // Playing through the effects (live-supercollider.md chunk 3): an input
 // per armed track in the daemon, and the song's session loaded with them.
@@ -87,9 +88,9 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
       expect(status.inputs).toEqual([expect.objectContaining({ name: 'keys:creek/bass', ring: routed.rings[0] })]);
       // Another command loading the song, as field play, its watch,
       // field ui, and field record do, compiles the input back in.
-      const inputs = await keysInputsFor(client, 'creek');
+      const inputs = await liveInputsFor(client, 'creek');
       expect(inputs).toEqual([{ track: 'bass', input: 'keys:creek/bass' }]);
-      expect(await keysInputsFor(client, 'tall-grass')).toEqual([]);
+      expect(await liveInputsFor(client, 'tall-grass')).toEqual([]);
       const { session } = await compileSession(root, 'creek', { inputs });
       await client.session(session);
       expect((await client.status()).inputs).toEqual([expect.objectContaining({ name: 'keys:creek/bass' })]);
@@ -154,6 +155,18 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
     } finally {
       client.close();
       await routed.close();
+    }
+  });
+
+  it('leaves a song another terminal loaded meanwhile when it closes', async () => {
+    const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
+    const client = await AudiodClient.connect(root);
+    try {
+      await client.session((await compileSession(root, 'tall-grass')).session);
+      await routed.close();
+      expect(await client.status()).toMatchObject({ live: true, song: 'tall-grass' });
+    } finally {
+      client.close();
     }
   });
 

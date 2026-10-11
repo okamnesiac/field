@@ -10,7 +10,9 @@ crash-safe transaction and its recovery — described in
 [Capture as built](#capture-as-built) below. Takes land in the project
 and build in place
 ([projects/recording/readme.md](projects/recording/readme.md));
-comping and monitoring through the engine are later work. This
+monitoring through the engine is `field record --monitoring host`
+([Monitoring](#monitoring-host-vs-apollo-direct)), and comping is later
+work. This
 document records the decisions already settled so the phases that build
 it start from agreement, not from scratch. Language and framework
 decisions (C++/JUCE, and the alternatives rejected) also live in
@@ -59,6 +61,19 @@ During recording, three related but distinct paths run simultaneously:
 - **Apollo direct** — input monitored in the Apollo's DSP (Console) at
   near-zero latency while Field handles playback and capture.
 
+Host monitoring as built: `field record --monitoring host` arms each
+audio track with `monitor`, a name, and the daemon opens a *capture
+input* under it that reads that track's armed channel. The song is
+loaded again with an input window on the track naming it, so the input
+travels the same way a [live input](#live-inputs) does: through the
+track's inserts, each bus above it, and `main`, beside the rendered
+song, playing or stopped. The capture tap still takes the dry channel.
+Disarming closes the capture inputs, and `field record` loads the song
+again without them, while the daemon still plays it and no other take
+records. The bypass-and-report latency policy below is not built: what
+you hear is late by the input and output buffers and the limiters and
+hosted plugins on the path.
+
 **Decision — Console is configured manually in V1.** Console is the
 mixer in the Apollo's DSP and matters only on the input side (preamp
 gain, Unison, direct monitoring, cue mixes); for playback and mixing the
@@ -85,6 +100,12 @@ the timeline:
 ```json
 { "input": "keys-voice", "gain_db": 0 }
 ```
+
+An armed input is the other source: `field record --monitoring host`
+names each armed audio track's input `capture:<song>/<track>`
+([Monitoring](#monitoring-host-vs-apollo-direct)), and the daemon reads
+it straight from the block its callback is in, one channel on both
+sides.
 
 The song still renders as before. The input travels beside it: its
 track and each track above it run a second instance of their chain on
@@ -153,9 +174,9 @@ it.
 Recording is transactional: a `.field/recording/<transaction-id>/`
 directory holds a manifest, a journal, and audio written continuously in
 recoverable chunks. A normal stop finalizes the asset and writes a take
-manifest (timeline placement, device, latency, monitoring context,
-session metadata); after a crash, Field recovers any valid audio from
-the transaction.
+manifest (timeline placement, device, latency, session metadata),
+and the take's row records how it was monitored; after a crash, Field
+recovers any valid audio from the transaction.
 
 ## Capture as built
 
