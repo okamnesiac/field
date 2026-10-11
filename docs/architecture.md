@@ -147,9 +147,12 @@ license. A daemon built from this repository takes the copyleft option
 of each (see the README's License section). A closed-source build would
 need a commercial JUCE license and Steinberg's proprietary VST3 license
 both; the JUCE license alone does not cover the SDK. JUCE and the SDK
-stay **quarantined inside the daemon** — they never leak into other
-components, so licensing exposure is one process and the hosting layer
-stays swappable.
+stay **quarantined inside `native/audiod/`**: the daemon, and
+`field-fixture`, the test plugin the same CMake project builds for the
+hosting tests, whose VST3 build carries both and whose AU build carries
+JUCE. They never leak into the CLI, the workers, or the UI, so licensing
+exposure stays in that one directory and the hosting layer stays
+swappable.
 
 ## SuperCollider
 
