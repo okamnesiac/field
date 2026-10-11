@@ -1361,4 +1361,11 @@ wheel reaches the voice as an optional `mod` control.
   after the take starts. Carrying the wheel's position into a take would
   still miss one set before `field record` arms, which it does just
   before the take, so it waits until a lasting arm (arming.md chunk 3)
-  keeps the MIDI sources open between takes.
+  keeps the MIDI sources open between takes. *Amended (2026-10-11,
+  instrument-knobs.md chunk 3):* a take now starts where `field keys`
+  left the wheel. `field keys` publishes the controllers it sent,
+  `field record` passes them in `arm`, and the daemon writes them at
+  the take's first sample, so `docs/keys.md` drops its advice to set
+  the wheel after the take starts. Only a hardware wheel moved before
+  the arm is still missed
+  ([instrument-knobs.md](../instrument-knobs/readme.md) §2.8).

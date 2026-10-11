@@ -512,7 +512,7 @@ keyboard-instrument.md §14.5's gap for the wheel.
 | `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls and `FIELD_KNOBS`, the checked copy of the knob file a voice reads, under "Make an instrument playable"; and how a take starts (chunk 3). |
 | `docs/build-graph.md` | The voice contract gains the `cc<n>` controls and `FIELD_KNOBS`, and the knob file joins a take's render inputs. |
 | `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 3). |
-| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits and at §3's choice of Musical Typing as the default, each pointing here. |
+| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits, at §3's choice of Musical Typing as the default, and at §14.5's gap for a wheel left up before a take, each pointing here. |
 
 ## 3 Why this design (DECIDED, 2026-10-11, Justin's review of #202)
 
