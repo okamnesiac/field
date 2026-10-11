@@ -245,7 +245,8 @@ function instrumentText({ name, status }: InstrumentState): string {
 
 // The sounding notes come last, so playing changes only the end of the
 // line and nothing after the notes moves as you play. A line wider than
-// the terminal gives up the text before the notes, never the notes.
+// the terminal gives up the text before the notes, and the notes only
+// when they alone are wider than it.
 export function statusText(
   session: KeysSession,
   layout: KeyboardLayout | undefined,

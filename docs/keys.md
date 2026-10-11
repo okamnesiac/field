@@ -55,7 +55,7 @@ for, once, and a new process gets a new MIDI client.
 3. Play. The status line shows the keymap, the transpose, the velocity,
    and last the notes sounding, so playing changes only the end of the
    line. On a narrow terminal the text before the notes is shortened,
-   never the notes.
+   and the notes only when they alone are wider than the terminal.
 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
    every held note and then All Notes Off, so nothing is left sounding,
    and `Field Keys` disappears.
