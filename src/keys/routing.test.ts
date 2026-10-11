@@ -135,6 +135,28 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
     }
   });
 
+  it('keeps the daemon running when the transport stops or pauses under a limiter on main', async () => {
+    // A stop or a pause rebuilds the idle path's chain, whose limiter then
+    // withholds its lookahead again; the delay after it must hold that
+    // many zeros again, or the next idle block reads past its end.
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      'name: main\ninserts:\n  - effect: limit\n    ceiling_db: -1\ninputs:\n  - track: bass\n',
+    );
+    const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
+    const client = await AudiodClient.connect(root);
+    try {
+      for (const halt of [() => client.stop(), () => client.pause(), () => client.stop()]) {
+        await halt();
+        await new Promise((r) => setTimeout(r, 300));
+        expect((await client.status()).inputs?.map((i) => i.name)).toEqual(['keys:creek/bass']);
+      }
+    } finally {
+      client.close();
+      await routed.close();
+    }
+  });
+
   it('says whether FieldOut is writing the ring', async () => {
     const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
     try {

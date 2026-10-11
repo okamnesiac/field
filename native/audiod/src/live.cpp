@@ -353,6 +353,17 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
     buildOverlay();
 }
 
+juce::int64 LiveSession::chainLatency (const std::vector<ChainStage>& chain)
+{
+    juce::int64 latency = 0;
+    for (const auto& stage : chain)
+        if (stage.limiter != nullptr)
+            latency += stage.limiter->latencySamples();
+        else if (stage.plugin != nullptr)
+            latency += stage.plugin->latencySamples();
+    return latency;
+}
+
 void LiveSession::buildOverlay()
 {
     const int count = (int) tracks.size();
@@ -459,11 +470,7 @@ void LiveSession::buildOverlay()
             if (t != outputTrack)
             {
                 buildStages (slot.chain, track.chainSpecs, track.rate, 0);
-                for (const auto& stage : slot.chain)
-                    if (stage.limiter != nullptr)
-                        latency += stage.limiter->latencySamples();
-                    else if (stage.plugin != nullptr)
-                        latency += stage.plugin->latencySamples();
+                latency = chainLatency (slot.chain);
             }
             slot.outLatency = slot.inLatency + latency;
             slot.pre.assign (2, std::vector<float>());
@@ -483,12 +490,7 @@ void LiveSession::buildOverlay()
     {
         const Track& output = tracks[(size_t) outputTrack];
         buildStages (idleChain, output.chainSpecs, output.rate, 0);
-        juce::int64 latency = 0;
-        for (const auto& stage : idleChain)
-            if (stage.limiter != nullptr)
-                latency += stage.limiter->latencySamples();
-            else if (stage.plugin != nullptr)
-                latency += stage.plugin->latencySamples();
+        const juce::int64 latency = chainLatency (idleChain);
         idleBlock.assign (2, std::vector<float>());
         idleDelayed.assign (2, std::vector<float> ((size_t) latency, 0.0f));
         reserveAll (idleBlock, 16384);
@@ -502,8 +504,11 @@ void LiveSession::resetIdle()
         return;
     const Track& output = tracks[(size_t) outputTrack];
     buildStages (idleChain, output.chainSpecs, output.rate, 0);
+    // A fresh chain withholds its latency again, so the delay holds that
+    // many zeros again, as buildOverlay leaves it; within the reserve.
+    const juce::int64 latency = chainLatency (idleChain);
     for (auto& delayed : idleDelayed)
-        std::fill (delayed.begin(), delayed.end(), 0.0f);
+        delayed.assign ((size_t) latency, 0.0f);
 }
 
 void LiveSession::renderIdle (float* const* out, int numChannels, int n)

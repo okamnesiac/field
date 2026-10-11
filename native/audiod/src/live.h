@@ -229,6 +229,9 @@ private:
                       const std::vector<ChainSpec>& specs,
                       int trackRate,
                       juce::int64 startClock) const;
+    // The samples a chain withholds before its first output: its limiters'
+    // lookahead and its hosted plugins' reported latency.
+    static juce::int64 chainLatency (const std::vector<ChainStage>& chain);
     // The history the output chain must hear for its state at a
     // position to be right within the design's audibility threshold —
     // what locate renders and discards after a rebuild.

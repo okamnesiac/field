@@ -35,9 +35,14 @@ export async function keysCommand(targets: string[], options: KeysOptions): Prom
     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
   }
   const root = findProjectRoot(process.cwd());
-  await withKittyKeyboard({ stdin, stdout }, (rest) =>
-    play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest),
-  );
+  let abandoned = false;
+  await withKittyKeyboard({ stdin, stdout }, async (rest) => {
+    abandoned = (await play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest)) === 'abandoned';
+  });
+  // Quit before routing landed: the daemon may still be answering, and
+  // waiting for it would hold the prompt. Any input it opens late closes
+  // with this process's connection.
+  if (abandoned) process.exit(0);
 }
 
 // Raw mode and the protocol flags are the terminal's state, not ours, so
@@ -86,7 +91,7 @@ export type InstrumentState = {
   reload?: { loaded: true } | { failed: string };
 };
 
-async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
+async function play(tty: Tty, options: PlayOptions, carried: string): Promise<'abandoned' | undefined> {
   // Armed tracks play through their effects when the daemon can take
   // their voices (live-supercollider.md chunk 3): each track then gets a
   // voice of its own, writing into its own input. Otherwise each program
@@ -94,10 +99,13 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   // Ctrl-C quits while the daemon is still answering: the key handler
   // that would see it does not exist yet, and a daemon starting cold can
   // take seconds.
+  let pending = carried;
   let onQuit: ((chunk: Buffer) => void) | undefined;
   const quit = new Promise<'quit'>((resolve) => {
     onQuit = (chunk) => {
-      if (decodeTerminal(chunk.toString('utf8')).events.some(isQuit)) resolve('quit');
+      const { events, rest } = decodeTerminal(pending + chunk.toString('utf8'));
+      pending = rest;
+      if (events.some(isQuit)) resolve('quit');
     };
     tty.stdin.on('data', onQuit);
   });
@@ -107,15 +115,11 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
       : Promise.resolve(undefined);
   const first = await Promise.race([routing0, quit]);
   tty.stdin.removeListener('data', onQuit!);
-  if (first === 'quit') {
-    // Whatever routing still finishes is undone.
-    void routing0.then((late) => (late !== undefined && 'programs' in late ? late.close() : undefined));
-    return;
-  }
+  if (first === 'quit') return 'abandoned';
   const routed = first;
   const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
   try {
-    await playRouted(tty, options, carried, routed, routing);
+    await playRouted(tty, options, pending, routed, routing);
   } finally {
     // However the session ends, a throw included, its inputs close; a
     // process killed outright has the daemon close them with its
@@ -204,7 +208,7 @@ async function playRouted(
       .then((flowing) => {
         if (flowing || instrument === undefined) return;
         // The voices play into a bus nothing reads: not dry, silent.
-        instrument.silent = 'scsynth is not writing the voice into the daemon, so FieldOut did not load';
+        instrument.silent = 'FieldOut did not load in scsynth, so nothing reaches the daemon';
         draw();
       })
       .catch(() => {});
