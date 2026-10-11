@@ -1,0 +1,1540 @@
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 4033acfb..dbccf56c 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -194,6 +194,10 @@ OSC over UDP, which TypeScript handles fine. Two modes:
+   the daemon's rather than through the session graph. Bringing it into
+   that graph, so a track's inserts process it, is
+   [live-supercollider](projects/live-supercollider/readme.md)'s work.
++  The engine's half has landed: a live session carries an input up
++  through every chain above its track ([audio-engine.md](audio-engine.md)
++  "Live inputs"), and the ring that feeds it from SuperCollider is
++  next.
+ 
+ SC source is tracked in Git and treated as code.
+ 
+diff --git a/docs/audio-engine.md b/docs/audio-engine.md
+index a4cd7eb5..0f24d072 100644
+--- a/docs/audio-engine.md
++++ b/docs/audio-engine.md
+@@ -75,6 +75,37 @@ reportable. A latency policy can bypass or substitute high-latency
+ plugins (look-ahead limiters, linear-phase EQ) when entering record
+ mode; any changes made for low-latency mode are clearly reported.
+ 
++## Live inputs
++
++A live session can carry an *input*: a source outside the session that
++the daemon reads every block, such as the voice `field keys` plays. An
++input window names its source and has a gain and a pan, but no place on
++the timeline:
++
++```json
++{ "input": "keys-voice", "gain_db": 0 }
++```
++
++The song still renders as before. The input travels beside it: its
++track and each track above it run a second instance of their chain on
++what the input carries, and `main` adds the result to its own mix before
++its own chain. The input reaches each track once, however many times
++the arrangement places its track. Where it reaches a track along paths
++of unequal latency, the shorter ones are delayed to match the longest,
++and it reaches `main` late by that longest path's limiters and hosted
++plugins.
++[live-supercollider.md](projects/live-supercollider/readme.md) §9
++describes the overlay and what it gives up.
++
++Today only `field-audiod --render-live` feeds an input, from a file:
++
++```sh
++field-audiod --render-live session.json out.wav --input keys-voice=take.wav
++```
++
++The `session` op refuses a session with an input window, because nothing
++in the daemon feeds one yet.
++
+ ## Crash-safe recording
+ 
+ Recording is transactional: a `.field/recording/<transaction-id>/`
+diff --git a/docs/build-graph.md b/docs/build-graph.md
+index bf518a32..3538d709 100644
+--- a/docs/build-graph.md
++++ b/docs/build-graph.md
+@@ -67,7 +67,10 @@ gain move ramps in the next block, and anything structural swaps the
+ session at a block boundary with the transport carried — no wrap to
+ wait for (realtime.md chunk 3). The compile is where the cache pays
+ twice (realtime.md decision 4): a track whose stem action is cached is
+-served as that stem — automatic freezing, no live chain to run — and
++served as that stem — automatic freezing, no live chain to run, except
++for a track carrying a live input and every track above it, which keep
++their chains for the input ([audio-engine.md](audio-engine.md) "Live
++inputs") — and
+ under watch the dirty stems rebuild behind the play and freeze on the
+ next compile, a swap with nothing to hear because live and offline are
+ bit-identical. The compile still runs `build` for the session's file
+diff --git a/docs/projects/live-supercollider/readme.md b/docs/projects/live-supercollider/readme.md
+index 3d56e1c0..b88ab6a8 100644
+--- a/docs/projects/live-supercollider/readme.md
++++ b/docs/projects/live-supercollider/readme.md
+@@ -1,6 +1,6 @@
+ ---
+-status: draft
+-priority: next
++status: in-progress
++priority: now
+ ---
+ 
+ # Live SuperCollider
+@@ -52,6 +52,16 @@ output into it, and the daemon reads it with a jitter buffer and drift
+ correction. `field keys` asks the daemon to put an input on each armed
+ MIDI track and points the voice host at that ring instead of the device.
+ 
++*Amended (2026-10-11, as built in chunk 1):* the tracks on an input's
++path do not trade their pre-rendering for per-block evaluation, as this
++section first said ("Every track on the path from an input up to `main`
++becomes a *live* track, which mixes and runs its chain in the audio
++callback instead of rendering at load"). The song renders exactly as
++before, and the input travels beside it through a second instance of
++each chain on its path, summed into `main` before `main`'s own chain.
++§9 describes that overlay and why it replaced the first design. The
++freeze still never collapses a track on the path.
++
+ ### 2.1 Flow
+ 
+ 1. You run `field keys creek/track:keys-bus`. Arming resolves it to the
+@@ -83,6 +93,13 @@ MIDI track and points the voice host at that ring instead of the device.
+ | Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. |
+ | `FieldOut` (new, `native/sc-fieldout/`) | An `scsynth` UGen plugin writing its input into a POSIX shared-memory, single-producer, single-consumer ring. |
+ 
++*Amended (2026-10-11, as built in chunk 1):* the input window is
++`{input: <name>, gain_db, pan?}`, where the name is the source the
++daemon resolves, a ring from chunk 2 on; the channel count is always
++two, as every other window's. The "Live tracks" row is §9's overlay,
++and `comp_delay` stays zero, because the overlay runs late by its own
++chain latency instead of delaying the song.
++
+ ## 3 Why this design
+ 
+ Three ways to bring the voice in were weighed:
+@@ -140,9 +157,14 @@ jitter buffer, at least one of the larger of the two processes' blocks.
+ 
+ 1. **The transport.** The plan recommends the shared-memory ring.
+    Justin decides between it and the loopback prototype before chunk 2.
++   Taken as recommended (2026-10-11): Justin started the work without
++   choosing otherwise, so chunk 2 builds the ring. Choosing the loopback
++   prototype instead reopens this before chunk 2 lands.
+ 2. **Playing with the transport stopped.** Live tracks running while the
+    song is stopped need the callback to run with no playhead; the plan
+-   assumes they do. Justin confirms before chunk 3.
++   assumes they do. Justin confirms before chunk 3. Taken as assumed
++   (2026-10-11), on the same start: chunk 3 runs the overlay and
++   `main`'s chain while the song is stopped.
+ 3. **Several armed tracks under one bus.** Each armed MIDI track gets its
+    own input and ring, so a bus with two armed tracks sums two live
+    inputs. Decided with arming.md chunk 3, which settles how armed
+@@ -158,3 +180,86 @@ The survey behind this plan, as the code stood on 2026-10-11:
+ - **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1.
+ - **Changing a live session** swaps the whole session at a block boundary (the `session` op); there are no per-insert edits.
+ - **The voice host** runs `scsynth` with a hardware buffer of 128 frames; the daemon takes JUCE's default buffer.
++
++## 9 The overlay
++
++What an input reaches is evaluated per block beside the song rather than
++in place of it. Each block, in the audio callback:
++
++1. Each input window reads its source, one block of stereo.
++2. Each track the input reaches, children first, mixes its inputs and
++   the overlay blocks of the live tracks it reads, with each window's
++   gain and pan, then runs a second instance of its own chain. A
++   pre-tap cable reads the block before that chain.
++3. Every feed into a track is first delayed to the track's longest
++   incoming path. An input arrives at once, a pre-tap edge as late as
++   what reached its child, and a post edge that plus its child's chain
++   latency, so an input that reaches a track two ways, such as through
++   a bus with a limiter and through a reverb send, never meets itself
++   offset.
++4. The chain's output passes through a delay preloaded with the chain's
++   latency, its limiters' and hosted plugins' together, so every block
++   is exactly one block, late by that latency. A limiter's stream lag
++   varies from block to block; the delay absorbs it.
++5. `main` adds what reaches it to its own mix of the song, and its own
++   chain runs on the sum. The input reaches `main` late by its longest
++   path's latency.
++
++An input has no place on the timeline, so it passes through each
++window's gain and pan but not its start, duration, or fades. It reaches
++each track that reads its track once, through the first window that
++does, however many times the arrangement places it. The overlay chains
++keep their state across a locate, and the warmup a far locate renders
++into the void reads no input, because a source read there would be
++consumed off the audio thread. A gain ramp on a window the input passes
++through glides the input with the song, sample by sample on the same
++timeline. A session swap builds the overlay afresh in the new session:
++the input goes silent for its path's latency and any tail its chains
++were ringing stops. Chunk 3 swaps sessions under a playing input, and
++decides there whether that gap is acceptable or the overlay's state
++should carry across.
++
++**Why not evaluate the path in place.** A track's content sits on a
++timeline its placement offsets, and a track placed more than once would
++need to be at several positions at once. creek places `phrase` three
++times, so an input under `phrase` would have three "nows", and a
++streaming chain can only be in one. The overlay keeps the song's
++render untouched, and with it the golden equivalence the live engine
++rests on.
++
++**What it gives up.** Linear inserts (eq, reverb, plate, hall) give the
++same result whether they process the song and the input together or
++apart, and `main`'s chain processes the true sum. A limiter or hosted
++plugin on a track between the input and `main` hears the input apart
++from that track's own content, so it does not duck the song under your
++playing. That is a monitoring difference only: a take recorded on the
++track renders through the real chain.
++
++**Limits in chunk 1.** An input's path stays at one rate, because the
++overlay has no converter; a path that crosses rates is refused, by the
++compiler and by the engine. Each input name appears once, and an input
++must sit under `main`.
++
++## 10 Progress
++
++- 2026-10-11 — Chunk 1 (branch `live/input-window`). Session version 4
++  adds the input window, `compileSession` takes `inputs` and keeps each
++  input's path out of the freeze, and the engine runs §9's overlay.
++  `field-audiod --render-live --input <name>=<file.wav>` feeds an input
++  from a file, which is how `src/audiod/live-input.test.ts` proves
++  criterion 1: the output equals the offline render of the same signal
++  through the same chains, sample for sample, 145 samples late, the
++  input track's limiter latency, for as long as the signal lasts. Past
++  it the two part on purpose: the stem ends with its track's content and
++  cuts an eq's ring there, and an input has no end, so the overlay rings
++  out. The test found the compiler's limiter latency one sample short of
++  the engine's window, which `insertLatency` now mirrors operation for
++  operation. The review of the chunk found paths of unequal latency
++  meeting offset, which step 3 now aligns; a second golden holds an
++  input reaching `main` three ways, at 0, 145, and 290 samples, to the
++  offline render late by 290, with the tone loud enough that all three
++  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2 holds in the compiled
++  session: the input's track and the bus above it keep their chains,
++  and a sibling fed by a file is served from its stem. The daemon's
++  `session` op refuses an input window until chunk 2 gives it a source,
++  so nothing outside the tests can attach one yet.
+diff --git a/native/audiod/src/live.cpp b/native/audiod/src/live.cpp
+index 905b5f9c..478136db 100644
+--- a/native/audiod/src/live.cpp
++++ b/native/audiod/src/live.cpp
+@@ -7,13 +7,14 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <set>
+ #include <stdexcept>
+ 
+ namespace field
+ {
+ namespace
+ {
+-constexpr int liveSessionVersion = 3; // session.ts SESSION_VERSION
++constexpr int liveSessionVersion = 4; // session.ts SESSION_VERSION
+ constexpr int engineBlock = 512; // internal granularity; output is block-size invariant
+ 
+ double requireNumber (const juce::var& object, const char* key, const char* what)
+@@ -42,9 +43,38 @@ const juce::Array<juce::var>& requireArray (const juce::var& object,
+     return *array;
+ }
+ 
++void reserveAll (std::vector<std::vector<float>>& channels, size_t frames)
++{
++    for (auto& channel : channels)
++        channel.reserve (frames);
++}
++
++// A file played as an input: what --render-live feeds an input window,
++// then silence.
++class FileInput final : public LiveInput
++{
++public:
++    explicit FileInput (std::vector<std::vector<float>> channelsIn) : channels (std::move (channelsIn)) {}
++
++    void read (float* left, float* right, int n) override
++    {
++        const auto& l = channels[0];
++        const auto& r = channels.size() > 1 ? channels[1] : channels[0];
++        for (int i = 0; i < n; ++i, ++at)
++        {
++            left[i] = at < l.size() ? l[at] : 0.0f;
++            right[i] = at < r.size() ? r[at] : 0.0f;
++        }
++    }
++
++private:
++    std::vector<std::vector<float>> channels;
++    size_t at = 0;
++};
++
+ } // namespace
+ 
+-LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoot)
++LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoot, const LiveInputs& inputs)
+ {
+     if ((int) requireNumber (session, "version", "session") != liveSessionVersion)
+         throw std::runtime_error ("session version mismatch — rebuild the daemon (pnpm build:native)");
+@@ -74,6 +104,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
+ 
+     // Second pass: windows, chains, buffers.
+     std::map<std::string, int> fileIndex;
++    std::set<std::string> inputNames;
+     for (int t = 0; t < (int) trackArray.size(); ++t)
+     {
+         const auto& entry = trackArray.getReference (t);
+@@ -82,6 +113,31 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
+         for (const auto& input : requireArray (entry, "inputs", "track"))
+         {
+             Window window;
++            const auto inputName = input.getProperty ("input", juce::var());
++            if (! inputName.isVoid())
++            {
++                // A live input (live-supercollider.md §2): a gain and a
++                // pan, and no place on the timeline — the overlay
++                // carries it (§9).
++                window.kind = Window::input;
++                window.gainDb = requireNumber (input, "gain_db", "input window");
++                const auto inputPan = input.getProperty ("pan", juce::var());
++                window.pan = inputPan.isVoid() ? 0.0 : (double) inputPan;
++                const auto name = inputName.toString().toStdString();
++                const auto fed = inputs.find (name);
++                if (fed == inputs.end() || fed->second == nullptr)
++                    throw std::runtime_error ("session names input \"" + name + "\", which nothing feeds");
++                if (! inputNames.insert (name).second)
++                    throw std::runtime_error ("input \"" + name + "\" is named twice");
++                if (track.rate != rate)
++                    throw std::runtime_error ("input \"" + name + "\" is on \"" + track.name + "\" at "
++                                              + std::to_string (track.rate) + " Hz; an input plays at the session's "
++                                              + std::to_string (rate) + " Hz");
++                window.source = (int) inputSources.size();
++                inputSources.push_back (fed->second);
++                track.windows.push_back (window);
++                continue;
++            }
+             window.start = (juce::int64) requireNumber (input, "start", "window");
+             window.duration = (juce::int64) requireNumber (input, "duration", "window");
+             window.readOffset = (juce::int64) requireNumber (input, "read_offset", "window");
+@@ -281,7 +337,7 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
+     // After load, mixInputBlock's ensure is a map lookup.
+     for (const auto& track : tracks)
+         for (const auto& window : track.windows)
+-            if (window.kind != Window::file
++            if (window.kind != Window::file && window.kind != Window::input
+                 && tracks[(size_t) window.source].rate != track.rate)
+                 ensureConverted (window.source, track.rate,
+                                  window.kind == Window::receivePre);
+@@ -294,6 +350,233 @@ LiveSession::LiveSession (const juce::var& session, const juce::File& projectRoo
+     }
+     outputPending.assign (2, std::vector<float>());
+     primeOutput();
++    buildOverlay();
++}
++
++void LiveSession::buildOverlay()
++{
++    const int count = (int) tracks.size();
++    const auto reads = [] (const Window& window, const std::vector<bool>& set)
++    {
++        return window.kind != Window::file && window.kind != Window::input
++               && set[(size_t) window.source];
++    };
++    // What an input reaches: its track, then upward to a fixed point
++    // through every window that places or receives a track on it.
++    std::vector<bool> live ((size_t) count, false);
++    for (int t = 0; t < count; ++t)
++        for (const auto& window : tracks[(size_t) t].windows)
++            if (window.kind == Window::input)
++                live[(size_t) t] = true;
++    for (bool grew = true; grew;)
++    {
++        grew = false;
++        for (int t = 0; t < count; ++t)
++            if (! live[(size_t) t])
++                for (const auto& window : tracks[(size_t) t].windows)
++                    if (reads (window, live))
++                    {
++                        live[(size_t) t] = grew = true;
++                        break;
++                    }
++    }
++
++    // Children before the tracks that read them: a track joins once
++    // every live track it reads has. Placement cycles never validate,
++    // so every live track joins.
++    overlayIndex.assign ((size_t) count, -1);
++    std::vector<bool> joined ((size_t) count, false);
++    for (bool grew = true; grew;)
++    {
++        grew = false;
++        for (int t = 0; t < count; ++t)
++        {
++            if (! live[(size_t) t] || joined[(size_t) t])
++                continue;
++            Track& track = tracks[(size_t) t];
++            bool ready = true;
++            for (const auto& window : track.windows)
++                if (reads (window, live) && ! joined[(size_t) window.source])
++                    ready = false;
++            if (! ready)
++                continue;
++
++            OverlayTrack slot;
++            slot.track = t;
++            std::set<std::pair<int, bool>> placed;
++            for (int w = 0; w < (int) track.windows.size(); ++w)
++            {
++                const auto& window = track.windows[(size_t) w];
++                if (window.kind == Window::input)
++                {
++                    OverlayInput input;
++                    input.window = w;
++                    slot.inputs.push_back (std::move (input));
++                    continue;
++                }
++                if (! reads (window, live))
++                    continue;
++                // Once per child and tap: the input is heard once,
++                // through the first window placing its track (§9).
++                const bool pre = window.kind == Window::receivePre;
++                if (! placed.insert ({ window.source, pre }).second)
++                    continue;
++                if (tracks[(size_t) window.source].rate != track.rate)
++                    throw std::runtime_error ("a live input crosses from \""
++                                              + tracks[(size_t) window.source].name + "\" into \""
++                                              + track.name + "\" at another rate; an input's path needs one rate");
++                OverlayEdge edge;
++                edge.child = window.source;
++                edge.window = w;
++                edge.pre = pre;
++                slot.edges.push_back (std::move (edge));
++            }
++
++            // Align every feed to the latest: an input arrives at once, a
++            // pre-tap edge as late as what reached its child, a post edge
++            // that plus its child's chain.
++            const auto arrival = [this] (const OverlayEdge& edge)
++            {
++                const auto& from = overlay[(size_t) overlayIndex[(size_t) edge.child]];
++                return edge.pre ? from.inLatency : from.outLatency;
++            };
++            for (const auto& edge : slot.edges)
++                slot.inLatency = std::max (slot.inLatency, arrival (edge));
++            const auto prepare = [] (DelayLine& delay, juce::int64 samples)
++            {
++                delay.samples = samples;
++                delay.line.assign (2, std::vector<float> ((size_t) samples, 0.0f));
++                delay.out.assign (2, std::vector<float>());
++                reserveAll (delay.line, (size_t) samples + 16384);
++                reserveAll (delay.out, 16384);
++            };
++            for (auto& input : slot.inputs)
++                prepare (input.delay, slot.inLatency);
++            for (auto& edge : slot.edges)
++                prepare (edge.delay, slot.inLatency - arrival (edge));
++
++            juce::int64 latency = 0;
++            if (t != outputTrack)
++            {
++                buildStages (slot.chain, track.chainSpecs, track.rate, 0);
++                for (const auto& stage : slot.chain)
++                    if (stage.limiter != nullptr)
++                        latency += stage.limiter->latencySamples();
++                    else if (stage.plugin != nullptr)
++                        latency += stage.plugin->latencySamples();
++            }
++            slot.outLatency = slot.inLatency + latency;
++            slot.pre.assign (2, std::vector<float>());
++            slot.post.assign (2, std::vector<float>());
++            slot.delayed.assign (2, std::vector<float> ((size_t) latency, 0.0f));
++            reserveAll (slot.pre, 16384);
++            reserveAll (slot.post, 16384);
++            reserveAll (slot.delayed, (size_t) latency + 16384);
++            overlayIndex[(size_t) t] = (int) overlay.size();
++            overlay.push_back (std::move (slot));
++            joined[(size_t) t] = grew = true;
++        }
++    }
++    if (! overlay.empty())
++        inputScratch.assign (2, std::vector<float> (8192, 0.0f));
++}
++
++// A feed through its delay line: the block that leaves it now, which is
++// the block that came in `samples` ago.
++static void passThrough (std::vector<std::vector<float>>& line,
++                         std::vector<std::vector<float>>& out,
++                         juce::int64 samples,
++                         const float* left,
++                         const float* right,
++                         int n,
++                         const float*& leftOut,
++                         const float*& rightOut)
++{
++    if (samples == 0)
++    {
++        leftOut = left;
++        rightOut = right;
++        return;
++    }
++    const float* in[2] = { left, right };
++    for (int c = 0; c < 2; ++c)
++    {
++        line[(size_t) c].insert (line[(size_t) c].end(), in[c], in[c] + n);
++        out[(size_t) c].assign (line[(size_t) c].begin(), line[(size_t) c].begin() + n);
++        line[(size_t) c].erase (line[(size_t) c].begin(), line[(size_t) c].begin() + n);
++    }
++    leftOut = out[0].data();
++    rightOut = out[1].data();
++}
++
++void LiveSession::renderOverlay (int n, juce::int64 absoluteFrom)
++{
++    if (inputScratch[0].size() < (size_t) n)
++        for (auto& channel : inputScratch)
++            channel.resize ((size_t) n, 0.0f);
++    // mixInputBlock's arithmetic without the fades: double accumulation,
++    // the same balance law, and a ramp's glide sample by sample, so an
++    // input adds exactly what a file window with its samples would.
++    const auto add = [&] (std::vector<std::vector<float>>& block, const Window& window, const float* left,
++                          const float* right)
++    {
++        const double baseGain = std::pow (10.0, window.gainDb / 20.0);
++        double balanceL = 1.0, balanceR = 1.0;
++        dsp::balanceGains (window.pan, balanceL, balanceR);
++        for (int i = 0; i < n; ++i)
++        {
++            const double g = rampedGain (window, absoluteFrom + i, baseGain);
++            block[0][(size_t) i] = (float) ((double) block[0][(size_t) i] + (double) left[i] * g * balanceL);
++            block[1][(size_t) i] = (float) ((double) block[1][(size_t) i] + (double) right[i] * g * balanceR);
++        }
++    };
++    for (auto& slot : overlay)
++    {
++        Track& track = tracks[(size_t) slot.track];
++        for (auto& channel : slot.post)
++            channel.assign ((size_t) n, 0.0f);
++        float* left = inputScratch[0].data();
++        float* right = inputScratch[1].data();
++        for (auto& input : slot.inputs)
++        {
++            const Window& window = track.windows[(size_t) input.window];
++            if (overlayReadsInputs)
++                inputSources[(size_t) window.source]->read (left, right, n);
++            else
++            {
++                std::fill (left, left + n, 0.0f);
++                std::fill (right, right + n, 0.0f);
++            }
++            const float* l = nullptr;
++            const float* r = nullptr;
++            passThrough (input.delay.line, input.delay.out, input.delay.samples, left, right, n, l, r);
++            add (slot.post, window, l, r);
++        }
++        for (auto& edge : slot.edges)
++        {
++            const auto& from = overlay[(size_t) overlayIndex[(size_t) edge.child]];
++            const auto& source = edge.pre ? from.pre : from.post;
++            const float* l = nullptr;
++            const float* r = nullptr;
++            passThrough (edge.delay.line, edge.delay.out, edge.delay.samples, source[0].data(), source[1].data(), n,
++                         l, r);
++            add (slot.post, track.windows[(size_t) edge.window], l, r);
++        }
++        // The output track's own chain runs on the true sum in renderBlock.
++        if (slot.track == outputTrack)
++            continue;
++        for (int c = 0; c < 2; ++c)
++            slot.pre[(size_t) c].assign (slot.post[(size_t) c].begin(), slot.post[(size_t) c].end());
++        runStages (slot.chain, slot.post, 0);
++        for (int c = 0; c < 2; ++c)
++        {
++            auto& delayed = slot.delayed[(size_t) c];
++            auto& post = slot.post[(size_t) c];
++            delayed.insert (delayed.end(), post.begin(), post.end());
++            post.assign (delayed.begin(), delayed.begin() + n);
++            delayed.erase (delayed.begin(), delayed.begin() + n);
++        }
++    }
+ }
+ 
+ void LiveSession::primeOutput()
+@@ -335,6 +618,14 @@ void LiveSession::primeOutput()
+ 
+ 
+ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
++{
++    buildStages (track.chain, track.chainSpecs, track.rate, startClock);
++}
++
++void LiveSession::buildStages (std::vector<ChainStage>& chain,
++                               const std::vector<ChainSpec>& specs,
++                               int trackRate,
++                               juce::int64 startClock) const
+ {
+     // Hosted stages survive the rebuild: a locate runs under liveLock,
+     // where reinstantiation — binary load, state blob from disk,
+@@ -345,12 +636,12 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
+     // order; reset() zeroes processing state, and the far-seek warmup
+     // carries the same −60 dB claim it always made for hosted arms.
+     std::vector<std::unique_ptr<LivePluginStage>> surviving;
+-    for (auto& stage : track.chain)
++    for (auto& stage : chain)
+         if (stage.plugin != nullptr)
+             surviving.push_back (std::move (stage.plugin));
+     size_t reused = 0;
+-    track.chain.clear();
+-    for (const auto& spec : track.chainSpecs)
++    chain.clear();
++    for (const auto& spec : specs)
+     {
+         ChainStage stage;
+         if (spec.kind == 0)
+@@ -358,10 +649,14 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
+             // track's chain runs on its own clock, exactly as its
+             // offline stem does.
+             stage.eq = std::make_unique<dsp::Eq> (spec.bands, spec.normalize,
+-                                                  (double) track.rate, (size_t) 2);
++                                                  (double) trackRate, (size_t) 2);
+         else if (spec.kind == 1)
++        {
+             stage.limiter = std::make_unique<dsp::Limiter> (spec.limiter, (size_t) 2,
+                                                             spec.horizonDb);
++            stage.scratch.assign (2, std::vector<float>());
++            reserveAll (stage.scratch, 16384 + (size_t) stage.limiter->latencySamples());
++        }
+         else if (spec.kind == 2)
+             stage.reverb = std::make_unique<dsp::Reverb> (spec.reverb, (size_t) 2);
+         else if (spec.kind == 3)
+@@ -392,11 +687,11 @@ void LiveSession::buildChain (Track& track, juce::int64 startClock) const
+                 // `latency:` was pinned under (#150 review) — and the
+                 // stage splits any larger block down to it.
+                 stage.plugin = std::make_unique<LivePluginStage> (spec.plugin,
+-                                                                  (double) track.rate, 512);
++                                                                  (double) trackRate, 512);
+             }
+             stage.plugin->startAt (startClock);
+         }
+-        track.chain.push_back (std::move (stage));
++        chain.push_back (std::move (stage));
+     }
+ }
+ 
+@@ -411,6 +706,8 @@ void LiveSession::mixInputBlock (Track& track,
+ 
+     for (auto& window : track.windows)
+     {
++        if (window.kind == Window::input)
++            continue; // the overlay carries it (§9)
+         const juce::int64 overlapStart = std::max (from, window.start);
+         const juce::int64 overlapEnd = std::min (from + n, window.start + window.duration);
+         if (overlapEnd <= overlapStart)
+@@ -463,26 +760,7 @@ void LiveSession::mixInputBlock (Track& track,
+             const juce::int64 s = window.readOffset + i - window.compDelay;
+             if (s < 0 || (size_t) s >= srcL->size())
+                 continue;
+-            double g = baseGain;
+-            if (window.rampStart >= 0)
+-            {
+-                // A dB-linear glide from rampFromDb to gainDb, evaluated
+-                // on the unwrapped timeline; before it starts, the old
+-                // value; after, the new one — and after a wrap, still
+-                // the new one.
+-                const juce::int64 into = absoluteFrom + (at - from) - window.rampStart;
+-                const double progress = window.rampLength <= 0
+-                                            ? 1.0
+-                                            : std::clamp ((double) into / (double) window.rampLength,
+-                                                          0.0, 1.0);
+-                if (into >= 0)
+-                    g = std::pow (10.0,
+-                                  (window.rampFromDb
+-                                   + (window.gainDb - window.rampFromDb) * progress)
+-                                      / 20.0);
+-                else
+-                    g = std::pow (10.0, window.rampFromDb / 20.0);
+-            }
++            double g = rampedGain (window, absoluteFrom + (at - from), baseGain);
+             if ((double) i < (double) window.fadeIn)
+                 g *= (double) i / (double) window.fadeIn;
+             const double fromEnd = (double) (window.duration - 1 - i);
+@@ -497,6 +775,22 @@ void LiveSession::mixInputBlock (Track& track,
+     }
+ }
+ 
++double LiveSession::rampedGain (const Window& window, juce::int64 absoluteAt, double baseGain)
++{
++    if (window.rampStart < 0)
++        return baseGain;
++    // A dB-linear glide from rampFromDb to gainDb, evaluated on the
++    // unwrapped timeline; before it starts, the old value; after, the new
++    // one — and after a wrap, still the new one.
++    const juce::int64 into = absoluteAt - window.rampStart;
++    const double progress = window.rampLength <= 0
++                                ? 1.0
++                                : std::clamp ((double) into / (double) window.rampLength, 0.0, 1.0);
++    if (into >= 0)
++        return std::pow (10.0, (window.rampFromDb + (window.gainDb - window.rampFromDb) * progress) / 20.0);
++    return std::pow (10.0, window.rampFromDb / 20.0);
++}
++
+ void LiveSession::ensureConverted (int trackIndexArg, int targetRate, bool pre)
+ {
+     Track& child = tracks[(size_t) trackIndexArg];
+@@ -562,9 +856,16 @@ void LiveSession::produceUntil (int trackIndexArg, juce::int64 outputSamples)
+ 
+ void LiveSession::runChain (Track& track, std::vector<std::vector<float>>& working, size_t fromStage)
+ {
+-    for (size_t k = fromStage; k < track.chain.size(); ++k)
++    runStages (track.chain, working, fromStage);
++}
++
++void LiveSession::runStages (std::vector<ChainStage>& chain,
++                             std::vector<std::vector<float>>& working,
++                             size_t fromStage)
++{
++    for (size_t k = fromStage; k < chain.size(); ++k)
+     {
+-        auto& stage = track.chain[k];
++        auto& stage = chain[k];
+         if (stage.eq != nullptr)
+             stage.eq->process (working);
+         else if (stage.reverb != nullptr)
+@@ -577,9 +878,13 @@ void LiveSession::runChain (Track& track, std::vector<std::vector<float>>& worki
+             stage.plugin->process (working);
+         else if (stage.limiter != nullptr)
+         {
+-            std::vector<std::vector<float>> out (2);
+-            stage.limiter->process (working, out);
+-            working = std::move (out);
++            // Into the stage's own buffers, reserved at build, and back:
++            // the callback never allocates for a limiter.
++            for (auto& channel : stage.scratch)
++                channel.clear();
++            stage.limiter->process (working, stage.scratch);
++            for (size_t c = 0; c < working.size(); ++c)
++                working[c].assign (stage.scratch[c].begin(), stage.scratch[c].end());
+         }
+     }
+ }
+@@ -646,6 +951,18 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
+         for (auto& channel : mixed)
+             channel.assign ((size_t) step, 0.0f);
+         mixInputBlock (output, t, step, mixed, clock);
++        if (! overlay.empty())
++        {
++            // What the inputs reach, added before the output's chain so
++            // its inserts hear the true sum (§9).
++            renderOverlay (step, clock);
++            if (const int slot = overlayIndex[(size_t) outputTrack]; slot >= 0)
++                for (int c = 0; c < 2; ++c)
++                    for (int i = 0; i < step; ++i)
++                        mixed[(size_t) c][(size_t) i]
++                            = (float) ((double) mixed[(size_t) c][(size_t) i]
++                                       + (double) overlay[(size_t) slot].post[(size_t) c][(size_t) i]);
++        }
+         runChain (output, mixed, 0);
+ 
+         for (int c = 0; c < 2; ++c)
+@@ -712,8 +1029,11 @@ void LiveSession::discardUntil (juce::int64 sample)
+ {
+     std::vector<std::vector<float>> sink (2, std::vector<float> ((size_t) engineBlock, 0.0f));
+     float* outs[2] = { sink[0].data(), sink[1].data() };
++    const bool reading = overlayReadsInputs;
++    overlayReadsInputs = false;
+     while (delivered < sample)
+         renderBlock (outs, 2, (int) std::min<juce::int64> (engineBlock, sample - delivered));
++    overlayReadsInputs = reading;
+ }
+ 
+ void LiveSession::locate (juce::int64 sample)
+@@ -802,7 +1122,8 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb,
+ std::string runRenderLive (const std::string& sessionPath,
+                            const std::string& outputPath,
+                            const std::string& rootPath,
+-                           const std::string& clickPath)
++                           const std::string& clickPath,
++                           const std::vector<std::string>& inputFiles)
+ {
+     try
+     {
+@@ -821,7 +1142,19 @@ std::string runRenderLive (const std::string& sessionPath,
+             click.setSchedule (juce::JSON::parse (clickFile.loadFileAsString()));
+         }
+ 
+-        LiveSession live (session, juce::File (juce::String (rootPath)));
++        LiveInputs inputs;
++        for (const auto& spec : inputFiles)
++        {
++            const auto equals = spec.find ('=');
++            if (equals == std::string::npos || equals == 0)
++                return "--input wants name=file.wav, not \"" + spec + "\"";
++            const auto path = juce::File (juce::String (rootPath))
++                                  .getChildFile (juce::String (spec.substr (equals + 1)))
++                                  .getFullPathName()
++                                  .toStdString();
++            inputs[spec.substr (0, equals)] = std::make_shared<FileInput> (dsp::readWav (path).channels);
++        }
++        LiveSession live (session, juce::File (juce::String (rootPath)), inputs);
+         // One pass of the declared length. Looping playback is a
+         // transport behaviour; the golden compares one pass, and a
+         // session without an extent has no "one pass" to compare.
+diff --git a/native/audiod/src/live.h b/native/audiod/src/live.h
+index 70555a60..d414eb88 100644
+--- a/native/audiod/src/live.h
++++ b/native/audiod/src/live.h
+@@ -41,13 +41,29 @@
+ namespace field
+ {
+ 
++// A source outside the session (live-supercollider.md §2): what an
++// `input` window plays, read once per block on the audio thread — the
++// voice `field keys` plays. read() must not block, lock, or allocate,
++// and fills silence for whatever it does not have.
++class LiveInput
++{
++public:
++    virtual ~LiveInput() = default;
++    virtual void read (float* left, float* right, int n) = 0;
++};
++
++// The sources a session's input windows name, by name.
++using LiveInputs = std::map<std::string, std::shared_ptr<LiveInput>>;
++
+ class LiveSession
+ {
+ public:
+     // Parses fail-closed (plan.cpp's discipline): any missing field,
+     // unknown effect, unknown track ref, or negative live delay throws,
+     // and nothing renders under a shape the two sides disagree about.
+-    LiveSession (const juce::var& session, const juce::File& projectRoot);
++    // An input window must name a source in `inputs`.
++    LiveSession (const juce::var& session, const juce::File& projectRoot,
++                 const LiveInputs& inputs = {});
+ 
+     int sessionRate() const { return rate; }
+     juce::int64 lengthSamples() const { return length; } // 0 = unbounded
+@@ -94,6 +110,9 @@ class LiveSession
+         std::unique_ptr<dsp::Plate> plate;
+         std::unique_ptr<dsp::Hall> hall;
+         std::unique_ptr<LivePluginStage> plugin;
++        // A limiter's output, reserved at build, so running the chain in
++        // the callback never allocates for it.
++        std::vector<std::vector<float>> scratch;
+     };
+     // Everything needed to rebuild a stage: locate discards chain state
+     // (a seek does not inherit the previous position's tails) and
+@@ -118,8 +137,8 @@ class LiveSession
+ 
+     struct Window
+     {
+-        enum Kind { file, track, receivePre } kind = file;
+-        int source = 0; // files[] or tracks[] index by kind
++        enum Kind { file, track, receivePre, input } kind = file;
++        int source = 0; // files[], tracks[], or inputSources[] index by kind
+         juce::int64 start = 0;
+         juce::int64 duration = 0;
+         juce::int64 readOffset = 0;
+@@ -188,6 +207,13 @@ class LiveSession
+     // the plate's LFO phase is a pure function of it (reverbs.md
+     // decision 4).
+     void buildChain (Track& track, juce::int64 startClock = 0) const;
++    // The stages for `specs` at `trackRate`, reusing any hosted instance
++    // already in `chain` (buildChain's rule) — the song's chain for a
++    // track, or the overlay's second instance of it.
++    void buildStages (std::vector<ChainStage>& chain,
++                      const std::vector<ChainSpec>& specs,
++                      int trackRate,
++                      juce::int64 startClock) const;
+     // The history the output chain must hear for its state at a
+     // position to be right within the design's audibility threshold —
+     // what locate renders and discards after a rebuild.
+@@ -204,10 +230,16 @@ class LiveSession
+                         int n,
+                         std::vector<std::vector<float>>& block,
+                         juce::int64 absoluteFrom);
++    // A window's linear gain at a position on the unwrapped timeline:
++    // `baseGain` unless a ramp is gliding it.
++    static double rampedGain (const Window& window, juce::int64 absoluteAt, double baseGain);
+     // Runs `working` through the chain from `fromStage`; a limiter stage
+     // re-points working at what it emitted (which may be shorter while
+     // its window primes).
+     static void runChain (Track& track, std::vector<std::vector<float>>& working, size_t fromStage);
++    static void runStages (std::vector<ChainStage>& chain,
++                           std::vector<std::vector<float>>& working,
++                           size_t fromStage);
+     // End of input: flush each limiter and cascade what emerges through
+     // the stages after it, appending to `working`.
+     static void flushChain (Track& track, std::vector<std::vector<float>>& working);
+@@ -241,6 +273,66 @@ class LiveSession
+     std::vector<std::vector<std::vector<float>>> files; // preloaded, 1–2 ch
+     std::vector<Track> tracks;
+     std::map<std::string, int> trackIndex;
++
++    // The overlay (live-supercollider.md §9): what an input reaches. A
++    // track with an input window, and every track that places or
++    // receives one, carries the input up through a second instance of
++    // its chain, beside the song it pre-renders as before; the output
++    // track adds what reaches it to its own mix before its own chain,
++    // so the output's inserts hear the true sum. An input has no place
++    // on the timeline, so it passes through each window's gain and pan
++    // but not its start, duration, or fades, and reaches each consumer
++    // once however often the arrangement places its track.
++    //
++    // Every path into a track is aligned to the longest: each feed waits
++    // in a delay line for the difference, so an input reaching a track
++    // two ways never meets itself offset.
++    struct DelayLine
++    {
++        juce::int64 samples = 0;
++        std::vector<std::vector<float>> line; // in flight
++        std::vector<std::vector<float>> out; // this block, once through
++    };
++    struct OverlayInput
++    {
++        int window = 0; // the track's input window
++        DelayLine delay;
++    };
++    struct OverlayEdge
++    {
++        int child = 0; // tracks[] index of the live track read
++        int window = 0; // the consumer's first window reading it
++        bool pre = false; // a pre-tap cable reads the child's pre-chain block
++        DelayLine delay;
++    };
++    struct OverlayTrack
++    {
++        int track = 0;
++        std::vector<OverlayInput> inputs;
++        std::vector<OverlayEdge> edges;
++        std::vector<ChainStage> chain; // empty for the output track
++        // How late what reaches this track is, against its input, and
++        // how late it leaves this track's chain.
++        juce::int64 inLatency = 0;
++        juce::int64 outLatency = 0;
++        // This block: the mix before the chain, and after it. The chain's
++        // emission runs through `delayed`, preloaded with the chain's
++        // latency in zeros, so `post` is always exactly one block, late
++        // by that latency — a limiter's lag varies block to block.
++        std::vector<std::vector<float>> pre, post, delayed;
++    };
++    void buildOverlay();
++    // `absoluteFrom` is the clock at the block's start: a ramp on a
++    // window the input passes through glides on the same timeline the
++    // song's does.
++    void renderOverlay (int n, juce::int64 absoluteFrom);
++    std::vector<std::shared_ptr<LiveInput>> inputSources;
++    std::vector<OverlayTrack> overlay; // children before the tracks that read them
++    std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay
++    std::vector<std::vector<float>> inputScratch;
++    // Off while locate renders into the void: a source read there is
++    // consumed off the audio thread and heard by nobody.
++    bool overlayReadsInputs = true;
+ };
+ 
+ // --render-live: run a session offline, faster than realtime, into a
+@@ -252,9 +344,14 @@ class LiveSession
+ // With a click schedule (recording.md §7), the same Click layer the
+ // callback runs is added block by block at the session rate — never for
+ // a golden, only so a test can prove where the ticks land.
++//
++// Each of `inputFiles`, as `name=path.wav`, feeds the input window of
++// that name from the file and then silence — the synthetic source
++// live-supercollider.md chunk 1's goldens use.
+ std::string runRenderLive (const std::string& sessionPath,
+                            const std::string& outputPath,
+                            const std::string& rootPath,
+-                           const std::string& clickPath = {});
++                           const std::string& clickPath = {},
++                           const std::vector<std::string>& inputFiles = {});
+ 
+ } // namespace field
+diff --git a/native/audiod/src/main.cpp b/native/audiod/src/main.cpp
+index 85fb79b5..06013ac3 100644
+--- a/native/audiod/src/main.cpp
++++ b/native/audiod/src/main.cpp
+@@ -148,6 +148,7 @@ int main (int argc, char* argv[])
+     juce::String renderLiveSession;
+     juce::String renderLiveOut;
+     juce::String renderLiveClick;
++    std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
+     juce::String scanFormat;
+     juce::String probeFormat;
+     juce::String probeCandidate;
+@@ -175,6 +176,8 @@ int main (int argc, char* argv[])
+         }
+         else if (arg == "--click" && i + 1 < argc)
+             renderLiveClick = argv[++i]; // with --render-live: a click schedule to add
++        else if (arg == "--input" && i + 1 < argc)
++            renderLiveInputs.push_back (argv[++i]); // with --render-live: name=file.wav
+         else if (arg == "--scan" && i + 1 < argc)
+             scanFormat = argv[++i];
+         else if (arg == "--scan-probe" && i + 3 < argc)
+@@ -205,7 +208,7 @@ int main (int argc, char* argv[])
+                           "[--idle <seconds>]\n"
+                           "       field-audiod --render <plan.json>\n"
+                           "       field-audiod --render-live <session.json> <out.wav> "
+-                          "[--click <schedule.json>]\n"
++                          "[--click <schedule.json>] [--input <name>=<file.wav>]...\n"
+                           "       field-audiod --scan <au|vst3>\n"
+                           "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
+                           "       field-audiod --state-capture <au|vst3> <identifier> "
+@@ -312,7 +315,8 @@ int main (int argc, char* argv[])
+                                                juce::File::getCurrentWorkingDirectory()
+                                                    .getFullPathName()
+                                                    .toStdString(),
+-                                               renderLiveClick.toStdString());
++                                               renderLiveClick.toStdString(),
++                                               renderLiveInputs);
+             ! error.empty())
+         {
+             std::fprintf (stderr, "field-audiod: render-live failed: %s\n", error.c_str());
+diff --git a/src/audiod/live-input.test.ts b/src/audiod/live-input.test.ts
+new file mode 100644
+index 00000000..9e784506
+--- /dev/null
++++ b/src/audiod/live-input.test.ts
+@@ -0,0 +1,382 @@
++import { execFile } from 'node:child_process';
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { promisify } from 'node:util';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { readWav, writeWavFloat32 } from '../audio/wav.js';
++import { buildLabels } from '../commands/build.js';
++import { createSong, createTrack } from '../commands/create.js';
++import { importAsset } from '../commands/import.js';
++import { init } from '../commands/init.js';
++import { compileSession } from '../graph/live.js';
++import { removeTempProject } from '../testing/temp.js';
++import { daemonBinary } from './client.js';
++import { insertLatency, type SessionTrack } from './session.js';
++
++// Live inputs (live-supercollider.md chunk 1): a source outside the
++// session, carried up from its track through a second instance of each
++// chain on the way to main (§9). The golden feeds an input a file with
++// --render-live and holds the output to the offline render of the same
++// signal through the same chains, late by exactly the input track's
++// latency: the limiter's window of 144 samples, plus the one it pushes.
++
++const binary = (() => {
++  try {
++    return daemonBinary();
++  } catch {
++    return undefined;
++  }
++})();
++
++const execFileAsync = promisify(execFile);
++const execOrError = async (args: string[], cwd: string): Promise<string> => {
++  try {
++    await execFileAsync(binary!, args, { cwd });
++    return '';
++  } catch (err) {
++    return (err as { stderr?: string }).stderr ?? String(err);
++  }
++};
++
++const FRAMES = 24000;
++
++// Loud enough that voice's limiter reduces gain, so the goldens hold the
++// overlay's limiters to the offline ones where it matters.
++function tone(): [Float32Array, Float32Array] {
++  const left = new Float32Array(FRAMES);
++  const right = new Float32Array(FRAMES);
++  for (let i = 0; i < FRAMES; i++) {
++    left[i] = 1.25 * Math.sin((2 * Math.PI * 220 * i) / 48000);
++    right[i] = Math.sin((2 * Math.PI * 330 * i) / 48000);
++  }
++  return [left, right];
++}
++
++const VOICE_INSERTS = [
++  'inserts:',
++  '  - effect: eq',
++  '    normalize: false',
++  '    bands:',
++  '      - type: bell',
++  '        frequency: 900',
++  '        gain_db: 3',
++  '        bandwidth: 1.5',
++  '  - effect: limit',
++  '    ceiling_db: -2',
++  '    lookahead_ms: 3',
++  '    release_ms: 60',
++];
++
++const MAIN_INSERTS = ['inserts:', '  - effect: limit', '    ceiling_db: -1', '    lookahead_ms: 5', '    release_ms: 80'];
++
++const SONG = (name: string, length: string) =>
++  [
++    `name: ${name}`,
++    'time:',
++    '  tempo:',
++    '    - at: 0',
++    '      bpm: 120',
++    '  meter:',
++    '    - at: 0',
++    '      numerator: 4',
++    '      denominator: 4',
++    `length: ${length}`,
++    '',
++  ].join('\n');
++
++// `opener` plays the tone from a file through voice's chain into main;
++// `monitor` has the same chains with nothing on voice, so an input on it
++// is the only sound — placed twice in main, which the input must still
++// reach once.
++async function scaffold(root: string): Promise<void> {
++  init({ dir: root, name: 'live-input' });
++  createSong(root, 'opener');
++  const src = join(tmpdir(), `live-input-tone-${process.pid}.wav`);
++  writeWavFloat32(src, 48000, tone());
++  await importAsset(root, 'opener', src, 'tone');
++  rmSync(src);
++  createTrack(root, 'opener', 'voice');
++  writeFileSync(
++    join(root, 'songs/opener/tracks/voice.yaml'),
++    ['name: voice', ...VOICE_INSERTS, 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
++  );
++  writeFileSync(
++    join(root, 'songs/opener/tracks/main.yaml'),
++    ['name: main', ...MAIN_INSERTS, 'inputs:', '  - track: voice', '    anchor: absolute', '    at: 0', ''].join('\n'),
++  );
++  writeFileSync(join(root, 'songs/opener/song.yaml'), SONG('opener', '[1]'));
++
++  createSong(root, 'monitor');
++  createTrack(root, 'monitor', 'voice');
++  writeFileSync(join(root, 'songs/monitor/tracks/voice.yaml'), ['name: voice', ...VOICE_INSERTS, 'inputs: []', ''].join('\n'));
++  writeFileSync(
++    join(root, 'songs/monitor/tracks/main.yaml'),
++    [
++      'name: main',
++      ...MAIN_INSERTS,
++      'inputs:',
++      '  - track: voice',
++      '    anchor: absolute',
++      '    at: 0',
++      '  - track: voice',
++      '    anchor: absolute',
++      '    at: 30000',
++      '',
++    ].join('\n'),
++  );
++  writeFileSync(join(root, 'songs/monitor/song.yaml'), SONG('monitor', '[1]'));
++}
++
++// Paths of unequal latency into main: voice (a limiter, 145 samples)
++// directly, through `crush` (a second limiter, 290 in all) by a post
++// send, and through `wash` (a reverb, no latency) by a pre-tap send. The
++// overlay aligns them to the longest, so the output is the offline
++// render late by 290, with nothing meeting itself offset.
++async function splitScaffold(root: string): Promise<void> {
++  init({ dir: root, name: 'live-split' });
++  const src = join(tmpdir(), `live-split-tone-${process.pid}.wav`);
++  writeWavFloat32(src, 48000, tone());
++  for (const song of ['split-offline', 'split-live']) {
++    createSong(root, song);
++    for (const name of ['voice', 'crush', 'wash']) createTrack(root, song, name);
++    const voiceInputs =
++      song === 'split-offline' ? ['inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0'] : ['inputs: []'];
++    if (song === 'split-offline') await importAsset(root, song, src, 'tone');
++    writeFileSync(
++      join(root, `songs/${song}/tracks/voice.yaml`),
++      [
++        'name: voice',
++        'sends:',
++        '  crush:',
++        '    gain_db: 0',
++        '  wash:',
++        '    gain_db: -12',
++        '    tap: pre',
++        ...VOICE_INSERTS,
++        ...voiceInputs,
++        '',
++      ].join('\n'),
++    );
++    writeFileSync(
++      join(root, `songs/${song}/tracks/crush.yaml`),
++      // A ceiling under what voice's limiter lets through, so crush's
++      // limiter reduces gain too; the same lookahead, so the same latency.
++      [
++        'name: crush',
++        'inserts:',
++        '  - effect: limit',
++        '    ceiling_db: -6',
++        '    lookahead_ms: 3',
++        '    release_ms: 60',
++        'inputs:',
++        '  - receive: crush',
++        '',
++      ].join('\n'),
++    );
++    writeFileSync(
++      join(root, `songs/${song}/tracks/wash.yaml`),
++      [
++        'name: wash',
++        'inserts:',
++        '  - effect: reverb',
++        '    mix: 0.5',
++        '    decay: 0.4',
++        '    predelay_ms: 5',
++        '    damping: 0.4',
++        'inputs:',
++        '  - receive: wash',
++        '',
++      ].join('\n'),
++    );
++    writeFileSync(
++      join(root, `songs/${song}/tracks/main.yaml`),
++      [
++        'name: main',
++        ...MAIN_INSERTS,
++        'inputs:',
++        '  - track: voice',
++        '    anchor: absolute',
++        '    at: 0',
++        '  - track: crush',
++        '    anchor: absolute',
++        '    at: 0',
++        '  - track: wash',
++        '    anchor: absolute',
++        '    at: 0',
++        '',
++      ].join('\n'),
++    );
++    writeFileSync(join(root, `songs/${song}/song.yaml`), SONG(song, '[1]'));
++  }
++  rmSync(src);
++}
++
++describe.skipIf(!binary)('live inputs through --render-live (live-supercollider.md chunk 1)', () => {
++  let root: string;
++
++  beforeEach(() => {
++    root = mkdtempSync(join(tmpdir(), 'field-live-input-'));
++  });
++  afterEach(async () => {
++    await removeTempProject(root);
++  });
++
++  it("plays an input through its track's chain and main's, as the offline render of the same signal, late by the track's latency", async () => {
++    await scaffold(root);
++    const offline = await buildLabels(root, ['//songs/opener/track:main']);
++    const stem = readWav(offline.find((o) => o.label.endsWith('track:main'))!.outputPath!).channels;
++
++    const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'mic' }] });
++    const voice = session.tracks.find((t) => t.name === 'voice')!;
++    expect(voice.inputs).toEqual([{ input: 'mic', gain_db: 0 }]);
++    const late = voice.chain.reduce((sum, insert) => sum + insertLatency(insert, 48000), 0);
++    expect(late).toBe(145);
++
++    writeFileSync(join(root, 'session.json'), JSON.stringify(session));
++    writeWavFloat32(join(root, 'mic.wav'), 48000, tone());
++    await execFileAsync(binary!, ['--render-live', 'session.json', 'live.wav', '--input', 'mic=mic.wav'], { cwd: root });
++    const live = readWav(join(root, 'live.wav')).channels;
++
++    expect(live[0]!.length).toBe(stem[0]!.length);
++    for (let c = 0; c < 2; c++) {
++      // Nothing before the input track's chain has emitted, then the
++      // offline stem sample for sample for as long as the tone lasts:
++      // placed twice, heard once. Past the tone the two part on
++      // purpose. The stem ends where voice's content does and cuts the
++      // eq's ring there; an input has no end, so the overlay rings out.
++      expect(live[c]!.subarray(0, late).every((s) => s === 0)).toBe(true);
++      let worst = 0;
++      for (let i = 0; i < FRAMES; i++) worst = Math.max(worst, Math.abs(live[c]![i + late]! - stem[c]![i]!));
++      expect(worst).toBe(0);
++    }
++  });
++
++  it('aligns every path into a track to the longest, so an input never meets itself offset', async () => {
++    await splitScaffold(root);
++    const offline = await buildLabels(root, [
++      '//songs/split-offline/track:main',
++      '//songs/split-offline/track:voice',
++      '//songs/split-offline/track:crush',
++    ]);
++    const stemOf = (name: string) =>
++      readWav(offline.find((o) => o.label.endsWith(`track:${name}`))!.outputPath!).channels;
++    const stem = stemOf('main');
++    // Every limiter on the way reduces gain: voice's output, which is
++    // what reaches crush, goes past crush's −6 dB ceiling, and crush's
++    // output stays under it.
++    const loudest = (channels: Float32Array[]) => Math.max(...channels.map((c) => c.reduce((m, s) => Math.max(m, Math.abs(s)), 0)));
++    expect(loudest(stemOf('voice'))).toBeGreaterThan(0.6);
++    expect(loudest(stemOf('crush'))).toBeLessThanOrEqual(10 ** (-6 / 20) + 1e-6);
++
++    const { session } = await compileSession(root, 'split-live', { inputs: [{ track: 'voice', input: 'mic' }] });
++    const chainLate = (name: string) =>
++      session.tracks.find((t) => t.name === name)!.chain.reduce((sum, insert) => sum + insertLatency(insert, 48000), 0);
++    const late = chainLate('voice') + chainLate('crush');
++    expect(late).toBe(290);
++
++    writeFileSync(join(root, 'session.json'), JSON.stringify(session));
++    writeWavFloat32(join(root, 'mic.wav'), 48000, tone());
++    await execFileAsync(binary!, ['--render-live', 'session.json', 'live.wav', '--input', 'mic=mic.wav'], { cwd: root });
++    const live = readWav(join(root, 'live.wav')).channels;
++
++    for (let c = 0; c < 2; c++) {
++      expect(live[c]!.subarray(0, late).every((s) => s === 0)).toBe(true);
++      let worst = 0;
++      for (let i = 0; i < FRAMES; i++) worst = Math.max(worst, Math.abs(live[c]![i + late]! - stem[c]![i]!));
++      expect(worst).toBe(0);
++    }
++  });
++
++  it('refuses a session whose input nothing feeds', async () => {
++    await scaffold(root);
++    const { session } = await compileSession(root, 'monitor', { inputs: [{ track: 'voice', input: 'mic' }] });
++    writeFileSync(join(root, 'session.json'), JSON.stringify(session));
++    expect(await execOrError(['--render-live', 'session.json', 'live.wav'], root)).toContain(
++      'session names input "mic", which nothing feeds',
++    );
++  });
++});
++
++describe('compiling a session with inputs (live-supercollider.md chunk 1)', () => {
++  let root: string;
++
++  beforeEach(() => {
++    root = mkdtempSync(join(tmpdir(), 'field-live-input-'));
++  });
++  afterEach(async () => {
++    await removeTempProject(root);
++  });
++
++  // keys under keys-bus with an eq, and pad, a sibling fed by a file,
++  // all under main; every stem built, so each would freeze.
++  async function busScaffold(): Promise<void> {
++    init({ dir: root, name: 'live-bus' });
++    createSong(root, 'creek');
++    const src = join(tmpdir(), `live-bus-tone-${process.pid}.wav`);
++    writeWavFloat32(src, 48000, tone());
++    await importAsset(root, 'creek', src, 'tone');
++    rmSync(src);
++    for (const name of ['keys', 'keys-bus', 'pad', 'stray']) createTrack(root, 'creek', name);
++    writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninputs: []\n');
++    writeFileSync(
++      join(root, 'songs/creek/tracks/keys-bus.yaml'),
++      [
++        'name: keys-bus',
++        'inserts:',
++        '  - effect: eq',
++        '    normalize: false',
++        '    bands:',
++        '      - type: lowpass',
++        '        frequency: 700',
++        '        gain_db: 0',
++        '        bandwidth: 1',
++        'inputs:',
++        '  - track: keys',
++        '',
++      ].join('\n'),
++    );
++    writeFileSync(join(root, 'songs/creek/tracks/pad.yaml'), 'name: pad\ninputs:\n  - audio: tone\n    anchor: absolute\n    at: 0\n');
++    writeFileSync(join(root, 'songs/creek/tracks/stray.yaml'), 'name: stray\ninputs: []\n');
++    writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), 'name: main\ninputs:\n  - track: keys-bus\n  - track: pad\n');
++    await buildLabels(root, ['//songs/creek/track:keys-bus', '//songs/creek/track:pad']);
++  }
++
++  const byName = (tracks: SessionTrack[], name: string) => tracks.find((t) => t.name === name);
++
++  it('keeps the input and every track above it live, and freezes a sibling fed by a file', async () => {
++    await busScaffold();
++    const frozen = await compileSession(root, 'creek');
++    expect(byName(frozen.session.tracks, 'keys-bus')!.inputs[0]).toHaveProperty('file');
++    expect(byName(frozen.session.tracks, 'keys')).toBeUndefined();
++
++    const { session, dirty } = await compileSession(root, 'creek', { inputs: [{ track: 'keys', input: 'keys-voice' }] });
++    const bus = byName(session.tracks, 'keys-bus')!;
++    expect(bus.chain.map((i) => i.effect)).toEqual(['eq']);
++    expect(bus.inputs).toEqual([expect.objectContaining({ track: 'keys' })]);
++    expect(byName(session.tracks, 'keys')!.inputs).toEqual([{ input: 'keys-voice', gain_db: 0 }]);
++    // The sibling is still served from its stem.
++    const pad = byName(session.tracks, 'pad')!;
++    expect(pad.chain).toEqual([]);
++    expect(pad.inputs[0]).toHaveProperty('file');
++    expect(dirty.some((label) => /track:(keys|keys-bus)$/.test(label))).toBe(false);
++  });
++
++  it('refuses an input that names no track, sits under nothing, or is named twice', async () => {
++    await busScaffold();
++    await expect(compileSession(root, 'creek', { inputs: [{ track: 'organ', input: 'mic' }] })).rejects.toThrow(
++      'input "mic" names "organ", which is not a track in song "creek"',
++    );
++    await expect(compileSession(root, 'creek', { inputs: [{ track: 'stray', input: 'mic' }] })).rejects.toThrow(
++      '"stray" is not under main, so input "mic" would not be heard',
++    );
++    await expect(
++      compileSession(root, 'creek', {
++        inputs: [
++          { track: 'keys', input: 'mic' },
++          { track: 'pad', input: 'mic' },
++        ],
++      }),
++    ).rejects.toThrow('input "mic" is named twice');
++  });
++});
+diff --git a/src/audiod/session.ts b/src/audiod/session.ts
+index 56132bcd..b27e0476 100644
+--- a/src/audiod/session.ts
++++ b/src/audiod/session.ts
+@@ -17,7 +17,9 @@ import { z } from 'zod';
+ // samples must refuse, which the version check is.
+ // 3: hosted plugin inserts join live chains (plugin-hosting.md
+ // chunk 2); an older engine has no way to run one.
+-export const SESSION_VERSION = 3;
++// 4: input windows (live-supercollider.md chunk 1); an older engine
++// would refuse the window's shape, and must refuse the session first.
++export const SESSION_VERSION = 4;
+ 
+ // One placed window, mirroring the render plan's clip exactly — same
+ // fields, same units, same omit-when-centred pan rule — except that the
+@@ -71,6 +73,18 @@ export const receiveWindowSchema = z.strictObject({
+   comp_delay: z.number().int().min(0),
+ });
+ 
++// A live input (live-supercollider.md §2): a source outside the
++// session that the daemon reads each block — the voice `field keys`
++// plays. It has no place on the timeline, so it carries no start,
++// duration, or fades: it passes up through every track that places this
++// one, with each window's gain and pan, and through a second instance
++// of each track's chain beside the song (§9).
++export const inputWindowSchema = z.strictObject({
++  input: z.string().min(1), // the source's name, which the daemon resolves
++  gain_db: z.number(),
++  pan: z.number().min(-1).max(1).optional(),
++});
++
+ export const sessionInsertSchema = z.discriminatedUnion('effect', [
+   z.strictObject({
+     effect: z.literal('eq'),
+@@ -203,8 +217,12 @@ export function insertGrowth(insert: SessionInsert, rate: number): number {
+ export function insertLatency(insert: SessionInsert, rate: number): number {
+   if (insert.effect === 'plugin') return insert.latency;
+   if (insert.effect !== 'limit') return 0;
+-  const window = Math.max(1, Math.round((insert.lookahead_ms / 1000) * rate));
+-  return Math.ceil((insert.horizon_db / 60) * window);
++  // The engine's pending window (dsp/limiter.cpp), in its own operations
++  // and order: the horizon at the attack slope, plus the sample being
++  // pushed. A live input's overlay runs late by exactly this
++  // (live-supercollider.md §9), so it has to be the engine's number.
++  const window = Math.max(1, (insert.lookahead_ms / 1000) * rate);
++  return Math.ceil(insert.horizon_db / (60 / window)) + 1;
+ }
+ 
+ export const sessionTrackSchema = z.strictObject({
+@@ -215,7 +233,9 @@ export const sessionTrackSchema = z.strictObject({
+   // group delay in the consumer's comp_delay arithmetic.
+   rate: z.number().int().positive(),
+   chain: z.array(sessionInsertSchema).default([]),
+-  inputs: z.array(z.union([fileWindowSchema, trackWindowSchema, receiveWindowSchema])).default([]),
++  inputs: z
++    .array(z.union([fileWindowSchema, trackWindowSchema, receiveWindowSchema, inputWindowSchema]))
++    .default([]),
+   // This track's accumulated latency at its output ring, compiler
+   // computed: max over inputs of (input latency + edge delays) plus the
+   // chain's own. Carried so `status` can report it and so the engine
+diff --git a/src/graph/live.ts b/src/graph/live.ts
+index 2aba6aec..6c404d2b 100644
+--- a/src/graph/live.ts
++++ b/src/graph/live.ts
+@@ -122,10 +122,17 @@ export interface CompiledSession {
+   dirty: string[];
+ }
+ 
++// A live input to attach (live-supercollider.md §2): the window named
++// `input` goes on `track`, and the daemon feeds it.
++export interface SessionInput {
++  track: string;
++  input: string;
++}
++
+ export async function compileSession(
+   root: string,
+   songName: string,
+-  options: { loop?: boolean; solo?: string } = {},
++  options: { loop?: boolean; solo?: string; inputs?: SessionInput[] } = {},
+ ): Promise<CompiledSession> {
+   const project = loadProject(root);
+   const errors = project.diagnostics.filter((d) => d.severity !== 'warning');
+@@ -164,6 +171,56 @@ export async function compileSession(
+   }
+   if (!shapes.has('main')) throw new Error(`song "${songName}" has no track named "main"`);
+ 
++  // Live inputs (live-supercollider.md §2): each input's track and
++  // every track above it on the way to main stay live — never frozen
++  // into a stem, which has no chain left — so the engine can run a
++  // second instance of each chain for the input (§9). The path must
++  // reach main, or nobody hears the input, and must stay at one rate,
++  // because the overlay has no converter yet.
++  const liveInputs = options.inputs ?? [];
++  const convertSource = (dep: string): string | undefined => {
++    if (!/\/convert:/.test(dep)) return undefined;
++    const node = graph.nodes.get(dep);
++    if (node === undefined || node.kind !== 'rule') return undefined;
++    const source = (node.spec as { source?: string }).source;
++    return source === undefined ? undefined : /^(?:track|tap):(.+)$/.exec(source)?.[1];
++  };
++  const readers = new Map<string, { name: string; convert: boolean }[]>();
++  for (const shape of shapes.values()) {
++    for (const dep of shape.deps) {
++      const direct = /\/(?:track|tap):(.+)$/.exec(dep)?.[1];
++      const converted = direct === undefined ? convertSource(dep) : undefined;
++      const child = direct ?? converted;
++      if (child === undefined || !shapes.has(child)) continue;
++      readers.set(child, [...(readers.get(child) ?? []), { name: shape.name, convert: converted !== undefined }]);
++    }
++  }
++  const liveBound = new Set<string>();
++  const inputNames = new Set<string>();
++  for (const { track, input } of liveInputs) {
++    if (!shapes.has(track)) throw new Error(`input "${input}" names "${track}", which is not a track in song "${songName}"`);
++    if (inputNames.has(input)) throw new Error(`input "${input}" is named twice`);
++    inputNames.add(input);
++    const reach = new Set<string>();
++    const queue = [track];
++    while (queue.length > 0) {
++      const name = queue.pop()!;
++      if (reach.has(name)) continue;
++      reach.add(name);
++      for (const reader of readers.get(name) ?? []) {
++        if (reader.convert) {
++          throw new Error(
++            `the input on "${track}" crosses from "${name}" into "${reader.name}" at another rate; ` +
++              `an input's path needs one rate`,
++          );
++        }
++        queue.push(reader.name);
++      }
++    }
++    if (!reach.has('main')) throw new Error(`"${track}" is not under main, so input "${input}" would not be heard`);
++    for (const name of reach) liveBound.add(name);
++  }
++
+   // The freeze (realtime.md decision 4): a track whose stem action is
+   // already cached is served as that stem — one file window, no chain,
+   // no children — because live and offline are sample-identical, so the
+@@ -219,7 +276,7 @@ export async function compileSession(
+   const frozen = new Set<string>();
+   const candidates = new Set<string>();
+   for (const name of shapes.keys()) {
+-    if (name === 'main' || preTapped.has(name)) continue;
++    if (name === 'main' || preTapped.has(name) || liveBound.has(name)) continue;
+     candidates.add(name);
+     // Hosted chains freeze by the same rule as built-ins now
+     // (plugin-hosting.md chunk 2 lifted chunk 1's unconditional
+@@ -419,6 +476,10 @@ export async function compileSession(
+       }
+     }
+ 
++    // The inputs on this track: no place on the timeline, so no length
++    // and no latency here; the engine's overlay carries them (§9).
++    for (const { input } of liveInputs.filter((i) => i.track === name)) inputs.push({ input, gain_db: 0 });
++
+     // comp_delay stays zero (Codex caught the double-compensation): the
+     // engine's buffers are timeline-aligned — a chain's stream lag is
+     // availability, not shift, because emitted sample i pairs with input
