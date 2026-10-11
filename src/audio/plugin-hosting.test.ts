@@ -16,6 +16,7 @@ import { daemonBinary } from '../audiod/client.js';
 import { pluginInfoSchema, type PluginInfo } from './plugins.js';
 import { renderInsertChain } from './render-daemon.js';
 import { writeWavFloat32 } from './wav.js';
+import { removeTempProject } from '../testing/temp.js';
 
 const binary = (() => {
   try {
@@ -358,10 +359,7 @@ describe.skipIf(!binary || !haveFixture)('hosted plugin renders (plugin-hosting.
   });
 });
 
-// win32: the live path runs over the control socket, which waits on the
-// named-pipe transport (windows-portability.md chunk 4); the offline
-// describe above renders through --render subprocesses and runs.
-describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted chains live (plugin-hosting.md chunk 2)', () => {
+describe.skipIf(!binary || !haveFixture)('hosted chains live (plugin-hosting.md chunk 2)', () => {
   let root: string;
 
   beforeEach(async () => {
@@ -424,8 +422,8 @@ describe.skipIf(!binary || !haveFixture || process.platform === 'win32')('hosted
     );
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await removeTempProject(root);
     delete process.env['FIELD_PLUGIN_PATH'];
   });
 
@@ -730,8 +728,8 @@ describe('inventory cache', () => {
     mkdirSync(join(root, '.field'));
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await removeTempProject(root);
   });
 
   it('serves an unchanged file from cache and re-reads a changed one', async () => {
@@ -773,6 +771,13 @@ describe('inventory cache', () => {
     utimesSync(path, pinned, pinned);
     const first = readInventory(root);
     expect(first?.plugins[0]?.name).toBe('aaa');
+    // On Windows the rewrite below can land inside the same change-time
+    // tick as the write above, so ctime does not move and the cache keeps
+    // serving 'aaa'. The cause is inferred, not measured: NTFS stamps
+    // ChangeTime from the system clock, which advances in ticks of about
+    // 15.6 ms. A real cp -p or restore is never that close to the read
+    // before it, so the test waits out one tick there.
+    if (process.platform === 'win32') await new Promise((done) => setTimeout(done, 50));
     // Same length, same pinned mtime — only ctime and content differ.
     writeFileSync(path, JSON.stringify({ plugins: [entry('bbb')], failed: [] }));
     utimesSync(path, pinned, pinned);

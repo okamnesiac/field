@@ -126,7 +126,11 @@ export class AudiodClient extends EventEmitter {
       if (!binary) {
         throw new Error('field-audiod is not built (pnpm build:native, or set FIELD_AUDIOD)');
       }
-      const args = ['--socket', SOCKET_RELATIVE];
+      // POSIX gets the relative path (the daemon binds it against its
+      // cwd, staying inside sun_path); Windows gets the full pipe name,
+      // since a pipe is not a filesystem path and cwd means nothing to
+      // it. Client and daemon agree because both strings come from here.
+      const args = ['--socket', process.platform === 'win32' ? path : SOCKET_RELATIVE];
       // FIELD_AUDIOD_NULL covers spawns the caller doesn't parameterize
       // (field play in CI or on a deviceless machine).
       if (options.nullOutput ?? process.env['FIELD_AUDIOD_NULL'] === '1') args.push('--null-output');

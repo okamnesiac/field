@@ -254,6 +254,18 @@ change making the readiness claim answers for what is still open.
    no `--from` would be a second, worse playback path kept alive on the
    platform with the least coverage. Without the daemon built, `field
    play` fails with "build the daemon", which is the honest answer.
+
+   **Amended 2026-08-18: the refusal covers every non-macOS platform,
+   not Windows alone.** #162's review found the CLI manual describing a
+   deliberate macOS-only fallback while the guard was win32-only —
+   Linux without a built daemon still spawned `afplay` and died with
+   ENOENT naming a macOS binary. The reasoning here was never about
+   Windows: `field play` is live evaluation since realtime.md, `afplay`
+   is dead code off macOS by definition, and the guard is the
+   difference between the build hint and a confusing error. Linux had
+   no plan recording the call
+   ([linux-portability.md](../linux-portability/readme.md) predates the
+   fallback question), so this amendment is where it lives.
 3. **`socketPathFor` grows a platform branch, in the same function.**
    `src/socketPath.ts` exists to keep the bound path inside `sun_path`'s
    104 bytes by returning a cwd-relative path; named pipes have no such
@@ -420,10 +432,56 @@ Recorded so the next reader does not re-derive it.
 4. **The transport** (§1.2). The seam, both ends, per §2.1. This is where
    `field play`, `field transport` and live rendering arrive, and it is
    the largest chunk by a wide margin.
+
+   **Implemented (2026-08-18).** Named pipes, as §2.1 decided, and the
+   decision's predictions held with one correction each way. What held:
+   `FILE_FLAG_FIRST_PIPE_INSTANCE` is the flock — the stampede test
+   passes with six clients racing a fresh project; Node dials the pipe
+   name natively; request handling above the I/O layer is shared with
+   the POSIX arm, so `dispatch` exists once. What the implementation
+   taught: **CancelIoEx is an event where SHUT_RD is a state.** A cancel
+   only aborts a read pending at that instant — a reader inside dispatch
+   at shutdown would issue a fresh read afterward and keep serving a
+   chatty client forever, so the daemon never exited. The reader now
+   checks the running flag each cycle (at most one request slips
+   through), and the shutdown drain is one peek deep: exactly the bytes
+   buffered at the half-close, the way SHUT_RD's EOF bounds it, because
+   re-peeking chases a client that keeps writing. Round trips measure
+   1.3 ms. One test-infrastructure find: Windows cannot delete a
+   directory that is a live process's cwd, and the daemon takes a few
+   hundred milliseconds to exit after quit — `removeTempProject`
+   (src/testing/temp.ts) retries the whole removal, because rmSync's
+   own retry knobs do not cover every op in its recursive walk. The
+   guards this chunk owed are retired: the 9 in `version.test.ts` (its
+   fake daemons now bind what `socketPathFor` answers), the serve-mode
+   describes, live-session's four socket tests, the recording guards
+   from chunk 2's third amendment (three tests in `click-daemon`, the
+   describes in `punch-daemon` and `record-daemon`), and
+   `record-midi-daemon`'s describe from its fourth, whose take tests
+   then skip on Windows for want of a virtual MIDI source (§7.2) —
+   8/8 protocol, 12/12 play-daemon, 25+1 hosting with live chains, on
+   Windows. The definition-of-done transcript, from a real session with
+   a dirty chain, steered from a second terminal:
+
+   ```text
+   playing  1.4.731 (0:01.9)
+   live session: proof
+   device: Speakers (FxSound Audio Enhancer) @ 48000 Hz
+   daemon: field-audiod 0.11.0
+   ```
 5. **Fallback and CI** (§1.6). The `afplay` path's Windows behaviour per
    §2.2, and a `windows-latest` job. The "V1 platform scope" amendment
    this chunk originally carried rode chunk 1 instead, because §2.4 tied
    the plan's `in-progress` flip to it.
+
+   **Implemented (2026-08-18), riding chunk 4's diff** — the fallback
+   refusal is three lines and the CI job one block, neither worth a
+   review cycle alone. `playWithAfplay` on win32 fails with the build
+   hint, per §2.2's no-fallback decision. The `windows-latest` job runs
+   what Linux runs minus the Python gates (the workers keep their POSIX
+   transport, §4). Unverified on an actual runner as of this writing:
+   Actions billing on the account is broken and no job of any kind
+   starts; the job is written to the Linux job's shape and waits there.
 
 Chunks 2 and 4 are independent of each other given chunk 1, so offline
 rendering on Windows can be real long before playback is.
@@ -439,12 +497,17 @@ rendering on Windows can be real long before playback is.
   the daemon protocol tests plus a real `field play` session are exactly
   the verification — a separate investigation would only rehearse what
   the chunk proves.
+
+  **Answered (2026-08-18, chunk 4): it survives.** The protocol
+  suite spawns detached daemons all day, idle-exit fires, ctrl-c during
+  a real `field play` returns the terminal, and the daemon outlives its
+  spawning CLI exactly as designed.
 - **Is the 104-byte reasoning simply gone, or replaced?** **Answered by
   §2.1 and §2.3 (2026-08-16)**: named pipes won, so `socketPathFor`'s
   104-byte premise is macOS/Linux-only. On Windows the same function
   returns a pipe name derived from the project root, and its comment says
-  which question each platform's branch answers. Chunk 4 writes that
-  branch.
+  which question each platform's branch answers. Chunk 4 wrote that
+  branch, in `src/socketPath.ts`.
 - **What does WASAPI do to the device story?** `field devices` and
   `--device` are built on JUCE's `AudioDeviceManager`, which on Windows
   offers WASAPI (shared and exclusive) and DirectSound, plus ASIO only
@@ -455,6 +518,13 @@ rendering on Windows can be real long before playback is.
   against a live daemon, which does not exist before the transport does —
   `field devices` against WASAPI and one unplug during playback are the
   test, and chunk 4's definition of done should name them.
+
+  **Mostly answered (2026-08-18, chunk 4)**: real
+  device names enumerate and round-trip on real hardware (`field
+  devices` lists the machine's WASAPI outputs with the default starred;
+  a live session reports its device by name), and null mode serves CI.
+  Still unexercised: a physical unplug during playback — one manual
+  test whenever a session is playing and a cable is handy.
 - **Does anything else hash on-disk bytes?** §1.1 names four
   consumers — three found by reading, the state-blob refusal by
   minjudd's grep on #154, which also placed `commands/click.ts` and
@@ -567,6 +637,17 @@ land as its own diff whenever.
   whether the probe succeeds under a Windows CI shell where `git`
   resolves but the LFS subcommand may not. One CI run answers it, with
   the `windows-latest` job (chunk 5).
+- **Crash recovery on Windows** (`record-daemon.test.ts`, "a daemon
+  killed mid-take leaves a recoverable transaction"): on the
+  `windows-latest` runner a request to the freshly spawned daemon fails
+  with "field-audiod connection closed", so the daemon drops the
+  connection or dies while it lists or recovers the killed take. The
+  cause is not diagnosed. `Transaction::recover`'s errors are thrown and
+  answered as error responses, so a crash would have to bypass
+  exceptions; the CRT's invalid-parameter handler in `truncateAndSync`
+  is one candidate. The test's temp project, and its `audiod.log`, is
+  removed with it. The test skips on win32 until this is found.
+  **Standalone**: start from the daemon log of one Windows run.
 - **`field keys` cannot publish a source on Windows**
   (`native/audiod/src/keys.cpp`): the helper publishes the computer
   keyboard as a virtual MIDI source, and Windows has no virtual MIDI

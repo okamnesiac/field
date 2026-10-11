@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
 import { fileStore } from '../remote/credentials.js';
 import { git } from '../git.js';
+import { socketPathFor } from '../socketPath.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { SETUP_SPECS } from './generate.js';
 import {
@@ -36,12 +37,6 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// fakeDaemon binds a Unix socket, which Node on Windows cannot do — the
-// local domain is named pipes there. Every test that fakes a daemon goes
-// with the transport when windows-portability.md chunk 4 moves
-// socketPathFor to pipe names; the guard is the transport's, not each
-// test's own.
-const itOverPosixSocket = it.skipIf(process.platform === 'win32');
 
 // A daemon that answers `hello` and nothing else, which is all this
 // command asks of one.
@@ -53,7 +48,9 @@ function fakeDaemon(socketRelative: string, hello: Record<string, unknown>): Pro
       );
     });
     servers.push(server);
-    server.listen(join(root, socketRelative), () => resolve());
+    // What versionReport dials: a path on POSIX, a pipe name on Windows
+    // (socketPathFor, windows-portability.md chunk 4).
+    server.listen(socketPathFor(root, socketRelative), () => resolve());
   });
 }
 
@@ -84,7 +81,7 @@ describe('field --version', () => {
     expect(formatVersionReport(report, root)).toContain('field-voiced  not running');
   });
 
-  itOverPosixSocket('reports what a running daemon says about itself', async () => {
+  it('reports what a running daemon says about itself', async () => {
     await fakeDaemon('.field/voiced.sock', {
       protocol: WORKER_PROTOCOL_VERSION,
       daemon: 'field-voiced',
@@ -99,7 +96,7 @@ describe('field --version', () => {
     expect(voiced.note).toBeUndefined();
   });
 
-  itOverPosixSocket('flags a daemon whose protocol predates this build', async () => {
+  it('flags a daemon whose protocol predates this build', async () => {
     // The reason the command exists. A worker started before a protocol
     // change answers hello perfectly well and will then refuse — or,
     // before the bump that made this visible, quietly do the wrong
@@ -117,7 +114,7 @@ describe('field --version', () => {
     expect(formatVersionReport(report, root)).toContain('!');
   });
 
-  itOverPosixSocket('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
+  it('flags a stale audiod against audiod\'s own number, not the workers\'', async () => {
     // audiod is at protocol 1 and the workers at 2; comparing either
     // against the other invents a disagreement. Skipping audiod was the
     // alternative and worse: AudiodClient refuses a mismatch and
@@ -132,7 +129,7 @@ describe('field --version', () => {
     expect(audiod.note).toContain('rebuild the daemon');
   });
 
-  itOverPosixSocket('does not flag a current audiod merely for differing from the workers', async () => {
+  it('does not flag a current audiod merely for differing from the workers', async () => {
     // The invented-disagreement case: audiod at its own current protocol
     // is fine even though that number is not the workers'.
     await fakeDaemon(AUDIOD_SOCKET, {
@@ -145,7 +142,7 @@ describe('field --version', () => {
     expect(audiod.note).toBeUndefined();
   });
 
-  itOverPosixSocket('does not hand audiod a remedy for a process that is not audiod', async () => {
+  it('does not hand audiod a remedy for a process that is not audiod', async () => {
     // The interaction, not the gap: put a worker on audiod's socket and
     // the old code reported field-audiod at the worker's version, then
     // measured the worker's protocol 2 against audiod's 1 and printed
@@ -162,13 +159,13 @@ describe('field --version', () => {
     expect(audiod.note).not.toContain('rebuild the daemon');
   });
 
-  itOverPosixSocket('does not report an audiod refusal as a healthy audiod', async () => {
+  it('does not report an audiod refusal as a healthy audiod', async () => {
     await fakeDaemon(AUDIOD_SOCKET, { ok: false, error: 'unknown op' });
     const audiod = (await versionReport(root, deps())).daemons.find((d) => d.name === AUDIOD_NAME)!;
     expect(audiod.note).toContain('refused the hello');
   });
 
-  itOverPosixSocket('says when the wrong worker is on a socket', async () => {
+  it('says when the wrong worker is on a socket', async () => {
     // One socket convention across every worker means a stale or
     // mis-pointed socket puts one worker's process under another's name.
     // A version report that mislabels a process is worse than one that
@@ -182,7 +179,7 @@ describe('field --version', () => {
     expect(voiced.note).toContain('identifies as field-aced');
   });
 
-  itOverPosixSocket('does not report a refusal as a healthy daemon', async () => {
+  it('does not report a refusal as a healthy daemon', async () => {
     // `ok: false` is a refusal, not a hello. Reporting it as running with
     // an unknown version is the command's own kind of lie.
     await fakeDaemon('.field/voiced.sock', { ok: false, error: 'unknown op' });
@@ -190,7 +187,7 @@ describe('field --version', () => {
     expect(voiced.note).toContain('refused the hello');
   });
 
-  itOverPosixSocket('does not flag a daemon that agrees', async () => {
+  it('does not flag a daemon that agrees', async () => {
     // The negative half: a warning that fires on a current daemon is a
     // warning nobody reads.
     await fakeDaemon('.field/aced.sock', {

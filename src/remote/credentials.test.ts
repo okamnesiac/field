@@ -25,8 +25,12 @@ describe('fileStore', () => {
     expect(store.read('https://audiofield.io')).toEqual({ token: 'abc' });
     expect(store.read('https://staging.audiofield.io')).toEqual({ token: 'def' });
     // A token is a secret in a home directory: only its owner reads it.
-    expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(statSync(join(dir, 'home', '.field')).mode & 0o777).toBe(0o700);
+    // Windows reports no POSIX mode bits (chmod only toggles read-only
+    // there), so the profile directory's ACL is what protects the file.
+    if (process.platform !== 'win32') {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(statSync(join(dir, 'home', '.field')).mode & 0o777).toBe(0o700);
+    }
   });
 
   it('deletes one remote and leaves the others', () => {

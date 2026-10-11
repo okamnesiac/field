@@ -12,9 +12,13 @@ class Player;
 
 // The versioned NDJSON control socket (playback.md §3.3): one JSON object
 // per line, request/response with client-chosen ids, plus broadcast events.
-// JUCE's StreamingSocket is TCP-only, so the AF_UNIX plumbing is POSIX by
-// hand; the socket path is bound relative to the daemon's working directory
-// (the project root) to stay inside sun_path's 104 bytes (§3.2).
+// JUCE's StreamingSocket is TCP-only, so the transport is by hand on both
+// platforms: AF_UNIX on POSIX, with the socket path bound relative to the
+// daemon's working directory (the project root) to stay inside sun_path's
+// 104 bytes (§3.2); a named pipe on Windows, where the CLI hands the full
+// \\.\pipe\ name via --socket and no length limit applies
+// (windows-portability.md §2.1, §2.3). The request handling — framing,
+// dispatch, broadcast — is shared; only the I/O layer splits.
 class Server
 {
 public:
@@ -51,7 +55,11 @@ public:
 private:
     struct Connection
     {
+#if defined(_WIN32)
+        void* pipe = nullptr; // HANDLE, spelled void* to keep windows.h out of this header
+#else
         int fd = -1;
+#endif
         std::thread reader;
         std::mutex writeMutex;
         std::atomic<bool> open { true };
@@ -65,8 +73,18 @@ private:
 
     Player& player;
     const juce::String socketPath;
+#if defined(_WIN32)
+    // The instance parked in ConnectNamedPipe, and the manual-reset event
+    // its OVERLAPPED waits on — beginShutdown signals it so the accept
+    // thread wakes without a client ever arriving. The first instance is
+    // created with FILE_FLAG_FIRST_PIPE_INSTANCE, which is the flock:
+    // a second daemon on the same name fails at creation.
+    void* pendingPipe = nullptr; // HANDLE
+    void* acceptEvent = nullptr; // HANDLE
+#else
     int lockFd = -1; // flock held for the daemon's life (single-owner guarantee)
     int listenFd = -1;
+#endif
     std::thread acceptThread;
     std::atomic<bool> running { false };
     std::mutex connectionsMutex;

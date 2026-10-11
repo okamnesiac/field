@@ -12,6 +12,7 @@ import { importAsset } from './import.js';
 import { init } from './init.js';
 import { playLiveSession } from './play.js';
 import { passesNote, recordTake } from './record.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // Punch-out, the region loop, and loop takes (recording.md §10.4,
 // chunk 4). The null clock's sawtooth (player.cpp) is what makes the
@@ -68,9 +69,7 @@ describe('the loop line', () => {
   });
 });
 
-// win32: serve mode refuses until the named-pipe transport
-// (windows-portability.md chunk 4); every test here dials the socket.
-describe.skipIf(!binary || process.platform === 'win32')('punch-out and loop takes', () => {
+describe.skipIf(!binary)('punch-out and loop takes', () => {
   let root: string;
 
   beforeEach(async () => {
@@ -97,7 +96,7 @@ describe.skipIf(!binary || process.platform === 'win32')('punch-out and loop tak
     } catch {
       // no daemon left behind
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempProject(root);
   });
 
   it('a region loop wraps the live session between its bounds, and clears', { timeout: 15_000 }, async () => {

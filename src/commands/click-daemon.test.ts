@@ -12,6 +12,7 @@ import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { recordTake } from './record.js';
+import { removeTempProject } from '../testing/temp.js';
 
 // The metronome in the engine (recording.md §7, chunk 3). The click is a
 // schedule the CLI projects and the daemon synthesizes, so two things
@@ -52,11 +53,6 @@ function zeroCrossings(samples: Float32Array): number {
   return n;
 }
 
-// The three tests that dial the socket wait on the named-pipe transport
-// (windows-portability.md chunk 4). The --render-live test runs the
-// binary as a subprocess and runs everywhere.
-const itOverSocket = it.skipIf(process.platform === 'win32');
-
 describe.skipIf(!binary)('the engine click', () => {
   let root: string;
 
@@ -84,7 +80,7 @@ describe.skipIf(!binary)('the engine click', () => {
     } catch {
       // no daemon left behind
     }
-    rmSync(root, { recursive: true, force: true });
+    await removeTempProject(root);
   });
 
   it('renders ticks on exactly the scheduled samples, accented on the downbeat', async () => {
@@ -128,7 +124,7 @@ describe.skipIf(!binary)('the engine click', () => {
     expect(zeroCrossings(left.subarray(24000, 24720))).toBeCloseTo(2 * 1046.5 * 0.015, -1);
   });
 
-  itOverSocket('takes a schedule over the socket, reports it, and clears it with the bed', async () => {
+  it('takes a schedule over the socket, reports it, and clears it with the bed', async () => {
     const client = await AudiodClient.connect(root, { nullOutput: true });
     try {
       expect(client.supports('click')).toBe(true);
@@ -150,7 +146,7 @@ describe.skipIf(!binary)('the engine click', () => {
     }
   });
 
-  itOverSocket('a pre-rolled take begins on exactly the sample it was asked for', { timeout: 15_000 }, async () => {
+  it('a pre-rolled take begins on exactly the sample it was asked for', { timeout: 15_000 }, async () => {
     const client = await AudiodClient.connect(root, { nullOutput: true });
     try {
       await client.load(join(root, 'songs/creek/audio/bed/bed.wav'));
@@ -177,7 +173,7 @@ describe.skipIf(!binary)('the engine click', () => {
     }
   });
 
-  itOverSocket('field record --count-in pre-rolls a bar and lands the take exactly at --at', { timeout: 20_000 }, async () => {
+  it('field record --count-in pre-rolls a bar and lands the take exactly at --at', { timeout: 20_000 }, async () => {
     createTrack(root, 'creek', 'lead-vocal');
     writeFileSync(
       join(root, 'songs/creek/tracks/lead-vocal.yaml'),
