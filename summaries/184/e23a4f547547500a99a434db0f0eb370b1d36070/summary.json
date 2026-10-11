@@ -1,0 +1,103 @@
+{
+ "version": 1,
+ "name": "MIT license for field",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 184,
+  "title": "License field under MIT",
+  "head": "e23a4f547547500a99a434db0f0eb370b1d36070",
+  "headRef": "license/mit",
+  "base": "b912ce8524d9753afa13e7f870f5ef37068b14f5",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a music production system that you drive from the command line. It has two parts that matter here. The <code>field</code> CLI is TypeScript, and <code>field-audiod</code> is a native audio daemon in C++ that plays, renders, and hosts plugins. The repository is about to go public, and a public repository with no license grants nobody the right to use, copy, or change the code.",
+   "This pull request licenses field's own code under MIT, with Amnesiac, LLC as the copyright holder. It adds the license text, declares it in <code>package.json</code> so npm and other tools report it, and adds a License section to the README. That section says what MIT does not cover. The daemon compiles in two third-party codebases with their own terms: JUCE, an audio framework licensed under AGPLv3 or a paid commercial license, and Steinberg's VST3 SDK, licensed under GPLv3 or Steinberg's proprietary license. A daemon binary built without the non-copyleft license for each is under AGPLv3 and GPLv3.",
+   "No code changes. The pull request leaves the daemon's build, and the JUCE version it pins, as they are."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>MIT</b>: a permissive license. Anyone may use, copy, change, and sell the code, provided they keep the copyright and license notice.</li><li><b>AGPLv3</b>: a copyleft license. Anyone who distributes the program, or runs a changed version as a network service, must offer its source under the same terms.</li><li><b>GPLv3</b>: the copyleft license AGPLv3 is based on, without the network-service clause.</li><li><b>JUCE</b>: the C++ audio framework <code>field-audiod</code> is built on. The daemon pins version <code>8.0.4</code>.</li><li><b>VST3 SDK</b>: Steinberg's kit for loading VST3 plugins, bundled inside JUCE and compiled into the daemon for plugin hosting.</li><li><b>SPDX identifier</b>: the standard short name for a license, such as <code>MIT</code>, that package tools read.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review history so far",
+    "html": "<ul class=\"tight\"><li><b><code>27188ee</code>, changes requested.</b> One finding: the License section named JUCE as the daemon's only third-party license, and left out the VST3 SDK.</li><li><b><code>e23a4f5</code>, clean.</b> The section now names the SDK and its two licenses beside JUCE. The author chose this over bumping JUCE to 8.0.11, whose bundled SDK is MIT, because a JUCE bump changes the native build and belongs in its own change.</li><li><b>Suggestions that do not block.</b> Give Steinberg's license one name in the README, update the Licensing paragraph in <code>docs/architecture.md</code>, which still says a commercial JUCE license is enough for a closed-source daemon, and declare <code>license = \"MIT\"</code> in the three Python workers' <code>pyproject.toml</code> files.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "grant",
+   "title": "The MIT grant and the metadata that reports it",
+   "kicker": "The license text at the repository root, and the field that names it in package.json",
+   "intro": [
+    "GitHub, npm, and other tools find a repository's license in two places. GitHub reads a <code>LICENSE</code> file at the root of the default branch and shows the license in the repository's About panel. npm and other JavaScript tools read the <code>license</code> field in <code>package.json</code>, which holds an SPDX identifier.",
+    "This group adds both. The text is the standard MIT license with the year and the holder filled in, so GitHub recognizes it. GitHub shows the license only after the pull request merges, because it reads the license from the default branch."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "LICENSE",
+     "note": "The standard MIT license, naming Amnesiac, LLC and the year 2026.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The text matches GitHub's MIT template, fetched with <code>gh api licenses/mit</code>, word for word once the year and holder are filled in. The only difference is one trailing blank line in the template. The year 2026 is the year of the repository's first commit."
+      }
+     ]
+    },
+    {
+     "path": "package.json",
+     "note": "Declares the <code>MIT</code> SPDX identifier for the one package in the repository.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The file parses with <code>node</code>, and <code>pnpm install --frozen-lockfile</code> passes, because the lockfile does not record the license. No <code>private</code> or <code>files</code> field conflicts with the new one."
+      },
+      {
+       "kind": "context",
+       "text": "The three Python workers under <code>python/</code> are field's own code too, but their <code>pyproject.toml</code> files declare no license, so uv and pip report none for them."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "readme",
+   "title": "What the MIT label does not cover",
+   "kicker": "The README's new License section, and the two codebases compiled into the daemon",
+   "intro": [
+    "MIT covers the code in this repository. It cannot cover the code that the build pulls in from elsewhere. <code>native/audiod/CMakeLists.txt</code> downloads JUCE <code>8.0.4</code> at build time and compiles its modules into <code>field-audiod</code>. In JUCE 8, every module is licensed under AGPLv3 or JUCE's commercial license.",
+    "The same build sets <code>JUCE_PLUGINHOST_VST3=1</code>, so the daemon can host VST3 plugins. That compiles parts of Steinberg's VST3 SDK, which JUCE bundles, into the binary. In JUCE 8.0.4 the SDK is licensed under GPLv3 or Steinberg's proprietary license, separately from JUCE, so a commercial JUCE license alone does not take the binary out of copyleft terms. The README section names both codebases so that the MIT label does not suggest a built daemon is MIT too."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "README.md",
+     "note": "Adds the License section at the end: MIT for field's code, then JUCE and the VST3 SDK with their licenses, and the copyleft terms a daemon binary carries without the non-copyleft license for each.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 176,
+       "text": "The JUCE claim matches the source the build fetches. JUCE <code>8.0.4</code>'s <code>LICENSE.md</code>, and the header of every module the daemon links, from <code>juce_core</code> to <code>juce_audio_processors</code> and the GUI modules it pulls in, say AGPLv3 or commercial."
+      },
+      {
+       "kind": "verify",
+       "line": 179,
+       "text": "The pin is still <code>GIT_TAG 8.0.4</code>, and that tag's VST3 SDK <code>LICENSE.txt</code> offers GPLv3 or the Proprietary Steinberg VST3 License. JUCE's <code>LICENSE.md</code> lists the SDK as a dependency under that license of its own. A Release build of the daemon carries 1,433 <code>Steinberg::</code> symbols. The SDK's <code>base/</code> and <code>public.sdk/</code> files that the daemon also compiles carry a BSD license, which is more permissive and leaves the section's conclusion unchanged."
+      },
+      {
+       "kind": "context",
+       "line": 183,
+       "text": "\"The commercial licence for each\" calls Steinberg's option commercial, while line 180 and the SDK's own license file call it proprietary. The SDK says either license may be used \"commercial or not\"."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
