@@ -1,0 +1,78 @@
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index 48ceb16..dab86ef 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -617,6 +617,11 @@ land as its own diff whenever.
+   OneDrive-redirected profile is not the Desktop the user sees (the
+   real one lives under `OneDrive\Desktop`); the export still lands and
+   prints its path, so this is a wart rather than a break. **Standalone.**
++  **Done** (2026-10-11): `homeRelative` takes the platform's separator,
++  so a path under the profile prints as `~\Desktop\…`, and with `\` it
++  compares the home prefix without regard to case, as Windows does, so
++  `c:\users\me\Music` prints as `~\Music` too. The OneDrive Desktop
++  stays the wart it was.
+ - **`sclangCommand` cannot find `sclang` on Windows**
+   (`sclangCommand` in `generators/supercollider.ts`, re-checked
+   2026-10-10 after #179). Since the keyboard instrument's voice host
+diff --git a/src/commands/export.test.ts b/src/commands/export.test.ts
+index 9419b5a..dee8233 100644
+--- a/src/commands/export.test.ts
++++ b/src/commands/export.test.ts
+@@ -181,13 +181,23 @@ describe('writeVersion', () => {
+ 
+ describe('homeRelative', () => {
+   it('abbreviates $HOME and only $HOME', () => {
+-    expect(homeRelative('/Users/justin/Desktop/creek-mix-main-v1.wav', '/Users/justin')).toBe(
++    // The separator is explicit, so each case means the same on every host.
++    expect(homeRelative('/Users/justin/Desktop/creek-mix-main-v1.wav', '/Users/justin', '/')).toBe(
+       '~/Desktop/creek-mix-main-v1.wav',
+     );
+-    expect(homeRelative('/Users/justin', '/Users/justin')).toBe('~');
++    expect(homeRelative('/Users/justin', '/Users/justin', '/')).toBe('~');
+     // A sibling whose name merely starts with the home path is not home.
+-    expect(homeRelative('/Users/justinx/Desktop', '/Users/justin')).toBe('/Users/justinx/Desktop');
+-    expect(homeRelative('/tmp/elsewhere.wav', '/Users/justin')).toBe('/tmp/elsewhere.wav');
++    expect(homeRelative('/Users/justinx/Desktop', '/Users/justin', '/')).toBe('/Users/justinx/Desktop');
++    expect(homeRelative('/tmp/elsewhere.wav', '/Users/justin', '/')).toBe('/tmp/elsewhere.wav');
++    // POSIX paths keep their case.
++    expect(homeRelative('/users/justin/Desktop', '/Users/justin', '/')).toBe('/users/justin/Desktop');
++    // With Windows' separator (windows-portability.md §7.2).
++    expect(homeRelative('C:\\Users\\justin\\Desktop\\creek-mix-main-v1.wav', 'C:\\Users\\justin', '\\')).toBe(
++      '~\\Desktop\\creek-mix-main-v1.wav',
++    );
++    expect(homeRelative('C:\\Users\\justinx\\Desktop', 'C:\\Users\\justin', '\\')).toBe('C:\\Users\\justinx\\Desktop');
++    // Windows paths compare without regard to case, and print as given.
++    expect(homeRelative('c:\\users\\justin\\Music', 'C:\\Users\\justin', '\\')).toBe('~\\Music');
+   });
+ });
+ 
+diff --git a/src/commands/export.ts b/src/commands/export.ts
+index c04a9b2..a75810b 100644
+--- a/src/commands/export.ts
++++ b/src/commands/export.ts
+@@ -1,6 +1,6 @@
+ import { copyFileSync, existsSync, linkSync, mkdtempSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
+ import { homedir, tmpdir } from 'node:os';
+-import { extname, join } from 'node:path';
++import { extname, join, sep } from 'node:path';
+ import { hasWavSignature, readWavHeader } from '../audio/wav.js';
+ import { renderInsertChain } from '../audio/render-daemon.js';
+ import { sha256File } from '../hash.js';
+@@ -67,9 +67,14 @@ export function defaultExportDir(): string {
+ // Paths under $HOME print with a tilde: an export line is meant to be
+ // read at a glance, and the interesting half is the end of it. Only a
+ // path that is $HOME or sits beneath it qualifies — `/Users/justinx`
+-// must not become `~x`.
+-export function homeRelative(path: string, home = homedir()): string {
+-  return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
++// must not become `~x`. The separator is the platform's, so a Windows
++// path under the profile prints as `~\Desktop\…` (windows-portability.md
++// §7.2), and Windows paths compare without regard to case.
++export function homeRelative(path: string, home = homedir(), separator = sep): string {
++  const prefix = path.slice(0, home.length);
++  const rest = path.slice(home.length);
++  const isHome = separator === '\\' ? prefix.toLowerCase() === home.toLowerCase() : prefix === home;
++  return isHome && (rest === '' || rest.startsWith(separator)) ? `~${rest}` : path;
+ }
+ 
+ // `//songs/creek/mix:main` → `creek-mix-main`: the whole label with the
