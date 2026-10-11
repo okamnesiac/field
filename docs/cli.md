@@ -172,7 +172,8 @@ Once the inputs are built, each input shows its hash in place of
 `(not built)`, and an `action:` line reports the action key and whether
 it is cached. Once the label itself is built, an `output:` line gives
 the output's hash and size. `--json` prints the whole explanation as
-JSON, with the field names of `Explanation` in `src/graph/build.ts`.
+JSON, with the field names of `Explanation` in `src/graph/build.ts`; an
+input that is not built yet has an empty `sha256`.
 
 `creek` cannot answer either command on a fresh checkout. Its generated
 takes are not committed, so `field query` and `field explain` on
