@@ -14,7 +14,9 @@ var port = "FIELD_SC_PORT".getenv.asInteger;
 var parentPid = "FIELD_PARENT_PID".getenv;
 var device = "FIELD_DEVICE".getenv;
 var trace = "FIELD_VOICE_TRACE".getenv.notNil;
-var server, voiceDef, loadError, voices, sustained, sustainDown = false, bend = 0, restarting = false;
+// True until the server answers, at the first boot and at each restart:
+// a note then has no server to sound on, so it is ignored.
+var server, voiceDef, loadError, voices, sustained, sustainDown = false, bend = 0, booting = true;
 var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, startVoice, releaseVoice, releaseAll, restart;
 
 jsonValue = { |value|
@@ -90,7 +92,7 @@ boot = {
 				waiting = false;
 				voiceDef.add;
 				server.sync;
-				restarting = false;
+				booting = false;
 				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
 			}
 			{ launched.notNil and: { server.pid.isNil } } {
@@ -109,7 +111,7 @@ boot = {
 // to another, so every voice would play sharp or flat. Each status reply
 // carries the booted rate and the rate measured from the device clock.
 restart = {
-	restarting = true;
+	booting = true;
 	voices.clear;
 	sustained.clear;
 	emit.(["restarting", true]);
@@ -142,7 +144,7 @@ run = {
 		if (velocity == 0) {
 			if (sustainDown) { sustained.add(key) } { releaseVoice.(key) };
 		} {
-			if (restarting.not) { startVoice.(key, note, velocity) };
+			if (booting.not) { startVoice.(key, note, velocity) };
 		};
 	});
 	MIDIdef.noteOff(\fieldNoteOff, { |velocity, note, chan|
@@ -165,7 +167,7 @@ run = {
 	Routine {
 		loop {
 			0.7.wait;
-			if (restarting.not and: { server.serverRunning }) {
+			if (booting.not and: { server.serverRunning }) {
 				var booted = server.sampleRate, measured = server.actualSampleRate;
 				if (booted.notNil and: { measured.notNil } and: { booted > 0 } and: { (measured / booted - 1).abs > 0.01 }) {
 					restart.();
