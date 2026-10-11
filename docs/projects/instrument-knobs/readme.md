@@ -77,7 +77,8 @@ writes them at the take's first sample.
 
 1. In `examples/bloom`, you run `field keys juno`. `field keys`
    resolves `juno` to `shared/instruments/juno.scd`, reads
-   `juno.knobs.yaml` beside it, and checks it (§2.2). It loads
+   `juno.knobs.yaml` beside it, and checks it before the voice host
+   starts (§2.2). It loads
    `musical`, builds its knob list, `mod` and then `juno`'s knobs in
    the file's order, and draws the knob line with `mod` chosen. A knob
    you have not changed shows its default.
@@ -96,13 +97,15 @@ writes them at the take's first sample.
    steps at a time the longer you hold (§2.6), and stops at the top of
    its range or when you release the key.
 6. Still holding the chord, you type `800`. The knob line shows
-   `cutoff 800_ Hz`, and the chord keeps sounding. You press `Enter`.
+   `cutoff  800_ Hz`, and the chord keeps sounding. You press `Enter`.
    The controller value nearest 800 Hz is 62, which maps to 810 Hz, and
    `field keys` glides CC 74 there over about half a second (§2.7).
-7. You save `juno.knobs.yaml`. `field keys` reads it again, keeps each
-   controller's value, and keeps the choice on the same knob by name.
-   It reloads `juno`'s voice too, as a save of `juno.scd` does
-   (keyboard-instrument.md §14), because the voice reads the file.
+7. You save `juno.knobs.yaml`. `field keys` checks it, takes the new
+   list, keeps each controller's value, and keeps the choice on the same
+   knob by name. It then reloads `juno`'s voice, as a save of `juno.scd`
+   does (keyboard-instrument.md §14), because the voice maps its
+   controls from the file. A save that fails the check changes only the
+   status line.
 8. You press `Ctrl-C` to quit. Knob positions last only for the
    session.
 
@@ -145,10 +148,15 @@ with what `field keys` shows.
 instrument, beside its program, and `min` and `max` are its range.
 `field keys` never turns a knob past them.
 
-A zod schema, `src/schema/knobs.ts`, checks a knob file when
-`field keys` reads it. A file that fails stops `field keys` at start
-with its errors, as a keymap does, and a save that fails keeps the last
-good list and names the error on the status line. The rules:
+A zod schema, `src/schema/knobs.ts`, is the one check of a knob file,
+and every path that hands a file to an instrument runs it first. A file
+that fails stops `field keys` at start with its errors, as a keymap
+does, before the voice host starts. A save that fails keeps the last
+good list, names the error on the status line, and reloads no voice. A
+take's render runs the same check and fails with the schema's errors,
+and `field check` reports them first, for the instrument of every
+record entry. §2.4 says how a SuperCollider voice reads only a file
+that passed. The rules:
 
 - **The controller is free.** It is from 2 to 119, and not 6, 32, 38,
   64, or 96 to 101. Those are bank select (0 and 32), data entry,
@@ -187,7 +195,7 @@ assigned meaning and suit the rest.
 | --- | --- |
 | `{ knob: <n> }` | Moves the choice n knobs to the right, or to the left when n is negative, wrapping past either end. Sends nothing. |
 | `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning while the key is held (§2.6). |
-| `{ type: <c> }` | Types c into an entry for the chosen knob's value (§2.7). c is a digit, `"."`, or `"-"`. |
+| `{ type: <c> }` | Types c into an entry for the chosen knob's value (§2.7). c is a digit written as a number from 0 to 9, as YAML reads `type: 1`, or the string `"."` or `"-"`. |
 
 The schema takes n as a non-zero integer. A step is one controller
 value. For a knob with a `step`, a step is the next controller value
@@ -261,13 +269,23 @@ in its own way, as it would answer a hardware controller's knobs:
   a control a voice lacks. This is the voice host's MIDI
   implementation. It is the same for every instrument and every MIDI
   source, and it knows nothing about knobs.
-- **A SuperCollider voice maps its own controls.** `juno`'s voice reads
-  its knob file with sclang's `parseYAMLFile` and maps each knob's
-  control through a `ControlSpec` built from it, so its ranges are
-  written once:
+- **A SuperCollider voice maps its own controls, from a file Field
+  checked.** In voice mode, `FIELD_KNOBS` names a copy of the
+  instrument's knob file that Field wrote after the file passed the
+  schema, and is unset when the instrument has none. `field keys`
+  writes a new copy only when a save passes, before it reloads the
+  voice. A take's render writes the copy it checked beside its events
+  file. So the voice never reads a file Field rejected, whether it loads
+  at start, on a reload, or in a render, and a program saved while its
+  knob file fails loads with the last good copy. `voice-load.scd` sets
+  `FIELD_KNOBS` for each program from the copy Field names for it, as
+  it already sets each program's own path. `juno`'s voice reads the
+  copy with sclang's `parseYAMLFile` and maps each knob's control
+  through a `ControlSpec` built from it, so its ranges are written once
+  (§3.2 gives the alternative):
 
   ```supercollider
-  var knobs = (PathName(thisProcess.nowExecutingPath).pathOnly +/+ "juno.knobs.yaml").parseYAMLFile["knobs"];
+  var knobs = "FIELD_KNOBS".getenv.parseYAMLFile["knobs"];
   var knob = { |name|
       var each = knobs.detect { |knob| knob["name"] == name };
       var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol);
@@ -287,7 +305,9 @@ in its own way, as it would answer a hardware controller's knobs:
 A take's render runs the same voicer in `sc/voice-render.scd`, so the
 controller messages in a take reach the voice as they did live. The
 knob file is now part of how a take sounds, so it becomes one of the
-render's cache inputs when it exists. A hardware controller's knob that
+render's cache inputs when it exists, and a render refuses to cache
+when the file changed while it ran, as it refuses for the program. A
+hardware controller's knob that
 sends CC 74 turns `juno`'s cutoff too, because to the voicer it is the
 same controller.
 
@@ -469,14 +489,16 @@ keyboard-instrument.md §14.5's gap for the wheel.
 | `src/keys/position.ts` | Resolves `Enter` and `Backspace`, which the terminal reports as `CSI 13 u` and `CSI 127 u`, as keys a keymap cannot bind. |
 | `src/keys/session.ts` | The controllers it has sent, by number, which the `mod` field and `setsMod()` become reads of; the knob list and the choice; a held turn, the entry, and each glide, advanced by `tick(now)`. |
 | `src/keys/print.ts` | The tags and descriptions of the three actions. |
-| `src/commands/keys.ts` | The knob line, the timer that ticks turns and glides, `--knobs`, watching knob files and reloading an instrument's voice when its file changes, `Esc` cancelling an entry or naming `Ctrl-C`, and `.field/keys.json` (chunk 3). |
-| `sc/voicer.scd`, `sc/voice-host.scd`, `sc/voice-render.scd` | The voicer keeps every controller from 2 to 119 except 64 and hands it to voices as `cc<n>`; the host and the render pass those values into each new synth. Nothing here knows about knobs. |
-| `src/generators/voice-render.ts` | The instrument's knob file, when it exists, is a cache input of a take's render. |
+| `src/commands/keys.ts` | The knob line; the timer that ticks turns and glides; `--knobs`; checking each instrument's knob file and writing the copy its voice reads, in a directory of its own that it removes on exit, before the host starts and before each reload, and reloading nothing after a save that fails; `Esc` cancelling an entry or naming `Ctrl-C`; and `.field/keys.json` (chunk 3). |
+| `src/keys/voice-host.ts` | Passes each program in `FIELD_INSTRUMENTS` with the path of its knob copy, if it has one. |
+| `sc/voicer.scd`, `sc/voice-host.scd`, `sc/voice-render.scd`, `sc/voice-load.scd` | The voicer keeps every controller from 2 to 119 except 64 and hands it to voices as `cc<n>`; the host and the render pass those values into each new synth. The loader sets `FIELD_KNOBS` for each program from the copy Field names for it. Nothing here reads or checks a knob file. |
+| `src/generators/voice-render.ts` | Checks the instrument's knob file with the schema, and fails the render with its errors before `sclang` runs; writes the copy it checked beside the events file and names it in `FIELD_KNOBS`. The file is a cache input, and `verifyAfterRun` refuses to cache when it changed during the render. |
+| `src/model/project.ts` | `field check` checks the knob file of each record entry's instrument with the same schema. |
 | `examples/bloom/shared/instruments/juno.knobs.yaml`, `bass.knobs.yaml` (new); `juno.scd`, `bass.scd` | The knob files, and voices that map `cc<n>` through them. The render branches keep their code and their bytes, and `bass.scd`'s comment names `musical`. |
 | `src/commands/record.ts`, `src/audiod/protocol.ts`, `src/audiod/client.ts` | Read `.field/keys.json` and pass `controllers` in `arm` (chunk 3). |
 | `native/audiod/src/player.cpp`, `player.h`, `server.cpp` | The chase: seeded from `arm`, updated before the start, written at the start; and the `midi-chase` feature (chunk 3). |
 | `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls under "Make an instrument playable"; and how a take starts (chunk 3). |
-| `docs/build-graph.md` | The voice contract gains the `cc<n>` controls, and the knob file joins a take's render inputs. |
+| `docs/build-graph.md` | The voice contract gains the `cc<n>` controls and `FIELD_KNOBS`, and the knob file joins a take's render inputs. |
 | `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 3). |
 | `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits and at §3's choice of Musical Typing as the default, each pointing here. |
 
@@ -564,16 +586,29 @@ with reads of one controller map, and `musical-typing` with `musical`.
 
 ### 3.2 Calls made here (DECIDED, 2026-10-11, for Justin's review)
 
-- **One knob file format for every instrument, which only TypeScript
-  reads for `field keys`.** A SuperCollider program reads its own file
-  to map its controls, so its ranges are written once. Rejected: knobs
-  declared in the SynthDef's metadata, as the first version had. It
-  keeps a SuperCollider program free of drift, but Field would need
-  `sclang` to learn any knob, would carry SuperCollider code that knows
-  the convention, and would read two formats. A knob file can still
-  drift from an instrument that ignores it, such as a hardware synth's
-  file written by hand. Then the line shows the wrong number and the
-  sound is unchanged, which is the hardware controller's trade too.
+- **One knob file format for every instrument, which only Field
+  checks.** One zod schema in TypeScript checks every file, on every
+  path that hands one to an instrument (§2.2). Rejected: knobs declared
+  in the SynthDef's metadata, as the first version had. It keeps a
+  SuperCollider program free of drift, but Field would need `sclang` to
+  learn any knob, would carry SuperCollider code that knows the
+  convention, and would read two formats. A knob file can still drift
+  from an instrument that ignores it, such as a hardware synth's file
+  written by hand. Then the line shows the wrong number and the sound is
+  unchanged, which is the hardware controller's trade too.
+- **A SuperCollider voice reads the copy Field checked, so each range is
+  written once.** Justin has not ruled on this, and the choice is his.
+  The alternative is that each program writes its own mapping, as in
+  `ControlSpec(50, 15000, \exp).map(\cc74.kr(0.647, 0.05))`, so each
+  range is written twice: once in the knob file, which `field keys`
+  shows, and once in the program, which makes the sound. That needs no
+  `FIELD_KNOBS`, no copies, and no knob file anywhere near
+  SuperCollider. Its cost is drift: when the two disagree, the knob line
+  shows a value the voice is not playing, and nothing reports it, as
+  with a hardware synth whose knob file is wrong. Reading the checked
+  copy costs the copies and `FIELD_KNOBS`, and in return a range cannot
+  drift. The recommendation is the copy, because `juno` and `bass` are
+  Field's own and are written alongside their knob files.
 - **Knob files sit beside the program, or come from `--knobs`.** A
   knob file belongs to the instrument, so it sits where the instrument
   does and resolves the way an instrument does. Rejected: a field in a
@@ -650,7 +685,7 @@ terminal.
 | 8 | Type `15000` on `cutoff` at `50.0 Hz`, press `Enter`, and press `ArrowUp` while it glides. | The glide stops, and `cutoff` turns one step up from where it stopped. |
 | 9 | Hold `N` over a held note, then release it. | The note bends up two semitones and returns, and the status line shows `bend +1`, then `bend +0`. |
 | 10 | Run `field keys --keymap musical-typing`. | Exit 1. The message lists `musical`, `tracker`, and `fourths`. |
-| 11 | With `cutoff` changed and chosen, delete the `attack` and `release` lines from `juno.knobs.yaml` and save. Then change `res`'s `cc` to 1 and save. | The line shows `mod`, `cutoff`, and `res`, and `cutoff` keeps its value and stays chosen. After the second save, the status line names the error and the knobs stay as they were. |
+| 11 | With `cutoff` changed and chosen, delete the `attack` and `release` lines from `juno.knobs.yaml` and save. Then change `res`'s `cc` to 1 and save. | The line shows `mod`, `cutoff`, and `res`, and `cutoff` keeps its value and stays chosen. After the second save, the status line names the error, the knobs stay as they were, the voice is not reloaded, and turning `res` still changes the sound. |
 | 12 | Write `~/knobs/test.yaml` with juno's `cutoff` line alone. Start the monitor, run `field keys --knobs ~/knobs/test.yaml`, choose `cutoff`, hold `ArrowUp` for a second, then type `800` and press `Enter`. | The monitor shows CC 74 rising, never more than 25 in one second, then a run of CC 74 values that ends at 62. No instrument runs: this is what Logic or a hardware synth would receive. |
 | 13 | With `field keys juno` running, turn a USB controller's knob that sends CC 74. | `juno`'s filter moves, and the knob line does not. |
 | 14 | Run `field keys pad`, type `64`, and press `Enter`. | The knob line shows `mod` alone, and it reads `64`. |
@@ -659,8 +694,9 @@ terminal.
 | 17 | Give `creek` a track `keys` with `instrument: juno` and a track `bass` with `instrument: bass`. Run `field keys creek/track:keys creek/track:bass`, choose `keys.cutoff`, and turn it. | Both instruments' filters move. `bass.cutoff` shows its own value for CC 74. |
 | 18 | Record a take on `keys`, sweeping `cutoff` and typing a value during it, then build and play. | The render sweeps and glides where you did. |
 | 19 | Run `field sc render shared/instruments/juno.scd --seed 1 --duration 4 --output <file>` before and after the change, and the same for `bass.scd`. Compare each pair with `cmp`. | Identical. A difference means the change touched a render branch. |
-| 20 | In one terminal run `field keys juno` and type a low `cutoff`. In another run `field record creek/track:keys --at 17`. Play without touching a knob, stop, build, and play. | The take renders dark from its first note, and the notes file's first `controls` row is `{ at: 0, cc: 74, value: … }`. |
+| 20 | In one terminal run `field keys juno` and turn `cutoff` down. In another run `field record creek/track:keys --at 17`. Play without touching a knob, stop, build, and play. | The take renders dark from its first note, and the notes file's first `controls` row is `{ at: 0, cc: 74, value: … }`. |
 | 21 | Run criterion 20's `field record` with `--count-in 1`, and turn `res` during the count-in. | The take starts with that `res`. |
+| 22 | With a take on `keys`, set `cutoff`'s `min` in `juno.knobs.yaml` to 0, then run `field check` and `field build creek`. | `field check` names the knob file's error, and the build fails the take's render with the same error instead of rendering it. Restoring the file renders the take again. |
 
 These vitest tests fail before the change:
 
@@ -677,11 +713,12 @@ These vitest tests fail before the change:
   two-position knob. Prints `2.00 kHz`, `800 ms`, `res` from `0.000` to
   `0.950`, and whole numbers, at one width across each knob's values.
 - **`src/schema/keymap.test.ts` and `src/keys/keymap.test.ts`.** Accept
-  `knob`, `turn`, and `type`, and reject a zero step, a fraction, and a
-  character other than a digit, `"."`, or `"-"`. `glide` defaults to
-  0. With no `--keymap` and no `FIELD_KEYMAP`, the keymap is `musical`,
-  which binds the arrows, `B` and `N`, and the number row.
-  `musical-typing` is not a built-in.
+  `knob` and `turn` and reject a zero step and a fraction. Accept
+  `type` with a number from 0 to 9 or the string `"."` or `"-"`, as
+  `musical` writes them, and reject 10 and any other character.
+  `glide` defaults to 0. With no `--keymap` and no `FIELD_KEYMAP`, the
+  keymap is `musical`, which binds the arrows, `B` and `N`, and the
+  number row. `musical-typing` is not a built-in.
 - **`src/keys/terminal.test.ts` and `src/keys/position.test.ts`.**
   `Esc` is not a quit and `Ctrl-C` is. `CSI 13 u` resolves to `Enter`
   and `CSI 127 u` to `Backspace`.
@@ -700,7 +737,12 @@ These vitest tests fail before the change:
   knob's reverse video, the same length through a turn and a glide, an
   entry in the value's place, the window on a narrow terminal, and the
   status line with and without `mod`. `Esc` with an entry open cancels
-  it; `Esc` without one shows `Ctrl-C quits` and does not quit.
+  it; `Esc` without one shows `Ctrl-C quits` and does not quit. A
+  saved knob file that fails leaves the voice's copy as it was and
+  sends no reload; one that passes rewrites the copy before the reload.
+- **`src/keys/voice-host.test.ts`, against a stub `sclang`.**
+  `FIELD_INSTRUMENTS` carries each program with its knob copy, and a
+  program without a knob file with none.
 - **`src/keys/print.test.ts`.** The `musical` diagram matches a stored
   copy.
 - **`src/keys/voicer.test.ts`, through real `sclang`.** CC 74 at 127
@@ -709,7 +751,10 @@ These vitest tests fail before the change:
 - **`src/generators/voice-render.test.ts`, through real `sclang`.** A
   take with CC 74 renders differently from the same take without it
   through a voice that reads `cc74`, and editing the knob file renders
-  the take again.
+  the take again. A knob file the schema rejects fails the render with
+  the schema's errors before `sclang` runs.
+- **`src/model/project.test.ts`.** `field check` reports a record
+  entry's instrument whose knob file fails the schema.
 - **`src/commands/record-midi-daemon.test.ts` and
   `src/commands/record-plan.test.ts`, chunk 3.** A seeded controller
   lands at `at: 0`. A control change sent after the arm and before the
@@ -720,7 +765,7 @@ These vitest tests fail before the change:
   with `midi-chase`.
 
 The tests through real `sclang` skip by name where it is absent, as
-they do today. Every criterion in the table needs a terminal with the
+they do today. Most criteria in the table need a terminal with the
 kitty protocol, and most make sound, so each pull request's Testing
 section records the ones it ran.
 
@@ -748,15 +793,17 @@ either renders once more.
 
 1. **Knobs, live and in takes.** Knob files and `--knobs`; choosing,
    turning, and the knob line; `musical` as the default, with the
-   arrows and the bend on `B` and `N`; the voicer's `cc<n>`; `juno` and
-   `bass` with their knob files; the render's new input; the docs; and
-   the note at keyboard-instrument.md §3. Criteria 1 to 3, 9 to 11, 13,
-   and 15 to 19, and criterion 12 up to its typed value.
+   arrows and the bend on `B` and `N`; the voicer's `cc<n>` and
+   `FIELD_KNOBS`; the checked copies a voice reads, the render's check,
+   and `field check`; `juno` and `bass` with their knob files; the docs;
+   and the note at keyboard-instrument.md §3. Criteria 1 to 3, 9 to 11,
+   13, 15 to 17, 19, and 22, and criteria 12 and 18 up to their typed
+   values.
 2. **Typing and the glide.** The `type` action and the number row,
    `Enter` and `Backspace`, `Esc` cancelling and no longer quitting,
    `glide`, and the entry and the glide on the knob line, with the note
    at keyboard-instrument.md §2.4. It needs chunk 1's knobs. Criteria 4
-   to 8, 12, and 14.
+   to 8, 12, 14, and 18.
 3. **Where a take starts.** `.field/keys.json`, `controllers` in `arm`,
    and the daemon's chase. It needs chunk 1's controller map. Criteria
    20 and 21.
