@@ -62,7 +62,7 @@ jobs:
 
           ## Testing
 
-          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`, and then dispatched CI on this branch, whose checks appear on this pull request. After the merge, the publish job runs \`node scripts/release.ts released --since\` with the commit \`main\` held before the merge. That exits 3 because the merge raised the version to an untagged one, and the job then runs \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
+          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`, and then dispatched CI on this branch, whose checks appear on this pull request. GitHub also holds a \`pull_request\` run of CI for approval here; leave it unapproved, because approving it runs every job a second time. After the merge, the publish job runs \`node scripts/release.ts released --since\` with the commit \`main\` held before the merge. That exits 3 because the merge raised the version to an untagged one, and the job then runs \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
           EOF
           # A pull request someone opened by hand from the branch after a failed run
           # already carries the force-pushed commit.
@@ -76,10 +76,11 @@ jobs:
             echo "::error::could not open the pull request; open it from https://github.com/$REPO/compare/main...$branch?expand=1"
             exit 1
           fi
-          # GitHub starts no workflow for a pull request this job's token opened,
-          # or for the push before it, so CI would never run on the release.
-          # workflow_dispatch is the exception, and its checks land on the
-          # branch's commit, which is the pull request's head.
+          # For a pull request this job's token opened, GitHub creates CI's
+          # pull_request run but holds it until someone approves it. A
+          # workflow_dispatch run needs no approval, and its checks land on the
+          # branch's commit, which is the pull request's head, so CI runs
+          # unattended. Approving the held run as well would run CI twice.
           gh workflow run ci.yml --ref "$branch"
 
   publish:

@@ -20,13 +20,15 @@ the GitHub release with notes generated from the merged pull requests.
    new version on `main`, tags it, moves `v0`, and creates the GitHub
    release.
 
-GitHub starts no workflow for a pull request that a workflow's own token
-opened, so CI would never run on the release pull request by itself. The
-workflow dispatches CI on the release branch instead, because
-`workflow_dispatch` is the one event that token may trigger, and the
-checks land on the branch's commit, which is the pull request's head.
-That is why `.github/workflows/ci.yml` lists `workflow_dispatch` among
-its triggers.
+For a pull request that a workflow's own token opened, GitHub creates
+CI's `pull_request` run but holds it until someone approves it, and the
+pull request offers **Approve workflows to run**. Leave that run
+unapproved. The workflow dispatches CI on the release branch instead,
+because a `workflow_dispatch` run needs no approval, and its checks land
+on the branch's commit, which is the pull request's head. That is why
+`.github/workflows/ci.yml` lists `workflow_dispatch` among its triggers.
+Approving the held run as well would run every CI job a second time on
+the same commit.
 
 The workflow can open the pull request only when GitHub Actions may
 create pull requests. That is **Allow GitHub Actions to create and

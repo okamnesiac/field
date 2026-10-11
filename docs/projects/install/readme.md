@@ -575,14 +575,23 @@ install would build the daemon with MSVC, as a Windows checkout does.
   2026-10-11 the enterprise allowed it, the `okamnesiac` organization and
   this repository were set to allow it, and a re-run opened #207.
   `docs/release.md` names all three levels.
-- **A pull request the workflow opens gets no CI of its own.** GitHub
-  starts no workflow for an event that a workflow's own token caused, so
-  #207 showed no checks. `workflow_dispatch` is the exception, so the
-  propose job dispatches `ci.yml` on the release branch after opening the
-  pull request, and `ci.yml` accepts `workflow_dispatch`. The checks land
-  on the branch's commit, the pull request's head. A token from a GitHub
-  App would have avoided the rule instead, and lost to this because it
-  needs an App and two secrets to do what one extra trigger does.
+- **A pull request the workflow opens gets no CI until someone approves
+  it.** For an event that a workflow's own token caused, GitHub creates
+  the `pull_request` run but holds it as `action_required`. #207's CI
+  run 38167745651 was held that way, and ran, and passed, only when
+  Justin approved it. `workflow_dispatch` and `repository_dispatch` are
+  exempt, so the propose job dispatches `ci.yml` on the release branch
+  after opening the pull request, and `ci.yml` accepts
+  `workflow_dispatch`. The checks land on the branch's commit, the pull
+  request's head. The held run still appears, and `docs/release.md` tells
+  the release's reviewer to leave it unapproved: its concurrency group,
+  `CI-refs/pull/<n>/merge`, differs from the dispatched run's
+  `CI-refs/heads/release/vX.Y.Z`, so approving it runs every job again.
+  Two alternatives lost. Approving the held run by hand needs no workflow
+  change, and lost because it is a click on every release, and Justin
+  asked for CI to run by itself. A token from a GitHub App would avoid
+  the hold, and lost because it needs an App and two secrets to do what
+  one extra trigger does.
 
 ### 9.2 What was verified, and how
 

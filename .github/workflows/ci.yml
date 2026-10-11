@@ -5,9 +5,10 @@ on:
     branches: [main]
   pull_request:
   # The Release workflow dispatches CI on each release branch it pushes.
-  # GitHub starts no workflow for a pull request that a workflow's own token
-  # opened, and workflow_dispatch is the exception it allows, so this is how
-  # a release pull request gets its checks (docs/release.md).
+  # For a pull request that a workflow's own token opened, GitHub creates the
+  # pull_request run but holds it until someone approves it; a dispatched
+  # run needs no approval, so this is how a release pull request gets its
+  # checks unattended (docs/release.md).
   workflow_dispatch:
 
 # Two jobs: `linux` runs every gate, and `windows` runs the same suite
