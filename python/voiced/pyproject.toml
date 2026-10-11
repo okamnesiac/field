@@ -6,6 +6,7 @@
 name = "field-voiced"
 version = "0.1.0"
 description = "Field's Chatterbox voice worker: NDJSON over a unix socket"
+license = "MIT"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "field-worker",
