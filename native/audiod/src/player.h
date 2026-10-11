@@ -7,7 +7,10 @@
 #include <array>
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -18,6 +21,7 @@
 namespace field
 {
 class LiveSession;
+class RingInput;
 }
 
 // Owns the output device (or the null-output clock used in CI), the loaded
@@ -85,6 +89,13 @@ public:
     // (retireOnMessageThread in player.cpp).
     juce::var loadSession (const juce::var& session, const juce::File& projectRoot);
     juce::String liveRamp (const juce::String& track, int input, double gainDb, double rampMs);
+
+    // Live inputs (live-supercollider.md §2): the `input` op makes a ring
+    // FieldOut writes, under a name a session's input window reads, and
+    // answers the ring's number. A session holds the rings it reads, so
+    // closing one it still plays only frees the name.
+    juce::var openInput (const juce::String& name);
+    juce::String closeInput (const juce::String& name);
     bool liveMode() const { return liveSession != nullptr; }
 
     juce::String play();
@@ -287,6 +298,10 @@ private:
     // read in the audio callback; the lock covers session access.
     std::unique_ptr<field::LiveSession> liveSession;
     juce::CriticalSection liveLock;
+    // The rings by input name; the session op reads it outside the
+    // message lock, so it has its own.
+    std::mutex inputsLock;
+    std::map<std::string, std::shared_ptr<field::RingInput>> rings;
     std::atomic<bool> livePlaying { false };
     juce::int64 liveLength = 0;
     juce::String liveSong;

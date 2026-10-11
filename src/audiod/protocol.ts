@@ -283,6 +283,30 @@ export const loadResponseSchema = z.object({
 
 export const transportState = z.enum(['playing', 'paused', 'stopped']);
 
+// A live input (live-supercollider.md §2, daemon feature "live-input"):
+// the ring FieldOut writes, by the number FieldOut takes, and its size.
+export const inputResponseSchema = z.object({
+  ok: z.literal(true),
+  name: z.string(),
+  ring: z.number().int().min(1),
+  capacity: z.number().int().positive(),
+  channels: z.literal(2),
+  sample_rate: z.number(),
+});
+
+// An open input in status: frames FieldOut wrote, the daemon read, and
+// FieldOut dropped for want of room; how often the reader ran dry; and
+// the frames it skipped to hold its level against a fast writer.
+export const inputStatusSchema = z.object({
+  name: z.string(),
+  ring: z.number().int(),
+  written: z.number().int(),
+  read: z.number().int(),
+  dropped: z.number().int(),
+  underruns: z.number().int(),
+  skipped: z.number().int(),
+});
+
 export const statusResponseSchema = z.object({
   ok: z.literal(true),
   state: transportState,
@@ -304,6 +328,7 @@ export const statusResponseSchema = z.object({
   // The live session's region loop, when one is set (daemon feature "loop-region").
   loop_from: z.number().int().optional(),
   loop_to: z.number().int().optional(),
+  inputs: z.array(inputStatusSchema).optional(), // open live inputs (daemon feature "live-input")
 });
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });

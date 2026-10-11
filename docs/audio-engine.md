@@ -97,14 +97,38 @@ plugins.
 [live-supercollider.md](projects/live-supercollider/readme.md) §9
 describes the overlay and what it gives up.
 
-Today only `field-audiod --render-live` feeds an input, from a file:
+The daemon feeds an input from a ring that FieldOut, a UGen in the
+voice host's scsynth, writes. The `input` op makes the ring under a
+name and answers its number, which FieldOut takes:
+
+```json
+{ "op": "input", "name": "keys-voice" }
+{ "ok": true, "name": "keys-voice", "ring": 4213871, "capacity": 8192, "channels": 2, "sample_rate": 48000 }
+```
+
+A session whose input window names an open input reads it every block;
+one that names no open input is refused. The reader keeps a block plus
+256 frames in hand, drops the oldest frames when the writer runs fast
+enough to hold twice that, and when the writer stops, plays what it
+holds and waits to fill again. `status` lists each open input with its
+counters: frames `written`, `read`, and `dropped` for want of room, and
+the reader's `underruns` and `skipped` frames. `input_close` frees the
+name; a session still reading the ring keeps it until the session goes.
+A daemon that does this lists `live-input` in `hello.features`. The ring
+is POSIX shared memory, so Windows has no live inputs yet.
+
+`field-audiod --render-live` feeds an input from a file instead, and
+`--ring-selftest` checks the reader against the writer FieldOut runs:
 
 ```sh
 field-audiod --render-live session.json out.wav --input keys-voice=take.wav
+field-audiod --ring-selftest
 ```
 
-The `session` op refuses a session with an input window, because nothing
-in the daemon feeds one yet.
+FieldOut lives in `native/sc-fieldout`, under GPL-3.0, because it builds
+against SuperCollider's plugin interface; its
+[README](../native/sc-fieldout/README.md) says how to build and load
+it.
 
 ## Crash-safe recording
 

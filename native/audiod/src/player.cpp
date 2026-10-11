@@ -2,6 +2,7 @@
 
 #include "capture.h"
 #include "live.h"
+#include "ring_input.h"
 #include "version.h"
 
 #if JUCE_MAC
@@ -387,7 +388,13 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         // so a caller holding the lock waits on itself — minjudd hung
         // `field play` with exactly that (#150). The hosting guard
         // turns that mistake into a load error instead of a hang.
-        auto next = std::make_unique<field::LiveSession> (session, projectRoot);
+        field::LiveInputs inputs;
+        {
+            std::lock_guard<std::mutex> hold (inputsLock);
+            for (const auto& [name, ring] : rings)
+                inputs[name] = ring;
+        }
+        auto next = std::make_unique<field::LiveSession> (session, projectRoot, inputs);
         // Pre-roll outside the lock too: a swap lands at the old
         // session's position, and warming the replacement's chain there
         // (LiveSession::locate) renders seconds of discarded audio —
@@ -673,10 +680,68 @@ juce::String Player::transportState()
     return "stopped";
 }
 
+juce::var Player::openInput (const juce::String& name)
+{
+    auto result = obj();
+    if (name.isEmpty())
+    {
+        result->setProperty ("error", "input needs a name");
+        return juce::var (result.get());
+    }
+    std::lock_guard<std::mutex> hold (inputsLock);
+    if (rings.count (name.toStdString()) > 0)
+    {
+        result->setProperty ("error", "input \"" + name + "\" is already open");
+        return juce::var (result.get());
+    }
+    try
+    {
+        auto ring = std::make_shared<field::RingInput> ((uint32_t) std::lround (currentDeviceRate()));
+        result->setProperty ("name", name);
+        result->setProperty ("ring", (int) ring->id());
+        result->setProperty ("capacity", (int) ring->capacity());
+        result->setProperty ("channels", 2);
+        result->setProperty ("sample_rate", currentDeviceRate());
+        rings[name.toStdString()] = std::move (ring);
+    }
+    catch (const std::exception& e)
+    {
+        result->setProperty ("error", juce::String (e.what()));
+    }
+    return juce::var (result.get());
+}
+
+juce::String Player::closeInput (const juce::String& name)
+{
+    std::lock_guard<std::mutex> hold (inputsLock);
+    const auto found = rings.find (name.toStdString());
+    if (found == rings.end())
+        return "no input named \"" + name + "\"";
+    found->second->retire();
+    rings.erase (found);
+    return {};
+}
+
 juce::var Player::status (bool consumePeak)
 {
     auto result = obj();
     result->setProperty ("state", transportState());
+    {
+        // Each open input's ring and its counters (live-supercollider.md
+        // §2): whether FieldOut is writing, and whether the reader keeps up.
+        std::lock_guard<std::mutex> hold (inputsLock);
+        if (! rings.empty())
+        {
+            juce::Array<juce::var> list;
+            for (const auto& [name, ring] : rings)
+            {
+                auto stats = ring->stats();
+                stats.getDynamicObject()->setProperty ("name", juce::String (name));
+                list.add (stats);
+            }
+            result->setProperty ("inputs", list);
+        }
+    }
     if (liveSession != nullptr)
     {
         result->setProperty ("sample", liveSession->wrappedPosition());

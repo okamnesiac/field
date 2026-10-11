@@ -3,6 +3,7 @@
 node_modules/
 dist/
 native/audiod/build/
+native/sc-fieldout/build/
 # clangd’s index, created because CMAKE_EXPORT_COMPILE_COMMANDS is on.
 # Machine-local editor state, and its content-derived filenames churn on
 # every reindex.

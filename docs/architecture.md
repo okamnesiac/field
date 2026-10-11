@@ -196,8 +196,9 @@ OSC over UDP, which TypeScript handles fine. Two modes:
   [live-supercollider](projects/live-supercollider/readme.md)'s work.
   The engine's half has landed: a live session carries an input up
   through every chain above its track ([audio-engine.md](audio-engine.md)
-  "Live inputs"), and the ring that feeds it from SuperCollider is
-  next.
+  "Live inputs"), fed from a shared-memory ring that FieldOut, a GPL-3.0
+  scsynth plugin in `native/sc-fieldout`, writes. Pointing the voice host
+  at FieldOut is next.
 
 SC source is tracked in Git and treated as code.
 

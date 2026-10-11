@@ -93,6 +93,13 @@ freeze still never collapses a track on the path.
 | Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. |
 | `FieldOut` (new, `native/sc-fieldout/`) | An `scsynth` UGen plugin writing its input into a POSIX shared-memory, single-producer, single-consumer ring. |
 
+*Amended (2026-10-11, as built in chunk 2):* the `input` op takes a
+name and answers `{ring, capacity, channels, sample_rate}`, where `ring`
+is the number FieldOut takes, below 2^24 because a UGen input is a
+float; `input_close` frees the name, and `status` lists each open input
+with its counters. FieldOut lives in `native/sc-fieldout` under GPL-3.0
+(§11) and shares `native/ring/field_ring.h` with the daemon.
+
 *Amended (2026-10-11, as built in chunk 1):* the input window is
 `{input: <name>, gain_db, pan?}`, where the name is the source the
 daemon resolves, a ring from chunk 2 on; the channel count is always
@@ -263,3 +270,33 @@ must sit under `main`.
   and a sibling fed by a file is served from its stem. The daemon's
   `session` op refuses an input window until chunk 2 gives it a source,
   so nothing outside the tests can attach one yet.
+- 2026-10-11 — Chunk 2 (branch `live/ring`, stacked on chunk 1).
+  `FieldOut` builds against SuperCollider 3.14.1's plugin headers,
+  vendored under `native/sc-fieldout/vendor`, and writes through
+  `native/ring/field_ring.h`, the layout and writer the daemon shares.
+  The daemon's `RingInput` makes the ring, holds a block plus 256 frames,
+  drops the oldest frames when the writer runs fast, and waits to fill
+  again when it runs dry; `field-audiod --ring-selftest` runs it against
+  that same writer through steady state, a gap, a fast writer, and no
+  reader. `src/audiod/live-ring.test.ts` runs FieldOut in scsynth's
+  non-realtime mode into a ring the daemon made, and a playing session
+  reads it. Building it turned up a constraint for chunk 3: at shutdown
+  scsynth unloads its plugins before it frees the synths still running,
+  so a FieldOut left running crashes scsynth on its way out, and the
+  voice host must free FieldOut before it quits. Criteria 4 and 5, the
+  added latency and an hour without a dropout, need the real device and
+  wait for chunk 3.
+
+## 11 FieldOut's license (DECIDED, 2026-10-11)
+
+FieldOut is GPL-3.0-or-later, in this repository, with its own
+`LICENSE` beside it. A UGen builds against SuperCollider's plugin
+interface, which is GPL-3.0, so the plugin is too. The rest of Field
+stays MIT: the daemon and FieldOut share only the ring's layout, an MIT
+header, and nothing links across that line.
+
+The alternatives were a separate GPL repository, which keeps this one
+MIT-only at the cost of a second repository and release step, and §3's
+loopback device, which needs no plugin at all but brings a third-party
+driver or a Mac-only API, its own clock, and more latency. Justin chose
+the plugin in this repository.

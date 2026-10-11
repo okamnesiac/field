@@ -4,6 +4,7 @@
 #include "keys.h"
 #include "live.h"
 #include "render.h"
+#include "ring_input.h"
 #include "server.h"
 
 #include <juce_events/juce_events.h>
@@ -149,6 +150,7 @@ int main (int argc, char* argv[])
     juce::String renderLiveOut;
     juce::String renderLiveClick;
     std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
+    bool ringSelfTest = false;
     juce::String scanFormat;
     juce::String probeFormat;
     juce::String probeCandidate;
@@ -199,6 +201,8 @@ int main (int argc, char* argv[])
             monitorName = juce::String::fromUTF8 (argv[++i]);
         else if (arg == "--null-output")
             nullOutput = true;
+        else if (arg == "--ring-selftest")
+            ringSelfTest = true;
         else if (arg == "--idle" && i + 1 < argc)
             idleSeconds = juce::String (argv[++i]).getIntValue();
         else
@@ -213,6 +217,7 @@ int main (int argc, char* argv[])
                           "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
                           "       field-audiod --state-capture <au|vst3> <identifier> "
                           "<paramsJson> <out>\n"
+                          "       field-audiod --ring-selftest\n"
                           "       field-audiod --keys <name>\n"
                           "       field-audiod --midi-monitor <name>\n");
             return 2;
@@ -302,6 +307,19 @@ int main (int argc, char* argv[])
         // exit it has always had.
         if (field::hostingWasUsed())
             field::exitSubprocess (0);
+        return 0;
+    }
+
+    // The ring's own check (ring_input.h): the reader against the
+    // writer FieldOut runs, with no SuperCollider in the loop.
+    if (ringSelfTest)
+    {
+        if (auto error = field::runRingSelfTest(); ! error.empty())
+        {
+            std::fprintf (stderr, "field-audiod: ring self-test failed: %s\n", error.c_str());
+            return 1;
+        }
+        std::printf ("{\"ok\":true}\n");
         return 0;
     }
 

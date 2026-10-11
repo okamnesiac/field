@@ -15,6 +15,7 @@ import {
   errorResponseSchema,
   eventSchema,
   helloResponseSchema,
+  inputResponseSchema,
   loadResponseSchema,
   okResponseSchema,
   PROTOCOL_VERSION,
@@ -233,6 +234,15 @@ export class AudiodClient extends EventEmitter {
   // The compiled live session (session.ts). Requires supports('session').
   session(session: unknown) {
     return this.request('session', { session }, loadResponseSchema);
+  }
+  // A live input (live-supercollider.md §2): a ring FieldOut writes,
+  // which the session's input window named `name` reads. Requires
+  // supports('live-input').
+  openInput(name: string) {
+    return this.request('input', { name }, inputResponseSchema);
+  }
+  closeInput(name: string) {
+    return this.request('input_close', { name }, okResponseSchema);
   }
   // A window gain glide on the live session (session.ts rampRequestSchema).
   ramp(track: string, input: number, gainDb: number, rampMs = 15) {

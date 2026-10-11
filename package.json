@@ -17,7 +17,7 @@
     "field": "tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build --parallel 4 --config Release",
+    "build:native": "cmake -S native/audiod -B native/audiod/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/audiod/build --parallel 4 --config Release && cmake -S native/sc-fieldout -B native/sc-fieldout/build -DCMAKE_BUILD_TYPE=Release && cmake --build native/sc-fieldout/build --config Release",
     "gen:limits": "tsx scripts/gen-plan-limits.ts",
     "build:ui": "pnpm --dir ui build"
   },
