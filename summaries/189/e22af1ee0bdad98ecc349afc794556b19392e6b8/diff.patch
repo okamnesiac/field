@@ -1,0 +1,1147 @@
+diff --git a/docs/keys.md b/docs/keys.md
+index 17eadec..fbffca6 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -189,6 +189,32 @@ The next save that loads puts `· reloaded` on the line instead.
+   times its cutoff. It plays at true pitch, so in `musical-typing` press
+   `Z` to drop an octave.
+ 
++## Play a track
++
++Name a track instead of an instrument, and `field keys` plays the
++instrument the track's record entry names, whether or not the track has
++any takes yet. Name several, and every key plays all of them at once:
++
++```console
++$ field keys creek/track:keys creek/track:bass
++keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers
++Field Keys · musical-typing · transpose 0 · velocity 100 · C3
++```
++
++A target with `track:` in it is a track; anything else is an
++instrument, so you can mix the two. A track whose record entry names no
++instrument plays the MIDI track under it, down its `track:` inputs, so
++naming a bus plays the part it carries. If more than one MIDI track is
++under it, `field keys` lists them and stops, and you name the ones you
++mean.
++
++The instrument still plays straight to the device, so the inserts on
++the track and on the tracks above it are not heard yet. When a track you
++named has any, the instrument's line ends
++`· dry: the effects on keys-bus are not heard yet`. Hearing them is the
++work of
++[the live-supercollider plan](projects/live-supercollider/readme.md).
++
+ ## Record what you play
+ 
+ A track records what you play when its `record:` entry names an
+diff --git a/docs/projects/arming/readme.md b/docs/projects/arming/readme.md
+new file mode 100644
+index 0000000..1ea8b4c
+--- /dev/null
++++ b/docs/projects/arming/readme.md
+@@ -0,0 +1,223 @@
++---
++status: in-progress
++priority: now
++---
++
++# Plan: Arming
++
++You arm the tracks you want to play or record, and `field keys` plays
++every armed MIDI track's instrument in unison while `field record`
++records every armed track, audio and MIDI, in one pass.
++
++## 1 Problem
++
++A song says what plays a part in its track files: a MIDI track is a
++track whose `record:` entry names an instrument
++([keyboard-instrument.md](../keyboard-instrument/readme.md) §12.2), and
++it is that before it has a single take. Two commands act on parts, and
++each takes exactly one thing.
++
++- **`field keys <instrument>` takes a program, not a track.** To hear
++  the part a track plays, you have to know which program its record
++  entry names, and you cannot name a bus above it at all.
++- **`field record <track>` records one track per pass.** The daemon
++  holds one arm: one `capture`, one `activeCapture`, and one
++  `activeMidiCapture` in `native/audiod/src/player.h`. Recording a
++  vocal and the keys under it, or two MIDI parts, takes two passes, so
++  the takes are two performances, not one.
++
++Justin asked for both on 2026-10-11: play a MIDI track, or a track above
++it with effects on it, and record audio, MIDI, or both, with the tracks
++you choose armed and every armed MIDI track playing in unison.
++
++## 2 Solution
++
++Arming is a set of tracks. You arm tracks by naming them on the command
++line: `field keys` and `field record` each take several targets. A
++track resolves to the MIDI tracks it is or contains. `field keys` loads
++every armed instrument into its one voice host and plays each key on
++all of them at once. `field record` arms each track in the daemon, an
++audio track on its own input channel and a MIDI track on the MIDI
++sources, starts all of them on one latch, and lands each as its own
++take. A lasting arm, set with `field arm` and the UI's arm buttons and
++read by both commands, follows in chunk 3. Hearing an armed track
++through the effects above it waits on
++[live-supercollider](../live-supercollider/readme.md), which owns
++getting the voice's audio into the daemon's graph; until then
++`field keys` plays an armed track dry and says so.
++
++### 2.1 Playing armed tracks
++
++1. You run `field keys creek/track:keys creek/track:bass`. A target with
++   no `track:` is an instrument, resolved as today
++   (keyboard-instrument.md §2.1), so `field keys juno` is unchanged.
++2. A track target arms the track itself when its record entry names an
++   instrument. Otherwise it arms the tracks under it, down its `track:`
++   inputs, whose record entries do. A target with none under it is an
++   error. A target with more than one under it is an error that lists
++   them, so you name the ones you mean: naming is how you choose.
++3. The voice host loads every armed instrument's program. Each key
++   starts one voice per instrument, and the bend, the modulation wheel,
++   sustain, and release apply to all of them, through the voicer as
++   today. Saving any of the programs reloads it (keyboard-instrument.md
++   §14).
++4. The instrument's line names what is armed, as
++   `keys: juno · bass: bass live at 48000 Hz on MacBook Pro Speakers`,
++   and when a target was a bus with effects, `· dry: the effects on
++   creek/track:keys-bus are not heard yet`.
++
++### 2.2 Recording armed tracks
++
++1. You run `field record creek/track:vox creek/track:keys --at 17`. Each
++   target must be a track with a record entry; its instrument decides
++   whether it records MIDI or audio, as today.
++2. Audio tracks take input channels in the order you name them:
++   `--input 1,2` gives the first audio track input 1 and the second
++   input 2. With no `--input`, they take 1, 2, and on.
++3. The daemon arms every track at once. One `record` starts them all on
++   the same latch, so every take starts at the same bed position, and
++   `--until` ends them all. Every armed MIDI track hears every MIDI
++   source, so two armed MIDI tracks record the same notes: unison, as
++   `field keys` plays them.
++4. On stop, each transaction finalizes and lands on its own track as
++   its own take, chosen, through the landing that exists today.
++   `--loop` stays a one-track, audio-only feature in this plan.
++
++### 2.3 Shapes
++
++| Shape | Today | After |
++| --- | --- | --- |
++| `field keys` | `[instrument]` | `[targets...]`: instruments and tracks, mixed |
++| `field record` | `[target]`, `--input <n>` | `[targets...]`, `--input <n>[,<n>...]` |
++| `arm` request | `{track, input, device?}` or `{track, kind: "midi"}` | adds `{tracks: [{track, kind: "audio", input} \| {track, kind: "midi"}], device?}`; the one-track forms stay |
++| `status.record` | one armed track's fields | adds `armed`, a list with each track's kind, input or sources, and level or events |
++| `take` event and `stop` response | one take | one per armed track, each naming its `track` |
++
++### 2.4 Files
++
++| File | Change |
++| --- | --- |
++| `src/keys/targets.ts` (new) | Resolves `field keys` targets to armed instruments: a program, a MIDI track, or the MIDI tracks under a bus. |
++| `src/commands/keys.ts`, `src/cli.ts` | Several targets; the instrument's line names each armed track and says when effects are not heard. |
++| `sc/voice-host.scd`, `src/keys/voice-host.ts` | Several programs: one voice per program per key, a reload per program. |
++| `native/audiod/src/player.cpp`, `player.h`, `server.cpp` | An arm set in place of the one arm: a capture per armed track, one latch, one stop. |
++| `src/audiod/protocol.ts`, `client.ts` | The arm-set request, status, and takes. |
++| `src/commands/record.ts`, `src/cli.ts` | Several targets and `--input` lists; land each take. |
++| `docs/keys.md`, `docs/audio-engine.md` | Playing and recording armed tracks. |
++
++## 3 Why this design (DECIDED, 2026-10-11, for Justin's review)
++
++Justin decided the choices that matter, that tracks are armed by choice
++and that armed tracks play in unison, and went to bed. The rest are
++decided here with the alternative each beat, and any of them can be
++overturned in review.
++
++- **Arm by naming, first.** Both commands already take targets, so
++  naming several is the smallest change that arms several. Rejected for
++  now: a lasting arm state first. Where it lives is a real question
++  (§7 question 1), and building it before anyone has armed two tracks
++  would decide it blind.
++- **A bus with several MIDI tracks under it refuses and lists them.**
++  "They should be able to choose which tracks to arm": naming each is
++  the choice. Rejected: arming everything under the bus, which would
++  play a part you did not ask for.
++- **Unison in one voice host.** One `scsynth` on one device, with a
++  voice per instrument per key. Rejected: one host per instrument, which
++  boots one server per instrument on the same device and multiplies the
++  boot time.
++- **Every armed MIDI track records every MIDI source.** That is what
++  unison means for recording, and it needs no routing. Rejected for now:
++  routing by MIDI channel, so the keys and the bass could be played on
++  different channels of one controller (§7 question 3).
++- **Inputs follow the order you name the audio tracks.** Rejected: a
++  per-target suffix such as `creek/track:vox@2`, which no other label
++  in Field has.
++- **Effects wait for live-supercollider.** The voice plays in its own
++  `scsynth`, and a track's inserts run inside `field-audiod`; joining
++  them is that plan's work.
++
++## 4 Acceptance criteria
++
++| # | Do | Expect |
++| --- | --- | --- |
++| 1 | In `examples/bloom`, give `creek` a track `keys` whose record entry has `instrument: juno` and no takes, and run `field keys creek/track:keys`. | `juno` plays, and the instrument's line names `keys`. |
++| 2 | Add a track `keys-bus` whose only input is `track: keys`, with an insert, and run `field keys creek/track:keys-bus`. | `juno` plays, and the line says the effects on `keys-bus` are not heard yet. |
++| 3 | Add a track `bass` whose record entry has `instrument: bass`, put it under `keys-bus` too, and run `field keys creek/track:keys-bus`. | Exit 1, listing `keys` and `bass`. |
++| 4 | Run `field keys creek/track:keys creek/track:bass` and press a key. | Both instruments sound the note at once. A held key and its release reach both. |
++| 5 | Run `field keys creek/track:pad-sc`, a track with no record entry and nothing under it that has one. | Exit 1: no MIDI track there. |
++| 6 | Run `field record creek/track:vox creek/track:keys --at 2`, play, sing, and stop. | Two takes land, one per track, both chosen, both starting at bar 2. |
++| 7 | Run `field record creek/track:vox creek/track:vox2 --input 1,2`. | Each take holds its own input. |
++| 8 | Run `field record creek/track:keys creek/track:bass` and play. | Both MIDI takes hold the same notes. |
++
++Criteria 1 to 5 belong to chunk 1, 6 to 8 to chunk 2.
++
++## 5 Cost
++
++Unison multiplies voices: each key starts one voice per armed
++instrument, and a chord of five keys on three instruments is fifteen
++voices, which `scsynth` runs without strain. Recording several tracks
++adds one capture per track: a lock-free queue the callback writes and a
++writer thread that drains it, as one audio take uses today. A mono
++float take is 192 KB/s at 48 kHz, so eight armed tracks write about
++1.5 MB/s. The callback's added work is one copy per armed audio track
++per block.
++
++## 6 Rollout
++
++1. **`field keys` on tracks, in unison.** Targets, the bus rule, the
++   voice host with several programs, and the line. Criteria 1 to 5.
++2. **`field record` on several tracks.** The daemon's arm set, the
++   protocol, the client, `--input` lists, and landing each take.
++   Criteria 6 to 8.
++3. **A lasting arm.** `field arm` and `field disarm`, the arm set held
++   where §7 question 1 decides, the UI's arm buttons, and both commands
++   playing or recording the armed set when given no targets.
++
++## 7 Open questions
++
++1. **Where a lasting arm lives (chunk 3).** The daemon, so the UI and
++   both commands share it while it runs, or `.field/`, so it survives
++   the daemon. Justin decides before chunk 3.
++2. **Loop takes on several tracks.** Chunk 2 refuses `--loop` with more
++   than one armed track. Deferred until someone loops a pass with two
++   parts.
++3. **Routing MIDI by channel.** Arming `keys` on channel 1 and `bass` on
++   channel 2 of one controller, instead of unison. Deferred until a
++   controller with split zones is in use.
++
++## 8 Background
++
++- `resolveInstrument` in `src/commands/keys.ts` resolves a program
++  name or path; nothing resolves a track to its instrument.
++- `recordNodeFor` in `src/commands/land.ts` finds a track's one record
++  entry; `resolveRecordTarget` in `src/commands/record.ts` accepts
++  exactly one label.
++- The voice host loads one program into `voiceDef`
++  (`sc/voice-host.scd`); the voicer's `start` returns one voice, and
++  any value works as a voice, so a list of synths is a voice too.
++- The daemon's single arm is `armedTrack`, `armedInput`, `capture`,
++  `activeCapture`, `activeMidiCapture`, and `standbyCapture` in
++  `native/audiod/src/player.h`; an arm of the other kind replaces it
++  (`docs/audio-engine.md` "MIDI capture").
++
++## 9 Chunk 1 as built (2026-10-11)
++
++`field keys` takes any number of targets. `src/keys/targets.ts`
++resolves them, holding `resolveInstrument` and the shelf listing too,
++which moved there from `src/commands/keys.ts`. A target with `track:`
++in it goes through `resolveRecordTarget`, and then down the track's
++`track:` inputs to the tracks whose record entries name an instrument.
++The voice host takes `FIELD_INSTRUMENTS`, a JSON list, loads each
++program, and renames each SynthDef for its place in the list, so two
++programs that name their voices alike both play. Each key starts a
++voice from every program; the voicer needs no change, because a list of
++synths is a voice. A save of any program reloads them all, and if one
++does not load, every voice stays as it was.
++
++| Check | Result |
++| --- | --- |
++| `src/keys/targets.test.ts` | A MIDI track with no takes arms its instrument; a bus with an EQ over it arms the track under it and names `keys-bus` as unheard; a bus over two MIDI tracks lists both and stops; a track with none under it says so; several targets, mixed and repeated, arm each once. |
++| `src/keys/voice-host.test.ts` | The host receives `FIELD_INSTRUMENTS` as a JSON list. |
++| The real host with two silent programs that both name their SynthDef `\quiet`, a note from `field-audiod --keys` | Live, then a voice on and a voice off for the note, with no error. |
++
++Still owed: criterion 4 by ear, hearing two instruments sound one key.
+diff --git a/docs/projects/live-supercollider/readme.md b/docs/projects/live-supercollider/readme.md
+index 90ecfd7..2c4cba4 100644
+--- a/docs/projects/live-supercollider/readme.md
++++ b/docs/projects/live-supercollider/readme.md
+@@ -1,11 +1,160 @@
+ ---
+ status: draft
+-priority: later
++priority: next
+ ---
+ 
+ # Plan: Live SuperCollider
+ 
+-**Goal:** scsynth as a node in the real-time graph via timestamped OSC.
++**Goal:** the voice `field keys` plays reaches the daemon's live graph as
++an input on its MIDI track, so the inserts on that track and on every
++track above it process what you play, as they process the track's takes.
+ 
+-No plan yet. This entry carries the line `later.md` held before the
+-Projector migration; write the plan here when the work graduates.
++## 1 Problem
++
++`field keys` plays an instrument in its own `scsynth`, which writes
++straight to the output device
++([keyboard-instrument.md](../keyboard-instrument/readme.md) §2.6). A
++track's inserts run inside `field-audiod`. So when you arm a MIDI track
++under a bus with an EQ ([arming.md](../arming/readme.md) §2.1), you hear
++the instrument dry, and `field keys` says so.
++
++Two things in the daemon stand in the way, not one:
++
++- **Nothing carries audio between Field's processes.** There is no
++  shared memory, pipe, or socket carrying audio anywhere in `native/`,
++  `src/`, or `sc/`; IPC is NDJSON over a Unix socket and OSC to
++  `scsynth` (`docs/architecture.md`).
++- **A live session renders every track but the output track ahead of
++  time.** `native/audiod/src/live.h` describes the engine as
++  "just-in-time offline rendering": every source is a committed or
++  built file, so a non-output track renders in full when the session
++  loads (`live.cpp` `produceUntil`), and only the output track mixes
++  and runs its chain per block (`renderBlock`, `runChain`). A voice
++  played by hand has no future to render, so the tracks between it and
++  `main` cannot be pre-rendered.
++
++`docs/build-graph.md` already classes "a SuperCollider node played by
++hand" as live-only, never cached, and `realtime/readme.md` expects that
++"capture becomes an input node… monitoring falls out of the same
++callback". This plan builds the input node and the live tracks it
++needs, and the transport that brings the voice to it.
++
++## 2 Solution
++
++A live session gains an `input` window kind: a source the daemon reads
++each block from outside the session. Every track on the path from an
++input up to `main` becomes a *live* track, which mixes and runs its
++chain in the audio callback instead of rendering at load; its siblings
++fed only by files stay pre-rendered, and the freeze never collapses a
++live track into a stem. The voice reaches the input through a shared
++memory ring: a small `scsynth` plugin, `FieldOut`, writes the voice host's
++output into it, and the daemon reads it with a jitter buffer and drift
++correction. `field keys` asks the daemon to put an input on each armed
++MIDI track and points the voice host at that ring instead of the device.
++
++### 2.1 Flow
++
++1. You run `field keys creek/track:keys-bus`. Arming resolves it to the
++   MIDI track `keys` under it (arming.md §2.1).
++2. `field keys` asks the daemon for a live input on `keys`. The daemon
++   creates a ring, loads the song's session if none is loaded, marks
++   `keys`, `keys-bus`, and every track above them live, and answers with
++   the ring's name.
++3. The voice host plays into `FieldOut.ar(ring)` rather than `Out.ar(0)`.
++   Its `scsynth` still runs on a device, the same one the daemon uses,
++   so the two callbacks share a clock.
++4. Each block, the daemon reads the ring into the input window, runs
++   `keys`'s inserts, mixes it into `keys-bus`, runs the EQ, and so on up
++   to `main`, beside the pre-rendered tracks.
++5. With the transport stopped, the live tracks still run, so you can
++   play over silence (§7 question 2). With it playing, you play over the
++   song.
++6. When `field keys` exits, the daemon drops the input and the live
++   marking, and the session renders as before.
++
++### 2.2 Shapes
++
++| Shape | Change |
++| --- | --- |
++| Session window kinds (`src/audiod/session.ts`, `live.h`) | Adds `input`, naming a ring: `{kind: "input", ring, channels}`. |
++| Live tracks (`live.cpp`) | A track with an input below it evaluates per block; `comp_delay` on its path becomes non-zero for the first time. |
++| Freeze (`src/graph/live.ts`) | A track with an input below it is never collapsed into its stem. |
++| Daemon protocol | `input` op: attach a ring to a track, answer its name; `input_close`. |
++| Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. |
++| `FieldOut` (new, `native/sc-fieldout/`) | An `scsynth` UGen plugin writing its input into a POSIX shared-memory, single-producer, single-consumer ring. |
++
++## 3 Why this design
++
++Three ways to bring the voice in were weighed:
++
++- **A shared-memory ring from a `scsynth` plugin (chosen).** A crash in
++  the voice cannot take the daemon down, it needs no third-party driver,
++  and the voice host's interface stays as it is. It is the most new
++  code: a native SC plugin built per platform, and a reader with a
++  jitter buffer and drift handling.
++- **The daemon hosting the voice.** No SuperCollider AU or VST3 exists,
++  so this means embedding `libscsynth` with a driver the daemon pulls
++  each block: one clock and sample-accurate MIDI, at the price of a
++  patched SC build, synthesis inside the daemon's callback, and a GPLv3
++  library beside JUCE. Rejected.
++- **A loopback device the daemon captures.** BlackHole, or a Core Audio
++  process tap on macOS 14.2 and later, extending `arm`'s duplex open to
++  a persistent stereo input. The least SC work and the fastest
++  prototype, but a third-party driver or a Mac-only API, its own clock,
++  about three buffers of latency, and the microphone permission in the
++  way. Kept as the fallback if §7 question 1 goes against the plugin.
++
++The input window is built first and alone, because host monitoring of a
++microphone (`docs/audio-engine.md` "Monitoring") needs exactly the same
++live tracks with the capture input as the source.
++
++## 4 Acceptance criteria
++
++| # | Do | Expect |
++| --- | --- | --- |
++| 1 | In a session test, feed an `input` window a known signal under a track with an EQ and a limiter. | The output equals the offline render of the same signal through the same chain, within the limiter's tolerance. |
++| 2 | Load a session with an input under `keys-bus`. | `keys`, `keys-bus`, and the tracks above them are live; a sibling fed by a file is still pre-rendered. |
++| 3 | Run `field keys creek/track:keys-bus` where `keys-bus` has a 700 Hz lowpass, and play. | You hear the instrument through the lowpass; the instrument's line no longer says dry. |
++| 4 | Measure the added latency: a click from the voice host to the device, through the ring and back out. | At most one daemon block plus one device buffer more than playing straight to the device. |
++| 5 | Play for an hour. | No dropout or click from the ring running empty or full. |
++
++## 5 Cost
++
++The live path runs in the audio callback, so its cost is per block:
++the chains of every live track, which today run once at load. A typical
++path is the MIDI track and one or two buses, each with a few built-in
++inserts. The ring adds one copy per block per input. Latency is the
++jitter buffer, at least one of the larger of the two processes' blocks.
++
++## 6 Rollout
++
++1. **The input window and live tracks,** fed in tests by a synthetic
++   source. Criteria 1 and 2.
++2. **`FieldOut` and the daemon's reader,** with the jitter buffer and
++   drift handling. Criteria 4 and 5.
++3. **`field keys` through it.** Criterion 3.
++4. **Host monitoring of a microphone** through the same live tracks,
++   with the capture input as the source.
++
++## 7 Open questions
++
++1. **The transport.** The plan recommends the shared-memory ring.
++   Justin decides between it and the loopback prototype before chunk 2.
++2. **Playing with the transport stopped.** Live tracks running while the
++   song is stopped need the callback to run with no playhead; the plan
++   assumes they do. Justin confirms before chunk 3.
++3. **Several armed tracks under one bus.** Each armed MIDI track gets its
++   own input and ring, so a bus with two armed tracks sums two live
++   inputs. Decided with arming.md chunk 3, which settles how armed
++   tracks are held.
++
++## 8 Background
++
++The survey behind this plan, as the code stood on 2026-10-11:
++
++- **Window kinds:** `file`, `track`, and `receive` (`src/audiod/session.ts`; `native/audiod/src/live.h`).
++- **Insert kinds:** eq, limit, reverb, plate, hall, and hosted `plugin`.
++- **Hosted plugins are inserts only,** with an empty `MidiBuffer`, so no instrument plugin exists to host a voice.
++- **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1.
++- **Changing a live session** swaps the whole session at a block boundary (the `session` op); there are no per-insert edits.
++- **The voice host** runs `scsynth` with a hardware buffer of 128 frames; the daemon takes JUCE's default buffer.
+diff --git a/sc/voice-host.scd b/sc/voice-host.scd
+index e60a5c6..473ea40 100644
+--- a/sc/voice-host.scd
++++ b/sc/voice-host.scd
+@@ -1,10 +1,12 @@
+ // The voice host behind `field keys <instrument>` (keyboard-instrument.md
+-// §2.6). It boots its own scsynth on the output device, loads the
+-// instrument's voice, and plays it from every MIDI source. Field reads
++// §2.6). It boots its own scsynth on the output device, loads each armed
++// instrument's voice (arming.md §2.1), and plays them from every MIDI
++// source, each note on all of them. Field reads
+ // only the lines that start with "@field ", each one JSON object; the rest
+ // of sclang's output is left for diagnosing a failure.
+ //
+-// Environment: FIELD_INSTRUMENT (the program's absolute path),
++// Environment: FIELD_INSTRUMENTS (a JSON list of the programs' absolute
++// paths, played in unison: each note sounds a voice from each),
+ // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
+ // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
+ // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
+@@ -13,14 +15,15 @@
+ (
+ var here = PathName(thisProcess.nowExecutingPath).pathOnly;
+ var loadVoice = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd");
+-var instrument = "FIELD_INSTRUMENT".getenv;
++var instruments = "FIELD_INSTRUMENTS".getenv.parseJSON;
+ var port = "FIELD_SC_PORT".getenv.asInteger;
+ var parentPid = "FIELD_PARENT_PID".getenv;
+ var device = "FIELD_DEVICE".getenv;
+ var trace = "FIELD_VOICE_TRACE".getenv.notNil;
+ // True until the server answers, at the first boot and at each restart:
+ // a note then has no server to sound on, so it is ignored.
+-var server, voiceDef, problem, voicer, booting = true;
++var server, voiceDefs, problem, voicer, booting = true;
++var loadAll, addAll;
+ var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, restart;
+ 
+ jsonValue = { |value|
+@@ -77,7 +80,7 @@ boot = {
+ 			case
+ 			{ server.serverRunning } {
+ 				waiting = false;
+-				voiceDef.add;
++				addAll.();
+ 				server.sync;
+ 				booting = false;
+ 				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
+@@ -94,6 +97,23 @@ boot = {
+ 	}.play(AppClock);
+ };
+ 
++// Each program's voice, or the first program's problem. Each SynthDef is
++// renamed for its place in the list, so two programs that name their
++// voices alike still both play.
++loadAll = {
++	var defs = [], why;
++	instruments.do { |path, i|
++		var def, problem;
++		# def, problem = loadVoice.(path);
++		if (problem.notNil) { why = why ? problem } {
++			def.name = ("field" ++ i ++ "_" ++ def.name).asSymbol;
++			defs = defs.add(def);
++		};
++	};
++	[defs, why]
++};
++addAll = { voiceDefs.do(_.add) };
++
+ // scsynth keeps computing at the rate it booted at when the device moves
+ // to another, so every voice would play sharp or flat. Each status reply
+ // carries the booted rate and the rate measured from the device clock.
+@@ -121,10 +141,12 @@ run = {
+ 
+ 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+ 		{ |note, velocity, freq, mod|
+-			Synth(voiceDef.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod], server)
++			voiceDefs.collect { |def|
++				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod], server)
++			}
+ 		},
+-		{ |synth, control, value| synth.set(control, value) },
+-		{ |synth| synth.set(\gate, 0) },
++		{ |synths, control, value| synths.do(_.set(control, value)) },
++		{ |synths| synths.do(_.set(\gate, 0)) },
+ 		if (trace) { { |note, on| emit.([if (on) { "voice_on" } { "voice_off" }, note]) } }
+ 	);
+ 
+@@ -138,24 +160,24 @@ run = {
+ 	MIDIdef.cc(\fieldControl, { |value, number, chan| voicer.cc(chan, number, value) });
+ 	MIDIdef.bend(\fieldBend, { |value, chan| voicer.bend(chan, value) });
+ 
+-	// The program's file changed: load it again. A voice that loads is
+-	// what the next note plays, and the notes sounding finish as they
+-	// started; one that does not leaves the last good voice playing.
++	// A program's file changed: load them again. Voices that load are what
++	// the next note plays, and the notes sounding finish as they started;
++	// if any program does not load, every voice stays as it was.
+ 	OSCdef(\fieldReload, { |msg, time, addr|
+ 		if (addr.ip == "127.0.0.1") {
+ 			var next, why;
+-			# next, why = loadVoice.(instrument);
++			# next, why = loadAll.();
+ 			case
+ 			{ why.notNil } { emit.(["reload_error", why]) }
+ 			{ booting } {
+-				// The boot adds whatever voiceDef holds when the server answers.
+-				voiceDef = next;
++				// The boot adds whatever voiceDefs holds when the server answers.
++				voiceDefs = next;
+ 				emit.(["reloaded", true]);
+ 			}
+ 			{
+-				voiceDef = next;
++				voiceDefs = next;
+ 				fork {
+-					voiceDef.add;
++					addAll.();
+ 					server.sync;
+ 					emit.(["reloaded", true]);
+ 				};
+@@ -189,7 +211,7 @@ run = {
+ 	boot.();
+ };
+ 
+-# voiceDef, problem = loadVoice.(instrument);
++# voiceDefs, problem = loadAll.();
+ case
+ 	{ problem.notNil } { fail.(problem) }
+ 	{ device.notNil and: { deviceProblem.(device).notNil } } { fail.(deviceProblem.(device)) }
+diff --git a/src/cli.ts b/src/cli.ts
+index 0edafa2..95a89f0 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1041,18 +1041,19 @@ program
+   });
+ 
+ program
+-  .command('keys [instrument]')
++  .command('keys [targets...]')
+   .description(
+-    'play the computer keyboard as the MIDI source "Field Keys", and a SuperCollider instrument from it when you name one ' +
++    'play the computer keyboard as the MIDI source "Field Keys", and SuperCollider instruments from it: name instruments, ' +
++      'or tracks (creek/track:keys) to play the instrument each MIDI track names, all at once ' +
+       '(needs a terminal with the kitty keyboard protocol; Esc quits)',
+   )
+   .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
+   .option('--device <name>', 'output device for the instrument (field devices lists them; default: the system output)')
+   .option('--print', 'print the keymap as a keyboard diagram and exit')
+-  .action(async (instrument: string | undefined, opts: { keymap?: string; print?: boolean; device?: string }) => {
++  .action(async (targets: string[], opts: { keymap?: string; print?: boolean; device?: string }) => {
+     try {
+       const { keysCommand } = await import('./commands/keys.js');
+-      await keysCommand(instrument, opts);
++      await keysCommand(targets, opts);
+     } catch (err) {
+       fail(err);
+     }
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index b95646a..d119701 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -1,14 +1,13 @@
+-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+-import { basename, extname, join } from 'node:path';
++import { basename } from 'node:path';
+ import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
+ import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
+ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+ import { printKeymap, signed } from '../keys/print.js';
+ import { KeysSession, type MidiMessage } from '../keys/session.js';
+ import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+-import { instrumentPath, VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
++import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
++import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
+ import { watchText } from '../keys/watch.js';
+-import { findProjectRoot } from '../model/project.js';
+ import type { Keymap } from '../schema/keymap.js';
+ 
+ export const UNSUPPORTED_TERMINAL =
+@@ -21,72 +20,20 @@ export interface KeysOptions {
+   device?: string;
+ }
+ 
+-// A bare instrument name resolves on the project's instruments shelf, as a
+-// supercollider: entry's source does; a path resolves from the project
+-// root, or from here outside a project (keyboard-instrument.md §2.1).
+-export function resolveInstrument(spec: string, cwd = process.cwd()): string {
+-  const root = findProjectRoot(cwd);
+-  if (root === undefined && !spec.includes('/')) {
+-    throw new Error(
+-      `field keys ${spec}: a bare instrument name resolves in a project's shared/instruments/, ` +
+-        'and this is not inside a Field project; give the program by path instead',
+-    );
+-  }
+-  const path = instrumentPath(spec, root ?? cwd);
+-  if (!existsSync(path)) {
+-    const shelf = root !== undefined ? `\n${describeShelf(root)}` : '';
+-    throw new Error(`field keys ${spec}: no instrument program at ${path}${shelf}`);
+-  }
+-  return path;
+-}
+-
+-// The programs on a project's instruments shelf, by name, split by whether
+-// they can play from notes. A program that never reads FIELD_MODE cannot
+-// answer voice mode, so its text is enough to tell, without starting
+-// sclang for each one (keys.md "Make an instrument playable"). Each is
+-// listed by a name field keys resolves: `.scd` is added back only to a
+-// name with no extension, so pad.v2.scd lists whole.
+-function shelfInstruments(root: string): { playable: string[]; renderOnly: string[] } {
+-  const dir = join(root, 'shared', 'instruments');
+-  const playable: string[] = [];
+-  const renderOnly: string[] = [];
+-  if (!existsSync(dir)) return { playable, renderOnly };
+-  const files = readdirSync(dir, { withFileTypes: true })
+-    .filter((entry) => entry.isFile() && entry.name.endsWith('.scd'))
+-    .map((entry) => entry.name)
+-    .sort();
+-  for (const file of files) {
+-    const stem = file.slice(0, -'.scd'.length);
+-    const name = extname(stem) === '' ? stem : file;
+-    (readFileSync(join(dir, file), 'utf8').includes('FIELD_MODE') ? playable : renderOnly).push(name);
+-  }
+-  return { playable, renderOnly };
+-}
+-
+-function describeShelf(root: string): string {
+-  const { playable, renderOnly } = shelfInstruments(root);
+-  if (playable.length + renderOnly.length === 0) return 'shared/instruments/ has no programs yet.';
+-  const lines = ['In shared/instruments/:', `  plays from notes: ${playable.length > 0 ? playable.join(', ') : 'none'}`];
+-  if (renderOnly.length > 0) {
+-    lines.push(`  renders only:     ${renderOnly.join(', ')} (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)`);
+-  }
+-  return lines.join('\n');
+-}
+-
+-export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {
++export async function keysCommand(targets: string[], options: KeysOptions): Promise<void> {
+   const source = resolveKeymapSource(options.keymap);
+   const keymap = loadKeymap(source.path);
+   if (options.print === true) {
+     process.stdout.write(printKeymap(keymap));
+     return;
+   }
+-  const program = instrument !== undefined ? resolveInstrument(instrument) : undefined;
++  const armed = resolveKeysTargets(targets);
+   const { stdin, stdout } = process;
+   if (!stdin.isTTY || !stdout.isTTY) {
+     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
+   }
+   await withKittyKeyboard({ stdin, stdout }, (rest) =>
+-    play({ stdin, stdout }, { source, keymap, program, device: options.device }, rest),
++    play({ stdin, stdout }, { source, keymap, armed, device: options.device }, rest),
+   );
+ }
+ 
+@@ -118,25 +65,33 @@ async function withKittyKeyboard(tty: Tty, run: (rest: string) => Promise<void>)
+ interface PlayOptions {
+   source: KeymapSource;
+   keymap: Keymap;
+-  program: string | undefined;
++  armed: ArmedInstrument[];
+   device: string | undefined;
+ }
+ 
+ type InstrumentState = {
+-  name: string;
++  name: string; // what is armed, as the line names it
++  dry: string[]; // tracks whose effects the voices do not pass through yet
+   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
+   // What the last save of the program did (keyboard-instrument.md §14).
+   reload?: { loaded: true } | { failed: string };
+ };
+ 
+ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
+-  const { source, program } = options;
++  const { source, armed } = options;
++  const programs = [...new Set(armed.map((a) => a.program))];
+   const session = new KeysSession(options.keymap);
+   let layout: KeyboardLayout | undefined;
+   let layoutPositions: ReadonlyMap<string, string> | undefined;
+   let reloadError: string | undefined;
+   const instrument: InstrumentState | undefined =
+-    program !== undefined ? { name: basename(program, '.scd'), status: { state: 'starting' } } : undefined;
++    armed.length > 0
++      ? {
++          name: armed.map(armedName).join(' + '),
++          dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
++          status: { state: 'starting' },
++        }
++      : undefined;
+ 
+   // An instrument has a line of its own above the status line: its state
+   // changes a few times a session, the status line with every key. That
+@@ -178,9 +133,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+   // connects its MIDI inputs; the keyboard plays while it boots.
+   const device = options.device ?? helper.defaultOutput;
+   const host =
+-    program !== undefined
++    programs.length > 0
+       ? await VoiceHost.start({
+-          instrument: program,
++          instruments: programs,
+           ...(device !== undefined ? { device } : {}),
+           onStatus: (status) => {
+             if (status.state === 'voice') return;
+@@ -194,8 +149,9 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+       : undefined;
+   host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
+ 
+-  // Saving the program loads it again, as saving a keymap does (§14).
+-  const stopWatchingProgram = program !== undefined && host !== undefined ? watchText(program, () => void host.reload()) : undefined;
++  // Saving a program loads it again, as saving a keymap does
++  // (keyboard-instrument.md §14).
++  const stopWatchingPrograms = host !== undefined ? programs.map((p) => watchText(p, () => void host.reload())) : [];
+   const stopWatching =
+     source.kind === 'file'
+       ? watchKeymap(source.path, (result) => {
+@@ -239,7 +195,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+   tty.stdin.removeListener('data', onData);
+   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
+   stopWatching?.();
+-  stopWatchingProgram?.();
++  stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
+   send(session.quit());
+   // A host still booting closes too: quitting never waits for it.
+   await host?.close();
+@@ -250,7 +206,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
+ 
+ // A save that did not load leads with why, so a narrow terminal keeps the
+ // error rather than the device; the voice that loaded last still plays.
+-function instrumentText({ name, status, reload }: InstrumentState): string {
++function instrumentText({ name, dry, status, reload }: InstrumentState): string {
+   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
+   const state =
+     status.state === 'live'
+@@ -258,7 +214,17 @@ function instrumentText({ name, status, reload }: InstrumentState): string {
+       : status.state === 'restarting'
+         ? `${name} restarting for a new sample rate`
+         : `${name} starting`;
+-  return reload === undefined ? state : `${state} · reloaded`;
++  // The voice plays straight to the device, so a track's inserts are not
++  // heard yet (arming.md §2.1, live-supercollider.md).
++  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard yet` : '';
++  return `${state}${reload === undefined ? '' : ' · reloaded'}${unheard}`;
++}
++
++// A track names itself and its instrument; an instrument given by program
++// names only itself.
++function armedName(armed: ArmedInstrument): string {
++  const program = basename(armed.program, '.scd');
++  return armed.track === undefined ? program : `${armed.track.split('/').pop()} (${program})`;
+ }
+ 
+ // The sounding notes come last, so playing changes only the end of the
+diff --git a/src/keys/targets.test.ts b/src/keys/targets.test.ts
+new file mode 100644
+index 0000000..4167f14
+--- /dev/null
++++ b/src/keys/targets.test.ts
+@@ -0,0 +1,80 @@
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { createSong, createTrack } from '../commands/create.js';
++import { init } from '../commands/init.js';
++import { resolveKeysTargets } from './targets.js';
++
++// What `field keys` arms from its targets (arming.md §2.1): a program by
++// name, a MIDI track, or the one MIDI track under a bus, refusing a bus
++// with several so you name the ones you mean.
++
++let root: string;
++
++const VOICE = '(\nif ("FIELD_MODE".getenv == "voice") { SynthDef(\\v, {}) } { 0.exit }\n)\n';
++
++function writeTrack(name: string, lines: string[]): void {
++  writeFileSync(join(root, 'songs/creek/tracks', `${name}.yaml`), [`name: ${name}`, ...lines, ''].join('\n'));
++}
++
++beforeEach(() => {
++  root = mkdtempSync(join(tmpdir(), 'field-keys-targets-'));
++  init({ dir: root, name: 'targets' });
++  createSong(root, 'creek');
++  writeFileSync(join(root, 'shared/instruments/juno.scd'), VOICE);
++  writeFileSync(join(root, 'shared/instruments/bass.scd'), VOICE);
++  for (const name of ['keys', 'bass', 'keys-bus', 'band', 'pad-sc']) createTrack(root, 'creek', name);
++  writeTrack('keys', ['inputs:', '  - record:', '      instrument: juno']);
++  writeTrack('bass', ['inputs:', '  - record:', '      instrument: bass']);
++  writeTrack('keys-bus', [
++    'inserts:',
++    '  - effect: eq',
++    '    bands:',
++    '      - type: lowpass',
++    '        frequency: 700',
++    'inputs:',
++    '  - track: keys',
++  ]);
++  writeTrack('band', ['inputs:', '  - track: keys-bus', '  - track: bass']);
++  writeTrack('pad-sc', ['inputs: []']);
++});
++
++afterEach(() => {
++  rmSync(root, { recursive: true, force: true });
++});
++
++const program = (name: string): string => join(root, 'shared/instruments', `${name}.scd`);
++
++describe('field keys targets', () => {
++  it('arms a MIDI track by its record entry, with no takes yet', () => {
++    expect(resolveKeysTargets(['creek/track:keys'], root)).toEqual([
++      { program: program('juno'), track: 'creek/keys', unheardEffects: [] },
++    ]);
++  });
++
++  it('arms the one MIDI track under a bus, and names the effects it does not hear yet', () => {
++    expect(resolveKeysTargets(['creek/track:keys-bus'], root)).toEqual([
++      { program: program('juno'), track: 'creek/keys', unheardEffects: ['keys-bus'] },
++    ]);
++  });
++
++  it('refuses a bus with several MIDI tracks under it, listing them', () => {
++    expect(() => resolveKeysTargets(['creek/track:band'], root)).toThrow(
++      'field keys creek/track:band: 2 MIDI tracks are under band, and field keys plays the ones you name: ' +
++        'creek/track:keys, creek/track:bass',
++    );
++  });
++
++  it('refuses a track with no MIDI track on it or under it', () => {
++    expect(() => resolveKeysTargets(['creek/track:pad-sc'], root)).toThrow('no MIDI track there');
++  });
++
++  it('arms every target at once, instruments and tracks mixed, each once', () => {
++    expect(resolveKeysTargets(['creek/track:keys', 'creek/track:bass', 'creek/track:keys', 'juno'], root)).toEqual([
++      { program: program('juno'), track: 'creek/keys', unheardEffects: [] },
++      { program: program('bass'), track: 'creek/bass', unheardEffects: [] },
++      { program: program('juno'), unheardEffects: [] },
++    ]);
++  });
++});
+diff --git a/src/keys/targets.ts b/src/keys/targets.ts
+new file mode 100644
+index 0000000..42e3a09
+--- /dev/null
++++ b/src/keys/targets.ts
+@@ -0,0 +1,144 @@
++import { existsSync, readdirSync, readFileSync } from 'node:fs';
++import { extname, join } from 'node:path';
++import { resolveRecordTarget } from '../commands/record.js';
++import { findProjectRoot, loadProject, type LoadedSong } from '../model/project.js';
++import { instrumentPath } from './voice-host.js';
++
++// A bare instrument name resolves on the project's instruments shelf, as a
++// supercollider: entry's source does; a path resolves from the project
++// root, or from here outside a project (keyboard-instrument.md §2.1).
++export function resolveInstrument(spec: string, cwd = process.cwd()): string {
++  const root = findProjectRoot(cwd);
++  if (root === undefined && !spec.includes('/')) {
++    throw new Error(
++      `field keys ${spec}: a bare instrument name resolves in a project's shared/instruments/, ` +
++        'and this is not inside a Field project; give the program by path instead',
++    );
++  }
++  const path = instrumentPath(spec, root ?? cwd);
++  if (!existsSync(path)) {
++    const shelf = root !== undefined ? `\n${describeShelf(root)}` : '';
++    throw new Error(`field keys ${spec}: no instrument program at ${path}${shelf}`);
++  }
++  return path;
++}
++
++// The programs on a project's instruments shelf, by name, split by whether
++// they can play from notes. A program that never reads FIELD_MODE cannot
++// answer voice mode, so its text is enough to tell, without starting
++// sclang for each one (keys.md "Make an instrument playable"). Each is
++// listed by a name field keys resolves: `.scd` is added back only to a
++// name with no extension, so pad.v2.scd lists whole.
++function shelfInstruments(root: string): { playable: string[]; renderOnly: string[] } {
++  const dir = join(root, 'shared', 'instruments');
++  const playable: string[] = [];
++  const renderOnly: string[] = [];
++  if (!existsSync(dir)) return { playable, renderOnly };
++  const files = readdirSync(dir, { withFileTypes: true })
++    .filter((entry) => entry.isFile() && entry.name.endsWith('.scd'))
++    .map((entry) => entry.name)
++    .sort();
++  for (const file of files) {
++    const stem = file.slice(0, -'.scd'.length);
++    const name = extname(stem) === '' ? stem : file;
++    (readFileSync(join(dir, file), 'utf8').includes('FIELD_MODE') ? playable : renderOnly).push(name);
++  }
++  return { playable, renderOnly };
++}
++
++function describeShelf(root: string): string {
++  const { playable, renderOnly } = shelfInstruments(root);
++  if (playable.length + renderOnly.length === 0) return 'shared/instruments/ has no programs yet.';
++  const lines = ['In shared/instruments/:', `  plays from notes: ${playable.length > 0 ? playable.join(', ') : 'none'}`];
++  if (renderOnly.length > 0) {
++    lines.push(`  renders only:     ${renderOnly.join(', ')} (no FIELD_MODE=voice branch; Field's docs/keys.md says how to add one)`);
++  }
++  return lines.join('\n');
++}
++
++// What `field keys` plays (arming.md §2.1): each instrument it was given
++// by program, and each MIDI track it was given or found under a track it
++// was given, all at once.
++export interface ArmedInstrument {
++  program: string; // absolute path to the instrument's program
++  track?: string; // the MIDI track it plays for, `song/track`
++  // Tracks from the one named down to the MIDI track whose inserts the
++  // voice does not pass through yet (live-supercollider.md).
++  unheardEffects: string[];
++}
++
++export function isTrackTarget(target: string): boolean {
++  return target.includes('track:');
++}
++
++// A target with `track:` in it is a track; anything else is an
++// instrument, by name or path, as keyboard-instrument.md §2.1 resolves
++// one. Tracks need a project; instruments by path do not.
++export function resolveKeysTargets(targets: string[], cwd = process.cwd()): ArmedInstrument[] {
++  const armed: ArmedInstrument[] = [];
++  const seen = new Set<string>();
++  const add = (instrument: ArmedInstrument): void => {
++    const key = instrument.track ?? instrument.program;
++    if (seen.has(key)) return;
++    seen.add(key);
++    armed.push(instrument);
++  };
++  for (const target of targets) {
++    if (!isTrackTarget(target)) {
++      add({ program: resolveInstrument(target, cwd), unheardEffects: [] });
++      continue;
++    }
++    const root = findProjectRoot(cwd);
++    if (root === undefined) throw new Error(`field keys ${target}: a track resolves inside a Field project`);
++    const { song: songName, track } = resolveRecordTarget(root, target);
++    const project = loadProject(root);
++    const song = project.songs.find((s) => s.name === songName)!;
++    const found = midiTracksUnder(song, track);
++    if (found.length === 0) {
++      throw new Error(
++        `field keys ${target}: no MIDI track there — a MIDI track is one whose record entry names an ` +
++          'instrument (instrument: under record:), on the track or on a track under it',
++      );
++    }
++    if (found.length > 1) {
++      throw new Error(
++        `field keys ${target}: ${found.length} MIDI tracks are under ${track}, and field keys plays the ` +
++          `ones you name: ${found.map((f) => `${songName}/track:${f.track}`).join(', ')}`,
++      );
++    }
++    const [midi] = found as [MidiTrack];
++    const program = instrumentPath(midi.instrument, root);
++    if (!existsSync(program)) {
++      throw new Error(`field keys ${target}: ${midi.track}'s instrument ${midi.instrument} has no program at ${program}`);
++    }
++    add({ program, track: `${songName}/${midi.track}`, unheardEffects: midi.effects });
++  }
++  return armed;
++}
++
++interface MidiTrack {
++  track: string;
++  instrument: string;
++  effects: string[]; // tracks on the way down, this one included, that have inserts
++}
++
++// The named track itself when its record entry names an instrument;
++// otherwise every such track under it, down its `track:` inputs.
++function midiTracksUnder(song: LoadedSong, name: string): MidiTrack[] {
++  const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
++  const found: MidiTrack[] = [];
++  const visit = (trackName: string, above: string[], path: Set<string>): void => {
++    const track = byName.get(trackName);
++    if (track === undefined || path.has(trackName)) return;
++    const effects = track.inserts.length > 0 ? [...above, trackName] : above;
++    const instrument = track.inputs.find((e) => e.record?.instrument !== undefined)?.record?.instrument;
++    if (instrument !== undefined) {
++      found.push({ track: trackName, instrument, effects });
++      return;
++    }
++    const onPath = new Set(path).add(trackName);
++    for (const entry of track.inputs) if (entry.track !== undefined) visit(entry.track, effects, onPath);
++  };
++  visit(name, [], new Set());
++  return found;
++}
+diff --git a/src/keys/voice-host.test.ts b/src/keys/voice-host.test.ts
+index 2c3b670..0ba6066 100644
+--- a/src/keys/voice-host.test.ts
++++ b/src/keys/voice-host.test.ts
+@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+-import { resolveInstrument } from '../commands/keys.js';
++import { resolveInstrument } from './targets.js';
+ import { freeUdpPort, instrumentPath, oscMessage, parseHostLine, VoiceHost, type VoiceHostStatus } from './voice-host.js';
+ 
+ // A stand-in for sclang running the voice host: it records its
+@@ -16,7 +16,7 @@ const log = process.env.STUB_LOG;
+ writeFileSync(log + '.env', JSON.stringify({
+   args: process.argv.slice(2),
+   mode: process.env.FIELD_MODE,
+-  instrument: process.env.FIELD_INSTRUMENT,
++  instruments: process.env.FIELD_INSTRUMENTS,
+   device: process.env.FIELD_DEVICE ?? null,
+   parent: process.env.FIELD_PARENT_PID,
+ }));
+@@ -169,7 +169,7 @@ describe('the voice host process', () => {
+   it('starts sclang on the host script in voice mode and is ready when the host says so', async () => {
+     const statuses: VoiceHostStatus[] = [];
+     const host = await VoiceHost.start({
+-      instrument: '/p/pad.scd',
++      instruments: ['/p/pad.scd'],
+       device: 'Test Out',
+       env: env('ready'),
+       onStatus: (s) => statuses.push(s),
+@@ -183,7 +183,7 @@ describe('the voice host process', () => {
+     expect(seen.args[2]).toBe('-D');
+     expect(seen.args[3]).toMatch(/sc\/voice-host\.scd$/);
+     expect(existsSync(seen.args[3])).toBe(true);
+-    expect(seen).toMatchObject({ mode: 'voice', instrument: '/p/pad.scd', device: 'Test Out', parent: String(process.pid) });
++    expect(seen).toMatchObject({ mode: 'voice', instruments: '["/p/pad.scd"]', device: 'Test Out', parent: String(process.pid) });
+     await host.close();
+     expect(readFileSync(log, 'latin1')).toContain('/quit');
+   });
+@@ -191,7 +191,7 @@ describe('the voice host process', () => {
+   it('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {
+     const statuses: VoiceHostStatus[] = [];
+     const host = await VoiceHost.start({
+-      instrument: '/p/pad.scd',
++      instruments: ['/p/pad.scd'],
+       env: { ...env('ready'), STUB_RELOADS: 'ok,fail' },
+       onStatus: (s) => statuses.push(s),
+     });
+@@ -212,18 +212,18 @@ describe('the voice host process', () => {
+   });
+ 
+   it('rejects ready with the host error and what sclang printed after its banner', async () => {
+-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('error') });
++    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('error') });
+     await expect(host.ready).rejects.toThrow('x.scd does not answer FIELD_MODE=voice\nERROR: a parse error the user needs to see');
+     await expect(host.ready).rejects.not.toThrow(/compiling class library/);
+   });
+ 
+   it('rejects ready when sclang exits before it is ready', async () => {
+-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('silent') });
++    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('silent') });
+     await expect(host.ready).rejects.toThrow(/exited with code 0 before the voice host was ready/);
+   });
+ 
+   it('closes a host that is still booting, without waiting for it to be ready', async () => {
+-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: env('hang') });
++    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: env('hang') });
+     const deadline = Date.now() + 5000;
+     while (!existsSync(log) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+     await host.close();
+@@ -232,7 +232,7 @@ describe('the voice host process', () => {
+   });
+ 
+   it('stops the server the host launched by process, when /quit cannot reach it', async () => {
+-    const host = await VoiceHost.start({ instrument: '/p/x.scd', env: { ...env('hang'), STUB_SERVER: '1' } });
++    const host = await VoiceHost.start({ instruments: ['/p/x.scd'], env: { ...env('hang'), STUB_SERVER: '1' } });
+     try {
+       const deadline = Date.now() + 5000;
+       while (!existsSync(`${log}.server`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+@@ -250,7 +250,7 @@ describe('the voice host process', () => {
+     const statuses: VoiceHostStatus[] = [];
+     const reasons: string[] = [];
+     const host = await VoiceHost.start({
+-      instrument: '/p/x.scd',
++      instruments: ['/p/x.scd'],
+       env: env('ready-then-die'),
+       onStatus: (s) => statuses.push(s),
+       onExit: (reason) => reasons.push(reason),
+@@ -264,7 +264,7 @@ describe('the voice host process', () => {
+ 
+   it('refuses a FIELD_SCLANG that does not exist', async () => {
+     await expect(
+-      VoiceHost.start({ instrument: '/p/x.scd', env: { ...process.env, FIELD_SCLANG: join(dir, 'missing') } }),
++      VoiceHost.start({ instruments: ['/p/x.scd'], env: { ...process.env, FIELD_SCLANG: join(dir, 'missing') } }),
+     ).rejects.toThrow('FIELD_SCLANG points at a missing binary');
+   });
+ });
+diff --git a/src/keys/voice-host.ts b/src/keys/voice-host.ts
+index 983dddb..a2c4c66 100644
+--- a/src/keys/voice-host.ts
++++ b/src/keys/voice-host.ts
+@@ -95,7 +95,9 @@ export function parseHostLine(line: string): z.infer<typeof hostLine> | undefine
+ }
+ 
+ export interface VoiceHostOptions {
+-  instrument: string;
++  // The programs to play, in unison: each note sounds a voice from each
++  // (arming.md §2.1).
++  instruments: string[];
+   device?: string;
+   onStatus?: (status: VoiceHostStatus) => void;
+   // Called when the host exits on its own after it was ready.
+@@ -190,7 +192,7 @@ export class VoiceHost {
+       env: {
+         ...env,
+         FIELD_MODE: 'voice',
+-        FIELD_INSTRUMENT: options.instrument,
++        FIELD_INSTRUMENTS: JSON.stringify(options.instruments),
+         FIELD_SC_PORT: String(port),
+         FIELD_PARENT_PID: String(process.pid),
+         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
