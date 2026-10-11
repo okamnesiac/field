@@ -202,8 +202,9 @@ export class VoiceHost {
     return new VoiceHost(child, port, langPort, options);
   }
 
-  // Asks the host to load the instrument's program again, as its file has
-  // changed; the result arrives as a `reloaded` or `reload-failed` status.
+  // Asks the host to load every program again, as one has changed; if one
+  // does not load, every voice stays as it was. The result arrives as a
+  // `reloaded` or `reload-failed` status.
   reload(): Promise<void> {
     this.reloadError = undefined;
     return sendOsc('/field/reload', this.langPort);

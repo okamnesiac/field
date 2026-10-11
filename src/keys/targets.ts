@@ -75,13 +75,14 @@ export function isTrackTarget(target: string): boolean {
 // instrument, by name or path, as keyboard-instrument.md §2.1 resolves
 // one. Tracks need a project; instruments by path do not.
 export function resolveKeysTargets(targets: string[], cwd = process.cwd()): ArmedInstrument[] {
-  const armed: ArmedInstrument[] = [];
-  const seen = new Set<string>();
+  // One entry per track, or per program given as an instrument; a track
+  // reached through several targets keeps the effects of every one.
+  const armed = new Map<string, ArmedInstrument>();
   const add = (instrument: ArmedInstrument): void => {
     const key = instrument.track ?? instrument.program;
-    if (seen.has(key)) return;
-    seen.add(key);
-    armed.push(instrument);
+    const earlier = armed.get(key);
+    if (earlier === undefined) armed.set(key, instrument);
+    else earlier.unheardEffects = [...new Set([...earlier.unheardEffects, ...instrument.unheardEffects])];
   };
   for (const target of targets) {
     if (!isTrackTarget(target)) {
@@ -106,14 +107,12 @@ export function resolveKeysTargets(targets: string[], cwd = process.cwd()): Arme
           `ones you name: ${found.map((f) => `${songName}/track:${f.track}`).join(', ')}`,
       );
     }
+    // resolveRecordTarget loads a valid project, and validation already
+    // refuses an instrument with no program.
     const [midi] = found as [MidiTrack];
-    const program = instrumentPath(midi.instrument, root);
-    if (!existsSync(program)) {
-      throw new Error(`field keys ${target}: ${midi.track}'s instrument ${midi.instrument} has no program at ${program}`);
-    }
-    add({ program, track: `${songName}/${midi.track}`, unheardEffects: midi.effects });
+    add({ program: instrumentPath(midi.instrument, root), track: `${songName}/${midi.track}`, unheardEffects: midi.effects });
   }
-  return armed;
+  return [...armed.values()];
 }
 
 interface MidiTrack {
@@ -123,22 +122,28 @@ interface MidiTrack {
 }
 
 // The named track itself when its record entry names an instrument;
-// otherwise every such track under it, down its `track:` inputs.
+// otherwise every such track under it, down its `track:` inputs, once
+// each however many paths reach it, with the effects of all of them.
 function midiTracksUnder(song: LoadedSong, name: string): MidiTrack[] {
   const byName = new Map(song.tracks.map((t) => [t.data.name, t.data]));
-  const found: MidiTrack[] = [];
+  const found = new Map<string, MidiTrack>();
   const visit = (trackName: string, above: string[], path: Set<string>): void => {
     const track = byName.get(trackName);
     if (track === undefined || path.has(trackName)) return;
     const effects = track.inserts.length > 0 ? [...above, trackName] : above;
     const instrument = track.inputs.find((e) => e.record?.instrument !== undefined)?.record?.instrument;
     if (instrument !== undefined) {
-      found.push({ track: trackName, instrument, effects });
+      const earlier = found.get(trackName);
+      found.set(trackName, {
+        track: trackName,
+        instrument,
+        effects: [...new Set([...(earlier?.effects ?? []), ...effects])],
+      });
       return;
     }
     const onPath = new Set(path).add(trackName);
     for (const entry of track.inputs) if (entry.track !== undefined) visit(entry.track, effects, onPath);
   };
   visit(name, [], new Set());
-  return found;
+  return [...found.values()];
 }

@@ -24,7 +24,7 @@ beforeEach(() => {
   createSong(root, 'creek');
   writeFileSync(join(root, 'shared/instruments/juno.scd'), VOICE);
   writeFileSync(join(root, 'shared/instruments/bass.scd'), VOICE);
-  for (const name of ['keys', 'bass', 'keys-bus', 'band', 'pad-sc']) createTrack(root, 'creek', name);
+  for (const name of ['keys', 'bass', 'keys-bus', 'band', 'keys-loop', 'pad-sc']) createTrack(root, 'creek', name);
   writeTrack('keys', ['inputs:', '  - record:', '      instrument: juno']);
   writeTrack('bass', ['inputs:', '  - record:', '      instrument: bass']);
   writeTrack('keys-bus', [
@@ -37,6 +37,7 @@ beforeEach(() => {
     '  - track: keys',
   ]);
   writeTrack('band', ['inputs:', '  - track: keys-bus', '  - track: bass']);
+  writeTrack('keys-loop', ['inputs:', '  - track: keys', '    at: [1]', '  - track: keys', '    at: [5]', '  - track: keys-bus']);
   writeTrack('pad-sc', ['inputs: []']);
 });
 
@@ -64,6 +65,22 @@ describe('field keys targets', () => {
       'field keys creek/track:band: 2 MIDI tracks are under band, and field keys plays the ones you name: ' +
         'creek/track:keys, creek/track:bass',
     );
+  });
+
+  it('counts a MIDI track reached by several paths once, with the effects of every path', () => {
+    // keys-loop places keys twice, and once more through keys-bus.
+    expect(resolveKeysTargets(['creek/track:keys-loop'], root)).toEqual([
+      { program: program('juno'), track: 'creek/keys', unheardEffects: ['keys-bus'] },
+    ]);
+    // Named directly and through its bus, in either order, it keeps the bus.
+    for (const targets of [
+      ['creek/track:keys', 'creek/track:keys-bus'],
+      ['creek/track:keys-bus', 'creek/track:keys'],
+    ]) {
+      expect(resolveKeysTargets(targets, root)).toEqual([
+        { program: program('juno'), track: 'creek/keys', unheardEffects: ['keys-bus'] },
+      ]);
+    }
   });
 
   it('refuses a track with no MIDI track on it or under it', () => {

@@ -11,7 +11,8 @@
 // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
 // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
 // sclang's own port, which Field also chooses (-u), takes /field/reload:
-// load the program again, as its file has changed (§14).
+// load every program again, as one has changed (§14), keeping them all as
+// they were if one does not load.
 (
 var here = PathName(thisProcess.nowExecutingPath).pathOnly;
 var loadVoice = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd");

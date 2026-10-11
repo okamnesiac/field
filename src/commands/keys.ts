@@ -69,7 +69,7 @@ interface PlayOptions {
   device: string | undefined;
 }
 
-type InstrumentState = {
+export type InstrumentState = {
   name: string; // what is armed, as the line names it
   dry: string[]; // tracks whose effects the voices do not pass through yet
   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
@@ -84,14 +84,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   let layout: KeyboardLayout | undefined;
   let layoutPositions: ReadonlyMap<string, string> | undefined;
   let reloadError: string | undefined;
-  const instrument: InstrumentState | undefined =
-    armed.length > 0
-      ? {
-          name: armed.map(armedName).join(' + '),
-          dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
-          status: { state: 'starting' },
-        }
-      : undefined;
+  const instrument = instrumentState(armed);
 
   // An instrument has a line of its own above the status line: its state
   // changes a few times a session, the status line with every key. That
@@ -204,9 +197,20 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   if (error !== undefined) throw error;
 }
 
+// What the instrument's line starts from: the armed tracks and
+// instruments by name, and the tracks whose effects are not heard yet.
+export function instrumentState(armed: ArmedInstrument[]): InstrumentState | undefined {
+  if (armed.length === 0) return undefined;
+  return {
+    name: armed.map(armedName).join(' + '),
+    dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
+    status: { state: 'starting' },
+  };
+}
+
 // A save that did not load leads with why, so a narrow terminal keeps the
 // error rather than the device; the voice that loaded last still plays.
-function instrumentText({ name, dry, status, reload }: InstrumentState): string {
+export function instrumentText({ name, dry, status, reload }: InstrumentState): string {
   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
   const state =
     status.state === 'live'

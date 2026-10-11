@@ -59,12 +59,13 @@ getting the voice's audio into the daemon's graph; until then
 3. The voice host loads every armed instrument's program. Each key
    starts one voice per instrument, and the bend, the modulation wheel,
    sustain, and release apply to all of them, through the voicer as
-   today. Saving any of the programs reloads it (keyboard-instrument.md
-   §14).
-4. The instrument's line names what is armed, as
-   `keys: juno · bass: bass live at 48000 Hz on MacBook Pro Speakers`,
-   and when a target was a bus with effects, `· dry: the effects on
-   creek/track:keys-bus are not heard yet`.
+   today. Saving any of the programs reloads every one
+   (keyboard-instrument.md §14); if one does not load, every voice
+   stays as it was.
+4. The instrument's line names each armed track and its instrument, as
+   `keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers`.
+   When a track you named has inserts on the way down to its MIDI track,
+   it ends `· dry: the effects on keys-bus are not heard yet`.
 
 ### 2.2 Recording armed tracks
 
