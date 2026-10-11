@@ -676,6 +676,15 @@ land as its own diff whenever.
   loopback driver such as loopMIDI, Windows MIDI Services, or feeding
   the voice host without a MIDI port at all. **Standalone**, and a
   design question before it is a port.
+- **Installing and upgrading on Windows** (`install.sh`,
+  `src/commands/upgrade.ts`): the installer is bash, so on Windows
+  `field upgrade` refuses and names the four commands to run in a
+  checkout ([install.md](../install/readme.md) §7.6). A release install
+  there needs an installer Windows runs, most likely an `install.ps1`
+  that downloads the release's source archive and builds it as
+  `install.sh` does, with the daemon under MSVC. install.md handed this
+  item here rather than design it without a Windows machine to try it
+  on. **Standalone**, and a design question before it is a port.
 
 ### 7.3 The workers chunk, when it opens (§4 stands)
 

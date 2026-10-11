@@ -26,18 +26,6 @@ The installer tells the two apart by where it runs. In a git work tree
 with Field's source beside it, it installs that checkout. Anywhere else,
 piped from curl or downloaded by `field upgrade`, it installs a release.
 
-`okamnesiac/field` is private until the one-line install from the
-website ships ([install.md](projects/install/readme.md) §3.3), and
-GitHub answers 404 for a private repository's files. While it is
-private, a maintainer installs a release with a GitHub token, which the
-installer sends to GitHub:
-
-```sh
-export GITHUB_TOKEN="$(gh auth token)"
-curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
-```
-
 The installer is bash and does not support Windows yet, and
 `field upgrade` refuses there. On Windows, install from a checkout and
 run the steps by hand in it:
@@ -306,10 +294,50 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
 | `audiod-override` | `FIELD_AUDIOD` is set, so `field` runs that binary instead of this build. |
 | `worker-current`, `worker-stale`, `worker-absent`, `worker-no-uv` | Each worker environment, from `field setup --check`. |
 
+### In a release install
+
+A release install has no checkout to compare, so its status compares
+the installed version with the release its ref names, and checks that
+each piece of the installed version is built:
+
+```console
+$ field upgrade status
++ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash -s -- status
+installed      0.3.0 in ~/.local/share/field/0.3.0
+release        okamnesiac/field v0 is at 0.3.0
+release-latest 0.3.0 is installed
+previous       0.2.0 in ~/.local/share/field/0.2.0, kept to switch back to by hand
+node           24.19.0
+pnpm           11.15.1
+cmake          4.4.0
+cli            ~/.local/bin/field -> ~/.local/share/field/current
+ui-current     ~/.local/share/field/0.3.0/ui/dist
+audiod-current ~/.local/share/field/0.3.0/native/audiod/build/field-audiod_artefacts/Release/field-audiod
+worker-absent  field-aced is not set up — field setup aced sets it up
+```
+
+| Row | Meaning |
+| --- | --- |
+| `installed`, `not-installed` | The version `current` names, or that no release is installed in the data directory. |
+| `release` | The repository and ref this install follows, and the version `package.json` names there. |
+| `release-latest`, `release-behind`, `release-ahead` | Whether the installed version is that version, older, or newer, as after following a branch and switching back. Run `field upgrade` for `release-behind`. |
+| `previous` | A version an upgrade replaced, kept so you can switch `current` back to it. |
+| `node`, `pnpm`, `cmake` | As in a checkout. |
+| `cli`, `cli-missing` | Whether the shim in the bin directory is the installer's. |
+| `cli-shadowed` | Another `field` comes before the shim on your PATH, so that one runs. |
+| `not-on-path` | The bin directory is not on your PATH. The row names the line to add to your shell's profile. |
+| `cli-unbuilt`, `ui-current`, `ui-missing`, `audiod-current`, `audiod-missing` | Whether the installed version's CLI, UI, and daemon are built. A release never changes in place, so there is no stale row. `field upgrade cli` or `field upgrade audiod` rebuilds a missing piece. |
+| `worker-…` | Each worker environment in the installed version, as in a checkout. |
+
 ## Environment variables
 
 | Variable | Effect |
 | --- | --- |
-| `FIELD_OFFLINE=1` | Skips the fetch, and compares the checkout against the last fetch of its upstream. |
+| `FIELD_OFFLINE=1` | In a checkout, skips the fetch and compares the checkout against the last fetch of its upstream. In a release install, `status` compares nothing, and `all` refuses, because it has nothing to download from. |
+| `FIELD_REPO`, `FIELD_REF` | The repository and ref a release install follows: `okamnesiac/field` and `v0` unless set. The installer records both in `release.conf`. |
+| `FIELD_DATA_DIR` | Where release installs live. The default is `$XDG_DATA_HOME/field` when `XDG_DATA_HOME` is an absolute path, and `~/.local/share/field` otherwise. |
+| `FIELD_BIN_DIR` | Where the release install's shim goes: `~/.local/bin` unless set. The installer records it in `release.conf`. |
+| `GITHUB_TOKEN` | Sent to GitHub's own hosts, and only over HTTPS, so a release install can follow a private fork. The installer passes it in curl's configuration on standard input, never on a command line. |
+| `FIELD_RAW_URL`, `FIELD_ARCHIVE_URL` | The bases the installer downloads `package.json`, `install.sh`, and the source archive from: `https://raw.githubusercontent.com` and `https://github.com` unless set. Tests point them at local files. |
 | `NO_COLOR` | Prints warning rows without color. The ⚠️ marker stays. |
 | `FIELD_AUDIOD` | Not read by the installer. `status` reports it, because `field` runs that binary instead of the one the installer builds. |

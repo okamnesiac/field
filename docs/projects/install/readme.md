@@ -49,16 +49,19 @@ for Projector.
 ### 2.1 One installer, two modes
 
 `install.sh` at the root of the repository is the only installer. It is
-a checkout's installer when `src/cli.ts` sits beside it, and a release
-installer otherwise: piped from curl, bash reads it from stdin with
-nothing beside it, and the copy `field upgrade` downloads sits alone in a
-temporary directory. Chunk 1 builds the checkout mode. Until chunk 3, the
-release mode says to clone and stops:
+a checkout's installer when `src/cli.ts` and a `.git` sit beside it, and
+a release installer otherwise: piped from curl, bash reads it from stdin
+with nothing beside it, the copy `field upgrade` downloads sits alone in
+a temporary directory, and a release version's own copy has the source
+beside it but no `.git`. Chunk 1 built the checkout mode, and chunk 3
+the release mode (§3.2). Until chunk 3, the release mode said to clone
+and stopped.
 
-```console
-$ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/main/install.sh | bash
-install.sh: run this from a Field checkout: git clone https://github.com/okamnesiac/field, then ./install.sh in it
-```
+The test asks for `.git` beside the installer, a directory or a
+worktree's file, rather than asking `git rev-parse`, which needs git
+installed and answers yes for a directory inside some other repository.
+The whole script defines functions and calls `main "$@"` on its last
+line, so a `curl | bash` cut short by a dropped connection runs nothing.
 
 ### 2.2 The targets
 
@@ -216,37 +219,82 @@ move with what each process does, so a release leaves them alone.
 
 ### 3.2 The release installer (chunk 3)
 
-Without a checkout, `install.sh` installs a release by building it:
+Without a checkout, `install.sh` installs a release by building it.
+`docs/install.md` describes it for users; this is the design.
 
 1. It reads the version from `package.json` at `FIELD_REF` (default
    `v0`) in `FIELD_REPO` (default `okamnesiac/field`), which is how
-   Projector's installer learns the version it is installing.
+   Projector's installer learns the version it is installing, and
+   accepts only `X.Y.Z`.
 2. It downloads GitHub's source archive of the immutable tag for that
-   version, `vX.Y.Z` rather than `v0`, and unpacks it into
-   `~/.local/share/field/<version>/`.
+   version, `vX.Y.Z` rather than `v0`, checks that the archive holds one
+   top-level directory whatever its name and that its `package.json`
+   names the version, and moves it to `<data>/<version>/`. A version
+   directory that is not current is never trusted: it is deleted and
+   downloaded again.
 3. It runs the same steps a checkout install runs, with the same
-   prerequisite checks: `pnpm install --frozen-lockfile`, the CLI and UI
-   builds, and the daemon build.
-4. It switches `~/.local/share/field/current` to the new version and
-   links `field` to it. The previous version stays until the switch
-   succeeds, so a failed download or build leaves the old install
-   working.
-5. It sets up again each worker that was set up in the previous version
-   (§7.5).
+   prerequisite checks, plus curl and tar: `pnpm install
+   --frozen-lockfile`, the CLI and UI builds, and the daemon build. It
+   never runs `pnpm add -g`.
+4. It sets up, in the new version, each worker set up in the version it
+   replaces (§7.5).
+5. It switches `<data>/current`, a relative symlink, to the new version
+   atomically, writes the `field` shim, records `release.conf`, and
+   removes every version but the new one and the one it replaced.
 
-It needs what `./install.sh` needs, plus curl and tar: Node 24, pnpm,
-CMake 3.24 or newer, and a C++ compiler. The first install compiles
-JUCE, which takes a few minutes. Each version unpacks into a directory
-of its own, so chunk 3 keeps JUCE's download outside it, for example
-with CMake's `FETCHCONTENT_BASE_DIR`, so that an upgrade does not fetch
-JUCE again. Whether `field` is linked by `pnpm add -g`, as a checkout
-is, or through `~/.local/bin`, is chunk 3's to settle (§4).
+Steps 1 to 4 leave the installed version alone, so a failed download,
+build, or worker setup leaves it current, and an exit trap says so. This
+moves the worker setup ahead of the switch, where the first draft of
+this section put it after.
 
-`field upgrade` in a release install finds no checkout beside its
-package, so it downloads the newest installer, from
-`https://field.one/install.sh` or from `install.sh` at `FIELD_REF` in
-the fork it was installed from, and runs that. `status` compares the
-installed version with the release's.
+The data directory is `FIELD_DATA_DIR`, then `$XDG_DATA_HOME/field` when
+that is an absolute path, then `~/.local/share/field`. A version's own
+`install.sh` infers it from the `current` link beside it.
+
+**The shim.** `field` is a two-line script in `FIELD_BIN_DIR` (default
+`~/.local/bin`) that runs `exec node '<data>/current/dist/cli.js' "$@"`,
+with a marker comment that identifies it. Switching `current` moves
+`field` with nothing to relink, and a release install needs no pnpm
+global bin directory. The installer refuses, with exit status 69, to
+replace a `field` there that is not its shim. A bin directory missing
+from PATH is a `not-on-path` warning that names the line to add, not a
+stop, and `cli-shadowed` reports a `field` that comes first on PATH in
+either direction.
+
+**JUCE's download.** `native/audiod/CMakeLists.txt` reads
+`$ENV{FIELD_FETCHCONTENT_BASE_DIR}` into CMake's cache as
+`FETCHCONTENT_BASE_DIR` before `include(FetchContent)`, and the
+installer exports it, in release mode only, as
+`<data>/cache/fetchcontent`. An environment variable, because
+`pnpm build:native` passes no `-D` and a `${VAR:+-D…}` in the script
+would break under Windows' `cmd.exe`. JUCE's build lands in that
+directory too, so an upgrade skips the download but compiles JUCE again.
+
+**`field upgrade`.** `src/commands/upgrade.ts` tells the two installs
+apart by the same test as the installer. In a release install it reads
+`release.conf` beside the real path of its package root, with
+`FIELD_REPO` and `FIELD_REF` ahead of the record and the defaults last.
+It downloads `install.sh` at that ref from
+`raw.githubusercontent.com`, prints `+ curl -fsSL <url> | bash -s --
+<target>`, and runs it with `FIELD_DATA_DIR` set. It never asks
+`field.one`, which serves only the upstream's `v0`, and a fork must
+upgrade from the fork.
+
+**The targets in a release install.** `all` installs the release the ref
+names, or, when that version is installed, builds any missing piece,
+runs `field setup --existing`, and rewrites the shim. `cli`, `audiod`,
+and `workers` rebuild that piece of the installed version in place, as
+they rebuild a checkout without pulling, so a command the CLI names,
+such as `field upgrade audiod`, works in either install. `status`
+compares the installed version with the release and checks each piece
+is built. `FIELD_OFFLINE` makes `all` refuse and `status` compare
+nothing.
+
+**Tokens.** `GITHUB_TOKEN` goes only to `github.com`,
+`raw.githubusercontent.com`, `api.github.com`, and
+`codeload.github.com`, over HTTPS, in curl's configuration on standard
+input, never on a command line where any process could read it. With
+the repository public, it matters only for a private fork.
 
 ### 3.3 The one-line install (chunk 4)
 
@@ -284,9 +332,11 @@ a private one. The website and the README then lead with this command.
     It would spare newcomers `pnpm setup`, but every existing install is
     a pnpm link and moving them means migrating each one. Release
     installs (chunk 3) were to use `~/.local/bin` because they would not
-    need pnpm. Since §7.1 they build with pnpm too, so chunk 3 settles
-    how they link `field`. `status` reports `cli-shadowed` when two
-    `field` commands exist and the wrong one is first on PATH.
+    need pnpm. Since §7.1 they build with pnpm too, and chunk 3 settled
+    it the original way for another reason: the shim moves with
+    `current` (the release-install bullet at the end of this list).
+    `status` reports `cli-shadowed` when two `field` commands exist and
+    the wrong one is first on PATH.
 - **Never pull, never switch branches.** The checkout may hold work in
   progress. `status` reports how far behind it is, which is Projector's
   choice too.
@@ -323,6 +373,22 @@ a private one. The website and the README then lead with this command.
   `field ui` stale or refusing. The `cli` target builds both rather than
   growing a `ui` target, because `field upgrade cli` is then the one
   remedy for either.
+- **A release install links `field` through a shim, not `pnpm add -g`**
+  (§3.2). A shim in `~/.local/bin` that runs `current/dist/cli.js` moves
+  with `current`, so an upgrade relinks nothing, and it needs no pnpm
+  global bin directory on PATH. `pnpm add -g` lost because each version
+  is a directory of its own, so every upgrade would relink, and because
+  it would compete with a checkout's link for the one global `field`.
+- **Everything the new version needs happens before the switch** (§3.2).
+  Download, build, and worker setup all run while the old version is
+  still current, so the only step that changes what `field` runs is one
+  atomic rename. Switching first and setting workers up after, as the
+  first draft of §3.2 had it, could leave a current version whose
+  workers did not set up.
+- **The release installer keeps two versions.** The new one, and the one
+  it replaced, so going back is one `ln -sfn`. Keeping every version
+  lost to disk use: each holds its own `node_modules`, JUCE build, and
+  worker environments.
 
 ## 5 Acceptance criteria
 
@@ -351,21 +417,33 @@ Chunk 2:
   alone releases nothing.
 - A release publishes no files.
 
-Chunks 3 and 4:
+Chunk 3:
 
 - On a machine with the checkout installer's prerequisites and no
-  checkout, `curl -fsSL https://field.one/install.sh | bash` installs
-  `field` and builds `field-audiod`, and `field upgrade` later moves both
-  to the next release.
+  checkout, piping `install.sh` at `v0` to bash installs the release
+  `v0` names: `field` on PATH through the shim, `field-audiod` built, and
+  `field --version` reporting that version.
+- Run again for a newer release, it installs that one beside the old,
+  switches `current`, keeps the version it replaced, and removes older
+  ones, without downloading JUCE again.
+- A failed download, build, or worker setup leaves the installed version
+  current and working, and says so.
+- `field upgrade [target]` in a release install downloads the newest
+  installer and runs it with the same target and exit status, and
+  `field upgrade status` reports the rows in `docs/install.md`.
+
+Chunk 4:
+
+- `curl -fsSL https://field.one/install.sh | bash` does what chunk 3's
+  first criterion says, and field.one leads with that command.
 
 ## 6 Chunks
 
 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
-2. **Releases.** §3.1. This change.
-3. **The release installer.** §3.2. Needs chunk 2, and decides whether
-   Windows gets an `install.ps1` (§7.6).
+2. **Releases.** §3.1. Shipped in #205.
+3. **The release installer.** §3.2. This change.
 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
-   chunk 3 and a public repository.
+   chunk 3 released and a public repository.
 
 ## 7 Open questions
 
@@ -443,28 +521,41 @@ to pay only once binaries exist.
 repository's GitHub homepage says `field.amnes.ac`. This plan assumes
 `field.one`, where the waitlist for source access already lives.
 
-### 7.5 Worker environments across release versions
+### 7.5 Worker environments across release versions (DECIDED, 2026-10-11)
 
 In a checkout, a worker's venv lives in `python/<worker>/.venv` and
 survives every upgrade. In a release install, each version unpacks into
 a directory of its own, so the venv would be left behind with the old
-version. Chunk 3 either sets each worker up again in the new version,
-which re-downloads no weights because they live in the Hugging Face
-cache, or points `UV_PROJECT_ENVIRONMENT` at a directory outside the
 version.
 
-### 7.6 Windows
+**Decided: an upgrade sets each worker up again in the new version,
+before it switches to it.** The old version's `field setup --check`
+says which workers are set up; the new version's `field setup <name>`
+sets up each one. Nothing large downloads again: the model weights live
+in the Hugging Face cache and the packages in uv's cache. A worker whose
+uv is gone is skipped with a `worker-skipped` row, because it could not
+run in the old version either, and any other failure stops the upgrade
+with the old version still current. The alternative, pointing
+`UV_PROJECT_ENVIRONMENT` at a directory outside the version, lost
+because `workerScriptInstalled` in `src/workers/client.ts` looks for
+each worker's console script in `python/<worker>/.venv`, and one
+environment shared across versions would hold the old version's
+packages while the new one ran.
+
+### 7.6 Windows (DECIDED, 2026-10-11)
 
 `install.sh` is bash, and Field's Windows support is
 [windows-portability.md](../windows-portability/readme.md). Windows
 installs from a checkout by hand for now, `field upgrade` refuses there
 with the steps, and the installer's tests skip there.
 
-Chunk 3 decides whether Windows gets an `install.ps1` of its own. A
-checkout on Windows installs with the four commands in
-`docs/install.md`, but a release install has no checkout to run them
-in, and the release installer is bash too. Since §7.1 a Windows release
-install would build the daemon with MSVC, as a Windows checkout does.
+**Decided: this plan builds no `install.ps1`.** A checkout on Windows
+installs with the four commands in `docs/install.md`, but a release
+install has no checkout to run them in, and the release installer is
+bash. An `install.ps1` that downloads and builds a release, with the
+daemon under MSVC, is a design that wants a Windows machine to try it
+on, so this change hands it to windows-portability.md §7.2, "Installing
+and upgrading on Windows", which owns it from here.
 
 ## 8 Chunk 1 as built (2026-10-11)
 

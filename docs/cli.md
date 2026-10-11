@@ -19,22 +19,24 @@ against, use [`examples/bloom`](../examples/bloom/README.md).
 ## Install
 
 Field needs Node 24 (the version in [`.nvmrc`](../.nvmrc)), pnpm —
-never npm or yarn — and CMake. From the checkout:
+never npm or yarn — and CMake with a C++ compiler. Install the newest
+release:
 
 ```sh
-pnpm setup           # once, if pnpm has never linked a global binary
-./install.sh         # builds the checkout, links `field`, builds field-audiod
+curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
 ```
 
-The installer links this checkout onto your PATH rather than copying
-it, so `field` runs whatever the checkout last built. After a `git
-pull`, `field upgrade` runs the same installer from any directory, and
-`field upgrade status` says what is out of date.
-[install.md](install.md) describes each step and each status row. On
-Windows the installer does not run yet: run `pnpm install`, `pnpm
-build`, `pnpm build:ui`, `pnpm build:native`, and `pnpm add -g .` in the
-checkout. To run from source without installing, use `pnpm field
-<args>`. To remove it, `pnpm remove -g field`.
+The installer builds the release from source in
+`~/.local/share/field/<version>/` and puts `field` in `~/.local/bin`.
+`field upgrade` installs the next release from any directory, and
+`field upgrade status` says what is out of date. To work on Field
+itself, run `pnpm setup` once and then `./install.sh` in a clone, which
+links that checkout onto your PATH instead.
+[install.md](install.md) describes both kinds of install, each step,
+and each status row. On Windows the installer does not run yet: run
+`pnpm install`, `pnpm build`, `pnpm build:ui`, `pnpm build:native`, and
+`pnpm add -g .` in a checkout. To run from source without installing,
+use `pnpm field <args>`.
 
 Build the daemon before you build, play or record anything.
 `field-audiod` is the renderer as well as the player: every track's
@@ -613,7 +615,9 @@ somewhere other than `<program>.wav` in the current directory.
 | `FIELD_AUDIOD` | path to the `field-audiod` binary, ahead of the built one |
 | `FIELD_REMOTE` | the remote's API base in place of the one `origin` implies, or `off` to stop reading from any remote |
 | `FIELD_TOKEN` | the token to send, ahead of the stored one, for CI and agents |
-| `FIELD_OFFLINE` | `install.sh` and `field upgrade` skip fetching the checkout's upstream, and compare against the last fetch |
+| `FIELD_OFFLINE` | `install.sh` and `field upgrade` download nothing: a checkout compares against the last fetch of its upstream, and a release install's `status` compares nothing |
+| `FIELD_REPO`, `FIELD_REF` | the repository and ref a release install follows, `okamnesiac/field` and `v0` unless set |
+| `FIELD_DATA_DIR`, `FIELD_BIN_DIR` | where a release install keeps its versions and its `field` shim; see [install.md](install.md#environment-variables) |
 
 `FIELD_SCLANG` and `FIELD_AUDIOD` point at a binary the default search
 does not find. `FIELD_AUDIOD` is resolved to an absolute path
@@ -675,7 +679,7 @@ amended. Porting the rest is tracked there and in
 | `field insert add <track> [plugin]` | add an insert to a track |
 | `field plugins scan\|list\|pin` | the hosted plugin inventory |
 | `field setup [worker]` | set up generation worker environments; `--check` reports, `--existing` re-syncs |
-| `field upgrade [target]` | run this checkout's `install.sh` from anywhere: `all`, `cli`, `audiod`, `workers`, or `status` |
+| `field upgrade [target]` | run the installer from anywhere: a checkout's own `install.sh`, or the newest release's, with `all`, `cli`, `audiod`, `workers`, or `status` |
 | `field generate <song>/<name>` | run a deliberate generator |
 | `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
 | `field choose <song>/<name> --take <name>` | repoint which recorded take plays |

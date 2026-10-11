@@ -6,8 +6,8 @@ It publishes no files: whoever installs a release builds it, the
 which `field --version` prints. Each release pushes an immutable tag such
 as `v0.2.0`, moves the major tag (`v0`) to the same commit, and creates
 the GitHub release with notes generated from the merged pull requests.
-`v0` is the channel that the release installer will follow
-([install.md](projects/install/readme.md) §3.2).
+`v0` is the channel that the release installer follows
+([install.md](install.md#install-a-release)).
 
 ## Cut a release
 

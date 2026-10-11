@@ -84,35 +84,44 @@ build, and audition a project with no DAW in the loop.
 ## Try it
 
 You need Node 24 (the version in [`.nvmrc`](.nvmrc)), pnpm — never npm
-or yarn — with `pnpm setup` run once, CMake 3.24 or newer with a C++
-compiler (Xcode's command line tools on macOS), and
-[SuperCollider](https://supercollider.github.io/): every render in the
-example project is an SC recipe, and `field build` runs `sclang` from
-your PATH, the macOS app bundle, or `FIELD_SCLANG`.
+or yarn — CMake 3.24 or newer with a C++ compiler (Xcode's command line
+tools on macOS), and [SuperCollider](https://supercollider.github.io/):
+every render in the example project is an SC recipe, and `field build`
+runs `sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`.
+
+Install the newest release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+```
+
+The installer downloads the release's source, builds it in
+`~/.local/share/field/<version>/`, builds `field-audiod`, the playback
+and render daemon, and puts a `field` command in `~/.local/bin`. Field
+publishes no binaries, so every install builds from source; the first
+compiles JUCE, which takes a few minutes. To move to the next release,
+from anywhere:
+
+```sh
+field upgrade            # installs the newest release
+field upgrade status     # what is installed, and what is out of date
+```
+
+To work on Field itself, install a checkout instead. Run `pnpm setup`
+once, then:
 
 ```sh
 git clone https://github.com/okamnesiac/field
 cd field
-./install.sh             # the field command and field-audiod
+./install.sh             # links this checkout onto your PATH as field
 ```
 
-The installer builds the checkout, links it onto your PATH as `field`,
-and builds `field-audiod`, the playback and render daemon. The first
-daemon build compiles JUCE, which takes a few minutes. Because `field`
-is a link to the checkout rather than a copy, it works from any
-directory and runs whatever the checkout last built. To pick up new
-commits, pull in the checkout, then upgrade from anywhere:
-
-```sh
-git pull                 # in the checkout
-field upgrade            # runs the checkout's ./install.sh
-field upgrade status     # what is installed, and what is out of date
-```
-
-[docs/install.md](docs/install.md) describes each step and each status
-row, and gives the steps by hand for Windows, where the installer does
-not run yet. To run from source without installing: `pnpm field
-<args>`. To remove: `pnpm remove -g field`.
+A checkout install is a link, not a copy: `field` runs whatever the
+checkout last built, and `field upgrade` rebuilds the checkout as it
+stands after you pull. [docs/install.md](docs/install.md) describes
+both kinds of install, each step, and each status row, and gives the
+steps by hand for Windows, where the installer does not run yet. To run
+from source without installing: `pnpm field <args>`.
 
 Then open the example project — two songs that exercise most of the
 system, checked by CI on every change:
