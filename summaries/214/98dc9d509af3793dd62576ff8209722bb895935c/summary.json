@@ -1,0 +1,231 @@
+{
+ "version": 1,
+ "name": "Release installer and upgrade",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 214,
+  "title": "Install a release without a clone: the release installer, and field upgrade for release installs (install.md chunk 3)",
+  "head": "98dc9d509af3793dd62576ff8209722bb895935c",
+  "headRef": "install/release-installer",
+  "base": "e791a11691ad3fe789720bb204b9d7df06df8996",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field is a command-line music tool whose <code>field</code> command and audio daemon, <code>field-audiod</code>, are built from source on your machine, because Field publishes no binaries. Until now the only installer was <code>install.sh</code> in a clone: it built that checkout and linked it onto your PATH with pnpm. This pull request lets you install Field without a clone:",
+   "<pre>curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash</pre>",
+   "Run outside a git checkout, <code>install.sh</code> now installs a <b>release</b>. It reads the version that <code>package.json</code> names at <code>v0</code>, a tag the Release workflow moves to each new release. It downloads GitHub's archive of that version's own tag, <code>vX.Y.Z</code>, which never moves, into <code>~/.local/share/field/&lt;version&gt;/</code>. It builds there, sets up again the model workers the old version had, and only then points the <code>current</code> link at the new version. A short shim script, <code>~/.local/bin/field</code>, runs whatever <code>current</code> names, so an upgrade relinks nothing. <code>field upgrade</code> now tells the two kinds of install apart: a checkout runs its own <code>install.sh</code>, and a release install downloads the newest one and runs that.",
+   "The first review, at <code>830f3ab</code>, found four things, and this head fixes all four. Offline, <code>field upgrade</code> runs the installed version's own installer. A failed install removes what it built. <code>field upgrade --help</code> names both installers. And the installer refuses a release from before release installs, such as 0.2.0. This head also merges <code>main</code> cleanly and takes every suggestion from that review. One new finding is flagged below: <code>prune</code> still deletes any <code>X.Y.Z</code> directory in a shared data directory, which plan §3.2 now says is safe."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Checkout install</b>: a git clone whose <code>install.sh</code> builds it in place and links it with <code>pnpm add -g</code>.</li><li><b>Release install</b>: a version unpacked from GitHub's tag archive into the data directory and built there.</li><li><b>Data directory</b>: <code>~/.local/share/field</code> by default, holding one directory per version, <code>current</code>, the shared JUCE cache, and <code>release.conf</code>.</li><li><b><code>current</code></b>: a relative symlink naming the version <code>field</code> runs. Only a successful install switches it.</li><li><b>Shim</b>: the script in <code>~/.local/bin/field</code> that runs <code>current/dist/cli.js</code>.</li><li><b><code>release.conf</code></b>: the repository, ref, and bin directory an install follows, so a fork keeps upgrading from the fork.</li><li><b>Workers</b>: optional Python model environments, each in <code>python/&lt;worker&gt;/.venv</code> inside a version.</li></ul>"
+   },
+   {
+    "id": "order",
+    "title": "What a release install does, in order",
+    "html": "<ol><li>Refuse in a Windows shell. Check prerequisites: Node 24, pnpm, CMake 3.24 or newer, curl, and tar, that <code>~/.local/bin/field</code> is free or already the shim, and that the bin directory can be written.</li><li>Read the version at the ref and accept only <code>X.Y.Z</code>.</li><li>Download and unpack the tag archive beside the versions, check it holds one directory whose <code>package.json</code> names that version and whose <code>install.sh</code> writes the shim, and move it into place.</li><li>Build the CLI, the UI, and the daemon.</li><li>Set up again, with the new CLI, each worker set up in the old version.</li><li>Rename a new link over <code>current</code>, write the shim and <code>release.conf</code>, and remove every version but the new one and the one it replaced.</li></ol><p class=\"note\">A failure in steps 1 to 5 leaves the old version current, and an exit trap says so and removes what it built of the new one.</p>"
+   },
+   {
+    "id": "left",
+    "title": "What the change leaves for later",
+    "html": "<ul class=\"tight\"><li>A Windows installer, handed to windows-portability.md §7.2. <code>field upgrade</code> refuses on Windows.</li><li>Serving the installer from <code>field.one</code>, which is chunk 4.</li><li>A real install from GitHub and a run on Linux. The author tested end to end on macOS against <code>file://</code> stand-ins.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "installer",
+   "title": "The release installer",
+   "kicker": "install.sh gains a release mode beside its checkout mode",
+   "intro": [
+    "<code>install.sh</code> decides its mode from where it runs. A checkout is the script inside a git work tree, with <code>src/cli.ts</code> beside it. Anything else installs a release: bash reading the script from curl, the copy <code>field upgrade</code> downloads to a temporary directory, and a release version's own copy, which has the source but no <code>.git</code>.",
+    "The release path is new code from <code>release_init</code> down. It is written for a script piped from curl. Every command is inside a function and <code>main \"$@\"</code> is the last line, so a download cut short runs nothing. It changes what <code>field</code> runs only with one rename at the end, after everything that can fail has succeeded."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "A truncated pipe runs nothing: before <code>main</code>, the script only assigns variables. Piped into bash 3.2, <code>BASH_SOURCE</code> is empty, so a piped run never takes the checkout path. I checked both by piping a stub into <code>/bin/bash</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "The whole release path: where installs live, the download and its checks, the switch, the shim, pruning, and the release <code>status</code> rows.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 486,
+       "text": "The data directory comes from <code>FIELD_DATA_DIR</code> first. Without it, a version's own copy uses the parent of its directory when a <code>current</code> link sits there, and anything else uses the XDG data directory. <code>FIELD_REPO</code> and <code>FIELD_REF</code> come ahead of <code>release.conf</code>, and both are held to the characters GitHub allows before they go into a URL."
+      },
+      {
+       "kind": "verify",
+       "line": 525,
+       "text": "<code>GITHUB_TOKEN</code> reaches curl through its configuration on standard input, never on the command line, and only for GitHub's own hosts over HTTPS. A host such as <code>github.com.example.com</code> does not match the pattern."
+      },
+      {
+       "kind": "context",
+       "line": 557,
+       "text": "<code>v0</code> moves, so the installer reads only the version from it. The archive comes from the version's own tag, which does not move, and the version must be <code>X.Y.Z</code> because it becomes a directory name."
+      },
+      {
+       "kind": "context",
+       "line": 614,
+       "text": "A <code>field</code> in the bin directory that is not the shim, or a bin directory nobody can write, stops the install before anything changes, because the shim is written after the switch."
+      },
+      {
+       "kind": "verify",
+       "line": 659,
+       "text": "A release from before release installs has an <code>install.sh</code> without the shim marker, and its own <code>field upgrade</code> could never move off it, so the installer refuses it before anything builds. I checked that <code>v0.2.0</code>'s <code>install.sh</code> carries no marker, and a test covers the refusal."
+      },
+      {
+       "kind": "verify",
+       "line": 703,
+       "text": "The switch renames a new link over <code>current</code> with <code>rename(2)</code> through node. <code>mv</code> would move the new link into the directory the old link names, and <code>ln -sfn</code> removes the old link before making the new one."
+      },
+      {
+       "kind": "flag",
+       "line": 749,
+       "text": "<code>prune</code> removes any directory named <code>X.Y.Z</code> that is not the new or the replaced version. In a shared <code>FIELD_DATA_DIR</code> holding another tool's <code>3.11.4/</code>, a first install deleted it and printed <code>removed 3.11.4</code>, although plan §3.2 says a shared data directory loses nothing. The review asks that a directory count as a version only when its <code>install.sh</code> carries the shim marker, which every installed version now has."
+      },
+      {
+       "kind": "verify",
+       "line": 856,
+       "text": "A failed install now removes the new version's directory and its download, but never the version <code>current</code> names. I reproduced the earlier failure at this head: after a daemon build failed, no <code>0.3.0/</code> was left and <code>status</code> printed no <code>previous</code> row."
+      },
+      {
+       "kind": "verify",
+       "line": 896,
+       "text": "<code>current</code> switches only after the download, the builds, and the worker setup succeed. A failing <code>setup_workers_again</code> at the end of an <code>||</code> list still stops the script under <code>set -e</code>; I checked that in bash 3.2."
+      }
+     ]
+    },
+    {
+     "path": "native/audiod/CMakeLists.txt",
+     "note": "Reads <code>FIELD_FETCHCONTENT_BASE_DIR</code> into CMake's cache as <code>FETCHCONTENT_BASE_DIR</code>, so every release version shares one JUCE download.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Only a release install sets the variable. A checkout, and CI, leave it unset, so their JUCE stays under <code>build/_deps</code> as before. It is an environment variable because <code>pnpm build:native</code> passes no <code>-D</code>."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "upgrade",
+   "title": "field upgrade for release installs",
+   "kicker": "field upgrade picks an installer by the kind of install",
+   "intro": [
+    "<code>field upgrade [target]</code> runs an installer with the same target and passes its exit status through. In a checkout it runs the checkout's own <code>install.sh</code>, as before. In a release install it downloads the newest <code>install.sh</code> at the ref <code>release.conf</code> records, because the copy inside an installed version is as old as that version, and runs it with <code>FIELD_DATA_DIR</code> set to the data directory it found from its own real path. Under <code>FIELD_OFFLINE</code>, nothing can download, so it runs the installed version's own copy instead."
+   ],
+   "files": [
+    {
+     "path": "src/commands/upgrade.ts",
+     "note": "Tells a checkout from a release install, reads <code>release.conf</code>, downloads the installer with curl and runs it with bash, or, offline, runs the installed version's own.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 152,
+       "text": "The package root is resolved to its real path first, because the shim runs <code>current/dist/cli.js</code>, and the data directory is the parent of the version directory, not of the link."
+      },
+      {
+       "kind": "verify",
+       "line": 174,
+       "text": "Under <code>FIELD_OFFLINE</code> a release install downloads nothing and runs <code>&lt;version&gt;/install.sh</code> with <code>FIELD_DATA_DIR</code> set, so <code>status</code> reaches its offline row. I called the built <code>upgrade('status')</code> with <code>FIELD_OFFLINE=1</code> against a throwaway data directory to check it."
+      }
+     ]
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "The <code>field upgrade</code> help and the comment above it now say which installer each kind of install runs."
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests",
+   "kicker": "The real install.sh under real bash, with stand-ins for everything it calls",
+   "intro": [
+    "<code>src/install.test.ts</code> runs the real <code>install.sh</code> with a temporary <code>HOME</code> and a <code>PATH</code> that holds only stand-ins for pnpm, cmake, curl, and the CLI, plus links to the ordinary tools. The curl stand-in serves GitHub from local files and fails for any other host. Releases are cut as the Release workflow cuts them, with a git archive of each tag. <code>src/commands/upgrade.test.ts</code> serves stand-in installers from <code>file://</code> URLs."
+   ],
+   "files": [
+    {
+     "path": "src/install.test.ts",
+     "note": "Both install modes, every release status row, and each failure leaving the old version current.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "Every test is synchronous, so vitest's worker never read its task-update replies and timed out after the file passed. This one-turn yield after each test lets the reply in, and the 30-second timeout at the top covers a test that runs the installer several times.",
+       "line": 268
+      },
+      {
+       "kind": "verify",
+       "text": "<code>pnpm exec vitest run src/install.test.ts src/commands/upgrade.test.ts src/release.test.ts</code> passed 110 tests in 3 files with no unhandled errors at this head."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/upgrade.test.ts",
+     "note": "The installer download at the recorded ref, overrides ahead of the record, and the token going only to GitHub."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Documentation and plans",
+   "kicker": "The README and manuals lead with the one-line install, and the plan records chunk 3",
+   "intro": [
+    "The README and <code>docs/cli.md</code> now lead with the curl install and treat a checkout as the way to work on Field itself. <code>docs/install.md</code> gains a section for each part of a release install: where it lives, upgrading, workers, the targets, following a fork, and removing it. The install plan records chunk 3 as built, decides worker setup across versions (§7.5) and Windows (§7.6), and hands a Windows installer to windows-portability.md §7.2."
+   ],
+   "files": [
+    {
+     "path": "README.md",
+     "note": "Leads with the curl install. The checkout install moves under \"To work on Field itself\".",
+     "checks": []
+    },
+    {
+     "path": "docs/cli.md",
+     "note": "The install section, the <code>FIELD_OFFLINE</code>, <code>FIELD_REPO</code>, and data-directory variables, and the <code>field upgrade</code> row.",
+     "checks": []
+    },
+    {
+     "path": "docs/install.md",
+     "note": "The user's guide to both kinds of install, each target, and each status row.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The pin example now names <code>vX.Y.Z</code> and says the installer refuses a release from before release installs, such as 0.2.0, whose own <code>field upgrade</code> could not move off it."
+      }
+     ]
+    },
+    {
+     "path": "docs/release.md",
+     "note": "Says the release installer follows <code>v0</code> now, and links the user's guide."
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "§3.2 as built, two decisions, the chunk 3 criteria, and §10 on what building it found and how it was verified.",
+     "checks": [
+      {
+       "kind": "context",
+       "text": "The plan stays <code>in-progress</code>. This head adds a §4 decision on pinning to an exact tag, and the only open question, §7.4 on which domain serves the installer, belongs to chunk 4."
+      },
+      {
+       "kind": "flag",
+       "line": 247,
+       "text": "Step 5 says a data directory shared with other files loses none of them. A directory named <code>X.Y.Z</code> that belongs to another tool is still removed; see the flag on <code>prune</code> in <code>install.sh</code>."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Adds \"Installing and upgrading on Windows\" to §7.2's inventory of work no chunk has scheduled yet."
+    }
+   ]
+  }
+ ]
+}
