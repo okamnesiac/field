@@ -26,6 +26,16 @@ class CaptureInput;
 struct CaptureBlock;
 }
 
+// A controller a MIDI take starts from, as `arm` passes it
+// (instrument-knobs.md §2.8): channel from 0 to 15, controller from 0 to
+// 119, value from 0 to 127.
+struct ChaseSeed
+{
+    int channel = 0;
+    int cc = 0;
+    int value = 0;
+};
+
 // Owns the output device (or the null-output clock used in CI), the loaded
 // file, the sample-accurate transport, and — once something arms — the
 // input side of the same device (recording.md §5). Artifacts-only by
@@ -38,16 +48,6 @@ struct CaptureBlock;
 // adds no locking of its own beyond the transport's internal locks. The
 // audio callback and the null clock only touch the transport, which is
 // safe by JUCE's design.
-// A controller a MIDI take starts from, as `arm` passes it
-// (instrument-knobs.md §2.8): channel from 0 to 15, controller from 0 to
-// 119, value from 0 to 127.
-struct ChaseSeed
-{
-    int channel = 0;
-    int cc = 0;
-    int value = 0;
-};
-
 class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallback
 {
 public:
