@@ -7,7 +7,7 @@ import { keymapSchema, toKeymap, type Keymap } from '../schema/keymap.js';
 import { watchText } from './watch.js';
 
 export const KEYMAP_ENV = 'FIELD_KEYMAP';
-export const DEFAULT_KEYMAP = 'musical-typing';
+export const DEFAULT_KEYMAP = 'musical';
 
 export type KeymapSource = { kind: 'builtin'; name: string; path: string } | { kind: 'file'; path: string };
 

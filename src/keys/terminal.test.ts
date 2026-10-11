@@ -74,11 +74,13 @@ describe('decoding kitty key events', () => {
 });
 
 describe('quitting', () => {
-  it('quits on Escape, on Ctrl-C, and on a raw Ctrl-C byte', () => {
-    for (const input of [`${CSI}27u`, `${CSI}99;${1 + MOD_CTRL}u`, '\x03']) {
+  it('quits on Ctrl-C and on a raw Ctrl-C byte, and not on Escape, which cancels a typed value', () => {
+    for (const input of [`${CSI}99;${1 + MOD_CTRL}u`, '\x03']) {
       const [event] = decodeTerminal(input).events;
       expect(isQuit(event!)).toBe(true);
     }
+    const [escape] = decodeTerminal(`${CSI}27u`).events;
+    expect(isQuit(escape!)).toBe(false);
   });
 
   it('quits on Ctrl at the c position under a layout with no c', () => {

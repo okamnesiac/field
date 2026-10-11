@@ -161,6 +161,9 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
         // The input and input_close ops, `inputs` in status, and input
         // windows in a session (live-supercollider.md chunk 2).
         features.add ("live-input");
+        // `monitor` on arm's audio entries: capture inputs a session's
+        // input windows read (live-supercollider.md §12).
+        features.add ("live-monitor");
         ok->setProperty ("features", features);
     }
     else if (op == "devices")
@@ -253,7 +256,7 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
         const auto kind = request.getProperty ("kind", juce::var());
         juce::var info;
         if (auto* tracks = request.getProperty ("tracks", juce::var()).getArray())
-            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString());
+            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString(), owner);
         else if (kind.toString() == "midi")
             info = player.armMidi (track);
         else if (! kind.isVoid())

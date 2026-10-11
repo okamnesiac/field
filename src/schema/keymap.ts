@@ -48,10 +48,22 @@ const ccAction = z
   })
   .strict();
 
+// How far a knob action moves: a whole number of knobs or steps, in
+// either direction (instrument-knobs.md §2.3).
+const knobSteps = z
+  .number()
+  .int()
+  .refine((n) => n !== 0, 'must move at least one: a positive number moves right or up, a negative one left or down');
+
 const action = z.union([
   z.object({ transpose: z.number().int() }).strict(),
   z.object({ velocity: z.number().int() }).strict(),
   z.object({ bend: z.number().min(-1).max(1) }).strict(),
+  z.object({ knob: knobSteps }).strict(),
+  z.object({ turn: knobSteps }).strict(),
+  // A digit, as YAML reads `type: 1`, or a minus sign. The decimal point
+  // is no action: Period types it while an entry is open (§2.7).
+  z.object({ type: z.union([z.number().int().min(0).max(9), z.literal('-')]) }).strict(),
   ccAction,
   z.literal('panic'),
 ]);
@@ -77,6 +89,9 @@ export const keymapSchema = z
     base: midiNote.default(60),
     velocity: z.number().int().min(1).max(127).default(100),
     channel: z.number().int().min(1).max(16).default(1),
+    // The seconds a typed value takes to cross a knob's whole range; 0
+    // sets it at once (instrument-knobs.md §2.3).
+    glide: z.number().min(0).default(0),
     notes: z.record(z.string(), z.union([offset, z.array(offset).min(1)])).optional(),
     grid: grid.optional(),
     controls: z.record(z.string(), action).optional(),
@@ -85,7 +100,7 @@ export const keymapSchema = z
   .superRefine((keymap, ctx) => {
     const checkPosition = (position: string, path: (string | number)[]): void => {
       if (position === 'Escape') {
-        ctx.addIssue({ code: 'custom', path, message: 'Escape is reserved: it always quits' });
+        ctx.addIssue({ code: 'custom', path, message: 'Escape is reserved: it cancels a typed value, and Ctrl-C quits' });
       } else if (!BINDABLE_POSITIONS.has(position)) {
         ctx.addIssue({
           code: 'custom',
@@ -166,6 +181,7 @@ export interface Keymap {
   base: number;
   velocity: number;
   channel: number;
+  glide: number;
   notes: ReadonlyMap<string, readonly number[]>;
   controls: ReadonlyMap<string, KeymapAction>;
 }
@@ -177,6 +193,7 @@ export function toKeymap(file: KeymapFile): Keymap {
     base: file.base,
     velocity: file.velocity,
     channel: file.channel,
+    glide: file.glide,
     notes: expandNotes(file),
     controls: new Map(Object.entries(file.controls ?? {})),
   };

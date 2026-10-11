@@ -41,6 +41,7 @@ target_sources(field-audiod PRIVATE
   src/plan.cpp
   src/live.cpp
   src/ring_input.cpp
+  src/capture_input.cpp
   src/hosting.cpp
   src/capture.cpp
   src/click.cpp

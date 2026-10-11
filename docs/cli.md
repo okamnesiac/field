@@ -405,11 +405,28 @@ and stops.
 | `--loop` | loops `--at` to `--until`, landing a take every pass until ctrl-c |
 | `--click` | plays a metronome through the take |
 | `--count-in <bars>` | clicks this many bars before `--at` |
-| `--monitoring <mode>` | records how you monitored the take (default `apollo-direct`) |
+| `--monitoring <mode>` | how you monitor the take, recorded on its row (default `apollo-direct`); `host` plays each audio input through its track |
 | `--console-preset <name>` | records the Console preset the take expects |
 
 `--until` and `--count-in` need `--at`, and `--loop` needs `--until`
 and a live song as the bed. Under `--loop`, the last pass is chosen.
+
+With `--monitoring host`, you hear each audio track's input through
+that track's inserts, the buses above it, and `main`, from the moment
+it arms, count-in included, until the take ends. The take itself is the
+dry input; the effects are only what you hear:
+
+```sh
+field record tall-grass/track:vocal --monitoring host --at 2 --count-in 1
+```
+
+Host monitoring needs the song as a live bed at the device's rate, with
+each track it hears reaching `main`: it refuses a file bed, another
+song, a device the daemon converts the song for, and a track that a
+solo, a muted placement, or the arrangement keeps from `main`. Use
+headphones, or a microphone the speakers cannot reach.
+With the default, `apollo-direct`, Field plays nothing of the input,
+and you monitor in your interface's mixer.
 
 Name several tracks to record them in one pass, audio, MIDI, or both:
 every take starts on the same sample and lands on its own track. A

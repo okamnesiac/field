@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The Release workflow dispatches CI on each release branch it pushes.
+  # For a pull request that a workflow's own token opened, GitHub creates the
+  # pull_request run but holds it until someone approves it; a dispatched
+  # run needs no approval, so this is how a release pull request gets its
+  # checks unattended (docs/release.md).
+  workflow_dispatch:
 
 # Two jobs: `linux` runs every gate, and `windows` runs the same suite
 # without the Python gates (its own comment says why). There is no macOS

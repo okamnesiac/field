@@ -118,7 +118,39 @@ describe('voice-render in the graph', () => {
     await buildLabels(root, [GEN], runner);
     expect(runs).toBe(2);
   });
+
+  it('keys the render on the instrument’s knob file when it has one, and re-renders when it changes', async () => {
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB);
+    const e = await explainLabel(root, GEN);
+    expect(e.inputs.map((i) => i.label)).toContain('shared/instruments/pad.knobs.yaml');
+    let runs = 0;
+    const runner: GeneratorRunner = async (_node, inputPaths, outputPath) => {
+      runs++;
+      copyFileSync(inputPaths[0]!, outputPath);
+    };
+    await buildLabels(root, [GEN], runner);
+    await buildLabels(root, [GEN], runner);
+    expect(runs).toBe(1);
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB.replace('default: 0', 'default: 0.5'));
+    await buildLabels(root, [GEN], runner);
+    expect(runs).toBe(2);
+  });
+
+  it('fails the build with the knob file’s errors, before anything renders', async () => {
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), 'knobs:\n  - { name: level, cc: 74, min: 0, max: 1, curve: exp }\n');
+    let runs = 0;
+    const runner: GeneratorRunner = async () => {
+      runs++;
+    };
+    await expect(buildLabels(root, [GEN], runner)).rejects.toThrow(
+      'shared/instruments/pad.knobs.yaml: knobs.0.min: level: an exp curve needs min and max of one sign and neither 0, not 0 and 1',
+    );
+    expect(runs).toBe(0);
+  });
 });
+
+// A knob that sets a voice's level, on CC 74.
+const LEVEL_KNOB = 'knobs:\n  - { name: level, cc: 74, min: 0, max: 1, curve: lin, default: 0 }\n';
 
 // buildLabels reports every node it walked, dependencies first.
 const built = <T extends { label: string }>(outcomes: T[], label: string): T => outcomes.find((o) => o.label === label)!;
@@ -174,6 +206,37 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
     expect(await peak()).toBeGreaterThan(0.05);
   });
 
+  it('maps a take\'s controllers through the instrument\'s knob file', { timeout: 120_000 }, async () => {
+    // A voice whose level is its knob, read from the copy Field checked:
+    // silent at the knob's default, sounding once CC 74 turns it up.
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB);
+    writeFileSync(
+      join(root, 'shared/instruments/pad.scd'),
+      VOICE.replace(
+        '(\n',
+        '(\nvar knob = "FIELD_KNOBS".getenv.parseYAMLFile["knobs"][0];\nvar spec = ControlSpec(knob["min"].asFloat, knob["max"].asFloat, knob["curve"].asSymbol);\n',
+      ).replace('* amp * 0.2 * env', '* amp * 0.2 * spec.map(("cc" ++ knob["cc"]).asSymbol.kr(spec.unmap(knob["default"].asFloat))) * env'),
+    );
+    const peak = async (): Promise<number> => {
+      const wav = readWav(built(await buildLabels(root, [GEN]), GEN).outputPath!);
+      return wav.channels[0]!.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
+    };
+    expect(await peak()).toBe(0);
+    await landMidiTake(
+      root,
+      midiTransaction('take-20261010-120400', {}, [
+        { at: 0, midi: [176, 74, 127] },
+        { at: 100, midi: [144, 69, 100] },
+        { at: 12000, midi: [128, 69, 0] },
+      ]),
+    );
+    const turned = await peak();
+    expect(turned).toBeGreaterThan(0.05);
+    // The knob's range is the file's: half the range, half the level.
+    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB.replace('max: 1', 'max: 0.5'));
+    expect(await peak()).toBeCloseTo(turned / 2, 2);
+  });
+
   it('loads the instrument without the render variables, as voice mode is live', { timeout: 120_000 }, async () => {
     const strict = VOICE.replace(
       '(\n',
@@ -184,4 +247,25 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
     const outcome = built(await buildLabels(root, [GEN]), GEN);
     expect(existsSync(outcome.outputPath!)).toBe(true);
   });
+
+  it.each(['juno', 'bass'])(
+    'renders bloom\'s %s from a knob file without some of the knobs it maps',
+    { timeout: 120_000 },
+    async (instrument) => {
+      // The schema accepts any set of knobs, so a voice keeps a setting's
+      // fixed value for a knob its file leaves out.
+      const shelf = join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments');
+      copyFileSync(join(shelf, `${instrument}.scd`), join(root, 'shared/instruments', `${instrument}.scd`));
+      writeFileSync(
+        join(root, 'shared/instruments', `${instrument}.knobs.yaml`),
+        'knobs:\n  - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 2000 }\n',
+      );
+      writeFileSync(
+        join(root, 'songs/creek/tracks/keys.yaml'),
+        `name: keys\ninputs:\n  - record:\n      instrument: ${instrument}\n`,
+      );
+      const wav = readWav(built(await buildLabels(root, [GEN]), GEN).outputPath!);
+      expect(wav.channels[0]!.some((s) => s !== 0)).toBe(true);
+    },
+  );
 });

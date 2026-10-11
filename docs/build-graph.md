@@ -265,12 +265,16 @@ The same program can also be played from notes. When `FIELD_MODE` is
 `voice`, it must not render or exit, and its value — the file's last
 expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
 controls that frees itself after `gate` goes to 0. It may also have a
-`mod` control, which the modulation wheel sets. `field keys
-<instrument>` plays that voice live; the render variables are absent in
-voice mode, so a program checks `FIELD_MODE` before reading them. A
-`supercollider:` entry never runs in voice mode, so voice mode changes
-its renders only through the program's own content hash. See
-[keys.md](keys.md).
+`mod` control, which the modulation wheel sets, and a `cc<n>` control
+for any controller n from 2 to 119 but the sustain pedal, each from 0
+to 1. When the instrument has a knob file beside it (`juno.knobs.yaml`
+for `juno.scd`), `FIELD_KNOBS` names a copy of it that passed Field's
+check, so the voice can map its controls through the knobs' ranges.
+`field keys <instrument>` plays that voice live; the render variables
+are absent in voice mode, so a program checks `FIELD_MODE` before
+reading them. A `supercollider:` entry never runs in voice mode, so
+voice mode changes its renders only through the program's own content
+hash. See [keys.md](keys.md).
 
 ### `voice-render` — a recorded MIDI take, rendered
 
@@ -280,17 +284,21 @@ the record node's, and the entry places it where the take was played
 (keyboard-instrument.md §12.3). Nobody declares it.
 
 It runs `sc/voice-render.scd` through `sclang`, which loads the
-instrument in voice mode with `sc/voice-load.scd`, as `field keys`
-loads it, and drives its voice from the take's notes file with
+instrument in voice mode with `sc/voice-load.scd`, as `field keys` loads
+it, and drives its voice from the take's notes file with
 `sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
-all-notes-off, pitch bend (±2 semitones), and the modulation wheel act
-as they did live. The render is stereo at the track's rate and runs 4
-seconds past the take, so the last notes' release is heard; scsynth
-rounds it up to a whole control block, as it does every NRT render. Its
-cache inputs are the notes file, the instrument's content hash, and the
+all-notes-off, pitch bend (±2 semitones), the modulation wheel, and
+every other controller act as they did live. The render is stereo at the
+track's rate and runs 4 seconds past the take, so the last notes'
+release is heard; scsynth rounds it up to a whole control block, as it
+does every NRT render. Its cache inputs are the notes file, the
+instrument's content hash, its knob file's when it has one, and the
 three harness files, so editing any of them renders the take again. The
-harness adds nothing random, so an instrument that renders reproducibly
-renders its takes reproducibly, bit for bit.
+render checks the knob file as `field keys` does, so `field check` and
+the build name a file that fails before anything renders, and it hands
+the voice the checked copy in `FIELD_KNOBS`. The harness adds nothing
+random, so an instrument that renders reproducibly renders its takes
+reproducibly, bit for bit.
 
 ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
 

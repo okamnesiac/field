@@ -10,6 +10,7 @@ import { createSong, createTrack } from './create.js';
 import { importAsset } from './import.js';
 import { init } from './init.js';
 import { buildLabels } from './build.js';
+import { compileSession } from '../graph/live.js';
 import { describeTake, meterLine, recordTake, resolveRecordTarget } from './record.js';
 import { transportCommand, transportStatusLines } from './transport.js';
 import { check } from './check.js';
@@ -44,6 +45,18 @@ function assertGapless(samples: Float32Array): void {
     const wraps = Math.abs(d - (SAW_STEP - 2)) < 1e-6;
     if (!climbs && !wraps) {
       throw new Error(`discontinuity at sample ${i}: ${samples[i - 1]} → ${samples[i]}`);
+    }
+  }
+}
+
+// A client of the daemon a running command spawned, once it answers.
+async function waitForClientOf(root: string): Promise<AudiodClient> {
+  for (let i = 0; ; i++) {
+    try {
+      return await AudiodClient.connect(root, { spawnIfNeeded: false });
+    } catch (err) {
+      if (i >= 100) throw err;
+      await sleep(50);
     }
   }
 }
@@ -467,6 +480,161 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     const status = await client.status();
     expect(status.state).toBe('stopped');
     expect(status.record?.state).toBe('idle');
+    client.close();
+  });
+
+  it(
+    'field record --monitoring host: hears the input through its track while it takes, keeps the take dry, and loads the song back without it',
+    { timeout: 30_000 },
+    async () => {
+      await importTone('tone', NULL_RATE * 6);
+      createTrack(root, 'creek', 'lead-vocal');
+      writeFileSync(
+        join(root, 'songs/creek/tracks/main.yaml'),
+        ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
+      );
+      writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+      const project = loadProject(root);
+      const lines: string[] = [];
+      let interrupted = false;
+      const recording = recordTake(
+        root,
+        project,
+        'creek/track:lead-vocal',
+        { input: 1, monitoring: 'host' },
+        {
+          onBed: (line) => lines.push(line),
+          onArmed: (line) => lines.push(line),
+          interrupted: () => interrupted,
+        },
+      );
+      // While it takes, the session reads the armed input: the null
+      // sawtooth, which reaches full scale once a second. Each status
+      // read resets the peak, so the loudest is kept across them.
+      let loudest = 0;
+      const watcher = await waitForClientOf(root);
+      await waitFor(
+        async () => {
+          const status = await watcher.status();
+          const input = status.inputs?.find((i) => i.name === 'capture:creek/lead-vocal');
+          if (input === undefined) return false;
+          loudest = Math.max(loudest, input.peak);
+          return status.record?.state === 'recording' && input.read > NULL_RATE * 1.5;
+        },
+        10_000,
+        'the monitored input to be read while the take records',
+      );
+      expect(loudest).toBeGreaterThan(0.9);
+      interrupted = true;
+      const { takes } = await recording;
+      expect(lines).toEqual([
+        'live    creek',
+        expect.stringMatching(/^armed {3}lead-vocal: null input 1 {2}\(48000 Hz, latency in 0 \/ out 0 samples\)$/),
+        'monitor lead-vocal through creek (host monitoring — use headphones)',
+      ]);
+      // The take is the dry input, and its row says how it was heard.
+      const { take, landed } = takes[0]!;
+      expect(landed.row).toMatchObject({ monitoring: 'host', input: 1 });
+      assertGapless(readWav(join(root, 'songs/creek', landed.file)).channels[0]!);
+      expect(take.complete).toBe(true);
+      // Disarmed, the song is loaded again without the input.
+      const after = await watcher.status();
+      expect(after).toMatchObject({ live: true, song: 'creek' });
+      expect(after.inputs).toBeUndefined();
+      watcher.close();
+    },
+  );
+
+  it('field record --monitoring host refuses a track the solo or the arrangement keeps from main, before arming', { timeout: 15_000 }, async () => {
+    await importTone('tone', NULL_RATE * 2);
+    createTrack(root, 'creek', 'bed');
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(join(root, 'songs/creek/tracks/bed.yaml'), ['name: bed', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'));
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    const client = await AudiodClient.connect(root);
+    try {
+      // Placed in main, but another terminal solos the bed.
+      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: bed', '  - track: lead-vocal', ''].join('\n'));
+      await client.session((await compileSession(root, 'creek', { solo: 'bed' })).session);
+      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+        /^host monitoring cannot play the input through creek: .*lead-vocal/,
+      );
+      expect((await client.status()).record?.state).toBe('idle');
+      // Not placed in main at all.
+      writeFileSync(join(root, 'songs/creek/tracks/main.yaml'), ['name: main', 'inputs:', '  - track: bed', ''].join('\n'));
+      await client.session((await compileSession(root, 'creek')).session);
+      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+        /^host monitoring cannot play the input through creek: .*lead-vocal/,
+      );
+      expect((await client.status()).record?.state).toBe('idle');
+    } finally {
+      client.close();
+    }
+  });
+
+  it('a song another terminal loads during a monitored take plays on after it', { timeout: 30_000 }, async () => {
+    await importTone('tone', NULL_RATE * 6);
+    createSong(root, 'tall-grass');
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    let interrupted = false;
+    const recording = recordTake(root, loadProject(root), 'creek/track:lead-vocal', { input: 1, monitoring: 'host' }, {
+      interrupted: () => interrupted,
+    });
+    const other = await waitForClientOf(root);
+    await waitFor(async () => (await other.status()).record?.state === 'recording', 10_000, 'the take to start');
+    // Another terminal, field ui tall-grass say, loads its song under the take.
+    await other.session((await compileSession(root, 'tall-grass')).session);
+    interrupted = true;
+    await recording;
+    expect(await other.status()).toMatchObject({ live: true, song: 'tall-grass', record: { state: 'idle' } });
+    other.close();
+  });
+
+  it("a monitored field record refused under another terminal's take leaves that take's bed and loop alone", { timeout: 20_000 }, async () => {
+    await importTone('tone', NULL_RATE * 6);
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(
+      join(root, 'songs/creek/tracks/main.yaml'),
+      ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
+    );
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    const other = await AudiodClient.connect(root);
+    try {
+      // Another terminal loops a take over the song's first beat.
+      await other.session((await compileSession(root, 'creek')).session);
+      await other.arm('//songs/creek/track:main', 1);
+      await other.record(0, undefined, 24000, true);
+      await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+        'cannot re-arm while recording',
+      );
+      await sleep(600);
+      expect(await other.status()).toMatchObject({
+        song: 'creek',
+        loop_from: 0,
+        loop_to: 24000,
+        record: { state: 'recording', loop: true },
+      });
+      await other.stop();
+    } finally {
+      other.close();
+    }
+  });
+
+  it('field record --monitoring host refuses a file bed before arming', { timeout: 15_000 }, async () => {
+    const tone = await importTone('tone', NULL_RATE * 2);
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    const client = await AudiodClient.connect(root);
+    await client.load(tone);
+    await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+      "host monitoring plays the input through creek's tracks, and the bed is the file",
+    );
+    expect((await client.status()).record?.state).toBe('idle');
     client.close();
   });
 

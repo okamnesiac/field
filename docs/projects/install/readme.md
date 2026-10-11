@@ -659,11 +659,31 @@ and upgrading on Windows", which owns it from here.
   release pull request lowers the version, so it releases nothing
   either. Tagging 0.1.0 as a baseline would also stop it, but that tag
   would name a version nobody released.
-- **This repository does not let GitHub Actions open pull requests**
-  (`can_approve_pull_request_reviews` is `false` on 2026-10-11), so the
-  propose job can push the release branch but not open its pull
-  request. The job then fails with the link that opens it by hand, and
-  `docs/release.md` names the setting.
+- **GitHub Actions may open pull requests only where the enterprise
+  allows it.** The first release run (38167355504) pushed
+  `release/v0.2.0` and then could not open its pull request, because the
+  `amnesiac` enterprise's policy forbade it, and an enterprise policy
+  overrides the organization's and the repository's settings. On
+  2026-10-11 the enterprise allowed it, the `okamnesiac` organization and
+  this repository were set to allow it, and a re-run opened #207.
+  `docs/release.md` names all three levels.
+- **A pull request the workflow opens gets no CI until someone approves
+  it.** For an event that a workflow's own token caused, GitHub creates
+  the `pull_request` run but holds it as `action_required`. #207's CI
+  run 38167745651 was held that way, and ran, and passed, only when
+  Justin approved it. `workflow_dispatch` and `repository_dispatch` are
+  exempt, so the propose job dispatches `ci.yml` on the release branch
+  after opening the pull request, and `ci.yml` accepts
+  `workflow_dispatch`. The checks land on the branch's commit, the pull
+  request's head. The held run still appears, and `docs/release.md` tells
+  the release's reviewer to leave it unapproved: its concurrency group,
+  `CI-refs/pull/<n>/merge`, differs from the dispatched run's
+  `CI-refs/heads/release/vX.Y.Z`, so approving it runs every job again.
+  Two alternatives lost. Approving the held run by hand needs no workflow
+  change, and lost because it is a click on every release, and Justin
+  asked for CI to run by itself. A token from a GitHub App would avoid
+  the hold, and lost because it needs an App and two secrets to do what
+  one extra trigger does.
 
 ### 9.2 What was verified, and how
 

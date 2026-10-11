@@ -1,15 +1,31 @@
-import { basename } from 'node:path';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
+import {
+  formatKnobValue,
+  knobFileFor,
+  knobFileName,
+  knobList,
+  knobsCopy,
+  knobValueWidth,
+  loadKnobs,
+  resolveKnobsPath,
+  watchKnobs,
+  type KnobsReload,
+  type ShownKnob,
+} from '../keys/knobs.js';
 import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
 import { printKeymap, signed } from '../keys/print.js';
-import { KeysSession, type MidiMessage } from '../keys/session.js';
+import { KeysSession, TICK_MS, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
 import { routeArmed, type Routing, type Unrouted } from '../keys/routing.js';
 import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
 import { findProjectRoot } from '../model/project.js';
 import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
 import { watchText } from '../keys/watch.js';
+import type { Knob } from '../schema/knobs.js';
 import type { Keymap } from '../schema/keymap.js';
 
 export const UNSUPPORTED_TERMINAL =
@@ -20,6 +36,7 @@ export interface KeysOptions {
   keymap?: string;
   print?: boolean;
   device?: string;
+  knobs?: string[];
 }
 
 export async function keysCommand(targets: string[], options: KeysOptions): Promise<void> {
@@ -30,14 +47,16 @@ export async function keysCommand(targets: string[], options: KeysOptions): Prom
     return;
   }
   const armed = resolveKeysTargets(targets);
+  const root = findProjectRoot(process.cwd());
+  // Every knob file is checked before anything starts, as the keymap is.
+  const knobs = loadKnobSources(armed, options.knobs ?? [], root);
   const { stdin, stdout } = process;
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
   }
-  const root = findProjectRoot(process.cwd());
   let abandoned = false;
   await withKittyKeyboard({ stdin, stdout }, async (rest) => {
-    abandoned = (await play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest)) === 'abandoned';
+    abandoned = (await play({ stdin, stdout }, { source, keymap, armed, knobs, device: options.device, root }, rest)) === 'abandoned';
   });
   // Quit before routing landed: the daemon may still be answering, and
   // waiting for it would hold the prompt. Any input it opens late closes
@@ -74,8 +93,86 @@ interface PlayOptions {
   source: KeymapSource;
   keymap: Keymap;
   armed: ArmedInstrument[];
+  knobs: KnobSource[];
   device: string | undefined;
   root: string | undefined;
+}
+
+// A knob file `field keys` reads (instrument-knobs.md §2.2): an armed
+// instrument's, which its voice also maps through, or one given with
+// --knobs, for whatever else listens to Field Keys.
+export interface KnobSource {
+  name: string; // what the knob line puts before its knobs' names
+  path: string;
+  program?: string; // the instrument whose voice reads it
+  knobs: Knob[];
+}
+
+// A session's knob files, and the copies its voices read: each voice
+// reads the copy of its knob file that passed the schema, never the file
+// itself, so a save that fails cannot reach it (instrument-knobs.md §2.4).
+// The copies live in a directory of their own for the session.
+export class KnobFiles {
+  // Each program with a knob file, and the copy its voice reads.
+  readonly copies = new Map<string, string>();
+  // Why the last save of each file did not load, by path.
+  readonly errors = new Map<string, string>();
+  private dir: string | undefined;
+
+  constructor(private readonly sources: KnobSource[]) {
+    sources.forEach((source) => this.write(source));
+  }
+
+  paths(): string[] {
+    return [...new Set(this.sources.map((s) => s.path))];
+  }
+
+  list(): ShownKnob[] {
+    return knobList(this.sources);
+  }
+
+  // A save that passes takes the file's new knobs and rewrites the copy
+  // of each voice that reads it; one that fails changes nothing but its
+  // error. Answers whether a voice reads the file, and so must reload.
+  saved(path: string, result: KnobsReload): boolean {
+    if ('error' in result) {
+      this.errors.set(path, `${basename(path)}: ${result.error.problems[0]}`);
+      return false;
+    }
+    this.errors.delete(path);
+    const changed = this.sources.filter((s) => s.path === path);
+    for (const source of changed) {
+      source.knobs = result.knobs;
+      this.write(source);
+    }
+    return changed.some((s) => s.program !== undefined);
+  }
+
+  remove(): void {
+    if (this.dir !== undefined) rmSync(this.dir, { recursive: true, force: true });
+  }
+
+  private write({ program, path, knobs }: KnobSource): void {
+    if (program === undefined) return;
+    this.dir ??= mkdtempSync(join(tmpdir(), 'field-knobs-'));
+    const copy = this.copies.get(program) ?? join(this.dir, `${this.copies.size}-${basename(path)}`);
+    writeFileSync(copy, knobsCopy(knobs));
+    this.copies.set(program, copy);
+  }
+}
+
+export function loadKnobSources(armed: ArmedInstrument[], specs: string[], root: string | undefined): KnobSource[] {
+  const sources: KnobSource[] = [];
+  for (const { program, track } of armed) {
+    const path = knobFileFor(program);
+    if (!existsSync(path)) continue;
+    sources.push({ name: track?.split('/').pop() ?? basename(program, '.scd'), path, program, knobs: loadKnobs(path) });
+  }
+  for (const spec of specs) {
+    const path = resolveKnobsPath(spec, root);
+    sources.push({ name: knobFileName(path), path, knobs: loadKnobs(path) });
+  }
+  return sources;
 }
 
 export type InstrumentState = {
@@ -118,13 +215,15 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<'a
   if (first === 'quit') return 'abandoned';
   const routed = first;
   const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
+  const knobFiles = new KnobFiles(options.knobs);
   try {
-    await playRouted(tty, options, pending, routed, routing);
+    await playRouted(tty, options, pending, routed, routing, knobFiles);
   } finally {
-    // However the session ends, a throw included, its inputs close; a
-    // process killed outright has the daemon close them with its
-    // connection.
+    // However the session ends, a throw included, its inputs close and its
+    // knob copies go; a process killed outright has the daemon close the
+    // inputs with its connection.
     await routing?.close();
+    knobFiles.remove();
   }
 }
 
@@ -134,30 +233,32 @@ async function playRouted(
   carried: string,
   routed: Routing | Unrouted | undefined,
   routing: Routing | undefined,
+  knobFiles: KnobFiles,
 ): Promise<void> {
   const { source, armed } = options;
   const programs = routing?.programs ?? [...new Set(armed.map((a) => a.program))];
-  const session = new KeysSession(options.keymap);
+  const session = new KeysSession(options.keymap, knobFiles.list());
   let layout: KeyboardLayout | undefined;
   let layoutPositions: ReadonlyMap<string, string> | undefined;
   let reloadError: string | undefined;
   const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
 
-  // An instrument has a line of its own above the status line: its state
-  // changes a few times a session, the status line with every key. That
-  // line is drawn once, then redrawn in place only when its text changes.
-  let instrumentLine: string | undefined;
+  // The instrument and the knobs each have a line of their own above the
+  // status line, which changes with every key (keyboard-instrument.md
+  // §2.4). They are drawn once, then redrawn in place only when they
+  // change.
+  const knobLine = new KnobLine();
+  let above: string[] = [];
   const draw = (): void => {
     // A terminal that reports no size reports 0 columns.
     const width = Math.max(20, (tty.stdout.columns || 80) - 1);
-    let above = '';
-    if (instrument !== undefined) {
-      const line = instrumentText(instrument).slice(0, width);
-      if (instrumentLine === undefined) above = `\r\x1b[K${line}\n`;
-      else if (line !== instrumentLine) above = `\x1b[1A\r\x1b[K${line}\n`;
-      instrumentLine = line;
-    }
-    tty.stdout.write(`${above}\r\x1b[K${statusText(session, layout, reloadError, width)}`);
+    const lines = [
+      ...(instrument !== undefined ? [instrumentText(instrument).slice(0, width)] : []),
+      ...(session.bindsKnobs() ? [knobLine.text(session, width)] : []),
+    ];
+    const knobError = knobFiles.errors.values().next().value;
+    tty.stdout.write(`${redrawAbove(above, lines)}\r\x1b[K${statusText(session, layout, reloadError, width, knobError)}`);
+    above = lines;
   };
 
   let stop!: (error?: Error) => void;
@@ -179,6 +280,23 @@ async function playRouted(
   });
   const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
 
+  // A held turn key and a glide move a knob on a timer of their own, which
+  // runs only while a turn key is held or a glide moves
+  // (instrument-knobs.md §2.6 and §2.7).
+  let ticker: NodeJS.Timeout | undefined;
+  const tickWhileMoving = (): void => {
+    if (session.ticking() && ticker === undefined) {
+      ticker = setInterval(() => {
+        send(session.tick(performance.now()));
+        tickWhileMoving();
+        draw();
+      }, TICK_MS);
+    } else if (!session.ticking() && ticker !== undefined) {
+      clearInterval(ticker);
+      ticker = undefined;
+    }
+  };
+
   // The host starts after the helper, so `Field Keys` exists when sclang
   // connects its MIDI inputs; the keyboard plays while it boots.
   // A routed voice is heard on the daemon's device, so it is made there.
@@ -187,6 +305,7 @@ async function playRouted(
     programs.length > 0
       ? await VoiceHost.start({
           instruments: programs,
+          knobs: knobFiles.copies,
           ...(device !== undefined ? { device } : {}),
           ...(routing !== undefined ? { rings: routing.rings, fieldOut: routing.fieldOut } : {}),
           onStatus: (status) => {
@@ -219,6 +338,16 @@ async function playRouted(
   // Each program once, however many tracks play it: one save, one reload.
   const stopWatchingPrograms =
     host !== undefined ? [...new Set(programs)].map((p) => watchText(p, () => void host.reload())) : [];
+  // A knob file saved: the knobs change and a voice that maps through it
+  // reloads, or, when the save fails, only the status line changes.
+  const stopWatchingKnobs = knobFiles.paths().map((path) =>
+    watchKnobs(path, (result) => {
+      const reload = knobFiles.saved(path, result);
+      if ('knobs' in result) session.setKnobs(knobFiles.list());
+      if (reload) void host?.reload();
+      draw();
+    }),
+  );
   const stopWatching =
     source.kind === 'file'
       ? watchKeymap(source.path, (result) => {
@@ -249,6 +378,7 @@ async function playRouted(
         if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
       }
     }
+    tickWhileMoving();
     draw();
   };
   const onSignal = (): void => stop();
@@ -263,7 +393,9 @@ async function playRouted(
   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
   stopWatching?.();
   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
+  stopWatchingKnobs.forEach((stopWatchingKnob) => stopWatchingKnob());
   send(session.quit());
+  tickWhileMoving();
   // A host still booting closes too: quitting never waits for it. The
   // inputs close after it, in play, once nothing writes them.
   await host?.close();
@@ -322,14 +454,17 @@ export function statusText(
   layout: KeyboardLayout | undefined,
   reloadError: string | undefined,
   width: number,
+  knobError?: string,
 ): string {
   const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
   const bends = session.bends();
   if (bends.length > 0 || session.bend !== 0) parts.push(`bend ${bendText(session.bend, bends)}`);
-  if (session.setsMod() || session.mod !== 0) parts.push(`mod ${session.mod}`);
+  // The knob line shows the wheel as the knob mod, when there is one.
+  if (!session.bindsKnobs() && (session.setsMod() || session.mod !== 0)) parts.push(`mod ${session.mod}`);
   const unplayable = unplayablePositions(layout, session.keymap);
   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
+  if (knobError !== undefined) parts.push(`knobs not reloaded: ${knobError}`);
   if (session.message !== undefined) parts.push(session.message);
   const sounding = session.soundingNotes();
   const notes = sounding.length > 0 ? sounding.join(' ') : '–';
@@ -356,4 +491,73 @@ function decimalPlaces(x: number): number {
   let places = 0;
   while (places < BEND_PLACES && Number(x.toFixed(places)) !== x) places++;
   return places;
+}
+
+// The escapes that redraw the lines above the status line when they
+// change, from the first that differs, leaving the cursor at the start of
+// the status line's row. Fewer lines than before clears what is left
+// below them.
+export function redrawAbove(drawn: string[], lines: string[]): string {
+  let from = 0;
+  while (from < drawn.length && from < lines.length && drawn[from] === lines[from]) from++;
+  if (from === drawn.length && from === lines.length) return '';
+  const up = drawn.length - from;
+  const rewrite = lines
+    .slice(from)
+    .map((line) => `\r\x1b[K${line}\n`)
+    .join('');
+  return `${up > 0 ? `\x1b[${up}A` : ''}${rewrite}${lines.length < drawn.length ? '\x1b[J' : ''}`;
+}
+
+const REVERSE = '\x1b[7m';
+const REVERSE_OFF = '\x1b[27m';
+const KNOB_GAP = '  ';
+const MORE_LEFT = '‹ ';
+const MORE_RIGHT = ' ›';
+
+// The knob line (instrument-knobs.md §2.5): every knob's name and value,
+// each value padded to the widest it prints, so turning a knob moves
+// nothing after it, and the chosen knob in reverse video, which takes no
+// columns. A line too wide for the terminal shows a window of whole knobs
+// that holds the chosen one and moves only when the choice leaves it.
+export class KnobLine {
+  private first = 0;
+  private readonly widths = new WeakMap<Knob, number>();
+
+  text(session: KeysSession, width: number): string {
+    const chosen = session.chosen;
+    const cells = session.knobs.map(({ label, knob }, i) => {
+      let valueWidth = this.widths.get(knob);
+      if (valueWidth === undefined) this.widths.set(knob, (valueWidth = knobValueWidth(knob)));
+      // An entry takes the value's place, in the units it is typed in,
+      // and widens the knob only once it outgrows the value.
+      const entry = i === chosen ? session.entry : undefined;
+      const value =
+        entry !== undefined
+          ? `${entry.text}_${knob.units !== undefined ? ` ${knob.units}` : ''}`
+          : formatKnobValue(knob, session.knobValue(knob));
+      return `${label} ${value.padStart(valueWidth)}`;
+    });
+    const span = (from: number, to: number): number =>
+      cells.slice(from, to + 1).reduce((sum, cell) => sum + cell.length, 0) +
+      KNOB_GAP.length * (to - from) +
+      (from > 0 ? MORE_LEFT.length : 0) +
+      (to < cells.length - 1 ? MORE_RIGHT.length : 0);
+    let first = Math.min(this.first, chosen);
+    if (span(first, chosen) > width) {
+      first = chosen;
+      while (first > 0 && span(first - 1, chosen) <= width) first--;
+    }
+    let last = chosen;
+    while (last + 1 < cells.length && span(first, last + 1) <= width) last++;
+    this.first = first;
+    const left = first > 0 ? MORE_LEFT : '';
+    const right = last < cells.length - 1 ? MORE_RIGHT : '';
+    const room = Math.max(0, width - left.length - right.length);
+    const shown = cells.slice(first, last + 1).map((cell, i) => {
+      const fitted = cell.slice(0, room);
+      return first + i === chosen ? `${REVERSE}${fitted}${REVERSE_OFF}` : fitted;
+    });
+    return `${left}${shown.join(KNOB_GAP)}${right}`;
+  }
 }

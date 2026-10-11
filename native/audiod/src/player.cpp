@@ -1,6 +1,7 @@
 #include "player.h"
 
 #include "capture.h"
+#include "capture_input.h"
 #include "live.h"
 #include "ring_input.h"
 #include "version.h"
@@ -77,7 +78,18 @@ void retireOnMessageThread (std::unique_ptr<field::LiveSession> retired)
 }
 } // namespace
 
-Player::Player (bool useNullOutput) : nullMode (useNullOutput)
+Player::Player (bool useNullOutput)
+    : nullMode (useNullOutput),
+      serviceStallMs (useNullOutput
+                          ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_SERVICE_STALL_MS", "0").getIntValue()
+                          : 0),
+      openStallMs (useNullOutput
+                       ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_OPEN_STALL_MS", "0").getIntValue()
+                       : 0),
+      latchStallMs (useNullOutput
+                        ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_LATCH_STALL_MS", "0").getIntValue()
+                        : 0),
+      captureBlock (std::make_shared<field::CaptureBlock>())
 {
     formatManager.registerBasicFormats();
 }
@@ -393,6 +405,8 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             std::lock_guard<std::mutex> hold (inputsLock);
             for (const auto& [name, input] : rings)
                 inputs[name] = input.ring;
+            for (const auto& [name, open] : captures)
+                inputs[name] = open.input;
         }
         auto next = std::make_unique<field::LiveSession> (session, projectRoot, inputs);
         // Pre-roll outside the lock too: a swap lands at the old
@@ -409,11 +423,18 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
                 if (liveSession != nullptr)
                     predicted = liveSession->position();
             }
+            // A loop take's region goes on first, so the chain warms on
+            // it. The take can start or stop while this runs, so the
+            // check under the lock below is the one that decides.
+            carryTakeRegion (*next);
             if (predicted >= 0)
             {
-                if (next->looping() && next->lengthSamples() > 0)
+                // The position counts every pass of a region, which wraps
+                // it itself; a session's own loop wraps at its length.
+                const bool region = next->loopRegionTo() > next->loopRegionFrom();
+                if (! region && next->looping() && next->lengthSamples() > 0)
                     predicted %= next->lengthSamples();
-                else if (next->lengthSamples() > 0)
+                else if (! region && next->lengthSamples() > 0)
                     predicted = std::min (predicted, next->lengthSamples());
                 next->locate (predicted);
             }
@@ -423,6 +444,14 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
         // to the end of the install this thread holds its lock, exactly
         // what every other request gets from handleLine.
         const juce::MessageManagerLock mml;
+        if (auto error = carryTakeRegion (*next); error.isNotEmpty())
+        {
+            // Refused: the session dies on the message thread, as a
+            // retired one does (retireOnMessageThread).
+            retireOnMessageThread (std::move (next));
+            result->setProperty ("error", error);
+            return juce::var (result.get());
+        }
         // Prefer running the device at the session's rate (bit-perfect
         // delivery); when it cannot switch, the prepared converter below
         // sets up converted delivery instead of refusing
@@ -491,9 +520,11 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveSession = std::move (next);
             if (hadSession)
             {
-                if (liveLoop && liveLength > 0)
+                // As at the pre-roll: a carried region wraps the position.
+                const bool region = liveSession->loopRegionTo() > liveSession->loopRegionFrom();
+                if (! region && liveLoop && liveLength > 0)
                     carry %= liveLength;
-                else if (liveLength > 0)
+                else if (! region && liveLength > 0)
                     carry = std::min (carry, liveLength);
                 liveSession->locate (carry);
                 livePlaying = wasPlaying;
@@ -617,6 +648,11 @@ juce::String Player::locate (juce::int64 sample)
     // placement could not describe that.
     if (capture != nullptr)
         return "cannot locate while recording (stop first)";
+    return seek (sample);
+}
+
+juce::String Player::seek (juce::int64 sample)
+{
     if (liveSession != nullptr)
     {
         if (sample < 0 || (! liveSession->looping() && liveLength > 0 && sample > liveLength))
@@ -701,7 +737,7 @@ juce::var Player::openInput (const juce::String& name, const void* owner)
         return juce::var (result.get());
     }
     std::lock_guard<std::mutex> hold (inputsLock);
-    if (rings.count (name.toStdString()) > 0)
+    if (rings.count (name.toStdString()) > 0 || captures.count (name.toStdString()) > 0)
     {
         result->setProperty ("error", "input \"" + name + "\" is already open");
         return juce::var (result.get());
@@ -729,12 +765,35 @@ void Player::closeInputs()
     for (auto& [name, input] : rings)
         input.ring->retire();
     rings.clear();
+    for (auto& [name, open] : captures)
+        open.input->close();
+    captures.clear();
+}
+
+void Player::closeCaptures (const void* owner)
+{
+    std::lock_guard<std::mutex> hold (inputsLock);
+    for (auto it = captures.begin(); it != captures.end();)
+    {
+        if (owner == nullptr || it->second.owner == owner)
+        {
+            it->second.input->close();
+            it = captures.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }
 
 void Player::closeInputsOwnedBy (const void* owner)
 {
     if (owner == nullptr)
         return;
+    // A monitored arm whose `field record` died stops being heard with
+    // its connection; the arm itself stays, as it always has.
+    closeCaptures (owner);
     std::lock_guard<std::mutex> hold (inputsLock);
     for (auto it = rings.begin(); it != rings.end();)
     {
@@ -769,12 +828,19 @@ juce::var Player::status (bool consumePeak)
         // Each open input's ring and its counters (live-supercollider.md
         // §2): whether FieldOut is writing, and whether the reader keeps up.
         std::lock_guard<std::mutex> hold (inputsLock);
-        if (! rings.empty())
+        if (! rings.empty() || ! captures.empty())
         {
             juce::Array<juce::var> list;
             for (const auto& [name, input] : rings)
             {
                 auto stats = input.ring->stats (consumePeak);
+                stats.getDynamicObject()->setProperty ("name", juce::String (name));
+                list.add (stats);
+            }
+            // The armed inputs a session hears (live-supercollider.md §12).
+            for (const auto& [name, open] : captures)
+            {
+                auto stats = open.input->stats (consumePeak);
                 stats.getDynamicObject()->setProperty ("name", juce::String (name));
                 list.add (stats);
             }
@@ -845,7 +911,9 @@ juce::var Player::status (bool consumePeak)
             rec->setProperty ("file", capture->file());
             rec->setProperty ("started_at_samples", capture->startedAt());
             // Counting in: the take exists and has not reached its position.
-            rec->setProperty ("pending", ! captureStarted.load());
+            // A loop's take is pending too while the pass before it is
+            // skipped, until the wrap that begins it.
+            rec->setProperty ("pending", ! captureStarted.load() || capture->startedAt() < 0);
             if (captureUntil.load() >= 0)
                 rec->setProperty ("until", captureUntil.load());
             if (captureLoop.load())
@@ -955,8 +1023,9 @@ void Player::rebuildLiveConverter()
         ch.reserve (1 << 16);
 }
 
-juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
+juce::int64 Player::pullAudio (const float* const* in, int numInputs, float* const* out, int numChannels, int n)
 {
+    blockSawRequest = false;
     {
         // The pointer is only readable under the lock (cursor's finding:
         // checking it first races a message-thread load). A missed lock
@@ -968,8 +1037,22 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
                 std::fill (out[c], out[c] + n, 0.0f);
             return -1;
         }
+        // What the latch may act on: a request this pull saw, so the
+        // position it returns is from after record's jump to `at`.
+        blockSawRequest = captureStartRequested.load();
         if (liveSession != nullptr)
         {
+            // The armed input, for the capture inputs a monitored session
+            // reads (live-supercollider.md §12), until the render is done.
+            // Converted delivery renders session-rate steps that are not
+            // this block's frames, so it hears nothing: the CLI refuses
+            // host monitoring there.
+            captureBlock->present (liveConverter == nullptr ? in : nullptr, numInputs, n);
+            struct Cleared
+            {
+                field::CaptureBlock& block;
+                ~Cleared() { block.clear(); }
+            } cleared { *captureBlock };
             // The song-timeline position this block starts at — wrapped
             // into whichever loop is in force, as status reports it —
             // which is where a take beginning here is placed.
@@ -1050,24 +1133,28 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
             // or a tick on: the first playing block is where both start.
             return -1;
         }
+        if (readerSource == nullptr)
+        {
+            for (int c = 0; c < numChannels; ++c)
+                std::fill (out[c], out[c] + n, 0.0f);
+            return -2; // no bed: the tap places against the free clock
+        }
+        // A file bed's position and pull under the same lock as a live
+        // one's, so record's jump falls wholly before or after them.
+        const juce::int64 position = transport.isPlaying() ? positionSamples() : -1;
+        juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
+        juce::AudioSourceChannelInfo info (&buffer, 0, n);
+        transport.getNextAudioBlock (info);
+        return position;
     }
-    if (readerSource == nullptr)
-    {
-        for (int c = 0; c < numChannels; ++c)
-            std::fill (out[c], out[c] + n, 0.0f);
-        return -2; // no bed: the tap places against the free clock
-    }
-    const juce::int64 position = transport.isPlaying() ? positionSamples() : -1;
-    juce::AudioBuffer<float> buffer (const_cast<float**> (out), numChannels, n);
-    juce::AudioSourceChannelInfo info (&buffer, 0, n);
-    transport.getNextAudioBlock (info);
-    return position;
 }
 
 void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
 {
     const double blockStartMs = juce::Time::getMillisecondCounterHiRes();
-    const juce::int64 position = pullAudio (out, numOutputs, n);
+    const juce::int64 position = pullAudio (in, numInputs, out, numOutputs, n);
+    if (latchStallMs > 0)
+        std::this_thread::sleep_for (std::chrono::milliseconds (latchStallMs));
     const juce::int64 freeBefore = freeClock.fetch_add (n);
     // The metronome rides the output after the pull, positioned by the
     // same block-start position the capture latches on; with no bed it
@@ -1124,19 +1211,21 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
 {
     const int live = liveCompanions.load();
     auto* target = activeCapture.load();
-    if (target == nullptr && captureLoop.load() && captureStartRequested.load())
-    {
-        // A pass began with no standby ready and was skipped; the next
-        // standby takes over at the next block, a block late.
-        target = standbyCapture.exchange (nullptr);
-        if (target != nullptr)
-            activeCapture = target;
-    }
-    if (target == nullptr)
+    // A loop pass that began with no standby ready has no take and is
+    // skipped whole (recording.md §15.4). Its blocks still run to the
+    // wrap below, because that is where a standby opened meanwhile takes
+    // over: at a pass's first sample, never in the middle of one.
+    const bool skipping = target == nullptr && captureLoop.load() && captureStarted.load();
+    if (target == nullptr && ! skipping)
         return;
     int from = 0; // the first frame of this block the take includes
-    if (captureStartRequested.load())
+    if (target != nullptr && captureStartRequested.load())
     {
+        // Armed after this block's pull: its position may be from before
+        // record's jump, so the next block, which saw the request, starts
+        // the take.
+        if (! blockSawRequest)
+            return;
         // A missed live lock made this block silence with no position to
         // latch; the take starts on the next block instead, so the latch
         // and the first pushed samples always describe the same instant.
@@ -1184,12 +1273,14 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
     // mid-block. Under a loop take the same frame begins the next pass
     // — the wrap in pullAudio put the rest of this block at the region's
     // start — so the standby transaction takes over inside this block
-    // and not one sample is lost between passes.
+    // and not one sample is lost between passes. A block that ends
+    // exactly on `until` ends the pass too, with nothing left over: the
+    // next block already begins at the region's start, so it cannot.
     const juce::int64 untilAt = captureUntil.load();
     const juce::int64 here = position == -2 ? freeBefore : position;
     int cut = n;
     bool ending = false;
-    if (untilAt >= 0 && position >= 0 && here + n > untilAt)
+    if (untilAt >= 0 && position >= 0 && here + n >= untilAt)
     {
         cut = (int) std::max<juce::int64> (from, untilAt - here);
         ending = true;
@@ -1197,7 +1288,7 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
     const float* source = input != nullptr ? input : ((int) silence.size() >= n ? silence.data() : nullptr);
     if (source == nullptr)
         return;
-    if (cut > from)
+    if (target != nullptr && cut > from)
     {
         target->push (source + from, cut - from);
         // Each audio companion takes the same span of its own input.
@@ -1213,17 +1304,11 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
     }
     if (! ending)
         return;
-    if (captureDone.load())
-    {
-        // The heartbeat has not serviced the last pass yet (a region
-        // shorter than its tick): this pass is lost, the count says so.
-        activeCapture = nullptr;
-        captureStarted = false;
-        captureMissed.fetch_add (1);
-        return;
-    }
     if (captureLoop.load())
     {
+        // Whether or not the heartbeat has finalized the last take, the
+        // standby it opened takes over here, and with none ready the pass
+        // that begins here is skipped and counted.
         auto* next = standbyCapture.exchange (nullptr);
         activeCapture = next;
         if (next != nullptr)
@@ -1233,11 +1318,7 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
                 next->push (source + cut, n - cut);
         }
         else
-        {
-            captureStarted = false;
-            captureStartRequested = true;
             captureMissed.fetch_add (1);
-        }
     }
     else
     {
@@ -1246,10 +1327,11 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
         for (int c = 0; c < live; ++c)
             companions[(size_t) c].audio = nullptr;
     }
-    // MIDI companions end a block later, as a MIDI take ends
-    // (recordMidiCompanions); the pass is done when they are.
-    if (! companionMidiRunning.load())
-        captureDone = true;
+    // A skipped pass ended no take. MIDI companions end a block later,
+    // as a MIDI take ends (recordMidiCompanions); the pass is done when
+    // they are.
+    if (target != nullptr && ! companionMidiRunning.load())
+        capturesEnded.fetch_add (1);
 }
 
 template <typename Handle>
@@ -1289,6 +1371,11 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
     };
     if (captureStartRequested.load())
     {
+        if (! blockSawRequest)
+        {
+            drainMidiArrivals (discard);
+            return;
+        }
         int from = 0;
         const juce::int64 startAt = captureStartAt.load();
         if (startAt >= 0)
@@ -1342,7 +1429,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
     for (int c = 0; c < live; ++c)
         companions[(size_t) c].midiTake = nullptr;
     captureStarted = false;
-    captureDone = true;
+    capturesEnded.fetch_add (1);
 }
 
 juce::int64 Player::midiUntilFrames (const field::Transaction& take) const
@@ -1431,7 +1518,7 @@ void Player::recordMidiCompanions (int n, double blockStartMs)
     companionMidiRunning = false;
     // The pass is done once the audio has ended too.
     if (activeCapture.load() == nullptr)
-        captureDone = true;
+        capturesEnded.fetch_add (1);
 }
 
 void Player::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
@@ -1510,7 +1597,7 @@ juce::var Player::armMidi (const juce::String& track)
     return armSet ({ juce::var (entry.get()) }, {});
 }
 
-juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device)
+juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner)
 {
     auto result = obj();
     auto fail = [&] (const juce::String& error)
@@ -1530,9 +1617,10 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         juce::String track;
         bool midi = false;
         int input = 0;
+        juce::String monitor; // the capture input's name, when monitored
     };
     std::vector<Entry> audio, midi;
-    juce::StringArray named;
+    juce::StringArray named, monitored;
     juce::Array<int> inputs;
     for (const auto& item : tracks)
     {
@@ -1544,6 +1632,18 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         if (named.contains (entry.track))
             return fail (entry.track + " is armed twice");
         named.add (entry.track);
+        entry.monitor = item.getProperty ("monitor", juce::var()).toString();
+        if (entry.monitor.isNotEmpty())
+        {
+            if (kind == "midi")
+                return fail (entry.track + " records MIDI, which has no input to monitor");
+            if (monitored.contains (entry.monitor))
+                return fail ("two tracks are monitored as \"" + entry.monitor + "\"");
+            monitored.add (entry.monitor);
+            std::lock_guard<std::mutex> hold (inputsLock);
+            if (rings.count (entry.monitor.toStdString()) > 0)
+                return fail ("input \"" + entry.monitor + "\" is already open");
+        }
         if (kind == "midi")
         {
             entry.midi = true;
@@ -1653,6 +1753,17 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         companion.channel = entry.midi ? 0 : channelIndex (entry.input);
     }
     liveCompanions = companionCount;
+    // The monitored inputs, replacing the arm before it's: each reads its
+    // channel of the block the callback presents.
+    closeCaptures();
+    {
+        std::lock_guard<std::mutex> hold (inputsLock);
+        for (const auto& entry : audio)
+            if (entry.monitor.isNotEmpty())
+                captures[entry.monitor.toStdString()] = {
+                    std::make_shared<field::CaptureInput> (captureBlock, channelIndex (entry.input)), owner
+                };
+    }
     inputPeak = 0.0f;
     freeClock = 0;
     // The kind before the flag, so the null clock never presents an input
@@ -1668,6 +1779,8 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         item->setProperty ("kind", entry.midi ? "midi" : "audio");
         if (! entry.midi)
             item->setProperty ("input", entry.input);
+        if (entry.monitor.isNotEmpty())
+            item->setProperty ("monitor", entry.monitor);
         armedList.add (juce::var (item.get()));
     }
     result->setProperty ("armed", armedList);
@@ -1793,6 +1906,7 @@ juce::String Player::disarm()
     armedMidi = false;
     liveCompanions = 0;
     companionCount = 0;
+    closeCaptures();
     closeMidiInputs();
     if (! armedInputs.isEmpty())
     {
@@ -1904,9 +2018,43 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
             return fail ("nothing loaded to record against; omit `at` for a free-running take");
         if (! at.isInt() && ! at.isInt64() && ! at.isDouble())
             return fail ("record needs a sample number for at");
-        if (auto error = locate (preRoll ? (juce::int64) start : (juce::int64) at); error.isNotEmpty())
-            return fail (error);
     }
+    // What a refused jump or play, or a failed open, leaves behind: no
+    // take, no standby, nothing the callback could reach, and nothing on
+    // disk, because a transaction left unfinalized stays there for
+    // `recordings` to offer back as a take that never was.
+    auto abandon = [&]
+    {
+        activeCapture = nullptr;
+        activeMidiCapture = nullptr;
+        standbyCapture = nullptr;
+        captureStartRequested = false;
+        captureLoop = false; // or every later stop would end a loop that never ran
+        // The region was the refused take's, as stop clears it.
+        if (loop && liveSession != nullptr)
+        {
+            const juce::ScopedLock guard (liveLock);
+            liveSession->setLoopRegion (0, 0);
+            liveLoop = liveSession->looping();
+        }
+        for (int c = 0; c < companionCount; ++c)
+        {
+            companions[(size_t) c].audio = nullptr;
+            companions[(size_t) c].midiTake = nullptr;
+        }
+        if (capture != nullptr)
+            capture->discard();
+        if (standby != nullptr)
+            standby->discard();
+        capture.reset();
+        standby.reset();
+        for (int c = 0; c < companionCount; ++c)
+            if (auto& take = companions[(size_t) c].take; take != nullptr)
+            {
+                take->discard();
+                take.reset();
+            }
+    };
     field::Capture* audioTake = nullptr;
     field::MidiCapture* midiTake = nullptr;
     try
@@ -1949,49 +2097,48 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
     }
     catch (const std::exception& e)
     {
-        capture.reset();
-        standby.reset();
-        for (int c = 0; c < companionCount; ++c)
-        {
-            companions[(size_t) c].audio = nullptr;
-            companions[(size_t) c].midiTake = nullptr;
-            companions[(size_t) c].take.reset();
-        }
+        abandon();
         return fail (e.what());
     }
+    if (openStallMs > 0)
+        std::this_thread::sleep_for (std::chrono::milliseconds (openStallMs));
 
-    captureStarted = false;
-    captureDone = false;
-    captureMissed = 0;
-    loopTakes = 0;
-    // An `at` is where the take begins, exactly: the callback latches on
-    // that sample whether the transport pre-rolls to it, starts on it
-    // (the request is armed before play, so the first rolling block is
-    // the one), or is already rolling toward it. Without one, the next
-    // block, wherever it falls.
-    captureStartAt = at.isVoid() ? -1 : (juce::int64) at;
-    captureUntil = punchOut ? (juce::int64) until : -1;
-    captureLoop = loop;
-    companionMidiRunning = false;
-    standbyCapture = standby.get();
-    activeCapture = audioTake;
-    activeMidiCapture = midiTake;
-    captureStartRequested = true;
+    {
+        // The jump to `at` and the latch that waits for it, in one hold of
+        // the lock the callback only tries, so no block runs between them.
+        // On a bed already rolling, a block between them would carry the
+        // transport past `at`, and the take would start late. The
+        // transactions open before, because opening them can take longer
+        // than a block.
+        const juce::ScopedLock guard (liveLock);
+        if (! at.isVoid())
+            if (auto error = seek (preRoll ? (juce::int64) start : (juce::int64) at); error.isNotEmpty())
+            {
+                abandon();
+                return fail (error);
+            }
+        captureStarted = false;
+        capturesEnded = 0;
+        captureMissed = 0;
+        loopTakes = 0;
+        // An `at` is where the take begins, exactly: the callback latches
+        // on that sample whether the transport pre-rolls to it, starts on
+        // it (the request is armed before play, so the first rolling block
+        // is the one), or is already rolling toward it. Without one, the
+        // next block, wherever it falls.
+        captureStartAt = at.isVoid() ? -1 : (juce::int64) at;
+        captureUntil = punchOut ? (juce::int64) until : -1;
+        captureLoop = loop;
+        companionMidiRunning = false;
+        standbyCapture = standby.get();
+        activeCapture = audioTake;
+        activeMidiCapture = midiTake;
+        captureStartRequested = true;
+    }
     if (bed && transportState() != "playing")
         if (auto error = play(); error.isNotEmpty())
         {
-            activeCapture = nullptr;
-            activeMidiCapture = nullptr;
-            standbyCapture = nullptr;
-            captureStartRequested = false;
-            capture.reset();
-            standby.reset();
-            for (int c = 0; c < companionCount; ++c)
-            {
-                companions[(size_t) c].audio = nullptr;
-                companions[(size_t) c].midiTake = nullptr;
-                companions[(size_t) c].take.reset();
-            }
+            abandon();
             return fail (error);
         }
     // Wait for the callback to latch the start — a block or two, unless
@@ -2027,7 +2174,10 @@ juce::Array<juce::var> Player::stopRecording()
     // A pass the callback already ended is finalized on its own terms
     // first, so its manifests reach onTake before the stop's.
     serviceCapture();
-    if (capture == nullptr)
+    // A loop is stopped even with no take open, as when opening its next
+    // one failed: the callback would otherwise go on skipping passes.
+    const bool wasLoop = captureLoop.load();
+    if (capture == nullptr && ! wasLoop)
         return {};
     // A MIDI message is drained in the block after it arrives, so that
     // block must finish before the detach for every message that arrived
@@ -2049,7 +2199,6 @@ juce::Array<juce::var> Player::stopRecording()
     // counter advances only after a block's push is done. Two epochs
     // covers that block and one more; the timeout covers a device that
     // is not running at all, where nothing can be pushing.
-    const bool wasLoop = captureLoop.load();
     activeCapture = nullptr;
     activeMidiCapture = nullptr;
     standbyCapture = nullptr;
@@ -2065,30 +2214,58 @@ juce::Array<juce::var> Player::stopRecording()
     const auto epoch = callbackEpoch.load();
     for (int i = 0; i < 300 && callbackEpoch.load() < epoch + 2; ++i)
         std::this_thread::sleep_for (std::chrono::milliseconds (1));
+    // Under a loop, the block in flight at those stores can have taken
+    // the standby over just before them and stored activeCapture just
+    // after. No later block takes one over, so a second detach and wait
+    // leave nothing pushing.
+    if (wasLoop && activeCapture.exchange (nullptr) != nullptr)
+    {
+        const auto again = callbackEpoch.load();
+        for (int i = 0; i < 300 && callbackEpoch.load() < again + 2; ++i)
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
+    }
     captureStarted = false;
-    captureDone = false;
+    capturesEnded = 0;
     companionMidiRunning = false;
 
     juce::Array<juce::var> manifests;
-    manifests.add (finalizeTake (*capture));
-    capture.reset();
+    if (capture != nullptr)
+    {
+        // A take that never took a sample is not one when it is a loop's
+        // next pass, still waiting for its wrap, as an unused standby is
+        // not. The loop's first take, which is `capture` until it is
+        // finalized and so while loopTakes is 0, is a take however soon
+        // the stop came, as any other take a stop ends is.
+        if (wasLoop && loopTakes > 0 && capture->startedAt() < 0)
+            capture->discard();
+        else
+            manifests.add (finalizeTake (*capture));
+        capture.reset();
+    }
     for (int c = 0; c < companionCount; ++c)
         if (auto& take = companions[(size_t) c].take; take != nullptr)
         {
             manifests.add (finalizeTake (*take));
             take.reset();
         }
-    // A standby that never took a sample is not a take.
+    // A standby is a take only when a wrap just before the stop began
+    // its pass; one the callback never reached is not.
     if (standby != nullptr)
     {
-        standby->discard();
+        if (standby->startedAt() >= 0)
+            manifests.add (finalizeTake (*standby));
+        else
+            standby->discard();
         standby.reset();
     }
     if (wasLoop && liveSession != nullptr)
     {
-        // The region was the take's; the session stops looping it.
+        // The region was the take's; the session stops looping it. A swap
+        // during the take installed the session looping, so the copy
+        // converted delivery reads follows it back.
         const juce::ScopedLock guard (liveLock);
         liveSession->setLoopRegion (0, 0);
+        liveLoop = liveSession->looping();
     }
     loopTakes = 0;
     announceTakes (manifests);
@@ -2121,24 +2298,55 @@ void Player::announceTakes (const juce::Array<juce::var>& manifests)
 
 void Player::serviceCapture()
 {
-    if (! captureDone.load())
-        return;
-    // The callback ended `capture` at its until and, under a loop, moved
-    // on to the standby; the message thread owns the pointers, so the
-    // hand-over of ownership happens here, after the fact.
-    finished = std::move (capture);
-    if (captureLoop.load())
+    // The callback ended `capture` at its until and, under a loop, may
+    // have ended the standby it took over at that wrap too; the message
+    // thread owns the pointers, so the hand-over of ownership happens
+    // here, after the fact. The count says how many ended, and they
+    // ended in the order they were opened, so each moves the next take
+    // up into `capture`: recording, ended, or under a loop, waiting for
+    // the wrap that begins it.
+    std::vector<std::unique_ptr<field::Transaction>> ended;
+    for (int count = capturesEnded.exchange (0); count > 0 && capture != nullptr; --count)
     {
-        if (standbyCapture.load() == nullptr && standby != nullptr)
+        ended.push_back (std::move (capture));
+        capture = std::move (standby);
+    }
+    const bool loop = captureLoop.load();
+    // Under a loop, the next pass's take opens before the last one
+    // finalizes, so a slow finalize does not cost a pass. One take waits
+    // in the slot at a time: an empty slot means the callback took the
+    // last one over, or none could be opened.
+    if (loop && standby == nullptr && standbyCapture.load() == nullptr)
+    {
+        try
         {
-            capture = std::move (standby); // the callback took it
-            ++loopTakes;
+            auto next = openCapture();
+            standbyCapture = next.get();
+            // With no take left, the callback is skipping a pass, and this
+            // one begins at its end.
+            if (capture == nullptr)
+                capture = std::move (next);
+            else
+                standby = std::move (next);
+        }
+        catch (const std::exception&)
+        {
+            // The passes go on being skipped and counted; the next
+            // heartbeat tries again.
         }
     }
-    captureDone = false;
+    if (ended.empty())
+        return;
+    if (serviceStallMs > 0)
+        std::this_thread::sleep_for (std::chrono::milliseconds (serviceStallMs));
     juce::Array<juce::var> manifests;
-    manifests.add (finalizeTake (*finished));
-    finished.reset();
+    for (const auto& take : ended)
+    {
+        manifests.add (finalizeTake (*take));
+        if (loop)
+            ++loopTakes;
+    }
+    ended.clear();
     // The companions ended with the pass (arming.md §2.2); a loop has none.
     for (int c = 0; c < companionCount; ++c)
         if (auto& take = companions[(size_t) c].take; take != nullptr)
@@ -2146,29 +2354,33 @@ void Player::serviceCapture()
             manifests.add (finalizeTake (*take));
             take.reset();
         }
-    if (captureLoop.load())
-    {
-        // The next standby, ready well before the next wrap.
-        if (standby == nullptr)
-        {
-            try
-            {
-                standby = openCapture();
-                standbyCapture = standby.get();
-            }
-            catch (const std::exception&)
-            {
-                standby.reset();
-            }
-        }
-    }
-    else
+    if (! loop)
     {
         captureStartAt = -1;
         captureUntil = -1;
         captureStarted = false;
     }
     announceTakes (manifests);
+}
+
+juce::String Player::carryTakeRegion (field::LiveSession& session) const
+{
+    // Outside a loop take, the incoming session starts with no region.
+    if (! captureLoop.load())
+    {
+        session.setLoopRegion (0, 0);
+        return {};
+    }
+    try
+    {
+        session.setLoopRegion (captureStartAt.load(), captureUntil.load());
+    }
+    catch (const std::exception& e)
+    {
+        return "a loop take is recording, and its region does not fit this session (stop first): "
+               + juce::String (e.what());
+    }
+    return {};
 }
 
 juce::String Player::setLoopRegion (juce::int64 from, juce::int64 to)

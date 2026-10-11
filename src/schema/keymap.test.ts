@@ -30,8 +30,8 @@ function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
 }
 
 describe('keymap schema', () => {
-  it('accepts musical-typing with its 18 notes and the defaults', () => {
-    const map = keymap(builtin('musical-typing'));
+  it('accepts musical with its 18 notes and the defaults', () => {
+    const map = keymap(builtin('musical'));
     expect(map.notes.get('KeyA')).toEqual([0]);
     expect(map.notes.get('Quote')).toEqual([17]);
     expect(notesPlayed(map).size).toBe(18);
@@ -39,6 +39,45 @@ describe('keymap schema', () => {
     expect(map.channel).toBe(1);
     expect(map.controls.get('Tab')).toEqual({ cc: 64, value: 127, mode: 'hold' });
     expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
+  });
+
+  it('binds the arrows to the knobs, the bend to Comma and Period, and the number row to typing in musical', () => {
+    const map = keymap(builtin('musical'));
+    expect(map.controls.get('ArrowLeft')).toEqual({ knob: -1 });
+    expect(map.controls.get('ArrowRight')).toEqual({ knob: 1 });
+    expect(map.controls.get('ArrowUp')).toEqual({ turn: 1 });
+    expect(map.controls.get('ArrowDown')).toEqual({ turn: -1 });
+    expect(map.controls.get('Comma')).toEqual({ bend: -1 });
+    expect(map.controls.get('Period')).toEqual({ bend: 1 });
+    for (let digit = 0; digit <= 9; digit++) expect(map.controls.get(`Digit${digit}`)).toEqual({ type: digit });
+    expect(map.controls.get('Minus')).toEqual({ type: '-' });
+    expect(map.glide).toBe(1);
+  });
+
+  it('accepts type with a digit or a minus sign, and glide defaults to 0', () => {
+    const map = keymap('name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: { type: 1 }, Minus: { type: "-" } }\n');
+    expect(map.controls.get('Digit1')).toEqual({ type: 1 });
+    expect(map.controls.get('Minus')).toEqual({ type: '-' });
+    expect(map.glide).toBe(0);
+    for (const bad of ['{ type: "." }', '{ type: 10 }', '{ type: "a" }', '{ type: "1" }', '{ type: -1 }']) {
+      expect(parse(`name: t\nnotes: { KeyA: 0 }\ncontrols: { Digit1: ${bad} }\n`).success, bad).toBe(false);
+    }
+    expect(parse('name: t\nglide: -1\nnotes: { KeyA: 0 }\n').success).toBe(false);
+  });
+
+  it('reserves Escape, which cancels a typed value', () => {
+    expect(messages('name: t\nnotes: { KeyA: 0 }\ncontrols: { Escape: panic }\n')).toEqual([
+      'Escape is reserved: it cancels a typed value, and Ctrl-C quits',
+    ]);
+  });
+
+  it('accepts knob and turn by any whole number but 0', () => {
+    const map = keymap('name: k\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { knob: -2 }, KeyN: { turn: 3 } }\n');
+    expect(map.controls.get('KeyB')).toEqual({ knob: -2 });
+    expect(map.controls.get('KeyN')).toEqual({ turn: 3 });
+    for (const bad of ['{ knob: 0 }', '{ turn: 0 }', '{ turn: 0.5 }', '{ knob: 1, turn: 1 }']) {
+      expect(parse(`name: k\nnotes: { KeyA: 0 }\ncontrols: { KeyB: ${bad} }\n`).success, bad).toBe(false);
+    }
   });
 
   it('accepts the tracker built-in with 32 notes', () => {

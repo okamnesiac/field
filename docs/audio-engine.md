@@ -10,7 +10,9 @@ crash-safe transaction and its recovery — described in
 [Capture as built](#capture-as-built) below. Takes land in the project
 and build in place
 ([projects/recording/readme.md](projects/recording/readme.md));
-comping and monitoring through the engine are later work. This
+monitoring through the engine is `field record --monitoring host`
+([Monitoring](#monitoring-host-vs-apollo-direct)), and comping is later
+work. This
 document records the decisions already settled so the phases that build
 it start from agreement, not from scratch. Language and framework
 decisions (C++/JUCE, and the alternatives rejected) also live in
@@ -59,6 +61,19 @@ During recording, three related but distinct paths run simultaneously:
 - **Apollo direct** — input monitored in the Apollo's DSP (Console) at
   near-zero latency while Field handles playback and capture.
 
+Host monitoring as built: `field record --monitoring host` arms each
+audio track with `monitor`, a name, and the daemon opens a *capture
+input* under it that reads that track's armed channel. The song is
+loaded again with an input window on the track naming it, so the input
+travels the same way a [live input](#live-inputs) does: through the
+track's inserts, each bus above it, and `main`, beside the rendered
+song, playing or stopped. The capture tap still takes the dry channel.
+Disarming closes the capture inputs, and `field record` loads the song
+again without them, while the daemon still plays it and no other take
+records. The bypass-and-report latency policy below is not built: what
+you hear is late by the input and output buffers and the limiters and
+hosted plugins on the path.
+
 **Decision — Console is configured manually in V1.** Console is the
 mixer in the Apollo's DSP and matters only on the input side (preamp
 gain, Unison, direct monitoring, cue mixes); for playback and mixing the
@@ -85,6 +100,12 @@ the timeline:
 ```json
 { "input": "keys-voice", "gain_db": 0 }
 ```
+
+An armed input is the other source: `field record --monitoring host`
+names each armed audio track's input `capture:<song>/<track>`
+([Monitoring](#monitoring-host-vs-apollo-direct)), and the daemon reads
+it straight from the block its callback is in, one channel on both
+sides.
 
 The song still renders as before. The input travels beside it: its
 track and each track above it run a second instance of their chain on
@@ -153,9 +174,9 @@ it.
 Recording is transactional: a `.field/recording/<transaction-id>/`
 directory holds a manifest, a journal, and audio written continuously in
 recoverable chunks. A normal stop finalizes the asset and writes a take
-manifest (timeline placement, device, latency, monitoring context,
-session metadata); after a crash, Field recovers any valid audio from
-the transaction.
+manifest (timeline placement, device, latency, session metadata),
+and the take's row records how it was monitored; after a crash, Field
+recovers any valid audio from the transaction.
 
 ## Capture as built
 
@@ -165,8 +186,9 @@ session never asks for the microphone. `arm` names a track, an input
 device, and a channel counted from 1; the daemon reopens the device
 with that one input channel active and reports the input and output
 latency the device declares, in samples. `record` starts a take: it
-locates the bed to `at` when you give one, starts the transport if it
-is stopped, and captures from the next callback block. The callback
+opens the take's transactions, locates the bed to `at` when you give
+one, with no block between the jump and the start, starts the transport
+if it is stopped, and captures from the next callback block. The callback
 latches that block's transport position as `started_at_samples`, so the
 first captured sample and the position it is placed at describe the
 same instant. `stop` and `pause` finalize the take and return its
@@ -258,11 +280,24 @@ same block: the pass that ends and the pass that begins meet on
 consecutive samples, which the suite proves on the null clock's
 sawtooth. Each take reaches every client as a `take` event as it
 finalizes, and `field record --loop` lands them as they arrive, the last
-one chosen, until ctrl-c — whose partial pass is a take too. A pass that
-begins before the previous one was serviced is counted in
-`record.missed` rather than recorded twice; regions shorter than a
-heartbeat tick are where that would happen, and `field record` says so
-on its live line and in its closing tally.
+one chosen, until ctrl-c — whose partial pass is a take too.
+
+The heartbeat finalizes each take the callback has ended since its
+last tick, however many there are. It opens the next pass's
+transaction before it finalizes, so a slow finalize costs no pass. A
+pass that begins with no transaction open is skipped whole and counted
+in `record.missed`. That happens when the region is shorter than a
+heartbeat tick, or when the message thread falls behind. The
+transaction opened late begins at the following wrap, and `status`
+reports it as `pending` until then, so every take is a whole pass that
+starts at `at`. `field record` reports the skipped passes on its live
+line and in its closing tally.
+
+A `session` swap during a loop take, such as the one `field play
+--watch` sends after an edit, carries the take's region onto the
+incoming session, as it carries the transport. The daemon refuses a
+session that the region does not fit, and the take goes on against the
+session already playing.
 
 The region loop is the live session's own (`loop {from, to}`, `to`
 defaulting to the content's extent): the clock wraps from `to` back to

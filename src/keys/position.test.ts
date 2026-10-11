@@ -50,6 +50,12 @@ describe('finding a key event position', () => {
     expect(positionOf({ kind: 'key', key: 'ArrowUp', mods: 0, type: 'press' })).toBe('ArrowUp');
   });
 
+  it('names Enter, Backspace, and Escape, which the protocol reports as CSI 13 u, CSI 127 u, and CSI 27 u', () => {
+    expect(positionOf(press(13), charactersToPositions(DVORAK))).toBe('Enter');
+    expect(positionOf(press(127))).toBe('Backspace');
+    expect(positionOf(press(27))).toBe('Escape');
+  });
+
   it('applies a new layout report to the next event', () => {
     let positions = charactersToPositions(DVORAK);
     expect(positionOf(press(code('a')), positions)).toBe('KeyA');

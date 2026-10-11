@@ -1,6 +1,6 @@
 ---
-status: ready
-priority: next
+status: in-progress
+priority: now
 ---
 
 # Instrument knobs
@@ -298,6 +298,8 @@ in its own way, as it would answer a hardware controller's knobs:
   constant. `parseYAMLFile` returns every number as a string, so the
   helper converts each field, and it reads every field, so `juno`'s and
   `bass`'s files spell each one out rather than lean on the defaults.
+  *Amended (2026-10-11, chunk 1):* the copy spells every field out
+  instead, defaults filled, so a knob file may lean on them (§9.1).
   The lag smooths the steps between controller values.
   A knob must be a value the graph uses as a signal; a setting that
   decides the graph's shape, such as `juno`'s `chorusOn`, stays a
@@ -334,11 +336,13 @@ the instrument's line.
   knob in seconds, in thousandths with `m` below 1 (`800 ms`). A `lin`
   knob prints the decimal places that give the end of its range
   farthest from zero three significant digits, so `res`, whose range
-  ends at 0.95, prints `0.000` to `0.950`. `mod`, and a knob whose step
-  is whole, print whole numbers. Units follow after a space. Each value
-  is padded on the left to the widest that its default or any of its
-  128 controller values prints. The places are fixed per knob, as the
-  bend's are per keymap.
+  ends at 0.95, prints `0.000` to `0.950`. *Amended (2026-10-11, chunk
+  1):* a `lin` knob with a fractional `step` prints at least the step's
+  places, so a `step` of 2.5 on 0 to 100 prints `2.5` rather than `3`.
+  `mod`, and a knob whose step is whole, print whole numbers. Units
+  follow after a space. Each value is padded on the left to the widest
+  that its default or any of its 128 controller values prints. The
+  places are fixed per knob, as the bend's are per keymap.
 - **A glide shows as it moves.** The value runs to its target at its
   fixed width.
 - **An entry takes the value's place.** While you type (§2.7), the
@@ -887,3 +891,135 @@ Each question is deferred out of this plan, so none blocks a chunk.
   controller defaults: 71 resonance, 72 release time, 73 attack time,
   74 brightness, which synths use for cutoff, and 75 to 78 decay and
   vibrato.
+
+## 9 Chunk 1 as built (2026-10-11)
+
+`field keys` reads knob files and `--knobs`, shows the knob line,
+chooses with the left and right arrows, and turns with up and down,
+faster while held. `musical` is the default keymap. The voicer hands
+every controller from 2 to 119 but the sustain pedal to the voices as
+`cc<n>`, and `juno` and `bass` map four knobs each through the checked
+copy of their knob files, live and in a take's render. Typing a value
+and the glide wait for chunk 2, and the starting positions for chunk 3.
+
+### 9.1 What implementation settled
+
+- **The copy a voice reads is the parsed file, every field spelled
+  out.** `knobsCopy` in `src/keys/knobs.ts` writes the schema's output,
+  with `min`, `max`, `curve`, `step`, and `default` filled. A voice
+  never has to know the schema's defaults, so `juno.knobs.yaml` and
+  `bass.knobs.yaml` leave `step` out, as §2.2's example does, and the
+  helper in `juno.scd` passes `step` to its `ControlSpec`, so a stepped
+  knob sounds as the line shows it.
+- **A voice without its copy fails with the reason.** `juno.scd` and
+  `bass.scd` throw `juno maps its knobs from juno.knobs.yaml, whose
+  checked copy Field names in FIELD_KNOBS` when `FIELD_KNOBS` is unset,
+  which the voice host reports as the program's error.
+- **A voice keeps a setting's fixed value for a knob its file leaves
+  out.** The schema accepts any set of knobs, and criterion 11 deletes
+  two of `juno`'s, so the helper in `juno.scd` and `bass.scd` takes the
+  fixed value as its second argument, as `knob.("attack", k[\atk])`,
+  and returns it when the copy has no knob of that name.
+- **`FIELD_INSTRUMENTS` lists objects.** Each is `{ "program": …,
+  "knobs": … }`, with `knobs` absent for a program without a knob file,
+  and `voice-load.scd` takes the copy's path beside the program's and
+  sets or unsets `FIELD_KNOBS` before it runs the program.
+- **The voicer hands `start` the controls as a list.** Its `start`
+  callback takes `[\mod, 0.5, \cc74, 1.0]` in place of `mod`, which the
+  host and the render append to each new synth's arguments, so the
+  voicer alone decides which controllers reach a voice.
+- **Knob names carry their source when knobs come from more than one
+  knob file.** An armed instrument without a knob file adds no knobs,
+  so `field keys juno pad` shows `cutoff`, not `juno.cutoff`.
+- **A knob file save goes through `KnobFiles` in
+  `src/commands/keys.ts`,** which owns the sources, the copies, and
+  each file's last error, so the rule that a failing save reaches no
+  voice is tested without a terminal. The copies' directory goes in
+  the `finally` that closes the routing, so a throw while the host
+  starts removes it too.
+- **The lines above the status line redraw together.** `redrawAbove`
+  rewrites from the first line that changed and clears below when a
+  keymap reload removes the knob line.
+- **`setsMod()` stays a keymap query.** The session's `mod` reads the
+  controller map, as §2.9 and §3 say, but `setsMod()` asks whether a
+  key can move the wheel, which the controllers sent so far cannot
+  answer, so it still reads the keymap's controls.
+- **The turn timer runs only while a turn key is held**, so a session
+  with no turn held keeps no 40 ms interval.
+- **`musical` leaves the number row free in chunk 1.** Its typing keys
+  arrive with chunk 2's `type` action.
+- **`field keys --keymap musical-typing` fails as any unknown name
+  does.** `docs/keys.md` gives Logic's number row as controls to copy.
+
+### 9.2 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| The vitest tests §4 lists for chunk 1 | Pass: `src/schema/knobs.test.ts` 7, `src/keys/knobs.test.ts` 13, the keymap schema 2 new, `src/keys/session.test.ts` 8 new, `src/commands/keys.test.ts` 8 new, `src/keys/voice-host.test.ts` 1 new, `src/keys/print.test.ts` with `musical`'s stored copy, `src/model/project.test.ts` 1 new. |
+| The full suite, against a `field-audiod` and FieldOut built from this branch | 90 files: 1167 tests pass, and 1 skips. |
+| `src/keys/routing-voice.test.ts` | The real voice host, given `FIELD_INSTRUMENTS` as objects, carries a note through FieldOut into the track's input in the daemon. |
+| `src/keys/voicer.test.ts` through `sclang` 3.14.1 | CC 74 at 127 sets `cc74` to 1.0 on the sounding voice and starts a new voice with it; CC 64, CC 0, and CC 120 never become controls; CC 1 still arrives as `mod`. |
+| `src/generators/voice-render.test.ts` through `sclang` | A take with CC 74 renders a voice whose level is its knob, silent without it; halving the knob's `max` in the knob file renders the take again at half the level. The knob file is a cache input, and one that fails the schema fails the build before the render runs. Bloom's `juno` and `bass` render a take from a knob file with `cutoff` alone. |
+| Criterion 10 | `field keys --keymap musical-typing` exits 1: `no built-in keymap named "musical-typing" (built-ins: fourths, musical, tracker)`. |
+| Criterion 19 | `field sc render` of `juno.scd` and `bass.scd` with `--seed 1 --duration 4`, before and after: `cmp` finds both pairs identical. |
+| Criterion 22 | With a `record:` entry for `juno` on `creek`'s `keys` and `min: 0` on `cutoff`, `field check` exits 1 naming `shared/instruments/juno.knobs.yaml: knobs.0.min: cutoff: an exp curve needs min and max of one sign and neither 0, not 0 and 15000`, and `field build creek` fails with the same line. |
+| The voice host through `sclang`, with an output device that does not exist | `juno` from its copy and `pad` without one both load, and the host stops only at the device; `juno` without a copy stops with the error above. |
+| `field keys --knobs` in a pseudo-terminal, with the real helper | The knob line read `mod   0  cutoff 2.00 kHz`, put `cutoff` in reverse video after `ArrowRight`, and read `cutoff 4.27 kHz` after `ArrowUp` held for a second and one `ArrowDown`, at one width throughout. The status line had no `mod` field. |
+
+### 9.3 What is still owed
+
+- **The criteria that need a kitty terminal and sound**, by hand: 1 to
+  3, 9, 11, 13, 15 to 17, and 12 and 18 up to their typed values. The
+  pseudo-terminal run drove the knob line with the protocol's bytes,
+  not Ghostty's or iTerm2's, and heard nothing.
+- **The MIDI a held turn sends, through CoreMIDI.** The monitor in the
+  pseudo-terminal run attached to the `Field Keys` of a `field keys`
+  session already running on the machine, so it saw none of the run's
+  control changes. `src/keys/session.test.ts` pins what a turn sends
+  and when.
+
+## 10 Chunk 2 as built (2026-10-11)
+
+The number row types a knob's value in `musical`, `Enter` completes it,
+and the knob glides there at the keymap's `glide`. `Period` types the
+decimal point while an entry is open and bends otherwise, `Backspace`
+edits, and `Esc` cancels an entry or, with none open, puts `Ctrl-C
+quits` on the status line; `Ctrl-C` alone quits. The starting positions
+wait for chunk 3.
+
+### 10.1 What implementation settled
+
+- **The session handles `Enter`, `Backspace`, and `Escape` as
+  positions.** `positionOf` names them, from `CSI 13 u`, `CSI 127 u`,
+  and `CSI 27 u`, and `KeysSession.press` acts on them before the
+  keymap, so no keymap binds them and `src/commands/keys.ts` needs no
+  case of its own for `Esc`.
+- **A glide is kept per controller,** since two knobs on one controller
+  share its value, and moves by the time since it started, so a late
+  tick catches up rather than slowing the glide. Each tick sends at most
+  one control change per gliding controller.
+- **The 40 ms timer runs while a turn key is held or a glide moves,**
+  as `tickWhileMoving` in `src/commands/keys.ts`, so a session with
+  neither keeps no interval. §9.1's turn timer becomes this one.
+- **A completed value that lands where the knob already is sends one
+  control change** rather than nothing, so a receiver still at its own
+  default takes the value the line shows.
+- **A `type`-only keymap shows the knob line,** as one with `knob` or
+  `turn` does: typing a value means nothing without the line.
+- **Focus-out leaves glides running.** §2.6 stops a held turn on
+  focus-out, and §2.7 names only a panic, a keymap reload, and quitting
+  as what stops a glide.
+
+### 10.2 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| The vitest tests §4 lists for chunk 2 | Pass, in `src/schema/keymap.test.ts`, `src/keys/terminal.test.ts`, `src/keys/position.test.ts`, `src/keys/knobs.test.ts`, `src/keys/session.test.ts`, `src/commands/keys.test.ts`, and `src/keys/print.test.ts` with `musical`'s stored copy. A value from 127 to 62 glides in 13 ticks and lands on 62. |
+| The full suite, against a `field-audiod` and FieldOut built from this branch | 90 files: 1187 tests pass, and 1 skips. |
+| `field keys --knobs` in a pseudo-terminal, against a stub helper that logs what it is sent | Criterion 4: `800` read `cutoff  800_ Hz` and glided CC 74 from 82 down to 62, five values a tick, to `810 Hz`. Criterion 6: `12`, `Backspace`, `5` read `15_ Hz`; the first `Esc` closed it at `810 Hz`, the second put `Ctrl-C quits` on the status line, and `Ctrl-C` quit with All Notes Off. Criterion 7: `300` and `ArrowRight` glided to `301 Hz` and moved the choice. Criterion 23: `0`, `.`, `8` read `0.8_ s` and landed `attack` on `782 ms`, and `.` with the entry closed sent a bend up and its release. At most 5 control changes went out in any second. |
+
+### 10.3 What is still owed
+
+- **Criteria 4 to 8, 12, 14, 18, and 23 by hand,** in Ghostty or
+  iTerm2 and by ear. The pseudo-terminal run sent the protocol's bytes
+  and heard nothing.

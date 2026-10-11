@@ -1,5 +1,5 @@
 import { AudiodClient } from '../audiod/client.js';
-import { compileSession, type SessionInput } from '../graph/live.js';
+import { reloadIfPlaying, reloadWithInputs } from '../audiod/live-inputs.js';
 import { BUILD_DAEMON } from '../remedies.js';
 import type { ArmedInstrument } from './targets.js';
 import { fieldOutPluginDir } from './voice-host.js';
@@ -35,21 +35,6 @@ export interface Unrouted {
   reason: string;
 }
 
-const KEYS_INPUT = /^keys:([^/]+)\/(.+)$/;
-
-// The open `field keys` inputs for `song`, as `compileSession` takes them:
-// every command that loads that song's session compiles them in, so a
-// reload from `field play`, its watch, `field ui`, or `field record` keeps
-// a routed voice heard.
-export async function keysInputsFor(client: AudiodClient, song: string): Promise<SessionInput[]> {
-  if (!client.supports('live-input')) return [];
-  const { inputs } = await client.status();
-  return (inputs ?? []).flatMap(({ name }) => {
-    const match = KEYS_INPUT.exec(name);
-    return match !== null && match[1] === song ? [{ track: match[2]!, input: name }] : [];
-  });
-}
-
 export async function routeArmed(
   armed: ArmedInstrument[],
   root: string,
@@ -82,26 +67,13 @@ export async function routeArmed(
   const closeOpened = async (): Promise<void> => {
     for (const name of opened.splice(0)) await client.closeInput(name).catch(() => {});
   };
-  // The song with whatever inputs are open now, others' included, and
-  // whatever the session loaded now was compiled and set with: its loop,
-  // its region, and its solo. A field keys load changes only the inputs.
-  const reload = async (): Promise<void> => {
-    const status = await client.status();
-    const same = status.live === true && status.song === song;
-    const { session } = await compileSession(root, song, {
-      ...(same && status.looping === true ? { loop: true } : {}),
-      ...(same && status.solo !== undefined ? { solo: status.solo } : {}),
-      inputs: await keysInputsFor(client, song),
-    });
-    await client.session(session);
-    if (same && status.loop_from !== undefined && status.loop_to !== undefined) {
-      await client.loop(status.loop_from, status.loop_to);
-    }
-  };
+  // The song with whatever inputs are open now, others' included; a
+  // field keys load changes only the inputs.
+  const reload = (): Promise<void> => reloadWithInputs(client, root, song);
   const unrouted = async (reason: string): Promise<Unrouted> => {
     if (opened.length > 0) {
       await closeOpened();
-      await reload().catch(() => {});
+      await reloadIfPlaying(client, root, song).catch(() => {});
     }
     client.close();
     return { reason };
@@ -158,10 +130,10 @@ export async function routeArmed(
       close: async () => {
         try {
           await closeOpened();
-          // The song as it is now: without these inputs, with any others.
-          // A song that no longer compiles keeps the session it has, and
-          // so does one under a take, whose closed input reads silence.
-          if ((await client.status()).record?.state !== 'recording') await reload();
+          // The song as it is now: without these inputs, with any others,
+          // while the daemon still plays it and no take records. A song
+          // that no longer compiles keeps the session it has.
+          await reloadIfPlaying(client, root, song);
         } catch {
           // the daemon or the project went away; nothing is left to restore
         } finally {

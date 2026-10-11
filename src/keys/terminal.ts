@@ -100,19 +100,20 @@ export function decodeTerminal(input: string): { events: TerminalEvent[]; rest: 
   return { events, rest: '' };
 }
 
-const QUIT_KEYS = { escape: 27, c: 99 };
+// The key that types `c`.
+const C_KEY = 99;
 
-// Escape always quits, and so does Ctrl-C, so no keymap can trap you
-// (keyboard-instrument.md §2.4). Ctrl-C is the key that types `c`; on a
-// layout with no `c`, such as Russian or Greek, it is the key at the US
-// `c` position, which the base layout key names. A layout that does type
-// ASCII there, such as Dvorak's `j`, keeps its own Ctrl-C.
+// Ctrl-C always quits, so no keymap can trap you: no keymap binds a Ctrl
+// chord (keyboard-instrument.md §2.4). Escape cancels a typed value
+// instead (instrument-knobs.md §2.7). Ctrl-C is the key that types `c`;
+// on a layout with no `c`, such as Russian or Greek, it is the key at the
+// US `c` position, which the base layout key names. A layout that does
+// type ASCII there, such as Dvorak's `j`, keeps its own Ctrl-C.
 export function isQuit(event: TerminalEvent): boolean {
   if (event.kind === 'interrupt') return true;
   if (event.kind !== 'key' || event.type !== 'press') return false;
-  if (event.key === QUIT_KEYS.escape) return true;
   if ((event.mods & MOD_CTRL) === 0 || typeof event.key !== 'number') return false;
-  return event.key === QUIT_KEYS.c || (event.key > 127 && event.base === QUIT_KEYS.c);
+  return event.key === C_KEY || (event.key > 127 && event.base === C_KEY);
 }
 
 export interface Tty {

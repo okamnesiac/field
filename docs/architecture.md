@@ -120,10 +120,12 @@ one input channel into a crash-safe transaction under
 behind ([audio-engine.md](audio-engine.md) "Capture as built"); a
 stopped take lands in the project and builds in place, the metronome
 and count-in run in the engine, and punch-out and loop takes ride the
-live session's region loop. The rest — comping, monitoring through the
-engine, editor windows, routing, metering beyond the armed input's
-peak — is future work whose settled decisions live in
-[audio-engine.md](audio-engine.md).
+live session's region loop. Monitoring through the engine followed
+with [live-supercollider.md](projects/live-supercollider/readme.md)
+§12: `field record --monitoring host` plays the armed input through its
+track's effects. The rest — comping, editor windows, routing, metering
+beyond the armed input's peak — is future work whose settled decisions
+live in [audio-engine.md](audio-engine.md).
 
 MIDI is hardware-facing too, so it lives here as well
 ([keys.md](keys.md)). `field keys` reads the keyboard in TypeScript and

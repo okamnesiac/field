@@ -14,18 +14,30 @@ the GitHub release with notes generated from the merged pull requests.
 1. On GitHub, open **Actions > Release > Run workflow**, and choose which
    part of the version to raise: `patch`, `minor`, or `major`.
 2. The workflow opens a pull request titled `Release X.Y.Z` that changes
-   only the version in `package.json`. Review and merge it like any other
-   pull request.
+   only the version in `package.json`, and starts CI on it. Review and
+   merge it like any other pull request.
 3. Merging is the decision to ship. The workflow's publish job sees the
    new version on `main`, tags it, moves `v0`, and creates the GitHub
    release.
 
-The workflow can open the pull request only when the repository allows
-GitHub Actions to create pull requests, under **Settings > Actions >
-General > Workflow permissions**. Without that setting, the job pushes
-the `release/vX.Y.Z` branch, fails, and prints the link that opens the
-pull request by hand. Merging that pull request publishes the release
-just the same.
+For a pull request that a workflow's own token opened, GitHub creates
+CI's `pull_request` run but holds it until someone approves it, and the
+pull request offers **Approve workflows to run**. Leave that run
+unapproved. The workflow dispatches CI on the release branch instead,
+because a `workflow_dispatch` run needs no approval, and its checks land
+on the branch's commit, which is the pull request's head. That is why
+`.github/workflows/ci.yml` lists `workflow_dispatch` among its triggers.
+Approving the held run as well would run every CI job a second time on
+the same commit.
+
+The workflow can open the pull request only when GitHub Actions may
+create pull requests. That is **Allow GitHub Actions to create and
+approve pull requests**, under **Workflow permissions**, at three
+levels, each of which must allow it before the one below can: the
+enterprise (for Field, `amnesiac`, under **Policies > Actions**), the
+organization, and the repository (each under **Settings > Actions >
+General**). Without it, the job pushes the `release/vX.Y.Z` branch,
+fails, and prints the link that opens the pull request by hand.
 
 Only a merge that raises the version releases. A change to `package.json`
 that leaves the version alone releases nothing, even while that version
