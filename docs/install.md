@@ -133,7 +133,7 @@ worker-absent  field-voiced is not set up — field setup voiced sets it up
 | `cli-shadowed` | Another `field` comes before pnpm's on your PATH, so that one runs. |
 | `not-on-path` | pnpm's global bin directory is not on your PATH. Run `pnpm setup`. |
 | `cli-current`, `cli-stale`, `cli-unbuilt` | Whether `dist/` was built from the checkout as it stands: the same commit, and the same number of uncommitted changes. `field --version` makes the same comparison. |
-| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod` is newer than it, which is the test the build itself uses to decide what to compile. |
+| `audiod-current`, `audiod-stale`, `audiod-missing` | Whether `field-audiod` is built, and whether any tracked file under `native/audiod` is newer than it. The installer touches `field-audiod` after each build, because CMake relinks it only when its own sources change, so `field upgrade audiod` clears `audiod-stale`. |
 | `audiod-override` | `FIELD_AUDIOD` is set, so `field` runs that binary instead of this build. |
 | `worker-current`, `worker-stale`, `worker-absent`, `worker-no-uv` | Each worker environment, from `field setup --check`. |
 

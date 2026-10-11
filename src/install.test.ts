@@ -47,7 +47,7 @@ function which(tool: string): string | undefined {
 }
 
 const BASH = which('bash')!;
-const TOOLS = ['bash', 'git', 'node', 'dirname', 'uname', 'sed', 'grep', 'cat', 'mkdir', 'ln', 'rm', 'chmod'];
+const TOOLS = ['bash', 'git', 'node', 'dirname', 'uname', 'sed', 'grep', 'cat', 'mkdir', 'ln', 'rm', 'chmod', 'touch'];
 
 let root: string;
 let upstream: string;
@@ -100,6 +100,9 @@ case "$1 \${2:-}" in
     cat "$FAKE_CLI" > "$dir/dist/cli.js" ;;
   "run build:native")
     [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
+    # A daemon already built is left alone, as CMake leaves field-audiod
+    # when the edit was to another target's source.
+    [ ! -e "$dir/${AUDIOD}" ] || exit 0
     mkdir -p "$dir/${dirname(AUDIOD)}"
     printf '#!/bin/sh\\n' > "$dir/${AUDIOD}"
     chmod +x "$dir/${AUDIOD}" ;;
@@ -389,6 +392,15 @@ posix('install.sh status', () => {
     expect(rows(install('status').stdout).get('audiod-stale')).toBe(
       'native/audiod/CMakeLists.txt changed since field-audiod was built — run field upgrade audiod',
     );
+  });
+
+  it('reports the daemon current after the rebuild it names, though CMake relinked nothing', () => {
+    install();
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(join(repo, AUDIOD), past, past);
+    expect(rows(install('status').stdout).has('audiod-stale')).toBe(true);
+    expect(install('audiod').status).toBe(0);
+    expect(rows(install('status').stdout).get('audiod-current')).toBe(`~/checkout/${AUDIOD}`);
   });
 
   it('says when field links another checkout', () => {

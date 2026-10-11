@@ -160,6 +160,10 @@ install_audiod() {
       echo "install.sh: on Linux, JUCE needs the ALSA, X11, and freetype development headers; .github/workflows/ci.yml installs the packages it needs on Ubuntu" >&2
     exit 1
   fi
+  # CMake relinks field-audiod only when its own inputs change, and this
+  # project builds other targets too. Dating the binary to this build lets
+  # audiod-stale clear once the build it asks for has run.
+  touch -c "$REPO/$AUDIOD_RELATIVE"
   row built "$(tilde "$REPO/$AUDIOD_RELATIVE")"
 }
 
@@ -294,8 +298,9 @@ console.log(`${info.commit ?? "-"} ${info.dirtyFiles ?? 0}`);' 2>/dev/null) || t
   row cli-current "built from ${head:0:7}"
 }
 
-# The first tracked daemon source newer than the binary. That is make's own
-# test, so a row saying stale means the build would compile something.
+# The first tracked daemon source newer than the binary. install_audiod
+# touches the binary after each build, so this names a source changed
+# since the installer last built the daemon.
 audiod_changed() {
   local file
   while IFS= read -r -d '' file; do

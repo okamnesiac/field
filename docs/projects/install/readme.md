@@ -145,7 +145,7 @@ there (§7.6).
 | --- | --- | --- |
 | Checkout | it matches its upstream after a fetch | `git rev-list --count HEAD..@{upstream}`, as Projector's installer does |
 | CLI | `dist/` was built from `HEAD` with the same number of uncommitted changes | `dist/build-info.json`, which `pnpm build` stamps and `field --version` already reads |
-| Daemon | no tracked file under `native/audiod` is newer than the binary | file mtimes, the test the build itself makes |
+| Daemon | no tracked file under `native/audiod` is newer than the binary | file mtimes, with the binary touched after each build (§8.1) |
 | Workers | each one set up passes `uv sync --check --locked` | `field setup --check` |
 
 `docs/install.md` lists every row.
@@ -270,9 +270,10 @@ a private one. The website and the README then lead with this command.
   nobody asked for.
 - **The daemon is compared by mtime, not by a stamp.** A commit stamped
   into the binary, as `dist/` has, would need the daemon to report it,
-  and would miss uncommitted edits. Mtimes are the build's own test, so
-  `audiod-stale` means a build would compile something, and nothing
-  else (§8.1).
+  and would miss uncommitted edits. Mtimes are the build's own test,
+  and the installer touches the binary after each build, so
+  `audiod-stale` means a source changed since the installer last built
+  the daemon, and the build it asks for clears it (§8.1).
 - **Releases ship built artifacts**, not a source archive (§3.1). The
   source archive is what Projector installs from, and for Field it would
   make every user install pnpm and a compiler and wait out a JUCE build.
@@ -375,6 +376,12 @@ gets an `install.ps1` of its own is open.
   daemon build recompile every file that includes the header, which the
   stale row was correctly reporting. `scripts/gen-plan-limits.ts` now
   writes only when the content changes, which fixes both.
+- **CMake relinks `field-audiod` only when its own inputs change.**
+  `native/audiod` also builds `field-dsp-check` and `field-fixture`, and
+  an edit to `CMakeLists.txt` may only reconfigure. Comparing the sources
+  with the binary alone would leave `audiod-stale` standing after the
+  rebuild it asks for, so `install_audiod` touches the binary after each
+  successful build.
 - **`pnpm install` builds only when it installs.** Verified against pnpm
   11.15.1: a repeat `pnpm install` prints "Already up to date" and skips
   `prepare`. Hence §4's "build every time".
