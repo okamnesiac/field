@@ -69,7 +69,9 @@ export const recordStatusSchema = z.object({
   transaction: z.string().optional(),
   file: z.string().optional(), // project-root-relative take.wav or take.midi.ndjson
   started_at_samples: z.number().int().optional(), // -1 until the callback latches
-  pending: z.boolean().optional(), // a pre-rolled take waiting for its position (daemon >= 0.13)
+  // A pre-rolled take waiting for its position (daemon >= 0.13), or a
+  // loop's next take waiting for the wrap that begins it.
+  pending: z.boolean().optional(),
   // Punch-out and loop takes (daemon >= 0.14): where the take ends,
   // whether every pass is a take, how many have finalized, and how many
   // passes began with no transaction ready.

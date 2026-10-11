@@ -165,8 +165,9 @@ session never asks for the microphone. `arm` names a track, an input
 device, and a channel counted from 1; the daemon reopens the device
 with that one input channel active and reports the input and output
 latency the device declares, in samples. `record` starts a take: it
-locates the bed to `at` when you give one, starts the transport if it
-is stopped, and captures from the next callback block. The callback
+opens the take's transactions, locates the bed to `at` when you give
+one, with no block between the jump and the start, starts the transport
+if it is stopped, and captures from the next callback block. The callback
 latches that block's transport position as `started_at_samples`, so the
 first captured sample and the position it is placed at describe the
 same instant. `stop` and `pause` finalize the take and return its
@@ -258,11 +259,24 @@ same block: the pass that ends and the pass that begins meet on
 consecutive samples, which the suite proves on the null clock's
 sawtooth. Each take reaches every client as a `take` event as it
 finalizes, and `field record --loop` lands them as they arrive, the last
-one chosen, until ctrl-c — whose partial pass is a take too. A pass that
-begins before the previous one was serviced is counted in
-`record.missed` rather than recorded twice; regions shorter than a
-heartbeat tick are where that would happen, and `field record` says so
-on its live line and in its closing tally.
+one chosen, until ctrl-c — whose partial pass is a take too.
+
+The heartbeat finalizes each take the callback has ended since its
+last tick, however many there are. It opens the next pass's
+transaction before it finalizes, so a slow finalize costs no pass. A
+pass that begins with no transaction open is skipped whole and counted
+in `record.missed`. That happens when the region is shorter than a
+heartbeat tick, or when the message thread falls behind. The
+transaction opened late begins at the following wrap, and `status`
+reports it as `pending` until then, so every take is a whole pass that
+starts at `at`. `field record` reports the skipped passes on its live
+line and in its closing tally.
+
+A `session` swap during a loop take, such as the one `field play
+--watch` sends after an edit, carries the take's region onto the
+incoming session, as it carries the transport. The daemon refuses a
+session that the region does not fit, and the take goes on against the
+session already playing.
 
 The region loop is the live session's own (`loop {from, to}`, `to`
 defaulting to the content's extent): the clock wraps from `to` back to
