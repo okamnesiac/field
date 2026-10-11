@@ -518,11 +518,17 @@ $ field record creek/track:vox creek/track:keys --at 17
 ```
 
 A take records every knob you turn while it runs, and its render turns
-the instrument's knobs where you did. It starts with every knob at its
-default and the modulation wheel at 0, because it records only the
-messages that arrive once it has started. A knob you turned before then
-plays live but not in the take's render, so turn it again after the
-take starts.
+the instrument's knobs where you did. It also starts where your knobs
+are. Run inside a project, `field keys` keeps the controllers it has
+sent, the wheel among them, in `.field/keys.json`, and removes the file
+when it quits. `field record` passes them to the daemon when it arms,
+and the daemon writes them at the take's first sample with every
+control change that arrives after the arm and before the start,
+including during a count-in. So a knob you turned before the take, on
+`field keys` or a hardware controller, renders where you left it. A
+daemon that predates this starts a take with every knob at its default:
+`field transport quit`, then record again, and it respawns on the new
+build.
 
 ## Keys are read by position
 

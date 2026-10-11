@@ -1023,3 +1023,52 @@ wait for chunk 3.
 - **Criteria 4 to 8, 12, 14, 18, and 23 by hand,** in Ghostty or
   iTerm2 and by ear. The pseudo-terminal run sent the protocol's bytes
   and heard nothing.
+
+## 11 Chunk 3 as built (2026-10-11)
+
+A MIDI take starts where the knobs are. `field keys` publishes the
+controllers it has sent in `.field/keys.json`, `field record` passes
+them in `arm` to a daemon that lists `midi-chase`, and the daemon writes
+the latest value of each controller at the take's first sample, ahead
+of every other line. With all three chunks built, what remains is the
+criteria a person checks by hand at a kitty terminal and by ear.
+
+### 11.1 What implementation settled
+
+- **The lines go in just before the take's first stamped message.** An
+  arrival in the start block that falls before the start sample is
+  chased first, so the table the lines come from is complete, and the
+  lines still lead the file. `stampMidiBlock` writes them, so a MIDI
+  primary and an audio primary's MIDI companions share the rule.
+- **The seeds cross to the callback under a lock it only tries.** `arm`
+  writes them on the message thread and raises a flag; the callback
+  takes them at the start of a block when the lock is free, and
+  otherwise at the next block. Each arm starts the table over.
+- **Each value's order is when it last arrived, seeds included.** A seed
+  is ordered as arriving at the arm, in the order `arm` lists it, which
+  is the order `field keys` last sent each value. That gives §2.8's
+  "seeded values first, the rest in the order their values last
+  arrived" as one rule.
+- **`.field/keys.json` lists each channel's controllers, least recently
+  sent first,** and a `field keys` that quits removes the file only if
+  it wrote it, so a second `field keys` in the same project keeps its
+  own.
+- **`arm` refuses `controllers` out of range** rather than dropping
+  them, as it refuses a bad input channel.
+
+### 11.2 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| The full suite, against a `field-audiod` built from this branch | 90 files: 1193 tests pass, and 1 skips. |
+| `src/commands/record-midi-daemon.test.ts` against the daemon built from this branch, through CoreMIDI | Seeded `cc 110 = 10` and `cc 111 = 20` on channel 16, then sent `cc 112 = 30` on channel 15, `cc 110 = 40` on 16, and CC 120 before the start, and `cc 111 = 50` after it. The take's lines at `at: 0` were `cc 111 = 20`, `cc 112 = 30`, `cc 110 = 40`, in that order, with no CC 120; `cc 111 = 50` landed at its own time, after them. `arm` refused a channel of 0, a CC of 120, and a value of 128. |
+| `field record` end to end, in the same file | With `.field/keys.json` published by the test's own process, the landed notes file had `{ at: 0, cc: 113, value: 23, channel: 16 }`. |
+| `src/commands/record-plan.test.ts` | `field record` reads the file only while its process runs and only for a daemon with `midi-chase`, and ignores a file it cannot parse; a `field keys` that quits leaves another one's file. |
+
+### 11.3 What is still owed
+
+- **Criteria 20 and 21 by hand**, and every criterion §9.3 and §10.3
+  list. Criterion 20's notes file is the shape the `field record` test
+  checks; what it does not show is a render that sounds dark from its
+  first note, which needs ears.
+- **`finish`**, once those are checked.

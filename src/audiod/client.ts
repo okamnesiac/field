@@ -26,6 +26,7 @@ import {
   statusResponseSchema,
   stopResponseSchema,
   type ArmTrack,
+  type ChasedController,
   type AudiodEvent,
   type ClickSchedule,
 } from './protocol.js';
@@ -282,15 +283,20 @@ export class AudiodClient extends EventEmitter {
   // Arm for MIDI (keyboard-instrument.md §12.4, supports('record-midi')):
   // every MIDI input the daemon can see, and no audio input. A take then
   // records their messages; `record` and `stop` work as for audio, and
-  // loop takes are refused.
-  armMidi(track: string) {
-    return this.request('arm', { track, kind: 'midi' }, armMidiResponseSchema);
+  // loop takes are refused. `controllers` (supports('midi-chase')) are
+  // where the take starts.
+  armMidi(track: string, controllers: ChasedController[] = []) {
+    return this.request('arm', { track, kind: 'midi', ...chase(controllers) }, armMidiResponseSchema);
   }
 
   // Arms every track at once (arming.md §2.2), on `device` for the audio
   // ones; daemon feature "record-tracks".
-  armTracks(tracks: ArmTrack[], device?: string) {
-    return this.request('arm', { tracks, ...(device !== undefined ? { device } : {}) }, armTracksResponseSchema);
+  armTracks(tracks: ArmTrack[], device?: string, controllers: ChasedController[] = []) {
+    return this.request(
+      'arm',
+      { tracks, ...(device !== undefined ? { device } : {}), ...chase(controllers) },
+      armTracksResponseSchema,
+    );
   }
   disarm() {
     return this.request('disarm', {}, okResponseSchema);
@@ -355,4 +361,10 @@ export class AudiodClient extends EventEmitter {
   close(): void {
     this.socket.destroy();
   }
+}
+
+// An arm names `controllers` only when it has some, so a daemon without
+// "midi-chase" never sees the field.
+function chase(controllers: ChasedController[]): { controllers?: ChasedController[] } {
+  return controllers.length > 0 ? { controllers } : {};
 }

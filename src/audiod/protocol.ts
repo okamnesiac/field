@@ -142,6 +142,16 @@ export const recordResponseSchema = z.object({
 // window to read (live-supercollider.md §12, "live-monitor").
 export type ArmTrack = { track: string; kind: 'audio'; input: number; monitor?: string } | { track: string; kind: 'midi' };
 
+// A controller a MIDI take starts from, as `arm`'s `controllers` passes it
+// (instrument-knobs.md §2.8, daemon feature "midi-chase"): the daemon
+// writes each at the take's first sample, before anything sent later.
+export const chasedControllerSchema = z.object({
+  channel: z.number().int().min(1).max(16),
+  cc: z.number().int().min(0).max(119),
+  value: z.number().int().min(0).max(127),
+});
+export type ChasedController = z.infer<typeof chasedControllerSchema>;
+
 // What arming a set opened: every track armed, the audio side's device
 // and latency when one is audio, and the MIDI side's sources when one is
 // MIDI.

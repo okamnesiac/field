@@ -7,7 +7,8 @@ import { createInterface } from 'node:readline';
 import { afterEach, beforeEach, describe, expect, it, type TestContext } from 'vitest';
 import { writeWavFloat32 } from '../audio/wav.js';
 import { AudiodClient, daemonBinary } from '../audiod/client.js';
-import { midiTakeLineSchema, midiTakeSchema, type AudiodEvent, type MidiTakeLine } from '../audiod/protocol.js';
+import { midiTakeLineSchema, midiTakeSchema, type AudiodEvent, type ChasedController, type MidiTakeLine } from '../audiod/protocol.js';
+import { publishControllers } from '../keys/published.js';
 import { loadProject } from '../model/project.js';
 import { check } from './check.js';
 import { createSong, createTrack } from './create.js';
@@ -194,24 +195,88 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
 
   // A source another process publishes takes a moment to reach this
   // one's list, so arm until it is there.
-  async function armListing(client: AudiodClient, name: string) {
+  async function armListing(client: AudiodClient, name: string, controllers: ChasedController[] = []) {
     const deadline = Date.now() + 5000;
     for (;;) {
-      const armed = await client.armMidi(TRACK);
+      const armed = await client.armMidi(TRACK, controllers);
       if (armed.sources.includes(name)) return armed;
       if (Date.now() > deadline) throw new Error(`${name} never appeared among ${armed.sources.join(', ')}`);
       await sleep(100);
     }
   }
 
-  it('advertises record-midi', async () => {
+  it('advertises record-midi and midi-chase', async () => {
     const client = await connect();
     try {
       expect(client.supports('record-midi')).toBe(true);
+      expect(client.supports('midi-chase')).toBe(true);
     } finally {
       client.close();
     }
   });
+
+  it('refuses controllers that are not {channel, cc, value} in range', async () => {
+    const client = await connect();
+    try {
+      for (const bad of [
+        { channel: 0, cc: 74, value: 1 },
+        { channel: 1, cc: 120, value: 1 },
+        { channel: 1, cc: 74, value: 128 },
+      ]) {
+        await expect(client.armMidi(TRACK, [bad])).rejects.toThrow(/arm's controllers are a list of \{channel, cc, value\}/);
+      }
+    } finally {
+      client.close();
+    }
+  });
+
+  it(
+    'starts a take with the controllers seeded at the arm and sent before the start, in the order their values last arrived',
+    { timeout: 20_000 },
+    async (ctx) => {
+      const name = source('chase');
+      const keys = await publishOrSkip(ctx, name);
+      const client = await connect();
+      try {
+        // Channels 15 and 16, on controllers with no assigned meaning, so
+        // another source's controllers on the machine are told apart.
+        await armListing(client, name, [
+          { channel: 16, cc: 110, value: 10 },
+          { channel: 16, cc: 111, value: 20 },
+        ]);
+        send(keys, [0xbe, 112, 30]);
+        send(keys, [0xbf, 110, 40]); // replaces its seed
+        send(keys, [0xbf, 120, 0]); // All Sound Off: acts once, never chased
+        await sleep(300);
+        const started = await client.record();
+        await sleep(300);
+        send(keys, [0xbf, 111, 50]);
+        await waitFor(
+          () => readLines(root, started.file).some((line) => line.midi[0] === 0xbf && line.midi[1] === 111 && line.midi[2] === 50),
+          3000,
+          'the controller sent after the start',
+        );
+        await client.stop();
+        const mine = readLines(root, started.file).filter(
+          (line) => (line.midi[0] === 0xbe || line.midi[0] === 0xbf) && line.midi[1]! >= 110 && line.midi[1]! <= 120,
+        );
+        expect(mine.filter((line) => line.at === 0).map((line) => line.midi)).toEqual([
+          [0xbf, 111, 20],
+          [0xbe, 112, 30],
+          [0xbf, 110, 40],
+        ]);
+        const later = mine.filter((line) => line.at > 0);
+        expect(later.map((line) => line.midi)).toEqual([[0xbf, 111, 50]]);
+        expect(later[0]!.at).toBeGreaterThanOrEqual((300 * NULL_RATE) / 1000 - BLOCK_SLACK);
+        // Every chased line comes before every other line of the take.
+        const lines = readLines(root, started.file);
+        const firstLater = lines.findIndex((line) => line.at > 0);
+        expect(lines.slice(firstLater).some((line) => line.at === 0)).toBe(false);
+      } finally {
+        client.close();
+      }
+    },
+  );
 
   it(
     'records a source on the sample clock, with no audio fields, and finalizes on stop',
@@ -517,6 +582,10 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
           client.close();
         }
 
+        // A field keys running in the project, as this process: the take
+        // starts where its knobs are (instrument-knobs.md §2.8).
+        publishControllers(root, [{ channel: 16, cc: 113, value: 23 }]);
+
         const lines: string[] = [];
         const positions: string[] = [];
         let played = false;
@@ -557,6 +626,7 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
         expect(landed.row).not.toHaveProperty('device');
         const notes = readFileSync(join(root, 'songs/creek', landed.file), 'utf8');
         expect(notes).toMatch(new RegExp(`\\{ at: \\d+, length: \\d+, note: ${NOTE}, velocity: 77, channel: 16 \\}`));
+        expect(notes).toContain('{ at: 0, cc: 113, value: 23, channel: 16 }');
         expect(existsSync(join(root, '.field/recording', take.id))).toBe(false);
         expect((await check(root)).diagnostics).toEqual([]);
       } finally {

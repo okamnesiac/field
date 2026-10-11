@@ -38,6 +38,16 @@ struct CaptureBlock;
 // adds no locking of its own beyond the transport's internal locks. The
 // audio callback and the null clock only touch the transport, which is
 // safe by JUCE's design.
+// A controller a MIDI take starts from, as `arm` passes it
+// (instrument-knobs.md §2.8): channel from 0 to 15, controller from 0 to
+// 119, value from 0 to 127.
+struct ChaseSeed
+{
+    int channel = 0;
+    int cc = 0;
+    int value = 0;
+};
+
 class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallback
 {
 public:
@@ -141,7 +151,7 @@ public:
     // input the system lists and no audio input, so it never asks for
     // the microphone. Returns {error} or {kind, sources, sample_rate,
     // output_latency}. Like arm, it moves an existing arm of either kind.
-    juce::var armMidi (const juce::String& track);
+    juce::var armMidi (const juce::String& track, const std::vector<ChaseSeed>& seeds = {});
     // Arms several tracks at once (arming.md §2.2): each entry is
     // {track, kind: "audio", input} or {track, kind: "midi"}. An audio
     // entry takes its own input channel on `device`; a MIDI entry hears
@@ -155,7 +165,9 @@ public:
     // {armed, sample_rate, output_latency}, plus the audio side's
     // {device, input, channels, input_latency} and the MIDI side's
     // {sources}, and {kind: "midi"} when the one entry is MIDI.
-    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner = nullptr);
+    // `seeds` are the controllers a MIDI take starts from (below).
+    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device,
+                      const std::vector<ChaseSeed>& seeds = {}, const void* owner = nullptr);
     // Closes the input side again. Empty string on success.
     juce::String disarm();
     // Start a take: locate to `at` when given (a source must be loaded
@@ -533,4 +545,34 @@ private:
     juce::int64 midiTakeClock = 0;
     juce::int64 midiFloor = 0;
     juce::int64 midiLastAt = 0;
+
+    // The chase (instrument-knobs.md §2.8): from the arm, the latest value
+    // of each controller from 0 to 119 on each channel, first those `arm`
+    // seeds, then each control change that arrives before the take
+    // starts. The take's first sample gets one line per controller, in
+    // the order the values last arrived, ahead of every other line. The
+    // audio thread owns the table; an arm hands it the seeds under a lock
+    // the callback only ever tries.
+    void takeChaseSeeds();
+    void chaseArrival (const MidiArrival& arrival);
+    template <typename Push>
+    void writeChase (Push&& push);
+    static constexpr int chasedControllers = 120;
+    static constexpr int chaseSlots = 16 * chasedControllers;
+    struct Chased
+    {
+        juce::uint32 order = 0; // 0: no value yet
+        juce::uint8 value = 0;
+    };
+    std::array<Chased, chaseSlots> chase {};
+    std::array<int, chaseSlots> chaseSorted {}; // writeChase's scratch
+    juce::uint32 chaseNext = 1;
+    // Set where the MIDI clock starts; the lines go in before the take's
+    // first stamped message, so an arrival in the start block that falls
+    // before the start sample is chased first.
+    bool chasePending = false;
+    std::array<ChaseSeed, chaseSlots> chaseSeeds {};
+    int chaseSeedCount = 0;
+    std::atomic<bool> chaseSeeded { false };
+    juce::SpinLock chaseSeedLock;
 };

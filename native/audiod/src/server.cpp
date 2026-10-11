@@ -18,6 +18,7 @@
 #pragma comment (lib, "advapi32.lib")
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <vector>
 #else
@@ -47,6 +48,31 @@ juce::var errorResponse (const juce::var& id, const juce::String& message)
     o->setProperty ("ok", false);
     o->setProperty ("error", message);
     return juce::var (o.get());
+}
+
+// arm's `controllers` (instrument-knobs.md §2.8): [{channel, cc, value}],
+// channel from 1 to 16 as `field keys` writes it, controller from 0 to
+// 119, value from 0 to 127. Absent is none. Empty string, or why not.
+juce::String readChaseSeeds (const juce::var& list, std::vector<ChaseSeed>& seeds)
+{
+    if (list.isVoid())
+        return {};
+    const auto* items = list.getArray();
+    const juce::String shape = "arm's controllers are a list of {channel, cc, value}: channel 1 to 16, cc 0 to 119, value 0 to 127";
+    if (items == nullptr)
+        return shape;
+    const auto whole = [] (const juce::var& v, int low, int high)
+    { return (v.isInt() || v.isInt64() || v.isDouble()) && (double) v == std::floor ((double) v) && (int) v >= low && (int) v <= high; };
+    for (const auto& item : *items)
+    {
+        const auto channel = item.getProperty ("channel", juce::var());
+        const auto cc = item.getProperty ("cc", juce::var());
+        const auto value = item.getProperty ("value", juce::var());
+        if (! whole (channel, 1, 16) || ! whole (cc, 0, 119) || ! whole (value, 0, 127))
+            return shape;
+        seeds.push_back ({ (int) channel - 1, (int) cc, (int) value });
+    }
+    return {};
 }
 
 // What a stop answers with (arming.md §2.2): `take`, the primary track's
@@ -158,6 +184,9 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
         // §12.4).
         features.add ("record-midi");
         features.add ("record-tracks");
+        // arm's controllers, and a MIDI take that starts with the
+        // controllers sent before it (instrument-knobs.md §2.8).
+        features.add ("midi-chase");
         // The input and input_close ops, `inputs` in status, and input
         // windows in a session (live-supercollider.md chunk 2).
         features.add ("live-input");
@@ -254,11 +283,14 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
     {
         const auto track = request.getProperty ("track", juce::var()).toString();
         const auto kind = request.getProperty ("kind", juce::var());
+        std::vector<ChaseSeed> seeds;
+        if (auto error = readChaseSeeds (request.getProperty ("controllers", juce::var()), seeds); error.isNotEmpty())
+            return jsonLine (errorResponse (id, error));
         juce::var info;
         if (auto* tracks = request.getProperty ("tracks", juce::var()).getArray())
-            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString(), owner);
+            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString(), seeds, owner);
         else if (kind.toString() == "midi")
-            info = player.armMidi (track);
+            info = player.armMidi (track, seeds);
         else if (! kind.isVoid())
             return jsonLine (errorResponse (id, "arm's kind is \"midi\", or absent for an audio input"));
         else

@@ -534,3 +534,22 @@ describe('typing a knob\'s value', () => {
 
 // cutoff's controller value nearest 300 Hz, which maps to 301 Hz.
 const nearestTo300 = 40;
+
+describe('what a take starts from', () => {
+  it('lists each controller sent below 120, by channel, the least recently sent first', () => {
+    const session = new KeysSession(
+      parseKeymap(
+        'name: s\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { cc: 74, value: 10 }, KeyN: { cc: 1, value: 64 }, KeyM: { cc: 74, value: 20 }, KeyQ: panic }\n',
+        's.yaml',
+      ),
+    );
+    session.press('KeyB');
+    session.press('KeyN');
+    session.press('KeyM');
+    session.press('KeyQ');
+    expect(session.sentControllers()).toEqual([
+      { channel: 1, cc: 1, value: 64 },
+      { channel: 1, cc: 74, value: 20 },
+    ]);
+  });
+});

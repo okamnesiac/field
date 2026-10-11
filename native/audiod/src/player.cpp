@@ -1152,6 +1152,7 @@ juce::int64 Player::pullAudio (const float* const* in, int numInputs, float* con
 void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
 {
     const double blockStartMs = juce::Time::getMillisecondCounterHiRes();
+    takeChaseSeeds();
     const juce::int64 position = pullAudio (in, numInputs, out, numOutputs, n);
     if (latchStallMs > 0)
         std::this_thread::sleep_for (std::chrono::milliseconds (latchStallMs));
@@ -1199,11 +1200,12 @@ void Player::processBlock (const float* const* in, int numInputs, float* const* 
     }
     recordAudioBlock (in, numInputs, input, position, freeBefore, n);
     // An audio primary's MIDI companions stamp what arrived on the clock
-    // its latch set; otherwise what arrived belongs to no take.
+    // its latch set; otherwise what arrived belongs to no take, and only
+    // the chase keeps it.
     if (companionMidiRunning.load())
         recordMidiCompanions (n, blockStartMs);
     else
-        drainMidiArrivals ([] (const MidiArrival&) {});
+        drainMidiArrivals ([this] (const MidiArrival& arrival) { chaseArrival (arrival); });
 }
 
 void Player::recordAudioBlock (const float* const* in, int numInputs, const float* input, juce::int64 position,
@@ -1263,6 +1265,7 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
             midiFloor = std::numeric_limits<juce::int64>::min();
             midiLastAt = 0;
             midiArrivalsLost = 0;
+            chasePending = true;
             companionMidiRunning = true;
         }
         captureStarted = true;
@@ -1357,7 +1360,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
     // from its own start.
     if (position == -1)
         return;
-    const auto discard = [] (const MidiArrival&) {};
+    const auto chaseEach = [this] (const MidiArrival& arrival) { chaseArrival (arrival); };
     const juce::int64 here = position == -2 ? freeBefore : position;
     // A MIDI primary's companions are MIDI too, since armSet makes an
     // audio track the primary whenever one is armed, and they record
@@ -1382,7 +1385,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
         {
             if (here + n <= startAt)
             {
-                drainMidiArrivals (discard);
+                drainMidiArrivals (chaseEach);
                 return;
             }
             from = (int) std::max<juce::int64> (0, startAt - here);
@@ -1394,11 +1397,12 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
         midiFloor = std::numeric_limits<juce::int64>::min();
         midiLastAt = 0;
         midiArrivalsLost = 0; // lost before the take began
+        chasePending = true;
         captureStarted = true;
     }
     if (! captureStarted.load())
     {
-        drainMidiArrivals (discard);
+        drainMidiArrivals (chaseEach);
         return;
     }
     const juce::int64 untilFrames = midiUntilFrames (take);
@@ -1464,17 +1468,70 @@ juce::int64 Player::stampMidiBlock (juce::int64 untilFrames, int n, double block
         // back than that block's start.
         at = std::clamp (at, midiFloor, blockEnd - 1);
         if (at < 0)
-            return; // before the start
+        {
+            chaseArrival (arrival); // before the start
+            return;
+        }
+        if (chasePending)
+            writeChase (push);
         at = std::max (at, midiLastAt);
         if (at >= untilFrames)
             return;
         push (at, arrival.bytes, arrival.size);
         midiLastAt = at;
     });
+    if (chasePending)
+        writeChase (push);
     frames (std::max<juce::int64> (0, std::min (blockEnd, untilFrames)), lost);
     midiFloor = blockStart;
     midiTakeClock = blockEnd;
     return blockStart;
+}
+
+void Player::takeChaseSeeds()
+{
+    if (! chaseSeeded.load())
+        return;
+    const juce::SpinLock::ScopedTryLockType lock (chaseSeedLock);
+    if (! lock.isLocked())
+        return; // an arm is writing them: the next block takes them
+    chase.fill ({});
+    chaseNext = 1;
+    for (int i = 0; i < chaseSeedCount; ++i)
+    {
+        const auto& seed = chaseSeeds[(size_t) i];
+        chase[(size_t) (seed.channel * chasedControllers + seed.cc)] = { chaseNext++, (juce::uint8) seed.value };
+    }
+    chaseSeeded = false;
+}
+
+void Player::chaseArrival (const MidiArrival& arrival)
+{
+    // A control change, and not a channel mode message (120 to 127),
+    // which acts once rather than setting a value to start from.
+    if (arrival.size != 3 || (arrival.bytes[0] & 0xf0) != 0xb0 || arrival.bytes[1] >= chasedControllers)
+        return;
+    const int channel = arrival.bytes[0] & 0x0f;
+    chase[(size_t) (channel * chasedControllers + arrival.bytes[1])] = { chaseNext++, arrival.bytes[2] };
+}
+
+template <typename Push>
+void Player::writeChase (Push&& push)
+{
+    chasePending = false;
+    int count = 0;
+    for (int slot = 0; slot < chaseSlots; ++slot)
+        if (chase[(size_t) slot].order != 0)
+            chaseSorted[(size_t) count++] = slot;
+    std::sort (chaseSorted.begin(), chaseSorted.begin() + count,
+               [this] (int a, int b) { return chase[(size_t) a].order < chase[(size_t) b].order; });
+    for (int i = 0; i < count; ++i)
+    {
+        const int slot = chaseSorted[(size_t) i];
+        const juce::uint8 bytes[3] { (juce::uint8) (0xb0 | (slot / chasedControllers)), (juce::uint8) (slot % chasedControllers),
+                                     chase[(size_t) slot].value };
+        push (0, bytes, 3);
+    }
 }
 
 void Player::recordMidiCompanions (int n, double blockStartMs)
@@ -1589,15 +1646,16 @@ juce::var Player::arm (const juce::String& track, const juce::String& device, in
     return armSet ({ juce::var (entry.get()) }, device);
 }
 
-juce::var Player::armMidi (const juce::String& track)
+juce::var Player::armMidi (const juce::String& track, const std::vector<ChaseSeed>& seeds)
 {
     auto entry = obj();
     entry->setProperty ("track", track);
     entry->setProperty ("kind", "midi");
-    return armSet ({ juce::var (entry.get()) }, {});
+    return armSet ({ juce::var (entry.get()) }, {}, seeds);
 }
 
-juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner)
+juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device,
+                          const std::vector<ChaseSeed>& seeds, const void* owner)
 {
     auto result = obj();
     auto fail = [&] (const juce::String& error)
@@ -1766,6 +1824,13 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
     }
     inputPeak = 0.0f;
     freeClock = 0;
+    // Each arm starts the chase over, from its own seeds.
+    {
+        const juce::SpinLock::ScopedLockType lock (chaseSeedLock);
+        chaseSeedCount = (int) std::min (seeds.size(), chaseSeeds.size());
+        std::copy_n (seeds.begin(), chaseSeedCount, chaseSeeds.begin());
+        chaseSeeded = true;
+    }
     // The kind before the flag, so the null clock never presents an input
     // to a MIDI arm.
     armedMidi = primary.midi;
