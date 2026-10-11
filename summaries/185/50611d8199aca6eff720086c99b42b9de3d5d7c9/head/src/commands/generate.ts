@@ -1,0 +1,851 @@
+import { execFile } from 'node:child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { Document, parseDocument } from 'yaml';
+import { AcedClient, ACED_SPEC } from '../aced/client.js';
+import { VoicedClient, VOICED_SPEC } from '../voiced/client.js';
+import {
+  probeEnvironment,
+  workerPackagePresent,
+  workerScriptInstalled,
+  type ProbeRun,
+} from '../workers/client.js';
+import type { WorkerSpec } from '../workers/protocol.js';
+import { sha256File } from '../hash.js';
+import { isSlug } from '../ids.js';
+import { DEFAULT_SAMPLE_RATE } from '../constants.js';
+import { RESERVED_LABEL_NAME } from '../labels.js';
+import { loadProject, lookupAsset, type LoadedProject } from '../model/project.js';
+import { generatorName } from '../generators/stem.js';
+import { takenSongNames } from '../model/namespace.js';
+import {
+  generativeTakesOrder,
+  generativeTakesSchema,
+  TAKES_FILENAME,
+  trackOrder,
+  trackSchema,
+  type GenerativeTakes,
+} from '../schema/index.js';
+import { barTicks, TempoMap } from '../time/tempo.js';
+import { canonicalizeDocument, stringifyDocument } from '../yaml/emit.js';
+
+const execFileAsync = promisify(execFile);
+
+// field generate / field choose (project-layout.md §1.4, §1.7, §4): the
+// deliberate-trigger verbs over the generator category. Generation lives
+// OUTSIDE the build graph — outputs are committed, not cached. `generate`
+// runs the model and lands variants in songs/<song>/audio/<name>/, the
+// request living as a `generative:` entry in a track (nested-tracks.md
+// §18 step 3 — a brand-new request scaffolds a leaf track carrying it);
+// `choose` repoints which variant the gen node's label resolves to —
+// placements reference the track, so choosing again moves what they
+// play, and nothing is ever copied into a ledger.
+//
+// One verb, two generators (voice-generation.md §4, answered by
+// project-layout.md §1.7): `--prompt` routes to field-aced, `--text` to
+// field-voiced, and the recipe's `model:` records which one ran. The
+// recipe schema discriminates the same way, on which of prompt/text is
+// present rather than a second `type:` (§1.6), so the CLI is stating the
+// schema's kind split in flag vocabulary rather than inventing a rule.
+
+export interface GenerateOptions {
+  song: string;
+  seed: number;
+  variants: number;
+  // Music, through field-aced: a prompt and a length.
+  prompt?: string | undefined;
+  bars?: number | undefined;
+  durationSeconds?: number | undefined;
+  lyrics?: string | undefined;
+  bpm?: number | undefined;
+  // Voice, through field-voiced: the line, and optionally the committed
+  // recording that defines the voice — an asset *name*, resolved to a
+  // path here so the worker never learns what an asset is. Omitted means
+  // the model's own voice, a first-class case (§6).
+  text?: string | undefined;
+  voiceRef?: string | undefined;
+  // How the line is delivered. `conviction` is Chatterbox's `cfg_weight`
+  // under a name that says what it does (voice-generation.md §8); the
+  // worker's adapter translates. Absent means the model's own default,
+  // and the recipe records the absence rather than inventing a number.
+  exaggeration?: number | undefined;
+  conviction?: number | undefined;
+  onProgress?: ((stage: string) => void) | undefined;
+}
+
+export interface GenerateResult {
+  // The track file whose generative entry this run filled — or the leaf
+  // track the create path scaffolded to carry a brand-new request.
+  recipePath: string; // project-relative
+  files: string[]; // project-relative variant WAVs, seed order
+  seeds: number[];
+  model: string;
+  // Music only. A voice line has no requested length — its length
+  // follows from the text, and the committed WAV is its own record.
+  durationSeconds?: number | undefined;
+  bpm?: number | undefined;
+  voiceRef?: string | undefined; // as written into the recipe
+}
+
+// The flags that belong to exactly one kind, and what to call them when
+// one shows up on the other. Checked before anything is spawned: the
+// schema would reject the same recipe on the way to disk, but by then
+// the model minutes are spent — the same reasoning as the namespace
+// pre-flight below.
+const MUSIC_ONLY: [keyof GenerateOptions, string][] = [
+  ['bars', '--bars'],
+  ['durationSeconds', '--duration'],
+  ['lyrics', '--lyrics'],
+  ['bpm', '--bpm'],
+];
+const VOICE_ONLY: [keyof GenerateOptions, string][] = [
+  ['voiceRef', '--voice-ref'],
+  ['exaggeration', '--exaggeration'],
+  ['conviction', '--conviction'],
+];
+
+export type GenerationKind = 'music' | 'voice';
+
+function generationKind(options: GenerateOptions): GenerationKind {
+  const isMusic = options.prompt !== undefined;
+  const isVoice = options.text !== undefined;
+  if (isMusic === isVoice) {
+    throw new Error(
+      isMusic
+        ? 'give either --prompt (music) or --text (voice), not both'
+        : 'give --prompt to generate music, or --text to generate a voice line',
+    );
+  }
+  for (const [key, flag] of isVoice ? MUSIC_ONLY : VOICE_ONLY) {
+    if (options[key] !== undefined) {
+      throw new Error(
+        isVoice
+          ? `${flag} is a music option — a voice recipe carries --text and optionally ` +
+            `--voice-ref (voice-generation.md §1.6)`
+          : `${flag} is a voice option — a music recipe carries --prompt`,
+      );
+    }
+  }
+  if (isMusic && (options.bars === undefined) === (options.durationSeconds === undefined)) {
+    throw new Error('give exactly one of --bars or --duration');
+  }
+  return isVoice ? 'voice' : 'music';
+}
+
+interface SongTime {
+  tempoMap: TempoMap;
+  initialBpm: number;
+  ticksPerBar: number;
+}
+
+function songTime(project: LoadedProject, songName: string): SongTime {
+  const song = project.songs.find((s) => s.name === songName);
+  if (!song) throw new Error(`no such song "${songName}"`);
+  if (!song.time) throw new Error(`song "${songName}" has no time: in song.yaml`);
+  const rate =
+    song.song?.data.rate ?? project.manifest?.data.sample_rate ?? DEFAULT_SAMPLE_RATE;
+  return {
+    tempoMap: new TempoMap(song.time.tempo, rate),
+    initialBpm: song.time.tempo[0]!.bpm,
+    ticksPerBar: barTicks(song.time.meter[0]!),
+  };
+}
+
+// A `voice_ref` is a name in the song's namespace; the worker needs a
+// path and the recipe needs a hash. Turning one into the other is the
+// first place field *writes* a content hash into a committed file rather
+// than checking one somebody else wrote, so it is written to be a pin
+// from the start (voice-generation.md §1.3, §6):
+//
+//   - the name resolves through the same lookupAsset the project model
+//     validates with, so "which asset is this" has one answer;
+//   - it must be a committed *asset*, not any visible name — a generated
+//     sound cannot carry the provenance the reference exists to give;
+//   - the hash written is the hash of the bytes actually read, and a
+//     recording that has drifted from its ledger entry is refused rather
+//     than generated from. Recording the ledger's value instead would
+//     leave the recipe check-green while describing bytes the model
+//     never heard, which is the one thing a recipe must never do —
+//     the refusal `field choose` already makes about a drifted variant.
+//
+// The last of those needs the *bytes*, not the file, or it is a promise
+// about one instant: hashing the recording and then handing the worker
+// its path leaves minutes of model load between the two, and a recording
+// edited in that window is generated from while the recipe pins what it
+// used to be. Re-hashing afterwards does not close it — an edit that is
+// undone before the run ends compares equal at both ends and passes.
+// So the window is removed rather than checked: the reference is copied
+// first, and the copy is what gets hashed and what the worker reads.
+// Hashed and heard are then the same bytes by construction.
+async function snapshotVoiceRef(
+  project: LoadedProject,
+  song: string,
+  ref: string,
+  into: string,
+): Promise<{ path: string; sha256: string }> {
+  const found = lookupAsset(project, song, ref);
+  if (!found) {
+    throw new Error(
+      `voice_ref "${ref}" is not a committed asset in ${song} — a reference recording is ` +
+        `an asset (field import), not a render (voice-generation.md §1.3)`,
+    );
+  }
+  // An ambiguous name is not a name. Two ledger rows called `ref-voice`
+  // make the project check-red already, but generation does not read
+  // diagnostics, so without this it spends model minutes on whichever
+  // recording sorted first and then writes that arbitrary choice down as
+  // provenance (#61 review).
+  if (found.matches > 1) {
+    throw new Error(
+      `voice_ref "${ref}" matches ${found.matches} rows in the ${
+        found.base === 'shared' ? 'shared' : song
+      } ledger — the name has no single meaning; fix the duplicate (field check)`,
+    );
+  }
+  if (found.path === undefined) {
+    throw new Error(`voice_ref "${ref}" ${found.problem}`);
+  }
+  // Copy, then hash the copy. Hashing the original first and copying
+  // after would leave the same window one step smaller.
+  const path = join(into, `voice-ref${extname(found.asset.file)}`);
+  copyFileSync(found.path, path);
+  const sha256 = await sha256File(path);
+  if (sha256 !== found.asset.sha256) {
+    throw new Error(
+      `voice_ref "${ref}" does not match its recorded sha256 — the reference recording ` +
+        `changed under its ledger entry; refusing to generate from it (field check)`,
+    );
+  }
+  return { path, sha256 };
+}
+
+// What to generate, as opposed to how this run is parameterized. A
+// recipe already on disk answers every one of these — that is what makes
+// it a request — so passing one alongside would be a second and possibly
+// conflicting answer. `--seed` and `--variants` are deliberately absent:
+// they describe the run, not the sound, and stay on the command line.
+const CONTENT_FLAGS: [keyof GenerateOptions, string][] = [
+  ['prompt', '--prompt'],
+  ['text', '--text'],
+  ['lyrics', '--lyrics'],
+  ['bpm', '--bpm'],
+  ['bars', '--bars'],
+  ['durationSeconds', '--duration'],
+  ['voiceRef', '--voice-ref'],
+  ['exaggeration', '--exaggeration'],
+  ['conviction', '--conviction'],
+];
+
+// The takes beside a request's audio (bloom-in-tree.md §7), read as a
+// document so `choose` can edit it without discarding comments. Absent
+// means nothing has been generated, which is a legal state rather than an
+// error — the whole point of the split.
+function takesFilePath(songDir: string, name: string): string {
+  return join(songDir, 'audio', name, TAKES_FILENAME);
+}
+
+function readTakesDoc(songDir: string, name: string): Document | undefined {
+  const path = takesFilePath(songDir, name);
+  if (!existsSync(path)) return undefined;
+  const doc = parseDocument(readFileSync(path, 'utf8'));
+  if (doc.errors.length > 0) {
+    throw new Error(`invalid YAML in ${TAKES_FILENAME} for "${name}": ${doc.errors[0]!.message}`);
+  }
+  return doc;
+}
+
+function readTakes(songDir: string, name: string): GenerativeTakes | undefined {
+  const doc = readTakesDoc(songDir, name);
+  if (doc === undefined) return undefined;
+  const parsed = generativeTakesSchema.safeParse(doc.toJS());
+  if (!parsed.success) {
+    throw new Error(
+      `the takes for "${name}" are invalid; fix them before generating or choosing ` +
+        `(field check)`,
+    );
+  }
+  return parsed.data;
+}
+
+function writeTakes(songDir: string, name: string, takes: GenerativeTakes): string {
+  const path = takesFilePath(songDir, name);
+  mkdirSync(dirname(path), { recursive: true });
+  const doc = new Document(generativeTakesSchema.parse(takes));
+  canonicalizeDocument(doc, generativeTakesOrder);
+  writeFileSync(path, stringifyDocument(doc));
+  return path;
+}
+
+// A generative entry is the request living in a track's `inputs:`,
+// addressed by its gen node's name — the owning track's, or <track>-<id>
+// (nested-tracks.md §18 step 3). Filling it writes takes under that name
+// and touches nothing the author wrote: a track file reads the same
+// before and after generating, which is the constraint the audio/ split
+// serves. That is also why a voice entry carries `voice_ref_sha256` up
+// front (the schema pairs it with `voice_ref`) — the run *verifies* the
+// snapshot against it instead of writing it back into the file.
+interface EntryFill {
+  trackPath: string; // project-relative, for the result
+  voiceRefSha256?: string | undefined;
+  options: GenerateOptions;
+}
+
+function fillableEntry(
+  project: LoadedProject,
+  songDir: string,
+  name: string,
+  options: GenerateOptions,
+): EntryFill | undefined {
+  const song = project.songs.find((s) => s.name === options.song);
+  if (song === undefined) return undefined;
+  for (const track of song.tracks) {
+    for (const entry of track.data.inputs) {
+      if (entry.supercollider === undefined && entry.generative === undefined) continue;
+      if (generatorName(entry, track.data.name) !== name) continue;
+      if (entry.supercollider !== undefined) {
+        throw new Error(
+          `"${name}" is a supercollider generator in ${options.song} — it is built ` +
+            `by a rule, not generated`,
+        );
+      }
+      const recipe = entry.generative!;
+      const existing = readTakes(songDir, name);
+      if (existing !== undefined && existing.variants.length > 0) {
+        const n = existing.variants.length;
+        throw new Error(
+          `"${name}" already has ${n} take${n === 1 ? '' : 's'} in ${options.song} — ` +
+            `choose among them, or give the entry a new id for a fresh set`,
+        );
+      }
+      const supplied = CONTENT_FLAGS.filter(([key]) => options[key] !== undefined);
+      if (supplied.length > 0) {
+        const flags = supplied.map(([, flag]) => flag).join(', ');
+        throw new Error(
+          `the entry already says what to generate, so ${flags} would be a second answer — ` +
+            `drop ${supplied.length === 1 ? 'it' : 'them'}, or edit the entry`,
+        );
+      }
+      return {
+        trackPath: track.path,
+        voiceRefSha256: recipe.voice_ref_sha256,
+        options: {
+          ...options,
+          prompt: recipe.prompt,
+          text: recipe.text,
+          lyrics: recipe.lyrics,
+          bpm: recipe.bpm,
+          // Seconds win over bars, for the reason fillableRecipe gives.
+          durationSeconds: recipe.duration_seconds,
+          bars: recipe.duration_seconds === undefined ? recipe.bars : undefined,
+          voiceRef: recipe.voice_ref,
+          exaggeration: recipe.exaggeration,
+          conviction: recipe.conviction,
+        },
+      };
+    }
+  }
+  return undefined;
+}
+
+export async function generateVariants(
+  root: string,
+  name: string,
+  options: GenerateOptions,
+): Promise<GenerateResult> {
+  if (!isSlug(name)) throw new Error(`name "${name}" must be a lowercase-slug`);
+  if (name === RESERVED_LABEL_NAME) {
+    throw new Error(`"${RESERVED_LABEL_NAME}" is reserved by the label grammar`);
+  }
+  if (!isSlug(options.song)) throw new Error(`song "${options.song}" must be a lowercase-slug`);
+
+  const project = loadProject(root);
+  if (!project.songs.some((s) => s.name === options.song)) {
+    throw new Error(`no such song "${options.song}"`);
+  }
+  const songDir = join(root, 'songs', options.song);
+  const outputDir = join(songDir, 'audio', name);
+  // Where the request comes from: a generative entry minting this name
+  // if one exists (§18 step 3), the flags otherwise — the create path,
+  // which scaffolds a leaf track carrying the entry, the one shape a
+  // request lives in. Everything downstream reads `request`, so the two
+  // entry points converge here and a run cannot behave differently
+  // depending on which one it arrived through.
+  const entryFill = fillableEntry(project, songDir, name, options);
+  const request = entryFill?.options ?? options;
+  const kind = generationKind(request);
+
+  // Musical time projects CLI-side; the worker never learns what a bar
+  // is. Only music asks for it: a voice line's length follows from its
+  // text (voice-generation.md §1.6), so a voice generate needs no tempo
+  // map and does not fail for want of one.
+  let durationSeconds: number | undefined;
+  let bpm: number | undefined;
+  if (kind === 'music') {
+    const time = songTime(project, request.song);
+    durationSeconds =
+      request.durationSeconds ?? time.tempoMap.ticksToSeconds(request.bars! * time.ticksPerBar);
+    // The model wants a whole-number hint; ramped songs get their opening tempo.
+    bpm = request.bpm ?? Math.round(time.initialBpm);
+  }
+
+  // One namespace per song (§4.3): everything this run will mint must be
+  // free, or the model-minutes get spent and the project lands
+  // check-red. The base name must not be an asset's: audio/<name>/
+  // would be the ledger's directory, and the run's renameSync would
+  // write into it — over a legacy flat file's item, potentially over
+  // the bytes themselves. check names this collision; generate refuses
+  // to act under it.
+  const song = project.songs.find((s) => s.name === request.song)!;
+  if (song.assets?.data.assets.some((a) => a.name === name)) {
+    throw new Error(
+      `"${name}" is also an asset in ${request.song} — audio/${name}/ is the ` +
+        `ledger's, and generating would write into it (field check names ` +
+        `the collision; rename one side)`,
+    );
+  }
+  // Takes audition in the gen: package, so `${name}-<n>` must not be
+  // another generator's node name, for the same spent-model-minutes
+  // reason.
+  const genNames = new Set<string>();
+  for (const track of song.tracks) {
+    for (const entry of track.data.inputs) {
+      if (entry.supercollider === undefined && entry.generative === undefined) continue;
+      const n = generatorName(entry, track.data.name);
+      if (n !== name) genNames.add(n);
+    }
+  }
+  const auditionCollision = Array.from(
+    { length: request.variants },
+    (_, i) => `${name}-${i + 1}`,
+  ).find((n) => genNames.has(n));
+  if (auditionCollision !== undefined) {
+    throw new Error(
+      `"${auditionCollision}" is already a generator name in ${request.song} — generating ` +
+        `${request.variants} variants of "${name}" would mint it as an audition label ` +
+        `(rename a track or change an id)`,
+    );
+  }
+  if (entryFill === undefined) {
+    // The create path writes tracks/<name>.yaml, so the file, the gen
+    // node name, and the bare name must all be free — an existing track
+    // of that name would be overwritten, another track's generator would
+    // collide in gen:, and an existing takes directory would be written
+    // into by the renameSync below.
+    if (existsSync(join(songDir, 'tracks', `${name}.yaml`))) {
+      throw new Error(
+        `"${name}" is already a track in ${request.song} — a new request scaffolds ` +
+          `tracks/${name}.yaml, and that file exists; add a generative: entry to it ` +
+          `yourself, or pick a new name`,
+      );
+    }
+    if (genNames.has(name)) {
+      throw new Error(
+        `"${name}" is already a generator name in ${request.song} — rename a track ` +
+          `or change an id, or pick a new name`,
+      );
+    }
+    const taken = takenSongNames(songDir);
+    if (taken.has(name)) {
+      throw new Error(
+        `"${name}" is already a name in ${request.song} — a song's names are one ` +
+          `namespace (pick a new name)`,
+      );
+    }
+    const existing = readTakes(songDir, name);
+    if (existing !== undefined && existing.variants.length > 0) {
+      throw new Error(
+        `audio/${name}/ already holds ${existing.variants.length} takes in ` +
+          `${request.song} (pick a new name)`,
+      );
+    }
+  }
+  // The reference recording, snapshotted before the worker starts: a
+  // name in the song's namespace becomes the bytes the model reads and
+  // the hash the recipe records — the same bytes, which is the point of
+  // taking a copy. Everything here is a refusal rather than a repair,
+  // because a voice generate that guesses is one that commits audio in a
+  // voice nobody asked for.
+  //
+  // Outside the project deliberately: the snapshot is scaffolding for one
+  // run, and a stray copy under songs/ would be a file `field check` has
+  // opinions about and a person would have to delete.
+  const scratch = request.voiceRef === undefined ? undefined : mkdtempSync(join(tmpdir(), 'field-voice-ref-'));
+  try {
+    const reference =
+      request.voiceRef === undefined
+        ? undefined
+        : await snapshotVoiceRef(project, request.song, request.voiceRef, scratch!);
+    // An entry's reference hash is authored, not filled in (the track
+    // file never changes on generate), so the snapshot verifies against
+    // it — a generate in a drifted voice is refused, not recorded.
+    if (
+      entryFill?.voiceRefSha256 !== undefined &&
+      reference !== undefined &&
+      reference.sha256 !== entryFill.voiceRefSha256
+    ) {
+      throw new Error(
+        `voice_ref "${request.voiceRef}" does not match the entry's voice_ref_sha256 — ` +
+          `refusing to generate in a drifted voice (re-import the recording, or update the hash)`,
+      );
+    }
+    mkdirSync(outputDir, { recursive: true });
+
+    // Every refusal above is instant — the voice-ref snapshot included,
+    // a file copy and a hash — and everything below can take real time:
+    // the first worker-emitted progress line is a daemon boot, a python
+    // import, and a model load away, a silent minute that reads as a
+    // hang (found exercising the format). So who is starting is said
+    // now, from this side, last before the slow work — a refusal never
+    // gets a stray "starting" ahead of it (Bugbot on #120).
+    // Finer-grained in-run progress is generation-progress.md's line.
+    request.onProgress?.(`starting field-${kind === 'voice' ? 'voiced' : 'aced'}`);
+    const client =
+      kind === 'voice' ? await VoicedClient.connect(root) : await AcedClient.connect(root);
+    try {
+      client.on('event', (e: { event: string; stage?: string }) => {
+        if (e.event === 'progress' && e.stage) request.onProgress?.(e.stage);
+      });
+      const response =
+        client instanceof VoicedClient
+          ? await client.generate({
+              text: request.text!,
+              seed: request.seed,
+              variants: request.variants,
+              output_dir: outputDir,
+              // Omitted, never empty: "" and absent are different requests
+              // and only one of them means the model's own voice (#60).
+              ...(reference !== undefined ? { voice_ref: reference.path } : {}),
+              ...(request.exaggeration !== undefined
+                ? { exaggeration: request.exaggeration }
+                : {}),
+              ...(request.conviction !== undefined ? { conviction: request.conviction } : {}),
+            })
+          : await client.generate({
+              prompt: request.prompt!,
+              duration_seconds: durationSeconds!,
+              seed: request.seed,
+              variants: request.variants,
+              output_dir: outputDir,
+              lyrics: request.lyrics,
+              bpm,
+            });
+
+      // The worker writes uuid names; variants get deterministic, seed-order
+      // names. The directory carries the identity, so the filename is just
+      // the number (project-layout.md §3, decided at migration).
+      const files: string[] = [];
+      const hashes: string[] = [];
+      for (let i = 0; i < response.paths.length; i++) {
+        const target = join(outputDir, `${i + 1}.wav`);
+        renameSync(response.paths[i]!, target);
+        files.push(join('songs', request.song, 'audio', name, `${i + 1}.wav`));
+        hashes.push(await sha256File(target));
+      }
+
+      // Provenance: everything needed to audit or deliberately regenerate,
+      // recorded per take because that is what it describes — two takes
+      // can come from different model versions (bloom-in-tree.md §3). One
+      // timestamp for the run, read once, so hashing a slow batch cannot
+      // split the takes across a second boundary and imply two runs.
+      const generatedAt = new Date().toISOString();
+      const variants = files.map((_, i) => ({
+        file: `audio/${name}/${i + 1}.wav`,
+        model: response.model,
+        seed: response.seeds[i]!, // schema guarantees paths/seeds align
+        sha256: hashes[i]!,
+        generated_at: generatedAt,
+      }));
+      // Every take this run produced is usable, so the first is chosen
+      // outright and the sound resolves the moment it exists. `field
+      // choose` is then what its name says — switching to another take —
+      // rather than a second mandatory step between generating audio and
+      // being able to build with it. Nothing that already has takes
+      // reaches here, so this can never overwrite somebody's pick.
+      const CHOSEN_FIRST = 1;
+      // The takes go beside their audio, never into the request — that
+      // is what keeps generating from modifying a committed file
+      // (bloom-in-tree.md §7).
+      writeTakes(songDir, name, { gen: name, chosen: CHOSEN_FIRST, variants });
+
+      if (entryFill === undefined) {
+        // A brand-new request lands as a leaf track whose one input is
+        // the entry — the shape every request lives in (nested-tracks.md
+        // §18, decision 12). Validated through the schema before writing
+        // (this command must never emit a file `field check` would
+        // reject) but written from the raw object, because parsing
+        // applies every placement default and a scaffold full of
+        // `anchor: musical` noise is not the file a person would write.
+        // The entry authors `voice_ref_sha256` up front — entries pin
+        // their reference recording, and the run just verified the
+        // snapshot against those bytes.
+        const raw = {
+          name,
+          inputs: [
+            {
+              generative:
+                // The kind split, written out: whichever half this run is
+                // not, its fields are absent rather than
+                // undefined-valued, because a strict schema counts a
+                // present key.
+                kind === 'voice'
+                  ? {
+                      text: request.text,
+                      ...(reference !== undefined
+                        ? { voice_ref: request.voiceRef, voice_ref_sha256: reference.sha256 }
+                        : {}),
+                      ...(request.exaggeration !== undefined
+                        ? { exaggeration: request.exaggeration }
+                        : {}),
+                      ...(request.conviction !== undefined
+                        ? { conviction: request.conviction }
+                        : {}),
+                    }
+                  : {
+                      prompt: request.prompt,
+                      ...(request.lyrics !== undefined ? { lyrics: request.lyrics } : {}),
+                      bpm,
+                      duration_seconds: Number(durationSeconds!.toFixed(3)),
+                      ...(request.bars !== undefined ? { bars: request.bars } : {}),
+                    },
+            },
+          ],
+        };
+        trackSchema.parse(raw);
+        const doc = new Document(raw);
+        mkdirSync(join(songDir, 'tracks'), { recursive: true });
+        canonicalizeDocument(doc, trackOrder);
+        writeFileSync(join(songDir, 'tracks', `${name}.yaml`), stringifyDocument(doc));
+      }
+
+      return {
+        recipePath:
+          entryFill !== undefined
+            ? entryFill.trackPath
+            : join('songs', request.song, 'tracks', `${name}.yaml`),
+        files,
+        seeds: response.seeds,
+        model: response.model,
+        durationSeconds,
+        bpm,
+        voiceRef: request.voiceRef,
+      };
+    } finally {
+      client.close();
+    }
+  } finally {
+    // The snapshot is scaffolding for one run, and the recipe now
+    // carries its hash — so nothing downstream needs the copy.
+    if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+export interface ChooseOptions {
+  song: string;
+  variant: number; // 1-based, matching the file names and recipe order
+}
+
+export interface ChooseResult {
+  file: string; // song-relative, what the name's label now resolves to
+  sha256: string;
+  bytes: number;
+  previous?: number | undefined; // the previously chosen variant, if any
+}
+
+// Choosing repoints what the gen node *means* (project-layout.md §1.4,
+// §4): its label resolves to the chosen variant, placements reference
+// the track that carries the request, and the bytes never move — so
+// choosing again is a one-line diff and every placement follows. There
+// is no ledger step: the takes file pins them (sha256 per take,
+// verified by check), and a same-name asset would violate the song's
+// one namespace anyway.
+//
+// The line it edits is in audio/<name>/variants.yaml, never in a track
+// file (bloom-in-tree.md §7): which take you kept is a fact about your
+// machine, and a project that ships its requests without audio must not
+// be dirtied by someone choosing.
+export async function chooseVariant(
+  root: string,
+  name: string,
+  options: ChooseOptions,
+): Promise<ChooseResult> {
+  // Both names build paths; both must be slugs before any join.
+  if (!isSlug(name)) throw new Error(`name "${name}" must be a lowercase-slug`);
+  if (!isSlug(options.song)) throw new Error(`song "${options.song}" must be a lowercase-slug`);
+  const songDir = join(root, 'songs', options.song);
+  if (!existsSync(join(songDir, 'song.yaml'))) {
+    throw new Error(`song "${options.song}" does not exist`);
+  }
+  // A gen node (nested-tracks.md §18 step 3): a generative entry minting
+  // this name in one of the song's tracks.
+  const project = loadProject(root);
+  const song = project.songs.find((s) => s.name === options.song)!;
+  let found = false;
+  for (const track of song.tracks) {
+    for (const entry of track.data.inputs) {
+      if (entry.supercollider === undefined && entry.generative === undefined) continue;
+      if (generatorName(entry, track.data.name) !== name) continue;
+      if (entry.supercollider !== undefined) {
+        throw new Error(
+          `"${name}" is a supercollider generator — it is built by a rule, ` +
+            `and has no takes to choose`,
+        );
+      }
+      found = true;
+    }
+  }
+  if (!found) throw new Error(`no generative request "${name}" in ${options.song}`);
+
+  const takesDoc = readTakesDoc(songDir, name);
+  const takes = takesDoc && readTakes(songDir, name);
+  if (takes === undefined || takes.variants.length === 0) {
+    throw new Error(
+      `"${name}" has no takes yet\n\n# Use this command to generate. Specify a seed ` +
+        `with --seed <n>\nfield generate ${options.song}/${name}`,
+    );
+  }
+  // The attachment must be the gen node this path resolved. Without
+  // this, a misattached takes file gets `chosen` rewritten and a
+  // success report while the loader rejects the file and the graph
+  // never sees the choice.
+  if (takes.gen !== name) {
+    throw new Error(
+      `the takes in audio/${name}/ attach to gen "${takes.gen}", not "${name}" (field check)`,
+    );
+  }
+  const variant = takes.variants[options.variant - 1];
+  if (!variant) {
+    throw new Error(
+      `variant ${options.variant} does not exist (${takes.variants.length} variants)`,
+    );
+  }
+  const absolute = join(songDir, variant.file);
+  if (!existsSync(absolute)) throw new Error(`variant file not found: ${variant.file}`);
+  // Choosing asserts provenance, so the bytes must still be the bytes the
+  // takes file recorded — drifted output gets diagnosed, never chosen.
+  const sha256 = await sha256File(absolute);
+  if (sha256 !== variant.sha256) {
+    throw new Error(
+      `variant ${options.variant} does not match its recorded sha256 — refusing to choose (field check)`,
+    );
+  }
+  const bytes = statSync(absolute).size;
+
+  const previous = takes.chosen;
+  takesDoc!.setIn(['chosen'], options.variant);
+  canonicalizeDocument(takesDoc!, generativeTakesOrder);
+  writeFileSync(takesFilePath(songDir, name), stringifyDocument(takesDoc!));
+
+  return { file: variant.file, sha256, bytes, previous };
+}
+
+// Explicit, loud environment setup (ace-generation.md §3.4): uv sync for
+// each worker env. The multi-GB weights download happens on the first
+// generate of that kind, announced by its progress events.
+// Every generation worker, and the list a new one cannot be left out
+// of: `field setup <name>` resolves through it, so a worker missing
+// here is a worker nobody can install. Exported because that makes it
+// the canonical list, and anything else enumerating workers should
+// read it rather than keep a copy in step by hand (#67 review).
+export const SETUP_SPECS: WorkerSpec[] = [ACED_SPEC, VOICED_SPEC];
+
+// Every worker, or the one named by its package directory or its daemon name.
+export function selectWorkers(which?: string | undefined): WorkerSpec[] {
+  if (which === undefined) return SETUP_SPECS;
+  const named = SETUP_SPECS.filter((s) => s.packageDir === which || s.name === which);
+  if (named.length === 0) {
+    throw new Error(
+      `unknown worker "${which}" — try ${SETUP_SPECS.map((s) => s.packageDir).join(' or ')}`,
+    );
+  }
+  return named;
+}
+
+// What `field setup --existing` syncs and skips. Set up means the worker's
+// console script is installed, the test `field generate` gates on, and
+// not that a `.venv` exists: a dev-only sync makes one with no worker in it.
+export function partitionExisting(specs: WorkerSpec[]): { sync: WorkerSpec[]; skip: WorkerSpec[] } {
+  const sync = specs.filter((spec) => workerScriptInstalled(spec));
+  return { sync, skip: specs.filter((spec) => !sync.includes(spec)) };
+}
+
+// `existing` re-syncs only the workers already set up and sets up none,
+// which is what an upgrade wants (install.md §2.4): keep current what
+// someone chose to install, and never choose for them.
+export async function setupWorker(
+  onLine: (line: string) => void,
+  which?: string | undefined,
+  options: { existing?: boolean | undefined } = {},
+): Promise<void> {
+  let specs = selectWorkers(which);
+  if (options.existing === true) {
+    const { sync, skip } = partitionExisting(specs);
+    for (const spec of skip) onLine(`skipping ${spec.name}: not set up (field setup ${spec.packageDir})`);
+    if (sync.length === 0) return;
+    specs = sync;
+  }
+  for (const spec of specs) {
+    // The package, not the environment: creating the environment is what
+    // this command is for, so asking whether it exists first would make
+    // setup impossible to run once.
+    const present = workerPackagePresent(spec);
+    if (!present.ok) throw new Error(present.reason ?? `${spec.name} unavailable`);
+    // fileURLToPath, not URL.pathname: the latter hands back a
+    // percent-encoded path, so a checkout under a directory with a space
+    // in it pointed uv at somewhere that does not exist.
+    const project = fileURLToPath(new URL(`../../python/${spec.packageDir}/`, import.meta.url));
+    onLine(`syncing the ${spec.name} environment (uv)…`);
+    const { stderr } = await execFileAsync('uv', ['sync', '--project', project], {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    for (const line of stderr.split('\n').slice(-5)) if (line.trim()) onLine(line);
+  }
+  // A worker already set up has its weights, or downloaded them once.
+  if (options.existing === true) return;
+  onLine(
+    'ready — the first `field generate` of each kind downloads that model’s weights ' +
+      '(ACE-Step ~10 GB, Chatterbox ~2 GB)',
+  );
+}
+
+// `field setup --check`: one row per worker, changing nothing, in the
+// format `install.sh status` prints (install.md §2.4), which reads these
+// rows and passes them through. The probe is the one `field generate`
+// gates on, so a row here and a refusal there cannot disagree. `ok` is
+// false when a worker someone set up cannot run as it stands; a worker
+// nobody set up is not a problem.
+export function checkWorkers(
+  specs: WorkerSpec[] = SETUP_SPECS,
+  run?: ProbeRun | undefined,
+): { lines: string[]; ok: boolean } {
+  const row = (label: string, text: string): string => `${label.padEnd(14)} ${text}`;
+  const lines: string[] = [];
+  let ok = true;
+  for (const spec of specs) {
+    const probe = probeEnvironment(spec, run);
+    if (!probe.scriptInstalled) {
+      lines.push(row('worker-absent', `${spec.name} is not set up — field setup ${spec.packageDir} sets it up`));
+    } else if (!probe.uvPresent) {
+      ok = false;
+      lines.push(row('worker-no-uv', `${spec.name} is set up, and uv is not installed (brew install uv)`));
+    } else if (probe.synced === true) {
+      lines.push(row('worker-current', spec.name));
+    } else {
+      ok = false;
+      lines.push(row('worker-stale', `${spec.name} is out of date — run field setup ${spec.packageDir}`));
+    }
+  }
+  return { lines, ok };
+}

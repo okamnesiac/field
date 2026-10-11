@@ -1,0 +1,125 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+import { eqBandSchema, eqParams, hallParams, limitParams, plateParams, reverbParams } from '../src/schema/effects.js';
+import { bitDepth, sampleRate } from '../src/schema/common.js';
+
+// Emits native/audiod/src/plan-limits.h from the zod schemas.
+//
+// The daemon validates the render plan against the same domains the
+// control plane enforces on the way in (render-pipeline.md decision 6).
+// It has to: a value inside the type but outside the range is not merely
+// odd — `bandwidth: 0` makes a bell an identity filter and `ceiling_db: 1`
+// leaves audio untouched, so the plan describes work the binary does not
+// perform, under an action key that says it does.
+//
+// Generating rather than copying is the whole point. A hand-written
+// second copy of these numbers is drift waiting to happen, and a
+// *partial* copy — which is what this file replaced — has the same drift
+// risk with none of the coverage. `pnpm gen:limits` rewrites the header
+// and a test fails if the committed one is stale, so zod stays the single
+// source of truth that project-core.md §5 says it is.
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// zod's JSON Schema export is the supported way to read these out; the
+// alternative is reaching into `.def` internals that move between minor
+// versions.
+function bounds(schema: z.ZodType, key: string): { min: number; max: number } {
+  const json = z.toJSONSchema(z.object({ probe: schema })) as {
+    properties: { probe: { properties: Record<string, { minimum?: number; maximum?: number }> } };
+  };
+  const field = json.properties.probe.properties[key];
+  if (field?.minimum === undefined || field.maximum === undefined) {
+    throw new Error(`gen-plan-limits: ${key} has no min/max in the generated JSON Schema`);
+  }
+  return { min: field.minimum, max: field.maximum };
+}
+
+function objectBounds(shape: z.ZodRawShape, key: string): { min: number; max: number } {
+  return bounds(z.object(shape), key);
+}
+
+const band = (key: string) => bounds(eqBandSchema, key);
+
+const lines: string[] = [];
+const emit = (name: string, value: string) => lines.push(`constexpr double ${name} = ${value};`);
+const pair = (prefix: string, b: { min: number; max: number }) => {
+  emit(`${prefix}Min`, b.min.toString());
+  emit(`${prefix}Max`, b.max.toString());
+};
+
+pair('eqFrequency', band('frequency'));
+pair('eqGainDb', band('gain_db'));
+pair('eqBandwidth', band('bandwidth'));
+pair('limitCeilingDb', objectBounds(limitParams, 'ceiling_db'));
+pair('limitLookaheadMs', objectBounds(limitParams, 'lookahead_ms'));
+pair('limitReleaseMs', objectBounds(limitParams, 'release_ms'));
+pair('reverbMix', objectBounds(reverbParams, 'mix'));
+pair('reverbDecay', objectBounds(reverbParams, 'decay'));
+pair('reverbPredelayMs', objectBounds(reverbParams, 'predelay_ms'));
+pair('reverbDamping', objectBounds(reverbParams, 'damping'));
+pair('plateMix', objectBounds(plateParams, 'mix'));
+pair('plateDecay', objectBounds(plateParams, 'decay'));
+pair('platePredelayMs', objectBounds(plateParams, 'predelay_ms'));
+pair('plateDamping', objectBounds(plateParams, 'damping'));
+pair('plateDiffusion', objectBounds(plateParams, 'diffusion'));
+pair('plateModulation', objectBounds(plateParams, 'modulation'));
+pair('hallMix', objectBounds(hallParams, 'mix'));
+pair('hallDecay', objectBounds(hallParams, 'decay'));
+pair('hallDecayLow', objectBounds(hallParams, 'decay_low'));
+pair('hallDecayHigh', objectBounds(hallParams, 'decay_high'));
+pair('hallSize', objectBounds(hallParams, 'size'));
+pair('hallPredelayMs', objectBounds(hallParams, 'predelay_ms'));
+pair('hallDiffusion', objectBounds(hallParams, 'diffusion'));
+pair('hallModulation', objectBounds(hallParams, 'modulation'));
+pair('hallWidth', objectBounds(hallParams, 'width'));
+
+// Cardinality of the band array, read the same way.
+const bandsJson = z.toJSONSchema(z.object({ bands: eqParams.bands })) as {
+  properties: { bands: { minItems?: number; maxItems?: number } };
+};
+if (bandsJson.properties.bands.minItems === undefined) {
+  throw new Error('gen-plan-limits: bands has no minItems');
+}
+lines.push(`constexpr int eqBandsMin = ${bandsJson.properties.bands.minItems};`);
+lines.push(`constexpr int eqBandsMax = ${bandsJson.properties.bands.maxItems};`);
+
+const rates = (z.toJSONSchema(sampleRate) as { anyOf: { const: number }[] }).anyOf.map(
+  (entry) => entry.const,
+);
+lines.push(`constexpr int sampleRates[] = { ${rates.join(', ')} };`);
+
+// Delivery's bit depths, read the same way. An enumerated set rather
+// than a range, so the daemon needs the members and not bounds.
+const depths = (z.toJSONSchema(bitDepth) as { anyOf: { const: number }[] }).anyOf.map(
+  (entry) => entry.const,
+);
+lines.push(`constexpr int bitDepths[] = { ${depths.join(', ')} };`);
+
+const header = `#pragma once
+
+// GENERATED by scripts/gen-plan-limits.ts from src/schema/. Do not edit.
+// Run \`pnpm gen:limits\` after changing a schema range; a test fails if
+// this file is stale, and the render plan's version should move with it.
+
+namespace field::limits
+{
+
+${lines.join('\n')}
+
+} // namespace field::limits
+`;
+
+const out = join(root, 'native/audiod/src/plan-limits.h');
+// Written only when it changes. src/schema/plan-limits.test.ts runs this
+// on every `pnpm test`, and rewriting identical bytes moved the header's
+// mtime, so the next daemon build recompiled every file that includes it
+// and `install.sh status` reported the daemon stale (install.md §8.1).
+if (existsSync(out) && readFileSync(out, 'utf8') === header) {
+  process.stdout.write(`${out} is current\n`);
+} else {
+  writeFileSync(out, header);
+  process.stdout.write(`wrote ${out}\n`);
+}
