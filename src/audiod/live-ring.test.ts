@@ -81,6 +81,14 @@ describe.skipIf(!binary || process.platform === 'win32')('the live input ring (l
     expect(JSON.parse(stdout)).toEqual({ ok: true });
   });
 
+  it('refuses --ring-feed with a ring that is not a number, rather than starting a daemon', async () => {
+    const failed = await execFileAsync(binary!, ['--ring-feed', 'abc', 'take.wav']).then(
+      () => '',
+      (err: { code?: number; stderr?: string }) => `${err.code} ${err.stderr ?? ''}`,
+    );
+    expect(failed).toMatch(/^2 .*--ring-feed wants a ring number, not "abc"/);
+  });
+
   it('opens and closes an input, reports it in status, and refuses what it cannot do', async () => {
     client = await AudiodClient.connect(root, { nullOutput: true, idleSeconds: 60 });
     expect(client.supports('live-input')).toBe(true);

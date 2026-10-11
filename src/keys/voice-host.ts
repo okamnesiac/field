@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createSocket } from 'node:dgram';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,9 +13,10 @@ export function voiceHostScript(): string {
   return scScript('voice-host.scd');
 }
 
-// Where the built FieldOut plugin is (live-supercollider.md chunk 2):
-// FIELD_FIELDOUT when it names a directory holding it, else the checkout's
-// build, else undefined.
+// Where the built FieldOut plugin is (live-supercollider.md chunk 2): the
+// directory FIELD_FIELDOUT names, which must hold it, or when that is
+// unset, the checkout's build; undefined when the one that applies does
+// not hold it.
 export function fieldOutPluginDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const holds = (dir: string): boolean => ['FieldOut.scx', 'FieldOut.so'].some((name) => existsSync(join(dir, name)));
   const override = env['FIELD_FIELDOUT'];
@@ -131,6 +132,8 @@ export class VoiceHost {
   private reloadError: string | undefined;
   // Settles when the host first goes live, or rejects with why it did not.
   readonly ready: Promise<void>;
+  // The directory holding the route's SynthDef, which close removes.
+  private routeDir: string | undefined;
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
@@ -202,10 +205,14 @@ export class VoiceHost {
     const langPort = await freeUdpPort();
     // The route the host loads by file: sclang has no FieldOut class, so
     // Field writes the SynthDef itself.
-    const routing =
+    const routeDir =
       options.rings !== undefined && options.fieldOut !== undefined && options.rings.some((r) => r !== null)
+        ? mkdtempSync(join(tmpdir(), 'field-route-'))
+        : undefined;
+    const routing =
+      routeDir !== undefined
         ? (() => {
-            const routeDef = join(mkdtempSync(join(tmpdir(), 'field-route-')), 'field-route.scsyndef');
+            const routeDef = join(routeDir, 'field-route.scsyndef');
             writeFileSync(routeDef, routeSynthDef());
             // scsynth searches SC_PLUGIN_PATH beside its own plugins;
             // naming a plugin path any other way replaces them, which on
@@ -231,7 +238,9 @@ export class VoiceHost {
         ...routing,
       },
     });
-    return new VoiceHost(child, port, langPort, options);
+    const host = new VoiceHost(child, port, langPort, options);
+    host.routeDir = routeDir;
+    return host;
   }
 
   // Asks the host to load every program again, as one has changed; if one
@@ -247,6 +256,7 @@ export class VoiceHost {
   async close(timeoutMs = 3000): Promise<void> {
     this.closing = true;
     await this.stopServer();
+    if (this.routeDir !== undefined) rmSync(this.routeDir, { recursive: true, force: true });
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
     await new Promise<void>((done) => {
       const timer = setTimeout(() => this.child.kill('SIGKILL'), timeoutMs);

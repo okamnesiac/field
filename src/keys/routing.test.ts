@@ -1,4 +1,7 @@
+import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { promisify } from 'node:util';
+import { writeWavFloat32 } from '../audio/wav.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -114,8 +117,36 @@ describe.skipIf(!binary || process.platform === 'win32')('routing armed tracks t
       await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, {
         env: { ...process.env, FIELD_FIELDOUT: join(root, 'songs') },
       }),
-    ).toEqual({ reason: 'FieldOut is not built: run pnpm build:native' });
+    ).toEqual({ reason: `FIELD_FIELDOUT names ${join(root, 'songs')}, which holds no FieldOut plugin` });
     expect(await routeArmed([{ program: pad(), unheardEffects: [] }], root, { env })).toBeUndefined();
+  });
+
+  it("keeps the loop and solo another terminal's session was loaded with", async () => {
+    const client = await AudiodClient.connect(root);
+    try {
+      const { session } = await compileSession(root, 'creek', { loop: true, solo: 'bass' });
+      await client.session(session);
+      const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
+      expect(await client.status()).toMatchObject({ looping: true, solo: 'bass', song: 'creek' });
+      await routed.close();
+      expect(await client.status()).toMatchObject({ looping: true, solo: 'bass', song: 'creek' });
+    } finally {
+      client.close();
+    }
+  });
+
+  it('says whether FieldOut is writing the ring', async () => {
+    const routed = (await routeArmed([{ program: pad(), track: 'creek/bass', unheardEffects: [] }], root, { env })) as Routing;
+    try {
+      // Nothing writes it: no voice host here.
+      expect(await routed.flowing(300)).toBe(false);
+      const tone = new Float32Array(4800).fill(0.1);
+      writeWavFloat32(join(root, 'tone.wav'), 48000, [tone, tone]);
+      await promisify(execFile)(binary!, ['--ring-feed', String(routed.rings[0]), 'tone.wav'], { cwd: root });
+      expect(await routed.flowing(300)).toBe(true);
+    } finally {
+      await routed.close();
+    }
   });
 
   it('plays dry when the daemon converts the song to the device, and leaves no input open', async () => {

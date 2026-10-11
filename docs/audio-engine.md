@@ -110,7 +110,9 @@ A session whose input window names an open input reads it every block;
 one that names no open input is refused. With the transport stopped,
 the daemon still plays what the inputs reach, through a second instance
 of the output's chain, so you play over silence while the song's own
-chain and position stay where they were. That idle path needs the device
+chain and position stay where they were. A gain ramp on a window the
+input passes through glides on a clock of the overlay's own, which keeps
+moving while the transport is stopped, so the glide finishes either way. That idle path needs the device
 at the session's rate; under converted delivery a stopped session is
 silent and reads nothing. The reader keeps a block plus 256 frames in
 hand, the block being the largest it has been asked for, drops the

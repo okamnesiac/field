@@ -176,10 +176,25 @@ async function playRouted(
         })
       : undefined;
   host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
+  // A route scsynth never ran, because FieldOut did not load in it, leaves
+  // its ring empty: the voice is then nowhere, and the line says so.
+  if (host !== undefined && routing !== undefined) {
+    void host.ready
+      .then(() => routing.flowing())
+      .then((flowing) => {
+        if (flowing || instrument === undefined) return;
+        instrument.dry = [...new Set(armed.flatMap((a) => a.unheardEffects))];
+        instrument.dryReason = 'scsynth is not writing the voice into the daemon: FieldOut did not load';
+        draw();
+      })
+      .catch(() => {});
+  }
 
   // Saving a program loads it again, as saving a keymap does
   // (keyboard-instrument.md §14).
-  const stopWatchingPrograms = host !== undefined ? programs.map((p) => watchText(p, () => void host.reload())) : [];
+  // Each program once, however many tracks play it: one save, one reload.
+  const stopWatchingPrograms =
+    host !== undefined ? [...new Set(programs)].map((p) => watchText(p, () => void host.reload())) : [];
   const stopWatching =
     source.kind === 'file'
       ? watchKeymap(source.path, (result) => {
@@ -242,7 +257,7 @@ export function instrumentState(armed: ArmedInstrument[], heard = false, dryReas
   return {
     name: armed.map(armedName).join(' + '),
     dry,
-    ...(dry.length > 0 && dryReason !== undefined ? { dryReason } : {}),
+    ...(!heard && dryReason !== undefined ? { dryReason } : {}),
     status: { state: 'starting' },
   };
 }
@@ -261,7 +276,8 @@ export function instrumentText({ name, dry, dryReason, status, reload }: Instrum
   // heard (arming.md §2.1); routing them was not possible, and the reason
   // says why (live-supercollider.md chunk 3).
   const why = dryReason !== undefined ? ` (${dryReason})` : '';
-  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard${why}` : '';
+  const unheard =
+    dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard${why}` : dryReason !== undefined ? ` · dry${why}` : '';
   return `${state}${reload === undefined ? '' : ' · reloaded'}${unheard}`;
 }
 

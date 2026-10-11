@@ -317,6 +317,9 @@ private:
     std::atomic<bool> livePlaying { false };
     juce::int64 liveLength = 0;
     juce::String liveSong;
+    // The track soloed in the loaded session, when its compile had one,
+    // so a command reloading the song can keep it.
+    juce::String liveSolo;
     bool liveLoop = false;
     int liveRate = 0;
     bool liveEverStarted = false;

@@ -159,6 +159,9 @@ private:
         // timeline; produceUntil evaluates it per sample.
         double rampFromDb = 0.0;
         juce::int64 rampStart = -1;
+        // Where the same glide starts on the overlay's clock, which keeps
+        // moving while the transport is stopped (live-supercollider.md §9).
+        juce::int64 overlayRampStart = -1;
         juce::int64 rampLength = 0;
     };
 
@@ -240,6 +243,8 @@ private:
     // A window's linear gain at a position on the unwrapped timeline:
     // `baseGain` unless a ramp is gliding it.
     static double rampedGain (const Window& window, juce::int64 absoluteAt, double baseGain);
+    // The glide itself, `into` samples after it started.
+    static double glide (const Window& window, juce::int64 into);
     // Runs `working` through the chain from `fromStage`; a limiter stage
     // re-points working at what it emitted (which may be shorter while
     // its window primes).
@@ -329,10 +334,12 @@ private:
         std::vector<std::vector<float>> pre, post, delayed;
     };
     void buildOverlay();
-    // `absoluteFrom` is the clock at the block's start: a ramp on a
-    // window the input passes through glides on the same timeline the
-    // song's does.
-    void renderOverlay (int n, juce::int64 absoluteFrom);
+    // Glides on the overlay's own clock, which advances with every block
+    // the overlay renders, playing or stopped, so a ramp issued while the
+    // transport is stopped finishes in real time instead of restarting
+    // with every block.
+    void renderOverlay (int n);
+    juce::int64 overlayClock = 0;
     std::vector<std::shared_ptr<LiveInput>> inputSources;
     std::vector<OverlayTrack> overlay; // children before the tracks that read them
     std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay

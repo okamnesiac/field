@@ -505,9 +505,9 @@ void LiveSession::renderIdle (float* const* out, int numChannels, int n)
             std::fill (out[c], out[c] + n, 0.0f);
         return;
     }
-    // Ramps evaluate at the stopped position: the song's clock does not
-    // move, and neither does any glide on it.
-    renderOverlay (n, clock);
+    // The song's clock does not move while stopped; the overlay's does,
+    // so a ramp on a window the input passes through still glides.
+    renderOverlay (n);
     const auto& mixed = overlay[(size_t) slot].post;
     for (int c = 0; c < 2; ++c)
         idleBlock[(size_t) c].assign (mixed[(size_t) c].begin(), mixed[(size_t) c].begin() + n);
@@ -552,7 +552,7 @@ static void passThrough (std::vector<std::vector<float>>& line,
     rightOut = out[1].data();
 }
 
-void LiveSession::renderOverlay (int n, juce::int64 absoluteFrom)
+void LiveSession::renderOverlay (int n)
 {
     if (inputScratch[0].size() < (size_t) n)
         for (auto& channel : inputScratch)
@@ -568,7 +568,9 @@ void LiveSession::renderOverlay (int n, juce::int64 absoluteFrom)
         dsp::balanceGains (window.pan, balanceL, balanceR);
         for (int i = 0; i < n; ++i)
         {
-            const double g = rampedGain (window, absoluteFrom + i, baseGain);
+            const double g = window.overlayRampStart < 0
+                                 ? baseGain
+                                 : glide (window, overlayClock + i - window.overlayRampStart);
             block[0][(size_t) i] = (float) ((double) block[0][(size_t) i] + (double) left[i] * g * balanceL);
             block[1][(size_t) i] = (float) ((double) block[1][(size_t) i] + (double) right[i] * g * balanceR);
         }
@@ -619,7 +621,7 @@ void LiveSession::renderOverlay (int n, juce::int64 absoluteFrom)
             post.assign (delayed.begin(), delayed.begin() + n);
             delayed.erase (delayed.begin(), delayed.begin() + n);
         }
-    }
+    }    overlayClock += n;
 }
 
 void LiveSession::primeOutput()
@@ -822,10 +824,15 @@ double LiveSession::rampedGain (const Window& window, juce::int64 absoluteAt, do
 {
     if (window.rampStart < 0)
         return baseGain;
-    // A dB-linear glide from rampFromDb to gainDb, evaluated on the
-    // unwrapped timeline; before it starts, the old value; after, the new
-    // one — and after a wrap, still the new one.
-    const juce::int64 into = absoluteAt - window.rampStart;
+    // Evaluated on the unwrapped timeline, so after a wrap the new value
+    // holds.
+    return glide (window, absoluteAt - window.rampStart);
+}
+
+double LiveSession::glide (const Window& window, juce::int64 into)
+{
+    // A dB-linear glide from rampFromDb to gainDb: before it starts, the
+    // old value; after, the new one.
     const double progress = window.rampLength <= 0
                                 ? 1.0
                                 : std::clamp ((double) into / (double) window.rampLength, 0.0, 1.0);
@@ -1000,7 +1007,7 @@ void LiveSession::renderBlock (float* const* out, int numChannels, int n)
         {
             // What the inputs reach, added before the output's chain so
             // its inserts hear the true sum (§9).
-            renderOverlay (step, clock);
+            renderOverlay (step);
             if (const int slot = overlayIndex[(size_t) outputTrack]; slot >= 0)
                 for (int c = 0; c < 2; ++c)
                     for (int i = 0; i < step; ++i)
@@ -1161,6 +1168,7 @@ void LiveSession::ramp (const std::string& trackName, int input, double gainDb, 
     // time would resurrect the old gain each pass (Codex's finding). A
     // pre-rendered child re-renders in chunk 3's diffing instead.
     window.rampStart = clock;
+    window.overlayRampStart = overlayClock;
     window.rampLength = (juce::int64) std::llround ((rampMs / 1000.0) * (double) rate);
 }
 

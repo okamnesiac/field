@@ -226,30 +226,37 @@ input through FieldOut, a SuperCollider plugin that ships with Field
 ([audio-engine.md](audio-engine.md) "Live inputs"). With the song
 stopped, you play over silence; press play in another terminal
 (`field transport play`) and you play over the song. When you quit,
-`field keys` closes the inputs and loads the song again without them.
+`field keys` closes the inputs and loads the song again without them,
+keeping the loop, region, and solo another terminal set.
 
 Each track gets a voice of its own, even when two share an instrument.
 An instrument you name without a track still plays straight to the
 device. The voice plays on the daemon's device, so the two share a
-clock, and reaches the speakers late by the latency of the limiters and
-hosted plugins on its way up, a few milliseconds for the built-in
+clock, and reaches the speakers late by the daemon's block plus 256
+frames, the margin its reader keeps, and the latency of the limiters
+and hosted plugins on its way up, a few milliseconds for the built-in
 limiter. `field play`, its `--watch`, `field ui`, and `field record`
 keep the voice routed when they load the song again, and the inputs
 close with `field keys`, even when it is killed.
 
 When a track's voice cannot go through the daemon, it plays straight to
-the device, and the instrument's line says which effects you are not
-hearing and why:
+the device, and the instrument's line says why, and which effects on its
+way to the speakers, from `main` down, you are not hearing:
 
 ```console
-keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, main are not heard (FieldOut is not built: run pnpm build:native)
+keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on main, keys-bus are not heard (FieldOut is not built: run pnpm build:native)
 ```
+
+With no effects on its way, the line ends `· dry (<why>)`.
 
 That happens when FieldOut is not built, on Windows, which has no
 POSIX shared memory, when the daemon predates live inputs, when the
 tracks you name are in two songs, because one session plays one song,
-when `--device` names a device other than the daemon's, or when the
-device cannot run at the song's rate and the daemon converts it.
+when `--device` names a device other than the daemon's, when the
+device cannot run at the song's rate and the daemon converts it, or
+when `FIELD_FIELDOUT` names a directory with no FieldOut in it. If
+FieldOut does not load in `scsynth`, the ring stays empty, and the line
+says so within two seconds of the voice going live.
 
 ## Record what you play
 

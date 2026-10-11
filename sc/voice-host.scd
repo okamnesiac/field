@@ -118,8 +118,7 @@ boot = {
 				startRoutes.();
 				server.sync;
 				booting = false;
-				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger,
-					"routed", routes.count(_.notNil)]);
+				emit.(["ready", true, "device", device ? "system output", "sample_rate", server.sampleRate.asInteger]);
 			}
 			{ launched.notNil and: { server.pid.isNil } } {
 				waiting = false;

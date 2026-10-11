@@ -61,7 +61,11 @@ getting the voice's audio into the daemon's graph; until then
    sustain, and release apply to all of them, through the voicer as
    today. Saving any of the programs reloads every one
    (keyboard-instrument.md §14); if one does not load, every voice
-   stays as it was.
+   stays as it was. *Amended (2026-10-11, live-supercollider.md chunk
+   3):* when the tracks play through their effects, each armed track
+   gets a voice of its own, even when two share an instrument, because
+   each voice goes to its own input; an instrument named without a track
+   still sounds once.
 4. The instrument's line names each armed track and its instrument, as
    `keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers`.
    When a track you named has inserts on the way down to its MIDI track,
@@ -129,7 +133,9 @@ overturned in review.
 - **Unison in one voice host.** One `scsynth` on one device, with a
   voice per instrument per key. Rejected: one host per instrument, which
   boots one server per instrument on the same device and multiplies the
-  boot time.
+  boot time. *Amended (2026-10-11, live-supercollider.md chunk 3):* still
+  one host, now with a voice per armed track per key when the tracks
+  play through their effects.
 - **Every armed MIDI track records every MIDI source.** That is what
   unison means for recording, and it needs no routing. Rejected for now:
   routing by MIDI channel, so the keys and the bass could be played on
@@ -146,7 +152,7 @@ overturned in review.
 | # | Do | Expect |
 | --- | --- | --- |
 | 1 | In `examples/bloom`, give `creek` a track `keys` whose record entry has `instrument: juno` and no takes, and run `field keys creek/track:keys`. | `juno` plays, and the instrument's line names `keys`. |
-| 2 | Add a track `keys-bus` whose only input is `track: keys`, with an insert, and run `field keys creek/track:keys-bus`. | `juno` plays, and the line says the effects on `keys-bus` are not heard yet. |
+| 2 | Add a track `keys-bus` whose only input is `track: keys`, with an insert, and run `field keys creek/track:keys-bus`. | `juno` plays, and the line says the effects on `keys-bus` are not heard yet. *Amended (2026-10-11, live-supercollider.md chunk 3):* `juno` plays through `keys-bus`'s insert, and the line says nothing about effects; with routing not possible, it says `· dry: the effects on … are not heard (<why>)`. |
 | 3 | Add a track `bass` whose record entry has `instrument: bass`, put it under `keys-bus` too, and run `field keys creek/track:keys-bus`. | Exit 1, listing `keys` and `bass`. |
 | 4 | Run `field keys creek/track:keys creek/track:bass` and press a key. | Both instruments sound the note at once. A held key and its release reach both. |
 | 5 | Run `field keys creek/track:pad-sc`, a track with no record entry and nothing under it that has one. | Exit 1: no MIDI track there. |

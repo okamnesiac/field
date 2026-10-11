@@ -19,6 +19,10 @@ export interface Routing {
   // The daemon's output device, which the voice host must boot on so the
   // two share a clock; undefined when the daemon names none (null output).
   device: string | undefined;
+  // Whether FieldOut is writing every ring this routing opened, within
+  // `ms`: FieldOut writes every block, silence included, so a ring that
+  // stays empty means scsynth never ran the route.
+  flowing(ms?: number): Promise<boolean>;
   // Closes every input this routing opened and loads the song again with
   // whatever inputs others still hold, so the daemon is not left reading
   // rings nobody writes.
@@ -56,18 +60,42 @@ export async function routeArmed(
   if (songs.length > 1) return { reason: `the tracks are in ${songs.join(' and ')}, and one session plays one song` };
   if (process.platform === 'win32') return { reason: 'live inputs need POSIX shared memory, which Windows does not have yet' };
   const fieldOut = fieldOutPluginDir(options.env);
-  if (fieldOut === undefined) return { reason: 'FieldOut is not built: run pnpm build:native' };
+  if (fieldOut === undefined) {
+    const named = (options.env ?? process.env)['FIELD_FIELDOUT'];
+    return {
+      reason:
+        named !== undefined && named !== ''
+          ? `FIELD_FIELDOUT names ${named}, which holds no FieldOut plugin`
+          : 'FieldOut is not built: run pnpm build:native',
+    };
+  }
 
-  const client = await AudiodClient.connect(root);
+  let client: AudiodClient;
+  try {
+    client = await AudiodClient.connect(root);
+  } catch (err) {
+    return { reason: `field-audiod did not answer: ${(err as Error).message.split('\n')[0]!}` };
+  }
   const opened: string[] = [];
   const song = songs[0]!;
   const closeOpened = async (): Promise<void> => {
     for (const name of opened.splice(0)) await client.closeInput(name).catch(() => {});
   };
-  // The song with whatever inputs are open now, others' included.
+  // The song with whatever inputs are open now, others' included, and
+  // whatever the session loaded now was compiled and set with: its loop,
+  // its region, and its solo. A field keys load changes only the inputs.
   const reload = async (): Promise<void> => {
-    const { session } = await compileSession(root, song, { inputs: await keysInputsFor(client, song) });
+    const status = await client.status();
+    const same = status.live === true && status.song === song;
+    const { session } = await compileSession(root, song, {
+      ...(same && status.looping === true ? { loop: true } : {}),
+      ...(same && status.solo !== undefined ? { solo: status.solo } : {}),
+      inputs: await keysInputsFor(client, song),
+    });
     await client.session(session);
+    if (same && status.loop_from !== undefined && status.loop_to !== undefined) {
+      await client.loop(status.loop_from, status.loop_to);
+    }
   };
   const unrouted = async (reason: string): Promise<Unrouted> => {
     if (opened.length > 0) {
@@ -110,6 +138,15 @@ export async function routeArmed(
       rings,
       fieldOut,
       device: daemonDevice,
+      flowing: async (ms = 2000) => {
+        const deadline = Date.now() + ms;
+        for (;;) {
+          const written = new Map(((await client.status()).inputs ?? []).map((i) => [i.name, i.written]));
+          if (opened.every((name) => (written.get(name) ?? 0) > 0)) return true;
+          if (Date.now() > deadline) return false;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      },
       close: async () => {
         try {
           await closeOpened();

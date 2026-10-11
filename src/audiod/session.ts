@@ -248,6 +248,10 @@ export const sessionSchema = z.strictObject({
   // The song this session was compiled from — identity for transport
   // status and locate, which have no artifact path to derive it from.
   song: z.string().min(1),
+  // The track soloed in this compile (model/solo.ts), carried so the daemon
+  // can report it and a command reloading the song can keep it; the
+  // engine plays the session as compiled either way.
+  solo: z.string().min(1).optional(),
   rate: z.number().int().positive(), // the engine clock: the song's rate
   // The song's declared extent at the session rate; with loop, the
   // clock wraps there — sample-exact, no takeover machinery.

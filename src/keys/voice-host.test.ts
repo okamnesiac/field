@@ -221,9 +221,10 @@ describe('the voice host process', () => {
     // FieldOut beside scsynth's own plugins, not in place of them.
     expect(seen).toMatchObject({ rings: '[4213871,null]', pluginPath: '/opt/fieldout' });
     // The route's SynthDef, which Field writes because sclang has no
-    // FieldOut class.
+    // FieldOut class, and which goes when the host does.
     expect(readFileSync(seen.routeDef).subarray(0, 4).toString('latin1')).toBe('SCgf');
     await host.close();
+    expect(existsSync(seen.routeDef)).toBe(false);
     // A FieldOut still running when scsynth quits crashes it on the way out.
     const sent = readFileSync(log, 'latin1');
     expect(sent.indexOf('/g_freeAll')).toBeGreaterThanOrEqual(0);

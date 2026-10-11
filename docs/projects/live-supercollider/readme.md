@@ -82,6 +82,19 @@ freeze still never collapses a track on the path.
 6. When `field keys` exits, the daemon drops the input and the live
    marking, and the session renders as before.
 
+*Amended (2026-10-11, as built in chunk 3):* `field keys` opens the
+inputs and compiles and loads the song itself, rather than the daemon
+loading it "if none is loaded" (step 2): it always loads the song with
+every open `keys:` input, keeping the loaded session's loop, region, and
+solo, and `field play`, its watch, `field ui`, and `field record` do the
+same when they load it. The voice host does not call `FieldOut.ar(ring)`
+in place of `Out.ar(0)` (step 3): each routed instrument's voices write
+to its private bus through `out`, and a route synth Field writes,
+`In` into `FieldOut`, carries the bus to the ring, on the daemon's
+device. On exit `field keys` closes the inputs and loads the song again
+with what remains (step 6), and the daemon closes an input whose
+connection drops.
+
 ### 2.2 Shapes
 
 | Shape | Change |
@@ -90,7 +103,7 @@ freeze still never collapses a track on the path.
 | Live tracks (`live.cpp`) | A track with an input below it evaluates per block; `comp_delay` on its path becomes non-zero for the first time. |
 | Freeze (`src/graph/live.ts`) | A track with an input below it is never collapsed into its stem. |
 | Daemon protocol | `input` op: attach a ring to a track, answer its name; `input_close`. |
-| Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. |
+| Voice host | `FIELD_RING` in its environment: play into `FieldOut` instead of the device. *Amended (2026-10-11, as built in chunk 3):* `FIELD_RINGS`, a ring or null per instrument, and `FIELD_ROUTE_DEF`, the route's SynthDef file; FieldOut's directory reaches scsynth on `SC_PLUGIN_PATH`. |
 | `FieldOut` (new, `native/sc-fieldout/`) | An `scsynth` UGen plugin writing its input into a POSIX shared-memory, single-producer, single-consumer ring. |
 
 *Amended (2026-10-11, as built in chunk 2):* the `input` op takes a
@@ -224,7 +237,13 @@ timeline. A session swap builds the overlay afresh in the new session:
 the input goes silent for its path's latency and any tail its chains
 were ringing stops. Chunk 3 swaps sessions under a playing input, and
 decides there whether that gap is acceptable or the overlay's state
-should carry across.
+should carry across. Glides on the overlay run on a clock of its own,
+which keeps moving while the transport is stopped, so a fader moved
+while stopped finishes its glide. The idle path's second instance of
+the output's chain keeps its state across play and stop, so the first
+blocks after a stop can carry a tail from before play; resetting it
+would rebuild stages inside the audio callback, which allocates, so it
+is left as is.
 
 **Why not evaluate the path in place.** A track's content sits on a
 timeline its placement offsets, and a track placed more than once would
@@ -323,7 +342,16 @@ must sit under `main`.
   the device's rate once a session has settled it; FieldOut reaches
   scsynth through `SC_PLUGIN_PATH`, beside its own plugins, which on
   Linux the replaced plugin path had lost; and the voice contract says
-  a voice writes to `out`, a private bus when routed. Criterion 3 by ear,
+  a voice writes to `out`, a private bus when routed. Its second review
+  found five more: a `field keys` load dropped another terminal's loop,
+  region, and solo, now carried through `status`, which reports the
+  solo; a ramp while stopped restarted its glide every block, now on the
+  overlay's own clock; a failed route said nothing when no named track
+  had inserts, and the dry note now names the effects above the track
+  too and always gives the reason; `field keys` checks that FieldOut is
+  writing once the voice goes live; and §2.1, §2.2, arming.md, and
+  keyboard-instrument.md carry dated amendments for what chunk 3
+  changed. Criterion 3 by ear,
   and criteria 4 and 5 on the real device, are still owed; a swap under
   a playing input, which §9 leaves to this chunk, rebuilds the overlay
   cold, a gap of the path's latency, accepted for now.

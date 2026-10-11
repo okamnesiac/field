@@ -775,7 +775,9 @@ Each chunk is one pull request, in order:
    lets it render. §12.3 answers it with Field's renderer.
 4. **Hearing the voice through the mix.** The voice skips inserts and
    the master chain until live-supercollider puts `scsynth` in the
-   graph. This is deferred to that project on purpose.
+   graph. This is deferred to that project on purpose. Answered
+   (2026-10-11): live-supercollider.md chunk 3 routes a track's voice
+   through its effects and every track's above it.
 5. **Reloading the voice when its file changes.** The voice host could
    re-run the program and add the new SynthDef while you play, as a
    keymap given by path already reloads. §14 answers it: it reloads.

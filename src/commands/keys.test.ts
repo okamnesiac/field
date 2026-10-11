@@ -100,6 +100,13 @@ describe('the instrument line', () => {
     expect(instrumentText({ ...instrumentState(armed, false, 'FieldOut is not built: run pnpm build:native')!, status: live })).toBe(
       'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard (FieldOut is not built: run pnpm build:native)',
     );
+    // A route that failed says why even with no effects to name.
+    expect(
+      instrumentText({
+        ...instrumentState([{ program: '/p/bass.scd', track: 'creek/bass', unheardEffects: [] }], false, 'FieldOut is not built: run pnpm build:native')!,
+        status: live,
+      }),
+    ).toBe('bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry (FieldOut is not built: run pnpm build:native)');
     // Routed through the daemon, the voices pass through every effect.
     expect(instrumentText({ ...instrumentState(armed, true, 'unused')!, status: live })).toBe(
       'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers',

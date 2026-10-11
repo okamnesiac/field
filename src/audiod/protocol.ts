@@ -321,6 +321,7 @@ export const statusResponseSchema = z.object({
   looping: z.boolean().optional(), // daemon >= 0.3
   live: z.boolean().optional(), // a live session is loaded (daemon feature "session")
   song: z.string().optional(), // the live session's song (live only)
+  solo: z.string().optional(), // the track its compile soloed, when it did (live only)
   sample_rate: z.number().optional(), // the live session's rate (live only)
   // Converted delivery's in-flight frames (live only, daemon >= 0.7):
   // the skew cross-rate-live.md decision 3 bounds, made visible.

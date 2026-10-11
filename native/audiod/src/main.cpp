@@ -207,7 +207,13 @@ int main (int argc, char* argv[])
             ringSelfTest = true;
         else if (arg == "--ring-feed" && i + 2 < argc)
         {
-            ringFeedId = juce::String (argv[++i]).getIntValue();
+            const juce::String id (argv[++i]);
+            ringFeedId = id.containsOnly ("0123456789") ? id.getIntValue() : 0;
+            if (ringFeedId <= 0)
+            {
+                std::fprintf (stderr, "field-audiod: --ring-feed wants a ring number, not \"%s\"\n", id.toRawUTF8());
+                return 2;
+            }
             ringFeedWav = argv[++i];
         }
         else if (arg == "--idle" && i + 1 < argc)

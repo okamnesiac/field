@@ -486,6 +486,7 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             liveLength = next->lengthSamples();
             liveLoop = next->looping();
             liveSong = session.getProperty ("song", juce::var()).toString();
+            liveSolo = session.getProperty ("solo", juce::var()).toString();
             retired = std::move (liveSession);
             liveSession = std::move (next);
             if (hadSession)
@@ -790,6 +791,8 @@ juce::var Player::status (bool consumePeak)
         result->setProperty ("live", true);
         if (liveSong.isNotEmpty())
             result->setProperty ("song", liveSong);
+        if (liveSolo.isNotEmpty())
+            result->setProperty ("solo", liveSolo);
         result->setProperty ("sample_rate", liveRate);
         // The in-flight converted audio decision 3's skew bound talks
         // about: already-converted frames the ear has not heard yet.
