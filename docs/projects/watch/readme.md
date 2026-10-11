@@ -1,10 +1,14 @@
 ---
-status: in-progress
-priority: now
+status: completed
 ---
 
-**Outcome:** Shipped: both chunks (#34, #35). Stays open while §5's
-status-visibility question is open, per its neighbours' precedent.
+**Outcome:** Superseded. Both chunks shipped (#34, #35) and were used
+for real on 2026-08-06; [realtime](../realtime/readme.md)'s chunk 3
+(#139) then retired the play half — the daemon `reload` op and the
+loop-wrap takeover — and `field play <song> --watch` runs on the live
+engine instead.
+`field build --watch` stands as built. §5's status-visibility question
+went moot with the looped file hash it asked about.
 
 # Plan: Watch mode — the loop follows the project
 

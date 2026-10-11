@@ -19,7 +19,8 @@ list` groups by priority, `project show <name>` prints one plan, and
 The docs are [overview](docs/README.md),
 [architecture](docs/architecture.md), [tracks](docs/tracks.md),
 [project model](docs/project-model.md), [build graph](docs/build-graph.md),
-[audio engine](docs/audio-engine.md), [remote](docs/remote.md).
+[audio engine](docs/audio-engine.md), [remote](docs/remote.md),
+[keys](docs/keys.md).
 
 Where code does not exist yet these describe how the system is *designed* to
 work and are the source of truth for it, which is less of the repo than it
@@ -35,7 +36,7 @@ decision, update the record with what changed, don't just diverge from it.
 ## Stack
 
 Stack choices (Node 24, pnpm, ESM-only, strict TypeScript, zod v4 +
-generated JSON Schema, commander, vitest, afconvert) are recorded in
+generated JSON Schema, commander, vitest) are recorded in
 [project-core.md §5](docs/projects/project-core/readme.md). Use pnpm — never npm
 or yarn, and never generate a package-lock.json.
 
@@ -48,7 +49,7 @@ takes no direct pushes, history stays linear, every review thread must be
 resolved before a merge, and merges are squashed with the PR title and body
 taken as the commit message.
 
-<!-- projector:begin 1 -->
+<!-- projector:begin 2 -->
 ## Projector conventions
 
 This repository keeps its project plans in Git with
@@ -69,6 +70,13 @@ body as prose that explains why the change exists, because a squash merge makes
 it the commit message. Match the line wrapping already used around a Markdown
 edit, and do not hard-wrap prose you post to GitHub, because GitHub renders
 line breaks.
+
+Open dependent work that is too large to review as one pull request as a
+GitHub stack with `gh stack`, as Projector's `implement` skill describes
+under "Stack dependent work". Fix stacked code on the branch that introduced
+it, and let `gh stack` carry the fix up by rebasing the layers above. Chain
+pull requests by base branch, and update them by merging, only where
+`gh stack` is unavailable.
 
 Projector generates this section. To change it, change the template in
 Projector and run `project init`.

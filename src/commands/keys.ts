@@ -1,0 +1,220 @@
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
+import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
+import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
+import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+import { printKeymap, signed } from '../keys/print.js';
+import { KeysSession, type MidiMessage } from '../keys/session.js';
+import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+import { instrumentPath, VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
+import { findProjectRoot } from '../model/project.js';
+import type { Keymap } from '../schema/keymap.js';
+
+export const UNSUPPORTED_TERMINAL =
+  'field keys needs a terminal that reports key releases through the kitty keyboard protocol: ' +
+  'Ghostty, iTerm2 3.5 or later, kitty, or WezTerm. This terminal did not answer the protocol probe.';
+
+export interface KeysOptions {
+  keymap?: string;
+  print?: boolean;
+  device?: string;
+}
+
+// A bare instrument name resolves on the project's instruments shelf, as a
+// supercollider: entry's source does; a path resolves from the project
+// root, or from here outside a project (keyboard-instrument.md §2.1).
+export function resolveInstrument(spec: string, cwd = process.cwd()): string {
+  const root = findProjectRoot(cwd);
+  if (root === undefined && !spec.includes('/')) {
+    throw new Error(
+      `field keys ${spec}: a bare instrument name resolves in a project's shared/instruments/, ` +
+        'and this is not inside a Field project; give the program by path instead',
+    );
+  }
+  const path = instrumentPath(spec, root ?? cwd);
+  if (!existsSync(path)) throw new Error(`field keys ${spec}: no instrument program at ${path}`);
+  return path;
+}
+
+export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {
+  const source = resolveKeymapSource(options.keymap);
+  const keymap = loadKeymap(source.path);
+  if (options.print === true) {
+    process.stdout.write(printKeymap(keymap));
+    return;
+  }
+  const program = instrument !== undefined ? resolveInstrument(instrument) : undefined;
+  const { stdin, stdout } = process;
+  if (!stdin.isTTY || !stdout.isTTY) {
+    throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
+  }
+  await withKittyKeyboard({ stdin, stdout }, (rest) =>
+    play({ stdin, stdout }, { source, keymap, program, device: options.device }, rest),
+  );
+}
+
+// Raw mode and the protocol flags are the terminal's state, not ours, so
+// every way out gives them back: a return, a throw, and a crash.
+async function withKittyKeyboard(tty: Tty, run: (rest: string) => Promise<void>): Promise<void> {
+  let enabled = false;
+  const restore = (): void => {
+    if (enabled) tty.stdout.write(RESTORE);
+    enabled = false;
+    if (tty.stdin.isRaw) tty.stdin.setRawMode(false);
+    tty.stdin.pause();
+  };
+  process.once('exit', restore);
+  try {
+    tty.stdin.setRawMode(true);
+    tty.stdin.resume();
+    const probe = await probeKittyProtocol(tty);
+    if (!probe.supported) throw new Error(UNSUPPORTED_TERMINAL);
+    tty.stdout.write(ENABLE);
+    enabled = true;
+    await run(probe.rest);
+  } finally {
+    restore();
+    process.removeListener('exit', restore);
+  }
+}
+
+interface PlayOptions {
+  source: KeymapSource;
+  keymap: Keymap;
+  program: string | undefined;
+  device: string | undefined;
+}
+
+type InstrumentState = { name: string; status: VoiceHostStatus | { state: 'starting' } };
+
+async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
+  const { source, program } = options;
+  const session = new KeysSession(options.keymap);
+  let layout: KeyboardLayout | undefined;
+  let layoutPositions: ReadonlyMap<string, string> | undefined;
+  let reloadError: string | undefined;
+  const instrument: InstrumentState | undefined =
+    program !== undefined ? { name: basename(program, '.scd'), status: { state: 'starting' } } : undefined;
+
+  const draw = (): void => {
+    // A terminal that reports no size reports 0 columns.
+    const width = Math.max(20, (tty.stdout.columns || 80) - 1);
+    tty.stdout.write(`\r\x1b[K${statusText(session, layout, reloadError, instrument).slice(0, width)}`);
+  };
+
+  let stop!: (error?: Error) => void;
+  const stopped = new Promise<Error | undefined>((resolve) => {
+    stop = resolve;
+  });
+
+  // Before the helper starts, because its first keyboard layout report
+  // draws the status line.
+  tty.stdout.write(`Playing ${options.keymap.name} as the MIDI source "${SOURCE_NAME}". Esc or Ctrl-C quits.\n`);
+  if (source.kind === 'file') tty.stdout.write(`Saving ${source.path} reloads it.\n`);
+
+  const helper = await KeysHelper.start(SOURCE_NAME, {
+    onKeyboard: (reported) => {
+      layout = reported;
+      layoutPositions = charactersToPositions(reported);
+      draw();
+    },
+    onExit: (reason) => stop(new Error(`the MIDI helper stopped: ${reason}`)),
+  });
+  const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
+
+  // The host starts after the helper, so `Field Keys` exists when sclang
+  // connects its MIDI inputs; the keyboard plays while it boots.
+  const device = options.device ?? helper.defaultOutput;
+  const host =
+    program !== undefined
+      ? await VoiceHost.start({
+          instrument: program,
+          ...(device !== undefined ? { device } : {}),
+          onStatus: (status) => {
+            if (status.state === 'voice') return;
+            instrument!.status = status;
+            draw();
+          },
+          onExit: (reason) => stop(new Error(`the voice host stopped: ${reason}`)),
+        })
+      : undefined;
+  host?.ready.catch((err: Error) => stop(new Error(`the voice host did not start: ${err.message}`)));
+
+  const stopWatching =
+    source.kind === 'file'
+      ? watchKeymap(source.path, (result) => {
+          if ('error' in result) {
+            reloadError = result.error.problems[0];
+          } else {
+            reloadError = undefined;
+            send(session.setKeymap(result.keymap));
+            session.message ??= `reloaded ${result.keymap.name}`;
+          }
+          draw();
+        })
+      : undefined;
+
+  const pressed = new PressedKeys();
+  let pending = carried;
+  const onData = (chunk: Buffer): void => {
+    const { events, rest } = decodeTerminal(pending + chunk.toString('utf8'));
+    pending = rest;
+    for (const event of events) {
+      if (isQuit(event)) return stop();
+      if (event.kind === 'focus' && !event.focused) {
+        send(session.releaseAll());
+        pressed.clear();
+      }
+      if (event.kind === 'key') {
+        const position = pressed.resolve(event, layoutPositions);
+        if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
+      }
+    }
+    draw();
+  };
+  const onSignal = (): void => stop();
+
+  draw();
+  tty.stdin.on('data', onData);
+  for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(signal, onSignal);
+
+  const error = await stopped;
+
+  tty.stdin.removeListener('data', onData);
+  for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
+  stopWatching?.();
+  send(session.quit());
+  // A host still booting closes too: quitting never waits for it.
+  await host?.close();
+  await helper.close();
+  tty.stdout.write('\n');
+  if (error !== undefined) throw error;
+}
+
+function instrumentText({ name, status }: InstrumentState): string {
+  if (status.state === 'live') return `${name} live at ${status.sampleRate} Hz on ${status.device}`;
+  if (status.state === 'restarting') return `${name} restarting for a new sample rate`;
+  return `${name} starting`;
+}
+
+function statusText(
+  session: KeysSession,
+  layout: KeyboardLayout | undefined,
+  reloadError: string | undefined,
+  instrument: InstrumentState | undefined,
+): string {
+  const notes = session.soundingNotes();
+  const parts = [
+    SOURCE_NAME,
+    session.keymap.name,
+    `transpose ${signed(session.transpose)}`,
+    `velocity ${session.velocity}`,
+    notes.length > 0 ? notes.join(' ') : '–',
+  ];
+  if (instrument !== undefined) parts.push(instrumentText(instrument));
+  const unplayable = unplayablePositions(layout, session.keymap);
+  if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
+  if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
+  if (session.message !== undefined) parts.push(session.message);
+  return parts.join(' · ');
+}
