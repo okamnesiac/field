@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { parseDocument } from 'yaml';
 import { sha256File } from '../hash.js';
 import { notesFileSchema, renderEvents } from '../schema/notes.js';
@@ -27,15 +27,22 @@ export const RELEASE_TAIL_SECONDS = 4;
 const HARNESS = ['voice-render.scd', 'voicer.scd'];
 
 export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
-  version: 1,
+  version: 2, // 2: a zero-length note releases after its own on
   wiringFields: ['take'],
 
   sources(spec) {
     return [spec.take];
   },
 
+  // The supercollider rule's path checks, on the program the instrument
+  // names: normalized, inside the project, and a regular file.
   validate(spec, ctx) {
-    const resolved = ctx.resolveFile('', instrumentProgram(spec.instrument));
+    const program = instrumentProgram(spec.instrument);
+    if (program !== posix.normalize(program) || program.includes('\\')) {
+      ctx.push(`instrument path not in normalized form: ${spec.instrument}`);
+      return;
+    }
+    const resolved = ctx.resolveFile('', program); // project-relative
     if (resolved.problem) ctx.push(`instrument ${resolved.problem}`);
   },
 

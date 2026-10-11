@@ -388,7 +388,9 @@ much.
 The build renders the chosen take through the instrument as a `gen:`
 node named like the record node, and the entry places that render. A
 take of the other kind than its entry records is an error in `field
-check`, as is an instrument with no program. The notes file has one
+check`, as is an instrument whose program is missing or outside the
+project: it resolves by the rule a `supercollider:` entry's `source:`
+does. The notes file has one
 writer, `field record`. Editing it by hand changes its hash, and the
 build then refuses it, as it refuses any pinned file whose bytes
 changed.

@@ -130,4 +130,15 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
     const track = built(await buildLabels(root, ['//songs/creek/track:keys']), '//songs/creek/track:keys');
     expect(existsSync(track.outputPath!)).toBe(true);
   });
+
+  it('loads the instrument without the render variables, as voice mode is live', { timeout: 120_000 }, async () => {
+    const strict = VOICE.replace(
+      '(\n',
+      '(\nif ("FIELD_OUTPUT FIELD_SEED FIELD_DURATION FIELD_SAMPLE_RATE FIELD_CHANNELS".split($ ).any { |name| name.getenv.notNil }) { Error("a render variable is set in voice mode").throw };\n',
+    );
+    expect(strict).not.toBe(VOICE);
+    writeFileSync(join(root, 'shared/instruments/pad.scd'), strict);
+    const outcome = built(await buildLabels(root, [GEN]), GEN);
+    expect(existsSync(outcome.outputPath!)).toBe(true);
+  });
 });

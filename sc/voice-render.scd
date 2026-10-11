@@ -18,6 +18,10 @@ var chans = "FIELD_CHANNELS".getenv.asInteger;
 var dur = "FIELD_DURATION".getenv.asFloat;
 var voiceDef, loadError, take, score, voicer, now = 0.0, nextNode = 1000;
 
+// Read above, and gone before the instrument loads: in voice mode the
+// render variables are absent, here as live (keys.md).
+["FIELD_OUTPUT", "FIELD_SEED", "FIELD_DURATION", "FIELD_SAMPLE_RATE", "FIELD_CHANNELS"].do(_.unsetenv);
+
 voiceDef = try { thisProcess.interpreter.executeFile(instrument) } { |error| loadError = error.errorString; nil };
 case
 { loadError.notNil } {

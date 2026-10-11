@@ -95,7 +95,10 @@ export function formatNotesFile(file: NotesFile): string {
 // in seconds, with 0-based MIDI channels. At one instant, note-offs come
 // first, then controller changes and bends, then note-ons, so a note
 // played again at the moment it ends is a new voice, and a pedal pressed
-// at a note's onset already holds it.
+// at a note's onset already holds it. A note that ends where it starts,
+// as a drum pad's on and off can inside one sample, releases right after
+// its own on: ranked with the other offs it would come first, and nothing
+// would ever release the voice.
 export type RenderEvent =
   | [number, 'on', number, number, number]
   | [number, 'off', number, number]
@@ -104,17 +107,19 @@ export type RenderEvent =
 
 export function renderEvents(file: NotesFile): RenderEvent[] {
   const seconds = (samples: number): number => samples / file.sample_rate;
-  const order = { off: 0, cc: 1, bend: 1, on: 2 } as const;
-  const timed: { at: number; event: RenderEvent }[] = [];
+  const [OFF, CONTROL, ON] = [0, 1, 2];
+  const timed: { at: number; rank: number; event: RenderEvent }[] = [];
   for (const n of file.notes) {
     const ch = (n.channel ?? 1) - 1;
-    timed.push({ at: n.at, event: [seconds(n.at), 'on', ch, n.note, n.velocity] });
-    timed.push({ at: n.at + n.length, event: [seconds(n.at + n.length), 'off', ch, n.note] });
+    timed.push({ at: n.at, rank: ON, event: [seconds(n.at), 'on', ch, n.note, n.velocity] });
+    timed.push({ at: n.at + n.length, rank: n.length === 0 ? ON : OFF, event: [seconds(n.at + n.length), 'off', ch, n.note] });
   }
-  for (const c of file.controls) timed.push({ at: c.at, event: [seconds(c.at), 'cc', (c.channel ?? 1) - 1, c.cc, c.value] });
-  for (const b of file.bends) timed.push({ at: b.at, event: [seconds(b.at), 'bend', (b.channel ?? 1) - 1, b.value] });
+  for (const c of file.controls) {
+    timed.push({ at: c.at, rank: CONTROL, event: [seconds(c.at), 'cc', (c.channel ?? 1) - 1, c.cc, c.value] });
+  }
+  for (const b of file.bends) timed.push({ at: b.at, rank: CONTROL, event: [seconds(b.at), 'bend', (b.channel ?? 1) - 1, b.value] });
   return timed
     .map((t, index) => ({ ...t, index }))
-    .sort((a, b) => a.at - b.at || order[a.event[1]] - order[b.event[1]] || a.index - b.index)
+    .sort((a, b) => a.at - b.at || a.rank - b.rank || a.index - b.index)
     .map((t) => t.event);
 }

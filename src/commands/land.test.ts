@@ -451,10 +451,21 @@ describe('landMidiTake', () => {
     writeTrack('keys', ['inputs:', '  - record:', '      instrument: pad']);
     await landAnyTake(root, writeMidiTransaction('take-20261010-100300', { track: '//songs/creek/track:keys' }, []));
 
-    writeTrack('keys', ['inputs:', '  - record:', '      instrument: ghost']);
-    expect((await check(root)).diagnostics.map((d) => d.message)).toContainEqual(
-      expect.stringContaining('instrument ghost has no program at shared/instruments/ghost.scd'),
-    );
+    // The instrument resolves by the supercollider rule's path checks.
+    const instrumentProblem = async (instrument: string): Promise<string[]> => {
+      writeTrack('keys', ['inputs:', '  - record:', `      instrument: ${instrument}`]);
+      return (await check(root)).diagnostics.map((d) => d.message).filter((m) => m.includes(' instrument '));
+    };
+    expect(await instrumentProblem('ghost')).toEqual([
+      'input 1 ("record") instrument file not found: shared/instruments/ghost.scd',
+    ]);
+    expect(await instrumentProblem('../synths/pad')).toEqual([
+      'input 1 ("record") instrument file path escapes the project: ../synths/pad.scd',
+    ]);
+    mkdirSync(join(root, 'shared/instruments/folder.scd'));
+    expect(await instrumentProblem('folder')).toEqual([
+      'input 1 ("record") instrument file is not a regular file: shared/instruments/folder.scd',
+    ]);
     writeTrack('keys', ['inputs:', '  - record:']);
     expect((await check(root)).diagnostics.map((d) => d.message)).toContainEqual(
       expect.stringContaining('take "take-20261010-100300" is a MIDI take'),

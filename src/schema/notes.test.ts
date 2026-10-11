@@ -133,4 +133,28 @@ describe('render events', () => {
       [1, 'bend', 2, 8192],
     ]);
   });
+
+  it('releases a zero-length note right after its own on, not before every on at that instant', () => {
+    // A pad's on and off inside one sample: the off must follow the on,
+    // or the voice it starts is never released.
+    const file = notesFromMessages(
+      [
+        { at: 4800, midi: [144, 36, 120] },
+        { at: 4800, midi: [128, 36, 0] },
+        { at: 4800, midi: [144, 60, 90] },
+      ],
+      9600,
+      48000,
+    );
+    expect(file.notes).toEqual([
+      { at: 4800, length: 0, note: 36, velocity: 120 },
+      { at: 4800, length: 4800, note: 60, velocity: 90 },
+    ]);
+    expect(renderEvents(file)).toEqual([
+      [0.1, 'on', 0, 36, 120],
+      [0.1, 'off', 0, 36],
+      [0.1, 'on', 0, 60, 90],
+      [0.2, 'off', 0, 60],
+    ]);
+  });
 });

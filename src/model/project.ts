@@ -6,7 +6,6 @@ import { PROJECT_MANIFEST } from '../constants.js';
 import { readWavHeader } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
-import { instrumentProgram } from '../generators/supercollider.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { checkCables, entryName, type Cable } from './cables.js';
@@ -763,10 +762,17 @@ function validate(project: LoadedProject): void {
           // must be of the entry's kind.
           const instrument = entry.record.instrument;
           if (instrument !== undefined) {
-            const program = instrumentProgram(instrument);
-            if (!existsSync(join(project.root, program))) {
-              push(track.path, `${what}'s instrument ${instrument} has no program at ${program}`);
-            }
+            // Through the render's own rule, as a supercollider: entry is,
+            // so check and the build resolve the program the same way. The
+            // take plays no part in it.
+            const spec = { name: rname, type: 'voice-render' as const, take: takes?.chosen ?? '', instrument };
+            generatorFor(spec).validate(spec, {
+              root: project.root,
+              songDir: song.dir,
+              names,
+              push: (message: string) => push(track.path, `${what} ${message}`),
+              resolveFile: (baseDir: string, file: string) => resolveAssetFile(project.root, baseDir, file),
+            });
           }
           for (const take of takes?.takes ?? []) {
             if (isMidiTakeRow(take) && instrument === undefined) {
