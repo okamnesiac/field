@@ -1,0 +1,409 @@
+{
+ "version": 1,
+ "name": "Instrument knobs",
+ "project": "instrument-knobs",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 209,
+  "title": "Give field keys knobs: choose with the arrows, turn with up and down, and map them through each instrument's knob file (instrument-knobs.md chunk 1)",
+  "head": "6a7f2a299257ec425f723d61cd44debd0648071e",
+  "headRef": "knobs/turn",
+  "base": "5f7cd66a26e487a759e078cb89a959982f331d7e",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> plays music from the computer keyboard. It publishes a virtual MIDI source named <code>Field Keys</code>, and when you name an instrument, such as <code>field keys juno</code> in <code>examples/bloom</code>, it also starts a <i>voice host</i>: a SuperCollider process that turns each MIDI note into a voice of that instrument. Until now the only thing you could change about the sound while playing was the modulation wheel (MIDI controller 1), in six fixed steps on keys <code>3</code> to <code>8</code>.",
+   "This pull request is chunk 1 of the instrument-knobs plan. It gives <code>field keys</code> knobs, the way a hardware MIDI controller has them. An instrument describes its knobs in a <i>knob file</i> beside its program, <code>juno.knobs.yaml</code> beside <code>juno.scd</code>. Each knob names a MIDI controller (a <i>CC</i>, a numbered control-change message), a range, a curve, and a default. A new <i>knob line</i> above the status line shows every knob. The left and right arrows choose a knob, and up and down turn it, faster the longer you hold. Every turn leaves <code>field keys</code> as an ordinary control change on <code>Field Keys</code>, so any instrument can answer it and a recorded take keeps it.",
+   "On the SuperCollider side, the <i>voicer</i>, the shared code that turns MIDI into voices both live and when a take renders, now hands every controller from 2 to 119 except sustain to the voices as a control named for its number, such as <code>cc74</code>, from 0 to 1. A voice maps that control to its own parameter. <code>juno</code> and <code>bass</code> map four knobs each through their knob file, read from a <i>checked copy</i> that Field writes after the file passes its schema and names in the <code>FIELD_KNOBS</code> environment variable. So a voice never reads a file Field rejected.",
+   "<code>musical</code>, a new built-in keymap, replaces <code>musical-typing</code> as the default. It keeps every note and the octave, velocity, and sustain keys, puts the knobs on the arrows, and moves the pitch bend to <code>,</code> and <code>.</code>. Typing a knob's value on the number row, gliding to it, and a take that starts where your knobs are come in chunks 2 and 3.",
+   "Read the open review finding first. A knob file that passes the schema but leaves out one of the four knobs <code>juno.scd</code> or <code>bass.scd</code> maps, as the plan's own criterion 11 does, makes that instrument's voice fail to load, live and in a take's render."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Controller (CC)</b>: a MIDI control-change message, numbered 0 to 127, with a value from 0 to 127. CC 1 is the modulation wheel, CC 64 the sustain pedal, CC 74 usually a filter's cutoff.</li><li><b>Knob file</b>: a YAML file, <code>&lt;program&gt;.knobs.yaml</code>, listing an instrument's knobs: <code>name</code>, <code>cc</code>, <code>min</code>, <code>max</code>, <code>curve</code> (<code>lin</code> or <code>exp</code>), <code>step</code>, <code>units</code>, and <code>default</code>.</li><li><b>Knob line</b>: the line between the instrument's line and the status line that shows every knob's name and value, the chosen one in reverse video.</li><li><b>Voice host</b>: the <code>sclang</code> process <code>sc/voice-host.scd</code> that plays an instrument live.</li><li><b>Voicer</b>: <code>sc/voicer.scd</code>, which turns MIDI into voices for both the voice host and a take's render.</li><li><b>Voice mode</b>: an instrument program run with <code>FIELD_MODE=voice</code>, whose value is one playable voice (a SynthDef) rather than a rendered file.</li><li><b>Checked copy</b>: the copy of a knob file that Field writes after the file passes the schema, with every field filled in, and names in <code>FIELD_KNOBS</code>.</li><li><b>Take</b>: a recorded MIDI performance on a track. Its <i>render</i> plays the take through the instrument offline to produce audio.</li></ul>"
+   },
+   {
+    "id": "scope",
+    "title": "What chunk 1 covers",
+    "html": "<ul class=\"tight\"><li><b>In this pull request</b>: knob files and <code>--knobs</code>, the knob line, choosing and turning, <code>musical</code> as the default, the voicer's <code>cc&lt;n&gt;</code>, the checked copies, the render's check and cache input, <code>field check</code>, <code>juno</code> and <code>bass</code>, and the docs. Acceptance criteria 1 to 3, 9 to 11, 13, 15 to 17, 19, and 22, and 12 and 18 up to their typed values.</li><li><b>Chunk 2</b>: typing a value on the number row, <code>Enter</code>, <code>Backspace</code>, <code>Period</code> as the decimal point, <code>Esc</code> cancelling instead of quitting, and the glide. Criteria 4 to 8, 14, and 23.</li><li><b>Chunk 3</b>: a take that starts where your knobs were, through <code>.field/keys.json</code> and the daemon's controller chase. Criteria 20 and 21.</li><li><b>Still open</b>: the plan's §3.2 recommends that voices read the checked copy, so each range is written once, and records that Justin has not ruled on it. This pull request builds on the recommendation.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>One review, at <code>6a7f2a2</code>, with one open finding: a knob file without one of the four knobs <code>juno.scd</code> maps stops its voice from loading.</li><li>The head was reviewed by reading only. Both commits carry a <code>Co-Authored-By: Claude</code> trailer that GitHub attributes to the login <code>claude</code>, which has read access only, so the review ran none of the head's code.</li><li>CI passes on this head. The <code>windows</code> job failed on the first head, <code>b4be562</code>, on the <code>--knobs</code> path test, which the second commit fixes.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "knob-file",
+   "title": "The knob file and what a controller value means",
+   "kicker": "One zod schema checks every knob file, and one module maps, steps, and prints knob values.",
+   "intro": [
+    "A knob file lists an instrument's knobs. <code>src/schema/knobs.ts</code> is the only check of one, and every path that hands a knob file to an instrument runs it first: <code>field keys</code> at start and on each save, and a take's render in its <code>validate</code>, which is also how <code>field check</code> reports a bad file.",
+    "<code>src/keys/knobs.ts</code> holds everything else about knobs that does not depend on a terminal. It finds an instrument's knob file beside its program, resolves <code>--knobs</code>, reads and watches files, and converts between a controller value from 0 to 127 and the knob's value. That conversion is SuperCollider's <code>ControlSpec.map</code> for the curve of the same name, so a voice that maps with <code>ControlSpec</code> plays what the line shows. It also prints each value at a fixed width, so turning one knob never moves the knobs after it."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A <code>lin</code> knob spreads the 128 controller values evenly over its range, and an <code>exp</code> knob by equal ratios, which suits a frequency or a time. That is why the schema rejects an <code>exp</code> range that touches or crosses 0."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/schema/knobs.ts",
+     "note": "The knob file's schema: field defaults, then a <code>superRefine</code> for the rules that span knobs (free controllers, unique names and controllers, <code>exp</code> ranges, <code>default</code> inside the range).",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 65,
+       "text": "An <code>exp</code> knob whose <code>min</code> or <code>max</code> is 0, or whose ends differ in sign, is rejected, and the default check uses <code>Math.min</code> and <code>Math.max</code> of the ends, so both ends are inside and a downward range works. Read against plan §2.2."
+      },
+      {
+       "kind": "context",
+       "line": 34,
+       "text": "Nothing ties <code>step</code> to the range. With <code>min: 0, max: 1, step: 0.4</code>, the top controller value rounds to 1.2, past <code>max</code>, on the line and in <code>ControlSpec</code> alike. The review lists this as a suggestion."
+      }
+     ]
+    },
+    {
+     "path": "src/schema/knobs.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/keys/knobs.ts",
+     "note": "Finding knob files, reading and watching them, writing the checked copy, mapping between controller values and knob values, stepping, and printing at a fixed width.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 152,
+       "text": "The width rule gives <code>mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s</code> for <code>juno</code>'s defaults: widths 3, 8, 5, 7, and 7, the widest each knob prints at its default or any of its 128 values. Worked by hand from <code>formatKnobValue</code> and <code>significant</code>."
+      },
+      {
+       "kind": "context",
+       "line": 118,
+       "text": "The checked copy is the schema's output, so it has every field with defaults filled. A voice never needs to know the schema's defaults, and a knob file may leave out <code>step</code>, as <code>juno.knobs.yaml</code> does."
+      },
+      {
+       "kind": "context",
+       "line": 67,
+       "text": "<code>KnobsError</code>, <code>parseKnobs</code>, <code>loadKnobs</code>, and <code>watchKnobs</code> follow <code>src/keys/keymap.ts</code>'s keymap loader almost line for line. The review suggests one shared helper."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/knobs.test.ts",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "session",
+   "title": "Choosing and turning in the keys session",
+   "kicker": "The session keeps every controller it sent, the knob list and the choice, and times a held turn key itself.",
+   "intro": [
+    "<code>KeysSession</code> in <code>src/keys/session.ts</code> turns key presses into MIDI messages and has no terminal or timer of its own. Two new keymap actions reach it: <code>{ knob: n }</code> moves the choice n knobs, wrapping past either end, and <code>{ turn: n }</code> turns the chosen knob n steps. A step is one controller value, or for a knob with a <code>step</code>, the next controller value that maps to a different value.",
+    "The session now records every controller it sends in one map, by number. The modulation wheel's old <code>mod</code> field becomes a read of controller 1 in that map, and a knob that has not been turned starts from its default's controller value. A held turn key turns again on each 40 ms <code>tick(now)</code>, faster the longer it is held, and the caller passes the time in, so tests run the acceleration without waiting."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "A held turn moves 1 step at the press, none before 300 ms, then 1 step a tick to 1 s, 2 to 1.5 s, and 4 after, so 0 to 127 takes about 2.32 s, matching plan §2.6. Each tick sends at most one control change, so at most 25 a second. Walked tick by tick from <code>TURN_RATES</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/keys/session.ts",
+     "note": "The controller map, the knob list and the choice, <code>knob</code> and <code>turn</code> actions, <code>tick</code>, and <code>setKnobs</code> for a saved knob file.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 180,
+       "text": "Release of the turn key, focus-out and panic (both through <code>releaseAll</code>), and quit all clear the held turn, so <code>tick</code> returns nothing after them. A second turn key replaces the first, and releasing the first does not stop the second."
+      },
+      {
+       "kind": "verify",
+       "line": 193,
+       "text": "A new knob list keeps each knob's value, because values live in the controller map by number, and keeps the choice on the knob with the same label, or the nearest index when that knob is gone."
+      },
+      {
+       "kind": "context",
+       "line": 214,
+       "text": "<code>setsMod()</code> still asks the keymap whether a key can move the wheel. The plan's §2.9 and §3 say it becomes a read of the controller map, so the review suggests recording the difference in §9.1."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/session.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/schema/keymap.ts",
+     "note": "Adds the <code>knob</code> and <code>turn</code> actions, each a non-zero whole number."
+    },
+    {
+     "path": "src/schema/keymap.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "keymaps/musical.yaml",
+     "note": "Renamed from <code>musical-typing.yaml</code>. The bend moves from <code>1</code> and <code>2</code> to <code>Comma</code> and <code>Period</code>, the wheel's steps on <code>3</code> to <code>8</code> go, and the arrows choose and turn knobs. The number row stays free for chunk 2's typing.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 33,
+       "text": "<code>tracker</code> and <code>fourths</code> are unchanged, so they bind no knob action and show no knob line (criterion 15)."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/keymap.ts",
+     "note": "<code>DEFAULT_KEYMAP</code> becomes <code>musical</code>. A bare <code>--keymap musical-typing</code> now fails as any unknown built-in does."
+    },
+    {
+     "path": "src/keys/keymap.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/keys/print.ts",
+     "note": "<code>field keys --print</code> tags the actions <code>K-1</code>, <code>K+1</code>, <code>R+1</code>, and <code>R-1</code>, and describes each.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 57,
+       "text": "\"choose the knob 1 to the right\" can read as knob number 1. The review suggests \"move the choice 1 knob to the right\"."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/print.test.ts",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "voicer",
+   "title": "The voicer hands every controller to the voices",
+   "kicker": "SuperCollider's side knows nothing about knobs: each controller becomes a control named for its number.",
+   "intro": [
+    "The voicer already kept the modulation wheel's last value and set it on every voice as <code>mod</code>. It now does the same for every controller from 2 to 119 except the sustain pedal, as <code>cc2</code> to <code>cc119</code>, each from 0 to 1, keeping one value per controller across all channels. A new voice starts with every stored value, and a sounding voice gets each change. scsynth ignores a control a voice does not have, so an instrument answers only the controllers it names.",
+    "The voice host now receives <code>FIELD_INSTRUMENTS</code> as a list of objects, each with the program's path and, when it has a knob file, the path of its checked copy. <code>voice-load.scd</code> sets or unsets <code>FIELD_KNOBS</code> for each program just before running it, so one program's copy never leaks into the next."
+   ],
+   "files": [
+    {
+     "path": "sc/voicer.scd",
+     "note": "Stores controllers in an <code>IdentityDictionary</code> and passes them to <code>start</code> as a list, such as <code>[\\mod, 0.5, \\cc74, 1.0]</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 59,
+       "text": "The <code>case</code> tests 64 and 123 before the 1-to-119 range, so sustain and All Notes Off keep their meaning and never become controls. Controller 0 and 120 to 127 match no branch. Read in order."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voicer.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "sc/voice-host.scd",
+     "note": "Reads each instrument's <code>program</code> and <code>knobs</code> from the objects, and appends the voicer's controls to each new synth's arguments."
+    },
+    {
+     "path": "sc/voice-load.scd",
+     "note": "Takes the copy's path beside the program's, and sets or unsets <code>FIELD_KNOBS</code> before it runs the program.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 15,
+       "text": "The variable is set or unset on every call, so in a host that loads <code>juno</code> and then <code>pad</code>, <code>pad</code> runs with <code>FIELD_KNOBS</code> unset."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/voice-host.ts",
+     "note": "Builds <code>FIELD_INSTRUMENTS</code> as objects, with <code>knobs</code> only for a program that has a checked copy."
+    },
+    {
+     "path": "src/keys/voice-host.test.ts",
+     "collapsed": true
+    }
+   ]
+  },
+  {
+   "id": "render",
+   "title": "A take's render checks and hashes the knob file",
+   "kicker": "The knob file now decides how a take sounds, so the build checks it, keys the cache on it, and hands the voice its own checked copy.",
+   "intro": [
+    "A take on a track whose record entry names an instrument renders through the <code>voice-render</code> generator, which runs the same voicer offline. Because <code>juno</code>'s voice now maps its controls through its knob file, editing that file must render the take again.",
+    "The generator's <code>validate</code> runs the knob file through the schema, so a bad file fails <code>field check</code> and the build with the schema's errors before <code>sclang</code> runs. The file joins the render's cache inputs when it exists. The render writes its own checked copy beside the events file and names it in <code>FIELD_KNOBS</code>, and it refuses to cache when the knob file changed while it ran, as it already refused for the program."
+   ],
+   "files": [
+    {
+     "path": "src/generators/voice-render.ts",
+     "note": "Checks the knob file in <code>validate</code>, adds it to <code>extraInputs</code>, writes and removes the copy around the run, and compares its hash in <code>verifyAfterRun</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 115,
+       "text": "The after-run check compares the file's hash, or its absence, with the input recorded before the run, so an edit, a deletion, or a file created during the render each refuse the cache."
+      }
+     ]
+    },
+    {
+     "path": "src/generators/voice-render.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "sc/voice-render.scd",
+     "note": "Passes <code>FIELD_KNOBS</code> to <code>voice-load.scd</code> and appends the voicer's controls to each <code>s_new</code>."
+    },
+    {
+     "path": "src/model/project.test.ts",
+     "collapsed": true,
+     "note": "Pins that <code>field check</code> reports a record entry whose instrument's knob file fails the schema."
+    }
+   ]
+  },
+  {
+   "id": "instruments",
+   "title": "juno and bass map four knobs each",
+   "kicker": "The example instruments read their checked copy and put four knobs in place of fixed settings.",
+   "intro": [
+    "<code>juno.scd</code> and <code>bass.scd</code> keep their sound in a settings Event that the JU-06A voice function reads. In voice mode they now replace four settings, the filter's cutoff and resonance and the envelope's attack and release, with signals from their knobs. A small <code>knob</code> helper finds each knob by name in the checked copy and maps <code>cc74</code> and the others through a <code>ControlSpec</code> built from the copy, starting at the knob's default. Settings the voice tests with <code>if</code>, such as <code>chorusOn</code>, stay fixed.",
+    "The render branch, which <code>field sc render</code> runs outside voice mode, is unchanged, so its output keeps its bytes (criterion 19). The knob files use General MIDI 2's sound controllers, 71 to 74, so a hardware controller set up for General MIDI turns the same knobs."
+   ],
+   "files": [
+    {
+     "path": "examples/bloom/shared/instruments/juno.scd",
+     "note": "The voice branch reads <code>FIELD_KNOBS</code>, throws a clear error when it is unset, and maps four knobs through the copy.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 67,
+       "text": "Open finding: <code>knob</code> indexes the result of <code>knobs.detect</code> without checking it. A knob file that passes the schema but lacks <code>attack</code>, as after criterion 11's first save, makes the SynthDef build throw <code>Message 'at' not understood</code>. The reload fails, the next <code>field keys juno</code> cannot start the voice, and a take's render fails while <code>field check</code> passes. The fix the finding names is to fall back to the setting's fixed value when the copy has no knob of that name."
+      },
+      {
+       "kind": "context",
+       "line": 62,
+       "text": "This comment, the one in <code>bass.scd</code>, and both knob files cite a \"Knobs\" section of <code>docs/keys.md</code> that does not exist. The sections are \"Knob files\" and \"Make an instrument playable\"."
+      }
+     ]
+    },
+    {
+     "path": "examples/bloom/shared/instruments/bass.scd",
+     "note": "The same helper and the same four knobs as <code>juno</code>, with <code>bass</code>'s defaults.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 69,
+       "text": "The same lookup as <code>juno.scd</code>'s open finding: a knob file without one of the four knobs stops <code>bass</code>'s voice from loading."
+      }
+     ]
+    },
+    {
+     "path": "examples/bloom/shared/instruments/juno.knobs.yaml",
+     "note": "<code>juno</code>'s four knobs: cutoff on CC 74, resonance on 71, attack on 73, and release on 72."
+    },
+    {
+     "path": "examples/bloom/shared/instruments/bass.knobs.yaml",
+     "note": "The same four knobs with <code>bass</code>'s defaults: 1200 Hz, 0.4, 5 ms, and 150 ms."
+    }
+   ]
+  },
+  {
+   "id": "command",
+   "title": "field keys draws the knob line and keeps the copies",
+   "kicker": "The command reads every knob file before it starts, owns the checked copies, runs the turn timer, and redraws the lines above the status line.",
+   "intro": [
+    "<code>field keys</code> checks every knob file before anything starts, as it checks the keymap: an armed instrument's file beside its program, and each <code>--knobs</code> file. A bare <code>--knobs</code> name means <code>shared/instruments/&lt;name&gt;.knobs.yaml</code> in the project, and anything with a <code>/</code> or ending in <code>.yaml</code> is a path.",
+    "<code>KnobFiles</code> owns the sources and the checked copies, in a temporary directory removed when the session ends, a throw included. When a watched knob file is saved, a file that passes replaces that source's knobs and rewrites the copy before the voice reloads. A file that fails changes only the status line, which then reads <code>knobs not reloaded:</code> with the first error. The voice keeps its last good copy, including when you save the program itself while its knob file is failing.",
+    "The knob line appears when the keymap binds a knob action, and the status line then leaves out its <code>mod</code> field. <code>KnobLine</code> pads each value to its fixed width, shows the chosen knob in reverse video, and on a narrow terminal shows a window of whole knobs that moves only when the choice leaves it. <code>redrawAbove</code> rewrites the lines above the status line from the first one that changed."
+   ],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Loads knob sources, owns the copies in <code>KnobFiles</code>, watches knob files, runs the 40 ms turn timer only while a turn key is held, and draws the knob line.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 137,
+       "text": "A failing save records its error and returns <code>false</code>, so the watcher reloads no voice and the copy is untouched. A passing save rewrites every copy that reads the file before it returns <code>true</code> and the voice reloads."
+      },
+      {
+       "kind": "verify",
+       "line": 226,
+       "text": "The copies' directory is removed in the <code>finally</code> that closes the routing, so it goes on a normal quit, a signal, and a throw from inside the session."
+      },
+      {
+       "kind": "verify",
+       "line": 286,
+       "text": "The interval starts when a turn key is held and is cleared after the input that releases it, after a focus-out, and after quit, so a session with no turn held keeps no timer."
+      },
+      {
+       "kind": "context",
+       "line": 522,
+       "text": "On a terminal narrower than about 25 columns, the chosen knob's cell plus the <code>‹</code> and <code>›</code> markers can exceed the width, the line wraps, and the redraw's cursor-up count no longer matches the screen. The review suggests slicing the cell to the width left after the markers."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/keys.test.ts",
+     "collapsed": true
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "Adds the repeatable <code>--knobs</code> option and names <code>musical</code> as the default keymap in <code>--keymap</code>'s help."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Docs and plans",
+   "kicker": "keys.md gains knobs and musical, build-graph.md the cc<n> controls and the knob file as a render input, and the plan its as-built section.",
+   "intro": [
+    "<code>docs/keys.md</code> gains a \"Turn knobs\" section with \"Knob files\" and \"Knobs for another instrument\", describes <code>musical</code> as the default with Logic's number row as controls to copy, and adds <code>cc&lt;n&gt;</code> and <code>FIELD_KNOBS</code> to the voice contract under \"Make an instrument playable\". <code>Esc</code> still quits, which stays true until chunk 2.",
+    "The instrument-knobs plan moves to <code>in-progress</code> and <code>now</code>, and gains §9, which records what implementation settled and what was verified. The keyboard-instrument plan gets a dated note at §3, where it chose Musical Typing as the default."
+   ],
+   "files": [
+    {
+     "path": "docs/keys.md",
+     "note": "Knobs, knob files, <code>--knobs</code>, <code>musical</code>, and the <code>cc&lt;n&gt;</code> voice controls.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 111,
+       "text": "\"a knob has 128 positions\" holds only for a knob without a <code>step</code>. The <code>step</code> row below says a stepped knob moves to the next value that rounds differently."
+      }
+     ]
+    },
+    {
+     "path": "docs/build-graph.md",
+     "note": "The voice contract gains <code>cc&lt;n&gt;</code> and <code>FIELD_KNOBS</code>, and the knob file joins a take's render inputs."
+    },
+    {
+     "path": "README.md",
+     "note": "Names <code>field keys juno</code> and the arrows that turn its knobs."
+    },
+    {
+     "path": "docs/projects/instrument-knobs/readme.md",
+     "note": "Status <code>in-progress</code>, a dated amendment at §2.4 about the copy spelling every field out, and the new §9.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 893,
+       "text": "§9 lists the criteria still owed by hand: those that need a kitty terminal and sound, 1 to 3, 9, 11, 13, 15 to 17, and 12 and 18 up to their typed values."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md",
+     "note": "A dated note at §3 that <code>musical</code> replaces <code>musical-typing</code> as the default."
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,3120 @@
+diff --git a/README.md b/README.md
+index 0f13161b..8ccd23de 100644
+--- a/README.md
++++ b/README.md
+@@ -157,9 +157,11 @@ needs `field-audiod` and a terminal that reports key releases through
+ the kitty keyboard protocol: Ghostty, iTerm2 3.5 or later, kitty, or
+ WezTerm. Keys are read by physical position, so Dvorak, AZERTY, and
+ other layouts play the same notes, and a keymap of your own is a YAML
+-file away. Name an instrument, as in `field keys pad` inside
++file away. Name an instrument, as in `field keys juno` inside
+ `examples/bloom`, and it plays that SuperCollider instrument live too.
+-See [docs/keys.md](docs/keys.md).
++The arrows choose and turn its knobs, such as `juno`'s filter cutoff,
++each one a MIDI controller, so a take you record keeps every turn. See
++[docs/keys.md](docs/keys.md).
+ 
+ ## Status
+ 
+diff --git a/docs/build-graph.md b/docs/build-graph.md
+index 3538d709..68fe64ec 100644
+--- a/docs/build-graph.md
++++ b/docs/build-graph.md
+@@ -265,9 +265,14 @@ The same program can also be played from notes. When `FIELD_MODE` is
+ `voice`, it must not render or exit, and its value — the file's last
+ expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
+ controls that frees itself after `gate` goes to 0. It may also have a
+-`mod` control, which the modulation wheel sets. `field keys
+-<instrument>` plays that voice live; the render variables are absent in
+-voice mode, so a program checks `FIELD_MODE` before reading them. A
++`mod` control, which the modulation wheel sets, and a `cc<n>` control
++for any controller n from 2 to 119 but the sustain pedal, each from 0
++to 1. When the instrument has a knob file beside it (`juno.knobs.yaml`
++for `juno.scd`), `FIELD_KNOBS` names a copy of it that passed Field's
++check, so the voice can map its controls through the knobs' ranges.
++`field keys <instrument>` plays that voice live; the render variables
++are absent in voice mode, so a program checks `FIELD_MODE` before
++reading them. A
+ `supercollider:` entry never runs in voice mode, so voice mode changes
+ its renders only through the program's own content hash. See
+ [keys.md](keys.md).
+@@ -280,17 +285,21 @@ the record node's, and the entry places it where the take was played
+ (keyboard-instrument.md §12.3). Nobody declares it.
+ 
+ It runs `sc/voice-render.scd` through `sclang`, which loads the
+-instrument in voice mode with `sc/voice-load.scd`, as `field keys`
+-loads it, and drives its voice from the take's notes file with
++instrument in voice mode with `sc/voice-load.scd`, as `field keys` loads
++it, and drives its voice from the take's notes file with
+ `sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
+-all-notes-off, pitch bend (±2 semitones), and the modulation wheel act
+-as they did live. The render is stereo at the track's rate and runs 4
+-seconds past the take, so the last notes' release is heard; scsynth
+-rounds it up to a whole control block, as it does every NRT render. Its
+-cache inputs are the notes file, the instrument's content hash, and the
++all-notes-off, pitch bend (±2 semitones), the modulation wheel, and
++every other controller act as they did live. The render is stereo at the
++track's rate and runs 4 seconds past the take, so the last notes'
++release is heard; scsynth rounds it up to a whole control block, as it
++does every NRT render. Its cache inputs are the notes file, the
++instrument's content hash, its knob file's when it has one, and the
+ three harness files, so editing any of them renders the take again. The
+-harness adds nothing random, so an instrument that renders reproducibly
+-renders its takes reproducibly, bit for bit.
++render checks the knob file as `field keys` does, so `field check` and
++the build name a file that fails before anything renders, and it hands
++the voice the checked copy in `FIELD_KNOBS`. The harness adds nothing
++random, so an instrument that renders reproducibly renders its takes
++reproducibly, bit for bit.
+ 
+ ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
+ 
+diff --git a/docs/keys.md b/docs/keys.md
+index 7877eb48..578033b6 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -4,22 +4,27 @@
+ publishes a virtual MIDI source named `Field Keys`, so Logic, the
+ SuperCollider IDE, or any other application that lists MIDI inputs can
+ play from it. A *keymap* decides what each key plays: a note, a chord,
+-or a control such as transpose or sustain. Logic Pro's Musical Typing is
+-the default keymap, and you can write your own.
++or a control such as transpose or sustain. The default keymap,
++`musical`, is Field's take on Logic Pro's Musical Typing, and you can
++write your own. `field keys` is also a controller with knobs: the arrows
++choose a knob and turn it, and every turn goes out as a MIDI controller
++message.
+ 
+ ```console
+ $ field keys
+-Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · C4 E4 G4
++mod   0
++Field Keys · musical · transpose 0 · velocity 100 · bend +0 · C4 E4 G4
+ ```
+ 
+ Name an instrument and `field keys` plays it too, from the keyboard and
+-from every other MIDI source:
++from every other MIDI source, and shows the knobs the instrument has:
+ 
+ ```console
+ $ cd examples/bloom
+-$ field keys pad
+-pad live at 48000 Hz on MacBook Pro Speakers
+-Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · D4
++$ field keys juno
++juno live at 48000 Hz on MacBook Pro Speakers
++mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s
++Field Keys · musical · transpose 0 · velocity 100 · bend +0 · D4
+ ```
+ 
+ To keep what you play, record it into a track; see
+@@ -55,17 +60,20 @@ for, once, and a new process gets a new MIDI client.
+ 2. In the application you want to play, choose `Field Keys` as the MIDI
+    input. In Logic, `Field Keys` appears with your other MIDI inputs.
+ 3. Play. The status line shows the keymap, the transpose, the velocity,
+-   the pitch bend and the modulation wheel when the keymap has keys that
+-   set them or their value is away from rest, and last the notes
+-   sounding, so playing changes only the end of the line. The bend runs
+-   from `-1` to `+1`. It always carries its sign and as many decimal
+-   places as the finest bend in the keymap needs, up to four, so bending
+-   a chord does not move the notes: with a `0.25` bend in the keymap,
+-   the bend at rest reads `+0.00`. The wheel runs from 0 to 127. Both
+-   are what `field keys` last sent; a USB controller's bender and wheel
+-   do not change them. On a narrow terminal the text before the notes
+-   is shortened, and the notes only when they alone are wider than the
+-   terminal.
++   the pitch bend when the keymap has keys that bend or the bend is
++   away from rest, and last the notes sounding, so playing changes only
++   the end of the line. The bend runs from `-1` to `+1`. It always
++   carries its sign and as many decimal places as the finest bend in
++   the keymap needs, up to four, so bending a chord does not move the
++   notes: with a `0.25` bend in the keymap, the bend at rest reads
++   `+0.00`. The knob line above it shows the modulation wheel and the
++   other knobs ([Turn knobs](#turn-knobs)). With a keymap that binds no
++   knob keys, the knob line is absent, and the status line shows the
++   wheel, from 0 to 127, when the keymap has keys that set it or it is
++   away from 0. The bend and the knobs show what `field keys` last
++   sent; a USB controller's bender and knobs do not change them. On a
++   narrow terminal the text before the notes is shortened, and the notes
++   only when they alone are wider than the terminal.
+ 4. Press `Esc` or `Ctrl-C` to quit. `field keys` sends a note-off for
+    every held note and then All Notes Off, so nothing is left sounding,
+    and `Field Keys` disappears.
+@@ -89,6 +97,122 @@ $ native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor
+ The monitor prints every MIDI message from the source you name, so it
+ also checks a USB controller: give it the controller's name.
+ 
++## Turn knobs
++
++`field keys` has knobs, as a hardware controller does. Each knob is a
++MIDI controller (CC) with a name and a range, and the knob line, between
++the instrument's line and the status line, shows every knob and its
++value. The first knob is always `mod`, the modulation wheel (CC 1), from
++0 to 127. An instrument adds its own knobs from its knob file.
++
++1. Press `ArrowRight` or `ArrowLeft` to choose a knob. The chosen knob is
++   in reverse video. The choice wraps past either end and sends nothing.
++2. Press `ArrowUp` or `ArrowDown` to turn the chosen knob one step up or
++   down. A step is one controller value, so a knob has 128 positions.
++   `field keys` sends the knob's controller with its new value on the
++   keymap's channel.
++3. Hold `ArrowUp` or `ArrowDown` to keep turning. After 300 ms the knob
++   turns a step every 40 ms, two steps from one second, and four from
++   one and a half, so a knob crosses its whole range in about 2.3
++   seconds. It stops at either end and when you release the key.
++
++A knob you have not turned shows its default, and its first turn starts
++from the controller value nearest the default. Knob values last for the
++session.
++
++Each value keeps its width as it changes, so turning a knob never moves
++the knobs after it or the notes. On a terminal too narrow for every
++knob, the line shows the knobs around the chosen one, with `‹` or `›`
++where knobs are hidden; the window moves only when the choice leaves
++it. The knob line appears whenever the keymap binds `knob` or `turn`
++([Actions](#actions)), which `musical` does.
++
++The knobs are MIDI, so they turn whatever listens to `Field Keys`: an
++instrument `field keys` plays, Logic, or a hardware synth. A take you
++record keeps every turn ([Record what you play](#record-what-you-play)).
++
++### Knob files
++
++A *knob file* describes an instrument's knobs. `field keys` reads it
++beside the instrument's program, `juno.knobs.yaml` for `juno.scd`, and
++adds its knobs after `mod` in the file's order:
++
++```yaml
++# shared/instruments/juno.knobs.yaml
++knobs:
++  - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 2000 }
++  - { name: res, cc: 71, min: 0, max: 0.95, curve: lin, default: 0.3 }
++  - { name: attack, cc: 73, min: 0.005, max: 4, curve: exp, units: s, default: 0.8 }
++  - { name: release, cc: 72, min: 0.02, max: 8, curve: exp, units: s, default: 1.5 }
++```
++
++| Field | Default | Meaning |
++| --- | --- | --- |
++| `name` | Required | Shown on the knob line. |
++| `cc` | Required | The controller that turns the knob. |
++| `min`, `max` | 0 and 127 | The knob's range. A turn stops at its ends. |
++| `curve` | `lin` | How the 128 controller values spread over the range: `lin` evenly, `exp` by equal ratios, for a frequency or a time. |
++| `step` | 0 | The quantum the knob's values round to; 0 for none. A turn moves to the next value that rounds differently, so a knob with two positions moves in one press. |
++| `units` | None | Shown after the value. |
++| `default` | `min` | The value the instrument starts at. |
++
++Controller value `v`, from 0 to 127, means `min + (max - min) * v / 127`
++on a `lin` knob and `min * (max / min) ** (v / 127)` on an `exp` knob,
++rounded to `step`: SuperCollider's `ControlSpec.map` for its warps of
++the same names. An `exp` knob prints three significant digits, with `k`
++from 1000 up and, for a knob in seconds, `m` below 1, as in `2.00 kHz`
++and `800 ms`. A `lin` knob prints the decimal places that give the end
++of its range farthest from zero three significant digits, and a knob
++with a whole `step` prints whole numbers.
++
++`field keys` checks a knob file before it plays, as it checks a keymap,
++and names each error:
++
++- **The controller is free.** It is from 2 to 119, and not 6, 32, 38,
++  64, or 96 to 101: bank select, data entry, sustain, and the
++  parameter-number controllers. CC 1 is `mod`, and 120 to 127 are
++  channel mode messages.
++- **No name or controller appears twice** in one file, and no knob is
++  named `mod`.
++- **An `exp` range does not touch or cross zero.**
++- **`min` and `max` differ, and `default` is inside the range**, ends
++  included.
++
++Saving a knob file while `field keys` plays takes its new knobs at once.
++Each controller keeps its value, and the choice stays on the knob of the
++same name. A save that fails the check keeps the knobs you had and names
++the error on the status line. A save that passes also reloads the
++instrument's voice, because the voice maps its controllers through the
++file ([Make an instrument playable](#make-an-instrument-playable)).
++
++`examples/bloom`'s `juno` and `bass` have the four knobs above, on
++General MIDI 2's sound controllers, so a hardware controller set up for
++General MIDI turns them too. Controllers 20 to 31 and 102 to 119 have no
++assigned meaning and suit knobs of your own.
++
++### Knobs for another instrument
++
++Give `--knobs` a knob file to turn knobs on an instrument `field keys`
++does not play, such as a hardware synth or an instrument in Logic. Write
++the file to match the instrument's MIDI implementation; `field keys`
++only shows the values, and the instrument decides what each controller
++does.
++
++```console
++$ field keys --knobs ~/knobs/ju-06a.yaml
++mod   0  cutoff 2.00 kHz
++Field Keys · musical · transpose 0 · velocity 100 · bend +0 · –
++```
++
++A bare name, as in `--knobs juno`, is `shared/instruments/juno.knobs.yaml`
++in the project. A value with a `/`, or ending in `.yaml`, is a path, and
++a leading `~/` means your home directory. Repeat `--knobs` for more than
++one file. With knobs from more than one instrument or file, each knob
++after `mod` carries the name of where it came from: the track, the
++program, or the file without `.knobs.yaml`, as in `keys.cutoff`. Two
++knobs on one controller share its value, and each shows it through its
++own range.
++
+ ## Play an instrument
+ 
+ `field keys <instrument>` plays a SuperCollider instrument from the
+@@ -145,10 +269,10 @@ these controls, and it must not render or exit.
+ | `gate` | 1 at note-on, 0 at note-off |
+ | `out` | The bus to write to: 0 when the voice plays straight to the device, a private bus when it plays through a track's effects. A voice must write to `out`, never to bus 0 itself |
+ | `mod` | Optional: the modulation wheel (CC 1), from 0 to 1, at note-on and whenever it moves |
++| `cc<n>` | Optional: controller n, for every n from 2 to 119 but the sustain pedal (64), from 0 to 1, as `cc74`, at note-on and whenever it moves |
+ 
+-A voice may leave `mod` out, and then the wheel does nothing to it. In
+-`musical-typing`, the keys `3` to `8` set the wheel from 0 to full, as
+-they do in Logic. The voice writes two channels and frees itself after
++A voice may leave `mod` or any `cc<n>` out, and then that controller
++does nothing to it. The voice writes two channels and frees itself after
+ `gate` goes to 0, with an envelope that ends in `doneAction: 2`. The
+ render variables are absent in voice mode, so check `FIELD_MODE` before
+ you read them:
+@@ -169,8 +293,35 @@ if ("FIELD_MODE".getenv == "voice") {
+ The host owns everything between MIDI and voices: one voice per
+ sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), pitch
+ bend, which it applies to `freq` on every sounding voice, up to two
+-semitones either way, and the modulation wheel, which it sets as `mod`
+-on every sounding voice and on each new one.
++semitones either way, the modulation wheel, which it sets as `mod`, and
++every other controller from 2 to 119 but the sustain pedal, which it
++sets as `cc<n>`. It sets each controller's last value, one per
++controller across every channel, on every sounding voice and on each
++new one. The host knows nothing about knobs.
++
++A voice maps each control it takes to a parameter of its own, as a
++hardware synth maps a controller. To map a knob through its knob file's
++range, so the range is written once, read the copy of the knob file that
++`FIELD_KNOBS` names. Field sets it in voice mode when the instrument has
++a knob file, live and in a render, and leaves it unset otherwise. The
++copy is one that passed the knob file's check, with every field spelled
++out, so a voice never reads a file `field keys` rejected. `juno.scd`
++reads it this way:
++
++```supercollider
++var knobs = "FIELD_KNOBS".getenv.parseYAMLFile["knobs"];
++var knob = { |name|
++	var each = knobs.detect { |knob| knob["name"] == name };
++	var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
++	spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
++};
++```
++
++Inside the SynthDef, `knob.("cutoff")` is then the cutoff as a signal,
++from 50 Hz to 15 kHz, starting at its default. `parseYAMLFile` reads
++every number as a string, hence `asFloat`, and the lag smooths the steps
++between controller values. A knob must be a value the graph uses as a
++signal; a setting the graph tests with `if` stays a constant.
+ 
+ Saving the program while `field keys` plays loads it again. The next
+ note plays the new voice, and notes already sounding finish as they
+@@ -192,12 +343,13 @@ The next save that loads puts `· reloaded` on the line instead.
+   [okamnesiac/offset](https://github.com/okamnesiac/offset), set to the
+   classic Juno pad: saw and pulse with the width swept, a slow attack,
+   and the chorus on. The modulation wheel adds vibrato, as the lever on
+-  a Juno's bender does.
++  a Juno's bender does, and its knobs turn the filter's cutoff and
++  resonance and the envelope's attack and release.
+ - **`bass`** — the same JU-06A set as offset's bass: a saw with a square
+   sub an octave down, a short envelope that opens the filter on each
+   note, and no chorus. The modulation wheel opens the filter, up to four
+-  times its cutoff. It plays at true pitch, so in `musical-typing` press
+-  `Z` to drop an octave.
++  times its cutoff, and its knobs are `juno`'s four. It plays at true
++  pitch, so in `musical` press `Z` to drop an octave.
+ 
+ ## Play a track
+ 
+@@ -208,7 +360,8 @@ any takes yet. Name several, and every key plays all of them at once:
+ ```console
+ $ field keys creek/track:keys creek/track:bass
+ keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers
+-Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · C3
++mod   0  keys.cutoff 2.00 kHz  keys.res 0.300  keys.attack  800 ms  keys.release  1.50 s  bass.cutoff 1.20 kHz ›
++Field Keys · musical · transpose 0 · velocity 100 · bend +0 · C3
+ ```
+ 
+ A target with `track:` in it is a track; anything else is an
+@@ -310,10 +463,12 @@ so you can sing and play at once:
+ $ field record creek/track:vox creek/track:keys --at 17
+ ```
+ 
+-A take starts with the modulation wheel at 0, because it records only
+-the messages that arrive once it has started. A wheel you left up
+-before then plays live but not in the take's render, so set it again
+-after the take starts: move the wheel, or press the key that sets it.
++A take records every knob you turn while it runs, and its render turns
++the instrument's knobs where you did. It starts with every knob at its
++default and the modulation wheel at 0, because it records only the
++messages that arrive once it has started. A knob you turned before then
++plays live but not in the take's render, so turn it again after the
++take starts.
+ 
+ ## Keys are read by position
+ 
+@@ -346,12 +501,14 @@ same note C3.
+ 
+ ```console
+ $ field keys --print
+-musical-typing: Logic Pro's Musical Typing. White keys on the home row, black keys above.
++musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
+ 
+-·     B-1   B+1   cc1   cc1   cc1   cc1   cc1   cc1   ·     ·     ·     ·
++·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·
+    cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·
+           C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5
+-             T-12  T+12  V-20  V+20  ·     ·     ·     ·     ·     ·
++             T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·
++
++← K-1   → K+1   ↑ R+1   ↓ R-1
+ ```
+ 
+ | Keys | What they do |
+@@ -360,19 +517,43 @@ musical-typing: Logic Pro's Musical Typing. White keys on the home row, black ke
+ | `W E`, `T Y U`, `O P` | Black keys |
+ | `Z`, `X` | Transpose down or up an octave |
+ | `C`, `V` | Velocity down or up by 20, between 1 and 127 |
++| `,`, `.` | Pitch bend fully down or up while held |
+ | `Tab` | Sustain (CC 64) while held |
+-| `1`, `2` | Pitch bend fully down or up while held |
+-| `3` to `8` | Modulation (CC 1): off, then five steps up to 127 |
++| `←`, `→` | Choose a knob |
++| `↑`, `↓` | Turn the chosen knob, faster while held |
+ | `Esc`, `Ctrl-C` | Quit |
+ 
+-Logic's guide describes `Tab` as turning sustain on or off. This keymap
+-holds sustain only while `Tab` is down, as a pedal does.
++`musical` plays every note where Musical Typing does, and keeps its
++octave, velocity, and sustain keys. Logic's guide describes `Tab` as
++turning sustain on or off; this keymap holds sustain only while `Tab` is
++down, as a pedal does. The bend moves to `,` and `.`, the keys that show
++`<` and `>`, and the modulation wheel is the knob `mod`, which the
++arrows turn. To bend on `1` and `2` and set the wheel in steps on `3` to
++`8`, as Logic does, copy `musical` into a keymap of your own
++([Write a keymap](#write-a-keymap)) with these controls in place of the
++bend's:
++
++```yaml
++  Digit1: { bend: -1 }
++  Digit2: { bend: 1 }
++  Digit3: { cc: 1, value: 0 }
++  Digit4: { cc: 1, value: 25 }
++  Digit5: { cc: 1, value: 51 }
++  Digit6: { cc: 1, value: 76 }
++  Digit7: { cc: 1, value: 102 }
++  Digit8: { cc: 1, value: 127 }
++```
++
++No built-in copies Musical Typing exactly, so `--keymap musical-typing`
++fails as any unknown name does, with a message that lists the
++built-ins.
+ 
+ ## The other built-in keymaps
+ 
+ Two more keymaps ship with Field. Each puts octave and velocity on the
+-arrows and sustain on `Space`, because notes take the rows Musical
+-Typing keeps for controls.
++arrows and sustain on `Space`, because notes take the rows `musical`
++keeps for controls, so neither has knob keys or a knob line. A keymap of
++your own can bind the knob actions.
+ 
+ | Keymap | What it plays | Range |
+ | --- | --- | --- |
+@@ -386,8 +567,8 @@ to see either one laid out on the keyboard.
+ 
+ | You give | `field keys` loads |
+ | --- | --- |
+-| Nothing | `musical-typing` |
+-| `--keymap musical-typing` | The built-in of that name. A bare name only ever names a built-in. |
++| Nothing | `musical` |
++| `--keymap tracker` | The built-in of that name. A bare name only ever names a built-in. |
+ | `--keymap ~/keymaps/mine.yaml` | That file. A value with a `/`, or ending in `.yaml`, is a path, and a leading `~/` means your home directory. |
+ | `FIELD_KEYMAP=<name or path>` | The same, when there is no `--keymap`. |
+ 
+@@ -467,8 +648,13 @@ times its row's index. In the example, `KeyZ` plays 48, `KeyA` 53,
+ | `{ transpose: <n> }` | Shifts every new note by n semitones, and stays shifted. A transpose that would move any note outside 0 to 127 is refused. |
+ | `{ velocity: <n> }` | Changes the velocity by n, kept between 1 and 127. |
+ | `{ bend: <x> }` | Pitch bend to x, from -1 to 1, while held; back to center on release. |
++| `{ knob: <n> }` | Moves the knob choice n knobs to the right, or to the left when n is negative, wrapping past either end. |
++| `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning faster while held ([Turn knobs](#turn-knobs)). Pressing a second turn key turns with it and stops the first. |
+ | `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0, and goes back to 0 when you quit, press `panic`, or reload the keymap. `value` defaults to 127. |
+-| `panic` | Releases every note and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
++| `panic` | Releases every note, stops a held turn, and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
++
++`knob` and `turn` take a whole number other than 0. A keymap that binds
++either one shows the knob line.
+ 
+ ### Rules
+ 
+diff --git a/docs/projects/instrument-knobs/readme.md b/docs/projects/instrument-knobs/readme.md
+index 66759cf7..0900f85a 100644
+--- a/docs/projects/instrument-knobs/readme.md
++++ b/docs/projects/instrument-knobs/readme.md
+@@ -1,6 +1,6 @@
+ ---
+-status: ready
+-priority: next
++status: in-progress
++priority: now
+ ---
+ 
+ # Instrument knobs
+@@ -298,6 +298,8 @@ in its own way, as it would answer a hardware controller's knobs:
+   constant. `parseYAMLFile` returns every number as a string, so the
+   helper converts each field, and it reads every field, so `juno`'s and
+   `bass`'s files spell each one out rather than lean on the defaults.
++  *Amended (2026-10-11, chunk 1):* the copy spells every field out
++  instead, defaults filled, so a knob file may lean on them (§9.1).
+   The lag smooths the steps between controller values.
+   A knob must be a value the graph uses as a signal; a setting that
+   decides the graph's shape, such as `juno`'s `chorusOn`, stays a
+@@ -887,3 +889,80 @@ Each question is deferred out of this plan, so none blocks a chunk.
+   controller defaults: 71 resonance, 72 release time, 73 attack time,
+   74 brightness, which synths use for cutoff, and 75 to 78 decay and
+   vibrato.
++
++## 9 Chunk 1 as built (2026-10-11)
++
++`field keys` reads knob files and `--knobs`, shows the knob line,
++chooses with the left and right arrows, and turns with up and down,
++faster while held. `musical` is the default keymap. The voicer hands
++every controller from 2 to 119 but the sustain pedal to the voices as
++`cc<n>`, and `juno` and `bass` map four knobs each through the checked
++copy of their knob files, live and in a take's render. Typing a value
++and the glide wait for chunk 2, and the starting positions for chunk 3.
++
++### 9.1 What implementation settled
++
++- **The copy a voice reads is the parsed file, every field spelled
++  out.** `knobsCopy` in `src/keys/knobs.ts` writes the schema's output,
++  with `min`, `max`, `curve`, `step`, and `default` filled. A voice
++  never has to know the schema's defaults, so `juno.knobs.yaml` and
++  `bass.knobs.yaml` leave `step` out, as §2.2's example does, and the
++  helper in `juno.scd` passes `step` to its `ControlSpec`, so a stepped
++  knob sounds as the line shows it.
++- **A voice without its copy fails with the reason.** `juno.scd` and
++  `bass.scd` throw `juno maps its knobs from juno.knobs.yaml, whose
++  checked copy Field names in FIELD_KNOBS` when `FIELD_KNOBS` is unset,
++  which the voice host reports as the program's error.
++- **`FIELD_INSTRUMENTS` lists objects.** Each is `{ "program": …,
++  "knobs": … }`, with `knobs` absent for a program without a knob file,
++  and `voice-load.scd` takes the copy's path beside the program's and
++  sets or unsets `FIELD_KNOBS` before it runs the program.
++- **The voicer hands `start` the controls as a list.** Its `start`
++  callback takes `[\mod, 0.5, \cc74, 1.0]` in place of `mod`, which the
++  host and the render append to each new synth's arguments, so the
++  voicer alone decides which controllers reach a voice.
++- **Knob names carry their source when knobs come from more than one
++  knob file.** An armed instrument without a knob file adds no knobs,
++  so `field keys juno pad` shows `cutoff`, not `juno.cutoff`.
++- **A knob file save goes through `KnobFiles` in
++  `src/commands/keys.ts`,** which owns the sources, the copies, and
++  each file's last error, so the rule that a failing save reaches no
++  voice is tested without a terminal. The copies' directory goes in
++  the `finally` that closes the routing, so a throw while the host
++  starts removes it too.
++- **The lines above the status line redraw together.** `redrawAbove`
++  rewrites from the first line that changed and clears below when a
++  keymap reload removes the knob line.
++- **The turn timer runs only while a turn key is held**, so a session
++  with no turn held keeps no 40 ms interval.
++- **`musical` leaves the number row free in chunk 1.** Its typing keys
++  arrive with chunk 2's `type` action.
++- **`field keys --keymap musical-typing` fails as any unknown name
++  does.** `docs/keys.md` gives Logic's number row as controls to copy.
++
++### 9.2 What was verified, and how
++
++| Check | Result |
++| --- | --- |
++| The vitest tests §4 lists for chunk 1 | Pass: `src/schema/knobs.test.ts` 7, `src/keys/knobs.test.ts` 13, the keymap schema 2 new, `src/keys/session.test.ts` 8 new, `src/commands/keys.test.ts` 8 new, `src/keys/voice-host.test.ts` 1 new, `src/keys/print.test.ts` with `musical`'s stored copy, `src/model/project.test.ts` 1 new. |
++| The full suite, against a `field-audiod` and FieldOut built from this branch | 90 files: 1167 tests pass, and 1 skips. |
++| `src/keys/routing-voice.test.ts` | The real voice host, given `FIELD_INSTRUMENTS` as objects, carries a note through FieldOut into the track's input in the daemon. |
++| `src/keys/voicer.test.ts` through `sclang` 3.14.1 | CC 74 at 127 sets `cc74` to 1.0 on the sounding voice and starts a new voice with it; CC 64, CC 0, and CC 120 never become controls; CC 1 still arrives as `mod`. |
++| `src/generators/voice-render.test.ts` through `sclang` | A take with CC 74 renders a voice whose level is its knob, silent without it; halving the knob's `max` in the knob file renders the take again at half the level. The knob file is a cache input, and one that fails the schema fails the build before the render runs. |
++| Criterion 10 | `field keys --keymap musical-typing` exits 1: `no built-in keymap named "musical-typing" (built-ins: fourths, musical, tracker)`. |
++| Criterion 19 | `field sc render` of `juno.scd` and `bass.scd` with `--seed 1 --duration 4`, before and after: `cmp` finds both pairs identical. |
++| Criterion 22 | With a `record:` entry for `juno` on `creek`'s `keys` and `min: 0` on `cutoff`, `field check` exits 1 naming `shared/instruments/juno.knobs.yaml: knobs.0.min: cutoff: an exp curve needs min and max of one sign and neither 0, not 0 and 15000`, and `field build creek` fails with the same line. |
++| The voice host through `sclang`, with an output device that does not exist | `juno` from its copy and `pad` without one both load, and the host stops only at the device; `juno` without a copy stops with the error above. |
++| `field keys --knobs` in a pseudo-terminal, with the real helper | The knob line read `mod   0  cutoff 2.00 kHz`, put `cutoff` in reverse video after `ArrowRight`, and read `cutoff 4.27 kHz` after `ArrowUp` held for a second and one `ArrowDown`, at one width throughout. The status line had no `mod` field. |
++
++### 9.3 What is still owed
++
++- **The criteria that need a kitty terminal and sound**, by hand: 1 to
++  3, 9, 11, 13, 15 to 17, and 12 and 18 up to their typed values. The
++  pseudo-terminal run drove the knob line with the protocol's bytes,
++  not Ghostty's or iTerm2's, and heard nothing.
++- **The MIDI a held turn sends, through CoreMIDI.** The monitor in the
++  pseudo-terminal run attached to the `Field Keys` of a `field keys`
++  session already running on the machine, so it saw none of the run's
++  control changes. `src/keys/session.test.ts` pins what a turn sends
++  and when.
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index a47e278c..2648e250 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -575,6 +575,13 @@ Chunk 4 adds its files when it appends its section (§6).
+   | `tracker` | 32 notes | Tracker users, from FastTracker 2 to Renoise | It spends the number row on black keys and the `KeyZ` row on notes, so its controls move to the arrows and lose pitch bend and modulation. The octaves zig-zag between rows. |
+   | `fourths` | 27 notes | Players of Ableton Push in fourths, LinnStrument, bass, and guitar | It is unfamiliar to keyboard players, has no piano shape, and spends every row on notes. Its gain beyond range is that a chord shape plays the same in every key. |
+ 
++  *Amended (2026-10-11, instrument-knobs.md chunk 1):* `musical`, Field's
++  adaptation of Musical Typing, replaces `musical-typing` as the default.
++  It keeps every note and the octave, velocity, and sustain keys, moves
++  the bend to `Comma` and `Period`, and spends the arrows on knobs,
++  where the modulation wheel is the knob `mod`
++  ([instrument-knobs.md](../instrument-knobs/readme.md) §2.3, §3.2).
++
+ - **`sclang` turns MIDI into voices, not TypeScript.** The voice host
+   is SuperCollider's own idiom (`MIDIdef`, `Synth`, `set(\gate, 0)`),
+   and `sclang` already reads CoreMIDI. The same code can build an NRT
+diff --git a/examples/bloom/shared/instruments/bass.knobs.yaml b/examples/bloom/shared/instruments/bass.knobs.yaml
+new file mode 100644
+index 00000000..460ecc34
+--- /dev/null
++++ b/examples/bloom/shared/instruments/bass.knobs.yaml
+@@ -0,0 +1,9 @@
++# bass's knobs (Field's docs/keys.md, "Knobs"): field keys shows them and
++# sends each as its controller, and bass.scd's voice maps each controller
++# through the range here. The numbers are General MIDI 2's sound
++# controllers, so a controller set up for General MIDI turns them too.
++knobs:
++  - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 1200 }
++  - { name: res, cc: 71, min: 0, max: 0.95, curve: lin, default: 0.4 }
++  - { name: attack, cc: 73, min: 0.005, max: 4, curve: exp, units: s, default: 0.005 }
++  - { name: release, cc: 72, min: 0.02, max: 8, curve: exp, units: s, default: 0.15 }
+diff --git a/examples/bloom/shared/instruments/bass.scd b/examples/bloom/shared/instruments/bass.scd
+index bb20de9a..a939411a 100644
+--- a/examples/bloom/shared/instruments/bass.scd
++++ b/examples/bloom/shared/instruments/bass.scd
+@@ -6,10 +6,10 @@
+ // because a program's own bytes are the cache key for what it renders.
+ //
+ // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
+-// bass` plays, with the mod wheel opening its filter (§14), and a
+-// record entry with `instrument: bass` renders
++// bass` plays, with the mod wheel opening its filter (§14) and the knobs
++// in bass.knobs.yaml, and a record entry with `instrument: bass` renders
+ // (keyboard-instrument.md §2.6). It plays at true pitch, so press Z in
+-// musical-typing to drop an octave. Otherwise it runs under Field's
++// musical to drop an octave. Otherwise it runs under Field's
+ // sc-render contract and renders offset's sequence from sessions/juno.scd,
+ // a note every quarter second as offset plays it, for FIELD_DURATION.
+ (
+@@ -25,9 +25,12 @@ var bass = (
+ );
+ var level = 0.3; // a voice's gain: a bass line rarely stacks notes
+ 
+-// One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
+-// ends after the gate closes. The knobs are fixed per instrument, so they
+-// shape the graph rather than arriving as controls. `mod`, the mod wheel
++// One JU-06A voice for the settings in `k`, stereo, freed when its
++// envelope ends after the gate closes. A render fixes every setting, so
++// they shape the graph. A voice takes four of them, the cutoff, the
++// resonance, the attack, and the release, as signals from its knobs; the
++// rest stay fixed, and those the graph tests with `if`, such as chorusOn,
++// must. `mod`, the mod wheel
+ // from 0 to 1, comes only in voice mode: it adds vibrato of up to
+ // modVibrato semitones and opens the filter by up to modOpen times its
+ // cutoff. A render passes none, so its graph is the one without them.
+@@ -56,8 +59,24 @@ var ju06a = { |freq, gate, k, mod|
+ };
+ 
+ if ("FIELD_MODE".getenv == "voice") {
++	// Each knob in bass.knobs.yaml, as the signal its controller sets: cc74
++	// from 0 to 1, mapped through the knob's range from the copy of the file
++	// that Field checked (keys.md, "Knobs"), starting at the knob's default.
++	var knobs = ("FIELD_KNOBS".getenv ?? {
++		Error("bass maps its knobs from bass.knobs.yaml, whose checked copy Field names in FIELD_KNOBS").throw
++	}).parseYAMLFile["knobs"];
++	var knob = { |name|
++		var each = knobs.detect { |knob| knob["name"] == name };
++		var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
++		spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
++	};
+ 	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
+-		Out.ar(out, ju06a.(freq, gate, bass, mod.lag(0.05)) * amp * level);
++		var k = bass.copy;
++		k[\vcfFreq] = knob.("cutoff");
++		k[\vcfRes] = knob.("res");
++		k[\atk] = knob.("attack");
++		k[\rel] = knob.("release");
++		Out.ar(out, ju06a.(freq, gate, k, mod.lag(0.05)) * amp * level);
+ 	})
+ } {
+ 	var seed = "FIELD_SEED".getenv.asInteger;
+diff --git a/examples/bloom/shared/instruments/juno.knobs.yaml b/examples/bloom/shared/instruments/juno.knobs.yaml
+new file mode 100644
+index 00000000..bf075657
+--- /dev/null
++++ b/examples/bloom/shared/instruments/juno.knobs.yaml
+@@ -0,0 +1,9 @@
++# juno's knobs (Field's docs/keys.md, "Knobs"): field keys shows them and
++# sends each as its controller, and juno.scd's voice maps each controller
++# through the range here. The numbers are General MIDI 2's sound
++# controllers, so a controller set up for General MIDI turns them too.
++knobs:
++  - { name: cutoff, cc: 74, min: 50, max: 15000, curve: exp, units: Hz, default: 2000 }
++  - { name: res, cc: 71, min: 0, max: 0.95, curve: lin, default: 0.3 }
++  - { name: attack, cc: 73, min: 0.005, max: 4, curve: exp, units: s, default: 0.8 }
++  - { name: release, cc: 72, min: 0.02, max: 8, curve: exp, units: s, default: 1.5 }
+diff --git a/examples/bloom/shared/instruments/juno.scd b/examples/bloom/shared/instruments/juno.scd
+index 1c2a57a3..f51c2540 100644
+--- a/examples/bloom/shared/instruments/juno.scd
++++ b/examples/bloom/shared/instruments/juno.scd
+@@ -5,8 +5,9 @@
+ // swept by the LFO, a slow attack, a long release, and the chorus on.
+ //
+ // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
+-// juno` plays, with vibrato from the mod wheel (§14), and a record
+-// entry with `instrument: juno` renders (keyboard-instrument.md §2.6).
++// juno` plays, with vibrato from the mod wheel (§14) and the knobs in
++// juno.knobs.yaml, and a record entry with `instrument: juno` renders
++// (keyboard-instrument.md §2.6).
+ // Otherwise it runs under Field's sc-render contract and renders a held
+ // C minor ninth chord for FIELD_DURATION.
+ (
+@@ -22,9 +23,12 @@ var pad = (
+ );
+ var level = 0.12; // a voice's gain: room for chords under 0 dBFS
+ 
+-// One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
+-// ends after the gate closes. The knobs are fixed per instrument, so they
+-// shape the graph rather than arriving as controls. `mod`, the mod wheel
++// One JU-06A voice for the settings in `k`, stereo, freed when its
++// envelope ends after the gate closes. A render fixes every setting, so
++// they shape the graph. A voice takes four of them, the cutoff, the
++// resonance, the attack, and the release, as signals from its knobs; the
++// rest stay fixed, and those the graph tests with `if`, such as chorusOn,
++// must. `mod`, the mod wheel
+ // from 0 to 1, comes only in voice mode: it adds vibrato of up to
+ // modVibrato semitones and opens the filter by up to modOpen times its
+ // cutoff. A render passes none, so its graph is the one without them.
+@@ -53,8 +57,24 @@ var ju06a = { |freq, gate, k, mod|
+ };
+ 
+ if ("FIELD_MODE".getenv == "voice") {
++	// Each knob in juno.knobs.yaml, as the signal its controller sets: cc74
++	// from 0 to 1, mapped through the knob's range from the copy of the file
++	// that Field checked (keys.md, "Knobs"), starting at the knob's default.
++	var knobs = ("FIELD_KNOBS".getenv ?? {
++		Error("juno maps its knobs from juno.knobs.yaml, whose checked copy Field names in FIELD_KNOBS").throw
++	}).parseYAMLFile["knobs"];
++	var knob = { |name|
++		var each = knobs.detect { |knob| knob["name"] == name };
++		var spec = ControlSpec(each["min"].asFloat, each["max"].asFloat, each["curve"].asSymbol, each["step"].asFloat);
++		spec.map(("cc" ++ each["cc"]).asSymbol.kr(spec.unmap(each["default"].asFloat), 0.05))
++	};
+ 	SynthDef(\junoKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
+-		Out.ar(out, ju06a.(freq, gate, pad, mod.lag(0.05)) * amp * level);
++		var k = pad.copy;
++		k[\vcfFreq] = knob.("cutoff");
++		k[\vcfRes] = knob.("res");
++		k[\atk] = knob.("attack");
++		k[\rel] = knob.("release");
++		Out.ar(out, ju06a.(freq, gate, k, mod.lag(0.05)) * amp * level);
+ 	})
+ } {
+ 	var seed = "FIELD_SEED".getenv.asInteger;
+diff --git a/keymaps/musical-typing.yaml b/keymaps/musical.yaml
+similarity index 51%
+rename from keymaps/musical-typing.yaml
+rename to keymaps/musical.yaml
+index e435c413..7c847266 100644
+--- a/keymaps/musical-typing.yaml
++++ b/keymaps/musical.yaml
+@@ -1,5 +1,5 @@
+-name: musical-typing
+-description: Logic Pro's Musical Typing. White keys on the home row, black keys above.
++name: musical
++description: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.
+ base: 60
+ notes:
+   KeyA: 0
+@@ -25,12 +25,10 @@ controls:
+   KeyX: { transpose: 12 }
+   KeyC: { velocity: -20 }
+   KeyV: { velocity: 20 }
++  Comma: { bend: -1 }
++  Period: { bend: 1 }
+   Tab: { cc: 64, value: 127, mode: hold }
+-  Digit1: { bend: -1 }
+-  Digit2: { bend: 1 }
+-  Digit3: { cc: 1, value: 0 }
+-  Digit4: { cc: 1, value: 25 }
+-  Digit5: { cc: 1, value: 51 }
+-  Digit6: { cc: 1, value: 76 }
+-  Digit7: { cc: 1, value: 102 }
+-  Digit8: { cc: 1, value: 127 }
++  ArrowLeft: { knob: -1 }
++  ArrowRight: { knob: 1 }
++  ArrowUp: { turn: 1 }
++  ArrowDown: { turn: -1 }
+diff --git a/sc/voice-host.scd b/sc/voice-host.scd
+index 5b66c7e2..9159bd93 100644
+--- a/sc/voice-host.scd
++++ b/sc/voice-host.scd
+@@ -5,8 +5,10 @@
+ // only the lines that start with "@field ", each one JSON object; the rest
+ // of sclang's output is left for diagnosing a failure.
+ //
+-// Environment: FIELD_INSTRUMENTS (a JSON list of the programs' absolute
+-// paths, played in unison: each note sounds a voice from each),
++// Environment: FIELD_INSTRUMENTS (a JSON list of the programs, played in
++// unison: each note sounds a voice from each, and each is an object with
++// "program", its absolute path, and "knobs", the checked copy of its knob
++// file, absent when it has none: instrument-knobs.md §2.4),
+ // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
+ // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
+ // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
+@@ -137,9 +139,9 @@ boot = {
+ // voices alike still both play.
+ loadAll = {
+ 	var defs = [], why;
+-	instruments.do { |path, i|
++	instruments.do { |each, i|
+ 		var def, problem;
+-		# def, problem = loadVoice.(path);
++		# def, problem = loadVoice.(each["program"], each["knobs"]);
+ 		if (problem.notNil) { why = why ? problem } {
+ 			def.name = ("field" ++ i ++ "_" ++ def.name).asSymbol;
+ 			defs = defs.add(def);
+@@ -176,10 +178,10 @@ run = {
+ 	Server.default = server;
+ 
+ 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+-		{ |note, velocity, freq, mod|
++		{ |note, velocity, freq, controls|
+ 			voiceDefs.collect { |def, i|
+ 				var out = buses[i] !? (_.index) ? 0;
+-				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, out, \mod, mod], server)
++				Synth(def.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, out] ++ controls, server)
+ 			}
+ 		},
+ 		{ |synths, control, value| synths.do(_.set(control, value)) },
+diff --git a/sc/voice-load.scd b/sc/voice-load.scd
+index d08c0a01..5e30fc4d 100644
+--- a/sc/voice-load.scd
++++ b/sc/voice-load.scd
+@@ -1,15 +1,18 @@
+ // Loads an instrument program's voice (keyboard-instrument.md §2.6): for
+ // the live voice host, at start and on each reload (§14), and for the
+ // offline render of a take (§12.3). Its value is a function of the
+-// program's path that answers [voiceDef, nil], or [nil, why] when the
+-// program does not compile, fails, or answers something other than a
+-// SynthDef. The caller's environment carries FIELD_MODE=voice.
+-{ |path|
++// program's path and the path of the checked copy of its knob file, or
++// nil when it has none, that answers [voiceDef, nil], or [nil, why] when
++// the program does not compile, fails, or answers something other than a
++// SynthDef. The caller's environment carries FIELD_MODE=voice; the program
++// finds its knob file's copy in FIELD_KNOBS (instrument-knobs.md §2.4).
++{ |path, knobs|
+ 	var name = PathName(path).fileName, compiled, value, error, saved;
+ 	compiled = thisProcess.interpreter.compileFile(path);
+ 	if (compiled.isNil) {
+ 		[nil, name ++ " does not compile"]
+ 	} {
++		if (knobs.notNil) { "FIELD_KNOBS".setenv(knobs) } { "FIELD_KNOBS".unsetenv };
+ 		// As executeFile runs it, so a program can find its own directory.
+ 		saved = thisProcess.nowExecutingPath;
+ 		thisProcess.nowExecutingPath = path;
+diff --git a/sc/voice-render.scd b/sc/voice-render.scd
+index 900f3cd5..d33b3fe9 100644
+--- a/sc/voice-render.scd
++++ b/sc/voice-render.scd
+@@ -4,6 +4,8 @@
+ // sc-render contract, plus the take:
+ //
+ // FIELD_INSTRUMENT  the instrument program, loaded under FIELD_MODE=voice
++// FIELD_KNOBS       the checked copy of its knob file, when it has one
++//                   (instrument-knobs.md §2.4)
+ // FIELD_EVENTS      a JSON file: {"events": [[seconds, kind, ...], ...]},
+ //                   in time order, where kind is "on" (channel, note,
+ //                   velocity), "off" (channel, note), "cc" (channel,
+@@ -11,6 +13,7 @@
+ // FIELD_OUTPUT, FIELD_SAMPLE_RATE, FIELD_CHANNELS, FIELD_DURATION
+ (
+ var instrument = "FIELD_INSTRUMENT".getenv;
++var knobs = "FIELD_KNOBS".getenv;
+ var eventsPath = "FIELD_EVENTS".getenv;
+ var out = "FIELD_OUTPUT".getenv;
+ var rate = "FIELD_SAMPLE_RATE".getenv.asInteger;
+@@ -23,7 +26,7 @@ var voiceDef, problem, take, score, voicer, now = 0.0, nextNode = 1000;
+ // render variables are absent, here as live (keys.md).
+ ["FIELD_OUTPUT", "FIELD_SEED", "FIELD_DURATION", "FIELD_SAMPLE_RATE", "FIELD_CHANNELS"].do(_.unsetenv);
+ 
+-# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument);
++# voiceDef, problem = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd").(instrument, knobs);
+ if (problem.notNil) {
+ 	("ERROR: " ++ problem).postln;
+ 	1.exit;
+@@ -33,10 +36,10 @@ if (problem.notNil) {
+ 	score.add([0.0, ['/d_recv', voiceDef.asBytes]]);
+ 
+ 	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+-		{ |note, velocity, freq, mod|
++		{ |note, velocity, freq, controls|
+ 			var node = nextNode;
+ 			nextNode = nextNode + 1;
+-			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod]]);
++			score.add([now, [\s_new, voiceDef.name, node, 0, 0, \freq, freq, \amp, velocity / 127, \gate, 1, \out, 0] ++ controls]);
+ 			node
+ 		},
+ 		{ |node, control, value| score.add([now, [\n_set, node, control, value]]) },
+diff --git a/sc/voicer.scd b/sc/voicer.scd
+index 71f436d2..56dd1a28 100644
+--- a/sc/voicer.scd
++++ b/sc/voicer.scd
+@@ -2,20 +2,25 @@
+ // offline render of a recorded take (keyboard-instrument.md §2.6, §12), so
+ // a take renders with exactly the voicing it was played with: one voice
+ // per sounding note, the sustain pedal (CC 64), All Notes Off (CC 123),
+-// pitch bend of up to two semitones on every sounding voice, and the
+-// modulation wheel (CC 1) as `mod`, from 0 to 1, on every voice
+-// (keyboard-instrument.md §14).
++// pitch bend of up to two semitones on every sounding voice, the
++// modulation wheel (CC 1) as `mod` (keyboard-instrument.md §14), and every
++// other controller from 2 to 119 but the sustain pedal as a control named
++// for its number, `cc74` (instrument-knobs.md §2.4). Each controller's
++// last value, from 0 to 1 and one per controller across every channel,
++// goes to every sounding voice and to each new one.
+ //
+ // Its value is a function of three callbacks and an optional fourth:
+-//   start.(note, velocity, freq, mod) -> a voice
+-//   set.(voice, control, value), for \freq and \mod
++//   start.(note, velocity, freq, controls) -> a voice, where controls is
++//     each controller's name and value, as [\mod, 0.5, \cc74, 1.0]
++//   set.(voice, control, value), for \freq, \mod, and each \cc<n>
+ //   release.(voice)
+ //   onVoice.(note, sounding), told as each voice starts and ends
+ // and returns an Event that takes noteOn, noteOff, cc, bend, and
+ // forgetVoices. No entry may share a name with a method Event already has,
+ // such as clear (Set.clear): the method runs instead, and empties the Event.
+ { |start, set, release, onVoice|
+-	var voices = Dictionary.new, sustained = Set.new, sustainDown = false, bend = 0, mod = 0;
++	var voices = Dictionary.new, sustained = Set.new, sustainDown = false, bend = 0;
++	var controls = IdentityDictionary[\mod -> 0];
+ 	var releaseKey, freqOf;
+ 	freqOf = { |note| (note + bend).midicps };
+ 	releaseKey = { |key|
+@@ -30,7 +35,7 @@
+ 			if (velocity == 0) { self.noteOff(chan, note) } {
+ 				voices[key] !? { |old| release.(old) };
+ 				sustained.remove(key);
+-				voices[key] = start.(note, velocity, freqOf.(note), mod);
++				voices[key] = start.(note, velocity, freqOf.(note), controls.asKeyValuePairs);
+ 				onVoice !? { onVoice.(note, true) };
+ 			};
+ 		},
+@@ -40,10 +45,6 @@
+ 		},
+ 		cc: { |self, chan, number, value|
+ 			case
+-			{ number == 1 } {
+-				mod = value / 127;
+-				voices.do { |voice| set.(voice, \mod, mod) };
+-			}
+ 			{ number == 64 } {
+ 				if (value >= 64) { sustainDown = true } {
+ 					sustainDown = false;
+@@ -54,6 +55,11 @@
+ 			{ number == 123 } {
+ 				voices.keys.copy.do(releaseKey);
+ 				sustained.clear;
++			}
++			{ number.inclusivelyBetween(1, 119) } {
++				var name = if (number == 1) { \mod } { ("cc" ++ number).asSymbol };
++				controls[name] = value / 127;
++				voices.do { |voice| set.(voice, name, controls[name]) };
+ 			};
+ 		},
+ 		bend: { |self, chan, value|
+diff --git a/src/cli.ts b/src/cli.ts
+index a76c3f00..ae6dff8b 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1071,10 +1071,17 @@ program
+       'or tracks (creek/track:keys) to play the instrument each MIDI track names, all at once ' +
+       '(needs a terminal with the kitty keyboard protocol; Esc quits)',
+   )
+-  .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
++  .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical)')
++  .option(
++    '--knobs <name or path>',
++    "a knob file to show and turn, for any instrument listening to Field Keys: a bare name is the project's " +
++      'shared/instruments/<name>.knobs.yaml, anything else a path (repeatable)',
++    (value: string, previous: string[]) => [...previous, value],
++    [] as string[],
++  )
+   .option('--device <name>', 'output device for the instrument (field devices lists them; default: the system output)')
+   .option('--print', 'print the keymap as a keyboard diagram and exit')
+-  .action(async (targets: string[], opts: { keymap?: string; print?: boolean; device?: string }) => {
++  .action(async (targets: string[], opts: { keymap?: string; print?: boolean; device?: string; knobs?: string[] }) => {
+     try {
+       const { keysCommand } = await import('./commands/keys.js');
+       await keysCommand(targets, opts);
+diff --git a/src/commands/keys.test.ts b/src/commands/keys.test.ts
+index ab7fc049..dcc88534 100644
+--- a/src/commands/keys.test.ts
++++ b/src/commands/keys.test.ts
+@@ -1,51 +1,67 @@
++import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+-import { describe, expect, it } from 'vitest';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import { builtinKeymapDir, loadKeymap, parseKeymap } from '../keys/keymap.js';
++import { KnobsError, knobList, loadKnobs, parseKnobs } from '../keys/knobs.js';
+ import { KeysSession } from '../keys/session.js';
+ import { BUILD_DAEMON } from '../remedies.js';
+-import { instrumentState, instrumentText, statusText } from './keys.js';
++import { instrumentState, instrumentText, KnobFiles, KnobLine, loadKnobSources, redrawAbove, statusText } from './keys.js';
+ 
+ // field keys' status line: the sounding notes come last, so playing
+ // changes only the end of the line, and a narrow terminal shortens what
+ // comes before them instead of the notes.
+ 
+-function musicalTyping(): KeysSession {
+-  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical-typing.yaml')));
++function musical(): KeysSession {
++  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')));
++}
++
++const shelf = join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments');
++const juno = loadKnobs(join(shelf, 'juno.knobs.yaml'));
++
++// What a line shows, without the escapes that put a knob in reverse video.
++const plain = (line: string): string => line.replace(/\x1b\[\d+m/g, '');
++
++function tap(session: KeysSession, position: string, times = 1): void {
++  for (let i = 0; i < times; i++) {
++    session.press(position);
++    session.release(position);
++  }
+ }
+ 
+ describe('the status line', () => {
+   it('ends with the sounding notes, after anything else it has to say', () => {
+-    const session = musicalTyping();
+-    expect(statusText(session, undefined, undefined, 200)).toBe(
+-      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · –',
+-    );
++    const session = musical();
++    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · musical · transpose 0 · velocity 100 · bend +0 · –');
+     session.press('KeyA');
+     session.press('KeyD');
+-    expect(statusText(session, undefined, 'KeyA is both a note and a control', 200)).toBe(
+-      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 0 · keymap not reloaded: KeyA is both a note and a control · C4 E4',
++    expect(statusText(session, undefined, 'KeyA is both a note and a control', 300, 'juno.knobs.yaml: knobs.1.cc: res: cc 1 is the modulation wheel')).toBe(
++      'Field Keys · musical · transpose 0 · velocity 100 · bend +0 · keymap not reloaded: KeyA is both a note and a control · ' +
++        'knobs not reloaded: juno.knobs.yaml: knobs.1.cc: res: cc 1 is the modulation wheel · C4 E4',
+     );
+   });
+ 
+-  it('shows the modulation wheel where the keymap can set it', () => {
+-    const session = musicalTyping();
++  it('shows the modulation wheel where the keymap can set it and has no knob line to show it', () => {
++    const session = new KeysSession(parseKeymap('name: wheel\nnotes: { KeyA: 0 }\ncontrols: { Digit6: { cc: 1, value: 76 } }\n', 'w.yaml'));
+     session.press('Digit6');
+     session.release('Digit6');
+-    expect(statusText(session, undefined, undefined, 200)).toBe(
+-      'Field Keys · musical-typing · transpose 0 · velocity 100 · bend +0 · mod 76 · –',
+-    );
++    expect(statusText(session, undefined, undefined, 200)).toBe('Field Keys · wheel · transpose 0 · velocity 100 · mod 76 · –');
+     const tracker = new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')));
+     expect(statusText(tracker, undefined, undefined, 200)).not.toMatch(/bend|mod/);
++    const turned = musical();
++    turned.press('ArrowUp');
++    expect(statusText(turned, undefined, undefined, 200)).not.toMatch(/mod/);
+   });
+ 
+   it('shows the pitch bend while a bend key is held, at the same width', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyA');
+     const rest = statusText(session, undefined, undefined, 200);
+-    session.press('Digit1');
++    session.press('Comma');
+     const bent = statusText(session, undefined, undefined, 200);
+-    expect(bent).toBe('Field Keys · musical-typing · transpose 0 · velocity 100 · bend -1 · mod 0 · C4');
++    expect(bent).toBe('Field Keys · musical · transpose 0 · velocity 100 · bend -1 · C4');
+     expect(bent).toHaveLength(rest.length);
+-    session.release('Digit1');
++    session.release('Comma');
+     expect(statusText(session, undefined, undefined, 200)).toBe(rest);
+   });
+ 
+@@ -66,12 +82,12 @@ describe('the status line', () => {
+   });
+ 
+   it('shortens the text before the notes to fit, never the notes', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyA');
+     session.press('KeyD');
+-    const line = statusText(session, undefined, undefined, 30);
+-    expect(line).toBe('Field Keys · musical-… · C4 E4');
+-    expect(line).toHaveLength(30);
++    const line = statusText(session, undefined, undefined, 26);
++    expect(line).toBe('Field Keys · musi… · C4 E4');
++    expect(line).toHaveLength(26);
+   });
+ });
+ 
+@@ -124,3 +140,139 @@ describe('the instrument line', () => {
+     );
+   });
+ });
++
++describe('the knob line', () => {
++  const withJuno = (): KeysSession => new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
++
++  it('shows every knob at its default, with the chosen one in reverse video', () => {
++    const line = new KnobLine().text(withJuno(), 200);
++    expect(line).toBe('\x1b[7mmod   0\x1b[27m  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s');
++  });
++
++  it('keeps its length through a turn, and moves the reverse video with the choice', () => {
++    const session = withJuno();
++    const knobLine = new KnobLine();
++    const rest = plain(knobLine.text(session, 200));
++    tap(session, 'ArrowRight');
++    tap(session, 'ArrowDown', 100);
++    const turned = knobLine.text(session, 200);
++    expect(turned).toBe('mod   0  \x1b[7mcutoff  50.0 Hz\x1b[27m  res 0.300  attack  800 ms  release  1.50 s');
++    expect(plain(turned)).toHaveLength(rest.length);
++    tap(session, 'ArrowUp');
++    expect(plain(knobLine.text(session, 200))).toBe('mod   0  cutoff  52.3 Hz  res 0.300  attack  800 ms  release  1.50 s');
++  });
++
++  it('names each knob after its source when knobs come from several', () => {
++    const session = new KeysSession(
++      loadKeymap(join(builtinKeymapDir(), 'musical.yaml')),
++      knobList([
++        { name: 'keys', knobs: juno.slice(0, 1) },
++        { name: 'bass', knobs: loadKnobs(join(shelf, 'bass.knobs.yaml')).slice(0, 1) },
++      ]),
++    );
++    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  keys.cutoff 2.00 kHz  bass.cutoff 1.20 kHz');
++    tap(session, 'ArrowRight');
++    tap(session, 'ArrowUp');
++    // Two knobs on one controller share its value, each through its own range.
++    expect(plain(new KnobLine().text(session, 200))).toBe('mod   0  keys.cutoff 2.08 kHz  bass.cutoff 2.08 kHz');
++  });
++
++  it('shows a window of whole knobs on a narrow terminal, which moves only when the choice leaves it', () => {
++    const session = withJuno();
++    const knobLine = new KnobLine();
++    expect(plain(knobLine.text(session, 40))).toBe('mod   0  cutoff 2.00 kHz  res 0.300 ›');
++    tap(session, 'ArrowRight', 2);
++    expect(plain(knobLine.text(session, 40))).toBe('mod   0  cutoff 2.00 kHz  res 0.300 ›');
++    tap(session, 'ArrowRight');
++    expect(plain(knobLine.text(session, 40))).toBe('‹ res 0.300  attack  800 ms ›');
++    tap(session, 'ArrowUp', 5);
++    expect(plain(knobLine.text(session, 40))).toBe('‹ res 0.300  attack  1.02 s ›');
++    tap(session, 'ArrowLeft');
++    expect(plain(knobLine.text(session, 40))).toBe('‹ res 0.300  attack  1.02 s ›');
++    tap(session, 'ArrowLeft');
++    expect(plain(knobLine.text(session, 40))).toBe('‹ cutoff 2.00 kHz  res 0.300 ›');
++    tap(session, 'ArrowLeft', 2);
++    expect(plain(knobLine.text(session, 40))).toBe('‹ attack  1.02 s  release  1.50 s');
++  });
++});
++
++describe('redrawing the lines above the status line', () => {
++  it('draws them all the first time, then only from the first that changed', () => {
++    expect(redrawAbove([], ['juno starting', 'mod   0'])).toBe('\r\x1b[Kjuno starting\n\r\x1b[Kmod   0\n');
++    expect(redrawAbove(['juno starting', 'mod   0'], ['juno starting', 'mod   0'])).toBe('');
++    expect(redrawAbove(['juno starting', 'mod   0'], ['juno starting', 'mod   1'])).toBe('\x1b[1A\r\x1b[Kmod   1\n');
++    expect(redrawAbove(['juno starting', 'mod   0'], ['juno live', 'mod   0'])).toBe('\x1b[2A\r\x1b[Kjuno live\n\r\x1b[Kmod   0\n');
++  });
++
++  it('clears what is left below when a line goes', () => {
++    expect(redrawAbove(['juno live', 'mod   0'], ['juno live'])).toBe('\x1b[1A\x1b[J');
++    expect(redrawAbove(['juno live'], ['juno live', 'mod   0'])).toBe('\r\x1b[Kmod   0\n');
++  });
++});
++
++describe('knob files in a session', () => {
++  let dir: string;
++  beforeEach(() => {
++    dir = mkdtempSync(join(tmpdir(), 'field-keys-knobs-'));
++  });
++  afterEach(() => rmSync(dir, { recursive: true, force: true }));
++
++  it('reads an armed instrument’s knob file beside its program, and each --knobs file', () => {
++    writeFileSync(join(dir, 'juno.scd'), '');
++    writeFileSync(join(dir, 'juno.knobs.yaml'), readFileSync(join(shelf, 'juno.knobs.yaml')));
++    writeFileSync(join(dir, 'pad.scd'), '');
++    writeFileSync(join(dir, 'ju-06a.yaml'), 'knobs:\n  - { name: cutoff, cc: 74 }\n');
++    const sources = loadKnobSources(
++      [
++        { program: join(dir, 'juno.scd'), track: 'creek/keys', unheardEffects: [] },
++        { program: join(dir, 'pad.scd'), unheardEffects: [] },
++      ],
++      [join(dir, 'ju-06a.yaml')],
++      undefined,
++    );
++    expect(sources.map(({ name, program }) => ({ name, program }))).toEqual([
++      { name: 'keys', program: join(dir, 'juno.scd') },
++      { name: 'ju-06a', program: undefined },
++    ]);
++    expect(sources[0]!.knobs).toEqual(juno);
++    expect(() => loadKnobSources([], [join(dir, 'missing.yaml')], undefined)).toThrow(/no such file/);
++    writeFileSync(join(dir, 'juno.knobs.yaml'), 'knobs:\n  - { name: cutoff, cc: 1 }\n');
++    expect(() => loadKnobSources([{ program: join(dir, 'juno.scd'), unheardEffects: [] }], [], undefined)).toThrow(KnobsError);
++  });
++
++  it('keeps the voice’s copy after a save that fails and asks for no reload, and rewrites it before one that passes', () => {
++    const path = join(dir, 'juno.knobs.yaml');
++    const files = new KnobFiles([
++      { name: 'juno', path, program: '/p/juno.scd', knobs: juno },
++      { name: 'ju-06a', path: join(dir, 'ju-06a.yaml'), knobs: juno.slice(0, 1) },
++    ]);
++    try {
++      const copy = files.copies.get('/p/juno.scd')!;
++      expect(parseKnobs(readFileSync(copy, 'utf8'), copy)).toEqual(juno);
++      expect([...files.copies.keys()]).toEqual(['/p/juno.scd']);
++
++      let failed: KnobsError | undefined;
++      try {
++        parseKnobs('knobs:\n  - { name: res, cc: 1 }\n', path);
++      } catch (err) {
++        failed = err as KnobsError;
++      }
++      expect(files.saved(path, { error: failed! })).toBe(false);
++      expect(files.errors.get(path)).toBe('juno.knobs.yaml: knobs.0.cc: res: cc 1 is the modulation wheel, which is the knob mod');
++      expect(parseKnobs(readFileSync(copy, 'utf8'), copy)).toEqual(juno);
++      expect(files.list().map((k) => k.label)).toContain('juno.release');
++
++      expect(files.saved(path, { knobs: juno.slice(0, 2) })).toBe(true);
++      expect(files.errors.size).toBe(0);
++      expect(parseKnobs(readFileSync(copy, 'utf8'), copy)).toEqual(juno.slice(0, 2));
++      expect(files.list().map((k) => k.label)).toEqual(['mod', 'juno.cutoff', 'juno.res', 'ju-06a.cutoff']);
++
++      // A --knobs file reaches no voice, so its save reloads none.
++      expect(files.saved(join(dir, 'ju-06a.yaml'), { knobs: juno.slice(1, 2) })).toBe(false);
++      expect(files.list().map((k) => k.label)).toEqual(['mod', 'juno.cutoff', 'juno.res', 'ju-06a.res']);
++    } finally {
++      files.remove();
++    }
++    expect(existsSync(files.copies.get('/p/juno.scd')!)).toBe(false);
++  });
++});
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index cb481479..d3154c3c 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -1,15 +1,31 @@
+-import { basename } from 'node:path';
++import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { basename, join } from 'node:path';
+ import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
+ import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
++import {
++  formatKnobValue,
++  knobFileFor,
++  knobFileName,
++  knobList,
++  knobsCopy,
++  knobValueWidth,
++  loadKnobs,
++  resolveKnobsPath,
++  watchKnobs,
++  type KnobsReload,
++  type ShownKnob,
++} from '../keys/knobs.js';
+ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+ import { printKeymap, signed } from '../keys/print.js';
+-import { KeysSession, type MidiMessage } from '../keys/session.js';
++import { KeysSession, TICK_MS, type MidiMessage } from '../keys/session.js';
+ import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+ import { routeArmed, type Routing, type Unrouted } from '../keys/routing.js';
+ import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
+ import { findProjectRoot } from '../model/project.js';
+ import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
+ import { watchText } from '../keys/watch.js';
++import type { Knob } from '../schema/knobs.js';
+ import type { Keymap } from '../schema/keymap.js';
+ 
+ export const UNSUPPORTED_TERMINAL =
+@@ -20,6 +36,7 @@ export interface KeysOptions {
+   keymap?: string;
+   print?: boolean;
+   device?: string;
++  knobs?: string[];
+ }
+ 
+ export async function keysCommand(targets: string[], options: KeysOptions): Promise<void> {
+@@ -30,14 +47,16 @@ export async function keysCommand(targets: string[], options: KeysOptions): Prom
+     return;
+   }
+   const armed = resolveKeysTargets(targets);
++  const root = findProjectRoot(process.cwd());
++  // Every knob file is checked before anything starts, as the keymap is.
++  const knobs = loadKnobSources(armed, options.knobs ?? [], root);
+   const { stdin, stdout } = process;
+   if (!stdin.isTTY || !stdout.isTTY) {
+     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
+   }
+-  const root = findProjectRoot(process.cwd());
+   let abandoned = false;
+   await withKittyKeyboard({ stdin, stdout }, async (rest) => {
+-    abandoned = (await play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest)) === 'abandoned';
++    abandoned = (await play({ stdin, stdout }, { source, keymap, armed, knobs, device: options.device, root }, rest)) === 'abandoned';
+   });
+   // Quit before routing landed: the daemon may still be answering, and
+   // waiting for it would hold the prompt. Any input it opens late closes
+@@ -74,10 +93,88 @@ interface PlayOptions {
+   source: KeymapSource;
+   keymap: Keymap;
+   armed: ArmedInstrument[];
++  knobs: KnobSource[];
+   device: string | undefined;
+   root: string | undefined;
+ }
+ 
++// A knob file `field keys` reads (instrument-knobs.md §2.2): an armed
++// instrument's, which its voice also maps through, or one given with
++// --knobs, for whatever else listens to Field Keys.
++export interface KnobSource {
++  name: string; // what the knob line puts before its knobs' names
++  path: string;
++  program?: string; // the instrument whose voice reads it
++  knobs: Knob[];
++}
++
++// A session's knob files, and the copies its voices read: each voice
++// reads the copy of its knob file that passed the schema, never the file
++// itself, so a save that fails cannot reach it (instrument-knobs.md §2.4).
++// The copies live in a directory of their own for the session.
++export class KnobFiles {
++  // Each program with a knob file, and the copy its voice reads.
++  readonly copies = new Map<string, string>();
++  // Why the last save of each file did not load, by path.
++  readonly errors = new Map<string, string>();
++  private dir: string | undefined;
++
++  constructor(private readonly sources: KnobSource[]) {
++    sources.forEach((source) => this.write(source));
++  }
++
++  paths(): string[] {
++    return [...new Set(this.sources.map((s) => s.path))];
++  }
++
++  list(): ShownKnob[] {
++    return knobList(this.sources);
++  }
++
++  // A save that passes takes the file's new knobs and rewrites the copy
++  // of each voice that reads it; one that fails changes nothing but its
++  // error. Answers whether a voice reads the file, and so must reload.
++  saved(path: string, result: KnobsReload): boolean {
++    if ('error' in result) {
++      this.errors.set(path, `${basename(path)}: ${result.error.problems[0]}`);
++      return false;
++    }
++    this.errors.delete(path);
++    const changed = this.sources.filter((s) => s.path === path);
++    for (const source of changed) {
++      source.knobs = result.knobs;
++      this.write(source);
++    }
++    return changed.some((s) => s.program !== undefined);
++  }
++
++  remove(): void {
++    if (this.dir !== undefined) rmSync(this.dir, { recursive: true, force: true });
++  }
++
++  private write({ program, path, knobs }: KnobSource): void {
++    if (program === undefined) return;
++    this.dir ??= mkdtempSync(join(tmpdir(), 'field-knobs-'));
++    const copy = this.copies.get(program) ?? join(this.dir, `${this.copies.size}-${basename(path)}`);
++    writeFileSync(copy, knobsCopy(knobs));
++    this.copies.set(program, copy);
++  }
++}
++
++export function loadKnobSources(armed: ArmedInstrument[], specs: string[], root: string | undefined): KnobSource[] {
++  const sources: KnobSource[] = [];
++  for (const { program, track } of armed) {
++    const path = knobFileFor(program);
++    if (!existsSync(path)) continue;
++    sources.push({ name: track?.split('/').pop() ?? basename(program, '.scd'), path, program, knobs: loadKnobs(path) });
++  }
++  for (const spec of specs) {
++    const path = resolveKnobsPath(spec, root);
++    sources.push({ name: knobFileName(path), path, knobs: loadKnobs(path) });
++  }
++  return sources;
++}
++
+ export type InstrumentState = {
+   name: string; // what is armed, as the line names it
+   dry: string[]; // tracks whose effects the voices do not pass through yet
+@@ -118,13 +215,15 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<'a
+   if (first === 'quit') return 'abandoned';
+   const routed = first;
+   const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
++  const knobFiles = new KnobFiles(options.knobs);
+   try {
+-    await playRouted(tty, options, pending, routed, routing);
++    await playRouted(tty, options, pending, routed, routing, knobFiles);
+   } finally {
+-    // However the session ends, a throw included, its inputs close; a
+-    // process killed outright has the daemon close them with its
+-    // connection.
++    // However the session ends, a throw included, its inputs close and its
++    // knob copies go; a process killed outright has the daemon close the
++    // inputs with its connection.
+     await routing?.close();
++    knobFiles.remove();
+   }
+ }
+ 
+@@ -134,30 +233,32 @@ async function playRouted(
+   carried: string,
+   routed: Routing | Unrouted | undefined,
+   routing: Routing | undefined,
++  knobFiles: KnobFiles,
+ ): Promise<void> {
+   const { source, armed } = options;
+   const programs = routing?.programs ?? [...new Set(armed.map((a) => a.program))];
+-  const session = new KeysSession(options.keymap);
++  const session = new KeysSession(options.keymap, knobFiles.list());
+   let layout: KeyboardLayout | undefined;
+   let layoutPositions: ReadonlyMap<string, string> | undefined;
+   let reloadError: string | undefined;
+   const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
+ 
+-  // An instrument has a line of its own above the status line: its state
+-  // changes a few times a session, the status line with every key. That
+-  // line is drawn once, then redrawn in place only when its text changes.
+-  let instrumentLine: string | undefined;
++  // The instrument and the knobs each have a line of their own above the
++  // status line, which changes with every key (keyboard-instrument.md
++  // §2.4). They are drawn once, then redrawn in place only when they
++  // change.
++  const knobLine = new KnobLine();
++  let above: string[] = [];
+   const draw = (): void => {
+     // A terminal that reports no size reports 0 columns.
+     const width = Math.max(20, (tty.stdout.columns || 80) - 1);
+-    let above = '';
+-    if (instrument !== undefined) {
+-      const line = instrumentText(instrument).slice(0, width);
+-      if (instrumentLine === undefined) above = `\r\x1b[K${line}\n`;
+-      else if (line !== instrumentLine) above = `\x1b[1A\r\x1b[K${line}\n`;
+-      instrumentLine = line;
+-    }
+-    tty.stdout.write(`${above}\r\x1b[K${statusText(session, layout, reloadError, width)}`);
++    const lines = [
++      ...(instrument !== undefined ? [instrumentText(instrument).slice(0, width)] : []),
++      ...(session.bindsKnobs() ? [knobLine.text(session, width)] : []),
++    ];
++    const knobError = knobFiles.errors.values().next().value;
++    tty.stdout.write(`${redrawAbove(above, lines)}\r\x1b[K${statusText(session, layout, reloadError, width, knobError)}`);
++    above = lines;
+   };
+ 
+   let stop!: (error?: Error) => void;
+@@ -179,6 +280,22 @@ async function playRouted(
+   });
+   const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
+ 
++  // A held turn key turns on a timer of its own, which runs only while
++  // one is held (instrument-knobs.md §2.6).
++  let ticker: NodeJS.Timeout | undefined;
++  const tickWhileTurning = (): void => {
++    if (session.ticking() && ticker === undefined) {
++      ticker = setInterval(() => {
++        send(session.tick(performance.now()));
++        tickWhileTurning();
++        draw();
++      }, TICK_MS);
++    } else if (!session.ticking() && ticker !== undefined) {
++      clearInterval(ticker);
++      ticker = undefined;
++    }
++  };
++
+   // The host starts after the helper, so `Field Keys` exists when sclang
+   // connects its MIDI inputs; the keyboard plays while it boots.
+   // A routed voice is heard on the daemon's device, so it is made there.
+@@ -187,6 +304,7 @@ async function playRouted(
+     programs.length > 0
+       ? await VoiceHost.start({
+           instruments: programs,
++          knobs: knobFiles.copies,
+           ...(device !== undefined ? { device } : {}),
+           ...(routing !== undefined ? { rings: routing.rings, fieldOut: routing.fieldOut } : {}),
+           onStatus: (status) => {
+@@ -219,6 +337,16 @@ async function playRouted(
+   // Each program once, however many tracks play it: one save, one reload.
+   const stopWatchingPrograms =
+     host !== undefined ? [...new Set(programs)].map((p) => watchText(p, () => void host.reload())) : [];
++  // A knob file saved: the knobs change and a voice that maps through it
++  // reloads, or, when the save fails, only the status line changes.
++  const stopWatchingKnobs = knobFiles.paths().map((path) =>
++    watchKnobs(path, (result) => {
++      const reload = knobFiles.saved(path, result);
++      if ('knobs' in result) session.setKnobs(knobFiles.list());
++      if (reload) void host?.reload();
++      draw();
++    }),
++  );
+   const stopWatching =
+     source.kind === 'file'
+       ? watchKeymap(source.path, (result) => {
+@@ -249,6 +377,7 @@ async function playRouted(
+         if (position !== undefined) send(session.handleKey(position, event.type, event.mods));
+       }
+     }
++    tickWhileTurning();
+     draw();
+   };
+   const onSignal = (): void => stop();
+@@ -263,7 +392,9 @@ async function playRouted(
+   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.removeListener(signal, onSignal);
+   stopWatching?.();
+   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
++  stopWatchingKnobs.forEach((stopWatchingKnob) => stopWatchingKnob());
+   send(session.quit());
++  tickWhileTurning();
+   // A host still booting closes too: quitting never waits for it. The
+   // inputs close after it, in play, once nothing writes them.
+   await host?.close();
+@@ -322,14 +453,17 @@ export function statusText(
+   layout: KeyboardLayout | undefined,
+   reloadError: string | undefined,
+   width: number,
++  knobError?: string,
+ ): string {
+   const parts = [SOURCE_NAME, session.keymap.name, `transpose ${signed(session.transpose)}`, `velocity ${session.velocity}`];
+   const bends = session.bends();
+   if (bends.length > 0 || session.bend !== 0) parts.push(`bend ${bendText(session.bend, bends)}`);
+-  if (session.setsMod() || session.mod !== 0) parts.push(`mod ${session.mod}`);
++  // The knob line shows the wheel as the knob mod, when there is one.
++  if (!session.bindsKnobs() && (session.setsMod() || session.mod !== 0)) parts.push(`mod ${session.mod}`);
+   const unplayable = unplayablePositions(layout, session.keymap);
+   if (unplayable.length > 0) parts.push(`${unplayable.join(', ')} cannot play on ${layout!.name}`);
+   if (reloadError !== undefined) parts.push(`keymap not reloaded: ${reloadError}`);
++  if (knobError !== undefined) parts.push(`knobs not reloaded: ${knobError}`);
+   if (session.message !== undefined) parts.push(session.message);
+   const sounding = session.soundingNotes();
+   const notes = sounding.length > 0 ? sounding.join(' ') : '–';
+@@ -357,3 +491,62 @@ function decimalPlaces(x: number): number {
+   while (places < BEND_PLACES && Number(x.toFixed(places)) !== x) places++;
+   return places;
+ }
++
++// The escapes that redraw the lines above the status line when they
++// change, from the first that differs, leaving the cursor at the start of
++// the status line's row. Fewer lines than before clears what is left
++// below them.
++export function redrawAbove(drawn: string[], lines: string[]): string {
++  let from = 0;
++  while (from < drawn.length && from < lines.length && drawn[from] === lines[from]) from++;
++  if (from === drawn.length && from === lines.length) return '';
++  const up = drawn.length - from;
++  const rewrite = lines
++    .slice(from)
++    .map((line) => `\r\x1b[K${line}\n`)
++    .join('');
++  return `${up > 0 ? `\x1b[${up}A` : ''}${rewrite}${lines.length < drawn.length ? '\x1b[J' : ''}`;
++}
++
++const REVERSE = '\x1b[7m';
++const REVERSE_OFF = '\x1b[27m';
++const KNOB_GAP = '  ';
++const MORE_LEFT = '‹ ';
++const MORE_RIGHT = ' ›';
++
++// The knob line (instrument-knobs.md §2.5): every knob's name and value,
++// each value padded to the widest it prints, so turning a knob moves
++// nothing after it, and the chosen knob in reverse video, which takes no
++// columns. A line too wide for the terminal shows a window of whole knobs
++// that holds the chosen one and moves only when the choice leaves it.
++export class KnobLine {
++  private first = 0;
++  private readonly widths = new WeakMap<Knob, number>();
++
++  text(session: KeysSession, width: number): string {
++    const cells = session.knobs.map(({ label, knob }) => {
++      let valueWidth = this.widths.get(knob);
++      if (valueWidth === undefined) this.widths.set(knob, (valueWidth = knobValueWidth(knob)));
++      return `${label} ${formatKnobValue(knob, session.knobValue(knob)).padStart(valueWidth)}`;
++    });
++    const chosen = session.chosen;
++    const span = (from: number, to: number): number =>
++      cells.slice(from, to + 1).reduce((sum, cell) => sum + cell.length, 0) +
++      KNOB_GAP.length * (to - from) +
++      (from > 0 ? MORE_LEFT.length : 0) +
++      (to < cells.length - 1 ? MORE_RIGHT.length : 0);
++    let first = Math.min(this.first, chosen);
++    if (span(first, chosen) > width) {
++      first = chosen;
++      while (first > 0 && span(first - 1, chosen) <= width) first--;
++    }
++    let last = chosen;
++    while (last + 1 < cells.length && span(first, last + 1) <= width) last++;
++    this.first = first;
++    const shown = cells.slice(first, last + 1).map((cell, i) => {
++      const fitted = cell.slice(0, width);
++      return first + i === chosen ? `${REVERSE}${fitted}${REVERSE_OFF}` : fitted;
++    });
++    return `${first > 0 ? MORE_LEFT : ''}${shown.join(KNOB_GAP)}${last < cells.length - 1 ? MORE_RIGHT : ''}`;
++  }
++}
+diff --git a/src/generators/voice-render.test.ts b/src/generators/voice-render.test.ts
+index 912926d1..ef60e1da 100644
+--- a/src/generators/voice-render.test.ts
++++ b/src/generators/voice-render.test.ts
+@@ -118,8 +118,40 @@ describe('voice-render in the graph', () => {
+     await buildLabels(root, [GEN], runner);
+     expect(runs).toBe(2);
+   });
++
++  it('keys the render on the instrument’s knob file when it has one, and re-renders when it changes', async () => {
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB);
++    const e = await explainLabel(root, GEN);
++    expect(e.inputs.map((i) => i.label)).toContain('shared/instruments/pad.knobs.yaml');
++    let runs = 0;
++    const runner: GeneratorRunner = async (_node, inputPaths, outputPath) => {
++      runs++;
++      copyFileSync(inputPaths[0]!, outputPath);
++    };
++    await buildLabels(root, [GEN], runner);
++    await buildLabels(root, [GEN], runner);
++    expect(runs).toBe(1);
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB.replace('default: 0', 'default: 0.5'));
++    await buildLabels(root, [GEN], runner);
++    expect(runs).toBe(2);
++  });
++
++  it('fails the build with the knob file’s errors, before anything renders', async () => {
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), 'knobs:\n  - { name: level, cc: 74, min: 0, max: 1, curve: exp }\n');
++    let runs = 0;
++    const runner: GeneratorRunner = async () => {
++      runs++;
++    };
++    await expect(buildLabels(root, [GEN], runner)).rejects.toThrow(
++      'shared/instruments/pad.knobs.yaml: knobs.0.min: level: an exp curve needs min and max of one sign and neither 0, not 0 and 1',
++    );
++    expect(runs).toBe(0);
++  });
+ });
+ 
++// A knob that sets a voice's level, on CC 74.
++const LEVEL_KNOB = 'knobs:\n  - { name: level, cc: 74, min: 0, max: 1, curve: lin, default: 0 }\n';
++
+ // buildLabels reports every node it walked, dependencies first.
+ const built = <T extends { label: string }>(outcomes: T[], label: string): T => outcomes.find((o) => o.label === label)!;
+ 
+@@ -174,6 +206,37 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
+     expect(await peak()).toBeGreaterThan(0.05);
+   });
+ 
++  it('maps a take\'s controllers through the instrument\'s knob file', { timeout: 120_000 }, async () => {
++    // A voice whose level is its knob, read from the copy Field checked:
++    // silent at the knob's default, sounding once CC 74 turns it up.
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB);
++    writeFileSync(
++      join(root, 'shared/instruments/pad.scd'),
++      VOICE.replace(
++        '(\n',
++        '(\nvar knob = "FIELD_KNOBS".getenv.parseYAMLFile["knobs"][0];\nvar spec = ControlSpec(knob["min"].asFloat, knob["max"].asFloat, knob["curve"].asSymbol);\n',
++      ).replace('* amp * 0.2 * env', '* amp * 0.2 * spec.map(("cc" ++ knob["cc"]).asSymbol.kr(spec.unmap(knob["default"].asFloat))) * env'),
++    );
++    const peak = async (): Promise<number> => {
++      const wav = readWav(built(await buildLabels(root, [GEN]), GEN).outputPath!);
++      return wav.channels[0]!.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
++    };
++    expect(await peak()).toBe(0);
++    await landMidiTake(
++      root,
++      midiTransaction('take-20261010-120400', {}, [
++        { at: 0, midi: [176, 74, 127] },
++        { at: 100, midi: [144, 69, 100] },
++        { at: 12000, midi: [128, 69, 0] },
++      ]),
++    );
++    const turned = await peak();
++    expect(turned).toBeGreaterThan(0.05);
++    // The knob's range is the file's: half the range, half the level.
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), LEVEL_KNOB.replace('max: 1', 'max: 0.5'));
++    expect(await peak()).toBeCloseTo(turned / 2, 2);
++  });
++
+   it('loads the instrument without the render variables, as voice mode is live', { timeout: 120_000 }, async () => {
+     const strict = VOICE.replace(
+       '(\n',
+diff --git a/src/generators/voice-render.ts b/src/generators/voice-render.ts
+index 8eb70f9b..a0f969aa 100644
+--- a/src/generators/voice-render.ts
++++ b/src/generators/voice-render.ts
+@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { join, posix } from 'node:path';
+ import { parseDocument } from 'yaml';
+ import { sha256File } from '../hash.js';
++import { knobFileFor, knobsCopy, KnobsError, loadKnobs } from '../keys/knobs.js';
+ import { notesFileSchema, renderEvents } from '../schema/notes.js';
+ import { instrumentProgram, runScProgram, scScript } from './supercollider.js';
+ import type { Generator } from './types.js';
+@@ -11,7 +12,10 @@ import type { Generator } from './types.js';
+ // for a record entry with an instrument whose chosen take is a notes
+ // file. sc/voice-render.scd loads the instrument's voice and drives it
+ // with sc/voicer.scd, the voicing the live host plays with, so the take
+-// renders as it sounded while it was played.
++// renders as it sounded while it was played. An instrument with a knob
++// file maps its controllers through it (instrument-knobs.md §2.4), so the
++// file decides the sound too: it is checked here, hashed as an input, and
++// handed to the voice as the copy that passed.
+ export interface VoiceRenderSpec {
+   name: string;
+   type: 'voice-render';
+@@ -35,7 +39,8 @@ export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
+   },
+ 
+   // The supercollider rule's path checks, on the program the instrument
+-  // names: normalized, inside the project, and a regular file.
++  // names: normalized, inside the project, and a regular file; and the
++  // knob file's schema, the check field keys runs, when it has one.
+   validate(spec, ctx) {
+     const program = instrumentProgram(spec.instrument);
+     if (program !== posix.normalize(program) || program.includes('\\')) {
+@@ -43,15 +48,28 @@ export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
+       return;
+     }
+     const resolved = ctx.resolveFile('', program); // project-relative
+-    if (resolved.problem) ctx.push(`instrument ${resolved.problem}`);
++    if (resolved.problem) {
++      ctx.push(`instrument ${resolved.problem}`);
++      return;
++    }
++    const knobs = knobFileFor(program);
++    if (!existsSync(join(ctx.root, knobs))) return;
++    try {
++      loadKnobs(join(ctx.root, knobs));
++    } catch (err) {
++      if (!(err instanceof KnobsError)) throw err;
++      for (const problem of err.problems) ctx.push(`${knobs}: ${problem}`);
++    }
+   },
+ 
+-  // The instrument and Field's own harness both decide the sound, so
+-  // editing any of them re-renders the take.
++  // The instrument, its knob file, and Field's own harness all decide the
++  // sound, so editing any of them re-renders the take.
+   async extraInputs(root, spec) {
+     const program = instrumentProgram(spec.instrument);
++    const knobs = knobFileFor(program);
+     return [
+       { label: program, sha256: await sha256File(join(root, program)) },
++      ...(existsSync(join(root, knobs)) ? [{ label: knobs, sha256: await sha256File(join(root, knobs)) }] : []),
+       ...(await Promise.all(HARNESS.map(async (name) => ({ label: `sc/${name}`, sha256: await sha256File(scScript(name)) })))),
+     ];
+   },
+@@ -60,7 +78,10 @@ export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
+     const notes = notesFileSchema.parse(parseDocument(readFileSync(inputPaths[0]!, 'utf8')).toJS());
+     const eventsPath = `${outputPath}.events.json`;
+     writeFileSync(eventsPath, JSON.stringify({ events: renderEvents(notes) }));
++    const knobFile = join(ctx.root, knobFileFor(instrumentProgram(spec.instrument)));
++    const knobsPath = existsSync(knobFile) ? `${outputPath}.knobs.yaml` : undefined;
+     try {
++      if (knobsPath !== undefined) writeFileSync(knobsPath, knobsCopy(loadKnobs(knobFile)));
+       await runScProgram(scScript('voice-render.scd'), outputPath, {
+         seed: 0,
+         duration: notes.length / notes.sample_rate + RELEASE_TAIL_SECONDS,
+@@ -70,10 +91,12 @@ export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
+           FIELD_MODE: 'voice',
+           FIELD_INSTRUMENT: join(ctx.root, instrumentProgram(spec.instrument)),
+           FIELD_EVENTS: eventsPath,
++          ...(knobsPath !== undefined ? { FIELD_KNOBS: knobsPath } : {}),
+         },
+       });
+     } finally {
+       rmSync(eventsPath, { force: true });
++      if (knobsPath !== undefined) rmSync(knobsPath, { force: true });
+     }
+     if (!existsSync(outputPath)) {
+       throw new Error(`rendering ${spec.take} through ${spec.instrument} wrote no audio`);
+@@ -81,9 +104,15 @@ export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
+   },
+ 
+   async verifyAfterRun(root, spec, extraInputs) {
+-    const after = await sha256File(join(root, instrumentProgram(spec.instrument)));
++    const program = instrumentProgram(spec.instrument);
++    const after = await sha256File(join(root, program));
+     if (after !== extraInputs[0]!.sha256) {
+       throw new Error(`refusing to cache: ${spec.instrument} changed during the render — re-run the build`);
+     }
++    const knobs = knobFileFor(program);
++    const knobsAfter = existsSync(join(root, knobs)) ? await sha256File(join(root, knobs)) : undefined;
++    if (knobsAfter !== extraInputs.find((input) => input.label === knobs)?.sha256) {
++      throw new Error(`refusing to cache: ${knobs} changed during the render — re-run the build`);
++    }
+   },
+ };
+diff --git a/src/keys/keymap.test.ts b/src/keys/keymap.test.ts
+index 822a6aca..7dca9c82 100644
+--- a/src/keys/keymap.test.ts
++++ b/src/keys/keymap.test.ts
+@@ -23,16 +23,19 @@ afterEach(() => {
+ });
+ 
+ describe('resolving a keymap', () => {
+-  it('defaults to musical-typing', () => {
++  it('defaults to musical', () => {
+     expect(resolveKeymapSource(undefined, {})).toEqual({
+       kind: 'builtin',
+-      name: 'musical-typing',
+-      path: join(builtinKeymapDir(), 'musical-typing.yaml'),
++      name: 'musical',
++      path: join(builtinKeymapDir(), 'musical.yaml'),
+     });
+   });
+ 
+-  it('lists the built-ins', () => {
+-    expect(builtinKeymapNames()).toEqual(['fourths', 'musical-typing', 'tracker']);
++  it('lists the built-ins, which no longer include musical-typing', () => {
++    expect(builtinKeymapNames()).toEqual(['fourths', 'musical', 'tracker']);
++    expect(() => resolveKeymapSource('musical-typing', {})).toThrow(
++      /no built-in keymap named "musical-typing" \(built-ins: fourths, musical, tracker\)/,
++    );
+   });
+ 
+   it('resolves and loads every built-in by its bare name', () => {
+@@ -46,7 +49,7 @@ describe('resolving a keymap', () => {
+   it('resolves a bare name only to a built-in', () => {
+     writeFileSync(join(dir, 'mine.yaml'), 'name: mine\nnotes: { KeyA: 0 }\n');
+     expect(() => resolveKeymapSource('mine', {}, { cwd: dir })).toThrow(
+-      /no built-in keymap named "mine" \(built-ins: .*musical-typing.*\); .*give a path .*\.\/mine\.yaml/,
++      /no built-in keymap named "mine" \(built-ins: .*musical.*\); .*give a path .*\.\/mine\.yaml/,
+     );
+   });
+ 
+@@ -68,7 +71,7 @@ describe('resolving a keymap', () => {
+       kind: 'file',
+       path: join(dir, 'mine.yaml'),
+     });
+-    expect(resolveKeymapSource('musical-typing', { FIELD_KEYMAP: '~/mine.yaml' }, { home: dir }).kind).toBe('builtin');
++    expect(resolveKeymapSource('musical', { FIELD_KEYMAP: '~/mine.yaml' }, { home: dir }).kind).toBe('builtin');
+     expect(resolveKeymapSource(undefined, { FIELD_KEYMAP: '' }).kind).toBe('builtin');
+   });
+ });
+diff --git a/src/keys/keymap.ts b/src/keys/keymap.ts
+index 7229efc7..ccd7559c 100644
+--- a/src/keys/keymap.ts
++++ b/src/keys/keymap.ts
+@@ -7,7 +7,7 @@ import { keymapSchema, toKeymap, type Keymap } from '../schema/keymap.js';
+ import { watchText } from './watch.js';
+ 
+ export const KEYMAP_ENV = 'FIELD_KEYMAP';
+-export const DEFAULT_KEYMAP = 'musical-typing';
++export const DEFAULT_KEYMAP = 'musical';
+ 
+ export type KeymapSource = { kind: 'builtin'; name: string; path: string } | { kind: 'file'; path: string };
+ 
+diff --git a/src/keys/knobs.test.ts b/src/keys/knobs.test.ts
+new file mode 100644
+index 00000000..04ee0756
+--- /dev/null
++++ b/src/keys/knobs.test.ts
+@@ -0,0 +1,158 @@
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join, resolve } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { parseDocument } from 'yaml';
++import type { Knob } from '../schema/knobs.js';
++import {
++  controllerOf,
++  formatKnobValue,
++  knobFileFor,
++  knobFileName,
++  knobList,
++  knobsCopy,
++  knobValue,
++  knobValueWidth,
++  KnobsError,
++  loadKnobs,
++  MOD_KNOB,
++  parseKnobs,
++  resolveKnobsPath,
++  stepFrom,
++} from './knobs.js';
++
++const shelf = join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments');
++const juno = loadKnobs(join(shelf, 'juno.knobs.yaml'));
++const knob = (name: string): Knob => juno.find((k) => k.name === name)!;
++
++// Every value a knob prints, at every controller value.
++function printed(k: Knob): string[] {
++  return Array.from({ length: 128 }, (_, cc) => formatKnobValue(k, knobValue(k, cc)));
++}
++
++describe('finding knob files', () => {
++  it('finds an instrument’s knob file beside its program', () => {
++    expect(knobFileFor('/p/shared/instruments/juno.scd')).toBe('/p/shared/instruments/juno.knobs.yaml');
++    expect(knobFileFor('/p/pad.v2.scd')).toBe('/p/pad.v2.knobs.yaml');
++  });
++
++  it('resolves --knobs by bare name on the shelf, and by path', () => {
++    expect(resolveKnobsPath('juno', '/p')).toBe(join('/p', 'shared', 'instruments', 'juno.knobs.yaml'));
++    expect(resolveKnobsPath('~/knobs/ju-06a.yaml', '/p', { home: '/home/j' })).toBe(resolve('/home/j', 'knobs', 'ju-06a.yaml'));
++    expect(resolveKnobsPath('ju-06a.yaml', undefined, { cwd: '/here' })).toBe(resolve('/here', 'ju-06a.yaml'));
++    expect(resolveKnobsPath('./k', undefined, { cwd: '/here' })).toBe(resolve('/here', 'k'));
++    expect(() => resolveKnobsPath('juno', undefined)).toThrow(/not inside a Field project/);
++  });
++
++  it('names a knob file’s knobs after the file', () => {
++    expect(knobFileName('/p/juno.knobs.yaml')).toBe('juno');
++    expect(knobFileName('/home/j/knobs/ju-06a.yaml')).toBe('ju-06a');
++  });
++});
++
++describe('reading knob files', () => {
++  let dir: string;
++  beforeEach(() => {
++    dir = mkdtempSync(join(tmpdir(), 'field-knobs-'));
++  });
++  afterEach(() => rmSync(dir, { recursive: true, force: true }));
++
++  it('names every problem with the file', () => {
++    const path = join(dir, 'bad.knobs.yaml');
++    writeFileSync(path, 'knobs:\n  - { name: a, cc: 1 }\n  - { name: b, cc: 20, min: 0, max: 0 }\n');
++    expect(() => loadKnobs(path)).toThrow(KnobsError);
++    try {
++      loadKnobs(path);
++    } catch (err) {
++      expect((err as KnobsError).problems).toEqual([
++        'knobs.0.cc: a: cc 1 is the modulation wheel, which is the knob mod',
++        'knobs.1.max: b: min and max are both 0, so the knob has nowhere to turn',
++      ]);
++    }
++    expect(() => loadKnobs(join(dir, 'missing.yaml'))).toThrow(/no such file/);
++    expect(() => parseKnobs('knobs: [', 'x.yaml')).toThrow(KnobsError);
++  });
++
++  it('writes a copy with every field spelled out, which reads back the same', () => {
++    const copy = knobsCopy(parseKnobs('knobs:\n  - { name: tone, cc: 20 }\n', 'k.yaml'));
++    expect(parseDocument(copy).toJS()).toEqual({ knobs: [{ name: 'tone', cc: 20, min: 0, max: 127, curve: 'lin', step: 0, default: 0 }] });
++    expect(parseKnobs(knobsCopy(juno), 'copy.yaml')).toEqual(juno);
++  });
++});
++
++describe('the knob list', () => {
++  it('puts mod first, then each source’s knobs, named after their source when there are several', () => {
++    expect(knobList([{ name: 'juno', knobs: juno }]).map((k) => k.label)).toEqual(['mod', 'cutoff', 'res', 'attack', 'release']);
++    expect(knobList([]).map((k) => k.label)).toEqual(['mod']);
++    const both = knobList([
++      { name: 'keys', knobs: juno.slice(0, 1) },
++      { name: 'bass', knobs: juno.slice(0, 1) },
++    ]);
++    expect(both.map((k) => k.label)).toEqual(['mod', 'keys.cutoff', 'bass.cutoff']);
++    expect(both[0]!.knob).toBe(MOD_KNOB);
++  });
++});
++
++describe('controller values', () => {
++  it('maps a controller value as ControlSpec.map does', () => {
++    // ControlSpec(50, 15000, \exp).map(62 / 127) in SuperCollider 3.14.1.
++    expect(knobValue(knob('cutoff'), 62)).toBeCloseTo(809.6052, 3);
++    expect(knobValue(knob('cutoff'), 0)).toBeCloseTo(50);
++    expect(knobValue(knob('cutoff'), 127)).toBeCloseTo(15000);
++    expect(knobValue(knob('res'), 127)).toBeCloseTo(0.95);
++    expect(knobValue({ ...MOD_KNOB, max: 10, step: 1 }, 64)).toBe(5);
++  });
++
++  it('starts a knob from its default, unmapped and rounded', () => {
++    // ControlSpec(50, 15000, \exp).unmap(2000) is 0.6467, so 82.
++    expect(controllerOf(knob('cutoff'), 2000)).toBe(82);
++    expect(controllerOf(knob('res'), 0.3)).toBe(40);
++    expect(controllerOf(MOD_KNOB, 0)).toBe(0);
++  });
++
++  it('steps one controller value, and stops at either end', () => {
++    expect(stepFrom(knob('cutoff'), 82, 1)).toBe(83);
++    expect(stepFrom(knob('cutoff'), 82, -1)).toBe(81);
++    expect(stepFrom(knob('cutoff'), 127, 1)).toBe(127);
++    expect(stepFrom(knob('cutoff'), 0, -1)).toBe(0);
++  });
++
++  it('steps a knob with a step to the next value that maps differently', () => {
++    const toggle: Knob = { name: 'chorus', cc: 20, min: 0, max: 1, curve: 'lin', step: 1, default: 0 };
++    expect(stepFrom(toggle, 0, 1)).toBe(64);
++    expect(stepFrom(toggle, 64, 1)).toBe(64);
++    expect(stepFrom(toggle, 64, -1)).toBe(63);
++    expect(knobValue(toggle, 63)).toBe(0);
++  });
++});
++
++describe('printing a value', () => {
++  it('prints an exp knob to three significant digits, with k and m', () => {
++    expect(formatKnobValue(knob('cutoff'), 2000)).toBe('2.00 kHz');
++    expect(formatKnobValue(knob('cutoff'), knobValue(knob('cutoff'), 62))).toBe('810 Hz');
++    expect(formatKnobValue(knob('cutoff'), 15000)).toBe('15.0 kHz');
++    expect(formatKnobValue(knob('cutoff'), 50)).toBe('50.0 Hz');
++    expect(formatKnobValue(knob('cutoff'), 999.9)).toBe('1.00 kHz');
++    expect(formatKnobValue(knob('attack'), 0.8)).toBe('800 ms');
++    expect(formatKnobValue(knob('attack'), 0.005)).toBe('5.00 ms');
++    expect(formatKnobValue(knob('attack'), 0.9999)).toBe('1.00 s');
++    expect(formatKnobValue(knob('release'), 1.5)).toBe('1.50 s');
++    expect(formatKnobValue({ ...knob('cutoff'), units: undefined }, 2000)).toBe('2.00k');
++  });
++
++  it('prints a lin knob with the places its far end needs, and whole knobs whole', () => {
++    expect(printed(knob('res'))[0]).toBe('0.000');
++    expect(printed(knob('res'))[127]).toBe('0.950');
++    expect(formatKnobValue(knob('res'), 0.3)).toBe('0.300');
++    expect(printed(MOD_KNOB).slice(0, 3)).toEqual(['0', '1', '2']);
++    expect(formatKnobValue({ name: 'p', cc: 20, min: -1, max: 1, curve: 'lin', step: 0, default: 0 }, -0.0001)).toBe('0.00');
++  });
++
++  it('gives each knob one width across its default and all its values', () => {
++    expect(knobValueWidth(MOD_KNOB)).toBe(3);
++    expect(knobValueWidth(knob('cutoff'))).toBe(8);
++    expect(knobValueWidth(knob('res'))).toBe(5);
++    expect(knobValueWidth(knob('attack'))).toBe(7);
++    expect(knobValueWidth(knob('release'))).toBe(7);
++  });
++});
+diff --git a/src/keys/knobs.ts b/src/keys/knobs.ts
+new file mode 100644
+index 00000000..7160f26b
+--- /dev/null
++++ b/src/keys/knobs.ts
+@@ -0,0 +1,189 @@
++import { readFileSync } from 'node:fs';
++import { homedir } from 'node:os';
++import { basename, join, resolve } from 'node:path';
++import { parseDocument, stringify } from 'yaml';
++import { knobFileSchema, type Knob } from '../schema/knobs.js';
++import { watchText } from './watch.js';
++
++// Knob files (instrument-knobs.md §2.2): finding them, reading and
++// watching them, and what a controller value means on each knob.
++
++const SUFFIX = '.knobs.yaml';
++export const CC_MAX = 127;
++
++// The modulation wheel, the knob every instrument has, which `field keys`
++// shows first (§2.1).
++export const MOD_KNOB: Knob = { name: 'mod', cc: 1, min: 0, max: CC_MAX, curve: 'lin', step: 1, default: 0 };
++
++// A knob as the line names it: after its source's name when knobs come
++// from more than one place, as in keys.cutoff (§2.5).
++export interface ShownKnob {
++  label: string;
++  knob: Knob;
++}
++
++// `mod`, then each source's knobs in its file's order.
++export function knobList(sources: { name: string; knobs: Knob[] }[]): ShownKnob[] {
++  const named = sources.length > 1;
++  return [
++    { label: MOD_KNOB.name, knob: MOD_KNOB },
++    ...sources.flatMap(({ name, knobs }) => knobs.map((knob) => ({ label: named ? `${name}.${knob.name}` : knob.name, knob }))),
++  ];
++}
++
++// An instrument's knob file sits beside its program: juno.knobs.yaml for
++// juno.scd.
++export function knobFileFor(program: string): string {
++  return `${program.endsWith('.scd') ? program.slice(0, -'.scd'.length) : program}${SUFFIX}`;
++}
++
++// A bare name is a knob file on the project's instruments shelf, and
++// anything with a / or ending in .yaml is a path, as a keymap resolves.
++export function resolveKnobsPath(
++  spec: string,
++  root: string | undefined,
++  options: { home?: string; cwd?: string } = {},
++): string {
++  if (spec.includes('/') || spec.endsWith('.yaml')) {
++    const expanded = spec.startsWith('~/') ? join(options.home ?? homedir(), spec.slice(2)) : spec;
++    return resolve(options.cwd ?? process.cwd(), expanded);
++  }
++  if (root === undefined) {
++    throw new Error(
++      `--knobs ${spec}: a bare name names a knob file in a project's shared/instruments/, ` +
++        'and this is not inside a Field project; give a path instead, such as ./knobs.yaml',
++    );
++  }
++  return join(root, 'shared', 'instruments', `${spec}${SUFFIX}`);
++}
++
++// What a knob file's knobs are called on the line when knobs come from
++// more than one place: ju-06a for ju-06a.knobs.yaml or ju-06a.yaml.
++export function knobFileName(path: string): string {
++  const name = basename(path);
++  return name.endsWith(SUFFIX) ? name.slice(0, -SUFFIX.length) : basename(name, '.yaml');
++}
++
++export class KnobsError extends Error {
++  constructor(
++    readonly path: string,
++    readonly problems: string[],
++  ) {
++    super(`${path}:\n${problems.map((p) => `  ${p}`).join('\n')}`);
++  }
++}
++
++export function parseKnobs(text: string, path: string): Knob[] {
++  const doc = parseDocument(text);
++  if (doc.errors.length > 0) throw new KnobsError(path, doc.errors.map((e) => e.message.split('\n')[0]!));
++  const parsed = knobFileSchema.safeParse(doc.toJS());
++  if (!parsed.success) {
++    throw new KnobsError(
++      path,
++      parsed.error.issues.map((issue) => (issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message)),
++    );
++  }
++  return parsed.data.knobs;
++}
++
++export function loadKnobs(path: string): Knob[] {
++  let text: string;
++  try {
++    text = readFileSync(path, 'utf8');
++  } catch (err) {
++    throw new KnobsError(path, [(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (err as Error).message]);
++  }
++  return parseKnobs(text, path);
++}
++
++export type KnobsReload = { knobs: Knob[] } | { error: KnobsError };
++
++export function watchKnobs(path: string, onReload: (result: KnobsReload) => void, settleMs = 50): () => void {
++  return watchText(
++    path,
++    (text) => {
++      try {
++        onReload({ knobs: parseKnobs(text, path) });
++      } catch (err) {
++        onReload({ error: err instanceof KnobsError ? err : new KnobsError(path, [(err as Error).message]) });
++      }
++    },
++    settleMs,
++  );
++}
++
++// The copy of a checked knob file that a SuperCollider voice reads
++// through FIELD_KNOBS (§2.4): every field spelled out, defaults filled,
++// so the voice never has to know the schema's defaults.
++export function knobsCopy(knobs: Knob[]): string {
++  return stringify({ knobs });
++}
++
++// A controller value from 0 to 127 as the knob's value: SuperCollider's
++// ControlSpec.map for the warp of the same name, so a voice that maps
++// with ControlSpec agrees with the line.
++export function knobValue(knob: Knob, cc: number): number {
++  const x = cc / CC_MAX;
++  const value = knob.curve === 'exp' ? knob.min * (knob.max / knob.min) ** x : knob.min + (knob.max - knob.min) * x;
++  return knob.step > 0 ? Math.round(value / knob.step) * knob.step : value;
++}
++
++// The controller value a knob's value sits at, rounded: where a knob
++// that has not been turned starts from.
++export function controllerOf(knob: Knob, value: number): number {
++  const x =
++    knob.curve === 'exp' ? Math.log(value / knob.min) / Math.log(knob.max / knob.min) : (value - knob.min) / (knob.max - knob.min);
++  return Math.min(CC_MAX, Math.max(0, Math.round(x * CC_MAX)));
++}
++
++// One step up or down from controller value `cc`: the next value, or on a
++// knob with a step, the next that maps to a different value, so a knob
++// with two positions moves in one press. Stays at `cc` at either end.
++export function stepFrom(knob: Knob, cc: number, direction: 1 | -1): number {
++  const position = (v: number): number => (knob.step > 0 ? Math.round(knobValue(knob, v) / knob.step) : v);
++  const from = position(cc);
++  for (let v = cc + direction; v >= 0 && v <= CC_MAX; v += direction) {
++    if (position(v) !== from) return v;
++  }
++  return cc;
++}
++
++// A knob's value as the line prints it (§2.5), without its padding.
++export function formatKnobValue(knob: Knob, value: number): string {
++  if (Number.isInteger(knob.step) && knob.step >= 1) return withUnits(String(Math.round(value)), knob.units);
++  if (knob.curve === 'lin') {
++    const farthest = Math.max(Math.abs(knob.min), Math.abs(knob.max));
++    return withUnits(fixed(value, Math.max(0, 2 - Math.floor(Math.log10(farthest)))), knob.units);
++  }
++  const shown = Math.abs(Number(significant(value)));
++  if (shown >= 1000) return withUnits(significant(value / 1000), knob.units, 'k');
++  if (knob.units === 's' && shown < 1) return withUnits(significant(value * 1000), knob.units, 'm');
++  return withUnits(significant(value), knob.units);
++}
++
++// The widest the knob's value prints, at its default or at any controller
++// value, so turning it never moves what follows it.
++export function knobValueWidth(knob: Knob): number {
++  let width = formatKnobValue(knob, knob.default).length;
++  for (let cc = 0; cc <= CC_MAX; cc++) width = Math.max(width, formatKnobValue(knob, knobValue(knob, cc)).length);
++  return width;
++}
++
++// A prefix with no units to carry it goes on the number itself: 2.00k.
++function withUnits(number: string, units: string | undefined, prefix = ''): string {
++  return units === undefined ? `${number}${prefix}` : `${number} ${prefix}${units}`;
++}
++
++// Three significant digits, counted on the rounded value, so 0.9999
++// prints 1.00 rather than 1.000.
++function significant(x: number): string {
++  if (x === 0) return fixed(0, 2);
++  const places = (y: number): number => Math.max(0, 2 - Math.floor(Math.log10(Math.abs(y))));
++  return fixed(x, places(Number(x.toFixed(places(x)))));
++}
++
++// toFixed, without the sign it leaves on a value that rounds to zero.
++function fixed(x: number, places: number): string {
++  const text = x.toFixed(places);
++  return Number(text) === 0 ? text.replace('-', '') : text;
++}
+diff --git a/src/keys/print.test.ts b/src/keys/print.test.ts
+index 25cdec92..bbd75e8c 100644
+--- a/src/keys/print.test.ts
++++ b/src/keys/print.test.ts
+@@ -11,30 +11,30 @@ describe('printing a keymap', () => {
+     expect(noteName(127)).toBe('G9');
+   });
+ 
+-  it('draws musical-typing as a keyboard', () => {
+-    const keymap = loadKeymap(join(builtinKeymapDir(), 'musical-typing.yaml'));
++  it('draws musical as a keyboard', () => {
++    const keymap = loadKeymap(join(builtinKeymapDir(), 'musical.yaml'));
+     expect(printKeymap(keymap)).toBe(
+       [
+-        "musical-typing: Logic Pro's Musical Typing. White keys on the home row, black keys above.",
++        "musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, and the arrows choose and turn knobs.",
+         '',
+-        '·     B-1   B+1   cc1   cc1   cc1   cc1   cc1   cc1   ·     ·     ·     ·',
++        '·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·',
+         '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·',
+         '          C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5',
+-        '             T-12  T+12  V-20  V+20  ·     ·     ·     ·     ·     ·',
++        '             T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·',
+         '',
+-        'KeyZ    transpose -12',
+-        'KeyX    transpose +12',
+-        'KeyC    velocity -20',
+-        'KeyV    velocity +20',
+-        'Tab     cc 64 = 127 while held',
+-        'Digit1  pitch bend -1 while held',
+-        'Digit2  pitch bend +1 while held',
+-        'Digit3  cc 1 = 0',
+-        'Digit4  cc 1 = 25',
+-        'Digit5  cc 1 = 51',
+-        'Digit6  cc 1 = 76',
+-        'Digit7  cc 1 = 102',
+-        'Digit8  cc 1 = 127',
++        '← K-1   → K+1   ↑ R+1   ↓ R-1',
++        '',
++        'KeyZ        transpose -12',
++        'KeyX        transpose +12',
++        'KeyC        velocity -20',
++        'KeyV        velocity +20',
++        'Comma       pitch bend -1 while held',
++        'Period      pitch bend +1 while held',
++        'Tab         cc 64 = 127 while held',
++        'ArrowLeft   choose the knob 1 to the left',
++        'ArrowRight  choose the knob 1 to the right',
++        'ArrowUp     turn the chosen knob 1 step up, faster while held',
++        'ArrowDown   turn the chosen knob 1 step down, faster while held',
+         '',
+         'Notes are in scientific pitch notation: MIDI note 60 is C4. Channel 1, velocity 100.',
+         '',
+diff --git a/src/keys/print.ts b/src/keys/print.ts
+index 00f9ca81..56f87cf2 100644
+--- a/src/keys/print.ts
++++ b/src/keys/print.ts
+@@ -44,6 +44,8 @@ function actionTag(action: KeymapAction): string {
+   if ('transpose' in action) return `T${signed(action.transpose)}`;
+   if ('velocity' in action) return `V${signed(action.velocity)}`;
+   if ('bend' in action) return `B${signed(action.bend)}`;
++  if ('knob' in action) return `K${signed(action.knob)}`;
++  if ('turn' in action) return `R${signed(action.turn)}`;
+   return `cc${action.cc}`;
+ }
+ 
+@@ -52,6 +54,11 @@ export function describeAction(action: KeymapAction): string {
+   if ('transpose' in action) return `transpose ${signed(action.transpose)}`;
+   if ('velocity' in action) return `velocity ${signed(action.velocity)}`;
+   if ('bend' in action) return `pitch bend ${signed(action.bend)} while held`;
++  if ('knob' in action) return `choose the knob ${Math.abs(action.knob)} to the ${action.knob > 0 ? 'right' : 'left'}`;
++  if ('turn' in action) {
++    const steps = Math.abs(action.turn);
++    return `turn the chosen knob ${steps} step${steps === 1 ? '' : 's'} ${action.turn > 0 ? 'up' : 'down'}, faster while held`;
++  }
+   const how = { set: '', hold: ' while held', toggle: ', toggled' }[action.mode];
+   return `cc ${action.cc} = ${action.value}${how}`;
+ }
+diff --git a/src/keys/session.test.ts b/src/keys/session.test.ts
+index 23abc239..d8dbd0d2 100644
+--- a/src/keys/session.test.ts
++++ b/src/keys/session.test.ts
+@@ -1,6 +1,7 @@
+ import { join } from 'node:path';
+ import { describe, expect, it } from 'vitest';
+ import { builtinKeymapDir, loadKeymap, parseKeymap } from './keymap.js';
++import { knobList, loadKnobs } from './knobs.js';
+ import { bendValue, KeysSession } from './session.js';
+ import { MOD_ALT, MOD_CAPS_LOCK, MOD_CTRL, MOD_NUM_LOCK, MOD_SHIFT, MOD_SUPER } from './terminal.js';
+ 
+@@ -9,13 +10,20 @@ const OFF = 0x80;
+ const CC = 0xb0;
+ const BEND = 0xe0;
+ 
+-function musicalTyping(): KeysSession {
+-  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical-typing.yaml')));
++function musical(): KeysSession {
++  return new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')));
+ }
+ 
++// A keymap that sets the modulation wheel to fixed values, as Logic's
++// Musical Typing does on 3 to 8.
++const WHEEL_STEPS = parseKeymap(
++  'name: wheel\nnotes: { KeyA: 0 }\ncontrols:\n  Digit3: { cc: 1, value: 0 }\n  Digit5: { cc: 1, value: 51 }\n  Digit6: { cc: 1, value: 76 }\n',
++  'wheel.yaml',
++);
++
+ describe('playing notes', () => {
+   it('sends a note-on at press and a note-off at release', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     expect(session.press('KeyA')).toEqual([[ON, 60, 100]]);
+     expect(session.soundingNotes()).toEqual(['C4']);
+     expect(session.release('KeyA')).toEqual([[OFF, 60, 0]]);
+@@ -23,7 +31,7 @@ describe('playing notes', () => {
+   });
+ 
+   it('ignores repeats, so a held key holds one note', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     expect(session.handleKey('KeyA', 'press', 0)).toHaveLength(1);
+     expect(session.handleKey('KeyA', 'repeat', 0)).toEqual([]);
+     expect(session.handleKey('KeyA', 'repeat', 0)).toEqual([]);
+@@ -31,7 +39,7 @@ describe('playing notes', () => {
+   });
+ 
+   it('releases the note a key started even after a transpose', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyA');
+     expect(session.press('KeyX')).toEqual([]);
+     expect(session.transpose).toBe(12);
+@@ -58,7 +66,7 @@ describe('playing notes', () => {
+       ['KeyA', 'KeyK'],
+       ['KeyK', 'KeyA'],
+     ]) {
+-      const session = musicalTyping();
++      const session = musical();
+       expect(session.press('KeyA')).toEqual([[ON, 60, 100]]);
+       session.press('KeyZ');
+       expect(session.press('KeyK')).toEqual([]);
+@@ -81,19 +89,19 @@ describe('playing notes', () => {
+ 
+ describe('modifiers', () => {
+   it('plays a key pressed with Shift or a lock bit as without it', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     expect(session.press('KeyA', MOD_SHIFT)).toEqual([[ON, 60, 100]]);
+     expect(session.press('KeyS', MOD_CAPS_LOCK | MOD_NUM_LOCK)).toEqual([[ON, 62, 100]]);
+   });
+ 
+   it('ignores a key pressed with Ctrl, Alt, or Cmd', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     for (const mod of [MOD_CTRL, MOD_ALT, MOD_SUPER]) expect(session.press('KeyA', mod)).toEqual([]);
+     expect(session.release('KeyA')).toEqual([]);
+   });
+ 
+   it('ends a note on a release that carries Ctrl', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyA');
+     expect(session.handleKey('KeyA', 'release', MOD_CTRL)).toEqual([[OFF, 60, 0]]);
+   });
+@@ -101,34 +109,34 @@ describe('modifiers', () => {
+ 
+ describe('controls', () => {
+   it('bends while held and returns to center on release', () => {
+-    const session = musicalTyping();
+-    expect(session.press('Digit2')).toEqual([[BEND, 0x7f, 0x7f]]);
+-    expect(session.release('Digit2')).toEqual([[BEND, 0, 64]]);
+-    expect(session.press('Digit1')).toEqual([[BEND, 0, 0]]);
++    const session = musical();
++    expect(session.press('Period')).toEqual([[BEND, 0x7f, 0x7f]]);
++    expect(session.release('Period')).toEqual([[BEND, 0, 64]]);
++    expect(session.press('Comma')).toEqual([[BEND, 0, 0]]);
+     expect([bendValue(1), bendValue(0), bendValue(-1), bendValue(0.5)]).toEqual([16383, 8192, 0, 12288]);
+   });
+ 
+   it('sets a controller in set mode', () => {
+-    const session = musicalTyping();
++    const session = new KeysSession(WHEEL_STEPS);
+     expect(session.press('Digit5')).toEqual([[CC, 1, 51]]);
+     expect(session.release('Digit5')).toEqual([]);
+     expect(session.press('Digit3')).toEqual([[CC, 1, 0]]);
+   });
+ 
+   it('remembers the bend while its key is held', () => {
+-    const session = musicalTyping();
+-    session.press('Digit1');
++    const session = musical();
++    session.press('Comma');
+     expect(session.bend).toBe(-1);
+-    session.release('Digit1');
++    session.release('Comma');
+     expect(session.bend).toBe(0);
+-    session.press('Digit2');
++    session.press('Period');
+     expect(session.bend).toBe(1);
+     session.releaseAll();
+     expect(session.bend).toBe(0);
+   });
+ 
+   it('remembers the modulation wheel it last set', () => {
+-    const session = musicalTyping();
++    const session = new KeysSession(WHEEL_STEPS);
+     expect(session.mod).toBe(0);
+     expect(session.press('Digit6')).toEqual([[CC, 1, 76]]);
+     session.release('Digit6');
+@@ -143,7 +151,7 @@ describe('controls', () => {
+   });
+ 
+   it('holds a controller in hold mode', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     expect(session.press('Tab')).toEqual([[CC, 64, 127]]);
+     expect(session.release('Tab')).toEqual([[CC, 64, 0]]);
+   });
+@@ -184,7 +192,7 @@ describe('controls', () => {
+   });
+ 
+   it('changes velocity within 1 to 127', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyV');
+     session.press('KeyV');
+     expect(session.velocity).toBe(127);
+@@ -194,7 +202,7 @@ describe('controls', () => {
+   });
+ 
+   it('refuses a transpose that would move a note outside MIDI range', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     for (let i = 0; i < 4; i++) session.press('KeyX');
+     expect(session.transpose).toBe(48);
+     session.press('KeyX');
+@@ -221,10 +229,10 @@ describe('controls', () => {
+ 
+ describe('releasing everything', () => {
+   it('releases held notes and held controls on focus-out', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyA');
+     session.press('Tab');
+-    session.press('Digit2');
++    session.press('Period');
+     expect(session.releaseAll()).toEqual([
+       [OFF, 60, 0],
+       [CC, 64, 0],
+@@ -234,7 +242,7 @@ describe('releasing everything', () => {
+   });
+ 
+   it('quits with note-offs, then All Notes Off', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     session.press('KeyA');
+     session.press('KeyS');
+     session.press('KeyD');
+@@ -257,10 +265,125 @@ describe('reloading the keymap', () => {
+   });
+ 
+   it('resets a transpose the reloaded keymap cannot hold', () => {
+-    const session = musicalTyping();
++    const session = musical();
+     for (let i = 0; i < 4; i++) session.press('KeyX');
+     session.setKeymap(parseKeymap('name: high\nbase: 100\nnotes: { KeyA: 0 }\n', 'high.yaml'));
+     expect(session.transpose).toBe(0);
+     expect(session.message).toMatch(/transpose reset/);
+   });
+ });
++
++describe('knobs', () => {
++  const juno = loadKnobs(join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments', 'juno.knobs.yaml'));
++  const withJuno = (): KeysSession => new KeysSession(loadKeymap(join(builtinKeymapDir(), 'musical.yaml')), knobList([{ name: 'juno', knobs: juno }]));
++  const label = (session: KeysSession): string => session.knobs[session.chosen]!.label;
++
++  it('chooses with knob, wrapping both ways, and sends nothing', () => {
++    const session = withJuno();
++    expect(label(session)).toBe('mod');
++    expect(session.press('ArrowLeft')).toEqual([]);
++    expect(label(session)).toBe('release');
++    session.release('ArrowLeft');
++    session.press('ArrowRight');
++    expect(label(session)).toBe('mod');
++    const far = new KeysSession(parseKeymap('name: f\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { knob: 7 } }\n', 'f.yaml'), session.knobs);
++    far.press('KeyB');
++    expect(label(far)).toBe('res');
++  });
++
++  it('turns the chosen knob from its default, on the keymap’s channel, and stops at 0 and 127', () => {
++    const session = withJuno();
++    session.press('ArrowRight');
++    // cutoff's default, 2000 Hz, is controller value 82.
++    expect(session.press('ArrowUp', 0, 0)).toEqual([[CC, 74, 83]]);
++    session.release('ArrowUp');
++    expect(session.press('ArrowDown', 0, 0)).toEqual([[CC, 74, 82]]);
++    session.release('ArrowDown');
++    expect(session.knobValue(juno[0]!)).toBeCloseTo(50 * 300 ** (82 / 127));
++    const onTwo = new KeysSession(parseKeymap('name: t\nchannel: 2\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { turn: 200 }, KeyN: { turn: -200 } }\n', 't.yaml'));
++    expect(onTwo.press('KeyB')).toEqual([[0xb1, 1, 127]]);
++    onTwo.release('KeyB');
++    expect(onTwo.press('KeyB')).toEqual([]);
++    onTwo.release('KeyB');
++    expect(onTwo.press('KeyN')).toEqual([[0xb1, 1, 0]]);
++    onTwo.release('KeyN');
++    expect(onTwo.press('KeyN')).toEqual([]);
++  });
++
++  it('turns faster the longer a turn key is held, one control change a tick', () => {
++    const session = musical();
++    expect(session.press('ArrowUp', 0, 1000)).toEqual([[CC, 1, 1]]);
++    expect(session.ticking()).toBe(true);
++    expect(session.tick(1040)).toEqual([]);
++    expect(session.tick(1299)).toEqual([]);
++    expect(session.tick(1300)).toEqual([[CC, 1, 2]]);
++    expect(session.tick(1999)).toEqual([[CC, 1, 3]]);
++    expect(session.tick(2000)).toEqual([[CC, 1, 5]]);
++    expect(session.tick(2499)).toEqual([[CC, 1, 7]]);
++    expect(session.tick(2500)).toEqual([[CC, 1, 11]]);
++    expect(session.release('ArrowUp')).toEqual([]);
++    expect(session.ticking()).toBe(false);
++    expect(session.tick(2540)).toEqual([]);
++  });
++
++  it('takes about 2.3 seconds to cross a range, ticked every 40 ms', () => {
++    const session = musical();
++    session.press('ArrowUp', 0, 0);
++    let now = 0;
++    while (session.mod < 127) {
++      now += 40;
++      session.tick(now);
++    }
++    expect(now).toBeGreaterThan(2200);
++    expect(now).toBeLessThan(2400);
++  });
++
++  it('turns with the second turn key pressed, and stops on focus-out, panic, and quit', () => {
++    const session = musical();
++    session.press('ArrowUp', 0, 0);
++    expect(session.press('ArrowDown', 0, 100)).toEqual([[CC, 1, 0]]);
++    expect(session.release('ArrowUp')).toEqual([]);
++    expect(session.ticking()).toBe(true);
++    session.releaseAll();
++    expect(session.ticking()).toBe(false);
++    const panicking = new KeysSession(parseKeymap('name: p\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { turn: 1 }, KeyN: panic }\n', 'p.yaml'));
++    panicking.press('KeyB', 0, 0);
++    panicking.press('KeyN');
++    expect(panicking.ticking()).toBe(false);
++    panicking.press('KeyB', 0, 0);
++    panicking.quit();
++    expect(panicking.ticking()).toBe(false);
++  });
++
++  it('moves mod from a cc 1 key as well as by turning it', () => {
++    const session = new KeysSession(
++      parseKeymap('name: w\nnotes: { KeyA: 0 }\ncontrols: { Digit6: { cc: 1, value: 76 }, ArrowUp: { turn: 1 } }\n', 'w.yaml'),
++    );
++    session.press('Digit6');
++    expect(session.knobValue(session.knobs[0]!.knob)).toBe(76);
++    expect(session.press('ArrowUp')).toEqual([[CC, 1, 77]]);
++  });
++
++  it('keeps values by controller and the choice by name when the knob list changes', () => {
++    const session = withJuno();
++    session.press('ArrowRight');
++    session.release('ArrowRight');
++    session.press('ArrowRight');
++    session.release('ArrowRight');
++    session.press('ArrowUp');
++    session.release('ArrowUp');
++    expect(label(session)).toBe('res');
++    session.setKnobs(knobList([{ name: 'juno', knobs: [juno[1]!, juno[0]!] }]));
++    expect(label(session)).toBe('res');
++    expect(session.chosen).toBe(1);
++    expect(session.controllers.get(71)).toBe(41);
++    session.setKnobs(knobList([{ name: 'juno', knobs: [juno[0]!] }]));
++    expect(session.chosen).toBe(1);
++    expect(label(session)).toBe('cutoff');
++  });
++
++  it('binds the knobs only in a keymap with a knob action', () => {
++    expect(musical().bindsKnobs()).toBe(true);
++    expect(new KeysSession(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml'))).bindsKnobs()).toBe(false);
++  });
++});
+diff --git a/src/keys/session.ts b/src/keys/session.ts
+index 1945a7fc..4a458195 100644
+--- a/src/keys/session.ts
++++ b/src/keys/session.ts
+@@ -1,4 +1,6 @@
++import type { Knob } from '../schema/knobs.js';
+ import type { Keymap, KeymapAction } from '../schema/keymap.js';
++import { controllerOf, knobList, knobValue, stepFrom, type ShownKnob } from './knobs.js';
+ import { noteName, signed } from './print.js';
+ import { MOD_ALT, MOD_CTRL, MOD_HYPER, MOD_META, MOD_SUPER, type KeyEventType } from './terminal.js';
+ 
+@@ -14,6 +16,17 @@ const BEND_MAX = 16383;
+ const MOD_WHEEL = 1;
+ const ALL_NOTES_OFF = 123;
+ 
++// How often a held turn key turns, and how many steps a tick it turns
++// after it has been held for at least `from` milliseconds
++// (instrument-knobs.md §2.6): about 2.3 seconds from one end of a range
++// to the other.
++export const TICK_MS = 40;
++const TURN_RATES = [
++  { from: 1500, steps: 4 },
++  { from: 1000, steps: 2 },
++  { from: 300, steps: 1 },
++];
++
+ function noteOn(channel: number, note: number, velocity: number): MidiMessage {
+   return [0x90 | (channel - 1), note, velocity];
+ }
+@@ -44,33 +57,46 @@ export class KeysSession {
+   keymap: Keymap;
+   transpose = 0;
+   velocity: number;
+-  // The pitch bend, from -1 to 1, and the modulation wheel (CC 1), from
+-  // 0 to 127, as this session last sent them, for the status line; the
+-  // receiver starts both at rest.
++  // The pitch bend, from -1 to 1, as this session last sent it, for the
++  // status line; the receiver starts it at rest.
+   bend = 0;
+-  mod = 0;
++  // Each controller this session has sent, by number, with the last value
++  // sent: what the knobs and the status line show.
++  readonly controllers = new Map<number, number>();
++  // The knobs the arrows choose and turn, `mod` first, and which is chosen.
++  knobs: ShownKnob[];
++  chosen = 0;
+   message: string | undefined;
++  // The turn key held now, if any: the one pressed last.
++  private turning: { position: string; steps: number; since: number } | undefined;
+   private readonly held = new Map<string, { channel: number; notes: number[] }>();
+   private readonly holders = new Map<number, number>();
+   private readonly heldControls = new Map<string, { channel: number; action: KeymapAction }>();
+   private readonly toggledOn = new Map<string, { channel: number; cc: number }>();
+ 
+-  constructor(keymap: Keymap) {
++  constructor(keymap: Keymap, knobs: ShownKnob[] = knobList([])) {
+     this.keymap = keymap;
+     this.velocity = keymap.velocity;
++    this.knobs = knobs;
++  }
++
++  // The modulation wheel (CC 1), from 0 to 127; the receiver starts it at 0.
++  get mod(): number {
++    return this.controllers.get(MOD_WHEEL) ?? 0;
+   }
+ 
+-  handleKey(position: string, type: KeyEventType, mods: number): MidiMessage[] {
++  // `now` is in milliseconds, on the clock `tick` is given.
++  handleKey(position: string, type: KeyEventType, mods: number, now = performance.now()): MidiMessage[] {
+     if (type === 'repeat') return [];
+-    return type === 'press' ? this.press(position, mods) : this.release(position);
++    return type === 'press' ? this.press(position, mods, now) : this.release(position);
+   }
+ 
+-  press(position: string, mods = 0): MidiMessage[] {
++  press(position: string, mods = 0, now = performance.now()): MidiMessage[] {
+     if ((mods & BLOCKING_MODS) !== 0) return [];
+     if (this.held.has(position) || this.heldControls.has(position)) return [];
+     this.message = undefined;
+     const action = this.keymap.controls.get(position);
+-    if (action !== undefined) return this.control(position, action);
++    if (action !== undefined) return this.control(position, action, now);
+     const offsets = this.keymap.notes.get(position);
+     if (offsets === undefined) return [];
+ 
+@@ -92,6 +118,10 @@ export class KeysSession {
+     if (control !== undefined) {
+       this.heldControls.delete(position);
+       const { action, channel } = control;
++      if (action !== 'panic' && 'turn' in action) {
++        if (this.turning?.position === position) this.turning = undefined;
++        return [];
++      }
+       if (action !== 'panic' && 'bend' in action) {
+         this.bend = 0;
+         return [pitchBend(channel, BEND_CENTER)];
+@@ -146,8 +176,36 @@ export class KeysSession {
+     return messages;
+   }
+ 
+-  // The bends the keymap can send, and whether it can move the modulation
+-  // wheel, so the status line has a value of its own to show.
++  // A held turn key turns again on each tick, faster the longer it is held.
++  tick(now: number): MidiMessage[] {
++    if (this.turning === undefined) return [];
++    const held = now - this.turning.since;
++    const rate = TURN_RATES.find(({ from }) => held >= from);
++    return rate === undefined ? [] : this.turn(this.turning.steps * rate.steps);
++  }
++
++  ticking(): boolean {
++    return this.turning !== undefined;
++  }
++
++  // A new knob list, from a knob file saved: each knob keeps the value its
++  // controller has, and the choice stays on the knob of the same name.
++  setKnobs(knobs: ShownKnob[]): void {
++    const label = this.knobs[this.chosen]?.label;
++    const same = knobs.findIndex((k) => k.label === label);
++    this.knobs = knobs;
++    this.chosen = same >= 0 ? same : Math.min(this.chosen, knobs.length - 1);
++  }
++
++  // A knob's value: what its controller was last sent as, or its default.
++  knobValue(knob: Knob): number {
++    const cc = this.controllers.get(knob.cc);
++    return cc === undefined ? knob.default : knobValue(knob, cc);
++  }
++
++  // The bends the keymap can send, whether it can move the modulation
++  // wheel, and whether it binds the knobs, so the status line and the knob
++  // line show a value only where the keymap can change it.
+   bends(): number[] {
+     return [...this.keymap.controls.values()].flatMap((a) => (a !== 'panic' && 'bend' in a ? [a.bend] : []));
+   }
+@@ -156,6 +214,10 @@ export class KeysSession {
+     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'cc' in a && a.cc === MOD_WHEEL);
+   }
+ 
++  bindsKnobs(): boolean {
++    return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a));
++  }
++
+   soundingNotes(): string[] {
+     return [...this.holders.keys()].sort((a, b) => a - b).map((key) => noteName(key % 128));
+   }
+@@ -171,11 +233,21 @@ export class KeysSession {
+   }
+ 
+   private cc(channel: number, cc: number, value: number): MidiMessage {
+-    if (cc === MOD_WHEEL) this.mod = value;
++    this.controllers.set(cc, value);
+     return controlChange(channel, cc, value);
+   }
+ 
+-  private control(position: string, action: KeymapAction): MidiMessage[] {
++  // Turns the chosen knob `steps` steps, from where its controller was
++  // last sent, or from its default before that, and sends the result once.
++  private turn(steps: number): MidiMessage[] {
++    const { knob } = this.knobs[this.chosen]!;
++    const from = this.controllers.get(knob.cc) ?? controllerOf(knob, knob.default);
++    let to = from;
++    for (let i = 0; i < Math.abs(steps); i++) to = stepFrom(knob, to, steps > 0 ? 1 : -1);
++    return to === from ? [] : [this.cc(this.keymap.channel, knob.cc, to)];
++  }
++
++  private control(position: string, action: KeymapAction, now: number): MidiMessage[] {
+     const channel = this.keymap.channel;
+     if (action === 'panic') {
+       return [...this.releaseAll(), ...this.untoggleAll(), this.cc(channel, ALL_NOTES_OFF, 0)];
+@@ -195,6 +267,16 @@ export class KeysSession {
+       this.bend = action.bend;
+       return [pitchBend(channel, bendValue(action.bend))];
+     }
++    if ('knob' in action) {
++      const count = this.knobs.length;
++      this.chosen = (((this.chosen + action.knob) % count) + count) % count;
++      return [];
++    }
++    if ('turn' in action) {
++      this.heldControls.set(position, { channel, action });
++      this.turning = { position, steps: action.turn, since: now };
++      return this.turn(action.turn);
++    }
+     if (action.mode === 'hold') {
+       this.heldControls.set(position, { channel, action });
+       return [this.cc(channel, action.cc, action.value)];
+diff --git a/src/keys/voice-host.test.ts b/src/keys/voice-host.test.ts
+index b3292680..1af99a9a 100644
+--- a/src/keys/voice-host.test.ts
++++ b/src/keys/voice-host.test.ts
+@@ -204,7 +204,8 @@ describe('the voice host process', () => {
+     expect(seen.args[2]).toBe('-D');
+     expect(seen.args[3]).toMatch(/sc\/voice-host\.scd$/);
+     expect(existsSync(seen.args[3])).toBe(true);
+-    expect(seen).toMatchObject({ mode: 'voice', instruments: '["/p/pad.scd"]', device: 'Test Out', parent: String(process.pid) });
++    expect(seen).toMatchObject({ mode: 'voice', device: 'Test Out', parent: String(process.pid) });
++    expect(JSON.parse(seen.instruments)).toEqual([{ program: '/p/pad.scd' }]);
+     await host.close();
+     expect(readFileSync(log, 'latin1')).toContain('/quit');
+   });
+@@ -231,6 +232,21 @@ describe('the voice host process', () => {
+     expect(sent.indexOf('/g_freeAll')).toBeLessThan(sent.indexOf('/quit'));
+   });
+ 
++  itStartsTheStub('hands each program the checked copy of its knob file, and a program without one none', async () => {
++    const host = await VoiceHost.start({
++      instruments: ['/p/juno.scd', '/p/pad.scd'],
++      knobs: new Map([['/p/juno.scd', '/tmp/field-knobs-x/0-juno.knobs.yaml']]),
++      env: env('ready'),
++    });
++    await host.ready;
++    const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
++    expect(JSON.parse(seen.instruments)).toEqual([
++      { program: '/p/juno.scd', knobs: '/tmp/field-knobs-x/0-juno.knobs.yaml' },
++      { program: '/p/pad.scd' },
++    ]);
++    await host.close();
++  });
++
+   itStartsTheStub('routes nothing when no instrument has a ring', async () => {
+     const host = await VoiceHost.start({ instruments: ['/p/pad.scd'], rings: [null], fieldOut: '/opt/fieldout', env: env('ready') });
+     await host.ready;
+diff --git a/src/keys/voice-host.ts b/src/keys/voice-host.ts
+index a80f19b1..7c70e773 100644
+--- a/src/keys/voice-host.ts
++++ b/src/keys/voice-host.ts
+@@ -107,6 +107,9 @@ export interface VoiceHostOptions {
+   // The programs to play, in unison: each note sounds a voice from each
+   // (arming.md §2.1).
+   instruments: string[];
++  // For each program with a knob file, the checked copy its voice reads
++  // through FIELD_KNOBS (instrument-knobs.md §2.4).
++  knobs?: ReadonlyMap<string, string>;
+   device?: string;
+   onStatus?: (status: VoiceHostStatus) => void;
+   // Called when the host exits on its own after it was ready.
+@@ -230,7 +233,12 @@ export class VoiceHost {
+       env: {
+         ...env,
+         FIELD_MODE: 'voice',
+-        FIELD_INSTRUMENTS: JSON.stringify(options.instruments),
++        FIELD_INSTRUMENTS: JSON.stringify(
++          options.instruments.map((program) => {
++            const knobs = options.knobs?.get(program);
++            return knobs !== undefined ? { program, knobs } : { program };
++          }),
++        ),
+         FIELD_SC_PORT: String(port),
+         FIELD_PARENT_PID: String(process.pid),
+         ...(options.device !== undefined ? { FIELD_DEVICE: options.device } : {}),
+diff --git a/src/keys/voicer.test.ts b/src/keys/voicer.test.ts
+index b55b9548..55310754 100644
+--- a/src/keys/voicer.test.ts
++++ b/src/keys/voicer.test.ts
+@@ -19,7 +19,8 @@ const sclang = (() => {
+ })();
+ 
+ // Runs `body` with `voicer` bound to a voicer whose callbacks print what
+-// they are asked to do, and returns those lines.
++// they are asked to do, and returns those lines. A voice starts with its
++// controls in name order.
+ function runVoicer(body: string): string[] {
+   const dir = mkdtempSync(join(tmpdir(), 'field-voicer-'));
+   try {
+@@ -29,7 +30,11 @@ function runVoicer(body: string): string[] {
+       [
+         '(',
+         `var voicer = thisProcess.interpreter.executeFile(${JSON.stringify(scScript('voicer.scd'))}).(`,
+-        '\t{ |note, velocity, freq, mod| ("start " ++ note ++ " mod " ++ mod.round(0.01)).postln; note },',
++        '\t{ |note, velocity, freq, controls|',
++        '\t\tvar pairs = controls.clump(2).sort { |a, b| a[0].asString <= b[0].asString };',
++        '\t\t("start " ++ note ++ pairs.collect { |kv| " " ++ kv[0] ++ " " ++ kv[1].round(0.01) }.join).postln;',
++        '\t\tnote',
++        '\t},',
+         '\t{ |voice, control, value| (control ++ " " ++ voice ++ " " ++ value.round(0.01)).postln },',
+         '\t{ |voice| ("release " ++ voice).postln }',
+         ');',
+@@ -41,7 +46,7 @@ function runVoicer(body: string): string[] {
+       ].join('\n'),
+     );
+     const run = spawnSync(sclang!, [script], { encoding: 'utf8', timeout: 60_000 });
+-    return run.stdout.split('\n').filter((line) => /^(start|freq|mod|release|done)\b/.test(line));
++    return run.stdout.split('\n').filter((line) => /^(start|freq|mod|cc\d+|release|done)\b/.test(line));
+   } finally {
+     rmSync(dir, { recursive: true, force: true });
+   }
+@@ -59,4 +64,22 @@ describe.skipIf(sclang === undefined)('the voicer through real sclang', () => {
+       runVoicer(['voicer.noteOn(0, 60, 100);', 'voicer.cc(0, 1, 127);', 'voicer.noteOn(0, 64, 100);', 'voicer.cc(0, 1, 0);'].join('\n')),
+     ).toEqual(['start 60 mod 0.0', 'mod 60 1.0', 'start 64 mod 1.0', 'mod 60 0.0', 'mod 64 0.0', 'done']);
+   });
++
++  it('hands every other controller to the voices as cc<n>, but never the sustain pedal', { timeout: 60_000 }, () => {
++    expect(
++      runVoicer(
++        ['voicer.noteOn(0, 60, 100);', 'voicer.cc(0, 74, 127);', 'voicer.cc(1, 71, 0);', 'voicer.cc(0, 64, 127);', 'voicer.noteOn(0, 64, 100);'].join(
++          '\n',
++        ),
++      ),
++    ).toEqual(['start 60 mod 0.0', 'cc74 60 1.0', 'cc71 60 0.0', 'start 64 cc71 0.0 cc74 1.0 mod 0.0', 'done']);
++  });
++
++  it('ignores bank select and the channel mode messages other than All Notes Off', { timeout: 60_000 }, () => {
++    expect(runVoicer(['voicer.noteOn(0, 60, 100);', 'voicer.cc(0, 0, 5);', 'voicer.cc(0, 120, 0);', 'voicer.noteOn(0, 62, 100);'].join('\n'))).toEqual([
++      'start 60 mod 0.0',
++      'start 62 mod 0.0',
++      'done',
++    ]);
++  });
+ });
+diff --git a/src/model/project.test.ts b/src/model/project.test.ts
+index 38dcf6cd..af6629f8 100644
+--- a/src/model/project.test.ts
++++ b/src/model/project.test.ts
+@@ -1662,6 +1662,15 @@ describe('record entries (recording.md §3–§4)', () => {
+     createTrack(root, 'opener', 'vox');
+   });
+ 
++  it('reports an instrument whose knob file fails its schema, as the take\'s render would', async () => {
++    writeVox(['  - record:', '      instrument: pad']);
++    writeFileSync(join(root, 'shared/instruments/pad.scd'), 'Out.ar(0, Silent.ar(2));\n');
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), 'knobs:\n  - { name: cutoff, cc: 64 }\n');
++    expect((await diagnostics()).join('\n')).toContain('shared/instruments/pad.knobs.yaml: knobs.0.cc: cutoff: cc 64 is the sustain pedal');
++    writeFileSync(join(root, 'shared/instruments/pad.knobs.yaml'), 'knobs:\n  - { name: cutoff, cc: 74 }\n');
++    expect((await diagnostics()).filter((d) => d.includes('knobs'))).toEqual([]);
++  });
++
+   it('a bare `- record:` is the spelling, and no takes yet is a warning, not a gate', async () => {
+     writeVox();
+     const project = loadProject(root);
+diff --git a/src/schema/keymap.test.ts b/src/schema/keymap.test.ts
+index d6f6b37c..40c9a7e3 100644
+--- a/src/schema/keymap.test.ts
++++ b/src/schema/keymap.test.ts
+@@ -30,8 +30,8 @@ function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
+ }
+ 
+ describe('keymap schema', () => {
+-  it('accepts musical-typing with its 18 notes and the defaults', () => {
+-    const map = keymap(builtin('musical-typing'));
++  it('accepts musical with its 18 notes and the defaults', () => {
++    const map = keymap(builtin('musical'));
+     expect(map.notes.get('KeyA')).toEqual([0]);
+     expect(map.notes.get('Quote')).toEqual([17]);
+     expect(notesPlayed(map).size).toBe(18);
+@@ -41,6 +41,26 @@ describe('keymap schema', () => {
+     expect(map.controls.get('KeyZ')).toEqual({ transpose: -12 });
+   });
+ 
++  it('binds the arrows to the knobs and the bend to Comma and Period in musical, and leaves the number row free', () => {
++    const map = keymap(builtin('musical'));
++    expect(map.controls.get('ArrowLeft')).toEqual({ knob: -1 });
++    expect(map.controls.get('ArrowRight')).toEqual({ knob: 1 });
++    expect(map.controls.get('ArrowUp')).toEqual({ turn: 1 });
++    expect(map.controls.get('ArrowDown')).toEqual({ turn: -1 });
++    expect(map.controls.get('Comma')).toEqual({ bend: -1 });
++    expect(map.controls.get('Period')).toEqual({ bend: 1 });
++    for (let digit = 0; digit <= 9; digit++) expect(map.controls.has(`Digit${digit}`)).toBe(false);
++  });
++
++  it('accepts knob and turn by any whole number but 0', () => {
++    const map = keymap('name: k\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { knob: -2 }, KeyN: { turn: 3 } }\n');
++    expect(map.controls.get('KeyB')).toEqual({ knob: -2 });
++    expect(map.controls.get('KeyN')).toEqual({ turn: 3 });
++    for (const bad of ['{ knob: 0 }', '{ turn: 0 }', '{ turn: 0.5 }', '{ knob: 1, turn: 1 }']) {
++      expect(parse(`name: k\nnotes: { KeyA: 0 }\ncontrols: { KeyB: ${bad} }\n`).success, bad).toBe(false);
++    }
++  });
++
+   it('accepts the tracker built-in with 32 notes', () => {
+     const map = keymap(builtin('tracker'));
+     expect(notesPlayed(map).size).toBe(32);
+diff --git a/src/schema/keymap.ts b/src/schema/keymap.ts
+index edff8207..0bc36b77 100644
+--- a/src/schema/keymap.ts
++++ b/src/schema/keymap.ts
+@@ -48,10 +48,19 @@ const ccAction = z
+   })
+   .strict();
+ 
++// How far a knob action moves: a whole number of knobs or steps, in
++// either direction (instrument-knobs.md §2.3).
++const knobSteps = z
++  .number()
++  .int()
++  .refine((n) => n !== 0, 'must move at least one: a positive number moves right or up, a negative one left or down');
++
+ const action = z.union([
+   z.object({ transpose: z.number().int() }).strict(),
+   z.object({ velocity: z.number().int() }).strict(),
+   z.object({ bend: z.number().min(-1).max(1) }).strict(),
++  z.object({ knob: knobSteps }).strict(),
++  z.object({ turn: knobSteps }).strict(),
+   ccAction,
+   z.literal('panic'),
+ ]);
+diff --git a/src/schema/knobs.test.ts b/src/schema/knobs.test.ts
+new file mode 100644
+index 00000000..021ad8cf
+--- /dev/null
++++ b/src/schema/knobs.test.ts
+@@ -0,0 +1,67 @@
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { parseDocument } from 'yaml';
++import { knobFileSchema } from './knobs.js';
++
++const shelf = join(import.meta.dirname, '..', '..', 'examples', 'bloom', 'shared', 'instruments');
++
++function problems(knobs: unknown[]): string[] {
++  const parsed = knobFileSchema.safeParse({ knobs });
++  return parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
++}
++
++describe('the knob file schema', () => {
++  it("accepts juno's and bass's files", () => {
++    for (const file of ['juno.knobs.yaml', 'bass.knobs.yaml']) {
++      const parsed = knobFileSchema.safeParse(parseDocument(readFileSync(join(shelf, file), 'utf8')).toJS());
++      expect(parsed.success, file).toBe(true);
++    }
++  });
++
++  it('fills min, max, curve, step, and default', () => {
++    expect(knobFileSchema.parse({ knobs: [{ name: 'tone', cc: 20 }] }).knobs[0]).toEqual({
++      name: 'tone',
++      cc: 20,
++      min: 0,
++      max: 127,
++      curve: 'lin',
++      step: 0,
++      default: 0,
++    });
++    expect(knobFileSchema.parse({ knobs: [{ name: 'tone', cc: 20, min: 5, max: 9 }] }).knobs[0]!.default).toBe(5);
++  });
++
++  it('accepts a default at either end of its range, and a range that runs downward', () => {
++    expect(problems([{ name: 'attack', cc: 73, min: 0.005, max: 4, curve: 'exp', default: 0.005 }])).toEqual([]);
++    expect(problems([{ name: 'a', cc: 20, min: 10, max: 0, default: 10 }])).toEqual([]);
++  });
++
++  it('rejects a repeated name or controller, and a knob named mod', () => {
++    expect(problems([{ name: 'a', cc: 20 }, { name: 'a', cc: 21 }])).toEqual(['a: appears twice; a name names one knob']);
++    expect(problems([{ name: 'a', cc: 20 }, { name: 'b', cc: 20 }])).toEqual(['b: cc 20 turns another knob in this file']);
++    expect(problems([{ name: 'mod', cc: 20 }])).toEqual(['mod: mod is the modulation wheel, the knob field keys always shows first']);
++  });
++
++  it('rejects a controller that is reserved, a channel mode message, or not a controller', () => {
++    expect(problems([{ name: 'a', cc: 1 }])).toEqual(['a: cc 1 is the modulation wheel, which is the knob mod']);
++    for (const cc of [0, 6, 32, 38, 64, 96, 97, 98, 99, 100, 101]) expect(problems([{ name: 'a', cc }]), String(cc)).toHaveLength(1);
++    expect(problems([{ name: 'a', cc: 120 }])).toEqual(['a: cc 120 is a channel mode message']);
++    expect(problems([{ name: 'a', cc: 128 }])).toEqual(['a: cc 128 is not a MIDI controller, which runs from 0 to 127']);
++    for (const cc of [2, 5, 7, 31, 33, 63, 65, 95, 102, 119]) expect(problems([{ name: 'a', cc }]), String(cc)).toEqual([]);
++  });
++
++  it('rejects an exp range that touches or crosses 0, equal min and max, and a default outside the range', () => {
++    expect(problems([{ name: 'a', cc: 20, min: 0, max: 1, curve: 'exp', default: 0.5 }])).toEqual([
++      'a: an exp curve needs min and max of one sign and neither 0, not 0 and 1',
++    ]);
++    expect(problems([{ name: 'a', cc: 20, min: -1, max: 1, curve: 'exp', default: 0.5 }])).toHaveLength(1);
++    expect(problems([{ name: 'a', cc: 20, min: -10, max: -1, curve: 'exp', default: -5 }])).toEqual([]);
++    expect(problems([{ name: 'a', cc: 20, min: 3, max: 3 }])).toEqual(['a: min and max are both 3, so the knob has nowhere to turn']);
++    expect(problems([{ name: 'a', cc: 20, min: 0, max: 1, default: 2 }])).toEqual(['a: default 2 is outside its range, 0 to 1']);
++  });
++
++  it('rejects a field it does not know', () => {
++    expect(problems([{ name: 'a', cc: 20, warp: 'exp' }])).toHaveLength(1);
++  });
++});
+diff --git a/src/schema/knobs.ts b/src/schema/knobs.ts
+new file mode 100644
+index 00000000..954cdccb
+--- /dev/null
++++ b/src/schema/knobs.ts
+@@ -0,0 +1,73 @@
++import { z } from 'zod';
++
++// A knob file (instrument-knobs.md §2.2): an instrument's knobs, each a
++// MIDI controller that `field keys` turns and shows through a range. This
++// schema is the one check of a knob file; every path that hands one to an
++// instrument runs it first.
++
++// Why each controller a knob cannot use is taken.
++const TAKEN: ReadonlyMap<number, string> = new Map([
++  [0, 'bank select'],
++  [1, 'the modulation wheel, which is the knob mod'],
++  [6, 'data entry'],
++  [32, 'bank select'],
++  [38, 'data entry'],
++  [64, 'the sustain pedal'],
++  [96, 'data increment'],
++  [97, 'data decrement'],
++  [98, 'a parameter-number controller'],
++  [99, 'a parameter-number controller'],
++  [100, 'a parameter-number controller'],
++  [101, 'a parameter-number controller'],
++]);
++
++// 120 to 127 are channel mode messages.
++const LAST_KNOB_CC = 119;
++
++const knob = z
++  .object({
++    name: z.string().min(1),
++    cc: z.number().int(),
++    min: z.number().default(0),
++    max: z.number().default(127),
++    curve: z.enum(['lin', 'exp']).default('lin'),
++    step: z.number().min(0).default(0),
++    units: z.string().min(1).optional(),
++    default: z.number().optional(),
++  })
++  .strict()
++  .transform(({ default: start, ...rest }) => ({ ...rest, default: start ?? rest.min }));
++
++export type Knob = z.infer<typeof knob>;
++
++export const knobFileSchema = z
++  .object({ knobs: z.array(knob) })
++  .strict()
++  .superRefine(({ knobs }, ctx) => {
++    const names = new Set<string>();
++    const ccs = new Set<number>();
++    knobs.forEach((k, i) => {
++      const problem = (field: string, message: string): void => {
++        ctx.addIssue({ code: 'custom', path: ['knobs', i, field], message: `${k.name}: ${message}` });
++      };
++      if (k.name === 'mod') problem('name', 'mod is the modulation wheel, the knob field keys always shows first');
++      else if (names.has(k.name)) problem('name', 'appears twice; a name names one knob');
++      names.add(k.name);
++
++      const taken = TAKEN.get(k.cc);
++      if (k.cc < 0 || k.cc > 127) problem('cc', `cc ${k.cc} is not a MIDI controller, which runs from 0 to 127`);
++      else if (k.cc > LAST_KNOB_CC) problem('cc', `cc ${k.cc} is a channel mode message`);
++      else if (taken !== undefined) problem('cc', `cc ${k.cc} is ${taken}`);
++      else if (ccs.has(k.cc)) problem('cc', `cc ${k.cc} turns another knob in this file`);
++      ccs.add(k.cc);
++
++      if (k.min === k.max) problem('max', `min and max are both ${k.min}, so the knob has nowhere to turn`);
++      else if (k.curve === 'exp' && (k.min === 0 || k.max === 0 || Math.sign(k.min) !== Math.sign(k.max))) {
++        problem('min', `an exp curve needs min and max of one sign and neither 0, not ${k.min} and ${k.max}`);
++      } else if (k.default < Math.min(k.min, k.max) || k.default > Math.max(k.min, k.max)) {
++        problem('default', `default ${k.default} is outside its range, ${k.min} to ${k.max}`);
++      }
++    });
++  });
++
++export type KnobFile = z.infer<typeof knobFileSchema>;
