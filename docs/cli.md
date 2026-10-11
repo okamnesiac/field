@@ -134,6 +134,10 @@ creek (12 bars)
   9.1.1 0:20.0  phrase
 ```
 
+`--json` prints the same structure as JSON, with the field names of
+`ArrangementView` in `src/commands/arrangement.ts`, for a program to
+read.
+
 The bar count appears when the song declares a `length:`. A song that
 declares none is as long as its material, which is also what governs
 where playback stops.
@@ -167,7 +171,8 @@ cable: receive "drum-verb" ← track:drums, -10.0 dB (tap post), arrives at samp
 Once the inputs are built, each input shows its hash in place of
 `(not built)`, and an `action:` line reports the action key and whether
 it is cached. Once the label itself is built, an `output:` line gives
-the output's hash and size.
+the output's hash and size. `--json` prints the whole explanation as
+JSON, with the field names of `Explanation` in `src/graph/build.ts`.
 
 `creek` cannot answer either command on a fresh checkout. Its generated
 takes are not committed, so `field query` and `field explain` on
@@ -475,7 +480,13 @@ Watch mode never asks the remote.
 | `field import <file> --song <name>` | copy audio in and record it in `assets.yaml` |
 
 `field init` takes `--name <slug>` and `--sample-rate <hz>`; without
-them it uses the directory name and the default rate.
+them it uses the directory name and the default rate. `--license <spdx>`
+writes the project's license, an SPDX identifier such as `CC-BY-4.0`,
+`CC0-1.0`, or `MIT`, into `field.yaml` as `license:`. Without it,
+`field.yaml` carries no license. The license speaks for the work the
+project's authors made; an imported asset keeps the license it arrived
+under. `field check` reports a `license:` that is not an SPDX
+identifier.
 
 `field import` records the file's content hash and its WAV facts — rate,
 bit depth, channels, frame count — and refuses a WAV whose sample rate

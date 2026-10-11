@@ -706,7 +706,8 @@ and the document ([docs/remote.md](../../remote.md)).
 `CheckResult` already) are the obvious next three; not in this plan
 unless the worker turns out to want them.
 
-Unchanged (2026-09-08): chunk 1 is unstarted and this belongs to it.
+Unchanged (2026-10-11): chunk 1 landed `--json` on `explain` and
+`arrangement`; these three stay out until the worker asks for them.
 
 ### 9.9 What `pull` does to `.field/out`
 
@@ -733,7 +734,8 @@ an asset's license is stricter than the project's — a CC-BY-SA sample
 in a CC0 project — is a question splice.md's chunk owns once both
 keys exist.
 
-Open (2026-09-08): chunk 1 is unstarted; nothing here changes it.
+Open (2026-10-11): chunk 1 landed the project license; whether `check`
+compares it with an asset's stays splice.md's question.
 
 ### 9.11 A recipe-only song cannot be warmed by action key
 
@@ -834,3 +836,14 @@ watch and misses it.
   token is reported per song; `pull` from a plain clone warms two
   entries and a build with a refusing runner is hits throughout.
   Chunk 1 (`--json` and `license`) is what remains of the plan.
+- 2026-10-11 — Chunk 1 (branch `remote/json-license`), ahead of the site
+  worker that wants it, at Justin's call. `field.yaml` takes an optional
+  `license:`, an SPDX identifier checked for shape (`SPDX_IDENTIFIER` in
+  `src/schema/manifest.ts`), which `projectOrder` places after `name`;
+  `field init --license <id>` writes it and refuses one of the wrong
+  shape, and `field check` reports a malformed one through the manifest
+  schema. `field explain --json` and `field arrangement --json` print
+  `Explanation` and `ArrangementView` through `explanationJson` and
+  `arrangementJson`, each in its command module. With this, every chunk
+  of §6 has landed; §8's definition of done, a real project on a second
+  machine, and the open questions in §9 are what keep the plan open.

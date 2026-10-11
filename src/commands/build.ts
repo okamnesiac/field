@@ -128,3 +128,9 @@ export async function explainLabel(
   const { project, graph } = loadValid(root);
   return explain(project, graph, resolveLabel(graph, parseLabel(label)), new Map(), remote);
 }
+
+// `field explain --json` (remote.md §3.6): the Explanation as it is, with
+// the interface's field names, so a reader needs no second vocabulary.
+export function explanationJson(explanation: Explanation): string {
+  return JSON.stringify(explanation, null, 2);
+}

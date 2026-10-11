@@ -3,7 +3,7 @@ import { basename, join, resolve } from 'node:path';
 import { DEFAULT_SAMPLE_RATE, PROJECT_MANIFEST } from '../constants.js';
 import { git, tryGit } from '../git.js';
 import { isSlug } from '../ids.js';
-import { projectOrder, projectSchema } from '../schema/index.js';
+import { projectOrder, projectSchema, SPDX_IDENTIFIER } from '../schema/index.js';
 import { stringifyCanonical } from '../yaml/emit.js';
 
 // Audio and MIDI assets ride Git LFS; manifests stay plain text
@@ -37,6 +37,9 @@ export interface InitOptions {
   dir: string;
   name?: string;
   sampleRate?: number;
+  // An SPDX identifier for the project's own work (remote.md §3.5);
+  // without one, field.yaml carries no license line rather than a guess.
+  license?: string | undefined;
 }
 
 export function init(options: InitOptions): string {
@@ -51,9 +54,15 @@ export function init(options: InitOptions): string {
     throw new Error(`project name "${name}" must be a lowercase-slug (use --name)`);
   }
 
+  if (options.license !== undefined && !SPDX_IDENTIFIER.test(options.license)) {
+    throw new Error(
+      `license "${options.license}" must be an SPDX license identifier, such as CC-BY-4.0, CC0-1.0, or MIT`,
+    );
+  }
   const manifest = projectSchema.parse({
     field: 1,
     name,
+    ...(options.license !== undefined ? { license: options.license } : {}),
     sample_rate: options.sampleRate ?? DEFAULT_SAMPLE_RATE,
   });
 

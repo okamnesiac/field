@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSong } from '../commands/create.js';
 import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
-import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
+import { buildLabels, explainLabel, explanationJson, projectRelative, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
 import { runScProgram } from '../generators/supercollider.js';
 import type { GeneratorRunner } from './build.js';
@@ -683,6 +683,9 @@ describe('query and explain', () => {
     expect(after.cached).toBe(true);
     expect(after.actionKey).toBe(before.actionKey);
     expect(after.outputs).toHaveLength(1);
+    // --json prints the same Explanation, with the interface's field
+    // names (remote.md §3.6).
+    expect(JSON.parse(explanationJson(after))).toEqual(after);
   });
 });
 
