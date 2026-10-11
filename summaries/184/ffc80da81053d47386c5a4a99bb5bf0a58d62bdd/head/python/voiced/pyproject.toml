@@ -1,0 +1,59 @@
+# field-voiced — the voice generation worker (voice-generation.md §1.4).
+# A uv project with its own pinned environment, set up explicitly via
+# `field voice setup`, never automatically. Its own process so model
+# memory and lifecycle stay independent of field-aced's.
+[project]
+name = "field-voiced"
+version = "0.1.0"
+description = "Field's Chatterbox voice worker: NDJSON over a unix socket"
+license = "MIT"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "field-worker",
+    "chatterbox-tts==0.1.7",
+    # Chatterbox watermarks every generation through `perth`, whose
+    # `perth_net/__init__.py` imports `pkg_resources` — a setuptools
+    # module that Python 3.12 no longer ships and uv does not install
+    # unasked. perth catches that ImportError and sets
+    # `PerthImplicitWatermarker = None`, so the failure surfaces one
+    # layer up as `'NoneType' object is not callable` from Chatterbox's
+    # constructor, naming neither perth nor setuptools. Declared here
+    # because it is genuinely required at runtime and nothing in the
+    # dependency graph asks for it.
+    # Pinned below 81: setuptools removed `pkg_resources` itself, so the
+    # newest release satisfies the dependency and still leaves perth
+    # unable to import (verified — 83.0.0 ships no pkg_resources at all).
+    "setuptools>=70,<81",
+]
+
+[tool.uv.sources]
+# editable: the lifecycle is *our* source, not a pinned release. As a
+# plain path dependency uv installs a copy, so editing
+# field_worker left every worker venv with a stale one — and the
+# failure lands in the importing module, blaming `field_voiced` for
+# a symbol `field_worker` had gained an hour earlier.
+field-worker = { path = "../worker", editable = true }
+
+[project.scripts]
+field-voiced = "field_voiced.main:main"
+
+[dependency-groups]
+dev = ["pyright==1.1.411"]
+
+[tool.pyright]
+# Strict everywhere we write; the Chatterbox boundary is quarantined in
+# adapter.py, exactly as ACE-Step's is (ace-generation.md §3.4).
+include = ["src"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+# The shared lifecycle by path, not by install: CI runs
+# `uv sync --only-group dev`, which excludes every production dependency
+# (#59 review — this is the step that broke when field-worker became one).
+extraPaths = ["../worker/src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/field_voiced"]

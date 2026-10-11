@@ -1,0 +1,53 @@
+# field-aced — the ACE generation worker (ace-generation.md §3). A uv
+# project with its own pinned environment; set up explicitly via
+# `field ace setup`, never automatically. ACE-Step 1.5 is pinned by
+# commit; bump deliberately.
+[project]
+name = "field-aced"
+version = "0.1.0"
+description = "Field's ACE-Step generation worker: NDJSON over a unix socket"
+license = "MIT"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "field-worker",
+    "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5.git@6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",
+]
+
+[tool.uv.sources]
+# editable: the lifecycle is *our* source, not a pinned release. As a
+# plain path dependency uv installs a copy, so editing
+# field_worker left every worker venv with a stale one — and the
+# failure lands in the importing module, blaming `field_voiced` for
+# a symbol `field_worker` had gained an hour earlier.
+field-worker = { path = "../worker", editable = true }
+
+[project.scripts]
+field-aced = "field_aced.main:main"
+
+[dependency-groups]
+dev = ["pyright==1.1.411"]
+
+[tool.pyright]
+# Strict everywhere we write; the ACE-Step boundary is quarantined in
+# adapter.py (ace-generation.md §3.4).
+include = ["src"]
+# The shared lifecycle by path rather than by install. CI runs
+# `uv sync --only-group dev` on purpose — the model environment is far
+# too heavy to install for a type check — and that excludes *every*
+# production dependency, `field-worker` among them, which is what broke
+# the Linux job on #59. Resolving it by path keeps the cheap install and
+# type-checks the real source, which is what the tests already do with
+# PYTHONPATH.
+extraPaths = ["../worker/src"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true # the ACE-Step pin is a git reference
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/field_aced"]
