@@ -88,13 +88,21 @@ describe('the instrument line', () => {
     );
   });
 
-  it('ends with the effects not heard yet, each once', () => {
-    const state = instrumentState([
+  it('ends with the effects not heard, each once, and why when routing them was not possible', () => {
+    const armed = [
       { program: '/p/juno.scd', track: 'creek/keys', unheardEffects: ['keys-bus'] },
       { program: '/p/bass.scd', track: 'creek/bass', unheardEffects: ['keys-bus', 'band'] },
-    ])!;
+    ];
+    const state = instrumentState(armed)!;
     expect(instrumentText({ ...state, status: live })).toBe(
-      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard yet',
+      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard',
+    );
+    expect(instrumentText({ ...instrumentState(armed, false, 'FieldOut is not built: run pnpm build:native')!, status: live })).toBe(
+      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, band are not heard (FieldOut is not built: run pnpm build:native)',
+    );
+    // Routed through the daemon, the voices pass through every effect.
+    expect(instrumentText({ ...instrumentState(armed, true, 'unused')!, status: live })).toBe(
+      'keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers',
     );
     expect(instrumentText({ ...state, status: live, reload: { failed: 'juno.scd does not compile' } })).toBe(
       'keys (juno) + bass (bass) kept its last voice: juno.scd does not compile',

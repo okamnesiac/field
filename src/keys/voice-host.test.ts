@@ -19,6 +19,9 @@ writeFileSync(log + '.env', JSON.stringify({
   instruments: process.env.FIELD_INSTRUMENTS,
   device: process.env.FIELD_DEVICE ?? null,
   parent: process.env.FIELD_PARENT_PID,
+  rings: process.env.FIELD_RINGS ?? null,
+  fieldOut: process.env.FIELD_FIELDOUT ?? null,
+  routeDef: process.env.FIELD_ROUTE_DEF ?? null,
 }));
 const socket = require('node:dgram').createSocket('udp4');
 socket.on('message', (msg) => appendFileSync(log, msg.toString('latin1') + '\\n'));
@@ -204,6 +207,33 @@ describe('the voice host process', () => {
     expect(seen).toMatchObject({ mode: 'voice', instruments: '["/p/pad.scd"]', device: 'Test Out', parent: String(process.pid) });
     await host.close();
     expect(readFileSync(log, 'latin1')).toContain('/quit');
+  });
+
+  itStartsTheStub('hands the host the rings and the route to play through the effects, and frees every node before /quit', async () => {
+    const host = await VoiceHost.start({
+      instruments: ['/p/juno.scd', '/p/pad.scd'],
+      rings: [4213871, null],
+      fieldOut: '/opt/fieldout',
+      env: env('ready'),
+    });
+    await host.ready;
+    const seen = JSON.parse(readFileSync(`${log}.env`, 'utf8'));
+    expect(seen).toMatchObject({ rings: '[4213871,null]', fieldOut: '/opt/fieldout' });
+    // The route's SynthDef, which Field writes because sclang has no
+    // FieldOut class.
+    expect(readFileSync(seen.routeDef).subarray(0, 4).toString('latin1')).toBe('SCgf');
+    await host.close();
+    // A FieldOut still running when scsynth quits crashes it on the way out.
+    const sent = readFileSync(log, 'latin1');
+    expect(sent.indexOf('/g_freeAll')).toBeGreaterThanOrEqual(0);
+    expect(sent.indexOf('/g_freeAll')).toBeLessThan(sent.indexOf('/quit'));
+  });
+
+  itStartsTheStub('routes nothing when no instrument has a ring', async () => {
+    const host = await VoiceHost.start({ instruments: ['/p/pad.scd'], rings: [null], fieldOut: '/opt/fieldout', env: env('ready') });
+    await host.ready;
+    expect(JSON.parse(readFileSync(`${log}.env`, 'utf8'))).toMatchObject({ rings: null, fieldOut: null, routeDef: null });
+    await host.close();
   });
 
   itStartsTheStub('asks the host to reload, and reports a reload and a failure with sclang\'s error', async () => {

@@ -125,7 +125,7 @@ public:
         // Armed or recording pins the daemon open (recording.md §5): an
         // idle exit under a take would be the take dying to a timeout.
         auto idle = server.connectionCount() == 0 && state != "playing"
-                    && ! player.recordingPinned()
+                    && ! player.recordingPinned() && ! player.inputsOpen()
                     && juce::Time::currentTimeMillis() - server.lastActivityMs() > idleMs;
         if (server.quitRequested || idle)
             wantExit = true;
@@ -151,6 +151,8 @@ int main (int argc, char* argv[])
     juce::String renderLiveClick;
     std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
     bool ringSelfTest = false;
+    int ringFeedId = 0;
+    std::string ringFeedWav;
     juce::String scanFormat;
     juce::String probeFormat;
     juce::String probeCandidate;
@@ -203,6 +205,11 @@ int main (int argc, char* argv[])
             nullOutput = true;
         else if (arg == "--ring-selftest")
             ringSelfTest = true;
+        else if (arg == "--ring-feed" && i + 2 < argc)
+        {
+            ringFeedId = juce::String (argv[++i]).getIntValue();
+            ringFeedWav = argv[++i];
+        }
         else if (arg == "--idle" && i + 1 < argc)
             idleSeconds = juce::String (argv[++i]).getIntValue();
         else
@@ -218,6 +225,7 @@ int main (int argc, char* argv[])
                           "       field-audiod --state-capture <au|vst3> <identifier> "
                           "<paramsJson> <out>\n"
                           "       field-audiod --ring-selftest\n"
+                          "       field-audiod --ring-feed <ring> <file.wav>\n"
                           "       field-audiod --keys <name>\n"
                           "       field-audiod --midi-monitor <name>\n");
             return 2;
@@ -320,6 +328,17 @@ int main (int argc, char* argv[])
             return 1;
         }
         std::printf ("{\"ok\":true}\n");
+        return 0;
+    }
+
+    // An input without SuperCollider (ring_input.h): a file into a ring.
+    if (ringFeedId > 0)
+    {
+        if (auto error = field::runRingFeed ((uint32_t) ringFeedId, ringFeedWav); ! error.empty())
+        {
+            std::fprintf (stderr, "field-audiod: ring feed failed: %s\n", error.c_str());
+            return 1;
+        }
         return 0;
     }
 

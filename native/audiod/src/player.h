@@ -100,6 +100,9 @@ public:
     // process unless unlinked, and an exit that skips destructors would
     // leave them behind.
     void closeInputs();
+    // An open input pins the daemon open, as an arm does: `field keys`
+    // may be playing through it with nothing else connected.
+    bool inputsOpen();
     bool liveMode() const { return liveSession != nullptr; }
 
     juce::String play();

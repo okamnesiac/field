@@ -112,6 +112,32 @@ export function synthDefFile(def: SynthDefSpec): Buffer {
   return w.bytes();
 }
 
+// The voice host's route (live-supercollider.md chunk 3): two channels
+// from the private bus an instrument's voices play into, written into the
+// daemon's ring by FieldOut. Freed before the server quits, which a
+// FieldOut still running at shutdown does not survive.
+export const ROUTE_DEF = 'field-route';
+
+export function routeSynthDef(): Buffer {
+  return synthDefFile({
+    name: ROUTE_DEF,
+    params: [
+      { name: 'in', value: 0 },
+      { name: 'ring', value: 0 },
+    ],
+    ugens: [
+      { name: 'Control', rate: 'control', inputs: [], outputs: ['control', 'control'] },
+      { name: 'In', rate: 'audio', inputs: [{ ugen: 0, output: 0 }], outputs: ['audio', 'audio'] },
+      {
+        name: 'FieldOut',
+        rate: 'audio',
+        inputs: [{ ugen: 0, output: 1 }, { ugen: 1, output: 0 }, { ugen: 1, output: 1 }],
+        outputs: [],
+      },
+    ],
+  });
+}
+
 export type OscArg = number | string | Buffer | { float: number };
 
 function oscString(s: string): Buffer {

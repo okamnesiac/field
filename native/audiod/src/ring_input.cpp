@@ -2,13 +2,17 @@
 
 #include "field_ring.h"
 
+#include "dsp/wavfile.h"
+
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <new>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace field
 {
@@ -122,12 +126,17 @@ void RingInput::read (float* left, float* right, int n)
         taken = (int) std::min<uint64_t> (held, (uint64_t) n);
         const float* data = ring::data (header);
         const uint64_t mask = frames - 1;
+        float loudest = 0.0f;
         for (int i = 0; i < taken; ++i)
         {
             const size_t from = (size_t) ((at + (uint64_t) i) & mask) * ring::channels;
             left[i] = data[from];
             right[i] = data[from + 1];
+            loudest = std::max (loudest, std::max (std::abs (left[i]), std::abs (right[i])));
         }
+        // One writer (this thread); status exchanges it back to zero.
+        if (loudest > peak.load (std::memory_order_relaxed))
+            peak.store (loudest, std::memory_order_relaxed);
         at += (uint64_t) taken;
         if (taken < n)
         {
@@ -142,7 +151,7 @@ void RingInput::read (float* left, float* right, int n)
     std::fill (right + taken, right + n, 0.0f);
 }
 
-juce::var RingInput::stats() const
+juce::var RingInput::stats (bool consumePeak)
 {
     auto* object = new juce::DynamicObject();
     object->setProperty ("ring", (int) ringId);
@@ -154,7 +163,42 @@ juce::var RingInput::stats() const
 #endif
     object->setProperty ("underruns", (juce::int64) underruns.load (std::memory_order_relaxed));
     object->setProperty ("skipped", (juce::int64) skipped.load (std::memory_order_relaxed));
+    object->setProperty ("peak", (double) (consumePeak ? peak.exchange (0.0f) : peak.load()));
     return juce::var (object);
+}
+
+std::string runRingFeed (uint32_t id, const std::string& wavPath)
+{
+#if defined(_WIN32)
+    juce::ignoreUnused (id, wavPath);
+    return "the ring needs POSIX shared memory";
+#else
+    try
+    {
+        const auto channels = dsp::readWav (wavPath).channels;
+        const char* error = nullptr;
+        auto mapping = ring::open (id, error);
+        if (mapping.header == nullptr)
+            return std::string ("ring ") + std::to_string (id) + ": " + error;
+        const auto& left = channels[0];
+        const auto& right = channels.size() > 1 ? channels[1] : channels[0];
+        const auto burst = std::chrono::microseconds ((long long) (128.0 * 1e6 / mapping.header->sampleRate));
+        auto due = std::chrono::steady_clock::now();
+        for (size_t at = 0; at < left.size(); at += 128)
+        {
+            const int n = (int) std::min<size_t> (128, left.size() - at);
+            ring::write (mapping.header, left.data() + at, right.data() + at, n);
+            due += burst;
+            std::this_thread::sleep_until (due);
+        }
+        ring::unmap (mapping);
+        return {};
+    }
+    catch (const std::exception& e)
+    {
+        return e.what();
+    }
+#endif
 }
 
 std::string runRingSelfTest()

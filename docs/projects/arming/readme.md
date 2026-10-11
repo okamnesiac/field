@@ -66,6 +66,10 @@ getting the voice's audio into the daemon's graph; until then
    `keys (juno) + bass (bass) live at 48000 Hz on MacBook Pro Speakers`.
    When a track you named has inserts on the way down to its MIDI track,
    it ends `· dry: the effects on keys-bus are not heard yet`.
+   *Amended (2026-10-11, live-supercollider.md chunk 3):* the voices now
+   pass through the effects, and the note appears only when routing
+   them is not possible, as `· dry: the effects on keys-bus are not
+   heard (<why>)`.
 
 ### 2.2 Recording armed tracks
 

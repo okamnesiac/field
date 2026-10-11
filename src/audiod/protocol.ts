@@ -295,8 +295,9 @@ export const inputResponseSchema = z.object({
 });
 
 // An open input in status: frames FieldOut wrote, the daemon read, and
-// FieldOut dropped for want of room; how often the reader ran dry; and
-// the frames it skipped to hold its level against a fast writer.
+// FieldOut dropped for want of room; how often the reader ran dry; the
+// frames it skipped to hold its level against a fast writer; and the
+// loudest sample read since a client last asked, which the asking resets.
 export const inputStatusSchema = z.object({
   name: z.string(),
   ring: z.number().int(),
@@ -305,6 +306,7 @@ export const inputStatusSchema = z.object({
   dropped: z.number().int(),
   underruns: z.number().int(),
   skipped: z.number().int(),
+  peak: z.number(),
 });
 
 export const statusResponseSchema = z.object({

@@ -296,6 +296,26 @@ must sit under `main`.
   moves the device leaves it stale; chunk 3 checks the rates before it
   routes a voice.
 
+- 2026-10-11 — Chunk 3 (branch `live/keys`, stacked on chunk 2).
+  `field keys` on tracks opens an input per armed track, loads the song's
+  session with them, and starts the voice host with a ring per
+  instrument; each routed instrument's voices play into a private bus
+  that a route synth, `In` into `FieldOut`, carries to its ring.
+  `src/keys/synthdef.ts` writes the route because sclang has no
+  `FieldOut` class, and the host loads it by file. Every way the host
+  stops frees its nodes first, which chunk 2 found scsynth needs. With
+  the transport stopped the daemon plays the overlay through a second
+  instance of `main`'s chain (§7 question 2), so the song's chain and
+  position do not move; open inputs pin the daemon open as an arm does.
+  Each input now reports a `peak`, and `--ring-feed` writes a file into a
+  ring as FieldOut would. `src/keys/routing-voice.test.ts` runs the whole
+  path through real sclang and scsynth: a note from a published MIDI
+  source reaches the track's input in the daemon. When routing is not
+  possible, the line keeps the dry note and says why. Criterion 3 by ear,
+  and criteria 4 and 5 on the real device, are still owed; a swap under
+  a playing input, which §9 leaves to this chunk, rebuilds the overlay
+  cold, a gap of the path's latency, accepted for now.
+
 ## 11 FieldOut's license (DECIDED, 2026-10-11)
 
 FieldOut is GPL-3.0-or-later, in this repository, with its own

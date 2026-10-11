@@ -479,6 +479,49 @@ void LiveSession::buildOverlay()
     }
     if (! overlay.empty())
         inputScratch.assign (2, std::vector<float> (8192, 0.0f));
+    if (overlayIndex[(size_t) outputTrack] >= 0)
+    {
+        const Track& output = tracks[(size_t) outputTrack];
+        buildStages (idleChain, output.chainSpecs, output.rate, 0);
+        juce::int64 latency = 0;
+        for (const auto& stage : idleChain)
+            if (stage.limiter != nullptr)
+                latency += stage.limiter->latencySamples();
+            else if (stage.plugin != nullptr)
+                latency += stage.plugin->latencySamples();
+        idleBlock.assign (2, std::vector<float>());
+        idleDelayed.assign (2, std::vector<float> ((size_t) latency, 0.0f));
+        reserveAll (idleBlock, 16384);
+        reserveAll (idleDelayed, (size_t) latency + 16384);
+    }
+}
+
+void LiveSession::renderIdle (float* const* out, int numChannels, int n)
+{
+    const int slot = overlay.empty() ? -1 : overlayIndex[(size_t) outputTrack];
+    if (slot < 0)
+    {
+        for (int c = 0; c < numChannels; ++c)
+            std::fill (out[c], out[c] + n, 0.0f);
+        return;
+    }
+    // Ramps evaluate at the stopped position: the song's clock does not
+    // move, and neither does any glide on it.
+    renderOverlay (n, clock);
+    const auto& mixed = overlay[(size_t) slot].post;
+    for (int c = 0; c < 2; ++c)
+        idleBlock[(size_t) c].assign (mixed[(size_t) c].begin(), mixed[(size_t) c].begin() + n);
+    runStages (idleChain, idleBlock, 0);
+    for (int c = 0; c < 2; ++c)
+    {
+        auto& delayed = idleDelayed[(size_t) c];
+        delayed.insert (delayed.end(), idleBlock[(size_t) c].begin(), idleBlock[(size_t) c].end());
+    }
+    for (int c = 0; c < numChannels; ++c)
+        for (int i = 0; i < n; ++i)
+            out[c][i] = c < 2 ? idleDelayed[(size_t) c][(size_t) i] : 0.0f;
+    for (auto& delayed : idleDelayed)
+        delayed.erase (delayed.begin(), delayed.begin() + n);
 }
 
 // A feed through its delay line: the block that leaves it now, which is

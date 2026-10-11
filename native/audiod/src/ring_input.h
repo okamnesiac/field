@@ -44,8 +44,10 @@ public:
     void read (float* left, float* right, int n) override;
 
     // For `status`: frames written, read, and dropped by the writer, how
-    // often the reader ran dry, and the frames it skipped for drift.
-    juce::var stats() const;
+    // often the reader ran dry, the frames it skipped for drift, and the
+    // loudest sample it read since a client last read the peak, which
+    // `consumePeak` resets, as the armed input's meter does.
+    juce::var stats (bool consumePeak = false);
 
     // What the reader keeps in hand beyond its block: one burst of the
     // writer's, which the voice host runs at a 128-frame hardware buffer,
@@ -64,6 +66,7 @@ private:
     bool primed = false;
     std::atomic<uint64_t> underruns { 0 };
     std::atomic<uint64_t> skipped { 0 };
+    std::atomic<float> peak { 0.0f };
 };
 
 // --ring-selftest: a RingInput and a writer through field_ring.h, the
@@ -71,5 +74,10 @@ private:
 // state, through a writer that stops, one that runs fast, and one with
 // nothing reading. Empty string when every scenario holds.
 std::string runRingSelfTest();
+
+// --ring-feed: write a WAV into ring `id` as FieldOut would, in 128-frame
+// bursts at the ring's rate in real time, so a test or a person can hear
+// an input without SuperCollider. Empty string when the file went in.
+std::string runRingFeed (uint32_t id, const std::string& wavPath);
 
 } // namespace field

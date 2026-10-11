@@ -719,6 +719,12 @@ void Player::closeInputs()
     rings.clear();
 }
 
+bool Player::inputsOpen()
+{
+    std::lock_guard<std::mutex> hold (inputsLock);
+    return ! rings.empty();
+}
+
 juce::String Player::closeInput (const juce::String& name)
 {
     std::lock_guard<std::mutex> hold (inputsLock);
@@ -743,7 +749,7 @@ juce::var Player::status (bool consumePeak)
             juce::Array<juce::var> list;
             for (const auto& [name, ring] : rings)
             {
-                auto stats = ring->stats();
+                auto stats = ring->stats (consumePeak);
                 stats.getDynamicObject()->setProperty ("name", juce::String (name));
                 list.add (stats);
             }
@@ -1004,8 +1010,15 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
                 }
                 return position;
             }
-            for (int c = 0; c < numChannels; ++c)
-                std::fill (out[c], out[c] + n, 0.0f);
+            // Stopped with a live input (live-supercollider.md §7
+            // question 2): what you play is heard over silence. Converted
+            // delivery has no idle path, because an input plays at the
+            // device's rate, which is then not the session's.
+            if (liveConverter == nullptr && liveSession->hasInputs())
+                liveSession->renderIdle (out, numChannels, n);
+            else
+                for (int c = 0; c < numChannels; ++c)
+                    std::fill (out[c], out[c] + n, 0.0f);
             // A bed that is not rolling has no position to latch a take
             // or a tick on: the first playing block is where both start.
             return -1;

@@ -90,6 +90,13 @@ public:
     // Channel counts beyond stereo are zero-filled.
     void renderBlock (float* const* out, int numChannels, int n);
 
+    // Stopped, with an input (live-supercollider.md §7 question 2): the
+    // overlay alone, through a second instance of the output's chain, so
+    // what you play is heard over silence while the song's clock and
+    // chains stay where they are.
+    void renderIdle (float* const* out, int numChannels, int n);
+    bool hasInputs() const { return ! inputSources.empty(); }
+
     void locate (juce::int64 sample);
     // What has been delivered to the device — the honest transport
     // position; the input clock runs ahead of it by any limiter window.
@@ -330,6 +337,10 @@ private:
     std::vector<OverlayTrack> overlay; // children before the tracks that read them
     std::vector<int> overlayIndex; // tracks[] → overlay[], -1 off the overlay
     std::vector<std::vector<float>> inputScratch;
+    // renderIdle's instance of the output chain, its block, and the delay
+    // that keeps each block whole across a limiter's varying lag.
+    std::vector<ChainStage> idleChain;
+    std::vector<std::vector<float>> idleBlock, idleDelayed;
     // Off while locate renders into the void: a source read there is
     // consumed off the audio thread and heard by nobody.
     bool overlayReadsInputs = true;

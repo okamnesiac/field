@@ -5,7 +5,9 @@ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardL
 import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+import { routeArmed } from '../keys/routing.js';
 import { resolveKeysTargets, type ArmedInstrument } from '../keys/targets.js';
+import { findProjectRoot } from '../model/project.js';
 import { VoiceHost, type VoiceHostStatus } from '../keys/voice-host.js';
 import { watchText } from '../keys/watch.js';
 import type { Keymap } from '../schema/keymap.js';
@@ -32,8 +34,9 @@ export async function keysCommand(targets: string[], options: KeysOptions): Prom
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error('field keys reads the keyboard, so it needs a terminal on stdin and stdout');
   }
+  const root = findProjectRoot(process.cwd());
   await withKittyKeyboard({ stdin, stdout }, (rest) =>
-    play({ stdin, stdout }, { source, keymap, armed, device: options.device }, rest),
+    play({ stdin, stdout }, { source, keymap, armed, device: options.device, root }, rest),
   );
 }
 
@@ -67,11 +70,15 @@ interface PlayOptions {
   keymap: Keymap;
   armed: ArmedInstrument[];
   device: string | undefined;
+  root: string | undefined;
 }
 
 export type InstrumentState = {
   name: string; // what is armed, as the line names it
   dry: string[]; // tracks whose effects the voices do not pass through yet
+  // Why the voices do not pass through them (live-supercollider.md
+  // chunk 3), when routing them was not possible.
+  dryReason?: string;
   status: Extract<VoiceHostStatus, { state: 'live' | 'restarting' }> | { state: 'starting' };
   // What the last save of the program did (keyboard-instrument.md §14).
   reload?: { loaded: true } | { failed: string };
@@ -79,12 +86,18 @@ export type InstrumentState = {
 
 async function play(tty: Tty, options: PlayOptions, carried: string): Promise<void> {
   const { source, armed } = options;
-  const programs = [...new Set(armed.map((a) => a.program))];
+  // Armed tracks play through their effects when the daemon can take
+  // their voices (live-supercollider.md chunk 3): each track then gets a
+  // voice of its own, writing into its own input. Otherwise each program
+  // plays once, straight to the device, and the line says why.
+  const routed = options.root !== undefined ? await routeArmed(armed, options.root) : undefined;
+  const routing = routed !== undefined && 'programs' in routed ? routed : undefined;
+  const programs = routing?.programs ?? [...new Set(armed.map((a) => a.program))];
   const session = new KeysSession(options.keymap);
   let layout: KeyboardLayout | undefined;
   let layoutPositions: ReadonlyMap<string, string> | undefined;
   let reloadError: string | undefined;
-  const instrument = instrumentState(armed);
+  const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
 
   // An instrument has a line of its own above the status line: its state
   // changes a few times a session, the status line with every key. That
@@ -130,6 +143,7 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
       ? await VoiceHost.start({
           instruments: programs,
           ...(device !== undefined ? { device } : {}),
+          ...(routing !== undefined ? { rings: routing.rings, fieldOut: routing.fieldOut } : {}),
           onStatus: (status) => {
             if (status.state === 'voice') return;
             if (status.state === 'reloaded') instrument!.reload = { loaded: true };
@@ -190,27 +204,32 @@ async function play(tty: Tty, options: PlayOptions, carried: string): Promise<vo
   stopWatching?.();
   stopWatchingPrograms.forEach((stopWatchingProgram) => stopWatchingProgram());
   send(session.quit());
-  // A host still booting closes too: quitting never waits for it.
+  // A host still booting closes too: quitting never waits for it. The
+  // inputs close after it, once nothing writes them.
   await host?.close();
+  await routing?.close();
   await helper.close();
   tty.stdout.write('\n');
   if (error !== undefined) throw error;
 }
 
 // What the instrument's line starts from: the armed tracks and
-// instruments by name, and the tracks whose effects are not heard yet.
-export function instrumentState(armed: ArmedInstrument[]): InstrumentState | undefined {
+// instruments by name, and the tracks whose effects are not heard, which
+// is none when the voices pass through them.
+export function instrumentState(armed: ArmedInstrument[], heard = false, dryReason?: string): InstrumentState | undefined {
   if (armed.length === 0) return undefined;
+  const dry = heard ? [] : [...new Set(armed.flatMap((a) => a.unheardEffects))];
   return {
     name: armed.map(armedName).join(' + '),
-    dry: [...new Set(armed.flatMap((a) => a.unheardEffects))],
+    dry,
+    ...(dry.length > 0 && dryReason !== undefined ? { dryReason } : {}),
     status: { state: 'starting' },
   };
 }
 
 // A save that did not load leads with why, so a narrow terminal keeps the
 // error rather than the device; the voice that loaded last still plays.
-export function instrumentText({ name, dry, status, reload }: InstrumentState): string {
+export function instrumentText({ name, dry, dryReason, status, reload }: InstrumentState): string {
   if (reload !== undefined && 'failed' in reload) return `${name} kept its last voice: ${reload.failed}`;
   const state =
     status.state === 'live'
@@ -219,8 +238,10 @@ export function instrumentText({ name, dry, status, reload }: InstrumentState): 
         ? `${name} restarting for a new sample rate`
         : `${name} starting`;
   // The voice plays straight to the device, so a track's inserts are not
-  // heard yet (arming.md §2.1, live-supercollider.md).
-  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard yet` : '';
+  // heard (arming.md §2.1); routing them was not possible, and the reason
+  // says why (live-supercollider.md chunk 3).
+  const why = dryReason !== undefined ? ` (${dryReason})` : '';
+  const unheard = dry.length > 0 ? ` · dry: the effects on ${dry.join(', ')} are not heard${why}` : '';
   return `${state}${reload === undefined ? '' : ' · reloaded'}${unheard}`;
 }
 

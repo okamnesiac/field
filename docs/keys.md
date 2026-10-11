@@ -218,12 +218,33 @@ naming a bus plays the part it carries. If more than one MIDI track is
 under it, `field keys` lists them and stops, and you name the ones you
 mean.
 
-The instrument still plays straight to the device, so the inserts on
-the track and on the tracks above it are not heard yet. When a track you
-named has any, the instrument's line ends
-`· dry: the effects on keys-bus are not heard yet`. Hearing them is the
-work of
-[the live-supercollider plan](projects/live-supercollider/readme.md).
+A track you name plays through its effects and the effects of every
+track above it, up to `main`'s, as the song would play it. `field keys`
+opens an input for the track in `field-audiod`, loads the song's live
+session with it, and the voice host writes the track's voice into that
+input through FieldOut, a SuperCollider plugin that ships with Field
+([audio-engine.md](audio-engine.md) "Live inputs"). With the song
+stopped, you play over silence; press play in another terminal
+(`field transport play`) and you play over the song. When you quit,
+`field keys` closes the inputs and loads the song again without them.
+
+Each track gets a voice of its own, even when two share an instrument.
+An instrument you name without a track still plays straight to the
+device. The voice reaches the speakers late by the latency of the
+limiters and hosted plugins on its way up, a few milliseconds for the
+built-in limiter.
+
+When a track's voice cannot go through the daemon, it plays straight to
+the device, and the instrument's line says which effects you are not
+hearing and why:
+
+```console
+keys (juno) live at 48000 Hz on MacBook Pro Speakers · dry: the effects on keys-bus, main are not heard (FieldOut is not built: run pnpm build:native)
+```
+
+That happens when FieldOut is not built, on Windows, which has no
+POSIX shared memory, when the daemon predates live inputs, or when the
+tracks you name are in two songs, because one session plays one song.
 
 ## Record what you play
 
