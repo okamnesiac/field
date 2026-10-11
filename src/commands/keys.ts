@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
 import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
@@ -32,8 +32,41 @@ export function resolveInstrument(spec: string, cwd = process.cwd()): string {
     );
   }
   const path = instrumentPath(spec, root ?? cwd);
-  if (!existsSync(path)) throw new Error(`field keys ${spec}: no instrument program at ${path}`);
+  if (!existsSync(path)) {
+    const shelf = root !== undefined ? `\n${describeShelf(root)}` : '';
+    throw new Error(`field keys ${spec}: no instrument program at ${path}${shelf}`);
+  }
   return path;
+}
+
+// The programs on a project's instruments shelf, by name, split by whether
+// they can play from notes. A program that never reads FIELD_MODE cannot
+// answer voice mode, so its text is enough to tell, without starting
+// sclang for each one (keys.md "Make an instrument playable").
+export function shelfInstruments(root: string): { playable: string[]; renderOnly: string[] } {
+  const dir = join(root, 'shared', 'instruments');
+  const playable: string[] = [];
+  const renderOnly: string[] = [];
+  if (!existsSync(dir)) return { playable, renderOnly };
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.scd'))
+    .map((entry) => entry.name)
+    .sort();
+  for (const file of files) {
+    const name = file.slice(0, -'.scd'.length);
+    (readFileSync(join(dir, file), 'utf8').includes('FIELD_MODE') ? playable : renderOnly).push(name);
+  }
+  return { playable, renderOnly };
+}
+
+function describeShelf(root: string): string {
+  const { playable, renderOnly } = shelfInstruments(root);
+  if (playable.length + renderOnly.length === 0) return 'shared/instruments/ has no programs yet.';
+  const lines = ['In shared/instruments/:', `  plays from notes: ${playable.length > 0 ? playable.join(', ') : 'none'}`];
+  if (renderOnly.length > 0) {
+    lines.push(`  renders only:     ${renderOnly.join(', ')} (no FIELD_MODE=voice branch; see docs/keys.md)`);
+  }
+  return lines.join('\n');
 }
 
 export async function keysCommand(instrument: string | undefined, options: KeysOptions): Promise<void> {

@@ -107,7 +107,18 @@ the new rate, and notes sounding at the switch stop. Without that
 restart every note would play sharp or flat.
 
 An instrument that cannot play stops `field keys` with the reason, such
-as `creek-kit.scd does not answer FIELD_MODE=voice`.
+as `creek-kit.scd does not answer FIELD_MODE=voice`. A name that is not
+on the shelf lists what is, split into the instruments that play from
+notes and those that only render, by whether each program reads
+`FIELD_MODE`:
+
+```console
+$ field keys bass
+field keys bass: no instrument program at …/examples/bloom/shared/instruments/bass.scd
+In shared/instruments/:
+  plays from notes: still-water-pad
+  renders only:     creek-kit, seven-eight-loop (no FIELD_MODE=voice branch; see docs/keys.md)
+```
 
 ### Make an instrument playable
 

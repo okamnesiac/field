@@ -98,6 +98,22 @@ describe('resolving an instrument', () => {
     writeFileSync(join(dir, 'shared/instruments/pad.scd'), '');
     expect(resolveInstrument('pad', dir)).toBe(join(dir, 'shared/instruments/pad.scd'));
   });
+
+  it('lists the shelf when a name is not on it, split by whether each plays from notes', () => {
+    writeFileSync(join(dir, 'field.yaml'), 'name: t\n');
+    mkdirSync(join(dir, 'shared/instruments'), { recursive: true });
+    expect(() => resolveInstrument('bass', dir)).toThrow(/shared\/instruments\/ has no programs yet\.$/);
+    writeFileSync(join(dir, 'shared/instruments/pad.scd'), '(\nif ("FIELD_MODE".getenv == "voice") { SynthDef(\\pad, {}) } { 0.exit }\n)\n');
+    writeFileSync(join(dir, 'shared/instruments/kit.scd'), '// renders only\n');
+    writeFileSync(join(dir, 'shared/instruments/notes.txt'), 'FIELD_MODE\n');
+    mkdirSync(join(dir, 'shared/instruments/folder.scd'));
+    expect(() => resolveInstrument('bass', dir)).toThrow(
+      `field keys bass: no instrument program at ${join(dir, 'shared/instruments/bass.scd')}\n` +
+        'In shared/instruments/:\n' +
+        '  plays from notes: pad\n' +
+        '  renders only:     kit (no FIELD_MODE=voice branch; see docs/keys.md)',
+    );
+  });
 });
 
 describe('the voice host protocol', () => {
