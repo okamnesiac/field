@@ -165,3 +165,13 @@ exposing the CLI's verbs to agents is planned.
 Start at [docs/](docs/README.md) — the thesis and core concepts, with
 the index to the rest: architecture, tracks, the project model, the
 build graph, and the audio engine.
+
+## License
+
+Field's code is licensed under the [MIT License](LICENSE).
+
+The audio daemon, `field-audiod`, is built on
+[JUCE](https://juce.com), which is licensed under AGPLv3 or a commercial
+JUCE licence. Unless you hold a commercial JUCE licence, a
+`field-audiod` binary you build or distribute is covered by AGPLv3 as a
+whole, because it links JUCE.

@@ -2,6 +2,7 @@
   "name": "field",
   "version": "0.1.0",
   "description": "Git-native, agent-operable music production system",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "field": "./dist/cli.js"
