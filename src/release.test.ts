@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { bump, current, githubRepo, main, NOT_RELEASED, parse, repoSlug, setVersion, tag } from '../scripts/release.js';
+import { bump, current, githubRepo, main, merged, NOT_RELEASED, parse, repoSlug, setVersion, tag } from '../scripts/release.js';
 
 // scripts/release.ts against a temporary repository whose `origin` is a
 // bare repository beside it (install.md §3.1), so tags are really pushed
@@ -155,6 +155,19 @@ describe('tagging a release', () => {
     expect(git(origin, 'tag', '--list')).toBe('');
   });
 
+  it('releases when run again after the remote refused the push, though the tags were made locally', () => {
+    const hook = join(origin, 'hooks', 'update');
+    writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    expect(() => tag(checkout, { githubRelease: false })).toThrow('hook declined');
+    expect(git(checkout, 'tag', '--list')).toBe('v0\nv0.1.0');
+    rmSync(hook);
+    expect(merged(checkout, 'origin', 'main').tagged).toBe(false);
+    const head = git(checkout, 'rev-parse', 'HEAD');
+    expect(tag(checkout, { githubRelease: false })).toBe(`tagged v0.1.0 and moved v0 to ${head.slice(0, 9)} on origin/main`);
+    expect(git(origin, 'rev-parse', 'v0.1.0^{commit}')).toBe(head);
+    expect(git(origin, 'rev-parse', 'v0^{commit}')).toBe(head);
+  });
+
   it('refuses a version that is already tagged', () => {
     tag(checkout, { githubRelease: false });
     expect(() => tag(checkout, { githubRelease: false })).toThrow('v0.1.0 already exists; set a new version first');
@@ -200,6 +213,9 @@ describe('the command line', () => {
   it('says whether the merged version is released, and exits 3 while it is not', () => {
     expect(run('released')).toEqual({ status: NOT_RELEASED, lines: ['v0.1.0 is not released yet'] });
     expect(run('tag', '--no-release').status).toBe(0);
+    expect(run('released')).toEqual({ status: 0, lines: ['v0.1.0 is released'] });
+    // The remote's tags decide, as in a fresh clone that has none.
+    git(checkout, 'tag', '--delete', 'v0', 'v0.1.0');
     expect(run('released')).toEqual({ status: 0, lines: ['v0.1.0 is released'] });
   });
 

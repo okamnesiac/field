@@ -2,7 +2,7 @@
 //
 //   node scripts/release.ts bump patch|minor|major   raise one part of the version, write it, and print it
 //   node scripts/release.ts set X.Y.Z                write an exact version instead
-//   node scripts/release.ts released                 exit 0 if origin/main's version is tagged, 3 if not
+//   node scripts/release.ts released                 exit 0 if origin has a tag for origin/main's version, 3 if not
 //   node scripts/release.ts tag [--no-release]       tag vX.Y.Z at origin/main, move vX, and create the GitHub release
 //
 // `released --since COMMIT` also exits 0 when origin/main's version is not
@@ -96,15 +96,15 @@ export function repoSlug(url: string): string | undefined {
   return undefined;
 }
 
-// The branch's commit on the remote, the version it names, and whether that
-// version is tagged. Tags are fetched with --force because every release
-// moves the major tag, and a local copy of the old one would otherwise
-// refuse the fetch.
+// The branch's commit on the remote, the version it names, and whether the
+// remote has that version's tag. The remote decides, never the local tags:
+// `tag` makes its tags before it pushes them, so a push the remote refused
+// leaves local tags that the remote never got.
 export function merged(root: string, remote: string, branch: string): { commit: string; version: string; tagged: boolean } {
-  git(root, 'fetch', '--quiet', '--tags', '--force', remote, branch);
+  git(root, 'fetch', '--quiet', '--no-tags', remote, branch);
   const commit = git(root, 'rev-parse', `refs/remotes/${remote}/${branch}`);
   const version = versionAt(root, commit);
-  return { commit, version, tagged: git(root, 'tag', '--list', `v${version}`) !== '' };
+  return { commit, version, tagged: git(root, 'ls-remote', '--tags', remote, `refs/tags/v${version}`) !== '' };
 }
 
 function versionAt(root: string, commit: string): string {
@@ -153,7 +153,9 @@ export function tag(root: string, options: TagOptions = {}): string {
   const release = `v${version}`;
   const major = `v${parse(version)[0]}`;
   if (tagged) throw new ReleaseError(`${release} already exists; set a new version first`);
-  git(root, 'tag', '-a', release, commit, '-m', `Field ${version}`);
+  // Forced, because a local tag of either name is stale: the remote has no
+  // release tag for this version, and its major tag names an older release.
+  git(root, 'tag', '-f', '-a', release, commit, '-m', `Field ${version}`);
   git(root, 'tag', '-f', '-a', major, commit, '-m', `Field ${version}`);
   // One atomic push: the release tag alone on the remote would make
   // `released` report the version released, so no later run would move

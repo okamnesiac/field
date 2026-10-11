@@ -40,7 +40,7 @@ Node 24 runs it directly, with no `pnpm install`:
 ```sh
 node scripts/release.ts bump minor                 # raise the version, write it, print it
 node scripts/release.ts set 0.3.0                  # write an exact version instead
-node scripts/release.ts released                   # exit 0 if main's version is tagged, 3 if not
+node scripts/release.ts released                   # exit 0 if origin has main's version tagged, 3 if not
 node scripts/release.ts released --since abc1234   # also exit 0 if that version is not above abc1234's
 node scripts/release.ts tag                        # tag main's version, move v0, create the GitHub release
 ```
@@ -50,10 +50,13 @@ before the merge, and `tag` only when that exits 3. `bump` and `set`
 refuse a version that does not go up. `tag` reads the version from
 `origin/main`, not from your checkout, so an unmerged bump cannot name a
 release, and it refuses a version that is already tagged. It pushes both
-tags in one atomic push, so the remote gets both or neither. It needs an
-authenticated `gh` for the GitHub release, and `tag --no-release` pushes
-the tags alone. If the GitHub release fails after the tags are pushed,
-the error prints the `gh release create` command that finishes it.
+tags in one atomic push, so the remote gets both or neither. `released`
+and `tag` ask the remote which tags it has, never your local tags, so if
+the remote refuses the push, run `tag` again once the cause is fixed.
+`tag` needs an authenticated `gh` for the GitHub release, and
+`tag --no-release` pushes the tags alone. If the GitHub release fails
+after the tags are pushed, the error prints the `gh release create`
+command that finishes it.
 
 ## Versions a release leaves alone
 
