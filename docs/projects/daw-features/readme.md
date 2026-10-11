@@ -7,8 +7,9 @@ priority: later
 
 **Goal:** a standing list of features that users of other DAWs single out as
 the best thing about them, with what each one would mean for Field. This is
-direction, not a plan. Nothing here is committed; a line graduates by getting
-its own project directory beside this one, at `priority: later`.
+direction, not a plan. The catalogue itself commits to nothing; a line
+graduates by getting its own project directory beside this one, at
+`priority: later`, as §16's four picks have.
 
 Compiled 2026-08-20 from forum threads and vendor documentation for REAPER,
 Logic Pro, Ableton Live, Pro Tools, Bitwig, Studio One, and the AI-native
@@ -492,16 +493,22 @@ reasoning above will keep moving.
 - **REAPER's actions, custom macros, and user-bound shortcuts** (§6) — in
   scope, all three parts: the searchable index of every verb, macros as named
   sequences committed to the project, and shortcuts the user assigns across
-  the whole action set.
+  the whole action set. Now
+  [actions-and-macros](../actions-and-macros/readme.md).
 - **A clip opens its editor with no menu in between** (§2) — clicking a clip
   brings up audio manipulation directly in the selection-driven detail pane.
-  Stated as the positive form of the anti-menu position.
+  Stated as the positive form of the anti-menu position. Now
+  [detail-pane](../detail-pane/readme.md).
 - **A sound browser spanning projects and libraries** (§14) — including
   sounds from other Field projects and from a personal library, not only the
-  open project.
+  open project. Now [sound-browser](../sound-browser/readme.md).
 - **Imported material conformed to the song's key** (§15) — with the model as
   the default path for transposition and time-stretch, not a fallback behind
-  an arithmetic one.
+  an arithmetic one. Now [key-conforming](../key-conforming/readme.md).
+
+**2026-10-10.** Each pick above has its own project directory at
+`priority: later`, so `project list` shows it; this catalogue stays
+`draft` as the record of where they came from.
 
 ## 17 The version-control gap
 
