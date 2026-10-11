@@ -543,10 +543,13 @@ export class KnobLine {
     let last = chosen;
     while (last + 1 < cells.length && span(first, last + 1) <= width) last++;
     this.first = first;
+    const left = first > 0 ? MORE_LEFT : '';
+    const right = last < cells.length - 1 ? MORE_RIGHT : '';
+    const room = Math.max(0, width - left.length - right.length);
     const shown = cells.slice(first, last + 1).map((cell, i) => {
-      const fitted = cell.slice(0, width);
+      const fitted = cell.slice(0, room);
       return first + i === chosen ? `${REVERSE}${fitted}${REVERSE_OFF}` : fitted;
     });
-    return `${first > 0 ? MORE_LEFT : ''}${shown.join(KNOB_GAP)}${last < cells.length - 1 ? MORE_RIGHT : ''}`;
+    return `${left}${shown.join(KNOB_GAP)}${right}`;
   }
 }

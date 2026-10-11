@@ -194,6 +194,18 @@ describe('the knob line', () => {
     tap(session, 'ArrowLeft', 2);
     expect(plain(knobLine.text(session, 40))).toBe('‹ attack  1.02 s  release  1.50 s');
   });
+
+  it('cuts a knob wider than the terminal, never the markers, so the line never wraps', () => {
+    const session = withJuno();
+    tap(session, 'ArrowRight');
+    expect(plain(new KnobLine().text(session, 16))).toBe('‹ cutoff 2.00  ›');
+    for (let choice = 0; choice < session.knobs.length; choice++) {
+      for (let width = 8; width <= 40; width++) {
+        expect(plain(new KnobLine().text(session, width)).length).toBeLessThanOrEqual(width);
+      }
+      tap(session, 'ArrowRight');
+    }
+  });
 });
 
 describe('redrawing the lines above the status line', () => {
