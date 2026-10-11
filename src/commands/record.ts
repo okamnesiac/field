@@ -3,6 +3,7 @@ import { captureInputName, compileWithInputs, reloadIfPlaying, reloadWithInputs 
 import { anyTakeSchema, type AnyTake, type AudiodEvent, type RecordingEntry } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { expandPattern } from '../graph/graph.js';
+import { controllersToChase } from '../keys/published.js';
 import { formatLabel, parsePattern } from '../labels.js';
 import type { LoadedProject } from '../model/project.js';
 import { loadValid } from './build.js';
@@ -312,6 +313,9 @@ async function captureTakes(
         throw new Error(`host monitoring cannot play the input through ${resolved.song}: ${(err as Error).message}`);
       }
     }
+    // A MIDI take starts where the knobs of a running `field keys` are
+    // (instrument-knobs.md §2.8).
+    const controllers = tracks.some((t) => t.kind === 'midi') ? controllersToChase(root, client.supports('midi-chase')) : [];
     let armedRate: number;
     if (tracks.length > 1 || monitored.length > 0) {
       if (!client.supports('record-tracks')) {
@@ -331,6 +335,7 @@ async function captureTakes(
               },
         ),
         options.device,
+        controllers,
       );
       armedHere = true;
       armedRate = armed.sample_rate;
@@ -351,7 +356,7 @@ async function captureTakes(
           `field-audiod ${client.daemonVersion} predates MIDI recording — field transport quit, then record again`,
         );
       }
-      const armed = await client.armMidi(resolved.label);
+      const armed = await client.armMidi(resolved.label, controllers);
       armedHere = true;
       armedRate = armed.sample_rate;
       hooks.onArmed?.(

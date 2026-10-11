@@ -63,6 +63,9 @@ export class KeysSession {
   // Each controller this session has sent, by number, with the last value
   // sent: what the knobs and the status line show.
   readonly controllers = new Map<number, number>();
+  // The same by channel, in the order the values were last sent, which is
+  // what a take starts from (instrument-knobs.md §2.8).
+  private readonly sent = new Map<number, { channel: number; cc: number; value: number }>();
   // The knobs the arrows choose and turn, `mod` first, and which is chosen.
   knobs: ShownKnob[];
   chosen = 0;
@@ -254,6 +257,13 @@ export class KeysSession {
     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'cc' in a && a.cc === MOD_WHEEL);
   }
 
+  // Every controller from 0 to 119 this session has sent on each channel,
+  // with its last value, the least recently sent first. 120 to 127 are
+  // channel mode messages, which act once and leave no value behind.
+  sentControllers(): { channel: number; cc: number; value: number }[] {
+    return [...this.sent.values()].filter(({ cc }) => cc < 120);
+  }
+
   bindsKnobs(): boolean {
     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a || 'type' in a));
   }
@@ -274,6 +284,9 @@ export class KeysSession {
 
   private cc(channel: number, cc: number, value: number): MidiMessage {
     this.controllers.set(cc, value);
+    const key = channel * 128 + cc;
+    this.sent.delete(key);
+    this.sent.set(key, { channel, cc, value });
     return controlChange(channel, cc, value);
   }
 

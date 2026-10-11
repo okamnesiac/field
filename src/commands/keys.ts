@@ -17,6 +17,7 @@ import {
   type ShownKnob,
 } from '../keys/knobs.js';
 import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
+import { publishControllers, unpublishControllers } from '../keys/published.js';
 import { printKeymap, signed } from '../keys/print.js';
 import { KeysSession, TICK_MS, type MidiMessage } from '../keys/session.js';
 import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
@@ -278,7 +279,16 @@ async function playRouted(
     },
     onExit: (reason) => stop(new Error(`the MIDI helper stopped: ${reason}`)),
   });
-  const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
+  // Each control change also goes into .field/keys.json, which `field
+  // record` starts a take from (instrument-knobs.md §2.8).
+  const { root } = options;
+  const send = (messages: MidiMessage[]): void => {
+    messages.forEach((m) => helper.send(m));
+    if (root !== undefined && messages.some(([status]) => (status! & 0xf0) === 0xb0)) {
+      const problem = publishControllers(root, session.sentControllers());
+      if (problem !== undefined) session.message = problem;
+    }
+  };
 
   // A held turn key and a glide move a knob on a timer of their own, which
   // runs only while a turn key is held or a glide moves
@@ -400,6 +410,7 @@ async function playRouted(
   // inputs close after it, in play, once nothing writes them.
   await host?.close();
   await helper.close();
+  if (root !== undefined) unpublishControllers(root);
   tty.stdout.write('\n');
   if (error !== undefined) throw error;
 }

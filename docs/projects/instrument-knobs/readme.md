@@ -483,7 +483,10 @@ parts close the gap:
    channel, so a render then starts on the value the voice last heard.
    The render applies these rows before a note at 0, because
    `renderEvents` already puts control changes before note-ons at one
-   instant.
+   instant. *Amended (2026-10-11, chunk 3):* the table follows every
+   control change from the arm, recorded or not, so a second take on
+   one arm starts each controller where the first take left it
+   (§11.1).
 
 All of it is MIDI, so it serves any source: a hardware knob moved after
 the arm starts the take where it was too. It also closes
@@ -512,7 +515,7 @@ keyboard-instrument.md §14.5's gap for the wheel.
 | `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls and `FIELD_KNOBS`, the checked copy of the knob file a voice reads, under "Make an instrument playable"; and how a take starts (chunk 3). |
 | `docs/build-graph.md` | The voice contract gains the `cc<n>` controls and `FIELD_KNOBS`, and the knob file joins a take's render inputs. |
 | `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 3). |
-| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits and at §3's choice of Musical Typing as the default, each pointing here. |
+| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits, at §3's choice of Musical Typing as the default, and at §14.5's gap for a wheel left up before a take, each pointing here. |
 
 ## 3 Why this design (DECIDED, 2026-10-11, Justin's review of #202)
 
@@ -1023,3 +1026,65 @@ wait for chunk 3.
 - **Criteria 4 to 8, 12, 14, 18, and 23 by hand,** in Ghostty or
   iTerm2 and by ear. The pseudo-terminal run sent the protocol's bytes
   and heard nothing.
+
+## 11 Chunk 3 as built (2026-10-11)
+
+A MIDI take starts where the knobs are. `field keys` publishes the
+controllers it has sent in `.field/keys.json`, `field record` passes
+them in `arm` to a daemon that lists `midi-chase`, and the daemon writes
+the latest value of each controller at the take's first sample, ahead
+of every other line. With all three chunks built, what remains is the
+criteria a person checks by hand at a kitty terminal and by ear.
+
+### 11.1 What implementation settled
+
+- **The lines go in just before the take's first stamped message.** An
+  arrival in the start block that falls before the start sample is
+  chased first, so the table the lines come from is complete, and the
+  lines still lead the file. `stampMidiBlock` writes them, so a MIDI
+  primary and an audio primary's MIDI companions share the rule.
+- **The seeds cross to the callback under a lock it only tries.** `arm`
+  writes them on the message thread and raises a flag; the callback
+  takes them at the start of a block when the lock is free, and
+  otherwise at the next block. Each arm starts the table over.
+- **Each value's order is when it last arrived, seeds included.** A seed
+  is ordered as arriving at the arm, in the order `arm` lists it, which
+  is the order `field keys` last sent each value. That gives §2.8's
+  "seeded values first, the rest in the order their values last
+  arrived" as one rule.
+- **`.field/keys.json` lists each channel's controllers, least recently
+  sent first,** and a `field keys` that quits removes the file only if
+  it wrote it, so a second `field keys` in the same project keeps its
+  own.
+- **`arm` refuses `controllers` out of range** rather than dropping
+  them, as it refuses a bad input channel.
+- **The table follows every control change from the arm, not only
+  those before the start.** A change a take records enters the table
+  after the take's lines at `at: 0`, so it is never written twice. A
+  change past `until`, or in the block where a stop detaches an audio
+  take's MIDI companions, enters it too, as one after the take ends
+  always did. So a second take on one arm, which arming.md chunk 3's
+  lasting arm makes, starts each controller where the first take left
+  it. `field record` still arms once per take.
+- **A block whose pull ran before `record`'s request chases what it
+  drains.** #204 lets such a block wait for the next to start the take,
+  and what it drains arrived before the start.
+
+### 11.2 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| The full suite, against a `field-audiod` built from this branch | 91 files: 1216 tests pass, and 1 skips. |
+| `src/commands/record-midi-daemon.test.ts` against the daemon built from this branch, through CoreMIDI | Seeded `cc 110 = 10` and `cc 111 = 20` on channel 16, then sent `cc 112 = 30` on channel 15, `cc 110 = 40` on 16, and CC 120 before the start, and `cc 111 = 50` after it. The take's lines at `at: 0` were `cc 111 = 20`, `cc 112 = 30`, `cc 110 = 40`, in that order, with no CC 120; `cc 111 = 50` landed at its own time, after them. `arm` refused a channel of 0, a CC of 120, and a value of 128. |
+| `field record` end to end, in the same file | With `.field/keys.json` published by the test's own process, the landed notes file had `{ at: 0, cc: 113, value: 23, channel: 16 }`. |
+| Ten `record`s on one arm with `FIELD_AUDIOD_LATCH_STALL_MS=8`, in the same file | A CC sent just before each `record` was in every take. With a discarding drain in the block whose pull ran before `record`'s request, a take missed it in 4 of 4 runs. |
+| Two `record`s on one arm, in the same file | `cc 114 = 20` sent before the first take and `cc 114 = 50` during it: the second take's line at `at: 0` was `cc 114 = 50`. Before every recorded change entered the table, it was `cc 114 = 20`. |
+| `src/commands/record-plan.test.ts` | `field record` reads the file only while its process runs and only for a daemon with `midi-chase`, and ignores a file it cannot parse; a `field keys` that quits leaves another one's file. |
+
+### 11.3 What is still owed
+
+- **Criteria 20 and 21 by hand**, and every criterion §9.3 and §10.3
+  list. Criterion 20's notes file is the shape the `field record` test
+  checks; what it does not show is a render that sounds dark from its
+  first note, which needs ears.
+- **`finish`**, once those are checked.

@@ -378,12 +378,16 @@ controls:
 bends: []
 ```
 
-A note still held when the take stopped lasts to its end, and
-`channel` appears only when it is not 1. Its row carries `sources`, the
-MIDI inputs the take listened to, where an audio row carries `device`
-and `input`, and its `latency` is the output latency alone: you play
-in time with what you hear, which runs behind the playhead by that
-much.
+A take starts where your knobs were: its first `controls` rows, at
+`at: 0`, are each controller's value when the take started, which the
+daemon chased from `field keys` and from every control change after the
+arm ([audio-engine.md](audio-engine.md) "MIDI capture"). The render
+applies them before a note at 0. A note still held when the take
+stopped lasts to its end, and `channel` appears only when it is not 1.
+Its row carries `sources`, the MIDI inputs the take listened to, where
+an audio row carries `device` and `input`, and its `latency` is the
+output latency alone: you play in time with what you hear, which runs
+behind the playhead by that much.
 
 The build renders the chosen take through the instrument as a `gen:`
 node named like the record node, and the entry places that render. A
