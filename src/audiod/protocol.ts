@@ -136,14 +136,23 @@ export const recordResponseSchema = z.object({
 });
 
 // One armed track, as `arm` with `tracks` takes it (arming.md §2.2).
-export type ArmTrack = { track: string; kind: 'audio'; input: number } | { track: string; kind: 'midi' };
+// An audio track's `monitor` names a capture input for a session's input
+// window to read (live-supercollider.md §12, "live-monitor").
+export type ArmTrack = { track: string; kind: 'audio'; input: number; monitor?: string } | { track: string; kind: 'midi' };
 
 // What arming a set opened: every track armed, the audio side's device
 // and latency when one is audio, and the MIDI side's sources when one is
 // MIDI.
 export const armTracksResponseSchema = z.object({
   ok: z.literal(true),
-  armed: z.array(z.object({ track: z.string(), kind: z.enum(['audio', 'midi']), input: z.number().int().optional() })),
+  armed: z.array(
+    z.object({
+      track: z.string(),
+      kind: z.enum(['audio', 'midi']),
+      input: z.number().int().optional(),
+      monitor: z.string().optional(),
+    }),
+  ),
   device: z.string().optional(),
   channels: z.number().int().optional(),
   input_latency: z.number().int().optional(),
@@ -294,18 +303,21 @@ export const inputResponseSchema = z.object({
   sample_rate: z.number(),
 });
 
-// An open input in status: frames FieldOut wrote, the daemon read, and
-// FieldOut dropped for want of room; how often the reader ran dry; the
-// frames it skipped to hold its level against a fast writer; and the
-// loudest sample read since a client last asked, which the asking resets.
+// An open input in status. A ring's: frames FieldOut wrote, the daemon
+// read, and FieldOut dropped for want of room; how often the reader ran
+// dry; the frames it skipped to hold its level against a fast writer. A
+// capture input's (`kind: "capture"`, live-supercollider.md §12): frames
+// read off the armed input. Both: the loudest sample read since a client
+// last asked, which the asking resets.
 export const inputStatusSchema = z.object({
   name: z.string(),
-  ring: z.number().int(),
-  written: z.number().int(),
+  kind: z.literal('capture').optional(),
+  ring: z.number().int().optional(),
+  written: z.number().int().optional(),
   read: z.number().int(),
-  dropped: z.number().int(),
-  underruns: z.number().int(),
-  skipped: z.number().int(),
+  dropped: z.number().int().optional(),
+  underruns: z.number().int().optional(),
+  skipped: z.number().int().optional(),
   peak: z.number(),
 });
 

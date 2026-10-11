@@ -896,7 +896,7 @@ program
   .option('--count-in <bars>', 'pre-roll this many bars before --at, clicking; the take begins exactly at --at', parseCountIn)
   .option('--until <position>', 'punch out at bar[.beat[.tick]]: the take ends there exactly and lands while the mix plays on')
   .option('--loop', 'loop --at to --until, landing a take every pass until ctrl-c (needs a live song as the bed); audio takes only')
-  .option('--monitoring <mode>', 'how the take was monitored, recorded on its row (default apollo-direct)')
+  .option('--monitoring <mode>', 'how you monitor the take, recorded on its row (default apollo-direct); host plays each audio input through its track')
   .option('--console-preset <name>', 'the Console preset the take expects, recorded on its row')
   .option('--list', 'list the transactions under .field/recording/ instead of recording')
   .option('--recover <id>', 'finalize a take a dead daemon left behind and land it, instead of recording')

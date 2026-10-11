@@ -104,7 +104,7 @@ export function trackOrigin(
 }
 
 export interface LandOptions {
-  monitoring?: string | undefined; // audio-engine.md "Monitoring": apollo-direct is V1
+  monitoring?: string | undefined; // audio-engine.md "Monitoring": apollo-direct by default, or host
   consolePreset?: string | undefined;
 }
 

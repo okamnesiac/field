@@ -154,6 +154,7 @@ live tracks with the capture input as the source.
 | 3 | Run `field keys creek/track:keys-bus` where `keys-bus` has a 700 Hz lowpass, and play. | You hear the instrument through the lowpass; the instrument's line no longer says dry. |
 | 4 | Measure the added latency: a click from the voice host to the device, through the ring and back out. | At most one daemon block plus one device buffer more than playing straight to the device. |
 | 5 | Play for an hour. | No dropout or click from the ring running empty or full. |
+| 6 | Run `field record <song>/track:<track> --monitoring host --at 2 --count-in 1` with headphones and a microphone, on a track with an insert. | You hear the microphone through the insert through the count-in and the take; the take is the dry input. |
 
 ## 5 Cost
 
@@ -171,7 +172,7 @@ jitter buffer, at least one of the larger of the two processes' blocks.
    drift handling. Criteria 4 and 5.
 3. **`field keys` through it.** Criterion 3.
 4. **Host monitoring of a microphone** through the same live tracks,
-   with the capture input as the source.
+   with the capture input as the source. §12. Criterion 6.
 
 ## 7 Open questions
 
@@ -197,7 +198,7 @@ The survey behind this plan, as the code stood on 2026-10-11:
 - **Window kinds:** `file`, `track`, and `receive` (`src/audiod/session.ts`; `native/audiod/src/live.h`).
 - **Insert kinds:** eq, limit, reverb, plate, hall, and hosted `plugin`.
 - **Hosted plugins are inserts only,** with an empty `MidiBuffer`, so no instrument plugin exists to host a voice.
-- **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1.
+- **The recording input** reaches only the capture queue and the peak meter (`Player::processBlock`); no monitor path exists, because recording.md chose Apollo-direct monitoring for V1. *Chunk 4 adds one (§12).*
 - **Changing a live session** swaps the whole session at a block boundary (the `session` op); there are no per-insert edits.
 - **The voice host** runs `scsynth` with a hardware buffer of 128 frames; the daemon takes JUCE's default buffer.
 
@@ -354,6 +355,18 @@ must sit under `main`.
   and criteria 4 and 5 on the real device, are still owed; a swap under
   a playing input, which §9 leaves to this chunk, rebuilds the overlay
   cold, a gap of the path's latency, accepted for now.
+- 2026-10-11 — Chunk 4 (branch `live/monitor`), host monitoring, as §12
+  describes. `field-audiod --capture-selftest` reads a capture input
+  whole, in the steps a loop wrap makes, past its block, with nothing
+  presented, and closed. `src/audiod/live-monitor.test.ts` arms the null
+  clock's sawtooth with `monitor`, loads a session naming it, and finds
+  it read at full scale while stopped and while playing; disarming, and
+  a dropped connection, close it; and the refusals hold.
+  `src/commands/record-daemon.test.ts` runs
+  `field record --monitoring host` and finds the input read while the
+  take records, the take dry and gapless with `monitoring: host` on its
+  row, and the song loaded again without the input, and refuses a file
+  bed before arming. Criterion 6 by ear is still owed.
 
 ## 11 FieldOut's license (DECIDED, 2026-10-11)
 
@@ -368,3 +381,92 @@ MIT-only at the cost of a second repository and release step, and §3's
 loopback device, which needs no plugin at all but brings a third-party
 driver or a Mac-only API, its own clock, and more latency. Justin chose
 the plugin in this repository.
+
+## 12 Host monitoring (chunk 4, 2026-10-11)
+
+`field record --monitoring host` plays each armed audio track's input
+through that track's inserts, the buses above it, and `main`, while the
+take itself stays dry. The input is a second kind of live input: where
+`field keys` feeds an input window from a ring, a monitored arm feeds
+one from the device's own input, read in the same callback that plays
+the song.
+
+### 12.1 Flow
+
+1. You run `field record tall-grass/track:vocal --monitoring host --at 2
+   --count-in 1`. `field record` loads the bed as before.
+2. Before arming, it refuses when no named track records audio, when
+   the daemon lacks `live-monitor`, when the bed is a file, which can
+   carry no input window, when the daemon plays another song, and when
+   the daemon converts the song to the device's rate.
+3. It arms with `monitor: "capture:tall-grass/vocal"` on each audio
+   entry, always in the `tracks` form. The daemon opens a capture input
+   under that name for each, reading that entry's channel of the
+   callback's input, owned by the connection that armed.
+4. It loads the song again with every open input, `field keys`' rings
+   and the capture inputs, keeping the loaded session's loop, region,
+   and solo, as `field keys` does (`reloadWithInputs`).
+5. Each callback, the daemon presents its input block before the
+   session renders, and each capture input reads its channel from it, on
+   both sides, from a cursor that starts again each block, because the
+   session reads a block in steps where a loop wraps. The overlay (§9)
+   carries it up the track's path, playing or stopped. The capture tap
+   still takes the dry channel after the render.
+6. When the take ends, `field record` disarms, which closes the capture
+   inputs, and loads the song again without them. A `field record` that
+   dies drops its connection, which closes them too; the arm itself
+   stays, as it always has.
+
+### 12.2 Shapes
+
+| Shape | Before | After |
+| --- | --- | --- |
+| `arm` audio entry | `{track, kind: "audio", input}` | adds `monitor`, the capture input's name |
+| `arm` response `armed[]` | `{track, kind, input}` | adds `monitor` when given |
+| `status.inputs[]` | a ring's counters | adds capture inputs, `{name, kind: "capture", read, peak}`; the ring's own fields become optional in `src/audiod/protocol.ts` |
+| Feature | — | `live-monitor` |
+| Daemon flag | — | `--capture-selftest` |
+| `src/audiod/live-inputs.ts` | `keysInputsFor` in `src/keys/routing.ts` | `liveInputsFor`, which lists both kinds, `captureInputName`, and `reloadWithInputs`, which `field keys` and `field record` share |
+
+### 12.3 Decisions (DECIDED, 2026-10-11, for Justin's review)
+
+- **`--monitoring host` turns it on, and `apollo-direct` stays the
+  default.** The flag already said how a take was monitored, so `host`
+  now does what it records. Rejected: a separate `--monitor` flag, two
+  flags for one fact that could disagree; and monitoring whenever armed,
+  which feeds back through a laptop's speakers and doubles an Apollo's
+  own cue.
+- **From arm to disarm, inside `field record`,** so the count-in is
+  heard. Monitoring without a take waits for arming.md chunk 3's
+  lasting `field arm`.
+- **A capture input, a second `LiveInput`,** rather than a new window
+  kind: the session format, its version, and `live.cpp` are unchanged,
+  and every command that reloads a song keeps a monitored input through
+  `liveInputsFor`, as it keeps a routed voice.
+- **Refused under converted delivery,** where the session renders in
+  session-rate steps that are not the callback's frames, rather than
+  given a device-to-session resampler, which would add latency and a
+  kernel to the path you sing into; `field keys` refuses the same case.
+- **Separate input and output devices are allowed.** JUCE combines
+  them (`AudioIODeviceCombiner`), so the input and the output still
+  meet in one callback, at the cost of a FIFO's latency on the output
+  and zeros on drift. Unverified on hardware, as recording.md §12.10
+  already notes for any combined pair.
+- **The latency policy is not built.** audio-engine.md "Latency"
+  describes bypassing or substituting high-latency plugins on entering
+  record; until criterion 6 measures what a singer hears, the monitored
+  input arrives late by both buffers and the path's limiters and hosted
+  plugins.
+
+### 12.4 Files
+
+| File | Change |
+| --- | --- |
+| `native/audiod/src/capture_input.h`, `capture_input.cpp` (new) | `CaptureBlock`, `CaptureInput`, and `runCaptureSelfTest`. |
+| `native/audiod/src/player.h`, `player.cpp` | `captures` beside `rings`; `armSet` parses `monitor` and opens them; `disarm` and a dropped connection close them; `pullAudio` presents the input block; `status` lists them. |
+| `native/audiod/src/server.cpp`, `main.cpp` | The connection passed to `armSet`; `live-monitor`; `--capture-selftest`. |
+| `src/audiod/live-inputs.ts` (new) | `liveInputsFor`, `captureInputName`, `reloadWithInputs`. |
+| `src/commands/record.ts` | The refusals, `monitor` on the arm, and the two reloads. |
+| `src/keys/routing.ts`, `src/commands/play.ts`, `src/commands/ui.ts` | Use `liveInputsFor` and `reloadWithInputs`. |
+| `src/audiod/protocol.ts` | `monitor` on `ArmTrack` and `armed[]`; capture inputs in `status.inputs`. |
+| `docs/cli.md`, `docs/audio-engine.md`, `docs/architecture.md`, `docs/projects/recording/readme.md` | Host monitoring as built, with dated amendments in recording.md §8 and §13.6. |

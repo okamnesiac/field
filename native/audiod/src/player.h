@@ -22,6 +22,8 @@ namespace field
 {
 class LiveSession;
 class RingInput;
+class CaptureInput;
+struct CaptureBlock;
 }
 
 // Owns the output device (or the null-output clock used in CI), the loaded
@@ -143,14 +145,17 @@ public:
     // Arms several tracks at once (arming.md §2.2): each entry is
     // {track, kind: "audio", input} or {track, kind: "midi"}. An audio
     // entry takes its own input channel on `device`; a MIDI entry hears
-    // every MIDI source. The first audio entry, or the first entry when
+    // every MIDI source. An audio entry with `monitor`, a name, also opens
+    // a capture input under that name for a session's input window to
+    // read (live-supercollider.md §12), owned by `owner`, the connection,
+    // and closed at disarm or when that connection drops. The first audio entry, or the first entry when
     // none is audio, is the primary that every capture rule runs on; the
     // rest are companions that start on its latch and end with its pass.
     // arm and armMidi are this with one entry. Returns {error} or
     // {armed, sample_rate, output_latency}, plus the audio side's
     // {device, input, channels, input_latency} and the MIDI side's
     // {sources}, and {kind: "midi"} when the one entry is MIDI.
-    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device);
+    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner = nullptr);
     // Closes the input side again. Empty string on success.
     juce::String disarm();
     // Start a take: locate to `at` when given (a source must be loaded
@@ -225,9 +230,9 @@ private:
 
     // The one block both the device callback and the null clock go
     // through: the output pull, then the capture tap over the input.
-    // Input first would read as natural, but the order is immaterial —
-    // both halves describe the same block — and pulling first is what
-    // yields the transport position the tap latches.
+    // Pulling first is what yields the transport position the tap
+    // latches; the pull is handed the input too, for the capture inputs
+    // a monitored session reads (live-supercollider.md §12).
     void processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n);
     // The output pull: the live session when one is loaded (behind a
     // try-lock — a missed block during a message-thread edit is silence,
@@ -236,7 +241,7 @@ private:
     // and the block is silence — a capture start defers to the next
     // block then, which keeps the latch and the first pushed samples
     // describing the same instant.
-    juce::int64 pullAudio (float* const* out, int numChannels, int n);
+    juce::int64 pullAudio (const float* const* in, int numInputs, float* const* out, int numChannels, int n);
     // The MIDI take's share of a block (keyboard-instrument.md §12.4):
     // the start latch, stamping each queued arrival against the instant
     // the block began, the samples elapsed, and the end at `until`.
@@ -314,6 +319,18 @@ private:
         const void* owner = nullptr; // the connection that opened it
     };
     std::map<std::string, OpenInput> rings;
+    // The armed inputs a session can hear (live-supercollider.md §12), by
+    // input name, under inputsLock with the rings; the callback presents
+    // its input block to them through captureBlock.
+    struct OpenCapture
+    {
+        std::shared_ptr<field::CaptureInput> input;
+        const void* owner = nullptr;
+    };
+    std::map<std::string, OpenCapture> captures;
+    std::shared_ptr<field::CaptureBlock> captureBlock;
+    // Closes every capture input, or those `owner` opened. Takes inputsLock.
+    void closeCaptures (const void* owner = nullptr);
     std::atomic<bool> livePlaying { false };
     juce::int64 liveLength = 0;
     juce::String liveSong;

@@ -260,7 +260,11 @@ machine — the story playback.md §3.4 deferred to this phase — is an
 open question (§11): its schema wants deciding from a real Apollo
 session, not invented here. Host monitoring (input through Field's
 engine and effects, with the latency policy beside it) is real future
-work and stays out of scope.
+work and stays out of scope. *Amended (2026-10-11,
+[live-supercollider.md](../live-supercollider/readme.md) §12):* host
+monitoring is built as `field record --monitoring host`, through the
+live session's input windows; Apollo-direct stays the default, and the
+latency policy is still unbuilt.
 
 ## 9 Definition of done
 
@@ -477,6 +481,8 @@ What landed, and the decisions it made:
    The wall-clock time is the transaction's; monitoring defaults to
    `apollo-direct` on the CLI (the V1 decision in audio-engine.md) and
    the preset is `--console-preset`, recorded only when given.
+   *Amended (2026-10-11, live-supercollider.md §12):* `host` also plays
+   the input through the engine while the take records.
 7. **Landing is the last step of `field record`,** and also of
    `--recover`; `--land <id>` covers a transaction the daemon finalized
    but nothing landed. The CLI refuses a track without a `record:`

@@ -1,6 +1,7 @@
 #include "player.h"
 
 #include "capture.h"
+#include "capture_input.h"
 #include "live.h"
 #include "ring_input.h"
 #include "version.h"
@@ -77,7 +78,7 @@ void retireOnMessageThread (std::unique_ptr<field::LiveSession> retired)
 }
 } // namespace
 
-Player::Player (bool useNullOutput) : nullMode (useNullOutput)
+Player::Player (bool useNullOutput) : nullMode (useNullOutput), captureBlock (std::make_shared<field::CaptureBlock>())
 {
     formatManager.registerBasicFormats();
 }
@@ -393,6 +394,8 @@ juce::var Player::loadSession (const juce::var& session, const juce::File& proje
             std::lock_guard<std::mutex> hold (inputsLock);
             for (const auto& [name, input] : rings)
                 inputs[name] = input.ring;
+            for (const auto& [name, open] : captures)
+                inputs[name] = open.input;
         }
         auto next = std::make_unique<field::LiveSession> (session, projectRoot, inputs);
         // Pre-roll outside the lock too: a swap lands at the old
@@ -701,7 +704,7 @@ juce::var Player::openInput (const juce::String& name, const void* owner)
         return juce::var (result.get());
     }
     std::lock_guard<std::mutex> hold (inputsLock);
-    if (rings.count (name.toStdString()) > 0)
+    if (rings.count (name.toStdString()) > 0 || captures.count (name.toStdString()) > 0)
     {
         result->setProperty ("error", "input \"" + name + "\" is already open");
         return juce::var (result.get());
@@ -729,12 +732,35 @@ void Player::closeInputs()
     for (auto& [name, input] : rings)
         input.ring->retire();
     rings.clear();
+    for (auto& [name, open] : captures)
+        open.input->close();
+    captures.clear();
+}
+
+void Player::closeCaptures (const void* owner)
+{
+    std::lock_guard<std::mutex> hold (inputsLock);
+    for (auto it = captures.begin(); it != captures.end();)
+    {
+        if (owner == nullptr || it->second.owner == owner)
+        {
+            it->second.input->close();
+            it = captures.erase (it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }
 
 void Player::closeInputsOwnedBy (const void* owner)
 {
     if (owner == nullptr)
         return;
+    // A monitored arm whose `field record` died stops being heard with
+    // its connection; the arm itself stays, as it always has.
+    closeCaptures (owner);
     std::lock_guard<std::mutex> hold (inputsLock);
     for (auto it = rings.begin(); it != rings.end();)
     {
@@ -769,12 +795,19 @@ juce::var Player::status (bool consumePeak)
         // Each open input's ring and its counters (live-supercollider.md
         // §2): whether FieldOut is writing, and whether the reader keeps up.
         std::lock_guard<std::mutex> hold (inputsLock);
-        if (! rings.empty())
+        if (! rings.empty() || ! captures.empty())
         {
             juce::Array<juce::var> list;
             for (const auto& [name, input] : rings)
             {
                 auto stats = input.ring->stats (consumePeak);
+                stats.getDynamicObject()->setProperty ("name", juce::String (name));
+                list.add (stats);
+            }
+            // The armed inputs a session hears (live-supercollider.md §12).
+            for (const auto& [name, open] : captures)
+            {
+                auto stats = open.input->stats (consumePeak);
                 stats.getDynamicObject()->setProperty ("name", juce::String (name));
                 list.add (stats);
             }
@@ -955,7 +988,7 @@ void Player::rebuildLiveConverter()
         ch.reserve (1 << 16);
 }
 
-juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
+juce::int64 Player::pullAudio (const float* const* in, int numInputs, float* const* out, int numChannels, int n)
 {
     {
         // The pointer is only readable under the lock (cursor's finding:
@@ -970,6 +1003,17 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
         }
         if (liveSession != nullptr)
         {
+            // The armed input, for the capture inputs a monitored session
+            // reads (live-supercollider.md §12), until the render is done.
+            // Converted delivery renders session-rate steps that are not
+            // this block's frames, so it hears nothing: the CLI refuses
+            // host monitoring there.
+            captureBlock->present (liveConverter == nullptr ? in : nullptr, numInputs, n);
+            struct Cleared
+            {
+                field::CaptureBlock& block;
+                ~Cleared() { block.clear(); }
+            } cleared { *captureBlock };
             // The song-timeline position this block starts at — wrapped
             // into whichever loop is in force, as status reports it —
             // which is where a take beginning here is placed.
@@ -1067,7 +1111,7 @@ juce::int64 Player::pullAudio (float* const* out, int numChannels, int n)
 void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
 {
     const double blockStartMs = juce::Time::getMillisecondCounterHiRes();
-    const juce::int64 position = pullAudio (out, numOutputs, n);
+    const juce::int64 position = pullAudio (in, numInputs, out, numOutputs, n);
     const juce::int64 freeBefore = freeClock.fetch_add (n);
     // The metronome rides the output after the pull, positioned by the
     // same block-start position the capture latches on; with no bed it
@@ -1510,7 +1554,7 @@ juce::var Player::armMidi (const juce::String& track)
     return armSet ({ juce::var (entry.get()) }, {});
 }
 
-juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device)
+juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner)
 {
     auto result = obj();
     auto fail = [&] (const juce::String& error)
@@ -1530,9 +1574,10 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         juce::String track;
         bool midi = false;
         int input = 0;
+        juce::String monitor; // the capture input's name, when monitored
     };
     std::vector<Entry> audio, midi;
-    juce::StringArray named;
+    juce::StringArray named, monitored;
     juce::Array<int> inputs;
     for (const auto& item : tracks)
     {
@@ -1544,6 +1589,18 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         if (named.contains (entry.track))
             return fail (entry.track + " is armed twice");
         named.add (entry.track);
+        entry.monitor = item.getProperty ("monitor", juce::var()).toString();
+        if (entry.monitor.isNotEmpty())
+        {
+            if (kind == "midi")
+                return fail (entry.track + " records MIDI, which has no input to monitor");
+            if (monitored.contains (entry.monitor))
+                return fail ("two tracks are monitored as \"" + entry.monitor + "\"");
+            monitored.add (entry.monitor);
+            std::lock_guard<std::mutex> hold (inputsLock);
+            if (rings.count (entry.monitor.toStdString()) > 0)
+                return fail ("input \"" + entry.monitor + "\" is already open");
+        }
         if (kind == "midi")
         {
             entry.midi = true;
@@ -1653,6 +1710,17 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         companion.channel = entry.midi ? 0 : channelIndex (entry.input);
     }
     liveCompanions = companionCount;
+    // The monitored inputs, replacing the arm before it's: each reads its
+    // channel of the block the callback presents.
+    closeCaptures();
+    {
+        std::lock_guard<std::mutex> hold (inputsLock);
+        for (const auto& entry : audio)
+            if (entry.monitor.isNotEmpty())
+                captures[entry.monitor.toStdString()] = {
+                    std::make_shared<field::CaptureInput> (captureBlock, channelIndex (entry.input)), owner
+                };
+    }
     inputPeak = 0.0f;
     freeClock = 0;
     // The kind before the flag, so the null clock never presents an input
@@ -1668,6 +1736,8 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
         item->setProperty ("kind", entry.midi ? "midi" : "audio");
         if (! entry.midi)
             item->setProperty ("input", entry.input);
+        if (entry.monitor.isNotEmpty())
+            item->setProperty ("monitor", entry.monitor);
         armedList.add (juce::var (item.get()));
     }
     result->setProperty ("armed", armedList);
@@ -1793,6 +1863,7 @@ juce::String Player::disarm()
     armedMidi = false;
     liveCompanions = 0;
     companionCount = 0;
+    closeCaptures();
     closeMidiInputs();
     if (! armedInputs.isEmpty())
     {

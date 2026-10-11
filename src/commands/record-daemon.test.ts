@@ -48,6 +48,18 @@ function assertGapless(samples: Float32Array): void {
   }
 }
 
+// A client of the daemon a running command spawned, once it answers.
+async function waitForClientOf(root: string): Promise<AudiodClient> {
+  for (let i = 0; ; i++) {
+    try {
+      return await AudiodClient.connect(root, { spawnIfNeeded: false });
+    } catch (err) {
+      if (i >= 100) throw err;
+      await sleep(50);
+    }
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -467,6 +479,81 @@ describe.skipIf(!binary)('recording through the daemon', () => {
     const status = await client.status();
     expect(status.state).toBe('stopped');
     expect(status.record?.state).toBe('idle');
+    client.close();
+  });
+
+  it(
+    'field record --monitoring host: hears the input through its track while it takes, keeps the take dry, and loads the song back without it',
+    { timeout: 30_000 },
+    async () => {
+      await importTone('tone', NULL_RATE * 6);
+      createTrack(root, 'creek', 'lead-vocal');
+      writeFileSync(
+        join(root, 'songs/creek/tracks/main.yaml'),
+        ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', '  - track: lead-vocal', ''].join('\n'),
+      );
+      writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+      const project = loadProject(root);
+      const lines: string[] = [];
+      let interrupted = false;
+      const recording = recordTake(
+        root,
+        project,
+        'creek/track:lead-vocal',
+        { input: 1, monitoring: 'host' },
+        {
+          onBed: (line) => lines.push(line),
+          onArmed: (line) => lines.push(line),
+          interrupted: () => interrupted,
+        },
+      );
+      // While it takes, the session reads the armed input: the null
+      // sawtooth, which reaches full scale once a second. Each status
+      // read resets the peak, so the loudest is kept across them.
+      let loudest = 0;
+      const watcher = await waitForClientOf(root);
+      await waitFor(
+        async () => {
+          const status = await watcher.status();
+          const input = status.inputs?.find((i) => i.name === 'capture:creek/lead-vocal');
+          if (input === undefined) return false;
+          loudest = Math.max(loudest, input.peak);
+          return status.record?.state === 'recording' && input.read > NULL_RATE * 1.5;
+        },
+        10_000,
+        'the monitored input to be read while the take records',
+      );
+      expect(loudest).toBeGreaterThan(0.9);
+      interrupted = true;
+      const { takes } = await recording;
+      expect(lines).toEqual([
+        'live    creek',
+        expect.stringMatching(/^armed {3}lead-vocal: null input 1 {2}\(48000 Hz, latency in 0 \/ out 0 samples\)$/),
+        'monitor lead-vocal through creek (host monitoring)',
+      ]);
+      // The take is the dry input, and its row says how it was heard.
+      const { take, landed } = takes[0]!;
+      expect(landed.row).toMatchObject({ monitoring: 'host', input: 1 });
+      assertGapless(readWav(join(root, 'songs/creek', landed.file)).channels[0]!);
+      expect(take.complete).toBe(true);
+      // Disarmed, the song is loaded again without the input.
+      const after = await watcher.status();
+      expect(after).toMatchObject({ live: true, song: 'creek' });
+      expect(after.inputs).toBeUndefined();
+      watcher.close();
+    },
+  );
+
+  it('field record --monitoring host refuses a file bed before arming', { timeout: 15_000 }, async () => {
+    const tone = await importTone('tone', NULL_RATE * 2);
+    createTrack(root, 'creek', 'lead-vocal');
+    writeFileSync(join(root, 'songs/creek/tracks/lead-vocal.yaml'), ['name: lead-vocal', 'inputs:', '  - record:', ''].join('\n'));
+    const client = await AudiodClient.connect(root);
+    await client.load(tone);
+    await expect(recordTake(root, loadProject(root), 'creek/track:lead-vocal', { monitoring: 'host' }, {})).rejects.toThrow(
+      "host monitoring plays the input through creek's tracks, and the bed is the file",
+    );
+    expect((await client.status()).record?.state).toBe('idle');
     client.close();
   });
 

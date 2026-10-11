@@ -1,5 +1,6 @@
 #include "player.h"
 #include "capture.h"
+#include "capture_input.h"
 #include "hosting.h"
 #include "keys.h"
 #include "live.h"
@@ -151,6 +152,7 @@ int main (int argc, char* argv[])
     juce::String renderLiveClick;
     std::vector<std::string> renderLiveInputs; // with --render-live: name=file.wav, each an input
     bool ringSelfTest = false;
+    bool captureSelfTest = false;
     int ringFeedId = 0;
     std::string ringFeedWav;
     juce::String scanFormat;
@@ -205,6 +207,8 @@ int main (int argc, char* argv[])
             nullOutput = true;
         else if (arg == "--ring-selftest")
             ringSelfTest = true;
+        else if (arg == "--capture-selftest")
+            captureSelfTest = true;
         else if (arg == "--ring-feed" && i + 2 < argc)
         {
             const juce::String id (argv[++i]);
@@ -231,6 +235,7 @@ int main (int argc, char* argv[])
                           "       field-audiod --state-capture <au|vst3> <identifier> "
                           "<paramsJson> <out>\n"
                           "       field-audiod --ring-selftest\n"
+                          "       field-audiod --capture-selftest\n"
                           "       field-audiod --ring-feed <ring> <file.wav>\n"
                           "       field-audiod --keys <name>\n"
                           "       field-audiod --midi-monitor <name>\n");
@@ -331,6 +336,19 @@ int main (int argc, char* argv[])
         if (auto error = field::runRingSelfTest(); ! error.empty())
         {
             std::fprintf (stderr, "field-audiod: ring self-test failed: %s\n", error.c_str());
+            return 1;
+        }
+        std::printf ("{\"ok\":true}\n");
+        return 0;
+    }
+
+    // The capture input's own check (capture_input.h): an armed input
+    // read whole, in a loop wrap's steps, and with nothing to read.
+    if (captureSelfTest)
+    {
+        if (auto error = field::runCaptureSelfTest(); ! error.empty())
+        {
+            std::fprintf (stderr, "field-audiod: capture self-test failed: %s\n", error.c_str());
             return 1;
         }
         std::printf ("{\"ok\":true}\n");

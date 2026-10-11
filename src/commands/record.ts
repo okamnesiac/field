@@ -1,4 +1,5 @@
 import { AudiodClient } from '../audiod/client.js';
+import { captureInputName, liveInputsFor, reloadWithInputs } from '../audiod/live-inputs.js';
 import { anyTakeSchema, type AnyTake, type AudiodEvent, type RecordingEntry } from '../audiod/protocol.js';
 import { DEFAULT_SAMPLE_RATE } from '../constants.js';
 import { expandPattern } from '../graph/graph.js';
@@ -157,6 +158,10 @@ export function planArm(root: string, project: LoadedProject, targets: string[],
     throw new Error(`armed tracks record against one song, and these are in ${songs.join(' and ')}`);
   }
   const audio = tracks.filter((t) => t.kind === 'audio');
+  // Host monitoring hears an audio input (live-supercollider.md §12).
+  if (options.monitoring === 'host' && audio.length === 0) {
+    throw new Error('--monitoring host plays an audio input through its track, and every track named records MIDI');
+  }
   if (audio.length === 0 && (options.input !== undefined || options.device !== undefined || options.loop === true)) {
     const only = tracks.length === 1 ? tracks[0]! : undefined;
     throw new Error(
@@ -222,6 +227,7 @@ async function captureTakes(
   // Every track is in one song (planArm), whose session is the bed.
   const resolved = tracks[0]!.resolved;
   const client = await AudiodClient.connect(root);
+  let monitored: ArmedTrack[] = [];
   try {
     if (!client.supports('record')) {
       throw new Error(
@@ -238,9 +244,8 @@ async function captureTakes(
       const { compileSession } = await import('../graph/live.js');
       // A `field keys` routed into this song keeps its inputs through
       // the bed's load (live-supercollider.md chunk 3).
-      const { keysInputsFor } = await import('../keys/routing.js');
-      const keysInputs = await keysInputsFor(client, resolved.song);
-      const compiled = await compileSession(root, resolved.song, keysInputs.length > 0 ? { inputs: keysInputs } : {});
+      const liveInputs = await liveInputsFor(client, resolved.song);
+      const compiled = await compileSession(root, resolved.song, liveInputs.length > 0 ? { inputs: liveInputs } : {});
       await client.session(compiled.session);
       hooks.onBed?.(`live    ${resolved.song}`);
       status = await client.status();
@@ -267,8 +272,35 @@ async function captureTakes(
     if (options.countIn !== undefined && (options.at === undefined || ctx === undefined)) {
       throw new Error('--count-in needs --at (the position to count into) on a song with a tempo map');
     }
+    // Host monitoring (live-supercollider.md §12): each audio track's
+    // input feeds an input window on that track, so you hear it through
+    // its inserts, its buses, and main, while the take stays dry.
+    monitored = options.monitoring === 'host' ? tracks.filter((t) => t.kind === 'audio') : [];
+    if (monitored.length > 0) {
+      if (!client.supports('live-monitor')) {
+        throw new Error(
+          `field-audiod ${client.daemonVersion} predates host monitoring — field transport quit, then record again`,
+        );
+      }
+      if (status.live !== true) {
+        throw new Error(
+          `host monitoring plays the input through ${resolved.song}'s tracks, and the bed is the file ${status.path}: ` +
+            `field transport quit, then record again to play ${resolved.song} live`,
+        );
+      }
+      if (status.song !== resolved.song) {
+        throw new Error(
+          `host monitoring plays the input through ${resolved.song}'s tracks, and the daemon is playing ${status.song ?? 'another song'}`,
+        );
+      }
+      if (status.resampling) {
+        throw new Error(
+          `host monitoring needs the device at ${resolved.song}'s ${rate} Hz, and the daemon converts the song to the device's rate`,
+        );
+      }
+    }
     let armedRate: number;
-    if (tracks.length > 1) {
+    if (tracks.length > 1 || monitored.length > 0) {
       if (!client.supports('record-tracks')) {
         throw new Error(
           `field-audiod ${client.daemonVersion} predates recording several tracks — field transport quit, then record again`,
@@ -276,7 +308,14 @@ async function captureTakes(
       }
       const armed = await client.armTracks(
         tracks.map((t) =>
-          t.kind === 'midi' ? { track: t.resolved.label, kind: 'midi' as const } : { track: t.resolved.label, kind: 'audio' as const, input: t.input! },
+          t.kind === 'midi'
+            ? { track: t.resolved.label, kind: 'midi' as const }
+            : {
+                track: t.resolved.label,
+                kind: 'audio' as const,
+                input: t.input!,
+                ...(monitored.includes(t) ? { monitor: captureInputName(t.resolved.song, t.node.trackName) } : {}),
+              },
         ),
         options.device,
       );
@@ -310,6 +349,12 @@ async function captureTakes(
         `armed   ${armed.device} input ${armed.input}  (${armed.sample_rate} Hz, ` +
           `latency in ${armed.input_latency} / out ${armed.output_latency} samples)`,
       );
+    }
+
+    // The song again, now with each monitored input on its track.
+    if (monitored.length > 0) {
+      await reloadWithInputs(client, root, resolved.song);
+      hooks.onArmed?.(`monitor ${monitored.map((t) => t.node.trackName).join(', ')} through ${resolved.song} (host monitoring)`);
     }
 
     let at: number | undefined;
@@ -421,6 +466,9 @@ async function captureTakes(
       // to whatever plays the bed next.
       if (clicking) await client.click({ rate, ticks: [] }).catch(() => {});
       await client.disarm().catch(() => {});
+      // Disarming closed the monitored inputs; the song plays on without
+      // them, as it was.
+      if (monitored.length > 0) await reloadWithInputs(client, root, resolved.song).catch(() => {});
     }
     if (!landedAny) {
       throw new Error(`the take ended but its manifest never arrived (${transaction ?? 'no transaction'})`);
