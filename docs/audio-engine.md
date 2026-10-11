@@ -92,8 +92,9 @@ session never asks for the microphone. `arm` names a track, an input
 device, and a channel counted from 1; the daemon reopens the device
 with that one input channel active and reports the input and output
 latency the device declares, in samples. `record` starts a take: it
-locates the bed to `at` when you give one, starts the transport if it
-is stopped, and captures from the next callback block. The callback
+opens the take's transactions, locates the bed to `at` when you give
+one, with no block between the jump and the start, starts the transport
+if it is stopped, and captures from the next callback block. The callback
 latches that block's transport position as `started_at_samples`, so the
 first captured sample and the position it is placed at describe the
 same instant. `stop` and `pause` finalize the take and return its

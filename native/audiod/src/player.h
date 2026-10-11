@@ -270,6 +270,13 @@ private:
     // FIELD_AUDIOD_SERVICE_STALL_MS. It makes a slow disk or a loaded
     // runner exact, so a test can land a loop's wrap inside a finalize.
     const int serviceStallMs;
+    // The same, for `record`: how long it stalls after opening a take's
+    // transactions, from FIELD_AUDIOD_OPEN_STALL_MS, so a test can make
+    // the open outlast the blocks a rolling bed plays meanwhile.
+    const int openStallMs;
+    // locate without its refusal under a take: record jumps to `at` once
+    // its transactions are open.
+    juce::String seek (juce::int64 sample);
     // True once device.select succeeds; cleared if that device vanishes.
     bool explicitSelection = false;
 #if JUCE_MAC

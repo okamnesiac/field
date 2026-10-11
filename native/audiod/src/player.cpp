@@ -80,7 +80,10 @@ Player::Player (bool useNullOutput)
     : nullMode (useNullOutput),
       serviceStallMs (useNullOutput
                           ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_SERVICE_STALL_MS", "0").getIntValue()
-                          : 0)
+                          : 0),
+      openStallMs (useNullOutput
+                       ? juce::SystemStats::getEnvironmentVariable ("FIELD_AUDIOD_OPEN_STALL_MS", "0").getIntValue()
+                       : 0)
 {
     formatManager.registerBasicFormats();
 }
@@ -619,6 +622,11 @@ juce::String Player::locate (juce::int64 sample)
     // placement could not describe that.
     if (capture != nullptr)
         return "cannot locate while recording (stop first)";
+    return seek (sample);
+}
+
+juce::String Player::seek (juce::int64 sample)
+{
     if (liveSession != nullptr)
     {
         if (sample < 0 || (! liveSession->looping() && liveLength > 0 && sample > liveLength))
@@ -1804,9 +1812,25 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
             return fail ("nothing loaded to record against; omit `at` for a free-running take");
         if (! at.isInt() && ! at.isInt64() && ! at.isDouble())
             return fail ("record needs a sample number for at");
-        if (auto error = locate (preRoll ? (juce::int64) start : (juce::int64) at); error.isNotEmpty())
-            return fail (error);
     }
+    // What a refused jump or play leaves behind: no take, no standby, and
+    // nothing the callback could reach.
+    auto abandon = [&]
+    {
+        activeCapture = nullptr;
+        activeMidiCapture = nullptr;
+        standbyCapture = nullptr;
+        captureStartRequested = false;
+        captureLoop = false; // or every later stop would end a loop that never ran
+        capture.reset();
+        standby.reset();
+        for (int c = 0; c < companionCount; ++c)
+        {
+            companions[(size_t) c].audio = nullptr;
+            companions[(size_t) c].midiTake = nullptr;
+            companions[(size_t) c].take.reset();
+        }
+    };
     field::Capture* audioTake = nullptr;
     field::MidiCapture* midiTake = nullptr;
     try
@@ -1849,50 +1873,48 @@ juce::var Player::record (const juce::var& at, const juce::var& start, const juc
     }
     catch (const std::exception& e)
     {
-        capture.reset();
-        standby.reset();
-        for (int c = 0; c < companionCount; ++c)
-        {
-            companions[(size_t) c].audio = nullptr;
-            companions[(size_t) c].midiTake = nullptr;
-            companions[(size_t) c].take.reset();
-        }
+        abandon();
         return fail (e.what());
     }
+    if (openStallMs > 0)
+        std::this_thread::sleep_for (std::chrono::milliseconds (openStallMs));
 
-    captureStarted = false;
-    capturesEnded = 0;
-    captureMissed = 0;
-    loopTakes = 0;
-    // An `at` is where the take begins, exactly: the callback latches on
-    // that sample whether the transport pre-rolls to it, starts on it
-    // (the request is armed before play, so the first rolling block is
-    // the one), or is already rolling toward it. Without one, the next
-    // block, wherever it falls.
-    captureStartAt = at.isVoid() ? -1 : (juce::int64) at;
-    captureUntil = punchOut ? (juce::int64) until : -1;
-    captureLoop = loop;
-    companionMidiRunning = false;
-    standbyCapture = standby.get();
-    activeCapture = audioTake;
-    activeMidiCapture = midiTake;
-    captureStartRequested = true;
+    {
+        // The jump to `at` and the latch that waits for it, in one hold of
+        // the lock the callback only tries, so no block runs between them.
+        // On a bed already rolling, a block between them would carry the
+        // transport past `at`, and the take would start late. The
+        // transactions open before, because opening them can take longer
+        // than a block.
+        const juce::ScopedLock guard (liveLock);
+        if (! at.isVoid())
+            if (auto error = seek (preRoll ? (juce::int64) start : (juce::int64) at); error.isNotEmpty())
+            {
+                abandon();
+                return fail (error);
+            }
+        captureStarted = false;
+        capturesEnded = 0;
+        captureMissed = 0;
+        loopTakes = 0;
+        // An `at` is where the take begins, exactly: the callback latches
+        // on that sample whether the transport pre-rolls to it, starts on
+        // it (the request is armed before play, so the first rolling block
+        // is the one), or is already rolling toward it. Without one, the
+        // next block, wherever it falls.
+        captureStartAt = at.isVoid() ? -1 : (juce::int64) at;
+        captureUntil = punchOut ? (juce::int64) until : -1;
+        captureLoop = loop;
+        companionMidiRunning = false;
+        standbyCapture = standby.get();
+        activeCapture = audioTake;
+        activeMidiCapture = midiTake;
+        captureStartRequested = true;
+    }
     if (bed && transportState() != "playing")
         if (auto error = play(); error.isNotEmpty())
         {
-            activeCapture = nullptr;
-            activeMidiCapture = nullptr;
-            standbyCapture = nullptr;
-            captureStartRequested = false;
-            captureLoop = false; // or every later stop would end a loop that never ran
-            capture.reset();
-            standby.reset();
-            for (int c = 0; c < companionCount; ++c)
-            {
-                companions[(size_t) c].audio = nullptr;
-                companions[(size_t) c].midiTake = nullptr;
-                companions[(size_t) c].take.reset();
-            }
+            abandon();
             return fail (error);
         }
     // Wait for the callback to latch the start — a block or two, unless

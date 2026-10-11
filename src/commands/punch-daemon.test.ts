@@ -104,6 +104,7 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
   afterEach(async () => {
     delete process.env['FIELD_AUDIOD_NULL'];
     delete process.env['FIELD_AUDIOD_SERVICE_STALL_MS'];
+    delete process.env['FIELD_AUDIOD_OPEN_STALL_MS'];
     try {
       const client = await AudiodClient.connect(root, { spawnIfNeeded: false });
       await client.quit();
@@ -112,6 +113,30 @@ describe.skipIf(!binary)('punch-out and loop takes', () => {
       // no daemon left behind
     }
     await removeTempProject(root);
+  });
+
+  it('a take at `at` on a bed already playing starts there, however long its transactions take to open', { timeout: 15_000 }, async () => {
+    // Opening a take's transactions outlasts many blocks here, as a slow
+    // disk would; a bed already playing must not carry the take past `at`
+    // meanwhile, live or from a file.
+    process.env['FIELD_AUDIOD_OPEN_STALL_MS'] = '200';
+    const client = await AudiodClient.connect(root, { nullOutput: true });
+    try {
+      const { session } = await compileSession(root, 'creek');
+      for (const load of [() => client.session(session), () => client.load(join(root, 'songs/creek/audio/bed/bed.wav'))]) {
+        await load();
+        await client.play();
+        await sleep(300);
+        await client.arm('//songs/creek/track:main', 1);
+        const started = await client.record(24000);
+        expect(started.started_at_samples).toBe(24000);
+        const take = (await client.stop()).take!;
+        expect(take.started_at_samples).toBe(24000);
+        await client.disarm();
+      }
+    } finally {
+      client.close();
+    }
   });
 
   it('a region loop wraps the live session between its bounds, and clears', { timeout: 15_000 }, async () => {

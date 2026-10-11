@@ -601,7 +601,11 @@ What landed, and the decisions it made:
    session, and the daemon refuses a session the region does not fit.
    A block that ended exactly on `until` hid the wrap, because the next
    block already began at `at`, so that pass ran on into the next one.
-   The callback now ends a pass in the block that reaches `until`.
+   The callback now ends a pass in the block that reaches `until`. On a
+   bed already rolling, `record` jumped to `at` before it opened the
+   take's transactions, so the blocks that played meanwhile started the
+   first take after `at`. It now opens them first, then jumps and arms
+   the start in one hold of the lock the callback only tries.
 5. **`field record --loop` lands takes as they arrive**, each `take`
    event landing in order while the next pass records, the last one
    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs
