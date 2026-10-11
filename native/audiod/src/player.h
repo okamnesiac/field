@@ -158,8 +158,9 @@ public:
     // Armed for MIDI, the take is a MidiCapture and the same latch starts
     // it; loop takes stay audio only.
     juce::var record (const juce::var& at, const juce::var& start, const juce::var& until, bool loop);
-    // Heartbeat: finalize a take the callback ended at its `until`, hand
-    // it to onTake, and open the next standby when looping.
+    // Heartbeat: finalize each take the callback ended at its `until`,
+    // hand it to onTake, and when looping, keep the next pass's take
+    // open ahead of its wrap.
     void serviceCapture();
     // The live session's region loop (recording.md §10.4): the clock
     // wraps from `to` back to `from`. Equal bounds clear it. Empty
@@ -372,16 +373,25 @@ private:
     // Punch-out and loop takes (recording.md §10.4). captureUntil is
     // where the callback ends the active take (-1: never); captureLoop
     // says the next pass is a take too, read from standbyCapture — the
-    // transaction the message thread opened ahead of the wrap — and
-    // captureDone tells the heartbeat a take is waiting to finalize.
-    // captureMissed counts passes that began with no standby ready.
+    // transaction the message thread opened ahead of the wrap, which the
+    // callback takes over only at a wrap — and capturesEnded counts the
+    // takes the callback has ended that the heartbeat has not finalized
+    // yet: a loop can end two between ticks. captureMissed counts passes
+    // that began with no standby ready, each skipped whole.
+    //
+    // Under a loop, `capture` is the oldest take not yet finalized: the
+    // one recording, one the callback has ended, or the next pass's,
+    // waiting in standbyCapture for the wrap that begins it. `standby`
+    // is the one after it, if any. The callback begins and ends takes
+    // in the order they were opened, so the heartbeat hands ownership
+    // over by counting ends, never by reading the slot the callback can
+    // empty at any moment.
     std::atomic<juce::int64> captureUntil { -1 };
     std::atomic<bool> captureLoop { false };
-    std::atomic<bool> captureDone { false };
+    std::atomic<int> capturesEnded { 0 };
     std::atomic<field::Capture*> standbyCapture { nullptr };
     std::atomic<int> captureMissed { 0 };
     std::unique_ptr<field::Capture> standby;
-    std::unique_ptr<field::Transaction> finished; // ended by the callback, awaiting finalize
     int loopTakes = 0; // takes finalized in the current loop
     // Everything a new transaction needs, kept for the standbys a loop
     // opens after the first.

@@ -582,6 +582,20 @@ What landed, and the decisions it made:
    and skipped rather than half-recorded. Stop finalizes the partial
    pass as a take, discards the unused standby (its directory goes;
    `recordings` never lists it), and clears the region.
+
+   *Amended 2026-10-11 (#203):* as first built, the code kept this
+   decision only while the heartbeat kept up with the wraps. A wrap that
+   came before the heartbeat had serviced the last pass stopped the loop
+   for good. A wrap during a finalize found no standby, so the callback
+   took the late one over a block after it opened, in the middle of the
+   pass. When the heartbeat ran again before that block, the daemon held
+   no take while the callback recorded one, and it crashed at the next
+   pass. The callback now takes a standby over only at a wrap. The done
+   flag is `capturesEnded`, a count of the takes the callback has ended,
+   and the heartbeat hands ownership over by that count rather than by
+   reading the standby slot. It also opens the next standby before it
+   finalizes the last pass. A take still waiting for its wrap reports as
+   `pending`, and stop discards it as it discards an unused standby.
 5. **`field record --loop` lands takes as they arrive**, each `take`
    event landing in order while the next pass records, the last one
    chosen, and the partial pass ctrl-c ends landing last. `--loop` needs

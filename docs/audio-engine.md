@@ -185,11 +185,18 @@ same block: the pass that ends and the pass that begins meet on
 consecutive samples, which the suite proves on the null clock's
 sawtooth. Each take reaches every client as a `take` event as it
 finalizes, and `field record --loop` lands them as they arrive, the last
-one chosen, until ctrl-c — whose partial pass is a take too. A pass that
-begins before the previous one was serviced is counted in
-`record.missed` rather than recorded twice; regions shorter than a
-heartbeat tick are where that would happen, and `field record` says so
-on its live line and in its closing tally.
+one chosen, until ctrl-c — whose partial pass is a take too.
+
+The heartbeat finalizes each take the callback has ended since its
+last tick, however many there are. It opens the next pass's
+transaction before it finalizes, so a slow finalize costs no pass. A
+pass that begins with no transaction open is skipped whole and counted
+in `record.missed`. That happens when the region is shorter than a
+heartbeat tick, or when the message thread falls behind. The
+transaction opened late begins at the following wrap, and `status`
+reports it as `pending` until then, so every take is a whole pass that
+starts at `at`. `field record` reports the skipped passes on its live
+line and in its closing tally.
 
 The region loop is the live session's own (`loop {from, to}`, `to`
 defaulting to the content's extent): the clock wraps from `to` back to
