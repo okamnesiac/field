@@ -709,7 +709,7 @@ times its row's index. In the example, `KeyZ` plays 48, `KeyA` 53,
 | `{ turn: <n> }` | Turns the chosen knob n steps up, or down when n is negative, at the press, and keeps turning faster while held ([Turn knobs](#turn-knobs)). Pressing a second turn key turns with it and stops the first. |
 | `{ type: <c> }` | Types c into the chosen knob's value ([Type a value](#type-a-value)): a digit, written as a number from 0 to 9 as in `type: 1`, or `"-"`. The decimal point is no action: `Period` types it while a value is open, in every keymap. |
 | `{ cc: <n>, value: <v>, mode: <m> }` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0, and goes back to 0 when you quit, press `panic`, or reload the keymap. `value` defaults to 127. |
-| `panic` | Releases every note, stops a held turn, and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
+| `panic` | Releases every note, stops a held turn and every glide, and sends All Notes Off. Write it as a bare word: `Backquote: panic`. |
 
 `knob` and `turn` take a whole number other than 0. A keymap that binds
 `knob`, `turn`, or `type` shows the knob line.
