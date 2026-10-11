@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { daemonBinary } from '../audiod/client.js';
+import { BUILD_DAEMON, daemonBinary } from '../audiod/client.js';
 import type { PluginWireInsert } from './plugins.js';
 import type { EffectInsert } from '../schema/index.js';
 import type { RenderedClip } from '../generators/stem.js';
@@ -95,7 +95,7 @@ function requireBinary(): string {
   const binary = daemonBinary();
   if (binary === undefined) {
     throw new RenderUnavailableError(
-      'field-audiod is not built — run `field upgrade audiod`. Effects render in the daemon ' +
+      `field-audiod is not built — run \`${BUILD_DAEMON}\`. Effects render in the daemon ` +
         'since render-pipeline.md chunk 2.',
     );
   }

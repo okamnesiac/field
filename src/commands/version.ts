@@ -10,6 +10,7 @@ import {
   PROTOCOL_VERSION as AUDIOD_PROTOCOL_VERSION,
   SOCKET_RELATIVE as AUDIOD_SOCKET,
 } from '../audiod/protocol.js';
+import { BUILD_DAEMON } from '../audiod/client.js';
 import { SETUP_SPECS } from './generate.js';
 import { WORKER_PROTOCOL_VERSION } from '../workers/protocol.js';
 import { defaultCredentialStore, resolveToken, type CredentialStore, type TokenSource } from '../remote/credentials.js';
@@ -263,7 +264,7 @@ export async function versionReport(root: string, deps: VersionDeps = {}): Promi
     note: daemonNote(audiod, {
       name: AUDIOD_NAME,
       protocol: AUDIOD_PROTOCOL_VERSION,
-      remedy: 'rebuild the daemon (field upgrade audiod)',
+      remedy: `rebuild the daemon (${BUILD_DAEMON})`,
     }),
   });
 

@@ -34,7 +34,7 @@ debugging round: `src/commands/version.ts` records a `field-voiced`
 that silently dropped a flag it predated, and a venv that held a stale
 copy of `field_worker` while the CLI read the new source.
 
-The remedies are also in the wrong place. Seven error messages told you
+The remedies are also in the wrong place. Eight error messages told you
 to run `pnpm build:native`, and every one of them fires while you are
 inside a song project, where `build:native` is not a script.
 
@@ -134,8 +134,10 @@ with `core.fileMode` off does not keep.
 
 The installer's own messages name `field upgrade <target>` as the way
 back when pnpm's `field` links this checkout, and the script's path
-otherwise. The seven daemon error messages now name
-`field upgrade audiod`.
+otherwise. The eight daemon error messages name `BUILD_DAEMON` from
+`src/audiod/client.ts`, which is `field upgrade audiod`, and on Windows
+`pnpm build:native` in the checkout, because `field upgrade` refuses
+there (§7.6).
 
 ### 2.6 `status` compares what is installed with its source
 
@@ -157,8 +159,9 @@ otherwise. The seven daemon error messages now name
 | `src/commands/generate.ts` | `selectWorkers`, `partitionExisting`, and `checkWorkers`; `setupWorker` takes `existing`. |
 | `src/cli.ts` | `field upgrade`, and `--existing` and `--check` on `field setup`. |
 | `scripts/gen-plan-limits.ts` | Writes the header only when it changes (§8.1). |
-| Seven daemon error messages | Name `field upgrade audiod`. |
+| `src/audiod/client.ts` | `BUILD_DAEMON`, which the eight daemon error messages name. |
 | `docs/install.md` | New. How install and upgrade work, and every status row. |
+| `docs/cli.md` | The install section, `field upgrade`, and the new `field setup` options. |
 | `README.md`, `examples/bloom/README.md` | Lead with `./install.sh`. |
 
 ## 3 Releases and the one-line install
@@ -355,8 +358,10 @@ version.
 ### 7.6 Windows
 
 `install.sh` is bash, and Field's Windows support is
-[windows-portability.md](../windows-portability/readme.md). Until that
-lands, Windows installs from a checkout by hand.
+[windows-portability.md](../windows-portability/readme.md). Windows
+installs from a checkout by hand for now, `field upgrade` refuses there
+with the steps, and the installer's tests skip there. Whether Windows
+gets an `install.ps1` of its own is open.
 
 ## 8 Chunk 1 as built (2026-10-11)
 

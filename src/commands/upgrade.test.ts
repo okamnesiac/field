@@ -34,6 +34,23 @@ describe('field upgrade', () => {
     expect(existsSync(installerPath())).toBe(true);
   });
 
+  it('refuses on Windows, naming the build steps instead', () => {
+    const { installer } = standIn(scratch, 0);
+    expect(() => upgrade('cli', { installer, platform: 'win32', err: () => {} })).toThrow(
+      'install.sh, which does not support Windows yet',
+    );
+  });
+
+  it('refuses when there is no installer, rather than guessing at another', () => {
+    const installer = join(scratch, 'install.sh');
+    expect(() => upgrade(undefined, { installer, platform: 'darwin', err: () => {} })).toThrow(
+      `cannot upgrade: ${installer} does not exist`,
+    );
+  });
+});
+
+// These hand a real bash the stand-in, which Windows does not reliably have.
+describe.skipIf(process.platform === 'win32')('field upgrade runs the installer', () => {
   it('hands the installer its target and returns its exit status', () => {
     const { installer, argsFile } = standIn(scratch, 3);
     const lines: string[] = [];
@@ -61,12 +78,5 @@ describe('field upgrade', () => {
     const lines: string[] = [];
     upgrade('all', { installer, err: (line) => lines.push(line) });
     expect(lines).toEqual([`+ '${scratch}/a checkout'\\''s home/install.sh' all`]);
-  });
-
-  it('refuses when there is no installer, rather than guessing at another', () => {
-    const installer = join(scratch, 'install.sh');
-    expect(() => upgrade(undefined, { installer, err: () => {} })).toThrow(
-      `cannot upgrade: ${installer} does not exist`,
-    );
   });
 });

@@ -26,6 +26,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // to the ordinary tools the script needs, so whatever happens to be
 // installed on the machine running the suite cannot answer in their place.
 // Locally that is macOS's bash 3.2 and in CI bash 5, so both run it.
+// Windows skips them: the installer does not support it yet
+// (install.md §7.6), and `field upgrade` refuses there instead.
+const posix = describe.skipIf(process.platform === 'win32');
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const AUDIOD = 'native/audiod/build/field-audiod_artefacts/Release/field-audiod';
@@ -198,7 +201,7 @@ function linkTo(target: string): void {
   symlinkSync(target, join(pnpmHome, 'global', 'field'));
 }
 
-describe('install.sh cli', () => {
+posix('install.sh cli', () => {
   it('installs, builds, and links the checkout, in that order', () => {
     const run = install('cli');
     expect(run.stderr).toBe('');
@@ -261,7 +264,7 @@ describe('install.sh cli', () => {
   });
 });
 
-describe('install.sh audiod and workers', () => {
+posix('install.sh audiod and workers', () => {
   it('builds the daemon through pnpm build:native', () => {
     const run = install('audiod');
     expect(run.status).toBe(0);
@@ -313,7 +316,7 @@ describe('install.sh audiod and workers', () => {
   });
 });
 
-describe('install.sh status', () => {
+posix('install.sh status', () => {
   it('reports a fresh checkout as installing nothing yet', () => {
     const run = install('status');
     expect(run.status).toBe(0);
@@ -406,7 +409,7 @@ describe('install.sh status', () => {
   });
 });
 
-describe('install.sh refuses', () => {
+posix('install.sh refuses', () => {
   it('outside a checkout, and says to clone', () => {
     const run = install(undefined, {}, join(root, 'install.sh'));
     expect(run.status).toBe(69);

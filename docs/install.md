@@ -17,6 +17,17 @@ Installing a release without a checkout, and the one-line `curl`
 install from the website, are planned in
 [install.md](projects/install/readme.md) §3.
 
+The installer is bash and does not support Windows yet, and
+`field upgrade` refuses there. On Windows, run the steps by hand in the
+checkout:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm build:native
+pnpm add -g .
+```
+
 ## Before you install
 
 The installer checks for each of these and stops with a message naming

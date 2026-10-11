@@ -110,8 +110,9 @@ field upgrade status     # what is installed, and what is out of date
 ```
 
 [docs/install.md](docs/install.md) describes each step and each status
-row. To run from source without installing: `pnpm field <args>`. To
-remove: `pnpm remove -g field`.
+row, and gives the steps by hand for Windows, where the installer does
+not run yet. To run from source without installing: `pnpm field
+<args>`. To remove: `pnpm remove -g field`.
 
 Then open the example project — two songs that exercise most of the
 system, checked by CI on every change:

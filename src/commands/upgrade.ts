@@ -20,9 +20,19 @@ export interface UpgradeDeps {
   installer?: string | undefined;
   run?: ((script: string, args: string[]) => number) | undefined;
   err?: ((line: string) => void) | undefined;
+  platform?: NodeJS.Platform | undefined;
 }
 
 export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): number {
+  // install.sh is bash and builds with the POSIX toolchain, so on Windows
+  // this would hand a script to whatever `bash` resolves to, which may be
+  // WSL's and not the Windows side at all (install.md §7.6).
+  if ((deps.platform ?? process.platform) === 'win32') {
+    throw new Error(
+      'field upgrade runs install.sh, which does not support Windows yet — in the field checkout, run ' +
+        'pnpm install --frozen-lockfile, pnpm build, and pnpm build:native',
+    );
+  }
   const installer = deps.installer ?? installerPath();
   if (!existsSync(installer)) {
     throw new Error(`cannot upgrade: ${installer} does not exist, so this field was not installed from a checkout`);

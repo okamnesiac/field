@@ -752,18 +752,18 @@ program
         return;
       }
       let items = await resolvePlayables(root, patterns, undefined, remoteReads(root));
-      const { AudiodClient, daemonBinary } = await import('./audiod/client.js');
+      const { AudiodClient, BUILD_DAEMON, daemonBinary } = await import('./audiod/client.js');
       if (!daemonBinary()) {
         if (process.platform !== 'darwin') {
           // afplay is a macOS binary: anywhere else the fallback could only
           // die with ENOENT naming a tool this machine never had, so the
           // build hint is the whole answer.
-          throw new Error('field-audiod is not built, and the afplay fallback is macOS-only — run `pnpm build:native`');
+          throw new Error(`field-audiod is not built, and the afplay fallback is macOS-only — run \`${BUILD_DAEMON}\``);
         }
         if (opts.from !== undefined || opts.device !== undefined || opts.loop === true || opts.click === true || opts.watch === true) {
-          throw new Error('--from, --device, --loop, --click, and --watch need field-audiod (field upgrade audiod)');
+          throw new Error(`--from, --device, --loop, --click, and --watch need field-audiod (${BUILD_DAEMON})`);
         }
-        process.stderr.write('field-audiod is not built; using afplay (field upgrade audiod)\n');
+        process.stderr.write(`field-audiod is not built; using afplay (${BUILD_DAEMON})\n`);
         await playWithAfplay(items);
         return;
       }
