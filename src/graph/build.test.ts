@@ -7,7 +7,7 @@ import { importAsset } from '../commands/import.js';
 import { init } from '../commands/init.js';
 import { buildLabels, explainLabel, projectRelative, queryDeps } from '../commands/build.js';
 import { resolvePlayables } from '../commands/play.js';
-import { runScProgram } from '../generators/supercollider.js';
+import { runScProgram, sclangCommand } from '../generators/supercollider.js';
 import type { GeneratorRunner } from './build.js';
 
 let root: string;
@@ -578,9 +578,16 @@ describe('runScProgram edges (no sclang needed)', () => {
   });
 });
 
-const sclangPresent =
-  existsSync('/Applications/SuperCollider.app/Contents/MacOS/sclang') ||
-  (process.env['PATH'] ?? '').split(':').some((p) => p !== '' && existsSync(join(p, 'sclang')));
+// Probed with the lookup the renders use, so the test runs wherever a real
+// sclang is found, Windows included.
+const sclangPresent = (() => {
+  try {
+    sclangCommand();
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 describe.skipIf(!sclangPresent)('sc-render integration (requires sclang)', () => {
   const SC_PROGRAM = `(
