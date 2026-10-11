@@ -149,7 +149,7 @@ async function splitScaffold(root: string): Promise<void> {
         'name: voice',
         'sends:',
         '  crush:',
-        '    gain_db: -6',
+        '    gain_db: 0',
         '  wash:',
         '    gain_db: -12',
         '    tap: pre',
@@ -160,7 +160,19 @@ async function splitScaffold(root: string): Promise<void> {
     );
     writeFileSync(
       join(root, `songs/${song}/tracks/crush.yaml`),
-      ['name: crush', ...VOICE_INSERTS.slice(0, 1), ...VOICE_INSERTS.slice(8), 'inputs:', '  - receive: crush', ''].join('\n'),
+      // A ceiling under what voice's limiter lets through, so crush's
+      // limiter reduces gain too; the same lookahead, so the same latency.
+      [
+        'name: crush',
+        'inserts:',
+        '  - effect: limit',
+        '    ceiling_db: -6',
+        '    lookahead_ms: 3',
+        '    release_ms: 60',
+        'inputs:',
+        '  - receive: crush',
+        '',
+      ].join('\n'),
     );
     writeFileSync(
       join(root, `songs/${song}/tracks/wash.yaml`),
@@ -242,8 +254,20 @@ describe.skipIf(!binary)('live inputs through --render-live (live-supercollider.
 
   it('aligns every path into a track to the longest, so an input never meets itself offset', async () => {
     await splitScaffold(root);
-    const offline = await buildLabels(root, ['//songs/split-offline/track:main']);
-    const stem = readWav(offline.find((o) => o.label.endsWith('track:main'))!.outputPath!).channels;
+    const offline = await buildLabels(root, [
+      '//songs/split-offline/track:main',
+      '//songs/split-offline/track:voice',
+      '//songs/split-offline/track:crush',
+    ]);
+    const stemOf = (name: string) =>
+      readWav(offline.find((o) => o.label.endsWith(`track:${name}`))!.outputPath!).channels;
+    const stem = stemOf('main');
+    // Every limiter on the way reduces gain: voice's output, which is
+    // what reaches crush, goes past crush's −6 dB ceiling, and crush's
+    // output stays under it.
+    const loudest = (channels: Float32Array[]) => Math.max(...channels.map((c) => c.reduce((m, s) => Math.max(m, Math.abs(s)), 0)));
+    expect(loudest(stemOf('voice'))).toBeGreaterThan(0.6);
+    expect(loudest(stemOf('crush'))).toBeLessThanOrEqual(10 ** (-6 / 20) + 1e-6);
 
     const { session } = await compileSession(root, 'split-live', { inputs: [{ track: 'voice', input: 'mic' }] });
     const chainLate = (name: string) =>

@@ -257,8 +257,8 @@ must sit under `main`.
   operation. The review of the chunk found paths of unequal latency
   meeting offset, which step 3 now aligns; a second golden holds an
   input reaching `main` three ways, at 0, 145, and 290 samples, to the
-  offline render late by 290, with the tone loud enough that both
-  limiters reduce gain. Criterion 2 holds in the compiled
+  offline render late by 290, with the tone loud enough that all three
+  limiters, `voice`'s, `crush`'s, and `main`'s, reduce gain. Criterion 2 holds in the compiled
   session: the input's track and the bus above it keep their chains,
   and a sibling fed by a file is served from its stem. The daemon's
   `session` op refuses an input window until chunk 2 gives it a source,
