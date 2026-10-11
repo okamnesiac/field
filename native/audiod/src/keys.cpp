@@ -137,6 +137,25 @@ bool stdinEnded()
     return false;
 }
 
+// The system output's name, which the voice host names as scsynth's input
+// device too: scsynth on macOS otherwise opens the default input device
+// even with no input channels, and blocks on the microphone permission
+// (keyboard-instrument.md §10.1).
+juce::String defaultOutputDevice()
+{
+#if JUCE_MAC
+    std::unique_ptr<juce::AudioIODeviceType> type (juce::AudioIODeviceType::createAudioIODeviceType_CoreAudio());
+    if (type == nullptr)
+        return {};
+    type->scanForDevices();
+    const auto names = type->getDeviceNames (false);
+    const auto index = type->getDefaultDeviceIndex (false);
+    return juce::isPositiveAndBelow (index, names.size()) ? names[index] : juce::String();
+#else
+    return {};
+#endif
+}
+
 std::atomic<bool> stopRequested { false };
 } // namespace
 
@@ -155,7 +174,11 @@ int runKeys (const juce::String& name)
         printError ("cannot create a virtual MIDI source named " + name + " on this system");
         return 1;
     }
-    printLine (jsonObject ({ { "ready", true }, { "name", name } }));
+    auto ready = jsonObject ({ { "ready", true }, { "name", name } });
+    const auto output = defaultOutputDevice();
+    if (output.isNotEmpty())
+        ready.getDynamicObject()->setProperty ("output", output);
+    printLine (ready);
 
     // Lines are read off the main thread, whose run loop delivers the
     // keyboard layout changes, and each message is sent as its line

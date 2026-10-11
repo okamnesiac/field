@@ -10,7 +10,7 @@ export const SOURCE_NAME = 'Field Keys';
 // The helper's lines (keyboard-instrument.md §2.5).
 const helperLine = z.union([
   z.object({ keyboard: z.object({ name: z.string(), keys: z.record(z.string(), z.string()), dead: z.array(z.string()) }) }),
-  z.object({ ready: z.literal(true), name: z.string() }),
+  z.object({ ready: z.literal(true), name: z.string(), output: z.string().optional() }),
   z.object({ error: z.string() }),
 ]);
 
@@ -27,6 +27,8 @@ export interface HelperOptions {
 // removes the source, so the source never outlives this process.
 export class KeysHelper {
   private closing = false;
+  // The system output on macOS, which the voice host names for scsynth.
+  defaultOutput: string | undefined;
 
   private constructor(private readonly child: ChildProcessWithoutNullStreams) {
     // A write after the helper died must not kill this process; the exit
@@ -68,6 +70,7 @@ export class KeysHelper {
         else if ('error' in parsed) lastError = parsed.error;
         else if (!ready) {
           ready = true;
+          helper.defaultOutput = parsed.output;
           resolve(helper);
         }
       });

@@ -13,8 +13,17 @@ Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
 Field Keys · musical-typing · transpose 0 · velocity 100 · C4 E4 G4
 ```
 
-Playing a SuperCollider instrument from `field keys` directly, and
-recording what you play, are the later chunks of
+Name an instrument and `field keys` plays it too, from the keyboard and
+from every other MIDI source:
+
+```console
+$ cd examples/bloom
+$ field keys still-water-pad
+Playing musical-typing as the MIDI source "Field Keys". Esc or Ctrl-C quits.
+Field Keys · musical-typing · transpose 0 · velocity 100 · D4 · still-water-pad live at 48000 Hz on MacBook Pro Speakers
+```
+
+Recording what you play is the last chunk of
 [the keyboard-instrument plan](projects/keyboard-instrument/readme.md).
 
 ## Before you start
@@ -29,6 +38,9 @@ recording what you play, are the later chunks of
 - **macOS or Linux.** On Linux the virtual source needs the ALSA
   sequencer (`/dev/snd/seq`). Windows has no virtual MIDI sources, and
   `field keys` reports that.
+- **SuperCollider, to play an instrument.** `field keys` finds `sclang`
+  the way `field build` does: `FIELD_SCLANG`, then your `PATH`, then
+  the macOS app bundle.
 
 You do not need to be inside a Field project.
 
@@ -65,6 +77,75 @@ $ native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor
 
 The monitor prints every MIDI message from the source you name, so it
 also checks a USB controller: give it the controller's name.
+
+## Play an instrument
+
+`field keys <instrument>` plays a SuperCollider instrument from the
+project's `shared/instruments/` shelf, by the name a `supercollider:`
+entry gives it, with or without `.scd`. A path works too. Inside a
+project it resolves from the project root, as a `supercollider:` entry's
+`source:` does, so give it from the root even in a subdirectory; outside
+a project a path is the only way to name an instrument, and it resolves
+from where you are.
+
+1. `field keys` publishes `Field Keys`, then starts a *voice host*:
+   `sclang` running Field's `sc/voice-host.scd`. The status line says
+   the instrument is starting.
+2. The host boots its own `scsynth` on the output device: the one you
+   give with `--device` (`field devices` lists them), or the system
+   output. It runs at the device's current sample rate and never
+   changes it, so `field play` and `field keys` can share a device.
+3. The host loads the instrument's voice and plays it from every MIDI
+   source, so a USB controller plays it too. The status line shows the
+   instrument live, with its device and rate.
+
+The voice's sound goes straight to the device, beside `field play`'s
+rather than through the song's inserts and master chain. If something
+moves the device to another sample rate while you play, such as a
+`field play` of a song at another rate, the host restarts its server at
+the new rate, and notes sounding at the switch stop. Without that
+restart every note would play sharp or flat.
+
+An instrument that cannot play stops `field keys` with the reason, such
+as `creek-kit.scd does not answer FIELD_MODE=voice`.
+
+### Make an instrument playable
+
+An instrument program renders from a spec when Field builds it. To play
+it from notes as well, give it a voice mode: when `FIELD_MODE` is
+`voice`, its value, the file's last expression, must be a SynthDef with
+these controls, and it must not render or exit.
+
+| Control | What the voice host sets |
+| --- | --- |
+| `freq` | The note's frequency in Hz |
+| `amp` | The velocity divided by 127 |
+| `gate` | 1 at note-on, 0 at note-off |
+| `out` | The output bus, 0 |
+
+The voice writes two channels and frees itself after `gate` goes to 0,
+with an envelope that ends in `doneAction: 2`. The render variables are
+absent in voice mode, so check `FIELD_MODE` before you read them:
+
+```supercollider
+(
+if ("FIELD_MODE".getenv == "voice") {
+	SynthDef(\myKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
+		var env = EnvGen.kr(Env.asr(0.01, 1, 0.5), gate, doneAction: 2);
+		Out.ar(out, Pan2.ar(SinOsc.ar(freq) * amp * 0.2 * env));
+	})
+} {
+	// render mode: the program as it reads today
+}
+)
+```
+
+The host owns everything between MIDI and voices: one voice per
+sounding note, the sustain pedal (CC 64), All Notes Off (CC 123), and
+pitch bend, which it applies to `freq` on every sounding voice, up to
+two semitones either way. It ignores modulation (CC 1) for now. In
+`examples/bloom`, `still-water-pad` answers voice mode; its render
+branch is unchanged and renders the same bytes as before.
 
 ## Keys are read by position
 

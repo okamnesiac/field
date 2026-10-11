@@ -254,6 +254,15 @@ iteration. Full contract:
 [projects/sc-render/readme.md](projects/sc-render/readme.md) §2 (the plan
 predates the §4 rename).
 
+The same program can also be played from notes. When `FIELD_MODE` is
+`voice`, it must not render or exit, and its value — the file's last
+expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
+controls that frees itself after `gate` goes to 0. `field keys
+<instrument>` plays that voice live; the render variables are absent in
+voice mode, so a program checks `FIELD_MODE` before reading them. Voice
+mode never enters the build, so it changes no cache key except through
+the program's own content hash. See [keys.md](keys.md).
+
 ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
 
 From [projects/effects/readme.md](projects/effects/readme.md): Fyra's
