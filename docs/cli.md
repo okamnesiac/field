@@ -350,6 +350,14 @@ is not installed, or exits before its window opens, `field ui` opens a
 browser instead and keeps the session running. [ui.md](projects/ui/readme.md)
 §6 records what the window does and why.
 
+The app window receives the session URL in its environment, out of
+sight of other users. A browser does not: `--browser`, and the fallback
+to a browser, hand the URL with its token to `open`, `xdg-open`, or
+`start` on the command line, where another user on a shared machine can
+read it, and a browser that starts for it can keep it in its own
+command line while it runs. Use the app window, or `--no-open` and paste
+the URL yourself, where that matters.
+
 ## Record a take
 
 `field record <track>` records a performance onto a track that asks for
