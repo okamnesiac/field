@@ -6,7 +6,8 @@
 // because a program's own bytes are the cache key for what it renders.
 //
 // Under FIELD_MODE=voice its value is one voice, gated, which `field keys
-// bass` plays and a record entry with `instrument: bass` renders
+// bass` plays, with the mod wheel opening its filter (§14), and a
+// record entry with `instrument: bass` renders
 // (keyboard-instrument.md §2.6). It plays at true pitch, so press Z in
 // musical-typing to drop an octave. Otherwise it runs under Field's
 // sc-render contract and renders offset's sequence from sessions/juno.scd,
@@ -19,17 +20,22 @@ var bass = (
 	hpfFreq: 20,
 	vcfFreq: 1200, vcfRes: 0.4, vcfEnv: 0.6, vcfLfo: 0, vcfKeyFollow: 0,
 	atk: 0.005, dec: 0.2, sus: 0.3, rel: 0.15,
-	chorusOn: 0, chorusRate: 0.5, chorusDepth: 0.005
+	chorusOn: 0, chorusRate: 0.5, chorusDepth: 0.005,
+	modVibrato: 0, modOpen: 3 // the mod wheel opens the filter, up to four times its cutoff
 );
 var level = 0.3; // a voice's gain: a bass line rarely stacks notes
 
 // One JU-06A voice for the knobs in `k`, stereo, freed when its envelope
 // ends after the gate closes. The knobs are fixed per instrument, so they
-// shape the graph rather than arriving as controls.
-var ju06a = { |freq, gate, k|
+// shape the graph rather than arriving as controls. `mod`, the mod wheel
+// from 0 to 1, comes only in voice mode: it adds vibrato of up to
+// modVibrato semitones and opens the filter by up to modOpen times its
+// cutoff. A render passes none, so its graph is the one without them.
+var ju06a = { |freq, gate, k, mod|
 	var lfo, pw, sig, env, cutoff;
 	lfo = SinOsc.kr(k[\lfoRate]) * EnvGen.kr(Env([0, 0, 1], [k[\lfoDelay], 0.01]));
 	freq = freq * (8 / k[\range]) * (2 ** (lfo * k[\dcoLfo] / 12));
+	if (mod.notNil) { freq = freq * (2 ** (SinOsc.kr(5.5) * mod * k[\modVibrato] / 12)) };
 	pw = if (k[\pwmMode] == 1) { SinOsc.kr(k[\lfoRate]).range(0.1, 0.9) } { k[\pwm] };
 	pw = (pw + (lfo * k[\pwmLfo])).clip(0.05, 0.95);
 	sig = (Saw.ar(freq) * k[\sawLevel]) + (Pulse.ar(freq, pw) * k[\pulseLevel]);
@@ -38,6 +44,7 @@ var ju06a = { |freq, gate, k|
 	sig = HPF.ar(sig, k[\hpfFreq].clip(20, 20000));
 	env = EnvGen.kr(Env.adsr(k[\atk], k[\dec], k[\sus], k[\rel]), gate, doneAction: 2);
 	cutoff = k[\vcfFreq] * (1 + (env * k[\vcfEnv]) + (lfo * k[\vcfLfo])) + (freq * k[\vcfKeyFollow]);
+	if (mod.notNil) { cutoff = cutoff * (1 + (mod * k[\modOpen])) };
 	sig = RLPF.ar(sig, cutoff.clip(20, 20000), 1 - k[\vcfRes].clip(0, 0.95)) * env;
 	if (k[\chorusOn] == 1) {
 		[0, pi].collect { |phase|
@@ -49,8 +56,8 @@ var ju06a = { |freq, gate, k|
 };
 
 if ("FIELD_MODE".getenv == "voice") {
-	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1|
-		Out.ar(out, ju06a.(freq, gate, bass) * amp * level);
+	SynthDef(\bassKey, { |out = 0, freq = 220, amp = 0.5, gate = 1, mod = 0|
+		Out.ar(out, ju06a.(freq, gate, bass, mod.lag(0.05)) * amp * level);
 	})
 } {
 	var seed = "FIELD_SEED".getenv.asInteger;

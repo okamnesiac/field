@@ -261,7 +261,8 @@ predates the §4 rename).
 The same program can also be played from notes. When `FIELD_MODE` is
 `voice`, it must not render or exit, and its value — the file's last
 expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
-controls that frees itself after `gate` goes to 0. `field keys
+controls that frees itself after `gate` goes to 0. It may also have a
+`mod` control, which the modulation wheel sets. `field keys
 <instrument>` plays that voice live; the render variables are absent in
 voice mode, so a program checks `FIELD_MODE` before reading them. A
 `supercollider:` entry never runs in voice mode, so voice mode changes
@@ -276,16 +277,17 @@ the record node's, and the entry places it where the take was played
 (keyboard-instrument.md §12.3). Nobody declares it.
 
 It runs `sc/voice-render.scd` through `sclang`, which loads the
-instrument in voice mode and drives its voice from the take's notes
-file with `sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
-all-notes-off, and pitch bend (±2 semitones) act as they did live. The
-render is stereo at the track's rate and runs 4 seconds past the take,
-so the last notes' release is heard; scsynth rounds it up to a whole
-control block, as it does every NRT render. Its cache inputs are the
-notes file, the instrument's content hash, and both harness files, so
-editing any of them renders the take again. The harness adds nothing
-random, so an instrument that renders reproducibly renders its takes
-reproducibly, bit for bit.
+instrument in voice mode with `sc/voice-load.scd`, as `field keys`
+loads it, and drives its voice from the take's notes file with
+`sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
+all-notes-off, pitch bend (±2 semitones), and the modulation wheel act
+as they did live. The render is stereo at the track's rate and runs 4
+seconds past the take, so the last notes' release is heard; scsynth
+rounds it up to a whole control block, as it does every NRT render. Its
+cache inputs are the notes file, the instrument's content hash, and the
+three harness files, so editing any of them renders the take again. The
+harness adds nothing random, so an instrument that renders reproducibly
+renders its takes reproducibly, bit for bit.
 
 ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
 

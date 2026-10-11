@@ -24,7 +24,7 @@ export interface VoiceRenderSpec {
 // release time.
 export const RELEASE_TAIL_SECONDS = 4;
 
-const HARNESS = ['voice-render.scd', 'voicer.scd'];
+const HARNESS = ['voice-render.scd', 'voice-load.scd', 'voicer.scd'];
 
 export const voiceRenderGenerator: Generator<VoiceRenderSpec> = {
   version: 2, // 2: a zero-length note releases after its own on

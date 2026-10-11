@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readWavHeader } from '../audio/wav.js';
+import { readWav, readWavHeader } from '../audio/wav.js';
 import type { MidiTake } from '../audiod/protocol.js';
 import { buildLabels, explainLabel } from '../commands/build.js';
 import { createSong, createTrack } from '../commands/create.js';
@@ -39,14 +39,15 @@ afterEach(() => {
 
 // Half a second of take at 48 kHz: an A held for a quarter second, then
 // a C still held when the take stopped.
-function midiTransaction(id = 'take-20261010-120000', placed: Partial<MidiTake> = {}): MidiTake {
+const HELD = [
+  { at: 0, midi: [144, 69, 100] },
+  { at: 12000, midi: [128, 69, 0] },
+  { at: 12000, midi: [144, 72, 80] },
+];
+
+function midiTransaction(id = 'take-20261010-120000', placed: Partial<MidiTake> = {}, lines = HELD): MidiTake {
   const dir = join(root, '.field', 'recording', id);
   mkdirSync(dir, { recursive: true });
-  const lines = [
-    { at: 0, midi: [144, 69, 100] },
-    { at: 12000, midi: [128, 69, 0] },
-    { at: 12000, midi: [144, 72, 80] },
-  ];
   writeFileSync(join(dir, 'take.midi.ndjson'), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
   const take: MidiTake = {
     id,
@@ -87,6 +88,7 @@ describe('voice-render in the graph', () => {
       '//songs/creek/asset:take-20261010-120000',
       'shared/instruments/pad.scd',
       'sc/voice-render.scd',
+      'sc/voice-load.scd',
       'sc/voicer.scd',
     ]);
   });
@@ -145,6 +147,31 @@ describe.skipIf(!sclangPresent)('voice-render through real sclang', () => {
     // The track builds over the render, where the take was played.
     const track = built(await buildLabels(root, ['//songs/creek/track:keys']), '//songs/creek/track:keys');
     expect(existsSync(track.outputPath!)).toBe(true);
+  });
+
+  it('passes a take\'s mod wheel to a voice that has the control', { timeout: 120_000 }, async () => {
+    // A voice whose level is the mod wheel: silent at 0, sounding at 1.
+    writeFileSync(
+      join(root, 'shared/instruments/pad.scd'),
+      VOICE.replace('|freq = 440, amp = 0.5, gate = 1, out = 0|', '|freq = 440, amp = 0.5, gate = 1, out = 0, mod = 0|').replace(
+        '* amp * 0.2 * env',
+        '* amp * 0.2 * mod * env',
+      ),
+    );
+    const peak = async (): Promise<number> => {
+      const wav = readWav(built(await buildLabels(root, [GEN]), GEN).outputPath!);
+      return wav.channels[0]!.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
+    };
+    expect(await peak()).toBe(0); // the take beforeEach landed sends no CC 1
+    await landMidiTake(
+      root,
+      midiTransaction('take-20261010-120300', {}, [
+        { at: 0, midi: [176, 1, 127] },
+        { at: 100, midi: [144, 69, 100] },
+        { at: 12000, midi: [128, 69, 0] },
+      ]),
+    );
+    expect(await peak()).toBeGreaterThan(0.05);
   });
 
   it('loads the instrument without the render variables, as voice mode is live', { timeout: 120_000 }, async () => {

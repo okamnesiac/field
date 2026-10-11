@@ -29,8 +29,8 @@ function runVoicer(body: string): string[] {
       [
         '(',
         `var voicer = thisProcess.interpreter.executeFile(${JSON.stringify(scScript('voicer.scd'))}).(`,
-        '\t{ |note, velocity, freq| ("start " ++ note).postln; note },',
-        '\t{ |voice, freq| ("freq " ++ voice).postln },',
+        '\t{ |note, velocity, freq, mod| ("start " ++ note ++ " mod " ++ mod.round(0.01)).postln; note },',
+        '\t{ |voice, control, value| (control ++ " " ++ voice ++ " " ++ value.round(0.01)).postln },',
         '\t{ |voice| ("release " ++ voice).postln }',
         ');',
         body,
@@ -41,7 +41,7 @@ function runVoicer(body: string): string[] {
       ].join('\n'),
     );
     const run = spawnSync(sclang!, [script], { encoding: 'utf8', timeout: 60_000 });
-    return run.stdout.split('\n').filter((line) => /^(start|freq|release|done)\b/.test(line));
+    return run.stdout.split('\n').filter((line) => /^(start|freq|mod|release|done)\b/.test(line));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -51,6 +51,12 @@ describe.skipIf(sclang === undefined)('the voicer through real sclang', () => {
   it('still plays after forgetVoices, which the host calls when its server restarts', { timeout: 60_000 }, () => {
     expect(
       runVoicer(['voicer.noteOn(0, 60, 100);', 'voicer.forgetVoices;', 'voicer.noteOn(0, 62, 100);', 'voicer.noteOff(0, 62);'].join('\n')),
-    ).toEqual(['start 60', 'start 62', 'release 62', 'done']);
+    ).toEqual(['start 60 mod 0.0', 'start 62 mod 0.0', 'release 62', 'done']);
+  });
+
+  it('sets mod from CC 1 on every sounding voice, and starts new voices with it', { timeout: 60_000 }, () => {
+    expect(
+      runVoicer(['voicer.noteOn(0, 60, 100);', 'voicer.cc(0, 1, 127);', 'voicer.noteOn(0, 64, 100);', 'voicer.cc(0, 1, 0);'].join('\n')),
+    ).toEqual(['start 60 mod 0.0', 'mod 60 1.0', 'start 64 mod 1.0', 'mod 60 0.0', 'mod 64 0.0', 'done']);
   });
 });

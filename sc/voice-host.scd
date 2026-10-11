@@ -8,7 +8,11 @@
 // FIELD_SC_PORT (the scsynth port Field chose), FIELD_PARENT_PID,
 // FIELD_DEVICE (optional output device), FIELD_MODE=voice, and
 // FIELD_VOICE_TRACE (optional: report each voice as it starts and ends).
+// sclang's own port, which Field also chooses (-u), takes /field/reload:
+// load the program again, as its file has changed (§14).
 (
+var here = PathName(thisProcess.nowExecutingPath).pathOnly;
+var loadVoice = thisProcess.interpreter.executeFile(here +/+ "voice-load.scd");
 var instrument = "FIELD_INSTRUMENT".getenv;
 var port = "FIELD_SC_PORT".getenv.asInteger;
 var parentPid = "FIELD_PARENT_PID".getenv;
@@ -16,7 +20,7 @@ var device = "FIELD_DEVICE".getenv;
 var trace = "FIELD_VOICE_TRACE".getenv.notNil;
 // True until the server answers, at the first boot and at each restart:
 // a note then has no server to sound on, so it is ignored.
-var server, voiceDef, loadError, voicer, booting = true;
+var server, voiceDef, problem, voicer, booting = true;
 var jsonValue, emit, fail, stopServer, deviceProblem, run, boot, restart;
 
 jsonValue = { |value|
@@ -115,9 +119,11 @@ run = {
 	};
 	Server.default = server;
 
-	voicer = thisProcess.interpreter.executeFile(PathName(thisProcess.nowExecutingPath).pathOnly +/+ "voicer.scd").(
-		{ |note, velocity, freq| Synth(voiceDef.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0], server) },
-		{ |synth, freq| synth.set(\freq, freq) },
+	voicer = thisProcess.interpreter.executeFile(here +/+ "voicer.scd").(
+		{ |note, velocity, freq, mod|
+			Synth(voiceDef.name, [\freq, freq, \amp, velocity / 127, \gate, 1, \out, 0, \mod, mod], server)
+		},
+		{ |synth, control, value| synth.set(control, value) },
 		{ |synth| synth.set(\gate, 0) },
 		if (trace) { { |note, on| emit.([if (on) { "voice_on" } { "voice_off" }, note]) } }
 	);
@@ -131,6 +137,31 @@ run = {
 	MIDIdef.noteOff(\fieldNoteOff, { |velocity, note, chan| voicer.noteOff(chan, note) });
 	MIDIdef.cc(\fieldControl, { |value, number, chan| voicer.cc(chan, number, value) });
 	MIDIdef.bend(\fieldBend, { |value, chan| voicer.bend(chan, value) });
+
+	// The program's file changed: load it again. A voice that loads is
+	// what the next note plays, and the notes sounding finish as they
+	// started; one that does not leaves the last good voice playing.
+	OSCdef(\fieldReload, { |msg, time, addr|
+		if (addr.ip == "127.0.0.1") {
+			var next, why;
+			# next, why = loadVoice.(instrument);
+			case
+			{ why.notNil } { emit.(["reload_error", why]) }
+			{ booting } {
+				// The boot adds whatever voiceDef holds when the server answers.
+				voiceDef = next;
+				emit.(["reloaded", true]);
+			}
+			{
+				voiceDef = next;
+				fork {
+					voiceDef.add;
+					server.sync;
+					emit.(["reloaded", true]);
+				};
+			};
+		};
+	}, '/field/reload');
 
 	Routine {
 		loop {
@@ -158,14 +189,9 @@ run = {
 	boot.();
 };
 
-voiceDef = try { thisProcess.interpreter.executeFile(instrument) } { |error| loadError = error.errorString; nil };
+# voiceDef, problem = loadVoice.(instrument);
 case
-	{ loadError.notNil } {
-		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: running it in voice mode failed with " ++ loadError);
-	}
-	{ voiceDef.isKindOf(SynthDef).not } {
-		fail.(PathName(instrument).fileName ++ " does not answer FIELD_MODE=voice: in voice mode its value must be a SynthDef");
-	}
+	{ problem.notNil } { fail.(problem) }
 	{ device.notNil and: { deviceProblem.(device).notNil } } { fail.(deviceProblem.(device)) }
 	{ run.() };
 )
