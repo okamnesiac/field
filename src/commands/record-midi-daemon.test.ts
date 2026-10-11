@@ -279,6 +279,45 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
   );
 
   it(
+    'keeps a controller sent just before record, though record lands between a block\'s pull and its latch',
+    { timeout: 30_000 },
+    async (ctx) => {
+      // The seam holds each block between its pull and its latch, so
+      // record's request often lands there. That block does not start the
+      // take, and what it drains arrived before the start, so it is chased.
+      process.env['FIELD_AUDIOD_LATCH_STALL_MS'] = '8';
+      try {
+        const name = source('latch');
+        const keys = await publishOrSkip(ctx, name);
+        const client = await connect();
+        try {
+          // One arm for every take, because each arm opens every MIDI
+          // source again, and re-arming before each take slowed CoreMIDI
+          // enough that a later test's source was not published in 5 s.
+          // The arm resets the chase table at the top of a later block, so
+          // the controllers go out once that reset has passed.
+          await armListing(client, name);
+          await sleep(100);
+          for (let value = 60; value < 70; value++) {
+            send(keys, [0xbf, 113, value]);
+            const started = await client.record();
+            await sleep(100);
+            await client.stop();
+            const sent = readLines(root, started.file).filter(
+              (line) => line.midi[0] === 0xbf && line.midi[1] === 113 && line.midi[2] === value,
+            );
+            expect(sent, `the controller sent before take ${value - 59}`).toHaveLength(1);
+          }
+        } finally {
+          client.close();
+        }
+      } finally {
+        delete process.env['FIELD_AUDIOD_LATCH_STALL_MS'];
+      }
+    },
+  );
+
+  it(
     'records a source on the sample clock, with no audio fields, and finalizes on stop',
     { timeout: 20_000 },
     async (ctx) => {

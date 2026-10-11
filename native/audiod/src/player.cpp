@@ -1376,7 +1376,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
     {
         if (! blockSawRequest)
         {
-            drainMidiArrivals (discard);
+            drainMidiArrivals (chaseEach);
             return;
         }
         int from = 0;
