@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveInstrument } from './targets.js';
 import { freeUdpPort, instrumentPath, oscMessage, parseHostLine, VoiceHost, type VoiceHostStatus } from './voice-host.js';
@@ -94,13 +94,18 @@ function env(mode: string): NodeJS.ProcessEnv {
 }
 
 describe('resolving an instrument', () => {
+  // A resolved program is a file to open, so its path is native: on
+  // Windows the root /p takes the current drive, as D:\p, and joins
+  // with \. Only project-relative paths that are data stay slashed.
+  const p = resolve('/p');
+
   it('adds .scd and resolves a bare name on the instruments shelf', () => {
-    expect(instrumentPath('pad', '/p')).toBe('/p/shared/instruments/pad.scd');
-    expect(instrumentPath('pad.scd', '/p')).toBe('/p/shared/instruments/pad.scd');
+    expect(instrumentPath('pad', '/p')).toBe(join(p, 'shared/instruments/pad.scd'));
+    expect(instrumentPath('pad.scd', '/p')).toBe(join(p, 'shared/instruments/pad.scd'));
   });
 
   it('resolves a slashed path from the root, and leaves an absolute path alone', () => {
-    expect(instrumentPath('songs/creek/voice', '/p')).toBe('/p/songs/creek/voice.scd');
+    expect(instrumentPath('songs/creek/voice', '/p')).toBe(join(p, 'songs/creek/voice.scd'));
     expect(instrumentPath('/elsewhere/voice.scd', '/p')).toBe('/elsewhere/voice.scd');
   });
 
@@ -108,7 +113,9 @@ describe('resolving an instrument', () => {
     expect(() => resolveInstrument('pad', dir)).toThrow(/not inside a Field project/);
     writeFileSync(join(dir, 'field.yaml'), 'name: t\n');
     mkdirSync(join(dir, 'shared/instruments'), { recursive: true });
-    expect(() => resolveInstrument('pad', dir)).toThrow(/no instrument program at .*shared\/instruments\/pad\.scd/);
+    expect(() => resolveInstrument('pad', dir)).toThrow(
+      `field keys pad: no instrument program at ${join(dir, 'shared/instruments/pad.scd')}`,
+    );
     writeFileSync(join(dir, 'shared/instruments/pad.scd'), '');
     expect(resolveInstrument('pad', dir)).toBe(join(dir, 'shared/instruments/pad.scd'));
   });
