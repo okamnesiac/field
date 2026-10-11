@@ -33,6 +33,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -61,19 +62,26 @@ jobs:
 
           ## Testing
 
-          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`. After the merge, the publish job runs \`node scripts/release.ts released\`, which exits 3 for an untagged version, and then \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
+          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`, and then dispatched CI on this branch, whose checks appear on this pull request. GitHub also holds a \`pull_request\` run of CI for approval here; leave it unapproved, because approving it runs every job a second time. After the merge, the publish job runs \`node scripts/release.ts released --since\` with the commit \`main\` held before the merge. That exits 3 because the merge raised the version to an untagged one, and the job then runs \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
           EOF
           # A pull request someone opened by hand from the branch after a failed run
           # already carries the force-pushed commit.
           if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
             echo "a pull request from $branch is already open"
           elif ! gh pr create --base main --head "$branch" --title "Release $version" --body-file "$RUNNER_TEMP/body.md"; then
-            # GitHub refuses unless the repository allows GitHub Actions to create
-            # pull requests (Settings > Actions > General). The branch is pushed,
+            # GitHub refuses unless Actions may create pull requests, which an
+            # enterprise's policy must allow before its organization's and the
+            # repository's settings can (docs/release.md). The branch is pushed,
             # so the pull request can be opened by hand.
             echo "::error::could not open the pull request; open it from https://github.com/$REPO/compare/main...$branch?expand=1"
             exit 1
           fi
+          # For a pull request this job's token opened, GitHub creates CI's
+          # pull_request run but holds it until someone approves it. A
+          # workflow_dispatch run needs no approval, and its checks land on the
+          # branch's commit, which is the pull request's head, so CI runs
+          # unattended. Approving the held run as well would run CI twice.
+          gh workflow run ci.yml --ref "$branch"
 
   publish:
     if: github.event_name == 'push'
