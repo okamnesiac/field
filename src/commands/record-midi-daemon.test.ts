@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -8,6 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, type TestContext } from 'v
 import { writeWavFloat32 } from '../audio/wav.js';
 import { AudiodClient, daemonBinary } from '../audiod/client.js';
 import { midiTakeLineSchema, midiTakeSchema, type AudiodEvent, type MidiTakeLine } from '../audiod/protocol.js';
+import { loadProject } from '../model/project.js';
+import { check } from './check.js';
+import { createSong, createTrack } from './create.js';
+import { importAsset } from './import.js';
+import { init } from './init.js';
+import { recordTake } from './record.js';
 
 // MIDI takes (keyboard-instrument.md §12.4) against the real daemon in
 // null-output mode, with `field-audiod --keys` publishing the source
@@ -103,7 +109,13 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
   // ready, or with why there is no MIDI service, which only a Linux
   // machine without the ALSA sequencer may say; anywhere else a helper
   // that cannot publish fails the test.
-  async function publish(name: string): Promise<{ helper: Helper } | { unavailable: string }> {
+  //
+  // CoreMIDI on macOS can refuse a new source for a moment after this
+  // file's earlier tests killed their helpers and daemons: run whole, the
+  // last test's first publish was refused every time, and the same name
+  // was accepted 500 ms later. Alone, it never was. So a refusal there
+  // is tried again, for up to a second, before it fails the test.
+  async function publish(name: string, retries = 4): Promise<{ helper: Helper } | { unavailable: string }> {
     const child = spawn(binary!, ['--keys', name], { stdio: 'pipe' });
     const helper: Helper = {
       child,
@@ -138,6 +150,11 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
               `no MIDI service: this Linux machine has no ALSA sequencer at /dev/snd/seq, ` +
               `and --keys said ${JSON.stringify(line['error'])}`,
           };
+        }
+        if ('error' in line && process.platform === 'darwin' && retries > 0) {
+          await helper.closed;
+          await sleep(250);
+          return publish(name, retries - 1);
         }
         expect(line).toMatchObject({ ready: true, name });
         return { helper };
@@ -429,4 +446,89 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
       client.close();
     }
   });
+
+  it(
+    'field record: arms for MIDI on an entry with an instrument, and lands the take as a notes file',
+    { timeout: 30_000 },
+    async (ctx) => {
+      process.env['FIELD_AUDIOD_NULL'] = '1';
+      try {
+        init({ dir: root, name: 'keys' });
+        createSong(root, 'creek'); // 120 bpm 4/4: one beat = 24000 samples
+        const tone = join(root, '..', `field-record-midi-tone-${process.pid}.wav`);
+        writeWavFloat32(tone, NULL_RATE, [new Float32Array(NULL_RATE * 6).fill(0.1)]);
+        await importAsset(root, 'creek', tone, 'tone');
+        rmSync(tone);
+        writeFileSync(
+          join(root, 'songs/creek/tracks/main.yaml'),
+          ['name: main', 'inputs:', '  - audio: tone', '    anchor: absolute', '    at: 0', ''].join('\n'),
+        );
+        createTrack(root, 'creek', 'keys');
+        writeFileSync(join(root, 'songs/creek/tracks/keys.yaml'), 'name: keys\ninputs:\n  - record: { instrument: pad }\n');
+        writeFileSync(join(root, 'shared/instruments/pad.scd'), '// a voice\n');
+        const project = loadProject(root);
+
+        // The audio flags are refused before the daemon is touched.
+        await expect(recordTake(root, project, 'creek/track:keys', { input: 2 })).rejects.toThrow(
+          'keys records MIDI for pad: --input, --device, and --loop are for audio takes',
+        );
+
+        // The source must be in the daemon's list before field record arms.
+        const name = source('field record');
+        const keys = await publishOrSkip(ctx, name);
+        const client = await connect();
+        try {
+          await armListing(client, name);
+          await client.disarm();
+        } finally {
+          client.close();
+        }
+
+        const lines: string[] = [];
+        const positions: string[] = [];
+        let played = false;
+        const { takes } = await recordTake(
+          root,
+          project,
+          'creek/track:keys',
+          { at: '1.2.1' },
+          {
+            onArmed: (line) => lines.push(line),
+            onStarted: (line) => {
+              lines.push(line);
+              send(keys, NOTE_ON);
+              void sleep(300).then(() => {
+                send(keys, NOTE_OFF);
+                played = true;
+              });
+            },
+            onPosition: (line) => positions.push(line),
+            interrupted: () => played && positions.some((line) => /  [2-9]\d* events /.test(line)),
+          },
+        );
+        expect(lines[0]).toMatch(/^armed {3}MIDI from .*Field Keys Capture.* {2}\(48000 Hz, latency out 0 samples\)$/);
+        expect(lines[1]).toMatch(/^recording take-\S+ from 1\.2\.1 \(0:00\.5\)$/);
+        expect(positions.at(-1)).toMatch(/^\d+\.\d+\.\d+ \(\d+:\d\d\.\d\)  \d+ events? \d+\.\ds$/);
+
+        expect(takes).toHaveLength(1);
+        const { take, landed } = takes[0]!;
+        expect(landed).toMatchObject({
+          node: 'keys',
+          file: `audio/keys/${take.id}.notes.yaml`,
+          placements: 1, // createTrack placed keys in main at 0
+          placedAt: take.started_at_samples,
+        });
+        expect(landed.events).toBeGreaterThanOrEqual(2);
+        expect(landed.row).toMatchObject({ latency: 0, musical_position: [1, 2] });
+        expect(landed.row).toHaveProperty('sources', expect.arrayContaining([name]));
+        expect(landed.row).not.toHaveProperty('device');
+        const notes = readFileSync(join(root, 'songs/creek', landed.file), 'utf8');
+        expect(notes).toMatch(/\{ at: \d+, length: \d+, note: 7, velocity: 77, channel: 16 \}/);
+        expect(existsSync(join(root, '.field/recording', take.id))).toBe(false);
+        expect((await check(root)).diagnostics).toEqual([]);
+      } finally {
+        delete process.env['FIELD_AUDIOD_NULL'];
+      }
+    },
+  );
 });

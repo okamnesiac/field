@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readWav, writeWavFloat32 } from '../audio/wav.js';
-import type { Take } from '../audiod/protocol.js';
+import type { MidiTake, Take } from '../audiod/protocol.js';
 import { loadProject } from '../model/project.js';
 import { buildLabels } from './build.js';
 import { check } from './check.js';
 import { createSong, createTrack } from './create.js';
 import { init } from './init.js';
-import { chooseTake, landTake, readTransaction, recordNodeFor, trackOrigin } from './land.js';
+import { chooseTake, landAnyTake, landTake, readTransaction, recordNodeFor, trackOrigin } from './land.js';
 
 // Landing without a daemon (recording.md §3, chunk 2): a finalized
 // transaction is a directory of files, so the arithmetic that turns the
@@ -342,5 +342,122 @@ describe('chooseTake', () => {
       'no record entry "main"',
     );
     expect((await check(root)).diagnostics).toEqual([]);
+  });
+});
+
+// A MIDI transaction the daemon would have left (keyboard-instrument.md
+// §12.4): the captured messages, one line each, and the manifest.
+function writeMidiTransaction(id: string, take: Partial<MidiTake> & { track: string }, lines: object[]): MidiTake {
+  const dir = join(root, '.field', 'recording', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'take.midi.ndjson'), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
+  const manifest: MidiTake = {
+    id,
+    file: `.field/recording/${id}/take.midi.ndjson`,
+    kind: 'midi',
+    sources: ['Field Keys'],
+    sample_rate: 48000,
+    timeline_rate: 48000,
+    output_latency: 0,
+    started_wall: '2026-10-10T10:00:00.000-04:00',
+    daemon: '0.14.0',
+    complete: true,
+    frames: 48000,
+    events: lines.length,
+    song: 'creek',
+    ...take,
+  };
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+  return manifest;
+}
+
+describe('landMidiTake', () => {
+  beforeEach(() => {
+    writeFileSync(join(root, 'shared/instruments/pad.scd'), '// a voice\n');
+  });
+
+  it('writes the notes file, pins it, and places the take by the output latency alone', async () => {
+    createTrack(root, 'creek', 'keys');
+    // keys sits at bar 5 (384000 samples), so a take started at song
+    // sample 432000 begins one second into the track; only the output's
+    // 128 samples pull it back, because the player kept time with what
+    // they heard.
+    writeTrack('main', ['inputs:', '  - track: keys', '    at: [5]']);
+    writeTrack('keys', ['inputs:', '  - record: { instrument: pad }']);
+    const manifest = writeMidiTransaction(
+      'take-20261010-100000',
+      { track: '//songs/creek/track:keys', started_at_samples: 432000, output_latency: 128 },
+      [
+        { at: 0, midi: [144, 60, 100] },
+        { at: 6000, midi: [176, 64, 127] },
+        { at: 12000, midi: [144, 64, 90] },
+        { at: 24000, midi: [128, 60, 0] },
+      ],
+    );
+
+    const landed = await landAnyTake(root, readTransaction(root, manifest.id));
+    expect(landed).toMatchObject({
+      node: 'keys',
+      file: 'audio/keys/take-20261010-100000.notes.yaml',
+      placedAt: 48000 - 128,
+      frames: 48000,
+      sampleRate: 48000,
+      events: 4,
+    });
+    expect(landed.row).toEqual({
+      asset: 'take-20261010-100000',
+      started_at_samples: 48000,
+      musical_position: [5, 3],
+      latency: 128,
+      sources: ['Field Keys'],
+      recorded_at: '2026-10-10T10:00:00.000-04:00',
+    });
+    expect(readFileSync(join(root, 'songs/creek/audio/keys/take-20261010-100000.notes.yaml'), 'utf8')).toBe(
+      [
+        'sample_rate: 48000',
+        'length: 48000',
+        'notes:',
+        '  - { at: 0, length: 24000, note: 60, velocity: 100 }',
+        // Still held when the take stopped: it lasts to the end.
+        '  - { at: 12000, length: 36000, note: 64, velocity: 90 }',
+        'controls:',
+        '  - { at: 6000, cc: 64, value: 127 }',
+        'bends: []',
+        '',
+      ].join('\n'),
+    );
+    const takes = readFileSync(join(root, 'songs/creek/audio/keys/takes.yaml'), 'utf8');
+    expect(takes).toContain('    sources: [Field Keys]\n');
+    expect(takes).toContain('chosen: take-20261010-100000\n');
+    const ledger = readFileSync(join(root, 'songs/creek/assets.yaml'), 'utf8');
+    expect(ledger).toContain('file: audio/keys/take-20261010-100000.notes.yaml');
+    expect(existsSync(join(root, '.field/recording/take-20261010-100000'))).toBe(false);
+    expect((await check(root)).diagnostics).toEqual([]);
+  });
+
+  it('refuses a take of the other kind than the entry records', async () => {
+    createTrack(root, 'creek', 'keys');
+    writeTrack('keys', ['inputs:', '  - record:']);
+    const midi = writeMidiTransaction('take-20261010-100100', { track: '//songs/creek/track:keys' }, []);
+    await expect(landAnyTake(root, midi)).rejects.toThrow('names no instrument to play it');
+
+    writeTrack('keys', ['inputs:', '  - record: { instrument: pad }']);
+    const audio = writeTransaction('take-20261010-100200', { track: '//songs/creek/track:keys' });
+    await expect(landAnyTake(root, audio)).rejects.toThrow('records MIDI for pad');
+  });
+
+  it('check refuses a missing instrument and a take of the wrong kind', async () => {
+    createTrack(root, 'creek', 'keys');
+    writeTrack('keys', ['inputs:', '  - record: { instrument: pad }']);
+    await landAnyTake(root, writeMidiTransaction('take-20261010-100300', { track: '//songs/creek/track:keys' }, []));
+
+    writeTrack('keys', ['inputs:', '  - record: { instrument: ghost }']);
+    expect((await check(root)).diagnostics.map((d) => d.message)).toContainEqual(
+      expect.stringContaining('instrument ghost has no program at shared/instruments/ghost.scd'),
+    );
+    writeTrack('keys', ['inputs:', '  - record:']);
+    expect((await check(root)).diagnostics.map((d) => d.message)).toContainEqual(
+      expect.stringContaining('take "take-20261010-100300" is a MIDI take'),
+    );
   });
 });

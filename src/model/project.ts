@@ -6,6 +6,7 @@ import { PROJECT_MANIFEST } from '../constants.js';
 import { readWavHeader } from '../audio/wav.js';
 import { generatorFor } from '../generators/index.js';
 import { entryRef, expandLoop, generatorName, placedWindow } from '../generators/stem.js';
+import { instrumentProgram } from '../generators/supercollider.js';
 import { MeterMap, TempoMap } from '../time/tempo.js';
 import { canonicalText, hasAnchorsOrAliases, type KeyOrder } from '../yaml/emit.js';
 import { checkCables, entryName, type Cable } from './cables.js';
@@ -32,6 +33,7 @@ import {
   generativeTakesSchema,
   TAKES_FILENAME,
   RECORD_TAKES_FILENAME,
+  isMidiTakeRow,
   recordTakesOrder,
   recordTakesSchema,
   trackOrder,
@@ -755,6 +757,23 @@ function validate(project: LoadedProject): void {
               track.path,
               `${what} has takes but none chosen — field choose ${song.name}/${rname} --take <name> first`,
             );
+          }
+          // The instrument decides the kind of take the entry records
+          // (keyboard-instrument.md §12.2): it must exist, and every take
+          // must be of the entry's kind.
+          const instrument = entry.record.instrument;
+          if (instrument !== undefined) {
+            const program = instrumentProgram(instrument);
+            if (!existsSync(join(project.root, program))) {
+              push(track.path, `${what}'s instrument ${instrument} has no program at ${program}`);
+            }
+          }
+          for (const take of takes?.takes ?? []) {
+            if (isMidiTakeRow(take) && instrument === undefined) {
+              push(track.path, `take "${take.asset}" is a MIDI take, and ${what} names no instrument to play it`);
+            } else if (!isMidiTakeRow(take) && instrument !== undefined) {
+              push(track.path, `take "${take.asset}" is an audio take, and ${what} records MIDI for ${instrument}`);
+            }
           }
         }
         // Musical arrays need the musical anchor: an absolute entry's
