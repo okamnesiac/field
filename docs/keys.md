@@ -82,8 +82,11 @@ also checks a USB controller: give it the controller's name.
 
 `field keys <instrument>` plays a SuperCollider instrument from the
 project's `shared/instruments/` shelf, by the name a `supercollider:`
-entry gives it, with or without `.scd`. A path works too, and outside a
-project it is the only way to name one.
+entry gives it, with or without `.scd`. A path works too. Inside a
+project it resolves from the project root, as a `supercollider:` entry's
+`source:` does, so give it from the root even in a subdirectory; outside
+a project a path is the only way to name an instrument, and it resolves
+from where you are.
 
 1. `field keys` publishes `Field Keys`, then starts a *voice host*:
    `sclang` running Field's `sc/voice-host.scd`. The status line says
