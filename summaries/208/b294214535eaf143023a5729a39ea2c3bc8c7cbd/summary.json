@@ -1,0 +1,133 @@
+{
+ "version": 1,
+ "name": "Release pull request CI",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 208,
+  "title": "Run CI on the release pull request the Release workflow opens",
+  "head": "b294214535eaf143023a5729a39ea2c3bc8c7cbd",
+  "headRef": "release-ci",
+  "base": "878cdbc043c9354d856c8cf6a10ae8ce5c017683",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field releases through a GitHub Actions workflow, <code>.github/workflows/release.yml</code>. You start it by hand, its <b>propose</b> job raises the version in <code>package.json</code> on a <code>release/vX.Y.Z</code> branch and opens a pull request, and merging that pull request is the decision to ship. The workflow opens the pull request with <code>GITHUB_TOKEN</code>, the token GitHub gives every workflow run.",
+   "The first release pull request, #207, showed no checks when it opened. This change makes CI start on every release pull request by itself: after the propose job opens the pull request, or finds one already open on a re-run, it runs <code>gh workflow run ci.yml --ref release/vX.Y.Z</code>. That starts a <code>workflow_dispatch</code> run of CI on the release branch, so <code>ci.yml</code> gains <code>workflow_dispatch</code> as a trigger, and the propose job gains <code>actions: write</code>, the permission a dispatch needs.",
+   "The change also documents the three levels at which an administrator must let Actions open pull requests (enterprise, organization, and repository), which the first release run ran into, and it updates the release pull request's own Testing text. The plan, <code>docs/projects/install/readme.md</code> §9.1, records both.",
+   "Read the review's open finding before anything else. The change rests on GitHub starting no workflow for a pull request that <code>GITHUB_TOKEN</code> opened. GitHub's documentation and #207's own CI run say otherwise: GitHub creates those runs held for approval, and a maintainer starts them with <b>Approve workflows to run</b>."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b><code>GITHUB_TOKEN</code></b>: the token GitHub gives each workflow run. Events it causes mostly start no further workflows.</li><li><b><code>workflow_dispatch</code></b>: the event that starts a workflow on request, from the Actions tab or <code>gh workflow run</code>. A <code>GITHUB_TOKEN</code> dispatch still starts a run.</li><li><b>Held run</b>: a <code>pull_request</code> run GitHub creates in an approval-required state, shown as <code>action_required</code>, until someone with write access approves it.</li><li><b>Propose job</b>: the Release workflow job that bumps the version and opens the release pull request.</li></ul>"
+   },
+   {
+    "id": "evidence",
+    "title": "What happened on #206 and #207",
+    "html": "<ul class=\"tight\"><li>Release run 38167355504 failed its first attempt, because the enterprise did not let Actions open pull requests.</li><li>#206 was opened by hand from the pushed branch and closed a minute later. Its CI ran normally.</li><li>A re-run of the Release workflow opened #207 as <code>github-actions[bot]</code>. CI run 38167745651 was created four seconds later and ended <code>action_required</code>. A maintainer started its second attempt 22 seconds after that, and <code>linux</code> passed.</li><li>#207 merged at 19:25:19Z, and Release run 38167947880 tagged and released <code>v0.2.0</code>.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "workflows",
+   "title": "The release dispatches CI",
+   "kicker": "The propose job starts CI on the release branch, and CI accepts the dispatch.",
+   "intro": [
+    "A workflow run cannot normally start another one: GitHub ignores most events that <code>GITHUB_TOKEN</code> causes, to keep workflows from triggering each other in a loop. A dispatch is one of the exceptions. So the propose job ends with <code>gh workflow run ci.yml --ref \"$branch\"</code>, on both of its paths: after it opens the pull request, and after it finds one already open on a re-run.",
+    "A dispatched run tests the tip of the release branch, which is the pull request's head commit, and GitHub records its checks on that commit. Because the dispatch reads <code>ci.yml</code> from the release branch, and that branch starts from <code>main</code>, it works only once this change is on <code>main</code>."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "CI's concurrency group is <code>CI-</code> plus <code>github.ref</code>. A dispatched run's ref is <code>refs/heads/release/vX.Y.Z</code>, and a <code>pull_request</code> run's is <code>refs/pull/&lt;n&gt;/merge</code>, so a dispatched run cancels an older dispatched run on the same branch but never a <code>pull_request</code> run."
+    }
+   ],
+   "files": [
+    {
+     "path": ".github/workflows/ci.yml",
+     "note": "Adds <code>workflow_dispatch</code> to the triggers, with a comment giving the reason.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "No job or step in <code>ci.yml</code> reads <code>github.event_name</code> or <code>github.event.pull_request</code>, so both jobs run the same steps under a dispatch. Checked by parsing the file and reading every job."
+      },
+      {
+       "kind": "flag",
+       "line": 8,
+       "text": "Repeats the claim from the open finding on <code>docs/release.md</code>: GitHub holds the release pull request's run for approval rather than starting none, and <code>workflow_dispatch</code> is not the only exception."
+      }
+     ]
+    },
+    {
+     "path": ".github/workflows/release.yml",
+     "note": "The propose job gains <code>actions: write</code> and ends with the dispatch. The release pull request body now says CI was dispatched and describes <code>released --since</code>.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 36,
+       "text": "<code>actions: write</code> is scoped to the propose job, which runs only on <code>workflow_dispatch</code>. The publish job keeps the top-level <code>contents: write</code>, and the repository default token permission is still <code>read</code>, read with <code>gh api repos/okamnesiac/field/actions/permissions/workflow</code>."
+      },
+      {
+       "kind": "verify",
+       "line": 65,
+       "text": "The heredoc renders cleanly with stand-in values: every backtick is escaped, and only <code>$version</code> and <code>$BUMP</code> expand. Rendered locally from the parsed step."
+      },
+      {
+       "kind": "verify",
+       "line": 83,
+       "text": "No <code>${{ }}</code> expression appears inside a <code>run</code> step. <code>$branch</code> comes from the version that <code>scripts/release.ts bump</code> prints, and it is quoted. Under <code>set -euo pipefail</code>, a failed dispatch fails the job after the pull request is open, and a re-run dispatches again."
+      },
+      {
+       "kind": "flag",
+       "line": 79,
+       "text": "Repeats the claim from the open finding on <code>docs/release.md</code>. The held <code>pull_request</code> run still appears beside the dispatched run."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "The release guide and the plan",
+   "kicker": "Why CI is dispatched, the three settings levels, and the plan record.",
+   "intro": [
+    "<code>docs/release.md</code> is the guide to cutting a release. It now says that the workflow starts CI on the release pull request and why, and it names the three levels of <b>Allow GitHub Actions to create and approve pull requests</b>: the enterprise, the organization, and the repository. Each level must allow it before the one below can.",
+    "The install plan's §9.1, \"What implementation settled\" for chunk 2, records the enterprise policy that stopped the first release run, and the dispatch with the GitHub App token it beat. The plan stays <code>in-progress</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/release.md",
+     "note": "Step 2 now says the workflow starts CI. A new paragraph explains the dispatch, and the settings paragraph names all three levels.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 23,
+       "text": "Open review finding: GitHub does not skip CI for a pull request that <code>GITHUB_TOKEN</code> opens. It creates the <code>pull_request</code> run held for approval, and the merge box offers <b>Approve workflows to run</b>, which is what #207 got. <code>repository_dispatch</code> is also exempt, so \"the one event\" is wrong too. Approving the held run beside the dispatched one runs <code>linux</code> and <code>windows</code> twice, because their concurrency groups differ."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "§9.1 replaces the repository-setting bullet with the enterprise policy, and adds the dispatch decision.",
+     "checks": [
+      {
+       "kind": "flag",
+       "line": 578,
+       "text": "Records the same claim as the open finding, and names the GitHub App token as the alternative the dispatch beat. It does not record the cheaper alternative, approving the held run, which is what #207 used."
+      },
+      {
+       "kind": "context",
+       "line": 570,
+       "text": "Run 38167355504 is real: its first attempt failed, and its second attempt opened #207. §9.2 still says the workflow has not run, and §9.3 still owes the first release, which shipped as <code>v0.2.0</code>. Those lines predate this change."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

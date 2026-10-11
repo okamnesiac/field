@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The Release workflow dispatches CI on each release branch it pushes.
+  # GitHub starts no workflow for a pull request that a workflow's own token
+  # opened, and workflow_dispatch is the exception it allows, so this is how
+  # a release pull request gets its checks (docs/release.md).
+  workflow_dispatch:
+
+# Two jobs: `linux` runs every gate, and `windows` runs the same suite
+# without the Python gates (its own comment says why). There is no macOS
+# job, for cost: the 3,000 included minutes are only 300 macOS minutes at
+# the 10x rate, and it was spending them to run a test set identical to
+# this one — `say` and `afconvert` retired in render-pipeline.md chunk 5
+# and took the last platform-bound cases with them, so nothing in the
+# suite needs a macOS binary.
+#
+# The Windows job bills at twice the Linux per-minute rate, and its
+# expensive step is a cold JUCE build whenever GitHub has evicted its
+# cache. While the repository is private that comes to roughly 10 to 13
+# cents a run, and Actions minutes are free once it is public. It is kept
+# running on purpose (2026-10-10): it is the only thing that compiles
+# the daemon under MSVC and dials the named pipe.
+#
+# What that gives up, stated plainly (linux-portability.md decision 4,
+# amended 2026-08-08): nobody compiles native/audiod against CoreAudio in
+# CI any more, so a break in a JUCE_MAC branch reaches main unnoticed.
+# There are six, in two files — the property listeners in player.cpp and
+# two declarations in player.h, one of which is
+# `hardwareListenersAvailable`, a platform-varying constant other code
+# branches on, so a break there can change behaviour rather than merely
+# fail to compile. The cover is that development happens on macOS, so
+# `pnpm build:native` locally is the real gate. That is a weaker
+# guarantee than a runner and it is the trade being made.
+#
+# `pnpm test` runs here — #46's stopgap dropped it entirely, and green
+# meaning "the tests ran" is the whole point.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    # The ui/ workspace member pulls electron, which has no install
+    # script: it downloads its ~100 MB runtime only when something
+    # resolves the package to launch it. CI typechecks and builds the
+    # client and never opens the shell, so the install fetches nothing.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      # ui/ is its own workspace member with its own tsconfig, so neither
+      # the root typecheck nor the root build touches it — this is the
+      # only thing standing between the client and silent rot. `build`
+      # there is `tsc --noEmit && vite build`, so it is the typecheck
+      # too. Linux only: it is seconds of platform-neutral bundling, and
+      # duplicating it on the 10x runner buys nothing.
+      - run: pnpm --dir ui build
+      # The example project, checked by the CLI that was just built. This
+      # is the reason bloom moved into the tree (bloom-in-tree.md §1): the
+      # format's only real consumer used to live in another repository,
+      # where a schema change could not break it until somebody opened it
+      # by hand — which is how a flag day half-landed, a second song went
+      # unmigrated, and a retired field sat accepted and unread.
+      #
+      # `node dist/cli.js` rather than a linked `field`, so what runs is
+      # the artifact `pnpm build` produced. `check` only: `build` would
+      # need sclang, which the runner does not have, and creek's takes are
+      # generated rather than committed so they are absent here by design.
+      - run: cd examples/bloom && node ../../dist/cli.js check
+      # JUCE's build helper `juceaide` links juce_gui_basics whatever the
+      # app links, so a headless console daemon still needs the X and
+      # freetype headers. This list is what an ubuntu:24.04 container
+      # actually needed, not a guess; `build-essential`, `cmake` and
+      # `pkg-config` are already on the runner.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxcomposite-dev libxrender-dev libglu1-mesa-dev
+      - uses: actions/cache@v4
+        with:
+          path: native/audiod/build
+          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      # `build:native` bounds the build to four jobs (package.json), the
+      # runner's core count. Before the bound it passed a bare `-j`, which
+      # Make reads as unlimited, so a cold cache — every run after a week
+      # of quiet, because GitHub evicts unused caches — compiled every
+      # JUCE translation unit at once. On 2026-09-06 that killed cc1plus
+      # and took the runner VM down with it, twice: on main and on a
+      # docs-only branch. A killed job never saves the cache, so the
+      # failure fed itself until this bound.
+      - run: pnpm build:native
+      # Before `pnpm test`, not after: src/workers/lockfile.test.ts asks
+      # real uv how `--locked` differs from `--frozen`, and skips without
+      # it. With setup-uv below the tests, that skip was unconditional in
+      # CI and the test only ever ran on the author's machine.
+      - uses: astral-sh/setup-uv@v5
+      # The tests that run real sclang always skip here, each on a probe
+      # for sclang rather than by excluding its file: the integration case
+      # in src/graph/build.test.ts, the two take renders in
+      # src/generators/voice-render.test.ts, and the voicer in
+      # src/keys/voicer.test.ts. Not the nine that linux-portability.md
+      # decision 4 describes — `say` and `afconvert` both retired in
+      # render-pipeline.md §6 chunk 5 and took their guards with them, so
+      # nothing in the suite shells out to a macOS binary any more. Nor
+      # are those skips a Linux limit: sclang runs on Linux, it just is
+      # not installed on the runner, and the first of them skipped on
+      # macOS for the same reason back when there was a macOS runner to
+      # skip on. The daemon's protocol tests run here, in null-output mode.
+      #
+      # The native MIDI round trip, src/keys/helper-native.test.ts, also
+      # skips on a runner without the ALSA sequencer at /dev/snd/seq,
+      # where `field-audiod --keys` cannot publish a virtual source. Each
+      # of its cases skips by name, saying so, and fails rather than skips
+      # on any other machine where `--keys` reports an error. The MIDI
+      # take cases in src/commands/record-midi-daemon.test.ts skip here
+      # the same way, and its case for arming with no MIDI source runs
+      # only here, where the source list is reliably empty.
+      - run: pnpm test
+      # Python workers: pyright strict is the gate (ace-generation.md §3.4).
+      # Only the dev group installs — the model environment (torch, mlx)
+      # is far too heavy for CI — so production dependencies are absent
+      # and `field_worker` is resolved by `extraPaths` rather than by
+      # install (#59 review: adding it as a real dependency broke this
+      # step, because --only-group excludes every production dependency).
+      #
+      # Both packages are checked. field-worker declares strict typing and
+      # nothing enforced it when it was added, which is a gate that exists
+      # only in its own pyproject (#59 review). It has no production
+      # dependencies at all, so its sync is trivial.
+      - run: cd python/worker && uv sync --only-group dev && uv run --no-sync pyright src
+      - run: cd python/aced && uv sync --only-group dev && uv run --no-sync pyright src
+      - run: cd python/voiced && uv sync --only-group dev && uv run --no-sync pyright src
+
+
+  # Windows is a build-and-test-and-play target (windows-portability.md),
+  # and this job is what keeps the port from rotting: the same typecheck,
+  # build, example check, native build and suite as Linux. The Python
+  # pyright gates stay Linux-only — the workers keep their POSIX
+  # transport until their own chunk (§4), so gating them here would test
+  # a combination nothing supports. The JUCE FetchContent build is the
+  # expensive step. The cache key below is the Linux job's key verbatim:
+  # it already varies by `runner.os`, so the two jobs never share a
+  # cache, which matters because MSVC and ELF objects share nothing.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: cd examples/bloom && node ../../dist/cli.js check
+      - uses: actions/cache@v4
+        with:
+          path: native/audiod/build
+          key: audiod-${{ runner.os }}-${{ hashFiles('native/audiod/CMakeLists.txt') }}
+      - run: pnpm build:native
+      - run: pnpm test

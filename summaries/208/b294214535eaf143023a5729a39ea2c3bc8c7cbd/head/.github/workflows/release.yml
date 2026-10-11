@@ -1,0 +1,114 @@
+name: Release
+
+# Start a release by hand: choose patch, minor, or major, and the propose job
+# opens a pull request that raises the version in package.json. Merging it is
+# the decision to ship; the publish job then tags the merged version, moves the
+# major tag the installer follows, and creates the GitHub release
+# (install.md §3.1, docs/release.md).
+#
+# Both jobs run scripts/release.ts under plain Node, which strips its types,
+# so neither installs a dependency. A release publishes no files: whoever
+# installs it builds it, the daemon included (install.md §7.1).
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+  push:
+    branches: [main]
+    paths: [package.json]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Open the release pull request
+        env:
+          BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(node scripts/release.ts bump "$BUMP")
+          branch="release/v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit --quiet -am "Release $version"
+          # The branch belongs to this workflow; a rerun after a run that pushed it
+          # but could not open the pull request replaces it.
+          git push --quiet --force origin "$branch"
+          cat > "$RUNNER_TEMP/body.md" <<EOF
+          Raises Field's version to $version in \`package.json\`. Merging this pull request publishes the release: the Release workflow then tags \`v$version\` on the merge commit, moves the major tag to it, and creates the GitHub release with generated notes.
+
+          ## Testing
+
+          The Release workflow ran \`node scripts/release.ts bump $BUMP\` from the repository root, which printed \`$version\` and wrote it to \`package.json\`, and then dispatched CI on this branch, whose checks appear on this pull request. After the merge, the publish job runs \`node scripts/release.ts released --since\` with the commit \`main\` held before the merge. That exits 3 because the merge raised the version to an untagged one, and the job then runs \`node scripts/release.ts tag\`. A failure there names the step that failed, and a failed GitHub release prints the \`gh release create\` command that finishes it.
+          EOF
+          # A pull request someone opened by hand from the branch after a failed run
+          # already carries the force-pushed commit.
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "a pull request from $branch is already open"
+          elif ! gh pr create --base main --head "$branch" --title "Release $version" --body-file "$RUNNER_TEMP/body.md"; then
+            # GitHub refuses unless Actions may create pull requests, which an
+            # enterprise's policy must allow before its organization's and the
+            # repository's settings can (docs/release.md). The branch is pushed,
+            # so the pull request can be opened by hand.
+            echo "::error::could not open the pull request; open it from https://github.com/$REPO/compare/main...$branch?expand=1"
+            exit 1
+          fi
+          # GitHub starts no workflow for a pull request this job's token opened,
+          # or for the push before it, so CI would never run on the release.
+          # workflow_dispatch is the exception, and its checks land on the
+          # branch's commit, which is the pull request's head.
+          gh workflow run ci.yml --ref "$branch"
+
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Only a push that raises the version releases: BEFORE is main's commit
+      # before the push. Checking for a tag alone would release an untagged
+      # version, such as the 0.1.0 main starts at, on any later change to
+      # package.json. A version that is already tagged releases nothing either.
+      - name: Tag and publish the merged version
+        env:
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          status=0
+          node scripts/release.ts released --since "$BEFORE" || status=$?
+          case "$status" in
+            0) exit 0 ;;
+            3) ;;
+            *) exit "$status" ;;
+          esac
+          node scripts/release.ts tag
