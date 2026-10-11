@@ -1062,7 +1062,8 @@ cannot quantize or transpose without pairing them first.
 # songs/creek/tracks/keys.yaml
 name: keys
 inputs:
-  - record: { instrument: still-water-pad }
+  - record:
+      instrument: still-water-pad
 ```
 
 A `record:` entry with `instrument:` records MIDI takes, and one
@@ -1161,3 +1162,83 @@ the last partial line, which recovery drops. Loop takes stay audio only.
 | `src/graph/graph.ts`, `src/generators/voice-render.ts` (new), `src/generators/index.ts` | The render node for a chosen MIDI take, and its generator. |
 | `src/model/project.ts` | Validation: a MIDI take only on an entry with an instrument, and the instrument's program exists. |
 | `docs/keys.md`, `docs/tracks.md`, `docs/project-model.md`, `docs/build-graph.md`, `docs/audio-engine.md` | Recording the keys, the entry, the take, the render node, and MIDI capture. |
+
+## 13 Chunk 4 as built (2026-10-10)
+
+`field record` now records what you play when the track's record entry
+names an instrument, lands the take as a notes file, and the build
+renders the chosen take through that instrument where you played it.
+Everything §12 decided holds; this section adds the criteria §6 said
+chunk 4 would append, and what building it settled and proved.
+
+### 13.1 Acceptance criteria
+
+Each runs in a project whose song builds, with a track `keys` whose
+record entry has `instrument: still-water-pad`.
+
+| # | Do | Expect |
+| --- | --- | --- |
+| 30 | Run `field keys still-water-pad` in one terminal and `field record creek/track:keys --at 17` in another. Play a few notes, then press Ctrl-C. | The armed line lists `Field Keys` among its sources, the position line counts events, and the take lands as `audio/keys/<take>.notes.yaml`, chosen. `field check` says ok. |
+| 31 | `field build creek`, then `field play creek`. | You hear what you played, through the pad, where you played it against the song. |
+| 32 | Run criterion 30's `field record` with `--input 2`, then with `--device <name>`, then with `--loop --until 19`. | Each is refused before anything arms: `keys records MIDI for still-water-pad: --input, --device, and --loop are for audio takes`. |
+| 33 | Edit `still-water-pad.scd` and build again; then build once more without an edit. | The first build renders `creek/gen:keys` again; the second is a cache hit. |
+| 34 | Change the instrument to a name with no program, and run `field check`. Then remove `instrument:` while a MIDI take is chosen, and run it again. | `... instrument ghost has no program at shared/instruments/ghost.scd`, then `take "<take>" is a MIDI take, and input 1 ("record") names no instrument to play it`. |
+| 35 | Hold a note through the stop. | The notes file has it last to the take's end, and its render rings on through the 4-second tail. |
+| 36 | Hold sustain (`Tab` in `musical-typing`, `Space` in `tracker` and `fourths`) across a few note releases while you record. | The render holds them as the live voice did. |
+
+### 13.2 What implementation settled
+
+- **Landing is shared.** `src/commands/land.ts` splits what every take
+  needs (the checks, the record node, the ledger, the placement, the
+  musical position, and the `takes.yaml` write) from what each kind
+  adds. `landMidiTake` pairs the captured lines into a notes file with
+  `notesFromMessages`, writes it with `formatNotesFile`, and pins it
+  with no WAV facts. `landAnyTake` picks by the manifest, and every
+  landing path in `field record` uses it: the take event, the stop, the
+  recordings fallback, `--recover`, and `--land`.
+- **The kinds stay apart.** A take of the other kind than its entry
+  records refuses to land, and `field check` makes it an error, as it
+  does an instrument with no program. `field record` refuses `--input`,
+  `--device`, and `--loop` on a MIDI entry before it connects.
+- **The entry's canonical form is block style.** `field fmt` writes
+  `instrument:` on its own line under `record:`, as for a
+  `supercollider:` entry, so §12.2's example and the docs use that
+  form.
+- **The render is stereo at the track's rate, 4 seconds past the
+  take.** The tail is fixed, `RELEASE_TAIL_SECONDS`, because the voice
+  contract carries no release time. scsynth writes whole control
+  blocks in NRT, so a render runs one 64-sample block past its
+  duration, as every sc-render does; the block is silence after the
+  tail.
+- **A dropped count means messages for a MIDI take.** `field record`
+  says so, and that a lost note-on is a missing note and a lost
+  note-off holds its note to the take's end.
+- **CoreMIDI can refuse a new source for a moment.** Run whole,
+  `src/commands/record-midi-daemon.test.ts` saw its last
+  `field-audiod --keys` refused every time, right after earlier tests
+  killed their helpers and daemons, and the same name was accepted
+  500 ms later. The test's publish retries for up to a second on
+  macOS. `field keys` itself does not retry: nothing outside that
+  churn has shown the refusal.
+
+### 13.3 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| `src/schema/notes.test.ts` | 9 pass: pairing by channel and note, a velocity-0 note-on as a note-off, a retrigger ending the earlier note, an unmatched note-off dropped, a held note lasting to the end, the file's text, and the render events' order and units. |
+| `src/commands/land.test.ts`, MIDI cases | A take started at song sample 432000 on a track placed at bar 5 lands at 48000 with latency 128, the output's alone, and is placed at 47872. The notes file, the row with `sources`, and the ledger pin are exact, and `field check` is clean. Either kind refuses the other's entry, and `field check` reports both errors in criterion 34. |
+| `src/generators/voice-render.test.ts` | The node's inputs are the notes asset, the instrument, and both harness files, and an instrument edit renders again. Through real `sclang`: a half-second take renders 216064 frames (the take, the tail, and one block), the same bytes from a cold cache, and the track builds over it. |
+| `src/commands/record-midi-daemon.test.ts` | The daemon's four capture tests, and `field record` end to end through the null output with a published source: the refusal in criterion 32, the armed, recording, and event-count lines, and a landed notes file holding the sent note on channel 16. |
+| By hand, the CLI on this Mac under ColemakC, in a scratch project with `still-water-pad`, through the null output | `field record creek/track:played --at 1.2.1` armed `MIDI from Field Keys Verify`, recorded from 1.2.1, and landed `take-20261010-203009` with 4 events. Two notes sent 0.4 s apart and held for 1.0 s and 0.8 s landed at 14579 and 34088, 48231 and 38356 samples long: within 5 ms of the script's sleeps. `field build creek` rendered the take through `still-water-pad`: first sound 1054 samples after the first note (the pad's attack), placed exactly 24000 samples later in the track, peaking at -17.8 dBFS. A cold-cache render had the same SHA-256. |
+
+### 13.4 What is still owed
+
+- **Criteria 30, 31, 35, and 36 by ear,** on a real output device. The
+  runs above used the null output so that nothing played aloud, which
+  also means the output latency they subtracted was 0; the subtraction
+  itself is checked with 128 in `land.test.ts`.
+- **Editing a notes file by hand.** The build refuses an edited notes
+  file, as it refuses any pinned file whose bytes changed, and
+  `field import` takes audio only, so there is no way yet to pin an
+  edit. A command that re-pins a notes file is the follow-up if editing
+  notes turns out to matter.

@@ -174,12 +174,13 @@ that generates it mechanically, in-graph, cached. The `generative` kind
 has none: its generation is human-triggered (`field generate`), its
 variants are committed under `audio/<name>/`, named by the gen node —
 and its label resolves to the chosen variant (`field choose` repoints
-it; every placement follows). A `record:` entry has no node of its own
-either: before a track is planned, the graph replaces the entry with a
-window over its chosen take's ledger asset, placed where the take's
-row says it was sung, or with nothing when no take is chosen
-(`withTakes` in `src/graph/graph.ts`). Nothing after that point knows
-recording exists.
+it; every placement follows). A `record:` entry that records audio has
+no node of its own either: before a track is planned, the graph
+replaces the entry with a window over its chosen take's ledger asset,
+placed where the take's row says it was sung, or with nothing when no
+take is chosen (`withTakes` in `src/graph/graph.ts`). Nothing after
+that point knows recording exists. An entry that records MIDI places
+its take's render instead, a `voice-render` node (below).
 
 ### `stem` — every track, implicitly
 
@@ -259,9 +260,29 @@ The same program can also be played from notes. When `FIELD_MODE` is
 expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
 controls that frees itself after `gate` goes to 0. `field keys
 <instrument>` plays that voice live; the render variables are absent in
-voice mode, so a program checks `FIELD_MODE` before reading them. Voice
-mode never enters the build, so it changes no cache key except through
-the program's own content hash. See [keys.md](keys.md).
+voice mode, so a program checks `FIELD_MODE` before reading them. A
+`supercollider:` entry never runs in voice mode, so voice mode changes
+its renders only through the program's own content hash. See
+[keys.md](keys.md).
+
+### `voice-render` — a recorded MIDI take, rendered
+
+The graph mints one for a record entry with an instrument whose chosen
+take is a MIDI take, at `//songs/<song>/gen:<name>` where `<name>` is
+the record node's, and the entry places it where the take was played
+(keyboard-instrument.md §12.3). Nobody declares it.
+
+It runs `sc/voice-render.scd` through `sclang`, which loads the
+instrument in voice mode and drives its voice from the take's notes
+file with `sc/voicer.scd`, the voicing `field keys` plays with. Sustain,
+all-notes-off, and pitch bend (±2 semitones) act as they did live. The
+render is stereo at the track's rate and runs 4 seconds past the take,
+so the last notes' release is heard; scsynth rounds it up to a whole
+control block, as it does every NRT render. Its cache inputs are the
+notes file, the instrument's content hash, and both harness files, so
+editing any of them renders the take again. The harness adds nothing
+random, so an instrument that renders reproducibly renders its takes
+reproducibly, bit for bit.
 
 ### `eq` / `limit` / `reverb` / `plate` / `hall` — the offline effects
 
