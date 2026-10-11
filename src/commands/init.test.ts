@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { check } from './check.js';
 import { init } from './init.js';
 
 // The .gitattributes init writes is what stands between a project's
@@ -39,5 +40,28 @@ describe('init .gitattributes', () => {
     // bytes move (plugins.ts); they must never ride the binary
     // heuristic.
     expect(lines).toContain('*.state binary');
+  });
+});
+
+describe('the project license (remote.md §3.5)', () => {
+  it('writes license after name when given, and no line without one', () => {
+    init({ dir: join(root, 'licensed'), name: 'licensed', license: 'CC-BY-4.0' });
+    expect(readFileSync(join(root, 'licensed/field.yaml'), 'utf8')).toBe(
+      'field: 1\nname: licensed\nlicense: CC-BY-4.0\nsample_rate: 48000\n',
+    );
+    init({ dir: join(root, 'plain'), name: 'plain' });
+    expect(readFileSync(join(root, 'plain/field.yaml'), 'utf8')).not.toContain('license');
+  });
+
+  it('refuses a license that is not an SPDX identifier, in init and in check', async () => {
+    expect(() => init({ dir: join(root, 'bad'), name: 'bad', license: 'CC BY 4.0' })).toThrow(
+      'license "CC BY 4.0" must be an SPDX license identifier',
+    );
+    init({ dir: join(root, 'edited'), name: 'edited' });
+    writeFileSync(join(root, 'edited/field.yaml'), 'field: 1\nname: edited\nlicense: CC BY 4.0\nsample_rate: 48000\n');
+    const { diagnostics } = await check(join(root, 'edited'));
+    expect(diagnostics.map((d) => d.message).join('\n')).toMatch(/must be an SPDX license identifier/);
+    writeFileSync(join(root, 'edited/field.yaml'), 'field: 1\nname: edited\nlicense: LicenseRef-mine\nsample_rate: 48000\n');
+    expect((await check(join(root, 'edited'))).diagnostics).toEqual([]);
   });
 });

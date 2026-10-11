@@ -307,11 +307,17 @@ export const REMOTE_API_VERSION = 1;
 
 Two things the contract deliberately does not carry: musical time
 (the action key already covers the resolved placement plan, and the
-site derives `bar.beat` from `arrangement --json`), and any request to
-render. The remote never asks the CLI for anything; every conversation
-starts here. The request and response shapes are zod schemas in
-`src/remote/protocol.ts`, the way `helloResponseSchema` is, so the
-site's tests can import the same file (§7).
+site derives `bar.beat` from its own copy of Field's tempo map,
+audiofield-io.md §13.9), and any request to render. The remote never
+asks the CLI for anything; every conversation starts here. The request
+and response shapes are zod schemas in `src/remote/protocol.ts`, the
+way `helloResponseSchema` is, so the site's tests can import the same
+file (§7).
+
+*Amended (2026-10-11, review of #193):* this said the site derives
+`bar.beat` "from `arrangement --json`", which §9.1 had already
+overtaken on 2026-10-10: the site computes it from its own copy of the
+tempo map.
 
 Paths, as the CLI speaks them since chunk 2 shipped (`paths` in
 `src/remote/protocol.ts`; the site is built to these, and either side
@@ -596,13 +602,23 @@ remote, and exits 0. `field push` after a one-line change to a track
 file uploads exactly the entries the change re-rendered and reports
 them by label, and a second `field push` uploads nothing. `field
 explain //songs/creek/track:main --json` and `field arrangement creek
---json` print the values their text forms show. A `license: not a
-license` line fails `field check` with the file and line and a missing
-`license` passes. `field clone` on a machine without `git-lfs` stops
-before cloning and names the package to install. And real music has
-been cloned and built through it: a HOWLO project on the site, on a
-second machine, playing from fetched artifacts with nothing rendered
-locally.
+--json` print the values their text forms are built from: positions in
+ticks and as bar.beat.tick, with seconds left to a reader that brings
+the song's tempo map, as the site does (audiofield-io.md §13.9). A
+`license: not a license` line fails `field check` with the file and the
+key, and a missing `license` passes. `field clone` on a machine without
+`git-lfs` stops before cloning and names the package to install. And
+real music has been cloned and built through it: a HOWLO project on
+the site, on a second machine, playing from fetched artifacts with
+nothing rendered locally.
+
+*Amended (2026-10-11, review of #193):* the two JSON commands were to
+"print the values their text forms show", but the text forms derive
+seconds and a bar span that `Explanation` and `ArrangementView` do not
+hold, and carrying those would give the JSON a second vocabulary
+(§3.6). A malformed license was to fail `field check` "with the file
+and line", but a diagnostic carries no line, so it names the file and
+the key.
 
 ## 9 Open questions
 
@@ -629,6 +645,11 @@ own copy of Field's tempo map (audiofield-io.md §13.9) rather than
 from `arrangement --json`, and the render worker that wants `--json`
 is moot for v1 (audiofield-io.md §10.14), so chunk 1 waits on that
 worker.
+
+Landed ahead of the worker (2026-10-11): Justin chose chunk 1 for the
+overnight batch, since it needs no remote at all, and it landed before
+the render worker exists. The priority stays `next`; §8's definition
+of done is what keeps the plan open.
 
 ### 9.2 Keychain, or `~/.field/credentials` everywhere
 
@@ -706,7 +727,8 @@ and the document ([docs/remote.md](../../remote.md)).
 `CheckResult` already) are the obvious next three; not in this plan
 unless the worker turns out to want them.
 
-Unchanged (2026-09-08): chunk 1 is unstarted and this belongs to it.
+Unchanged (2026-10-11): chunk 1 landed `--json` on `explain` and
+`arrangement`; these three stay out until the worker asks for them.
 
 ### 9.9 What `pull` does to `.field/out`
 
@@ -733,7 +755,8 @@ an asset's license is stricter than the project's — a CC-BY-SA sample
 in a CC0 project — is a question splice.md's chunk owns once both
 keys exist.
 
-Open (2026-09-08): chunk 1 is unstarted; nothing here changes it.
+Open (2026-10-11): chunk 1 landed the project license; whether `check`
+compares it with an asset's stays splice.md's question.
 
 ### 9.11 A recipe-only song cannot be warmed by action key
 
@@ -834,3 +857,14 @@ watch and misses it.
   token is reported per song; `pull` from a plain clone warms two
   entries and a build with a refusing runner is hits throughout.
   Chunk 1 (`--json` and `license`) is what remains of the plan.
+- 2026-10-11 — Chunk 1 (branch `remote/json-license`), ahead of the site
+  worker that wants it, at Justin's call. `field.yaml` takes an optional
+  `license:`, an SPDX identifier checked for shape (`SPDX_IDENTIFIER` in
+  `src/schema/manifest.ts`), which `projectOrder` places after `name`;
+  `field init --license <id>` writes it and refuses one of the wrong
+  shape, and `field check` reports a malformed one through the manifest
+  schema. `field explain --json` and `field arrangement --json` print
+  `Explanation` and `ArrangementView` through `explanationJson` and
+  `arrangementJson`, each in its command module. With this, every chunk
+  of §6 has landed; §8's definition of done, a real project on a second
+  machine, and the open questions in §9 are what keep the plan open.

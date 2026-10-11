@@ -22,7 +22,7 @@ import {
   parseVariants,
   wantsVersion,
 } from './cliParsers.js';
-import { buildLabels, explainLabel, projectRelative, queryDeps, remoteReads } from './commands/build.js';
+import { buildLabels, explainLabel, explanationJson, projectRelative, queryDeps, remoteReads } from './commands/build.js';
 import { formatReach, rootNote } from './model/levels.js';
 import { formatCable } from './model/cables.js';
 import { playThroughDaemon, resolvePlayables, type Playable } from './commands/play.js';
@@ -93,7 +93,8 @@ program
   .description('initialize a Field project in the current directory')
   .option('--name <slug>', 'project name (defaults to the directory name)')
   .option('--sample-rate <hz>', 'project sample rate', (v) => Number(v))
-  .action((opts: { name?: string; sampleRate?: number }) => {
+  .option('--license <spdx>', "the project's license, an SPDX identifier such as CC-BY-4.0 (default: none)")
+  .action((opts: { name?: string; sampleRate?: number; license?: string }) => {
     try {
       const root = init({ dir: process.cwd(), ...opts });
       process.stdout.write(`initialized Field project at ${root}\n`);
@@ -1076,10 +1077,15 @@ program
   .command('explain <label>')
   .description('show a label\'s type, inputs, action key, and cache status')
   .option('--no-remote', 'do not consult the remote cache')
-  .action(async (label: string, opts: { remote?: boolean }) => {
+  .option('--json', 'print the explanation as JSON')
+  .action(async (label: string, opts: { remote?: boolean; json?: boolean }) => {
     try {
       const root = requireRoot();
       const e = await explainLabel(root, label, remoteReads(root, { noRemote: opts.remote === false }));
+      if (opts.json === true) {
+        process.stdout.write(`${explanationJson(e)}\n`);
+        return;
+      }
       process.stdout.write(`${e.label} (${e.kind})\n`);
       // The CLI speaks the format's language (project-layout.md §4):
       // type, not the engine's rule.
@@ -1208,10 +1214,11 @@ program
 program
   .command('arrangement <song>')
   .description("the song's structure, derived from its output track's placements")
-  .action(async (songName: string) => {
+  .option('--json', 'print the arrangement as JSON')
+  .action(async (songName: string, opts: { json?: boolean }) => {
     try {
-      const { arrangement } = await import('./commands/arrangement.js');
-      process.stdout.write(`${arrangement(requireRoot(), songName)}\n`);
+      const { arrangement, arrangementJson } = await import('./commands/arrangement.js');
+      process.stdout.write(`${(opts.json === true ? arrangementJson : arrangement)(requireRoot(), songName)}\n`);
     } catch (err) {
       fail(err);
     }

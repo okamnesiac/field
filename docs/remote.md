@@ -243,6 +243,9 @@ creek: fetched 2 artifacts (2.1 MB)
 A plain `git pull` keeps working and skips the warm; the next `field
 build` then reads through per miss instead.
 
-With `push` and `pull` the remote's verbs are complete. What remains of
-[remote.md](projects/remote/readme.md) is its first chunk: `--json` on
-`explain` and `arrangement`, and `license` in `field.yaml`.
+With `push` and `pull` the remote's verbs are complete, and so is the
+rest of [remote.md](projects/remote/readme.md): `--json` on `explain`
+and `arrangement`, and `license` in `field.yaml`, are in the
+[CLI manual](cli.md). What remains is the plan's definition of done, a
+real project cloned and built on a second machine, playing from fetched
+artifacts.

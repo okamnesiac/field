@@ -143,14 +143,25 @@ function fmtSeconds(s: number): string {
 }
 
 export function arrangement(root: string, songName: string): string {
+  const project = validProject(root);
+  return formatArrangement(songArrangement(project, songName), project);
+}
+
+// `field arrangement --json` (remote.md §3.6): the same view, as the
+// ArrangementView it is, with the interface's field names.
+export function arrangementJson(root: string, songName: string): string {
+  return JSON.stringify(songArrangement(validProject(root), songName), null, 2);
+}
+
+// A derived view is only worth trusting if it refuses to guess, and
+// unresolved musical time is exactly where it would: positions that
+// never resolved print as raw arrays, which read like bar numbers.
+// `build` (loadValid) and `fmt` both stop here; this was the outlier.
+function validProject(root: string): LoadedProject {
   const project = loadProject(root);
-  // A derived view is only worth trusting if it refuses to guess, and
-  // unresolved musical time is exactly where it would: positions that
-  // never resolved print as raw arrays, which read like bar numbers.
-  // `build` (loadValid) and `fmt` both stop here; this was the outlier.
   if (diagnosticErrors(project.diagnostics).length > 0) {
     const lines = project.diagnostics.map(formatDiagnostic).join('\n');
     throw new Error(`project has errors (field check):\n${lines}`);
   }
-  return formatArrangement(songArrangement(project, songName), project);
+  return project;
 }
