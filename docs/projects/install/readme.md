@@ -8,7 +8,7 @@ priority: now
 **Goal:** one command installs Field and another keeps it current, the
 way Projector's `install.sh` and `project upgrade` do. `./install.sh`
 installs a checkout today, and `field upgrade` runs it from any
-directory. Field has releases now, and once the release installer
+directory. Field can cut releases now, and once the release installer
 exists, `curl -fsSL https://field.one/install.sh | bash` installs one
 with no clone, building it as the checkout installer does, and
 `field upgrade` moves it to the next release.
