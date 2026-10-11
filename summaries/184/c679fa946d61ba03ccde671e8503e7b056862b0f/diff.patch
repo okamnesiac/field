@@ -1,0 +1,129 @@
+diff --git a/LICENSE b/LICENSE
+new file mode 100644
+index 0000000..0b624f6
+--- /dev/null
++++ b/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Amnesiac, LLC
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/README.md b/README.md
+index bf40574..c7111b6 100644
+--- a/README.md
++++ b/README.md
+@@ -165,3 +165,22 @@ exposing the CLI's verbs to agents is planned.
+ Start at [docs/](docs/README.md) — the thesis and core concepts, with
+ the index to the rest: architecture, tracks, the project model, the
+ build graph, and the audio engine.
++
++## License
++
++Field's code is licensed under the [MIT License](LICENSE).
++
++The audio daemon, `field-audiod`, links two third-party codebases that
++carry their own terms:
++
++- **[JUCE](https://juce.com)**, licensed under AGPLv3 or a commercial
++  JUCE license.
++- **Steinberg's VST3 SDK**, compiled in so the daemon can host VST3
++  plugins. JUCE 8.0.4, the version the daemon pins, bundles it under
++  GPLv3 or Steinberg's proprietary VST3 license.
++
++A commercial JUCE license does not cover the VST3 SDK. Unless you hold
++both a commercial JUCE license and Steinberg's proprietary VST3
++license, a `field-audiod` binary you build or distribute is under
++copyleft terms: AGPLv3 for JUCE and GPLv3 for the VST3 SDK, so anyone
++who receives it is entitled to its source.
+diff --git a/docs/architecture.md b/docs/architecture.md
+index bcb2e67..f6bb5bb 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -140,12 +140,16 @@ you about 0.7ms.
+   real-time threading bugs at the FFI boundary. Not worth borrow
+   checking in roughly 30% of one contained process.
+ 
+-**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial. Field uses
+-AGPL while personal/open-source; if productized closed-source, a
+-commercial license (about $130/month Pro tier, or perpetual) resolves
+-it. JUCE stays **quarantined inside the daemon** — it never leaks into
+-other components, so licensing exposure is one process and the hosting
+-layer stays swappable.
++**Licensing.** JUCE 8 is dual-licensed AGPLv3 / commercial, and the
++daemon also compiles in Steinberg's VST3 SDK to host VST3 plugins,
++which JUCE 8.0.4 bundles under GPLv3 or Steinberg's proprietary VST3
++license. A daemon built from this repository takes the copyleft option
++of each (see the README's License section). A closed-source build would
++need a commercial JUCE license and Steinberg's proprietary VST3 license
++both; the JUCE license alone does not cover the SDK. JUCE and the SDK
++stay **quarantined inside the daemon** — they never leak into other
++components, so licensing exposure is one process and the hosting layer
++stays swappable.
+ 
+ ## SuperCollider
+ 
+diff --git a/package.json b/package.json
+index bc947ce..55f7612 100644
+--- a/package.json
++++ b/package.json
+@@ -2,6 +2,7 @@
+   "name": "field",
+   "version": "0.1.0",
+   "description": "Git-native, agent-operable music production system",
++  "license": "MIT",
+   "type": "module",
+   "bin": {
+     "field": "./dist/cli.js"
+diff --git a/python/aced/pyproject.toml b/python/aced/pyproject.toml
+index 49690f7..04dea95 100644
+--- a/python/aced/pyproject.toml
++++ b/python/aced/pyproject.toml
+@@ -6,6 +6,7 @@
+ name = "field-aced"
+ version = "0.1.0"
+ description = "Field's ACE-Step generation worker: NDJSON over a unix socket"
++license = "MIT"
+ requires-python = ">=3.11,<3.13"
+ dependencies = [
+     "field-worker",
+diff --git a/python/voiced/pyproject.toml b/python/voiced/pyproject.toml
+index f5effa1..37feafd 100644
+--- a/python/voiced/pyproject.toml
++++ b/python/voiced/pyproject.toml
+@@ -6,6 +6,7 @@
+ name = "field-voiced"
+ version = "0.1.0"
+ description = "Field's Chatterbox voice worker: NDJSON over a unix socket"
++license = "MIT"
+ requires-python = ">=3.11,<3.13"
+ dependencies = [
+     "field-worker",
+diff --git a/python/worker/pyproject.toml b/python/worker/pyproject.toml
+index 1e80474..73ae485 100644
+--- a/python/worker/pyproject.toml
++++ b/python/worker/pyproject.toml
+@@ -11,6 +11,7 @@
+ name = "field-worker"
+ version = "0.1.0"
+ description = "Field's shared generation-worker lifecycle: NDJSON over a unix socket"
++license = "MIT"
+ requires-python = ">=3.11,<3.13"
+ dependencies = []
+ 
