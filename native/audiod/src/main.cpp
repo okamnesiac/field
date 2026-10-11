@@ -1,6 +1,7 @@
 #include "player.h"
 #include "capture.h"
 #include "hosting.h"
+#include "keys.h"
 #include "live.h"
 #include "render.h"
 #include "server.h"
@@ -8,6 +9,7 @@
 #include <juce_events/juce_events.h>
 
 #include <csignal>
+#include <optional>
 
 // field-audiod: the playback daemon (playback.md). Spawned on demand by the
 // CLI with its working directory at the project root, serves the NDJSON
@@ -154,6 +156,8 @@ int main (int argc, char* argv[])
     juce::String captureIdentifier;
     juce::String captureParams;
     juce::String captureOut;
+    std::optional<juce::String> keysName;
+    std::optional<juce::String> monitorName;
     bool nullOutput = false;
     int idleSeconds = 300;
 
@@ -186,6 +190,10 @@ int main (int argc, char* argv[])
             captureParams = argv[++i];
             captureOut = argv[++i];
         }
+        else if (arg == "--keys" && i + 1 < argc)
+            keysName = juce::String::fromUTF8 (argv[++i]);
+        else if (arg == "--midi-monitor" && i + 1 < argc)
+            monitorName = juce::String::fromUTF8 (argv[++i]);
         else if (arg == "--null-output")
             nullOutput = true;
         else if (arg == "--idle" && i + 1 < argc)
@@ -201,10 +209,21 @@ int main (int argc, char* argv[])
                           "       field-audiod --scan <au|vst3>\n"
                           "       field-audiod --scan-probe <au|vst3> <candidate> <out>\n"
                           "       field-audiod --state-capture <au|vst3> <identifier> "
-                          "<paramsJson> <out>\n");
+                          "<paramsJson> <out>\n"
+                          "       field-audiod --keys <name>\n"
+                          "       field-audiod --midi-monitor <name>\n");
             return 2;
         }
     }
+
+    // The helper behind `field keys` and its monitor
+    // (keyboard-instrument.md §2.5) are subprocesses for the reason --render
+    // is: they return before any socket or audio device exists, so playing
+    // keys never contends with the transport.
+    if (keysName)
+        return field::runKeys (*keysName);
+    if (monitorName)
+        return field::runMidiMonitor (*monitorName);
 
     // Scanning is a subprocess tree for the same isolation reasons as
     // --render: the parent iterates candidates and spawns itself with

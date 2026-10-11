@@ -1,5 +1,5 @@
 ---
-status: ready
+status: in-progress
 priority: now
 ---
 
@@ -204,6 +204,9 @@ and reacts to changes to the keymap's name. Many editors save by
 writing a temporary file and renaming it over the original. On macOS
 and Linux, Node's `fs.watch` on a file keeps watching the original
 file, so a watch on the keymap itself would end at the first such save.
+`field keys` reloads only when the file's text has changed, because
+macOS can report a write made just before the watch began, or an event
+with no file name.
 
 `field keys --print` prints the keymap as a keyboard-shaped diagram,
 one line per keyboard row, with the note or control in each key's
@@ -296,7 +299,7 @@ The offset of a position is `column` times its index in its row, plus
 | `velocity: <n>` | Changes the velocity by n, kept between 1 and 127. |
 | `bend: <x>` | Pitch bend to x, from -1 to 1 of the full range, while held. Back to center on release. |
 | `cc: <n>`, `value: <v>`, `mode: <m>` | Controller n. Mode `set`, the default, sends v at each press. `hold` sends v while held and 0 on release. `toggle` alternates v and 0 at each press. `value` defaults to 127. |
-| `panic` | Releases every note and sends All Notes Off. |
+| `panic` | Releases every note and sends All Notes Off. It is written as a bare word: `Backquote: panic`. |
 
 The schema enforces these rules, and an error names the position and
 the rule it breaks:
@@ -317,6 +320,8 @@ the rule it breaks:
   `Shift` or another held key switches to are an open question (§7).
 - **Every note is in MIDI's range.** Each note at `base` is between 0
   and 127.
+- **A keymap plays at least one note.** One with only controls is
+  rejected, because it would start a source that can never sound.
 
 Musical Typing's `KeyA` plays MIDI note 60, which Logic names C3 and
 most other tools name C4. Its velocity steps by 20, as Ableton Live's
@@ -462,9 +467,10 @@ audio recording ([recording.md](../recording/readme.md) §3 and §4), and
 | --- | --- |
 | `src/keys/terminal.ts` (new) | Probes, enables, and restores the kitty protocol and focus reports, and decodes key events, with their base layout keys, from stdin bytes. The decoder is a pure function over bytes. |
 | `src/keys/position.ts` (new) | Finds a key event's position from its base layout key or, failing that, the keyboard layout the helper reported, and finds the dead-key positions the status line names (§2.3). |
-| `src/schema/keymap.ts` (new) | The zod schema for keymap files: the fields, the grid, the actions, and the rules in §2.4. |
-| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, expands a grid into offsets, and watches the directory of a keymap given by path to reload it. |
+| `src/schema/keymap.ts` (new) | The zod schema for keymap files: the fields, the grid, the actions, and the rules in §2.4. It also expands a grid into offsets, because the range rule needs the expanded notes. |
+| `src/keys/keymap.ts` (new) | Resolves `--keymap` and `FIELD_KEYMAP` to a built-in or a path, loads and validates the file, and watches the directory of a keymap given by path to reload it. |
 | `src/keys/print.ts` (new) | The `--print` diagram. |
+| `src/commands/keys.ts` (new) | The interactive shell: probes the terminal and gives it back on every exit, starts the helper, plays key events through positions and the session, draws the status line, and reloads a keymap given by path. |
 | `keymaps/musical-typing.yaml` (new) | The default keymap. |
 | `keymaps/tracker.yaml`, `keymaps/fourths.yaml` (new, chunk 3) | The other built-ins. Chunk 1's schema tests carry both as fixtures, so the format is known to express them before they ship. |
 | `src/keys/session.ts` (new) | The note state: which position holds which notes, transpose, velocity, controller modes, pitch bend, and releasing every note on focus-out and on quit. Emits MIDI bytes. |
@@ -617,7 +623,7 @@ Chunk 1, the MIDI device and keymaps:
 
 | # | Do | Expect |
 | --- | --- | --- |
-| 1 | In Ghostty, run `field keys`. In another terminal, run `field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
+| 1 | In Ghostty, run `field keys`. In another terminal, from the Field checkout, run `native/audiod/build/field-audiod_artefacts/Release/field-audiod --midi-monitor "Field Keys"`. Press and release `KeyA`. | Note-on 60, then note-off 60. `Field Keys` is listed in Audio MIDI Setup. |
 | 2 | Hold `KeyA`, press `KeyX`, release `KeyA`. | Note-off 60, not 72. |
 | 3 | Hold `KeyA` for two seconds. | One note-on, no repeats. |
 | 4 | Hold `KeyA`, then switch to another window. | Note-off 60 when focus leaves. |
@@ -832,3 +838,62 @@ Each chunk is one pull request, in order:
   D-minor chord from twelve sine voices under `Env.linen`, a fixed-length
   envelope. Its voice is already one SynthDef, and a gated envelope
   makes it playable.
+
+## 9 Chunk 1 as built (2026-10-10)
+
+`field keys` plays the computer keyboard as the MIDI source `Field
+Keys`, through any keymap, built-in or yours. The built-in is
+`musical-typing`; `tracker` and `fourths` wait for chunk 3 as planned.
+
+### 9.1 What implementation settled
+
+- **A release takes the position its press resolved to.** An
+  end-to-end run through CoreMIDI under a ColemakC keyboard layout
+  showed the problem: a release resolved afresh can land on another
+  position when its base layout key is missing or the input source
+  changes while the key is held, and the note sounds until focus-out
+  or quit. `PressedKeys` in `src/keys/position.ts` remembers each
+  pressed key's position by the key the terminal reported.
+- **The grid expands in the schema file.** `src/schema/keymap.ts`
+  expands grids because the range rule needs the expanded notes, and
+  `src/keys/keymap.ts` resolves, loads, and watches.
+- **The interactive shell is `src/commands/keys.ts`.** §2.8 gains the
+  row.
+- **`panic` is a bare word**, and **a keymap plays at least one note**
+  (§2.4).
+- **Reload happens only when the keymap's text changes**, because macOS
+  can report a write made just before the watch began (§2.4).
+- **The probe waits two seconds** for the terminal's answers. Every
+  terminal answers the device-attributes query, so the wait matters
+  only for one that answers nothing, and a slow SSH link needs more
+  than one second.
+- **The helper's modes are subprocesses in `native/audiod/src/keys.cpp`
+  and `keyboard-layout.cpp`.** The layout code includes no JUCE headers,
+  so Carbon's and JUCE's never meet.
+
+### 9.2 What was verified, and how
+
+| Check | Result |
+| --- | --- |
+| The vitest tests §4 lists for chunk 1 | Pass: schema 13, keymap 10, print 3, terminal 13, position 11, session 20, helper 6. |
+| The native round trip, `src/keys/helper-native.test.ts` | 8 pass on macOS against the built binary. It fails against a binary without `--keys`. |
+| `field keys` in a pseudo-terminal, against a stub helper that reports a Dvorak layout | Eleven scripted key events sent exactly the predicted MIDI, including the note a transpose left under a held key, the focus-out release, sustain, bend, an ignored Ctrl-chord, and All Notes Off. The protocol flags were pushed at start and popped at exit. |
+| `field keys` in a pseudo-terminal with the real helper, under this Mac's ColemakC layout, heard by `--midi-monitor` through CoreMIDI | `o` played E5 through the layout report, `r` with base layout key `d` played E4, and `e` played C5, each with its own note-off, then All Notes Off. `Field Keys` was gone the moment the command exited. |
+| The layout change report | `--keys` printed a new report when the input source switched from ColemakC to U.S. and back. macOS posted the switch twice, so a switch can produce two reports. |
+| Dead keys | A read-only `UCKeyTranslate` check of U.S. International – PC marks `Quote` and `Backquote` dead. `musical-typing` binds `Quote` and not `Backquote`, so criterion 11 holds as written. |
+
+### 9.3 What is still owed
+
+- **Criteria 1 to 20 by hand at a real keyboard.** The runs above typed
+  the protocol's bytes into a pseudo-terminal, so they prove the
+  decoding, the positions, the session, and the helper, but not how
+  Ghostty, iTerm2, and Apple's Terminal behave with real keys. Criteria
+  6, 9, and 10 decide whether iTerm2 sends base layout keys and whether
+  the layout report reaches `field keys` in time.
+- **Linux.** `--keys` has not run on Linux; CI's runner has no ALSA
+  sequencer, so the round trip skips there by name.
+- **A one-off CoreMIDI failure.** The first `--keys` start on this Mac
+  printed `CoreMIDI error: 580` (`MIDIClientCreate` returned -304) and
+  could not create the source; about sixty later starts did not. JUCE
+  keeps a failed client for the life of the process, so the remedy is
+  to run `field keys` again, which `docs/keys.md` says.

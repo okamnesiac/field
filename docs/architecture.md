@@ -100,6 +100,14 @@ engine, editor windows, routing, metering beyond the armed input's
 peak — is future work whose settled decisions live in
 [audio-engine.md](audio-engine.md).
 
+MIDI is hardware-facing too, so it lives here as well
+([keys.md](keys.md)). `field keys` reads the keyboard in TypeScript and
+spawns `field-audiod --keys`, a short-lived mode separate from the
+daemon that owns the `Field Keys` virtual MIDI source and, on macOS,
+reports the active keyboard layout. `--midi-monitor` prints what a
+named MIDI source sends. Neither touches the transport or the control
+socket.
+
 The real-time audio callback never depends on TypeScript or Python: GC
 pauses and JIT are disqualifying when a 64-sample buffer at 96kHz gives
 you about 0.7ms.

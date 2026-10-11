@@ -1006,6 +1006,20 @@ program
   });
 
 program
+  .command('keys')
+  .description('play the computer keyboard as the MIDI source "Field Keys" (needs a terminal with the kitty keyboard protocol; Esc quits)')
+  .option('--keymap <name or path>', 'a built-in keymap by name, or your own keymap file by path (default: $FIELD_KEYMAP, then musical-typing)')
+  .option('--print', 'print the keymap as a keyboard diagram and exit')
+  .action(async (opts: { keymap?: string; print?: boolean }) => {
+    try {
+      const { keysCommand } = await import('./commands/keys.js');
+      await keysCommand(opts);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program
   .command('query <expr>')
   .description("query the graph: a pattern, or deps(creek/track:drums)")
   .action((expr: string) => {
