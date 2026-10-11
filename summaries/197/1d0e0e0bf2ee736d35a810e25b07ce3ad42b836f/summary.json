@@ -1,0 +1,129 @@
+{
+ "version": 1,
+ "name": "Windows CI test fixes",
+ "project": "windows-portability",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 197,
+  "title": "Fix the test failures that turn main's windows CI job red on every run (windows-portability.md §7.2)",
+  "head": "1d0e0e0bf2ee736d35a810e25b07ce3ad42b836f",
+  "headRef": "windows/ci-green",
+  "base": "8472df55978ef137bc18ad7c89b4ca47bf942620",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field's CI runs the whole test suite twice for every push: once in a <code>linux</code> job and once in a <code>windows</code> job on GitHub's <code>windows-latest</code> runner. The <code>windows</code> job has failed on every run of <code>main</code>, so every branch cut from <code>main</code> shows a red windows check that says nothing about the branch itself. This pull request makes that job pass by changing expectations and cleanup in three test files, and one note in the Windows portability plan. It changes no product code.",
+   "<code>main</code>'s windows run at <code>8472df5</code> failed 13 tests: twelve that fail on every run, and one intermittent loop take. This pull request addresses the twelve, and one more intermittent failure, the inventory cache test, which failed in 7 of the 22 failed windows runs the author read:",
+   "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Tests</th><th>Why they fail on Windows</th><th>What the change does</th></tr></thead><tbody><tr><td>3 in \"resolving an instrument\"</td><td>They expect <code>/p/shared/instruments/pad.scd</code>, but <code>instrumentPath</code> resolves a program with <code>path.resolve</code>, which answers <code>D:\\p\\shared\\instruments\\pad.scd</code> on Windows.</td><td class=\"r\">Port: expect native paths</td></tr><tr><td>7 in \"the voice host process\"</td><td>They point <code>FIELD_SCLANG</code> at an extensionless Node script with a <code>#!</code> line. Windows cannot start that, and <code>sclangCommand</code> refuses it before anything spawns.</td><td class=\"r\">Skip on win32, recorded in the plan</td></tr><tr><td>2 MIDI take tests</td><td>Both test bodies pass. The <code>afterEach</code> then deletes the temp project while the killed daemon still has it as its working directory, and <code>rmSync</code> fails with <code>EPERM</code>.</td><td class=\"r\">Retry the removal with <code>removeTempProject</code></td></tr><tr><td>1 inventory cache test (intermittent)</td><td>A same-size rewrite lands in the same Windows timestamp tick as the write before it, so the cache sees no change.</td><td class=\"r\">Wait 50 ms on win32 first</td></tr></tbody></table></div>",
+   "The loop take, in <code>src/commands/punch-daemon.test.ts</code>, comes from the daemon rather than from a test. The pull request leaves it alone and says so in its description, along with occasional runner stalls in <code>clone.test.ts</code>, <code>project.test.ts</code>, and <code>live-session.test.ts</code>."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Voice host</b>: the <code>sclang</code> process that <code>field keys</code> starts to play an instrument program live. <code>VoiceHost</code> in <code>src/keys/voice-host.ts</code> spawns and supervises it.</li><li><b><code>FIELD_SCLANG</code></b>: the environment variable that names the <code>sclang</code> binary. Tests point it at a stub.</li><li><b><code>sclangCommand</code></b>: the lookup that turns <code>FIELD_SCLANG</code> or <code>PATH</code> into a binary. On Windows it accepts only <code>.exe</code> and <code>.com</code>.</li><li><b>Inventory</b>: <code>.field/plugins.json</code>, the list of hosted plugins a scan writes. <code>readInventory</code> caches its parse by file timestamps, inode, and size.</li><li><b><code>removeTempProject</code></b>: the test helper in <code>src/testing/temp.ts</code> that retries a temp project's removal for up to 10 s while a daemon exits.</li></ul>"
+   },
+   {
+    "id": "review",
+    "title": "What the review found",
+    "html": "<p>The Projector review of <code>1d0e0e0</code> found no defects and opened no threads. It checked each failure against <code>main</code>'s windows log, and ran <code>pnpm typecheck</code> and the changed tests on macOS, leaving out the MIDI take tests that arm every MIDI source on the machine.</p><p>This head's windows CI job, run on the head merged into <code>main</code>, passed every test the change fixes, but still failed: the <code>beforeEach</code> in <code>src/commands/clone.test.ts</code> timed out at 10 s. The change does not touch that test, and its description names it among the runner stalls it leaves alone.</p><p class=\"note\">Two suggestions: give the clone hook more headroom, since its tests took up to 5.7 s each on Windows, and file the daemon loop take races the description diagnoses as an issue.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "voice-host",
+   "title": "Instrument paths become native, and the stub sclang tests skip on Windows",
+   "kicker": "Ten of the twelve failures, all in the voice host's test file",
+   "intro": [
+    "<code>src/keys/voice-host.test.ts</code> tests two things that fail on Windows for different reasons, and the change treats them differently.",
+    "<b>Instrument resolution is ported.</b> <code>instrumentPath</code> turns a program name such as <code>pad</code> into a file to open: it adds <code>.scd</code>, puts a bare name on the <code>shared/instruments</code> shelf, and resolves it against the project root with <code>path.resolve</code>. A file to open has a native path, so on Windows the root <code>/p</code> becomes <code>D:\\p</code> and the parts join with <code>\\</code>. The product code is right; the tests expected POSIX strings. They now build the expected path with <code>resolve</code> and <code>join</code>, which produce the same strings as before on macOS and Linux. Project-relative paths that Field stores as data stay slash-separated, as the plan decides, and these are not those.",
+    "<b>The process tests skip.</b> Seven tests start a stub <code>sclang</code>: an extensionless Node script with a <code>#!/usr/bin/env node</code> line. Windows has no <code>#!</code> lines, and <code>sclangCommand</code> refuses a <code>FIELD_SCLANG</code> without <code>.exe</code> or <code>.com</code> on Windows. So each test failed at the refusal before anything spawned. The change wraps them in <code>itStartsTheStub</code>, an <code>it.skipIf(process.platform === 'win32')</code>, the same guard that <code>src/graph/build.test.ts</code> puts on its two <code>#!/bin/sh</code> sclang stubs. Only a second stub that Windows can start, such as a small <code>.exe</code>, would lift it."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "A skip hides whatever the skipped tests would have found on Windows. What these seven exercise is <code>VoiceHost</code>: the spawn, the host's output lines, OSC <code>/quit</code> and <code>/field/reload</code> over UDP, and stopping processes with <code>child.kill</code> and <code>process.kill</code>, all Node APIs that work on Windows. The Windows-specific part, which binary <code>sclangCommand</code> picks, is covered on every platform by <code>src/generators/supercollider.test.ts</code>."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/keys/voice-host.test.ts",
+     "note": "Three instrument resolution tests now expect native paths, and seven process tests skip on win32 through <code>itStartsTheStub</code>.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 100,
+       "text": "<code>main</code>'s windows log received <code>D:\\p\\shared\\instruments\\pad.scd</code> and <code>D:\\p\\songs\\creek\\voice.scd</code>, which <code>join(resolve('/p'), …)</code> builds on a runner whose working directory is on <code>D:</code>. The absolute case, <code>/elsewhere/voice.scd</code>, stays as written because <code>instrumentPath</code> returns any spec that <code>isAbsolute</code> accepts unchanged, and win32 <code>isAbsolute</code> accepts a rooted path."
+      },
+      {
+       "kind": "verify",
+       "line": 116,
+       "text": "The refusal message names <code>join(dir, 'shared/instruments/pad.scd')</code> with <code>dir</code> exactly as <code>mkdtempSync</code> returned it, short name <code>RUNNER~1</code> included, as <code>main</code>'s windows log shows. A string passed to <code>toThrow</code> matches a substring, so the shelf listing that follows the path does not break it. The assertion is stricter than the regular expression it replaces, because it pins the whole prefix."
+      },
+      {
+       "kind": "verify",
+       "line": 177,
+       "text": "Seven tests use <code>itStartsTheStub</code>, matching the seven \"the voice host process\" failures in <code>main</code>'s windows log. The missing-binary test at the end of the block still runs on Windows: <code>sclangCommand</code> reports a missing <code>FIELD_SCLANG</code> before it checks the extension."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "cleanup-timing",
+   "title": "A daemon's working directory and a timestamp tick",
+   "kicker": "The MIDI take cleanup and the inventory cache's same-size rewrite",
+   "intro": [
+    "Two more tests fail on Windows for reasons that have nothing to do with what they test. Both fixes follow a pattern the repository already uses elsewhere.",
+    "<b>The MIDI take tests' cleanup retries.</b> <code>src/commands/record-midi-daemon.test.ts</code> starts real <code>field-audiod</code> daemons with the temp project as their working directory, kills them in <code>afterEach</code>, and deletes the project at once. Windows refuses to delete a directory that a live process uses as its working directory, and a killed daemon takes a moment to exit. So \"advertises record-midi\" and \"refuses to arm for MIDI where there is no MIDI source\" failed with <code>EPERM</code> after their bodies had passed. The cleanup now calls <code>removeTempProject</code>, which retries the removal every 150 ms for up to 10 s, as every other daemon test file already does.",
+    "<b>The inventory cache test waits out a tick.</b> <code>readInventory</code> reuses its parse of <code>.field/plugins.json</code> while the file's modification time, change time, inode, and size are unchanged. The test rewrites the file with different bytes of the same length, which only a timestamp can reveal. On Windows, file timestamps advance with the system clock in ticks of about 15.6 ms, so a write right after another can carry the same timestamps, and the cache serves the old parse. The test now waits 50 ms on win32 before that write, as the next test in the file already does for the same reason."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/record-midi-daemon.test.ts",
+     "note": "The <code>afterEach</code> removes the temp project with <code>removeTempProject</code> instead of a single <code>rmSync</code>.",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 104,
+       "text": "In <code>main</code>'s windows log each of the two failures carries one error, <code>EPERM</code> from <code>rmSync</code> at the old line 101, and nothing from the test body. So the refusal to arm with no MIDI source works over the Windows named pipe, and no daemon defect sits behind these failures. The change skips neither test; the four take tests still skip at run time because Windows has no virtual MIDI ports."
+      }
+     ]
+    },
+    {
+     "path": "src/audio/plugin-hosting.test.ts",
+     "note": "A 50 ms wait on win32 before the same-size rewrite in \"serves an unchanged file from cache and re-reads a changed one\".",
+     "collapsed": false,
+     "checks": [
+      {
+       "kind": "context",
+       "line": 757,
+       "text": "The wait sits only before the same-size write. The write before it changes the file's size, which the cache sees without help from the timestamps. The cause is inferred from the failure, the third read returning the second read's object, not measured; the comment says so. A scan writes the inventory once per run, so two writes a tick apart are a shape only this test produces; that is an inference, and the sibling test's comment makes the same case."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The Windows plan records the new guard",
+   "kicker": "One sentence in section 7.2 of windows-portability",
+   "intro": [
+    "The Windows portability plan lists every test that skips on Windows and what would lift each guard. The <code>sclangCommand</code> item in section 7.2, \"Found by the sweep, not yet in any chunk\", now says that the seven voice host tests skip for the same reason as <code>build.test.ts</code>'s two stubs, and that only a second stub dialect would lift them."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Section 7.2, the <code>sclangCommand</code> item: four lines recording the voice host's win32 guard.",
+     "collapsed": false
+    }
+   ]
+  }
+ ]
+}
