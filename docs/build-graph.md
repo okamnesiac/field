@@ -261,8 +261,8 @@ predates the §4 rename).
 The same program can also be played from notes. When `FIELD_MODE` is
 `voice`, it must not render or exit, and its value — the file's last
 expression — is a SynthDef with `freq`, `amp`, `gate`, and `out`
-controls, and optionally `mod`, that frees itself after `gate` goes to
-0. `field keys
+controls that frees itself after `gate` goes to 0. It may also have a
+`mod` control, which the modulation wheel sets. `field keys
 <instrument>` plays that voice live; the render variables are absent in
 voice mode, so a program checks `FIELD_MODE` before reading them. A
 `supercollider:` entry never runs in voice mode, so voice mode changes

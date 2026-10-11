@@ -138,9 +138,10 @@ these controls, and it must not render or exit.
 
 A voice may leave `mod` out, and then the wheel does nothing to it. In
 `musical-typing`, the keys `3` to `8` set the wheel from 0 to full, as
-they do in Logic. The voice writes two channels and frees itself after `gate` goes to 0,
-with an envelope that ends in `doneAction: 2`. The render variables are
-absent in voice mode, so check `FIELD_MODE` before you read them:
+they do in Logic. The voice writes two channels and frees itself after
+`gate` goes to 0, with an envelope that ends in `doneAction: 2`. The
+render variables are absent in voice mode, so check `FIELD_MODE` before
+you read them:
 
 ```supercollider
 (
@@ -231,6 +232,11 @@ audio takes only. The take is placed by the output latency alone,
 because you play in time with what you hear. `field choose` picks
 among takes as it does for audio. For the files a take leaves, see
 [project-model.md](project-model.md) "MIDI takes".
+
+A take starts with the modulation wheel at 0, because it records only
+the messages that arrive once it has started. A wheel you left up
+before then plays live but not in the take's render, so set it again
+after the take starts: move the wheel, or press the key that sets it.
 
 ## Keys are read by position
 

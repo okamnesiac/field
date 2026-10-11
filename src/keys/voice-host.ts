@@ -111,9 +111,9 @@ export class VoiceHost {
   // The scsynth the host launched last, which `close` stops by process:
   // one that is still booting has not bound its port, so /quit misses it.
   private serverPid: number | undefined;
-  // sclang's ERROR lines since the last reload: a program that does not
-  // compile says why only there.
-  private reloadErrors: string[] = [];
+  // sclang's first ERROR line since the last reload: a program that does
+  // not compile says why only there.
+  private reloadError: string | undefined;
   // Settles when the host first goes live, or rejects with why it did not.
   readonly ready: Promise<void>;
 
@@ -151,7 +151,7 @@ export class VoiceHost {
       child.stderr.on('data', () => {});
       createInterface({ input: child.stdout }).on('line', (line) => {
         tail.push(line);
-        if (line.startsWith('ERROR:')) this.reloadErrors.push(line.slice('ERROR:'.length).trim());
+        if (line.startsWith('ERROR:')) this.reloadError ??= line.slice('ERROR:'.length).trim();
         if (tail.length > OUTPUT_TAIL * 4) tail.splice(0, tail.length - OUTPUT_TAIL * 4);
         const parsed = parseHostLine(line);
         if (parsed === undefined) return;
@@ -168,7 +168,7 @@ export class VoiceHost {
         else if ('voice_off' in parsed) options.onStatus?.({ state: 'voice', note: parsed.voice_off, on: false });
         else if ('reloaded' in parsed) options.onStatus?.({ state: 'reloaded' });
         else {
-          const detail = this.reloadErrors[0];
+          const detail = this.reloadError;
           options.onStatus?.({ state: 'reload-failed', reason: detail === undefined ? parsed.reload_error : `${parsed.reload_error}: ${detail}` });
         }
       });
@@ -203,7 +203,7 @@ export class VoiceHost {
   // Asks the host to load the instrument's program again, as its file has
   // changed; the result arrives as a `reloaded` or `reload-failed` status.
   reload(): Promise<void> {
-    this.reloadErrors = [];
+    this.reloadError = undefined;
     return sendOsc('/field/reload', this.langPort);
   }
 

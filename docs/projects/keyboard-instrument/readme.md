@@ -377,6 +377,7 @@ must be a SynthDef with these controls:
 | `amp` | `velocity / 127` |
 | `gate` | 1 at note-on, 0 at note-off |
 | `out` | The output bus, 0 |
+| `mod` | Optional, added in §14: the modulation wheel (CC 1), from 0 to 1 |
 
 The voice writes two channels to `out` and frees itself after `gate`
 goes to 0, with an envelope that ends in `doneAction: 2`. The render
@@ -407,9 +408,8 @@ The voice host owns everything between MIDI and voices:
 - **Pitch bend.** The host sets `freq` on every sounding voice to its
   note bent by up to two semitones either way, so the contract gains no
   control for it.
-- **Modulation.** The host ignores CC 1. It reaches other applications
-  through `Field Keys`, and a voice can respond to it once the contract
-  has a control for it (§7).
+- **Modulation.** This chunk's host ignored CC 1; §14 gives the
+  contract an optional `mod` control for it.
 - **Every source and channel.** The host connects every MIDI source at
   start. A controller plugged in later needs a restart.
 - **Device and rate.** `scsynth` opens the device from `--device`, or
@@ -1341,3 +1341,10 @@ wheel reaches the voice as an optional `mod` control.
 - **A save in the first seconds of a session** can arrive before
   `sclang` has registered its reload responder, and is then lost; the
   next save reloads.
+- **A wheel left up before a take starts** plays live but not in the
+  take: the daemon records only what arrives once the take has started,
+  so the render starts at `mod` 0. `docs/keys.md` says to set the wheel
+  after the take starts. Carrying the wheel's position into a take would
+  still miss one set before `field record` arms, which it does just
+  before the take, so it waits until a lasting arm (arming.md chunk 3)
+  keeps the MIDI sources open between takes.
