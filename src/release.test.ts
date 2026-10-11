@@ -1,25 +1,31 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { bump, current, main, NOT_RELEASED, parse, repoSlug, setVersion, tag } from '../scripts/release.js';
+import { bump, current, githubRepo, main, NOT_RELEASED, parse, repoSlug, setVersion, tag } from '../scripts/release.js';
 
 // scripts/release.ts against a temporary repository whose `origin` is a
 // bare repository beside it (install.md §3.1), so tags are really pushed
 // and really fetched. The GitHub release is the one step a test cannot
 // take, so it is a stand-in that records its arguments.
+//
+// `origin` is the bare repository's path, never a GitHub URL. No git
+// process this file starts, the script's included, reads the user's or the
+// system's git config, or a repository the environment names: a
+// `pushInsteadOf` rule there, or the GIT_DIR a git hook exports, would
+// send the suite's pushes to a real remote. Git for Windows reads
+// /dev/null as its null device too.
+for (const name of Object.keys(process.env)) if (name.startsWith('GIT_')) delete process.env[name];
+process.env['GIT_CONFIG_GLOBAL'] = '/dev/null';
+process.env['GIT_CONFIG_NOSYSTEM'] = '1';
 
 let root: string;
 let origin: string;
 let checkout: string;
 
 function git(cwd: string, ...args: string[]): string {
-  const result = spawnSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: root },
-  });
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
   return result.stdout.trim();
 }
@@ -30,7 +36,6 @@ function commit(message: string): void {
 }
 
 const PACKAGE = '{\n  "name": "field",\n  "version": "0.1.0",\n  "type": "module"\n}\n';
-const GITHUB = 'https://github.com/okamnesiac/field.git';
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'field-release-')));
@@ -46,10 +51,6 @@ beforeEach(() => {
   ] as const) {
     git(checkout, 'config', key, value);
   }
-  // origin names the GitHub repository, as a real clone's does, and git
-  // rewrites that URL to the bare repository beside it.
-  git(checkout, 'config', 'remote.origin.url', GITHUB);
-  git(checkout, 'config', `url.${origin}.insteadOf`, GITHUB);
   writeFileSync(join(checkout, 'package.json'), PACKAGE);
   git(checkout, 'add', 'package.json');
   git(checkout, 'commit', '--quiet', '-m', 'one');
@@ -89,20 +90,44 @@ describe('tagging a release', () => {
   it('tags the merged version, moves the major tag, and creates the GitHub release', () => {
     const calls: string[][] = [];
     const head = git(checkout, 'rev-parse', 'HEAD');
-    expect(tag(checkout, { createRelease: (slug, name) => calls.push([slug, name]) })).toBe(
+    expect(tag(checkout, { createRelease: (_root, remote, name) => calls.push([remote, name]) })).toBe(
       `tagged v0.1.0 and moved v0 to ${head.slice(0, 9)} on origin/main, and published the v0.1.0 GitHub release`,
     );
     expect(git(origin, 'rev-parse', 'v0.1.0^{commit}')).toBe(head);
     expect(git(origin, 'rev-parse', 'v0^{commit}')).toBe(head);
     expect(git(origin, 'tag', '-l', '--format=%(contents:subject)', 'v0.1.0')).toBe('Field 0.1.0');
-    // The repository origin names, though git fetched from a path.
-    expect(calls).toEqual([['okamnesiac/field', 'v0.1.0']]);
+    expect(calls).toEqual([['origin', 'v0.1.0']]);
   });
 
   it('pushes the tags from a remote that is not GitHub, and says the release is unfinished', () => {
-    git(checkout, 'config', 'remote.origin.url', origin);
     expect(() => tag(checkout)).toThrow('the GitHub release was not created (origin is not a GitHub repository)');
     expect(git(origin, 'tag', '--list')).toBe('v0\nv0.1.0');
+  });
+
+  it('pushes to origin whatever pushInsteadOf rule the user has, never to where the rule points', () => {
+    // The user's ~/.gitconfig rewrites pushes to GitHub, as a rule that
+    // pushes over SSH does, and pushes to the bare repository's directory.
+    // Both rules point at a decoy.
+    const home = join(root, 'home');
+    const decoy = join(root, 'decoy');
+    mkdirSync(home);
+    git(root, 'init', '--quiet', '--bare', join(decoy, 'origin.git'));
+    for (const from of ['https://github.com/', `${root}${sep}`]) {
+      git(root, 'config', '--file', join(home, '.gitconfig'), '--add', `url.${decoy}${sep}.pushInsteadOf`, from);
+    }
+    const saved = { HOME: process.env['HOME'], XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'] };
+    process.env['HOME'] = home;
+    process.env['XDG_CONFIG_HOME'] = join(home, '.config');
+    try {
+      tag(checkout, { githubRelease: false });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(git(origin, 'tag', '--list')).toBe('v0\nv0.1.0');
+    expect(git(join(decoy, 'origin.git'), 'for-each-ref')).toBe('');
   });
 
   it('moves the major tag forward on the next release and leaves the old tag where it was', () => {
@@ -147,6 +172,15 @@ describe('tagging a release', () => {
     expect(repoSlug('ssh://git@github.com/okamnesiac/field.git')).toBe('okamnesiac/field');
     expect(repoSlug('https://github.com/okamnesiac/field')).toBe('okamnesiac/field');
     expect(repoSlug('/tmp/origin.git')).toBeUndefined();
+  });
+
+  it('names the GitHub repository from the URL a remote is configured with, before insteadOf rewrites it', () => {
+    // Nothing is fetched from or pushed to this remote.
+    git(checkout, 'remote', 'add', 'github', 'https://github.com/example/field.git');
+    git(checkout, 'config', `url.${origin}.insteadOf`, 'https://github.com/example/field.git');
+    expect(git(checkout, 'remote', 'get-url', 'github')).toBe(origin);
+    expect(githubRepo(checkout, 'github')).toBe('example/field');
+    expect(() => githubRepo(checkout, 'origin')).toThrow('origin is not a GitHub repository');
   });
 });
 

@@ -554,13 +554,20 @@ install would build the daemon with MSVC, as a Windows checkout does.
 ### 9.2 What was verified, and how
 
 - `src/release.test.ts` runs the script's functions against a temporary
-  repository whose `origin` is a bare repository standing in for the
-  GitHub URL. It covers each `bump` part, `set` refusing a version that
-  does not go up, `tag` pushing both tags and moving `v0` on the next
-  release, tagging what `origin/main` holds rather than an unpushed
-  bump, refusing a tagged version, a remote that is not GitHub, a failed
-  GitHub release naming the command that finishes it, `released`'s exit
-  codes, and plain `node` running the file.
+  repository whose `origin` is the path of a bare repository beside it,
+  never a GitHub URL. Every git process the file starts, the script's
+  included, ignores the user's and the system's git config and any
+  repository the environment names, so a `pushInsteadOf` rule in
+  `~/.gitconfig` cannot send the suite's pushes to GitHub. A test puts
+  such rules in a stand-in home directory and checks that the pushes
+  still reach `origin` and never the decoy the rules point at. The file
+  also covers each `bump` part, `set` refusing a version that does not
+  go up, `tag` pushing both tags and moving `v0` on the next release,
+  tagging what `origin/main` holds rather than an unpushed bump,
+  refusing a tagged version, a remote that is not GitHub, the GitHub
+  repository read from a remote's configured URL, a failed GitHub
+  release naming the command that finishes it, `released`'s exit codes,
+  and plain `node` running the file.
 - The workflow itself has not run. Its first run is the first release.
 
 ### 9.3 What is still owed

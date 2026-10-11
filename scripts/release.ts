@@ -104,9 +104,18 @@ export function merged(root: string, remote: string, branch: string): { commit: 
   return { commit, version, tagged: git(root, 'tag', '--list', `v${version}`) !== '' };
 }
 
-export type CreateRelease = (slug: string, tag: string) => void;
+// The repository the remote's configured URL names. `git remote get-url`
+// applies `insteadOf` rewrites, which can turn a GitHub URL into a mirror's.
+export function githubRepo(root: string, remote: string): string {
+  const slug = repoSlug(git(root, 'config', '--get', `remote.${remote}.url`));
+  if (slug === undefined) throw new ReleaseError(`${remote} is not a GitHub repository`);
+  return slug;
+}
 
-function ghRelease(slug: string, tag: string): void {
+export type CreateRelease = (root: string, remote: string, tag: string) => void;
+
+function ghRelease(root: string, remote: string, tag: string): void {
+  const slug = githubRepo(root, remote);
   const result = spawnSync('gh', ['release', 'create', tag, '--repo', slug, '--verify-tag', '--generate-notes'], {
     encoding: 'utf8',
   });
@@ -142,11 +151,7 @@ export function tag(root: string, options: TagOptions = {}): string {
   const done = `tagged ${release} and moved ${major} to ${commit.slice(0, 9)} on ${remote}/${branch}`;
   if (options.githubRelease === false) return done;
   try {
-    // The configured URL, not `git remote get-url`, which applies
-    // `insteadOf` rewrites and can turn a GitHub URL into a mirror's.
-    const slug = repoSlug(git(root, 'config', '--get', `remote.${remote}.url`));
-    if (slug === undefined) throw new ReleaseError(`${remote} is not a GitHub repository`);
-    (options.createRelease ?? ghRelease)(slug, release);
+    (options.createRelease ?? ghRelease)(root, remote, release);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new ReleaseError(
