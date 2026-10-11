@@ -1,0 +1,1014 @@
+diff --git a/docs/audio-engine.md b/docs/audio-engine.md
+index 7ee18bc..77d6670 100644
+--- a/docs/audio-engine.md
++++ b/docs/audio-engine.md
+@@ -336,9 +336,25 @@ clock, and active sensing.
+ only. The take counts the device's samples from its start, as an audio
+ take counts frames, so each message's `at` is in `sample_rate`. Messages
+ before the start, including during a count-in, and at or after `until`
+-are left out. A take with `until` ends at the first block that begins
+-at or past it, and `stop` lets one more block begin before it ends the
+-take, so every message that arrived in time is placed.
++are left out, except as the chase below keeps them. A take with `until`
++ends at the first block that begins at or past it, and `stop` lets one
++more block begin before it ends the take, so every message that arrived
++in time is placed.
++
++A MIDI take starts where the controllers were
++([instrument-knobs.md](projects/instrument-knobs/readme.md) §2.8). From
++the arm, the daemon keeps the latest value of each controller from 0 to
++119 on each channel: first those `arm` passes in `controllers`, a list
++of `{channel, cc, value}` with `channel` from 1 to 16, then each control
++change that arrives before the take starts. At the take's first sample
++it writes one line per channel and controller, at `at: 0` and ahead of
++every other line, in the order the values last arrived, with the ones
++`arm` passed and nothing replaced first. Every MIDI take of a pass gets
++the same lines. Controllers 120 to 127 are channel mode messages, which
++act once, and are never chased. The table is 16 channels by 120
++controllers, updated in constant time per message by the callback, and
++each arm starts it over. `arm` refuses `controllers` that are out of
++range. A daemon that does this lists `midi-chase` in `hello.features`.
+ 
+ The transaction is a directory, `.field/recording/take-YYYYMMDD-HHMMSS/`,
+ as for audio:
+diff --git a/docs/keys.md b/docs/keys.md
+index cdc829f..618ce2b 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -518,11 +518,19 @@ $ field record creek/track:vox creek/track:keys --at 17
+ ```
+ 
+ A take records every knob you turn while it runs, and its render turns
+-the instrument's knobs where you did. It starts with every knob at its
+-default and the modulation wheel at 0, because it records only the
+-messages that arrive once it has started. A knob you turned before then
+-plays live but not in the take's render, so turn it again after the
+-take starts.
++the instrument's knobs where you did. It also starts where your knobs
++are. Run inside a project, `field keys` keeps the controllers it has
++sent, the wheel among them, in `.field/keys.json`, and removes the file
++when it quits. When it cannot write the file, it keeps playing and names
++the error on the status line, and a take starts without those knobs.
++`field record` passes them to the daemon when it arms, and the daemon
++writes them at the take's first sample with every control change that
++arrives after the arm and before the start, including during a
++count-in. So a knob you turned before the take, on
++`field keys` or a hardware controller, renders where you left it. A
++daemon that predates this starts a take with every knob at its default:
++`field transport quit`, then record again, and it respawns on the new
++build.
+ 
+ ## Keys are read by position
+ 
+diff --git a/docs/project-model.md b/docs/project-model.md
+index eed1d83..9e5f7d0 100644
+--- a/docs/project-model.md
++++ b/docs/project-model.md
+@@ -378,12 +378,16 @@ controls:
+ bends: []
+ ```
+ 
+-A note still held when the take stopped lasts to its end, and
+-`channel` appears only when it is not 1. Its row carries `sources`, the
+-MIDI inputs the take listened to, where an audio row carries `device`
+-and `input`, and its `latency` is the output latency alone: you play
+-in time with what you hear, which runs behind the playhead by that
+-much.
++A take starts where your knobs were: its first `controls` rows, at
++`at: 0`, are each controller's value when the take started, which the
++daemon chased from `field keys` and from every control change after the
++arm ([audio-engine.md](audio-engine.md) "MIDI capture"). The render
++applies them before a note at 0. A note still held when the take
++stopped lasts to its end, and `channel` appears only when it is not 1.
++Its row carries `sources`, the MIDI inputs the take listened to, where
++an audio row carries `device` and `input`, and its `latency` is the
++output latency alone: you play in time with what you hear, which runs
++behind the playhead by that much.
+ 
+ The build renders the chosen take through the instrument as a `gen:`
+ node named like the record node, and the entry places that render. A
+diff --git a/docs/projects/instrument-knobs/readme.md b/docs/projects/instrument-knobs/readme.md
+index 836473c..b5c982a 100644
+--- a/docs/projects/instrument-knobs/readme.md
++++ b/docs/projects/instrument-knobs/readme.md
+@@ -512,7 +512,7 @@ keyboard-instrument.md §14.5's gap for the wheel.
+ | `docs/keys.md` | `musical` as the default, with Logic's number row to copy; knob files and `--knobs`; turning and typing a knob, and the glide; `Ctrl-C` as the way to quit in "Play", the default keymap's table, and "Rules"; the `cc<n>` controls and `FIELD_KNOBS`, the checked copy of the knob file a voice reads, under "Make an instrument playable"; and how a take starts (chunk 3). |
+ | `docs/build-graph.md` | The voice contract gains the `cc<n>` controls and `FIELD_KNOBS`, and the knob file joins a take's render inputs. |
+ | `docs/audio-engine.md`, `docs/project-model.md` | The chase, and the rows it puts at a take's start (chunk 3). |
+-| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits and at §3's choice of Musical Typing as the default, each pointing here. |
++| `docs/projects/keyboard-instrument/readme.md` | Dated notes at §2.4's rule that `Escape` always quits, at §3's choice of Musical Typing as the default, and at §14.5's gap for a wheel left up before a take, each pointing here. |
+ 
+ ## 3 Why this design (DECIDED, 2026-10-11, Justin's review of #202)
+ 
+@@ -1023,3 +1023,52 @@ wait for chunk 3.
+ - **Criteria 4 to 8, 12, 14, 18, and 23 by hand,** in Ghostty or
+   iTerm2 and by ear. The pseudo-terminal run sent the protocol's bytes
+   and heard nothing.
++
++## 11 Chunk 3 as built (2026-10-11)
++
++A MIDI take starts where the knobs are. `field keys` publishes the
++controllers it has sent in `.field/keys.json`, `field record` passes
++them in `arm` to a daemon that lists `midi-chase`, and the daemon writes
++the latest value of each controller at the take's first sample, ahead
++of every other line. With all three chunks built, what remains is the
++criteria a person checks by hand at a kitty terminal and by ear.
++
++### 11.1 What implementation settled
++
++- **The lines go in just before the take's first stamped message.** An
++  arrival in the start block that falls before the start sample is
++  chased first, so the table the lines come from is complete, and the
++  lines still lead the file. `stampMidiBlock` writes them, so a MIDI
++  primary and an audio primary's MIDI companions share the rule.
++- **The seeds cross to the callback under a lock it only tries.** `arm`
++  writes them on the message thread and raises a flag; the callback
++  takes them at the start of a block when the lock is free, and
++  otherwise at the next block. Each arm starts the table over.
++- **Each value's order is when it last arrived, seeds included.** A seed
++  is ordered as arriving at the arm, in the order `arm` lists it, which
++  is the order `field keys` last sent each value. That gives §2.8's
++  "seeded values first, the rest in the order their values last
++  arrived" as one rule.
++- **`.field/keys.json` lists each channel's controllers, least recently
++  sent first,** and a `field keys` that quits removes the file only if
++  it wrote it, so a second `field keys` in the same project keeps its
++  own.
++- **`arm` refuses `controllers` out of range** rather than dropping
++  them, as it refuses a bad input channel.
++
++### 11.2 What was verified, and how
++
++| Check | Result |
++| --- | --- |
++| The full suite, against a `field-audiod` built from this branch | 90 files: 1193 tests pass, and 1 skips. |
++| `src/commands/record-midi-daemon.test.ts` against the daemon built from this branch, through CoreMIDI | Seeded `cc 110 = 10` and `cc 111 = 20` on channel 16, then sent `cc 112 = 30` on channel 15, `cc 110 = 40` on 16, and CC 120 before the start, and `cc 111 = 50` after it. The take's lines at `at: 0` were `cc 111 = 20`, `cc 112 = 30`, `cc 110 = 40`, in that order, with no CC 120; `cc 111 = 50` landed at its own time, after them. `arm` refused a channel of 0, a CC of 120, and a value of 128. |
++| `field record` end to end, in the same file | With `.field/keys.json` published by the test's own process, the landed notes file had `{ at: 0, cc: 113, value: 23, channel: 16 }`. |
++| `src/commands/record-plan.test.ts` | `field record` reads the file only while its process runs and only for a daemon with `midi-chase`, and ignores a file it cannot parse; a `field keys` that quits leaves another one's file. |
++
++### 11.3 What is still owed
++
++- **Criteria 20 and 21 by hand**, and every criterion §9.3 and §10.3
++  list. Criterion 20's notes file is the shape the `field record` test
++  checks; what it does not show is a render that sounds dark from its
++  first note, which needs ears.
++- **`finish`**, once those are checked.
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index d57b9be..f3a37b9 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -1361,4 +1361,11 @@ wheel reaches the voice as an optional `mod` control.
+   after the take starts. Carrying the wheel's position into a take would
+   still miss one set before `field record` arms, which it does just
+   before the take, so it waits until a lasting arm (arming.md chunk 3)
+-  keeps the MIDI sources open between takes.
++  keeps the MIDI sources open between takes. *Amended (2026-10-11,
++  instrument-knobs.md chunk 3):* a take now starts where `field keys`
++  left the wheel. `field keys` publishes the controllers it sent,
++  `field record` passes them in `arm`, and the daemon writes them at
++  the take's first sample, so `docs/keys.md` drops its advice to set
++  the wheel after the take starts. Only a hardware wheel moved before
++  the arm is still missed
++  ([instrument-knobs.md](../instrument-knobs/readme.md) §2.8).
+diff --git a/native/audiod/src/player.cpp b/native/audiod/src/player.cpp
+index 099d500..8205163 100644
+--- a/native/audiod/src/player.cpp
++++ b/native/audiod/src/player.cpp
+@@ -1152,6 +1152,7 @@ juce::int64 Player::pullAudio (const float* const* in, int numInputs, float* con
+ void Player::processBlock (const float* const* in, int numInputs, float* const* out, int numOutputs, int n)
+ {
+     const double blockStartMs = juce::Time::getMillisecondCounterHiRes();
++    takeChaseSeeds();
+     const juce::int64 position = pullAudio (in, numInputs, out, numOutputs, n);
+     if (latchStallMs > 0)
+         std::this_thread::sleep_for (std::chrono::milliseconds (latchStallMs));
+@@ -1199,11 +1200,12 @@ void Player::processBlock (const float* const* in, int numInputs, float* const*
+     }
+     recordAudioBlock (in, numInputs, input, position, freeBefore, n);
+     // An audio primary's MIDI companions stamp what arrived on the clock
+-    // its latch set; otherwise what arrived belongs to no take.
++    // its latch set; otherwise what arrived belongs to no take, and only
++    // the chase keeps it.
+     if (companionMidiRunning.load())
+         recordMidiCompanions (n, blockStartMs);
+     else
+-        drainMidiArrivals ([] (const MidiArrival&) {});
++        drainMidiArrivals ([this] (const MidiArrival& arrival) { chaseArrival (arrival); });
+ }
+ 
+ void Player::recordAudioBlock (const float* const* in, int numInputs, const float* input, juce::int64 position,
+@@ -1263,6 +1265,7 @@ void Player::recordAudioBlock (const float* const* in, int numInputs, const floa
+             midiFloor = std::numeric_limits<juce::int64>::min();
+             midiLastAt = 0;
+             midiArrivalsLost = 0;
++            chasePending = true;
+             companionMidiRunning = true;
+         }
+         captureStarted = true;
+@@ -1357,7 +1360,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
+     // from its own start.
+     if (position == -1)
+         return;
+-    const auto discard = [] (const MidiArrival&) {};
++    const auto chaseEach = [this] (const MidiArrival& arrival) { chaseArrival (arrival); };
+     const juce::int64 here = position == -2 ? freeBefore : position;
+     // A MIDI primary's companions are MIDI too, since armSet makes an
+     // audio track the primary whenever one is armed, and they record
+@@ -1373,7 +1376,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
+     {
+         if (! blockSawRequest)
+         {
+-            drainMidiArrivals (discard);
++            drainMidiArrivals (chaseEach);
+             return;
+         }
+         int from = 0;
+@@ -1382,7 +1385,7 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
+         {
+             if (here + n <= startAt)
+             {
+-                drainMidiArrivals (discard);
++                drainMidiArrivals (chaseEach);
+                 return;
+             }
+             from = (int) std::max<juce::int64> (0, startAt - here);
+@@ -1394,11 +1397,12 @@ void Player::recordMidiBlock (field::MidiCapture& take, juce::int64 position, ju
+         midiFloor = std::numeric_limits<juce::int64>::min();
+         midiLastAt = 0;
+         midiArrivalsLost = 0; // lost before the take began
++        chasePending = true;
+         captureStarted = true;
+     }
+     if (! captureStarted.load())
+     {
+-        drainMidiArrivals (discard);
++        drainMidiArrivals (chaseEach);
+         return;
+     }
+     const juce::int64 untilFrames = midiUntilFrames (take);
+@@ -1464,19 +1468,72 @@ juce::int64 Player::stampMidiBlock (juce::int64 untilFrames, int n, double block
+         // back than that block's start.
+         at = std::clamp (at, midiFloor, blockEnd - 1);
+         if (at < 0)
+-            return; // before the start
++        {
++            chaseArrival (arrival); // before the start
++            return;
++        }
++        if (chasePending)
++            writeChase (push);
+         at = std::max (at, midiLastAt);
+         if (at >= untilFrames)
+             return;
+         push (at, arrival.bytes, arrival.size);
+         midiLastAt = at;
+     });
++    if (chasePending)
++        writeChase (push);
+     frames (std::max<juce::int64> (0, std::min (blockEnd, untilFrames)), lost);
+     midiFloor = blockStart;
+     midiTakeClock = blockEnd;
+     return blockStart;
+ }
+ 
++void Player::takeChaseSeeds()
++{
++    if (! chaseSeeded.load())
++        return;
++    const juce::SpinLock::ScopedTryLockType lock (chaseSeedLock);
++    if (! lock.isLocked())
++        return; // an arm is writing them: the next block takes them
++    chase.fill ({});
++    chaseNext = 1;
++    for (int i = 0; i < chaseSeedCount; ++i)
++    {
++        const auto& seed = chaseSeeds[(size_t) i];
++        chase[(size_t) (seed.channel * chasedControllers + seed.cc)] = { chaseNext++, (juce::uint8) seed.value };
++    }
++    chaseSeeded = false;
++}
++
++void Player::chaseArrival (const MidiArrival& arrival)
++{
++    // A control change, and not a channel mode message (120 to 127),
++    // which acts once rather than setting a value to start from.
++    if (arrival.size != 3 || (arrival.bytes[0] & 0xf0) != 0xb0 || arrival.bytes[1] >= chasedControllers)
++        return;
++    const int channel = arrival.bytes[0] & 0x0f;
++    chase[(size_t) (channel * chasedControllers + arrival.bytes[1])] = { chaseNext++, arrival.bytes[2] };
++}
++
++template <typename Push>
++void Player::writeChase (Push&& push)
++{
++    chasePending = false;
++    int count = 0;
++    for (int slot = 0; slot < chaseSlots; ++slot)
++        if (chase[(size_t) slot].order != 0)
++            chaseSorted[(size_t) count++] = slot;
++    std::sort (chaseSorted.begin(), chaseSorted.begin() + count,
++               [this] (int a, int b) { return chase[(size_t) a].order < chase[(size_t) b].order; });
++    for (int i = 0; i < count; ++i)
++    {
++        const int slot = chaseSorted[(size_t) i];
++        const juce::uint8 bytes[3] { (juce::uint8) (0xb0 | (slot / chasedControllers)), (juce::uint8) (slot % chasedControllers),
++                                     chase[(size_t) slot].value };
++        push (0, bytes, 3);
++    }
++}
++
+ void Player::recordMidiCompanions (int n, double blockStartMs)
+ {
+     const int live = liveCompanions.load();
+@@ -1589,15 +1646,16 @@ juce::var Player::arm (const juce::String& track, const juce::String& device, in
+     return armSet ({ juce::var (entry.get()) }, device);
+ }
+ 
+-juce::var Player::armMidi (const juce::String& track)
++juce::var Player::armMidi (const juce::String& track, const std::vector<ChaseSeed>& seeds)
+ {
+     auto entry = obj();
+     entry->setProperty ("track", track);
+     entry->setProperty ("kind", "midi");
+-    return armSet ({ juce::var (entry.get()) }, {});
++    return armSet ({ juce::var (entry.get()) }, {}, seeds);
+ }
+ 
+-juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner)
++juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::String& device,
++                          const std::vector<ChaseSeed>& seeds, const void* owner)
+ {
+     auto result = obj();
+     auto fail = [&] (const juce::String& error)
+@@ -1766,6 +1824,13 @@ juce::var Player::armSet (const juce::Array<juce::var>& tracks, const juce::Stri
+     }
+     inputPeak = 0.0f;
+     freeClock = 0;
++    // Each arm starts the chase over, from its own seeds.
++    {
++        const juce::SpinLock::ScopedLockType lock (chaseSeedLock);
++        chaseSeedCount = (int) std::min (seeds.size(), chaseSeeds.size());
++        std::copy_n (seeds.begin(), chaseSeedCount, chaseSeeds.begin());
++        chaseSeeded = true;
++    }
+     // The kind before the flag, so the null clock never presents an input
+     // to a MIDI arm.
+     armedMidi = primary.midi;
+diff --git a/native/audiod/src/player.h b/native/audiod/src/player.h
+index 6473520..4477346 100644
+--- a/native/audiod/src/player.h
++++ b/native/audiod/src/player.h
+@@ -26,6 +26,16 @@ class CaptureInput;
+ struct CaptureBlock;
+ }
+ 
++// A controller a MIDI take starts from, as `arm` passes it
++// (instrument-knobs.md §2.8): channel from 0 to 15, controller from 0 to
++// 119, value from 0 to 127.
++struct ChaseSeed
++{
++    int channel = 0;
++    int cc = 0;
++    int value = 0;
++};
++
+ // Owns the output device (or the null-output clock used in CI), the loaded
+ // file, the sample-accurate transport, and — once something arms — the
+ // input side of the same device (recording.md §5). Artifacts-only by
+@@ -141,7 +151,7 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // input the system lists and no audio input, so it never asks for
+     // the microphone. Returns {error} or {kind, sources, sample_rate,
+     // output_latency}. Like arm, it moves an existing arm of either kind.
+-    juce::var armMidi (const juce::String& track);
++    juce::var armMidi (const juce::String& track, const std::vector<ChaseSeed>& seeds = {});
+     // Arms several tracks at once (arming.md §2.2): each entry is
+     // {track, kind: "audio", input} or {track, kind: "midi"}. An audio
+     // entry takes its own input channel on `device`; a MIDI entry hears
+@@ -155,7 +165,9 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     // {armed, sample_rate, output_latency}, plus the audio side's
+     // {device, input, channels, input_latency} and the MIDI side's
+     // {sources}, and {kind: "midi"} when the one entry is MIDI.
+-    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device, const void* owner = nullptr);
++    // `seeds` are the controllers a MIDI take starts from (below).
++    juce::var armSet (const juce::Array<juce::var>& tracks, const juce::String& device,
++                      const std::vector<ChaseSeed>& seeds = {}, const void* owner = nullptr);
+     // Closes the input side again. Empty string on success.
+     juce::String disarm();
+     // Start a take: locate to `at` when given (a source must be loaded
+@@ -533,4 +545,34 @@ class Player : private juce::AudioIODeviceCallback, private juce::MidiInputCallb
+     juce::int64 midiTakeClock = 0;
+     juce::int64 midiFloor = 0;
+     juce::int64 midiLastAt = 0;
++
++    // The chase (instrument-knobs.md §2.8): from the arm, the latest value
++    // of each controller from 0 to 119 on each channel, first those `arm`
++    // seeds, then each control change that arrives before the take
++    // starts. The take's first sample gets one line per controller, in
++    // the order the values last arrived, ahead of every other line. The
++    // audio thread owns the table; an arm hands it the seeds under a lock
++    // the callback only ever tries.
++    void takeChaseSeeds();
++    void chaseArrival (const MidiArrival& arrival);
++    template <typename Push>
++    void writeChase (Push&& push);
++    static constexpr int chasedControllers = 120;
++    static constexpr int chaseSlots = 16 * chasedControllers;
++    struct Chased
++    {
++        juce::uint32 order = 0; // 0: no value yet
++        juce::uint8 value = 0;
++    };
++    std::array<Chased, chaseSlots> chase {};
++    std::array<int, chaseSlots> chaseSorted {}; // writeChase's scratch
++    juce::uint32 chaseNext = 1;
++    // Set where the MIDI clock starts; the lines go in before the take's
++    // first stamped message, so an arrival in the start block that falls
++    // before the start sample is chased first.
++    bool chasePending = false;
++    std::array<ChaseSeed, chaseSlots> chaseSeeds {};
++    int chaseSeedCount = 0;
++    std::atomic<bool> chaseSeeded { false };
++    juce::SpinLock chaseSeedLock;
+ };
+diff --git a/native/audiod/src/server.cpp b/native/audiod/src/server.cpp
+index af6ac24..064c43a 100644
+--- a/native/audiod/src/server.cpp
++++ b/native/audiod/src/server.cpp
+@@ -18,6 +18,7 @@
+ #pragma comment (lib, "advapi32.lib")
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstring>
+ #include <vector>
+ #else
+@@ -49,6 +50,31 @@ juce::var errorResponse (const juce::var& id, const juce::String& message)
+     return juce::var (o.get());
+ }
+ 
++// arm's `controllers` (instrument-knobs.md §2.8): [{channel, cc, value}],
++// channel from 1 to 16 as `field keys` writes it, controller from 0 to
++// 119, value from 0 to 127. Absent is none. Empty string, or why not.
++juce::String readChaseSeeds (const juce::var& list, std::vector<ChaseSeed>& seeds)
++{
++    if (list.isVoid())
++        return {};
++    const auto* items = list.getArray();
++    const juce::String shape = "arm's controllers are a list of {channel, cc, value}: channel 1 to 16, cc 0 to 119, value 0 to 127";
++    if (items == nullptr)
++        return shape;
++    const auto whole = [] (const juce::var& v, int low, int high)
++    { return (v.isInt() || v.isInt64() || v.isDouble()) && (double) v == std::floor ((double) v) && (int) v >= low && (int) v <= high; };
++    for (const auto& item : *items)
++    {
++        const auto channel = item.getProperty ("channel", juce::var());
++        const auto cc = item.getProperty ("cc", juce::var());
++        const auto value = item.getProperty ("value", juce::var());
++        if (! whole (channel, 1, 16) || ! whole (cc, 0, 119) || ! whole (value, 0, 127))
++            return shape;
++        seeds.push_back ({ (int) channel - 1, (int) cc, (int) value });
++    }
++    return {};
++}
++
+ // What a stop answers with (arming.md §2.2): `take`, the primary track's
+ // manifest, as a one-track stop always has, and `takes`, every armed
+ // track's, the primary's first. A take whose finalize failed is left out.
+@@ -158,6 +184,9 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
+         // §12.4).
+         features.add ("record-midi");
+         features.add ("record-tracks");
++        // arm's controllers, and a MIDI take that starts with the
++        // controllers sent before it (instrument-knobs.md §2.8).
++        features.add ("midi-chase");
+         // The input and input_close ops, `inputs` in status, and input
+         // windows in a session (live-supercollider.md chunk 2).
+         features.add ("live-input");
+@@ -254,11 +283,14 @@ juce::String Server::dispatch (const juce::var& request, const void* owner)
+     {
+         const auto track = request.getProperty ("track", juce::var()).toString();
+         const auto kind = request.getProperty ("kind", juce::var());
++        std::vector<ChaseSeed> seeds;
++        if (auto error = readChaseSeeds (request.getProperty ("controllers", juce::var()), seeds); error.isNotEmpty())
++            return jsonLine (errorResponse (id, error));
+         juce::var info;
+         if (auto* tracks = request.getProperty ("tracks", juce::var()).getArray())
+-            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString(), owner);
++            info = player.armSet (*tracks, request.getProperty ("device", juce::var()).toString(), seeds, owner);
+         else if (kind.toString() == "midi")
+-            info = player.armMidi (track);
++            info = player.armMidi (track, seeds);
+         else if (! kind.isVoid())
+             return jsonLine (errorResponse (id, "arm's kind is \"midi\", or absent for an audio input"));
+         else
+diff --git a/src/audiod/client.ts b/src/audiod/client.ts
+index 512f9f8..e8cb4e3 100644
+--- a/src/audiod/client.ts
++++ b/src/audiod/client.ts
+@@ -26,6 +26,7 @@ import {
+   statusResponseSchema,
+   stopResponseSchema,
+   type ArmTrack,
++  type ChasedController,
+   type AudiodEvent,
+   type ClickSchedule,
+ } from './protocol.js';
+@@ -282,15 +283,20 @@ export class AudiodClient extends EventEmitter {
+   // Arm for MIDI (keyboard-instrument.md §12.4, supports('record-midi')):
+   // every MIDI input the daemon can see, and no audio input. A take then
+   // records their messages; `record` and `stop` work as for audio, and
+-  // loop takes are refused.
+-  armMidi(track: string) {
+-    return this.request('arm', { track, kind: 'midi' }, armMidiResponseSchema);
++  // loop takes are refused. `controllers` (supports('midi-chase')) are
++  // where the take starts.
++  armMidi(track: string, controllers: ChasedController[] = []) {
++    return this.request('arm', { track, kind: 'midi', ...chase(controllers) }, armMidiResponseSchema);
+   }
+ 
+   // Arms every track at once (arming.md §2.2), on `device` for the audio
+   // ones; daemon feature "record-tracks".
+-  armTracks(tracks: ArmTrack[], device?: string) {
+-    return this.request('arm', { tracks, ...(device !== undefined ? { device } : {}) }, armTracksResponseSchema);
++  armTracks(tracks: ArmTrack[], device?: string, controllers: ChasedController[] = []) {
++    return this.request(
++      'arm',
++      { tracks, ...(device !== undefined ? { device } : {}), ...chase(controllers) },
++      armTracksResponseSchema,
++    );
+   }
+   disarm() {
+     return this.request('disarm', {}, okResponseSchema);
+@@ -356,3 +362,9 @@ export class AudiodClient extends EventEmitter {
+     this.socket.destroy();
+   }
+ }
++
++// An arm names `controllers` only when it has some, so a daemon without
++// "midi-chase" never sees the field.
++function chase(controllers: ChasedController[]): { controllers?: ChasedController[] } {
++  return controllers.length > 0 ? { controllers } : {};
++}
+diff --git a/src/audiod/protocol.ts b/src/audiod/protocol.ts
+index c27bb6a..8275d59 100644
+--- a/src/audiod/protocol.ts
++++ b/src/audiod/protocol.ts
+@@ -142,6 +142,16 @@ export const recordResponseSchema = z.object({
+ // window to read (live-supercollider.md §12, "live-monitor").
+ export type ArmTrack = { track: string; kind: 'audio'; input: number; monitor?: string } | { track: string; kind: 'midi' };
+ 
++// A controller a MIDI take starts from, as `arm`'s `controllers` passes it
++// (instrument-knobs.md §2.8, daemon feature "midi-chase"): the daemon
++// writes each at the take's first sample, before anything sent later.
++export const chasedControllerSchema = z.object({
++  channel: z.number().int().min(1).max(16),
++  cc: z.number().int().min(0).max(119),
++  value: z.number().int().min(0).max(127),
++});
++export type ChasedController = z.infer<typeof chasedControllerSchema>;
++
+ // What arming a set opened: every track armed, the audio side's device
+ // and latency when one is audio, and the MIDI side's sources when one is
+ // MIDI.
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index 2037814..351f5b3 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -17,6 +17,7 @@ import {
+   type ShownKnob,
+ } from '../keys/knobs.js';
+ import { charactersToPositions, PressedKeys, unplayablePositions, type KeyboardLayout } from '../keys/position.js';
++import { publishControllers, unpublishControllers } from '../keys/published.js';
+ import { printKeymap, signed } from '../keys/print.js';
+ import { KeysSession, TICK_MS, type MidiMessage } from '../keys/session.js';
+ import { decodeTerminal, ENABLE, isQuit, probeKittyProtocol, RESTORE, type Tty } from '../keys/terminal.js';
+@@ -278,7 +279,16 @@ async function playRouted(
+     },
+     onExit: (reason) => stop(new Error(`the MIDI helper stopped: ${reason}`)),
+   });
+-  const send = (messages: MidiMessage[]): void => messages.forEach((m) => helper.send(m));
++  // Each control change also goes into .field/keys.json, which `field
++  // record` starts a take from (instrument-knobs.md §2.8).
++  const { root } = options;
++  const send = (messages: MidiMessage[]): void => {
++    messages.forEach((m) => helper.send(m));
++    if (root !== undefined && messages.some(([status]) => (status! & 0xf0) === 0xb0)) {
++      const problem = publishControllers(root, session.sentControllers());
++      if (problem !== undefined) session.message = problem;
++    }
++  };
+ 
+   // A held turn key and a glide move a knob on a timer of their own, which
+   // runs only while a turn key is held or a glide moves
+@@ -400,6 +410,7 @@ async function playRouted(
+   // inputs close after it, in play, once nothing writes them.
+   await host?.close();
+   await helper.close();
++  if (root !== undefined) unpublishControllers(root);
+   tty.stdout.write('\n');
+   if (error !== undefined) throw error;
+ }
+diff --git a/src/commands/record-midi-daemon.test.ts b/src/commands/record-midi-daemon.test.ts
+index 5d5290e..beaa35a 100644
+--- a/src/commands/record-midi-daemon.test.ts
++++ b/src/commands/record-midi-daemon.test.ts
+@@ -7,7 +7,8 @@ import { createInterface } from 'node:readline';
+ import { afterEach, beforeEach, describe, expect, it, type TestContext } from 'vitest';
+ import { writeWavFloat32 } from '../audio/wav.js';
+ import { AudiodClient, daemonBinary } from '../audiod/client.js';
+-import { midiTakeLineSchema, midiTakeSchema, type AudiodEvent, type MidiTakeLine } from '../audiod/protocol.js';
++import { midiTakeLineSchema, midiTakeSchema, type AudiodEvent, type ChasedController, type MidiTakeLine } from '../audiod/protocol.js';
++import { publishControllers } from '../keys/published.js';
+ import { loadProject } from '../model/project.js';
+ import { check } from './check.js';
+ import { createSong, createTrack } from './create.js';
+@@ -194,25 +195,128 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
+ 
+   // A source another process publishes takes a moment to reach this
+   // one's list, so arm until it is there.
+-  async function armListing(client: AudiodClient, name: string) {
++  async function armListing(client: AudiodClient, name: string, controllers: ChasedController[] = []) {
+     const deadline = Date.now() + 5000;
+     for (;;) {
+-      const armed = await client.armMidi(TRACK);
++      const armed = await client.armMidi(TRACK, controllers);
+       if (armed.sources.includes(name)) return armed;
+       if (Date.now() > deadline) throw new Error(`${name} never appeared among ${armed.sources.join(', ')}`);
+       await sleep(100);
+     }
+   }
+ 
+-  it('advertises record-midi', async () => {
++  it('advertises record-midi and midi-chase', async () => {
+     const client = await connect();
+     try {
+       expect(client.supports('record-midi')).toBe(true);
++      expect(client.supports('midi-chase')).toBe(true);
+     } finally {
+       client.close();
+     }
+   });
+ 
++  it('refuses controllers that are not {channel, cc, value} in range', async () => {
++    const client = await connect();
++    try {
++      for (const bad of [
++        { channel: 0, cc: 74, value: 1 },
++        { channel: 1, cc: 120, value: 1 },
++        { channel: 1, cc: 74, value: 128 },
++      ]) {
++        await expect(client.armMidi(TRACK, [bad])).rejects.toThrow(/arm's controllers are a list of \{channel, cc, value\}/);
++      }
++    } finally {
++      client.close();
++    }
++  });
++
++  it(
++    'starts a take with the controllers seeded at the arm and sent before the start, in the order their values last arrived',
++    { timeout: 20_000 },
++    async (ctx) => {
++      const name = source('chase');
++      const keys = await publishOrSkip(ctx, name);
++      const client = await connect();
++      try {
++        // Channels 15 and 16, on controllers with no assigned meaning, so
++        // another source's controllers on the machine are told apart.
++        await armListing(client, name, [
++          { channel: 16, cc: 110, value: 10 },
++          { channel: 16, cc: 111, value: 20 },
++        ]);
++        send(keys, [0xbe, 112, 30]);
++        send(keys, [0xbf, 110, 40]); // replaces its seed
++        send(keys, [0xbf, 120, 0]); // All Sound Off: acts once, never chased
++        await sleep(300);
++        const started = await client.record();
++        await sleep(300);
++        send(keys, [0xbf, 111, 50]);
++        await waitFor(
++          () => readLines(root, started.file).some((line) => line.midi[0] === 0xbf && line.midi[1] === 111 && line.midi[2] === 50),
++          3000,
++          'the controller sent after the start',
++        );
++        await client.stop();
++        const mine = readLines(root, started.file).filter(
++          (line) => (line.midi[0] === 0xbe || line.midi[0] === 0xbf) && line.midi[1]! >= 110 && line.midi[1]! <= 120,
++        );
++        expect(mine.filter((line) => line.at === 0).map((line) => line.midi)).toEqual([
++          [0xbf, 111, 20],
++          [0xbe, 112, 30],
++          [0xbf, 110, 40],
++        ]);
++        const later = mine.filter((line) => line.at > 0);
++        expect(later.map((line) => line.midi)).toEqual([[0xbf, 111, 50]]);
++        expect(later[0]!.at).toBeGreaterThanOrEqual((300 * NULL_RATE) / 1000 - BLOCK_SLACK);
++        // Every chased line comes before every other line of the take.
++        const lines = readLines(root, started.file);
++        const firstLater = lines.findIndex((line) => line.at > 0);
++        expect(lines.slice(firstLater).some((line) => line.at === 0)).toBe(false);
++      } finally {
++        client.close();
++      }
++    },
++  );
++
++  it(
++    'keeps a controller sent just before record, though record lands between a block\'s pull and its latch',
++    { timeout: 30_000 },
++    async (ctx) => {
++      // The seam holds each block between its pull and its latch, so
++      // record's request often lands there. That block does not start the
++      // take, and what it drains arrived before the start, so it is chased.
++      process.env['FIELD_AUDIOD_LATCH_STALL_MS'] = '8';
++      try {
++        const name = source('latch');
++        const keys = await publishOrSkip(ctx, name);
++        const client = await connect();
++        try {
++          // One arm for every take, because each arm opens every MIDI
++          // source again, and re-arming before each take slowed CoreMIDI
++          // enough that a later test's source was not published in 5 s.
++          // The arm resets the chase table at the top of a later block, so
++          // the controllers go out once that reset has passed.
++          await armListing(client, name);
++          await sleep(100);
++          for (let value = 60; value < 70; value++) {
++            send(keys, [0xbf, 113, value]);
++            const started = await client.record();
++            await sleep(100);
++            await client.stop();
++            const sent = readLines(root, started.file).filter(
++              (line) => line.midi[0] === 0xbf && line.midi[1] === 113 && line.midi[2] === value,
++            );
++            expect(sent, `the controller sent before take ${value - 59}`).toHaveLength(1);
++          }
++        } finally {
++          client.close();
++        }
++      } finally {
++        delete process.env['FIELD_AUDIOD_LATCH_STALL_MS'];
++      }
++    },
++  );
++
+   it(
+     'records a source on the sample clock, with no audio fields, and finalizes on stop',
+     { timeout: 20_000 },
+@@ -517,6 +621,10 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
+           client.close();
+         }
+ 
++        // A field keys running in the project, as this process: the take
++        // starts where its knobs are (instrument-knobs.md §2.8).
++        publishControllers(root, [{ channel: 16, cc: 113, value: 23 }]);
++
+         const lines: string[] = [];
+         const positions: string[] = [];
+         let played = false;
+@@ -557,6 +665,7 @@ describe.skipIf(!binary)('MIDI takes through the daemon', () => {
+         expect(landed.row).not.toHaveProperty('device');
+         const notes = readFileSync(join(root, 'songs/creek', landed.file), 'utf8');
+         expect(notes).toMatch(new RegExp(`\\{ at: \\d+, length: \\d+, note: ${NOTE}, velocity: 77, channel: 16 \\}`));
++        expect(notes).toContain('{ at: 0, cc: 113, value: 23, channel: 16 }');
+         expect(existsSync(join(root, '.field/recording', take.id))).toBe(false);
+         expect((await check(root)).diagnostics).toEqual([]);
+       } finally {
+diff --git a/src/commands/record-plan.test.ts b/src/commands/record-plan.test.ts
+index f339469..1220058 100644
+--- a/src/commands/record-plan.test.ts
++++ b/src/commands/record-plan.test.ts
+@@ -1,7 +1,8 @@
+-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { controllersToChase, PUBLISHED_PATH, publishControllers, unpublishControllers } from '../keys/published.js';
+ import { loadProject } from '../model/project.js';
+ import { createSong, createTrack } from './create.js';
+ import { init } from './init.js';
+@@ -70,3 +71,49 @@ describe('planning an armed set', () => {
+     );
+   });
+ });
++
++describe('the controllers a MIDI take starts from (instrument-knobs.md §2.8)', () => {
++  let dir: string;
++  beforeEach(() => {
++    dir = mkdtempSync(join(tmpdir(), 'field-chase-'));
++  });
++  afterEach(() => rmSync(dir, { recursive: true, force: true }));
++
++  const knobs = [
++    { channel: 1, cc: 1, value: 64 },
++    { channel: 1, cc: 74, value: 30 },
++  ];
++
++  it('reads what a running field keys published, only for a daemon that chases', () => {
++    expect(controllersToChase(dir, true)).toEqual([]);
++    publishControllers(dir, knobs);
++    expect(controllersToChase(dir, true)).toEqual(knobs);
++    expect(controllersToChase(dir, false)).toEqual([]);
++  });
++
++  it('ignores what a field keys that has exited published', () => {
++    // A pid no process has: one below the largest a 32-bit pid_t holds.
++    publishControllers(dir, knobs, 2147483646);
++    expect(controllersToChase(dir, true)).toEqual([]);
++  });
++
++  it('ignores a file it cannot read, and leaves another field keys\' file when it quits', () => {
++    mkdirSync(join(dir, '.field'));
++    writeFileSync(join(dir, PUBLISHED_PATH), '{"pid":');
++    expect(controllersToChase(dir, true)).toEqual([]);
++    publishControllers(dir, knobs, process.ppid);
++    unpublishControllers(dir);
++    expect(existsSync(join(dir, PUBLISHED_PATH))).toBe(true);
++    publishControllers(dir, knobs);
++    unpublishControllers(dir);
++    expect(existsSync(join(dir, PUBLISHED_PATH))).toBe(false);
++  });
++
++  it('says why it could not publish, rather than throwing out of field keys', () => {
++    writeFileSync(join(dir, '.field'), '');
++    expect(publishControllers(dir, knobs)).toMatch(/^\.field[/\\]keys\.json not written, so a take starts without these knobs: /);
++    rmSync(join(dir, '.field'));
++    expect(publishControllers(dir, knobs)).toBeUndefined();
++    expect(controllersToChase(dir, true)).toEqual(knobs);
++  });
++});
+diff --git a/src/commands/record.ts b/src/commands/record.ts
+index 134370d..f6dd2f3 100644
+--- a/src/commands/record.ts
++++ b/src/commands/record.ts
+@@ -3,6 +3,7 @@ import { captureInputName, compileWithInputs, reloadIfPlaying, reloadWithInputs
+ import { anyTakeSchema, type AnyTake, type AudiodEvent, type RecordingEntry } from '../audiod/protocol.js';
+ import { DEFAULT_SAMPLE_RATE } from '../constants.js';
+ import { expandPattern } from '../graph/graph.js';
++import { controllersToChase } from '../keys/published.js';
+ import { formatLabel, parsePattern } from '../labels.js';
+ import type { LoadedProject } from '../model/project.js';
+ import { loadValid } from './build.js';
+@@ -312,6 +313,9 @@ async function captureTakes(
+         throw new Error(`host monitoring cannot play the input through ${resolved.song}: ${(err as Error).message}`);
+       }
+     }
++    // A MIDI take starts where the knobs of a running `field keys` are
++    // (instrument-knobs.md §2.8).
++    const controllers = tracks.some((t) => t.kind === 'midi') ? controllersToChase(root, client.supports('midi-chase')) : [];
+     let armedRate: number;
+     if (tracks.length > 1 || monitored.length > 0) {
+       if (!client.supports('record-tracks')) {
+@@ -331,6 +335,7 @@ async function captureTakes(
+               },
+         ),
+         options.device,
++        controllers,
+       );
+       armedHere = true;
+       armedRate = armed.sample_rate;
+@@ -351,7 +356,7 @@ async function captureTakes(
+           `field-audiod ${client.daemonVersion} predates MIDI recording — field transport quit, then record again`,
+         );
+       }
+-      const armed = await client.armMidi(resolved.label);
++      const armed = await client.armMidi(resolved.label, controllers);
+       armedHere = true;
+       armedRate = armed.sample_rate;
+       hooks.onArmed?.(
+diff --git a/src/keys/published.ts b/src/keys/published.ts
+new file mode 100644
+index 0000000..1f775d5
+--- /dev/null
++++ b/src/keys/published.ts
+@@ -0,0 +1,65 @@
++import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { z } from 'zod';
++import { chasedControllerSchema, type ChasedController } from '../audiod/protocol.js';
++
++// What `field keys` has sent, for `field record` (instrument-knobs.md
++// §2.8): a take records only what arrives after it starts, so the daemon
++// starts it from the controllers `field keys` published, and a take
++// renders with the knobs where you left them.
++
++export const PUBLISHED_PATH = join('.field', 'keys.json');
++
++const publishedSchema = z.object({
++  pid: z.number().int().positive(),
++  controllers: z.array(chasedControllerSchema),
++});
++
++// Written to a temporary file and renamed over the last, so a reader
++// never sees half of it. A write that fails, such as on a `.field` that
++// another user owns, returns why rather than throwing: `field keys` still
++// plays, and only a take's starting knobs miss it.
++export function publishControllers(root: string, controllers: ChasedController[], pid = process.pid): string | undefined {
++  const path = join(root, PUBLISHED_PATH);
++  try {
++    mkdirSync(join(root, '.field'), { recursive: true });
++    writeFileSync(`${path}.${pid}.tmp`, JSON.stringify({ pid, controllers }));
++    renameSync(`${path}.${pid}.tmp`, path);
++    return undefined;
++  } catch (err) {
++    return `${PUBLISHED_PATH} not written, so a take starts without these knobs: ${(err as Error).message}`;
++  }
++}
++
++// Removes the file when this process wrote it, so a `field keys` that
++// quits leaves another one's alone.
++export function unpublishControllers(root: string, pid = process.pid): void {
++  if (readPublished(root)?.pid === pid) rmSync(join(root, PUBLISHED_PATH), { force: true });
++}
++
++// The controllers to start a MIDI take from: none unless the daemon
++// chases them, and none unless the `field keys` that published them is
++// still running.
++export function controllersToChase(root: string, daemonChases: boolean): ChasedController[] {
++  if (!daemonChases) return [];
++  const published = readPublished(root);
++  return published !== undefined && running(published.pid) ? published.controllers : [];
++}
++
++function readPublished(root: string): z.infer<typeof publishedSchema> | undefined {
++  try {
++    return publishedSchema.parse(JSON.parse(readFileSync(join(root, PUBLISHED_PATH), 'utf8')));
++  } catch {
++    return undefined;
++  }
++}
++
++function running(pid: number): boolean {
++  try {
++    process.kill(pid, 0);
++    return true;
++  } catch (err) {
++    // EPERM: the process runs, under another user.
++    return (err as NodeJS.ErrnoException).code === 'EPERM';
++  }
++}
+diff --git a/src/keys/session.test.ts b/src/keys/session.test.ts
+index 658d759..1ee18e6 100644
+--- a/src/keys/session.test.ts
++++ b/src/keys/session.test.ts
+@@ -534,3 +534,22 @@ describe('typing a knob\'s value', () => {
+ 
+ // cutoff's controller value nearest 300 Hz, which maps to 301 Hz.
+ const nearestTo300 = 40;
++
++describe('what a take starts from', () => {
++  it('lists each controller sent below 120, by channel, the least recently sent first', () => {
++    const session = new KeysSession(
++      parseKeymap(
++        'name: s\nnotes: { KeyA: 0 }\ncontrols: { KeyB: { cc: 74, value: 10 }, KeyN: { cc: 1, value: 64 }, KeyM: { cc: 74, value: 20 }, KeyQ: panic }\n',
++        's.yaml',
++      ),
++    );
++    session.press('KeyB');
++    session.press('KeyN');
++    session.press('KeyM');
++    session.press('KeyQ');
++    expect(session.sentControllers()).toEqual([
++      { channel: 1, cc: 1, value: 64 },
++      { channel: 1, cc: 74, value: 20 },
++    ]);
++  });
++});
+diff --git a/src/keys/session.ts b/src/keys/session.ts
+index 2744207..535b8d8 100644
+--- a/src/keys/session.ts
++++ b/src/keys/session.ts
+@@ -63,6 +63,9 @@ export class KeysSession {
+   // Each controller this session has sent, by number, with the last value
+   // sent: what the knobs and the status line show.
+   readonly controllers = new Map<number, number>();
++  // The same by channel, in the order the values were last sent, which is
++  // what a take starts from (instrument-knobs.md §2.8).
++  private readonly sent = new Map<number, { channel: number; cc: number; value: number }>();
+   // The knobs the arrows choose and turn, `mod` first, and which is chosen.
+   knobs: ShownKnob[];
+   chosen = 0;
+@@ -254,6 +257,13 @@ export class KeysSession {
+     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && 'cc' in a && a.cc === MOD_WHEEL);
+   }
+ 
++  // Every controller from 0 to 119 this session has sent on each channel,
++  // with its last value, the least recently sent first. 120 to 127 are
++  // channel mode messages, which act once and leave no value behind.
++  sentControllers(): { channel: number; cc: number; value: number }[] {
++    return [...this.sent.values()].filter(({ cc }) => cc < 120);
++  }
++
+   bindsKnobs(): boolean {
+     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a || 'type' in a));
+   }
+@@ -274,6 +284,9 @@ export class KeysSession {
+ 
+   private cc(channel: number, cc: number, value: number): MidiMessage {
+     this.controllers.set(cc, value);
++    const key = channel * 128 + cc;
++    this.sent.delete(key);
++    this.sent.set(key, { channel, cc, value });
+     return controlChange(channel, cc, value);
+   }
+ 
