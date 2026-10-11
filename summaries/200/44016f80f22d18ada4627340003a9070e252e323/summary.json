@@ -1,0 +1,239 @@
+{
+ "version": 1,
+ "name": "Plan titles without the prefix",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 200,
+  "title": "Drop the \"Plan: \" prefix from every project's heading",
+  "head": "44016f80f22d18ada4627340003a9070e252e323",
+  "headRef": "drop-plan-prefix",
+  "base": "4467d6f0cc80ce4ba8d102429195287331ee493a",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Each project in this repository has a plan: a <code>readme.md</code> in its own directory under <code>docs/projects/</code>. Projector, the tool that manages those plans and builds the repository's project site, takes each project's title from the plan's first <code>#</code> heading, word for word. Every plan but one opened with <code># Plan: …</code>, so every title in <code>project list</code>, <code>project show</code>, and on the site began with the same word.",
+   "This pull request deletes <code>Plan: </code> from those 51 headings and changes nothing else in any file. Three headings would then start with an ordinary lowercase word, so they also gain a capital. Headings that start with a name the docs keep lowercase, such as <code>bloom</code> and <code>prettier</code>, keep it lowercase.",
+   "The repository's own rule in <code>docs/projects/README.md</code> already says to open a plan with a <code># Title</code>, so the change brings the plans in line with it. Other documents and code comments cite a plan by its directory name, as in <code>project-core.md §3.2</code>, so no citation depends on a title."
+  ],
+  "cards": [
+   {
+    "id": "where",
+    "title": "Where a plan's title shows",
+    "html": "<ul class=\"tight\"><li><b><code>project list</code> and <code>project show</code>.</b> Each row shows the title beside the project's directory name and status.</li><li><b>The project site's project pages.</b> The site takes titles from the plans on <code>main</code>. Its workflow redeploys on every push to <code>main</code> under <code>docs/</code>, so the new titles appear when this merges.</li><li><b>The site's proposed projects.</b> A plan that an open pull request adds is listed from that pull request's newest summary, with the title its own heading gives.</li></ul><p class=\"note\">Plan citations and each summary's <code>project</code> field use the directory name, which this change leaves alone.</p>"
+   },
+   {
+    "id": "history",
+    "title": "Review so far",
+    "html": "<p>One review, of <code>44016f8</code>, found the head clean with no finding threads. It left two suggestions, both about things outside this diff:</p><ul class=\"tight\"><li><b>Two new plans keep the prefix.</b> #185 adds <code>docs/projects/install/readme.md</code> and #202 adds <code>docs/projects/instrument-knobs/readme.md</code>, each still opening with <code># Plan:</code>. Each needs a one-line edit on its own branch.</li><li><b>The description's paragraph about open pull requests.</b> It says #185 changes plan bodies, but #185 adds a new plan. It also leaves out #201 and #202. All six open pull requests that touch plans merge cleanly with this head.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "prefix",
+   "title": "Every plan heading drops its prefix",
+   "kicker": "48 headings lose <code>Plan: </code> and keep the rest of their wording",
+   "intro": [
+    "In each of these plans the only change is the first heading: <code># Plan: Arming</code> becomes <code># Arming</code>. The frontmatter above the heading and the plan below it are untouched, so no project's status, priority, or content changes.",
+    "A few headings start with a name the docs write in lowercase or in code font. <code>bloom moves into field</code>, <code>prettier and ESLint</code>, <code>src/engine umbrella</code>, and the two headings that open with a <code>field</code> command keep their first word as it was rather than gaining a capital."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "<code>git grep 'Plan:'</code> at the head finds nothing in the repository. At the base it finds exactly the 51 headings this pull request edits, and no code, test, script, or link that reads them."
+    },
+    {
+     "kind": "verify",
+     "text": "<code>project list --json</code> at the base and at the head, compared project by project: each of these 48 titles differs only by the missing <code>Plan: </code>, and every project's name, status, priority, owner, and path is unchanged. <code>project check</code> at the head reports the plans valid."
+    },
+    {
+     "kind": "context",
+     "text": "22 of these plans are <code>completed</code>. <code>docs/projects/README.md</code> says not to rewrite a finished plan to match later reality. A title change leaves what the plan records as it was, so that rule is not in play."
+    },
+    {
+     "kind": "flag",
+     "text": "Two open pull requests add plans that still open with <code># Plan:</code>, and those plans are not on this branch: #185 adds <code>docs/projects/install/readme.md</code>, and #202 adds <code>docs/projects/instrument-knobs/readme.md</code>. After this merges, theirs are the only prefixed titles in <code>project list</code> and on the site. Decide whether to drop the prefix on those two branches."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/ace-generation/readme.md"
+    },
+    {
+     "path": "docs/projects/actions-and-macros/readme.md"
+    },
+    {
+     "path": "docs/projects/add-insert/readme.md"
+    },
+    {
+     "path": "docs/projects/analysis-workers/readme.md"
+    },
+    {
+     "path": "docs/projects/apollo-session/readme.md"
+    },
+    {
+     "path": "docs/projects/arming/readme.md"
+    },
+    {
+     "path": "docs/projects/automation/readme.md"
+    },
+    {
+     "path": "docs/projects/bloom-in-tree/readme.md"
+    },
+    {
+     "path": "docs/projects/builtins-in-chooser/readme.md"
+    },
+    {
+     "path": "docs/projects/clip-looping/readme.md"
+    },
+    {
+     "path": "docs/projects/comping/readme.md"
+    },
+    {
+     "path": "docs/projects/convolution-reverb/readme.md"
+    },
+    {
+     "path": "docs/projects/cross-rate-live/readme.md"
+    },
+    {
+     "path": "docs/projects/detail-pane/readme.md"
+    },
+    {
+     "path": "docs/projects/effects/readme.md"
+    },
+    {
+     "path": "docs/projects/engine-umbrella/readme.md"
+    },
+    {
+     "path": "docs/projects/exotic-reverbs/readme.md"
+    },
+    {
+     "path": "docs/projects/external-instruments/readme.md"
+    },
+    {
+     "path": "docs/projects/generation-progress/readme.md"
+    },
+    {
+     "path": "docs/projects/key-conforming/readme.md"
+    },
+    {
+     "path": "docs/projects/keyboard-instrument/readme.md"
+    },
+    {
+     "path": "docs/projects/lint-and-format/readme.md"
+    },
+    {
+     "path": "docs/projects/linux-portability/readme.md"
+    },
+    {
+     "path": "docs/projects/live-supercollider/readme.md"
+    },
+    {
+     "path": "docs/projects/mcp-surface/readme.md"
+    },
+    {
+     "path": "docs/projects/mix-assembly/readme.md"
+    },
+    {
+     "path": "docs/projects/multi-rate/readme.md"
+    },
+    {
+     "path": "docs/projects/musical-time/readme.md"
+    },
+    {
+     "path": "docs/projects/nested-tracks/readme.md"
+    },
+    {
+     "path": "docs/projects/pickups/readme.md"
+    },
+    {
+     "path": "docs/projects/playback/readme.md"
+    },
+    {
+     "path": "docs/projects/project-core/readme.md"
+    },
+    {
+     "path": "docs/projects/project-layout/readme.md"
+    },
+    {
+     "path": "docs/projects/realtime/readme.md"
+    },
+    {
+     "path": "docs/projects/recording-widget/readme.md"
+    },
+    {
+     "path": "docs/projects/recording/readme.md"
+    },
+    {
+     "path": "docs/projects/remote-asset-store/readme.md"
+    },
+    {
+     "path": "docs/projects/remote/readme.md"
+    },
+    {
+     "path": "docs/projects/render-pipeline/readme.md"
+    },
+    {
+     "path": "docs/projects/reverbs/readme.md"
+    },
+    {
+     "path": "docs/projects/sc-render/readme.md"
+    },
+    {
+     "path": "docs/projects/sound-browser/readme.md"
+    },
+    {
+     "path": "docs/projects/splice/readme.md"
+    },
+    {
+     "path": "docs/projects/streaming-rings/readme.md"
+    },
+    {
+     "path": "docs/projects/track-rename/readme.md"
+    },
+    {
+     "path": "docs/projects/voice-generation/readme.md"
+    },
+    {
+     "path": "docs/projects/watch/readme.md"
+    },
+    {
+     "path": "docs/projects/windows-portability/readme.md"
+    }
+   ]
+  },
+  {
+   "id": "capitals",
+   "title": "Three headings also gain a capital",
+   "kicker": "Headings that would start with a lowercase ordinary word now start with a capital",
+   "intro": [
+    "Three headings continued after <code>Plan: </code> with an ordinary word in lowercase, which read naturally after the colon. Without the prefix, that word opens the heading, so this pull request capitalizes it. That matches the sentence-case headings <code>AGENTS.md</code> asks for."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "In the <code>project list --json</code> comparison between the base and the head, these three are the only titles that differ by more than the missing prefix."
+    }
+   ],
+   "files": [
+    {
+     "path": "docs/projects/plugin-hosting/readme.md",
+     "note": "The plan for hosting AU and VST3 plugins as inserts. <code>hosted plugins — AU and VST3 as inserts</code> becomes <code>Hosted plugins — AU and VST3 as inserts</code>. The plan is <code>in-progress</code> with priority <code>now</code>, so this title shows near the top of <code>project list</code>.",
+     "collapsed": false
+    },
+    {
+     "path": "docs/projects/tui/readme.md",
+     "note": "The plan for the terminal interface. <code>the TUI</code> becomes <code>The TUI</code>.",
+     "collapsed": false
+    },
+    {
+     "path": "docs/projects/ui/readme.md",
+     "note": "The plan for the first version of the graphical interface. <code>the UI, first version</code> becomes <code>The UI, first version</code>. The plan is <code>in-progress</code> with priority <code>now</code>.",
+     "collapsed": false
+    }
+   ]
+  }
+ ],
+ "project": ""
+}

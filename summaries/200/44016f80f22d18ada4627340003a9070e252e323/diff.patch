@@ -1,0 +1,663 @@
+diff --git a/docs/projects/ace-generation/readme.md b/docs/projects/ace-generation/readme.md
+index 4141d65a..08391912 100644
+--- a/docs/projects/ace-generation/readme.md
++++ b/docs/projects/ace-generation/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: ACE generation
++# ACE generation
+ 
+ **Status:** Complete (2026-08-05, #17 + #18). Both chunks shipped; bloom
+ demonstrates the full loop — generate, audition variants in the mix,
+diff --git a/docs/projects/actions-and-macros/readme.md b/docs/projects/actions-and-macros/readme.md
+index a871b58e..3eca1345 100644
+--- a/docs/projects/actions-and-macros/readme.md
++++ b/docs/projects/actions-and-macros/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Everything is an action, and actions compose
++# Everything is an action, and actions compose
+ 
+ **Goal:** every Field verb is an action in a searchable index, named
+ macros of actions are committed to the project, and the user can bind a
+diff --git a/docs/projects/add-insert/readme.md b/docs/projects/add-insert/readme.md
+index 77781769..e5f75d61 100644
+--- a/docs/projects/add-insert/readme.md
++++ b/docs/projects/add-insert/readme.md
+@@ -7,7 +7,7 @@ choosers, and `--at`. The editor handoff (§5) needs `field open`, which
+ plugin-hosting's chunk 3 builds, so it moved into that chunk; until
+ then the command prints the `field open` line it would run.
+ 
+-# Plan: `field insert` — add an insert with a chooser
++# `field insert` — add an insert with a chooser
+ 
+ **Goal:** one command that adds an insert to a track: fully pinned at
+ birth, found with an interactive search over the scanned inventory
+diff --git a/docs/projects/analysis-workers/readme.md b/docs/projects/analysis-workers/readme.md
+index a34849d2..9a897c9b 100644
+--- a/docs/projects/analysis-workers/readme.md
++++ b/docs/projects/analysis-workers/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Analysis workers
++# Analysis workers
+ 
+ **Goal:** separation, transcription, loudness, take ranking on the worker
+ protocol [ace-generation.md](../ace-generation/readme.md) establishes.
+diff --git a/docs/projects/apollo-session/readme.md b/docs/projects/apollo-session/readme.md
+index 1d10f2ab..5016f3e6 100644
+--- a/docs/projects/apollo-session/readme.md
++++ b/docs/projects/apollo-session/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: The first Apollo session
++# The first Apollo session
+ 
+ **Goal:** a take recorded against creek on the Apollo plays back in
+ place, compensated, from `field build && field play`. That is the half
+diff --git a/docs/projects/arming/readme.md b/docs/projects/arming/readme.md
+index 88a024d8..9d9040bb 100644
+--- a/docs/projects/arming/readme.md
++++ b/docs/projects/arming/readme.md
+@@ -3,7 +3,7 @@ status: in-progress
+ priority: now
+ ---
+ 
+-# Plan: Arming
++# Arming
+ 
+ You arm the tracks you want to play or record, and `field keys` plays
+ every armed MIDI track's instrument in unison while `field record`
+diff --git a/docs/projects/automation/readme.md b/docs/projects/automation/readme.md
+index 3db3e7a5..93d58986 100644
+--- a/docs/projects/automation/readme.md
++++ b/docs/projects/automation/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Automation
++# Automation
+ 
+ **Status:** Design only (2026-08-05). The shape below was settled in a
+ design discussion; no implementation is started or committed. The doc
+diff --git a/docs/projects/bloom-in-tree/readme.md b/docs/projects/bloom-in-tree/readme.md
+index 25a25dbc..63ef3155 100644
+--- a/docs/projects/bloom-in-tree/readme.md
++++ b/docs/projects/bloom-in-tree/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: bloom moves into field
++# bloom moves into field
+ 
+ **Status:** Done (2026-08-08). The example lives at `examples/bloom`, CI
+ runs `field check` against it (#85), and `okamnesiac/bloom` is deleted.
+diff --git a/docs/projects/builtins-in-chooser/readme.md b/docs/projects/builtins-in-chooser/readme.md
+index 98333505..ccf8a4a6 100644
+--- a/docs/projects/builtins-in-chooser/readme.md
++++ b/docs/projects/builtins-in-chooser/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Built-ins in the chooser — or as plugins
++# Built-ins in the chooser — or as plugins
+ 
+ **Goal:** whether `eq` and friends join `field insert add`'s picker as rows
+ that write `effect:` blocks, or become actual AU/VST3 wrappers; the
+diff --git a/docs/projects/clip-looping/readme.md b/docs/projects/clip-looping/readme.md
+index 97b5d019..b77726bc 100644
+--- a/docs/projects/clip-looping/readme.md
++++ b/docs/projects/clip-looping/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Clip looping
++# Clip looping
+ 
+ **Status:** Complete. Clip looping shipped in #21; #23 extended looping
+ to the song layer (`length` + `loop: true` in song.yaml — the mix folds
+diff --git a/docs/projects/comping/readme.md b/docs/projects/comping/readme.md
+index 214e3b0b..abb99d0a 100644
+--- a/docs/projects/comping/readme.md
++++ b/docs/projects/comping/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Comping
++# Comping
+ 
+ **Goal:** one active take assembled from several, so a performance can
+ be built from the best moments of each pass
+diff --git a/docs/projects/convolution-reverb/readme.md b/docs/projects/convolution-reverb/readme.md
+index 5f4b6fee..07f1161e 100644
+--- a/docs/projects/convolution-reverb/readme.md
++++ b/docs/projects/convolution-reverb/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Convolution reverb
++# Convolution reverb
+ 
+ **Goal:** impulse responses as committed assets (a real place in the repo,
+ hash-pinned and action-keyed like any asset) through partitioned
+diff --git a/docs/projects/cross-rate-live/readme.md b/docs/projects/cross-rate-live/readme.md
+index 152d1846..7778b978 100644
+--- a/docs/projects/cross-rate-live/readme.md
++++ b/docs/projects/cross-rate-live/readme.md
+@@ -11,7 +11,7 @@ it turns on is tested. And converted delivery has run on the null
+ device only, because the hardware #143 played on switched to 44.1 kHz
+ rather than converting.
+ 
+-# Plan: Cross-rate live wiring
++# Cross-rate live wiring
+ 
+ **Goal:** deliver [realtime.md](../realtime/readme.md) decision 7's promise — "a
+ foreign-rate dirty track therefore runs live like every other track" —
+diff --git a/docs/projects/detail-pane/readme.md b/docs/projects/detail-pane/readme.md
+index ddc0e74e..b3485355 100644
+--- a/docs/projects/detail-pane/readme.md
++++ b/docs/projects/detail-pane/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: One detail pane that follows the selection
++# One detail pane that follows the selection
+ 
+ **Goal:** the `field ui` window has one detail region, driven entirely by
+ the current selection. Clicking a clip brings up its editing surface
+diff --git a/docs/projects/effects/readme.md b/docs/projects/effects/readme.md
+index c141a96d..759ad902 100644
+--- a/docs/projects/effects/readme.md
++++ b/docs/projects/effects/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Offline effects
++# Offline effects
+ 
+ **Status:** Shipped — the rules in #14 (eq with the Fyra-derived
+ auto-normalizing gain, limiter, reverb) and all three insert homes in
+diff --git a/docs/projects/engine-umbrella/readme.md b/docs/projects/engine-umbrella/readme.md
+index 15e85efa..a38db852 100644
+--- a/docs/projects/engine-umbrella/readme.md
++++ b/docs/projects/engine-umbrella/readme.md
+@@ -8,7 +8,7 @@ reader at the wrong process, and `src/` has since grown `audiod/`,
+ `remote/`, `time/` and `workers/` beside `graph/` and `generators/`
+ without anything needing them gathered.
+ 
+-# Plan: src/engine umbrella
++# src/engine umbrella
+ 
+ **Goal:** `graph/` + `generators/` (+ `audio/`?) under one engine module;
+ discussed 2026-08-06, no flag-day pressure, land as a quiet cleanup
+diff --git a/docs/projects/exotic-reverbs/readme.md b/docs/projects/exotic-reverbs/readme.md
+index 357c29f9..b922ec18 100644
+--- a/docs/projects/exotic-reverbs/readme.md
++++ b/docs/projects/exotic-reverbs/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Exotic reverb architectures
++# Exotic reverb architectures
+ 
+ **Goal:** velvet-noise reverbs, scattering delay networks: interesting papers,
+ no track record worth a mix; revisit once plate and hall have soaked
+diff --git a/docs/projects/external-instruments/readme.md b/docs/projects/external-instruments/readme.md
+index 0e464aaa..68ebd5f8 100644
+--- a/docs/projects/external-instruments/readme.md
++++ b/docs/projects/external-instruments/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: External instruments
++# External instruments
+ 
+ **Goal:** MIDI out with a declared audio return graduates live-only →
+ realtime-bounce, nondeterministic
+diff --git a/docs/projects/generation-progress/readme.md b/docs/projects/generation-progress/readme.md
+index b32c4f84..5d3401c0 100644
+--- a/docs/projects/generation-progress/readme.md
++++ b/docs/projects/generation-progress/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Generation progress
++# Generation progress
+ 
+ **Goal:** real per-step progress from the workers (ACE step counts, Chatterbox
+ chunking) over the existing progress events; today a minutes-long
+diff --git a/docs/projects/key-conforming/readme.md b/docs/projects/key-conforming/readme.md
+index 1a791370..6c1d2f16 100644
+--- a/docs/projects/key-conforming/readme.md
++++ b/docs/projects/key-conforming/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Getting imported material into key
++# Getting imported material into key
+ 
+ **Goal:** imported material moves into the song's key in one step, with
+ a model as the default path for transposition and time-stretch rather
+diff --git a/docs/projects/keyboard-instrument/readme.md b/docs/projects/keyboard-instrument/readme.md
+index bca5440b..a5d7fd63 100644
+--- a/docs/projects/keyboard-instrument/readme.md
++++ b/docs/projects/keyboard-instrument/readme.md
+@@ -3,7 +3,7 @@ status: in-progress
+ priority: now
+ ---
+ 
+-# Plan: Keyboard instrument
++# Keyboard instrument
+ 
+ **Goal:** `field keys` turns the computer keyboard into a MIDI device
+ that any application can play from, through a keymap you choose or
+diff --git a/docs/projects/lint-and-format/readme.md b/docs/projects/lint-and-format/readme.md
+index 71b8fa8c..1f6e1211 100644
+--- a/docs/projects/lint-and-format/readme.md
++++ b/docs/projects/lint-and-format/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: prettier and ESLint
++# prettier and ESLint
+ 
+ **Goal:** neither is installed and no config exists, so a tool reaching for a
+ formatter applies its own defaults (#83, 312 lines); ESLint is free,
+diff --git a/docs/projects/linux-portability/readme.md b/docs/projects/linux-portability/readme.md
+index 7518206e..d382154a 100644
+--- a/docs/projects/linux-portability/readme.md
++++ b/docs/projects/linux-portability/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Linux portability — the daemon, and CI that runs anywhere
++# Linux portability — the daemon, and CI that runs anywhere
+ 
+ **Status:** Complete. Chunk 1 shipped (#49), chunk 4 shipped (#52);
+ chunks 2–3 **withdrawn** to
+diff --git a/docs/projects/live-supercollider/readme.md b/docs/projects/live-supercollider/readme.md
+index 2c4cba4d..3d56e1c0 100644
+--- a/docs/projects/live-supercollider/readme.md
++++ b/docs/projects/live-supercollider/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: next
+ ---
+ 
+-# Plan: Live SuperCollider
++# Live SuperCollider
+ 
+ **Goal:** the voice `field keys` plays reaches the daemon's live graph as
+ an input on its MIDI track, so the inserts on that track and on every
+diff --git a/docs/projects/mcp-surface/readme.md b/docs/projects/mcp-surface/readme.md
+index 76060329..fe19c448 100644
+--- a/docs/projects/mcp-surface/readme.md
++++ b/docs/projects/mcp-surface/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: MCP surface
++# MCP surface
+ 
+ **Goal:** expose the CLI's verbs as MCP tools; agents are a first-class user,
+ but not until everything else actually works (moved down from next
+diff --git a/docs/projects/mix-assembly/readme.md b/docs/projects/mix-assembly/readme.md
+index 44a8fa10..b142ad95 100644
+--- a/docs/projects/mix-assembly/readme.md
++++ b/docs/projects/mix-assembly/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Offline mix assembly
++# Offline mix assembly
+ 
+ **Status:** Shipped (#9–#11, merged 2026-08-05). Follows
+ [sc-render.md](../sc-render/readme.md) — the phase order was re-decided after #8: mix
+diff --git a/docs/projects/multi-rate/readme.md b/docs/projects/multi-rate/readme.md
+index c4846932..132ba01d 100644
+--- a/docs/projects/multi-rate/readme.md
++++ b/docs/projects/multi-rate/readme.md
+@@ -5,7 +5,7 @@ status: completed
+ **Outcome:** Shipped: all three steps (#107, #108, #112), with every §5
+ clause discharged as that section records.
+ 
+-# Plan: Sample rate is a property of the track, converted at the edge
++# Sample rate is a property of the track, converted at the edge
+ 
+ **Status:** Complete (2026-08-09), all three steps. Step 1 (import
+ reads headers, decision 5): the ledger records `sample_rate` /
+diff --git a/docs/projects/musical-time/readme.md b/docs/projects/musical-time/readme.md
+index 10e39127..4930ff97 100644
+--- a/docs/projects/musical-time/readme.md
++++ b/docs/projects/musical-time/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Musical time arrays
++# Musical time arrays
+ 
+ **Status:** Shipped — #24 landed the arrays and bloom converted with
+ it: creek is authored in `[bar, beat?, tick?]` notation (`at: [1]`,
+diff --git a/docs/projects/nested-tracks/readme.md b/docs/projects/nested-tracks/readme.md
+index b2f5dfac..5ee99830 100644
+--- a/docs/projects/nested-tracks/readme.md
++++ b/docs/projects/nested-tracks/readme.md
+@@ -7,7 +7,7 @@ its amendments record. Negative local positions, which §1.6 decided are
+ how a pickup works and §9 deferred, never landed and carry over to
+ [pickups](../pickups/readme.md).
+ 
+-# Plan: Nested tracks — one primitive for structure, time and mix
++# Nested tracks — one primitive for structure, time and mix
+ 
+ **Status:** Shipped (2026-08-10): every chunk is live. Chunk 4 landed
+ last, in two slices — the schema, the warning severity and the whole
+diff --git a/docs/projects/pickups/readme.md b/docs/projects/pickups/readme.md
+index 9260ec09..d827d448 100644
+--- a/docs/projects/pickups/readme.md
++++ b/docs/projects/pickups/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Pickups — negative local positions
++# Pickups — negative local positions
+ 
+ **Goal:** a placement or clip may start before its parent's zero, which
+ is how a pickup works
+diff --git a/docs/projects/playback/readme.md b/docs/projects/playback/readme.md
+index f1f647c1..d56ab219 100644
+--- a/docs/projects/playback/readme.md
++++ b/docs/projects/playback/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Playback
++# Playback
+ 
+ **Status:** Shipped (#12–#13, merged 2026-08-05): the daemon, the socket,
+ and blocking `field play` with `--from` and the `field transport` family —
+diff --git a/docs/projects/plugin-hosting/readme.md b/docs/projects/plugin-hosting/readme.md
+index 7d721e27..37d2b666 100644
+--- a/docs/projects/plugin-hosting/readme.md
++++ b/docs/projects/plugin-hosting/readme.md
+@@ -3,7 +3,7 @@ status: in-progress
+ priority: now
+ ---
+ 
+-# Plan: hosted plugins — AU and VST3 as inserts
++# Hosted plugins — AU and VST3 as inserts
+ 
+ **Goal:** third-party plugins join insert chains as first-class
+ content — named readably, pinned exactly, their state content-addressed
+diff --git a/docs/projects/project-core/readme.md b/docs/projects/project-core/readme.md
+index d5af75ea..8d3d91b4 100644
+--- a/docs/projects/project-core/readme.md
++++ b/docs/projects/project-core/readme.md
+@@ -7,7 +7,7 @@ commitment never landed — `field track rename` and its siblings,
+ rewriting every reference atomically — and carries over to
+ [track-rename](../track-rename/readme.md).
+ 
+-# Plan: Project core — format, CLI, build graph skeleton
++# Project core — format, CLI, build graph skeleton
+ 
+ **Status:** Scaffold, schemas, tick/tempo math, deterministic YAML, and the
+ first CLI commands shipped in #4; the asset store in #5; the build graph
+diff --git a/docs/projects/project-layout/readme.md b/docs/projects/project-layout/readme.md
+index d2adc572..f0a78fa4 100644
+--- a/docs/projects/project-layout/readme.md
++++ b/docs/projects/project-layout/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: Project layout revision
++# Project layout revision
+ 
+ **Status:** Done (2026-08-06); the loader/CLI migration (§2.1) and the
+ §4 vocabulary shipped in #31, and bloom migrated the same day (bloom
+diff --git a/docs/projects/realtime/readme.md b/docs/projects/realtime/readme.md
+index 016662af..e53f4477 100644
+--- a/docs/projects/realtime/readme.md
++++ b/docs/projects/realtime/readme.md
+@@ -9,7 +9,7 @@ a session costs the engine one live chain, but sources preload whole
+ rather than streaming. Streaming rings, owed before large sessions
+ (§7), carry over to [streaming-rings](../streaming-rings/readme.md).
+ 
+-# Plan: Realtime
++# Realtime
+ 
+ **Goal:** the graph runs live — edit YAML while the song plays and hear
+ it next block — while `field build` stays exactly what it is: stems,
+diff --git a/docs/projects/recording-widget/readme.md b/docs/projects/recording-widget/readme.md
+index a81cb0d5..1faa1b7f 100644
+--- a/docs/projects/recording-widget/readme.md
++++ b/docs/projects/recording-widget/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Recording widget
++# Recording widget
+ 
+ **Goal:** the native macOS control surface, last on purpose: a client of an
+ engine that must exist first.
+diff --git a/docs/projects/recording/readme.md b/docs/projects/recording/readme.md
+index 7039ae09..bbac36eb 100644
+--- a/docs/projects/recording/readme.md
++++ b/docs/projects/recording/readme.md
+@@ -14,7 +14,7 @@ schema §11 deferred all wait on a take recorded on the Apollo, which
+ has not happened. They carry over to
+ [apollo-session](../apollo-session/readme.md).
+ 
+-# Plan: Recording
++# Recording
+ 
+ Waited behind [realtime.md](../realtime/readme.md), whose live graph makes
+ capture an input node rather than a second transport (realtime.md §6);
+diff --git a/docs/projects/remote-asset-store/readme.md b/docs/projects/remote-asset-store/readme.md
+index e26f7170..b5993bea 100644
+--- a/docs/projects/remote-asset-store/readme.md
++++ b/docs/projects/remote-asset-store/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Remote asset store
++# Remote asset store
+ 
+ **Goal:** S3-backed backend behind the content-hash abstraction, when LFS costs
+ hurt.
+diff --git a/docs/projects/remote/readme.md b/docs/projects/remote/readme.md
+index 815e03e3..452ad81a 100644
+--- a/docs/projects/remote/readme.md
++++ b/docs/projects/remote/readme.md
+@@ -3,7 +3,7 @@ status: in-progress
+ priority: next
+ ---
+ 
+-# Plan: Remote — login, clone, push, and a read-through cache
++# Remote — login, clone, push, and a read-through cache
+ 
+ **Goal:** the CLI half of audiofield.io: `field login`, `field clone
+ <owner>/<project>`, `field push` and `field pull`, and a `field build`
+diff --git a/docs/projects/render-pipeline/readme.md b/docs/projects/render-pipeline/readme.md
+index 61e2306b..28651839 100644
+--- a/docs/projects/render-pipeline/readme.md
++++ b/docs/projects/render-pipeline/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: One rendering pipeline
++# One rendering pipeline
+ 
+ **Status:** Shipped, chunks 1–6 (#50, #53, #54, #55 and chunk 5 here),
+ chunk 2 having carried most of chunk 6 with it. One §7 question outlives
+diff --git a/docs/projects/reverbs/readme.md b/docs/projects/reverbs/readme.md
+index 5d9b8870..f3f1217b 100644
+--- a/docs/projects/reverbs/readme.md
++++ b/docs/projects/reverbs/readme.md
+@@ -8,7 +8,7 @@ the live comparison. §5's live A/B ran on hardware under `--watch` in
+ #146. The decision it enables, which room creek ships with, has not
+ been made, so `space` still uses `reverb`.
+ 
+-# Plan: Two reverbs that beat Freeverb
++# Two reverbs that beat Freeverb
+ 
+ **Goal:** two new insert effects — `plate`, a Dattorro figure-8 tank,
+ and `hall`, a feedback delay network with per-band decay — that make
+diff --git a/docs/projects/sc-render/readme.md b/docs/projects/sc-render/readme.md
+index 5fcc1ca0..e7c0c61b 100644
+--- a/docs/projects/sc-render/readme.md
++++ b/docs/projects/sc-render/readme.md
+@@ -4,7 +4,7 @@ status: completed
+ 
+ **Outcome:** Shipped.
+ 
+-# Plan: SuperCollider offline rendering
++# SuperCollider offline rendering
+ 
+ **Status:** Shipped (#7, merged 2026-08-04); demonstrated publicly by
+ bloom's committed pad recipe. The `sc-render` rule and `field sc render` are
+diff --git a/docs/projects/sound-browser/readme.md b/docs/projects/sound-browser/readme.md
+index 2c5facac..592994b1 100644
+--- a/docs/projects/sound-browser/readme.md
++++ b/docs/projects/sound-browser/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: A sound browser that spans projects and libraries
++# A sound browser that spans projects and libraries
+ 
+ **Goal:** one browser finds and auditions sounds across the open
+ project, other Field projects, and a personal library, not only the
+diff --git a/docs/projects/splice/readme.md b/docs/projects/splice/readme.md
+index b50f4285..767caf8f 100644
+--- a/docs/projects/splice/readme.md
++++ b/docs/projects/splice/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: Splice support
++# Splice support
+ 
+ **Status:** Unstarted. Sketched 2026-08-09 from a later.md line; no code, no
+ PRs. The open questions in §4 gate any chunking.
+diff --git a/docs/projects/streaming-rings/readme.md b/docs/projects/streaming-rings/readme.md
+index 808e9f7b..b46dd92d 100644
+--- a/docs/projects/streaming-rings/readme.md
++++ b/docs/projects/streaming-rings/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: next
+ ---
+ 
+-# Plan: Streaming rings
++# Streaming rings
+ 
+ **Goal:** the live engine streams sources and track buffers through
+ bounded rings instead of preloading whole files and rendering every
+diff --git a/docs/projects/track-rename/readme.md b/docs/projects/track-rename/readme.md
+index 775efa6b..b6bacaef 100644
+--- a/docs/projects/track-rename/readme.md
++++ b/docs/projects/track-rename/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: `field track rename`
++# `field track rename`
+ 
+ **Goal:** `field track rename` (and its siblings) rename a track and
+ rewrite every reference to it in one commit, which is what makes names
+diff --git a/docs/projects/tui/readme.md b/docs/projects/tui/readme.md
+index 006c2727..ea0a8787 100644
+--- a/docs/projects/tui/readme.md
++++ b/docs/projects/tui/readme.md
+@@ -3,7 +3,7 @@ status: draft
+ priority: later
+ ---
+ 
+-# Plan: the TUI
++# The TUI
+ 
+ **Goal:** a full-screen terminal face for a playing project, wanted
+ outright (2026-08-12) and deliberately after the first
+diff --git a/docs/projects/ui/readme.md b/docs/projects/ui/readme.md
+index 57d10c96..44a2c639 100644
+--- a/docs/projects/ui/readme.md
++++ b/docs/projects/ui/readme.md
+@@ -3,7 +3,7 @@ status: in-progress
+ priority: now
+ ---
+ 
+-# Plan: the UI, first version
++# The UI, first version
+ 
+ **Goal:** a graphical face for a playing project — transport and
+ position, the song's tracks with their levels, edits landing as YAML
+diff --git a/docs/projects/voice-generation/readme.md b/docs/projects/voice-generation/readme.md
+index e3d293cd..a8318e1c 100644
+--- a/docs/projects/voice-generation/readme.md
++++ b/docs/projects/voice-generation/readme.md
+@@ -7,7 +7,7 @@ status: completed
+ clause, start-to-audio in seconds rather than minutes on the M3 Max,
+ was never measured on record.
+ 
+-# Plan: Voice generation
++# Voice generation
+ 
+ **Status:** Shipped — creek sings. Chunk 1 landed as schema (#58),
+ worker lifecycle (#59), `field-voiced` (#60) and the CLI seam (#61);
+diff --git a/docs/projects/watch/readme.md b/docs/projects/watch/readme.md
+index 6be10a2f..3f98ec55 100644
+--- a/docs/projects/watch/readme.md
++++ b/docs/projects/watch/readme.md
+@@ -10,7 +10,7 @@ engine instead.
+ `field build --watch` stands as built. §5's status-visibility question
+ went moot with the looped file hash it asked about.
+ 
+-# Plan: Watch mode — the loop follows the project
++# Watch mode — the loop follows the project
+ 
+ **Status:** Implemented (2026-08-06). Chunk 1 — the daemon `reload` op
+ (takeover at the wrap, daemon 0.4) and `field build --watch` — landed
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index 79ff5362..b267f81e 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -3,7 +3,7 @@ status: in-progress
+ priority: now
+ ---
+ 
+-# Plan: Windows portability — the checkout, the socket, and the last bits
++# Windows portability — the checkout, the socket, and the last bits
+ 
+ **Goal:** field builds, checks, plays and **live-renders** on Windows, so
+ that the realtime engine — which has no platform-bound code in it at all —
