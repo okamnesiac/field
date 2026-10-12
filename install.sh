@@ -620,6 +620,29 @@ version_older() {
 
 is_release_shim() { [ -f "$1" ] && grep -qF "$SHIM_MARKER" "$1" 2>/dev/null; }
 
+# The data directory a release shim runs: the path write_shim quoted on its
+# exec line, less /current/dist/cli.js, or nothing when the line is not in
+# that shape.
+shim_data_dir() {
+  local path quote="'\\''" tick="'" tail="/current/dist/cli.js' \"\$@\""
+  path="$(sed -n 's/^exec node //p' "$1")"
+  path="${path%%$'\n'*}"
+  case "$path" in "$tick"*"$tail") ;; *) return 0 ;; esac
+  path="${path#"$tick"}"
+  path="${path%"$tail"}"
+  printf '%s' "${path//"$quote"/$tick}"
+}
+
+# True when the shim runs this data directory's current. `field uninstall`
+# names the data directory by its real path, and the shim by the path it
+# was installed through, so the two compare as files when they differ.
+shim_runs_here() {
+  local dir
+  is_release_shim "$1" || return 1
+  dir="$(shim_data_dir "$1")"
+  [ -n "$dir" ] && { [ "$dir" = "$DATA_DIR" ] || [ "$dir" -ef "$DATA_DIR" ]; }
+}
+
 require_fetch_tools() {
   command -v curl >/dev/null 2>&1 || die "installing a release needs curl, which is not on PATH" 69
   command -v tar >/dev/null 2>&1 || die "installing a release needs tar, which is not on PATH" 69
@@ -940,24 +963,42 @@ huggingface_cache() {
   fi
 }
 
+# The row for a `field` in the bin directory that the uninstall leaves. A
+# release shim that runs another data directory is the one record of where
+# that install lives, so the row names it.
+keep_shim() {
+  local other
+  if is_release_shim "$1"; then
+    other="$(shim_data_dir "$1")"
+    if [ -n "$other" ]; then
+      row kept "$(tilde "$1"), which runs the install in $(tilde "$other") — to remove that install, uninstall again with FIELD_DATA_DIR=$(tilde "$other")"
+    else
+      row kept "$(tilde "$1"), which does not run $(tilde "$DATA_DIR/current")"
+    fi
+  elif [ -e "$1" ] || [ -L "$1" ]; then
+    row kept "$(tilde "$1"), which is not Field's release shim"
+  fi
+}
+
 # Removes a release install (install.md §3.5): the shim, when it is the
-# installer's, every version and download the installer can show it made,
-# `current`, release.conf, and JUCE's download, then the data directory if
-# nothing else is left in it. FIELD_DATA_DIR can name a directory that holds
-# other things, so those stay, as does a `field` in the bin directory that
-# is not the shim. The shim goes first, so `field` never runs a version
-# half removed.
+# installer's and runs this data directory, every version and download the
+# installer can show it made, `current`, release.conf, and JUCE's download,
+# then the data directory if nothing else is left in it. FIELD_DATA_DIR can
+# name a directory that holds other things, so those stay, as does any
+# other `field` in the bin directory. The shim goes first, so `field` never
+# runs a version half removed.
 uninstall_release() {
   local shim="$BIN_DIR/field" entry name workers="" models
-  if [ -z "$(current_version)" ] && [ -z "$(kept_versions "")" ] && ! is_release_shim "$shim"; then
+  if [ -z "$(current_version)" ] && [ -z "$(kept_versions "")" ] && ! shim_runs_here "$shim"; then
     row not-installed "no release of Field is installed in $(tilde "$DATA_DIR")"
+    ! is_release_shim "$shim" || keep_shim "$shim"
     return 0
   fi
-  if is_release_shim "$shim"; then
+  if shim_runs_here "$shim"; then
     rm -f "$shim"
     row removed "$(tilde "$shim")"
-  elif [ -e "$shim" ] || [ -L "$shim" ]; then
-    row kept "$(tilde "$shim"), which is not Field's release shim"
+  else
+    keep_shim "$shim"
   fi
   for entry in "$DATA_DIR"/* "$DATA_DIR"/.download-*; do
     name="${entry##*/}"

@@ -340,13 +340,19 @@ or the newest release's. Nothing else decides what an uninstall
 removes.
 
 - **A release install.** The target removes the shim, but only when it
-  carries the installer's marker; every version and download that the
-  installer can show it made, by the same tests `prune` uses;
-  `current`; `release.conf`; and JUCE's download in
-  `cache/fetchcontent`. Then it removes the data directory if nothing
-  else is left in it. Anything else, in the data directory or in the bin
-  directory, stays, with a `kept` row. The shim goes first, so `field`
-  never runs a version half removed.
+  carries the installer's marker and runs this data directory's
+  `current`; every version and download that the installer can show it
+  made, by the same tests `prune` uses; `current`; `release.conf`; and
+  JUCE's download in `cache/fetchcontent`. Then it removes the data
+  directory if nothing else is left in it. Anything else, in the data
+  directory or in the bin directory, stays, with a `kept` row. The shim
+  goes first, so `field` never runs a version half removed.
+- **A shim that runs another data directory stays.** It is the one
+  record of where that install lives, so its `kept` row names the
+  directory and says to uninstall again with `FIELD_DATA_DIR` set to
+  it. The shim's exec line holds the path it was installed through, and
+  `field uninstall` names the data directory by its real path, so the
+  two compare as files when their text differs.
 - **The model weights stay.** The workers' weights live in the Hugging
   Face cache (`HF_HOME`, or `~/.cache/huggingface`), which other tools
   share, so when a worker was set up, the target names that directory

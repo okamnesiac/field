@@ -1245,6 +1245,66 @@ posix('install.sh uninstall', () => {
     expect(run.stdout).not.toContain('3.11.4');
   });
 
+  // The shim is the one record of where its install lives, so the
+  // uninstall of another data directory leaves it to name that one.
+  it('keeps a shim that runs another data directory, and names that directory', () => {
+    publish('0.2.0');
+    const custom = join(root, 'custom');
+    release(undefined, { FIELD_DATA_DIR: custom });
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(field('--version').stdout).toBe('0.2.0\n');
+    expect(rows(run.stdout).get('not-installed')).toBe('no release of Field is installed in ~/.local/share/field');
+    expect(rows(run.stdout).get('kept')).toBe(
+      '~/.local/bin/field, which runs the install in ~/custom — to remove that install, uninstall again with FIELD_DATA_DIR=~/custom',
+    );
+    expect(release('uninstall', { FIELD_DATA_DIR: custom }).status).toBe(0);
+    expect(existsSync(shim)).toBe(false);
+    expect(existsSync(custom)).toBe(false);
+  });
+
+  it('removes its own versions, and keeps the shim another install wrote over its own', () => {
+    publish('0.2.0');
+    release();
+    const custom = join(root, 'custom');
+    release(undefined, { FIELD_DATA_DIR: custom });
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(existsSync(data)).toBe(false);
+    expect(field('--version').stdout).toBe('0.2.0\n');
+    expect(current(custom)).toBe('0.2.0');
+    expect(rows(run.stdout).get('kept')).toBe(
+      '~/.local/bin/field, which runs the install in ~/custom — to remove that install, uninstall again with FIELD_DATA_DIR=~/custom',
+    );
+  });
+
+  it('keeps a shim whose exec line it cannot read', () => {
+    publish('0.2.0');
+    release();
+    const text = readFileSync(shim, 'utf8').replace(/^exec node .*$/m, 'exec node "$HOME/elsewhere/cli.js" "$@"');
+    write(shim, text, 0o755);
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(readFileSync(shim, 'utf8')).toBe(text);
+    expect(existsSync(data)).toBe(false);
+    expect(rows(run.stdout).get('kept')).toBe('~/.local/bin/field, which does not run ~/.local/share/field/current');
+  });
+
+  // `field uninstall` hands the installer the data directory's real path,
+  // and the shim has the path it was installed through, quoted.
+  it('removes the shim it wrote through a link to the data directory, whose path needs quoting', () => {
+    publish('0.2.0');
+    mkdirSync(join(root, 'real'));
+    symlinkSync(join(root, 'real'), join(root, 'link'));
+    release(undefined, { FIELD_DATA_DIR: join(root, 'link', "a user's data") });
+    const run = release('uninstall', { FIELD_DATA_DIR: join(root, 'real', "a user's data") });
+    expect(run.status).toBe(0);
+    expect(existsSync(shim)).toBe(false);
+    expect(existsSync(join(root, 'real', "a user's data"))).toBe(false);
+    expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
+  });
+
   it('leaves the model weights in the shared Hugging Face cache, and says where they are', () => {
     publish('0.2.0');
     release();

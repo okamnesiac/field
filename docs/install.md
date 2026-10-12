@@ -243,6 +243,14 @@ Either way it removes the shim, every version and download the installer
 made, `current`, `release.conf`, and JUCE's download, then the data
 directory if nothing else is left in it. It leaves anything it did not
 put there, in the data directory or in the bin directory, and says so.
+
+The uninstall removes the shim only when it runs the data directory
+being uninstalled. If you installed with `FIELD_DATA_DIR`, set it again
+when you uninstall with curl. `field uninstall` finds the directory
+itself. Without `FIELD_DATA_DIR`, the curl uninstall looks in the
+default data directory, and it keeps a shim that runs another one, with
+a `kept` row that names that directory.
+
 The model workers' weights stay in the Hugging Face cache
 (`~/.cache/huggingface` unless `HF_HOME` moves it), which other tools
 share, and the uninstall names that directory when a worker was set up.
