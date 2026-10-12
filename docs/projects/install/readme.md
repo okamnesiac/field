@@ -82,9 +82,9 @@ Each prerequisite is checked before anything changes, and a missing one
 stops the installer with exit status 69 and a message that names the
 fix: Node 24 or newer, pnpm, a pnpm global bin directory on PATH
 (`pnpm setup`), and for `audiod` and `all` CMake 3.24 or newer, a C++
-compiler, git, and on Linux JUCE's development headers. Every check runs
-before the installer stops, so one run names all that is missing (§3.4).
-An unknown target exits 64.
+compiler, git, and on Linux make and JUCE's development headers. Every
+check runs before the installer stops, so one run names all that is
+missing (§3.4). An unknown target exits 64.
 
 ### 2.3 The CLI is a link to the checkout
 
@@ -352,9 +352,10 @@ it gets the cmake.org line an old CMake gets, so the next run does not
 reject what the first one installed. It checks Xcode's command line
 tools on macOS through `xcode-select -p`, never by running
 `/usr/bin/c++` or `/usr/bin/git`, which open an install dialog when the
-tools are absent. On Linux it
-checks for a C++ compiler, git, and through `pkg-config` the modules of
-the headers `ci.yml` installs. It installs nothing itself.
+tools are absent. On Linux it checks for a C++ compiler, git, make
+unless `CMAKE_GENERATOR` names another generator, and through
+`pkg-config` the modules of the headers `ci.yml` installs. It installs
+nothing itself.
 
 **Chunk 6 offers to install them.** On macOS with Homebrew, the
 installer asks whether to run the `brew install` it would print, and

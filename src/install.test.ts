@@ -247,9 +247,9 @@ beforeEach(() => {
   write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
   write(join(bin, 'curl'), CURL, 0o755);
   // The platform is the machine's unless FAKE_UNAME names another, so the
-  // macOS and Linux checks both run wherever the suite does. A compiler and
-  // every header module are there unless a test removes them, or names the
-  // modules FAKE_NO_HEADERS leaves out.
+  // macOS and Linux checks both run wherever the suite does. A compiler,
+  // make, and every header module are there unless a test removes them, or
+  // names the modules FAKE_NO_HEADERS leaves out.
   write(
     join(bin, 'uname'),
     `#!${BASH}\nif [ -n "\${FAKE_UNAME:-}" ] && [ "\${1:-}" = -s ]; then echo "$FAKE_UNAME"; else exec ${UNAME} "$@"; fi\n`,
@@ -257,6 +257,7 @@ beforeEach(() => {
   );
   write(join(bin, 'xcode-select'), `#!${BASH}\necho ${root}\n`, 0o755);
   write(join(bin, 'c++'), `#!${BASH}\n`, 0o755);
+  write(join(bin, 'make'), `#!${BASH}\n`, 0o755);
   write(
     join(bin, 'pkg-config'),
     `#!${BASH}\ncase " \${FAKE_NO_HEADERS:-} " in *" $2 "*) exit 1 ;; esac\n`,
@@ -487,9 +488,7 @@ posix('install.sh cli', () => {
   });
 
   it('builds the CLI without the tools only the daemon needs', () => {
-    rmSync(join(bin, 'cmake'));
-    rmSync(join(bin, 'c++'));
-    rmSync(join(bin, 'xcode-select'));
+    for (const tool of ['cmake', 'c++', 'make', 'xcode-select']) rmSync(join(bin, tool));
     expect(install('cli').status).toBe(0);
   });
 });
@@ -542,6 +541,24 @@ posix('install.sh before it changes anything', () => {
     expect(run.status).toBe(69);
     expect(run.stderr).toContain("install the same with your distribution's package manager");
     expect(run.stderr).toContain('libglu1-mesa-dev');
+  });
+
+  // build:native runs CMake's default generator, which on Linux is Unix
+  // Makefiles, and a compiler installed without build-essential brings no
+  // make.
+  it('names make on Linux when there is a compiler and no make', () => {
+    rmSync(join(bin, 'make'));
+    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
+    const run = install('audiod', { FAKE_UNAME: 'Linux' });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toContain('  make-missing ');
+    expect(run.stderr).toContain('  sudo apt-get install -y make\n');
+    expect(changes(run)).toEqual([]);
+  });
+
+  it('needs no make when CMAKE_GENERATOR names another generator', () => {
+    rmSync(join(bin, 'make'));
+    expect(install('audiod', { FAKE_UNAME: 'Linux', CMAKE_GENERATOR: 'Ninja' }).status).toBe(0);
   });
 
   it('asks for the headers too when there is no pkg-config to look for them', () => {

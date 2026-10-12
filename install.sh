@@ -204,6 +204,10 @@ check_compiler() {
   fi
   command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 ||
     need compiler-missing "building field-audiod needs a C++20 compiler" "" build-essential "# a C++20 compiler, such as g++ 10 or newer"
+  # build:native names no generator, so CMake takes CMAKE_GENERATOR's, or
+  # else Unix Makefiles, which runs make. A compiler installs without it.
+  [ -n "${CMAKE_GENERATOR:-}" ] || command -v make >/dev/null 2>&1 ||
+    need make-missing "building field-audiod runs make, CMake's default build tool on Linux" "" make
 }
 
 # CMake clones JUCE with git. On macOS, check_compiler covers it.

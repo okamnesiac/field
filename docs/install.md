@@ -81,9 +81,11 @@ same packages with its package manager. `all` needs everything below,
   install one older than 3.24, the installer points at
   [cmake.org](https://cmake.org/download/) instead of the `cmake`
   package.
-- **A C++20 compiler and git**, for `field-audiod`, whose build clones
-  JUCE with git. On macOS, Xcode's command line tools hold both, and
-  `xcode-select --install` installs them.
+- **A C++20 compiler, git, and make**, for `field-audiod`, whose build
+  clones JUCE with git and runs make, the build tool CMake uses unless
+  `CMAKE_GENERATOR` names another. On macOS, Xcode's command line tools
+  hold all three, and `xcode-select --install` installs them. On Linux,
+  `build-essential` holds the compiler and make.
 - **The ALSA, X11, and freetype development headers**, on Linux, which
   JUCE builds against. The installer looks for them with `pkg-config`,
   and the packages it names are the ones `.github/workflows/ci.yml`
