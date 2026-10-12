@@ -1305,24 +1305,66 @@ posix('install.sh uninstall', () => {
     expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
   });
 
-  it('leaves the model weights in the shared Hugging Face cache, and says where they are', () => {
+  // field-aced downloads ACE-Step's weights into a directory of Field's own
+  // (models_root in python/aced), and Chatterbox's go to the Hugging Face
+  // cache, so each worker set up names the directory its weights are in.
+  const ACE_ROW =
+    "ACE-Step's weights stay in ~/.field/models/acestep, which every Field install on this machine uses — delete it once none of them needs the weights";
+  const CHATTERBOX_ROW =
+    "Chatterbox's weights stay in the Hugging Face cache, ~/.cache/huggingface, which other tools share — remove the models you no longer want from there";
+
+  function weights(): { ace: string; huggingface: string } {
+    const ace = join(root, '.field', 'models', 'acestep', 'checkpoints');
+    const huggingface = join(root, '.cache', 'huggingface', 'hub');
+    mkdirSync(ace, { recursive: true });
+    mkdirSync(huggingface, { recursive: true });
+    return { ace, huggingface };
+  }
+
+  it("leaves each worker's model weights where the worker keeps them, and says where", () => {
     publish('0.2.0');
     release();
     field('setup', 'aced');
-    const models = join(root, '.cache', 'huggingface', 'hub');
-    mkdirSync(models, { recursive: true });
+    field('setup', 'voiced');
+    const { ace, huggingface } = weights();
     const run = release('uninstall');
     expect(run.status).toBe(0);
-    expect(existsSync(models)).toBe(true);
-    expect(rows(run.stdout).get('models-kept')).toBe(
-      "the model workers' weights stay in ~/.cache/huggingface, which other tools share — remove the models you no longer want from there",
-    );
+    expect(existsSync(ace)).toBe(true);
+    expect(existsSync(huggingface)).toBe(true);
+    expect(run.stdout).toContain(`models-kept    ${ACE_ROW}\n`);
+    expect(run.stdout).toContain(`models-kept    ${CHATTERBOX_ROW}\n`);
+  });
+
+  it('names only the weights of the workers that were set up', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    weights();
+    const run = release('uninstall');
+    expect(run.stdout).toContain(`models-kept    ${ACE_ROW}\n`);
+    expect(run.stdout).not.toContain('Chatterbox');
+  });
+
+  it('names the directories FIELD_ACE_MODELS and HF_HUB_CACHE move the weights to', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    field('setup', 'voiced');
+    mkdirSync(join(root, 'ace'));
+    mkdirSync(join(root, 'hub'));
+    const run = release('uninstall', {
+      FIELD_ACE_MODELS: join(root, 'ace'),
+      HF_HOME: join(root, 'hf'),
+      HF_HUB_CACHE: join(root, 'hub'),
+    });
+    expect(run.stdout).toContain("ACE-Step's weights stay in ~/ace,");
+    expect(run.stdout).toContain("Chatterbox's weights stay in the Hugging Face cache, ~/hub,");
   });
 
   it('says nothing about models when no worker was set up', () => {
     publish('0.2.0');
     release();
-    mkdirSync(join(root, '.cache', 'huggingface'), { recursive: true });
+    weights();
     expect(rows(release('uninstall').stdout).has('models-kept')).toBe(false);
   });
 

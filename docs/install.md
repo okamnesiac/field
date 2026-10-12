@@ -182,10 +182,11 @@ the release `v0` names again.
 Each version keeps its worker environments in its own
 `python/<worker>/.venv`, so an upgrade sets up again, in the new version,
 each worker you set up in the old one, before it switches. The model
-weights live in the Hugging Face cache and the packages in uv's cache,
-so nothing large downloads again. A worker whose uv is gone is skipped
-with a `worker-skipped` row that names the fix, because it could not run
-in the old version either.
+weights live outside every version, ACE-Step's in
+`~/.field/models/acestep` and Chatterbox's in the Hugging Face cache,
+and the packages live in uv's cache, so nothing large downloads again.
+A worker whose uv is gone is skipped with a `worker-skipped` row that
+names the fix, because it could not run in the old version either.
 
 ### What each target does in a release install
 
@@ -251,9 +252,18 @@ itself. Without `FIELD_DATA_DIR`, the curl uninstall looks in the
 default data directory, and it keeps a shim that runs another one, with
 a `kept` row that names that directory.
 
-The model workers' weights stay in the Hugging Face cache
-(`~/.cache/huggingface` unless `HF_HOME` moves it), which other tools
-share, and the uninstall names that directory when a worker was set up.
+The model workers' weights stay. For each worker you set up, the
+uninstall prints a `models-kept` row that names the directory its
+weights are in:
+
+- **ACE-Step**, for `field-aced`: about 10 GB in
+  `~/.field/models/acestep`, or in `FIELD_ACE_MODELS` when you set it.
+  Every Field install on the machine uses that directory, checkouts
+  included, so delete it only once none of them needs the weights.
+- **Chatterbox**, for `field-voiced`: about 2 GB in the Hugging Face
+  cache, `~/.cache/huggingface` unless `HF_HOME` or `HF_HUB_CACHE` moves
+  it. Other tools share that cache, so remove only
+  `hub/models--ResembleAI--chatterbox` from it.
 
 ## Install from a checkout
 

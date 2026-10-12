@@ -730,10 +730,10 @@ workers_set_up_in() {
 # A worker's environment lives in python/<worker>/.venv inside the version,
 # so each worker set up in the version being replaced is set up again in
 # the new one, with the new one's CLI, before the switch (install.md §7.5).
-# Its weights are in the Hugging Face cache and its packages in uv's, so
-# nothing large downloads again. One whose uv is gone could not run in the
-# old version either, so it is skipped with a row rather than failing the
-# upgrade.
+# Its weights are outside the version, where ace_models and
+# huggingface_cache say, and its packages in uv's cache, so nothing large
+# downloads again. One whose uv is gone could not run in the old version
+# either, so it is skipped with a row rather than failing the upgrade.
 setup_workers_again() {
   local old="$1" list label name
   list="$(workers_set_up_in "$DATA_DIR/$old")"
@@ -953,10 +953,17 @@ install_release() {
   report_shim
 }
 
-# Where the model workers' weights live: the Hugging Face cache, which
-# other tools share, so an uninstall names it rather than removing it.
+# Where the model workers' weights live, which an uninstall names rather
+# than removes. field-aced downloads ACE-Step's into a directory of Field's
+# own that every install on the machine uses (models_root in python/aced).
+# field-voiced's Chatterbox downloads into the Hugging Face cache, which
+# other tools share.
+ace_models() { printf '%s' "${FIELD_ACE_MODELS:-$HOME/.field/models/acestep}"; }
+
 huggingface_cache() {
-  if [ -n "${HF_HOME:-}" ]; then
+  if [ -n "${HF_HUB_CACHE:-}" ]; then
+    printf '%s' "$HF_HUB_CACHE"
+  elif [ -n "${HF_HOME:-}" ]; then
     printf '%s' "$HF_HOME"
   else
     printf '%s/huggingface' "${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -988,7 +995,7 @@ keep_shim() {
 # other `field` in the bin directory. The shim goes first, so `field` never
 # runs a version half removed.
 uninstall_release() {
-  local shim="$BIN_DIR/field" entry name workers="" models
+  local shim="$BIN_DIR/field" entry name aced="" voiced="" models
   if [ -z "$(current_version)" ] && [ -z "$(kept_versions "")" ] && ! shim_runs_here "$shim"; then
     row not-installed "no release of Field is installed in $(tilde "$DATA_DIR")"
     ! is_release_shim "$shim" || keep_shim "$shim"
@@ -1003,7 +1010,8 @@ uninstall_release() {
   for entry in "$DATA_DIR"/* "$DATA_DIR"/.download-*; do
     name="${entry##*/}"
     if is_field_version "$entry"; then
-      for models in "$entry"/python/*/.venv; do [ ! -d "$models" ] || workers=1; done
+      [ ! -d "$entry/python/aced/.venv" ] || aced=1
+      [ ! -d "$entry/python/voiced/.venv" ] || voiced=1
       rm -rf "$entry"
       row removed "$name"
     elif is_field_download "$entry"; then
@@ -1019,9 +1027,13 @@ uninstall_release() {
   elif [ -d "$DATA_DIR" ]; then
     row kept "$(tilde "$DATA_DIR"), which holds things Field did not put there"
   fi
+  models="$(ace_models)"
+  if [ -n "$aced" ] && [ -d "$models" ]; then
+    row models-kept "ACE-Step's weights stay in $(tilde "$models"), which every Field install on this machine uses — delete it once none of them needs the weights"
+  fi
   models="$(huggingface_cache)"
-  if [ -n "$workers" ] && [ -d "$models" ]; then
-    row models-kept "the model workers' weights stay in $(tilde "$models"), which other tools share — remove the models you no longer want from there"
+  if [ -n "$voiced" ] && [ -d "$models" ]; then
+    row models-kept "Chatterbox's weights stay in the Hugging Face cache, $(tilde "$models"), which other tools share — remove the models you no longer want from there"
   fi
   # release_init read release.conf before it went, so a fork's install
   # names the fork's installer.

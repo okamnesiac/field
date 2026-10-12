@@ -353,10 +353,13 @@ removes.
   it. The shim's exec line holds the path it was installed through, and
   `field uninstall` names the data directory by its real path, so the
   two compare as files when their text differs.
-- **The model weights stay.** The workers' weights live in the Hugging
-  Face cache (`HF_HOME`, or `~/.cache/huggingface`), which other tools
-  share, so when a worker was set up, the target names that directory
-  rather than removing it.
+- **The model weights stay.** field-aced keeps ACE-Step's in
+  `FIELD_ACE_MODELS`, or `~/.field/models/acestep`, which every Field
+  install on the machine uses (`models_root` in `python/aced`).
+  field-voiced's Chatterbox keeps its weights in the Hugging Face cache
+  (`HF_HUB_CACHE`, `HF_HOME`, or `~/.cache/huggingface`), which other
+  tools share. For each worker that was set up, the target names the
+  directory its weights are in rather than removing it.
 - **A checkout install.** The target runs `pnpm remove -g field` when
   pnpm's global `field` links this checkout, leaves a link to another
   checkout alone, and never deletes the checkout, which someone cloned
@@ -468,8 +471,10 @@ removes.
   `field uninstall` that removes files from TypeScript lost for the same
   reason, and because it cannot help when `field` itself no longer runs.
   `field.one/uninstall.sh` is a static file that runs the installer's
-  target, so the curl path needs nothing of its own. Removing the
-  Hugging Face cache lost because other tools share it.
+  target, so the curl path needs nothing of its own. Removing the model
+  weights lost: other tools share the Hugging Face cache, and every
+  Field install on the machine, checkouts included, shares ACE-Step's
+  directory.
 
 ## 5 Acceptance criteria
 
@@ -625,15 +630,16 @@ version.
 before it switches to it.** The old version's `field setup --check`
 says which workers are set up; the new version's `field setup <name>`
 sets up each one. Nothing large downloads again: the model weights live
-in the Hugging Face cache and the packages in uv's cache. A worker whose
-uv is gone is skipped with a `worker-skipped` row, because it could not
-run in the old version either, and any other failure stops the upgrade
-with the old version still current. The alternative, pointing
-`UV_PROJECT_ENVIRONMENT` at a directory outside the version, lost
-because `workerScriptInstalled` in `src/workers/client.ts` looks for
-each worker's console script in `python/<worker>/.venv`, and one
-environment shared across versions would hold the old version's
-packages while the new one ran.
+outside every version, ACE-Step's in `~/.field/models/acestep` and
+Chatterbox's in the Hugging Face cache, and the packages live in uv's
+cache. A worker whose uv is gone is skipped with a `worker-skipped` row,
+because it could not run in the old version either, and any other
+failure stops the upgrade with the old version still current. The
+alternative, pointing `UV_PROJECT_ENVIRONMENT` at a directory outside
+the version, lost because `workerScriptInstalled` in
+`src/workers/client.ts` looks for each worker's console script in
+`python/<worker>/.venv`, and one environment shared across versions
+would hold the old version's packages while the new one ran.
 
 ### 7.6 Windows (DECIDED, 2026-10-11)
 
