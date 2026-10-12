@@ -119,11 +119,9 @@ rerun() {
 
 # --- What the build needs (install.md "Before you install") ---
 #
-# A check that fails adds a row and what supplies the missing tool, rather
-# than stopping, and require_tools stops once every check has run. So one
-# run names everything the machine lacks, with the commands that install
-# it, before anything downloads or builds, rather than stopping at the
-# first missing tool or failing minutes into the daemon's build.
+# One run names everything the machine lacks before anything downloads or
+# builds, rather than one tool a run or a failure minutes into the
+# daemon's build.
 
 OS="$(uname -s)"
 NEEDS=""
@@ -238,14 +236,11 @@ check_headers() {
     need headers-missing "JUCE needs the ALSA, X11, and freetype development headers, and pkg-config finds no$absent" "" "$HEADER_PACKAGES"
 }
 
-# A release install downloads its source and unpacks it.
 check_fetch() {
   command -v curl >/dev/null 2>&1 || need curl-missing "installing a release downloads it with curl" curl curl
   command -v tar >/dev/null 2>&1 || need tar-missing "installing a release unpacks it with tar" "" tar "# tar"
 }
 
-# Runs the named checks and, when any found something missing, stops before
-# anything changes, with every row and the commands that install it all.
 require_tools() {
   local check
   for check in "$@"; do "check_$check"; done

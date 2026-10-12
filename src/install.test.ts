@@ -494,9 +494,6 @@ posix('install.sh cli', () => {
 });
 
 posix('install.sh before it changes anything', () => {
-  // Every check runs before the installer stops, so one run names all that
-  // is missing, with one command per package manager, rather than one tool
-  // a run, or a failure minutes into compiling JUCE.
   it('names everything missing on macOS at once, and the commands that install it', () => {
     for (const tool of ['node', 'pnpm', 'cmake', 'xcode-select']) rmSync(join(bin, tool));
     const run = install(undefined, { FAKE_UNAME: 'Darwin' });
