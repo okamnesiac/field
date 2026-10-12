@@ -376,7 +376,9 @@ The installer prints one row for each thing it does, such as
 screen. The output of the commands it runs, such as `pnpm install` and
 the compiler, goes to a log file in `$TMPDIR` instead. In a terminal,
 the command that is running and its last five lines show dimmed below
-the rows as they arrive, and disappear when the command finishes.
+the rows as they arrive, and disappear when the command finishes. The
+window shows each character outside ASCII as `?`, so no line is wider
+than the terminal; the log keeps them as they were.
 
 When a command fails, the installer prints the end of that command's
 output and where the whole log is, and keeps the log:

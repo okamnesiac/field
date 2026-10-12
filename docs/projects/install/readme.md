@@ -192,7 +192,12 @@ Each command a target runs to build, link, or set up, which `step` in
 `mktemp` in `$TMPDIR`. On a terminal, the command and its last five
 lines show dimmed under the rows as they arrive, redrawn in place and
 cut short of the terminal's width so no line wraps, and erased when the
-command ends, as Docker shows a build. Off a terminal, such as in a log
+command ends, as Docker shows a build. The redraw moves up one row per
+line, so a line that wrapped would leave output behind. Bash cannot
+measure a character's width, so each line drawn is ASCII: a character
+outside it, such as CJK, which a terminal draws two columns wide, shows
+as `?`, and control characters are dropped. The width comes from `stty
+size`, then `COLUMNS`, then 80. Off a terminal, such as in a log
 or CI, nothing shows. A command that fails prints the end of its own
 output and the log's path, and the log stays. A target that succeeds
 removes it. `FIELD_VERBOSE=1` streams every line instead, and makes no

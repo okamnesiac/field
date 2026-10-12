@@ -130,7 +130,7 @@ case "$1 \${2:-}" in
     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
   "remove -g")
     rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
-  "install --frozen-lockfile") echo "Packages: +122" ;;
+  "install --frozen-lockfile") echo "Packages: +122"; echo "依存関係を解決しています、依存関係を解決しています" ;;
   "run build")
     mkdir -p "$dir/dist"
     node "$dir/scripts/stamp-build.mjs" > /dev/null
@@ -336,6 +336,40 @@ function install(target?: string, env: Record<string, string> = {}, script = joi
   return {
     status: result.status,
     stdout: result.stdout,
+    stderr: result.stderr,
+    log: readFileSync(log, 'utf8').split('\n').filter(Boolean),
+  };
+}
+
+// The installer in a pseudo-terminal, through script(1), whose arguments
+// differ between macOS and util-linux. Its output is the terminal's.
+const SCRIPT = which('script');
+function inTerminal(target: string, env: Record<string, string> = {}): Run {
+  if (SCRIPT === undefined) throw new Error('these tests need script(1) on PATH');
+  writeFileSync(log, '');
+  const command = [BASH, join(repo, 'install.sh'), target];
+  const args =
+    process.platform === 'darwin'
+      ? ['-q', '/dev/null', ...command]
+      : ['-qec', command.map((arg) => `'${arg.replace(/'/g, `'\\''`)}'`).join(' '), '/dev/null'];
+  const result = spawnSync(SCRIPT, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      PATH: [join(pnpmHome, 'bin'), bin].join(delimiter),
+      HOME: root,
+      GIT_CONFIG_NOSYSTEM: '1',
+      FAKE_LOG: log,
+      FAKE_PNPM_HOME: pnpmHome,
+      FAKE_CLI: join(root, 'cli.js'),
+      TMPDIR: join(root, 'tmp'),
+      TERM: 'xterm',
+      ...env,
+    },
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout.replace(/\r\n/g, '\n'),
     stderr: result.stderr,
     log: readFileSync(log, 'utf8').split('\n').filter(Boolean),
   };
@@ -706,6 +740,25 @@ posix('install.sh audiod and workers', () => {
     expect(readFileSync(join(root, 'tmp', logs[0]!), 'utf8')).toBe(
       `$ pnpm --dir ${repo} run build:native\ncmake: JUCE did not compile\n`,
     );
+  });
+
+  it('draws build output in a dimmed window no wider than the terminal, and erases it', () => {
+    const run = inTerminal('cli', { COLUMNS: '24' });
+    expect(run.status).toBe(0);
+    // Each line the window draws: the escape that clears the row and
+    // dims, the text, and the escape that resets.
+    const drawn = [...run.stdout.matchAll(/\x1b\[2K\x1b\[2m(.*?)\x1b\[0m/g)].map((match) => match[1]!);
+    expect(drawn).toContain('  Packages: +122');
+    expect(drawn).toContain(`  ${'?'.repeat(19)}`);
+    for (const line of drawn) {
+      expect(line).toMatch(/^[\x20-\x7e]*$/);
+      expect(line.length).toBeLessThan(24);
+    }
+    // Erased, so nothing of the build is left among the rows after it.
+    const after = run.stdout.slice(run.stdout.lastIndexOf('\x1b[J'));
+    expect(after).not.toContain('Packages');
+    expect(rows(after.slice('\x1b[J'.length)).has('linked')).toBe(true);
+    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
   });
 
   it('shows every line of build output with FIELD_VERBOSE', () => {

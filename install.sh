@@ -63,16 +63,11 @@ warn_row() {
   fi
 }
 
-# Build output (install.md §2.8). A step's output goes to LOG rather than
-# the screen, so an install fits on one screen. On a terminal, the step's
-# command and its last STEP_LINES lines show dimmed as they arrive, the
-# way Docker shows a build, and are erased when it ends. A step that fails
-# prints the end of LOG and where the whole of it is. LOG is removed once
-# the target succeeds. FIELD_VERBOSE=1 shows every line instead.
+# Build output: install.md §2.8.
 STEP_LINES=5
 LOG=""
 
-# Runs a command as a build step, with /dev/null as its standard input.
+# Standard input is /dev/null: piped from curl, it is the script.
 step() {
   local status=0 dir start
   if [ -n "${FIELD_VERBOSE:-}" ]; then
@@ -83,7 +78,6 @@ step() {
     dir="${TMPDIR:-/tmp}"
     LOG="$(mktemp "${dir%/}/field-install.XXXXXX")" || die "could not make a log file in ${dir%/}"
   fi
-  # Where this step's lines begin in LOG, which holds every step's.
   start="$(sed -n '$=' "$LOG")"
   printf '$ %s\n' "$*" >>"$LOG"
   if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then
@@ -95,38 +89,40 @@ step() {
   return "$status"
 }
 
-# A step's command for the screen, each path under the home directory as ~.
 step_title() {
   local arg title=""
   for arg in "$@"; do title="$title${title:+ }$(tilde "$arg")"; done
   printf '%s' "$title"
 }
 
-# The terminal's width, or 80 when it will not say.
 terminal_width() {
   local size
   size="$(stty size </dev/tty 2>/dev/null)" || size=""
   size="${size##* }"
+  case "$size" in "" | 0 | *[!0-9]*) size="${COLUMNS:-80}" ;; esac
   case "$size" in "" | *[!0-9]*) size=80 ;; esac
   [ "$size" -ge 20 ] || size=20
   printf '%s' "$size"
 }
 
-# A step's window on a terminal: its command and last STEP_LINES lines,
-# dimmed, each cut short of the terminal's width so none wraps, redrawn
-# in place as each line arrives and erased at the end. Every line goes to
-# LOG as well.
+# Every line drawn is ASCII without control characters, so its length is
+# the columns it takes, and cutting it short of the terminal's width means
+# it never wraps: the redraw moves up one row per line. A character that
+# may be two columns wide, such as CJK, shows as ?.
 step_window() {
   local title="$1" width line drawn=0 n=0 i dim="" plain=""
   local lines=()
-  width=$(($(terminal_width) - 4))
+  width=$(($(terminal_width) - 5))
+  title="${title//[^[:ascii:]]/?}"
+  title="${title//[[:cntrl:]]/}"
   [ -n "${NO_COLOR:-}" ] || { dim=$'\033[2m'; plain=$'\033[0m'; }
   while IFS= read -r line || [ -n "$line" ]; do
     printf '%s\n' "$line" >&3
-    # A progress bar redraws itself with carriage returns; its last state
-    # is the line. A tab would widen the line past the cut.
+    # A progress bar's last state follows its last carriage return.
     line="${line##*$'\r'}"
     line="${line//$'\t'/  }"
+    line="${line//[^[:ascii:]]/?}"
+    line="${line//[[:cntrl:]]/}"
     if [ "$n" -lt "$STEP_LINES" ]; then n=$((n + 1)); else lines=("${lines[@]:1}"); fi
     lines[n - 1]="$line"
     [ "$drawn" -eq 0 ] || printf '\033[%dA' "$drawn"
@@ -139,8 +135,7 @@ step_window() {
   [ "$drawn" -eq 0 ] || printf '\033[%dA\r\033[J' "$drawn"
 }
 
-# The end of a failed step's output, from line $3 of LOG, where its own
-# lines begin after the command.
+# $3 is the line of LOG where the failed step's own output begins.
 step_failed() {
   {
     printf 'install.sh: %s exited with status %s. The end of its output:\n\n' "$1" "$2"
