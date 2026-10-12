@@ -1,0 +1,79 @@
+{
+ "version": 1,
+ "name": "Remote test timeout budgets",
+ "project": "windows-portability",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 220,
+  "title": "Give the clone, push, and pull tests room on the windows runner (windows-portability.md §7.2)",
+  "head": "205b0caa95d297c0823c7746b262708791e78577",
+  "headRef": "windows/remote-test-timeouts",
+  "base": "b6639000b390ac8f7ee29faafb0b879f195a25fb",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "The clone, push, and pull integration tests check real Git repositories against a local remote service. Starting Git and Git LFS processes on the Windows CI runner sometimes takes longer than the test runner’s default budgets, so otherwise healthy tests time out.",
+   "Each file now grants its setup hook and every test 30 seconds. The change keeps the larger budget within these three suites; product behavior and the rest of the test suite keep their existing limits."
+  ],
+  "cards": [
+   {
+    "id": "validation",
+    "title": "Validation",
+    "html": "<ul><li>All 22 tests in the three changed suites pass on macOS.</li><li>Type checking and project-plan validation pass.</li><li>Windows CI must establish whether the new budget contains the intermittent stalls.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "budgets",
+   "title": "Give real Git operations time to finish",
+   "kicker": "Setup and test bodies share a 30-second budget",
+   "intro": [
+    "Vitest is the test runner. Its setup hooks prepare a fresh project and bare Git repository before each test; several test bodies then clone, push, or pull that repository. Each file defines <code>GIT_HEAVY_MS</code> and passes it explicitly to <code>beforeEach</code> and as the suite’s inherited test timeout.",
+    "The comments preserve why these suites need a larger budget: they test behavior rather than speed, and Windows process-start stalls have crossed the previous defaults."
+   ],
+   "checks": [
+    {
+     "kind": "verify",
+     "text": "Ran the three suites together: 3 files and 22 tests passed; type checking also passed."
+    }
+   ],
+   "files": [
+    {
+     "path": "src/commands/clone.test.ts",
+     "note": "Tests clone against a real local Git remote; raises the setup and test timeout budgets."
+    },
+    {
+     "path": "src/commands/push.test.ts",
+     "note": "Tests push against a real local Git remote; raises the setup and test timeout budgets."
+    },
+    {
+     "path": "src/commands/pull.test.ts",
+     "note": "Tests pull against a real local Git remote; raises the setup and test timeout budgets."
+    }
+   ]
+  },
+  {
+   "id": "record",
+   "title": "Record the Windows follow-up",
+   "kicker": "Keep the portability inventory current",
+   "intro": [
+    "Section 7.2 of the Windows portability plan records the remote-test timeout failures and the scoped budget change. The existing plan remains in progress; this pull request neither changes its readiness status nor introduces a new design question."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/windows-portability/readme.md",
+     "note": "Records the completed timeout-budget follow-up in section 7.2.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "The documented 30-second hook and test budgets match all three suites; project check reports valid plans."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

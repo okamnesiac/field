@@ -1,0 +1,139 @@
+diff --git a/docs/projects/windows-portability/readme.md b/docs/projects/windows-portability/readme.md
+index e57c806..02b1d94 100644
+--- a/docs/projects/windows-portability/readme.md
++++ b/docs/projects/windows-portability/readme.md
+@@ -685,6 +685,19 @@ land as its own diff whenever.
+   `install.sh` does, with the daemon under MSVC. install.md handed this
+   item here rather than design it without a Windows machine to try it
+   on. **Standalone**, and a design question before it is a port.
++- **The remote commands' tests time out on the windows runner**
++  (`commands/clone.test.ts`, `push.test.ts`, `pull.test.ts`): each
++  test's setup builds a project, commits it, and makes a bare remote,
++  one git or git-lfs process after another, before the test clones,
++  pushes, or pulls. On a windows run that passes, vitest reports 3 to
++  7 s for one of these tests, setup included, against a 5 s test
++  default and a 10 s hook default, so the runner's process-start
++  stalls tipped one over in six windows runs on 2026-10-11, on `main`
++  and on branches alike. #197 had given only `clone.test.ts`'s hook
++  room. **Done** (2026-10-11): all three files give their hook and
++  every test 30 s, as `release.test.ts` gives its git-heavy tests. The
++  slowest timed-out test reported 14.2 s, so a timeout there now means
++  a stall twice that long, or a hang.
+ 
+ ### 7.3 The workers chunk, when it opens (§4 stands)
+ 
+diff --git a/src/commands/clone.test.ts b/src/commands/clone.test.ts
+index 3ac9257..fdfe1c2 100644
+--- a/src/commands/clone.test.ts
++++ b/src/commands/clone.test.ts
+@@ -64,12 +64,13 @@ const refusingRunner: GeneratorRunner = async (node) => {
+ };
+ 
+ // The setup below builds the source, commits it, clones it bare, and
+-// pushes its LFS objects, one git or git-lfs process after another. On
+-// the windows CI runner it takes 2 to 3 s, but a process start there
+-// stalls now and then, and one stall pushed it past vitest's 10 s hook
+-// default. Nothing here measures how fast clone is, so the hook gets
+-// room to finish.
+-const SETUP_TIMEOUT_MS = 30_000;
++// pushes its LFS objects, one git or git-lfs process after another, and
++// several tests then clone that remote. On the windows CI runner the
++// setup takes 2 to 3 s, but a process start there stalls now and then:
++// one stall pushed the hook past vitest's 10 s hook default, and others
++// pushed a clone past its 5 s test default. Nothing here measures how
++// fast clone is, so the hook and every test get room to finish.
++const GIT_HEAVY_MS = 30_000;
+ 
+ beforeEach(async () => {
+   tmp = mkdtempSync(join(tmpdir(), 'field-clone-'));
+@@ -126,7 +127,7 @@ beforeEach(async () => {
+       entry.outputs.map((o) => readFileSync(join(source, '.field', 'cache', 'cas', o.sha256))),
+     );
+   }
+-}, SETUP_TIMEOUT_MS);
++}, GIT_HEAVY_MS);
+ 
+ afterEach(async () => {
+   await remote.close();
+@@ -150,7 +151,7 @@ const options = (overrides: Partial<Parameters<typeof clone>[0]> = {}) => {
+   };
+ };
+ 
+-describe('field clone', () => {
++describe('field clone', { timeout: GIT_HEAVY_MS }, () => {
+   it('refuses without git-lfs, before touching the network or the disk', async () => {
+     const { opts } = options({ lfsAvailable: () => false });
+     await expect(clone(opts)).rejects.toThrow(/git-lfs is required/);
+diff --git a/src/commands/pull.test.ts b/src/commands/pull.test.ts
+index e85f2f1..8a129f0 100644
+--- a/src/commands/pull.test.ts
++++ b/src/commands/pull.test.ts
+@@ -53,6 +53,14 @@ const refusingRunner: GeneratorRunner = async (node) => {
+   throw new Error(`rendered ${node.label.name}, which a warmed checkout must never do`);
+ };
+ 
++// The setup below builds the source, commits it, pushes it to a bare
++// remote, and clones that, one git or git-lfs process after another,
++// and two of the three tests then pull. Process starts on the windows
++// CI runner stall now and then, and one stall pushed the hook past
++// vitest's 10 s hook default. Nothing here measures how fast pull is,
++// so the hook and every test get room to finish, as in clone.test.ts.
++const GIT_HEAVY_MS = 30_000;
++
+ beforeEach(async () => {
+   tmp = mkdtempSync(join(tmpdir(), 'field-pull-'));
+   source = join(tmp, 'source');
+@@ -95,14 +103,14 @@ beforeEach(async () => {
+   // git-lfs is present, and no warm.
+   work = join(tmp, 'work');
+   git(['clone', '-q', ...LFS_FILTER_CONFIG.flatMap(([k, v]) => ['-c', `${k}=${v}`]), pathToFileURL(bare).href, work], { cwd: tmp });
+-});
++}, GIT_HEAVY_MS);
+ 
+ afterEach(async () => {
+   await remote.close();
+   rmSync(tmp, { recursive: true, force: true });
+ });
+ 
+-describe('field pull', () => {
++describe('field pull', { timeout: GIT_HEAVY_MS }, () => {
+   it('pulls, then warms the cache for HEAD so the next build renders nothing', async () => {
+     expect(existsSync(join(work, '.field', 'cache'))).toBe(false);
+     const out: string[] = [];
+diff --git a/src/commands/push.test.ts b/src/commands/push.test.ts
+index f9d2afa..84c21d4 100644
+--- a/src/commands/push.test.ts
++++ b/src/commands/push.test.ts
+@@ -55,6 +55,14 @@ function commit(message: string): void {
+   });
+ }
+ 
++// The setup below builds the source and commits it, and several tests
++// then push it, git and git-lfs together, to a bare remote. Process
++// starts on the windows CI runner stall now and then, and those stalls
++// kept a push running past vitest's 5 s test default. Nothing here
++// measures how fast push is, so the hook and every test get room to
++// finish, as in clone.test.ts.
++const GIT_HEAVY_MS = 30_000;
++
+ beforeEach(async () => {
+   tmp = mkdtempSync(join(tmpdir(), 'field-push-'));
+   source = join(tmp, 'source');
+@@ -89,7 +97,7 @@ beforeEach(async () => {
+ 
+   remote = await fakeRemote();
+   remote.addProject('howlo/chemicals', { clone_url: pathToFileURL(bare).href, default_branch: branch, visibility: 'public' });
+-});
++}, GIT_HEAVY_MS);
+ 
+ afterEach(async () => {
+   await remote.close();
+@@ -112,7 +120,7 @@ const options = (overrides: Partial<Parameters<typeof push>[0]> = {}) => {
+   };
+ };
+ 
+-describe('field push', () => {
++describe('field push', { timeout: GIT_HEAVY_MS }, () => {
+   it('pushes, then offers every entry beneath main for HEAD, uploading only what the remote lacks', async () => {
+     const { opts, out } = options();
+     const result = await push(opts);
