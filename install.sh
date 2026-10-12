@@ -431,13 +431,7 @@ describe_field() {
 # keeps JUCE's download outside all of them, so only the first version
 # downloads it (install.md §3.2).
 install_audiod() {
-  if [ ! -x "$REPO/$AUDIOD_RELATIVE" ]; then
-    if [ -d "${FIELD_FETCHCONTENT_BASE_DIR:-/nonexistent}/juce-src" ]; then
-      row building "field-audiod for this version: CMake compiles JUCE from its download in $(tilde "$FIELD_FETCHCONTENT_BASE_DIR"), which takes a few minutes"
-    else
-      row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
-    fi
-  fi
+  [ -x "$REPO/$AUDIOD_RELATIVE" ] || row building "field-audiod, takes a while"
   if ! step pnpm --dir "$REPO" run build:native; then
     [ "$(uname -s)" != Linux ] ||
       echo "install.sh: on Linux, JUCE needs the ALSA, X11, and freetype development headers; .github/workflows/ci.yml installs the packages it needs on Ubuntu" >&2
