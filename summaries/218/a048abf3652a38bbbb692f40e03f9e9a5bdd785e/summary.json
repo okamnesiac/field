@@ -1,0 +1,205 @@
+{
+ "version": 1,
+ "name": "Installer missing-tool report",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 218,
+  "title": "Name everything the build needs before the installer stops (install.md chunk 5)",
+  "head": "a048abf3652a38bbbb692f40e03f9e9a5bdd785e",
+  "headRef": "installer-missing-deps",
+  "base": "6f28530dc4b06a162b38e66c14428754e070a25f",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>install.sh</code> is Field's one installer. Run inside a checkout, it installs that checkout. Piped from curl, or downloaded by <code>field upgrade</code>, it installs a release. Either way it builds the CLI with pnpm and the audio daemon <code>field-audiod</code> with CMake, which downloads and compiles the JUCE framework. Before it builds, it checks for the tools the build needs.",
+   "Before this change, those checks stopped at the first missing tool, so a new machine took one run per tool. They also never looked for a C++ compiler, git, or the Linux development headers JUCE compiles against, so a machine without them failed minutes into the JUCE build. Most people meet this on the one-line install, on a machine that has never built Field.",
+   "Now every check the target needs runs first. Each missing or old tool adds a labeled row and what supplies it: a Homebrew formula on macOS, a Debian or Ubuntu package on Linux, or a manual step where no package fits. The installer then prints every row, one <code>brew install</code> or <code>sudo apt-get install</code> line, the manual steps, and the command to run again. It exits 69 before it downloads, builds, or links anything, and it installs nothing itself. Offering to run the Homebrew command is chunk 6, which the plan describes and nobody has started."
+  ],
+  "cards": [
+   {
+    "id": "targets",
+    "title": "Which checks each target runs",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Target</th><th>Checks it runs</th></tr></thead><tbody><tr><td><code>all</code>, checkout</td><td>node, pnpm, compiler, git, cmake, headers</td></tr><tr><td><code>all</code>, release</td><td>the same, plus curl and tar</td></tr><tr><td><code>cli</code></td><td>node, pnpm</td></tr><tr><td><code>audiod</code></td><td>pnpm, compiler, git, cmake, headers</td></tr><tr><td><code>workers</code></td><td>node</td></tr><tr><td><code>status</code></td><td>none; it reports rather than stops</td></tr></tbody></table></div>"
+   },
+   {
+    "id": "remedies",
+    "title": "Where each row's remedy goes",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Row</th><th>macOS</th><th>Linux</th></tr></thead><tbody><tr><td><code>node-missing</code>, <code>node-old</code></td><td><code>brew install node</code></td><td>step: Node 24 or newer from nodejs.org</td></tr><tr><td><code>pnpm-missing</code></td><td><code>brew install pnpm</code></td><td>step: <code>corepack enable pnpm</code> (flagged)</td></tr><tr><td><code>cmake-missing</code></td><td><code>brew install cmake</code></td><td>apt <code>cmake</code> (flagged)</td></tr><tr><td><code>cmake-old</code></td><td><code>brew install cmake</code></td><td>step: CMake from cmake.org</td></tr><tr><td><code>xcode-missing</code></td><td>step: <code>xcode-select --install</code></td><td>not checked</td></tr><tr><td><code>compiler-missing</code>, <code>git-missing</code></td><td>not checked; the Xcode row covers both</td><td>apt <code>build-essential</code>, <code>git</code></td></tr><tr><td><code>pkg-config-missing</code>, <code>headers-unchecked</code>, <code>headers-missing</code></td><td>not checked</td><td>apt <code>pkg-config</code> and the eleven header packages</td></tr><tr><td><code>curl-missing</code>, <code>tar-missing</code></td><td><code>brew install curl</code>, step for tar</td><td>apt <code>curl</code>, <code>tar</code></td></tr></tbody></table></div>"
+   },
+   {
+    "id": "review",
+    "title": "What the review found",
+    "html": "<ul class=\"tight\"><li><b>Two open findings, both about Linux remedies.</b> The only pnpm step, <code>corepack enable pnpm</code>, fails on Node 25 and newer, which ship no Corepack. A missing CMake gets the apt <code>cmake</code> package, which on Ubuntu 22.04 and Debian 11 is older than 3.24, so the next run asks again.</li><li><b>Two suggestions.</b> Check <code>make</code> on Linux, which CMake's default generator needs. Drop the manual-step strings that <code>need</code> can never print.</li><li><b>What ran.</b> Typecheck, <code>project check</code>, <code>bash -n</code>, the installer's 86 tests, and sandboxed runs with a stubbed <code>PATH</code> and a temporary <code>HOME</code>. CI passes on this head.</li></ul>"
+   },
+   {
+    "id": "terms",
+    "title": "Terms",
+    "html": "<ul class=\"tight\"><li><b>Row.</b> One line of the report: a label such as <code>cmake-missing</code>, then what Field needs.</li><li><b>Formula.</b> A Homebrew package, installed with <code>brew install</code>.</li><li><b>Xcode command line tools.</b> Apple's compiler, git, and make, which <code>xcode-select --install</code> installs and <code>xcode-select -p</code> locates.</li><li><b>pkg-config module.</b> The name under which a library's development files register, such as <code>alsa</code> or <code>x11</code>. JUCE's CMake finds its Linux libraries through them.</li><li><b>Exit status 69.</b> <code>EX_UNAVAILABLE</code> from <code>sysexits.h</code>. Every missing-prerequisite stop in the installer uses it.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "checks",
+   "title": "Every check runs before the installer stops",
+   "kicker": "install.sh: the check functions, the collector, and the one report",
+   "intro": [
+    "Each prerequisite has a <code>check_</code> function: <code>check_node</code>, <code>check_pnpm</code>, <code>check_cmake</code>, <code>check_compiler</code>, <code>check_git</code>, <code>check_headers</code>, and <code>check_fetch</code> for curl and tar. A check that finds a tool missing or too old no longer stops the script. It calls <code>need</code>, which adds a row to the report and puts the remedy on one of three lists: <code>BREW</code> for Homebrew formulae on macOS, <code>APT</code> for Debian and Ubuntu packages elsewhere, or <code>STEPS</code> for a manual line when the platform has no package for that row.",
+    "<code>require_tools</code> takes the names of the checks a target needs and runs them all. When any added a row, it prints the report to stderr and exits 69. Each target in <code>checkout_main</code> and <code>release_main</code> now calls it once, in place of the separate <code>require_node</code>, <code>require_pnpm</code>, <code>require_cmake</code>, and <code>require_fetch_tools</code> calls, which this change removes.",
+    "Two checks are new in kind. On macOS, the compiler and git come from Xcode's command line tools, and <code>/usr/bin/c++</code> and <code>/usr/bin/git</code> exist even without them, as stubs that open an install dialog. So <code>check_compiler</code> asks <code>xcode-select -p</code> for the tools' directory instead of running either. On Linux, <code>check_headers</code> asks <code>pkg-config</code> for each module the JUCE build links. Without pkg-config it cannot look, so it names pkg-config and every header package."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "<code>OS</code> is read once from <code>uname -s</code> when the script loads. The macOS checks run when it is <code>Darwin</code>, the header check only when it is <code>Linux</code>, and every other system gets the apt names with a line saying to translate them when <code>apt-get</code> is absent."
+    }
+   ],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "The new checks, <code>need</code> and <code>require_tools</code>, and each target's single call to <code>require_tools</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 138,
+       "text": "<code>need</code> picks one remedy per row. On macOS a row with a formula goes on the <code>brew install</code> line. Elsewhere a row with an apt package goes on the <code>apt-get</code> line. Only a row with neither prints its manual step."
+      },
+      {
+       "kind": "flag",
+       "line": 162,
+       "text": "Open finding: on Linux the only pnpm step is <code>corepack enable pnpm</code>, but Node.js stopped distributing Corepack in 25.0.0. A machine with Node 25 or 26 and no pnpm passes <code>check_node</code>, and the printed step fails with <code>corepack: command not found</code>. The base also named https://pnpm.io/installation, and the <code>status</code> row at line 426 still does. Keep a step that works without Corepack beside it."
+      },
+      {
+       "kind": "flag",
+       "line": 168,
+       "text": "Open finding: a missing CMake on Linux gets the apt <code>cmake</code> package, which is CMake 3.22.1 on Ubuntu 22.04 and 3.18.4 on Debian 11, both below 3.24. The next run then reports <code>cmake-old</code> and only then names cmake.org. Print the cmake.org step for a missing CMake on Linux too, in place of the package or beside it."
+      },
+      {
+       "kind": "verify",
+       "line": 180,
+       "text": "With the <code>xcode-select</code> stand-in removed, a macOS-mode run lists <code>xcode-missing</code> and prints <code>xcode-select --install</code> before the Homebrew lines. The test at <code>src/install.test.ts:490</code> asserts that order, and it passes. The check never runs <code>/usr/bin/c++</code> or <code>/usr/bin/git</code>."
+      },
+      {
+       "kind": "context",
+       "line": 184,
+       "text": "The Linux compiler check does not look for <code>make</code>, which CMake's default generator needs. A compiler installed without <code>build-essential</code>, beside a CMake from cmake.org, passes every check and then fails at configure. The base had the same gap, and the review lists it as a suggestion."
+      },
+      {
+       "kind": "verify",
+       "line": 199,
+       "text": "<code>HEADER_PACKAGES</code> holds the same eleven packages, in the same order, that <code>.github/workflows/ci.yml</code> installs before <code>pnpm build:native</code> on Ubuntu. CI's comment says that list came from what a bare <code>ubuntu:24.04</code> container needed. Compared against <code>ci.yml</code> at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 226,
+       "text": "Every <code>check_</code> function returns 0 on every path, and every <code>need</code> call passes all five arguments. So under <code>set -euo pipefail</code> the loop runs every check to the end and no unset argument stops it. Traced by reading each function at this head."
+      },
+      {
+       "kind": "verify",
+       "line": 252,
+       "text": "Every sandboxed run that found something missing exited 69 and left the temporary <code>HOME</code> empty. The runs covered release mode on Linux and macOS, with the targets <code>all</code>, <code>cli</code>, and <code>audiod</code>."
+      },
+      {
+       "kind": "context",
+       "line": 1056,
+       "text": "A release <code>all</code> also checks curl and tar. <code>require_shim_free</code> runs after <code>require_tools</code>, so a <code>field</code> that belongs to something else in the bin directory shows up only on the run after the tools are in place."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests stub the platform and every tool",
+   "kicker": "src/install.test.ts: uname, xcode-select, c++, and pkg-config become stand-ins",
+   "intro": [
+    "The installer's tests run the real <code>install.sh</code> under bash, with <code>HOME</code> set to a fresh temporary directory and <code>PATH</code> limited to a directory of links and stand-ins. So nothing installed on the machine can answer for a missing tool. This change adds four stand-ins. <code>uname</code> reports <code>FAKE_UNAME</code> for <code>uname -s</code>, so the macOS and Linux checks both run wherever the suite runs. <code>xcode-select</code> prints a directory that exists, <code>c++</code> does nothing, and <code>pkg-config</code> finds every module except those <code>FAKE_NO_HEADERS</code> names. A test removes a stand-in to make a tool missing.",
+    "The new <code>install.sh before it changes anything</code> block covers everything missing at once on macOS, one missing formula with Homebrew present, several misses on Linux, a Linux without <code>apt-get</code>, a Linux without pkg-config, and a macOS without pkg-config, where no header check runs. A release-mode test removes curl and tar and checks that the data directory was never made."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/install.test.ts",
+     "note": "Four new stand-ins, platform-specific pnpm tests, and a block for the combined report.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "All 86 tests in this file pass at this head under macOS's bash 3.2, and CI's <code>linux</code> job ran them under bash 5. No <code>field-install-*</code> directory was left in the temporary directory afterward."
+      },
+      {
+       "kind": "context",
+       "line": 255,
+       "text": "The <code>uname</code> stand-in answers only <code>uname -s</code> and hands every other call to the real <code>uname</code>. <code>install_audiod</code> and <code>profile_hint</code> also call <code>uname -s</code>, so they see the faked platform too."
+      },
+      {
+       "kind": "context",
+       "line": 490,
+       "text": "This test asserts the order of the steps: <code>xcode-select --install</code> comes before the Homebrew lines, because Homebrew needs the command line tools too."
+      },
+      {
+       "kind": "context",
+       "line": 513,
+       "text": "The stand-ins answer the same on every distribution, so no test can show the two Linux findings: a Node without Corepack, or a distribution whose CMake package is older than 3.24."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Documentation and the plan",
+   "kicker": "docs/install.md shows the report; the install plan adds §3.4 and chunks 5 and 6",
+   "intro": [
+    "<code>docs/install.md</code> replaced its list of what the installer does not check with an example of the new report. It now lists what each target needs, with the platform's remedy beside each tool. The install plan adds §3.4, which states the problem and describes chunk 5, this change, and chunk 6, which would offer to run the Homebrew command. It adds acceptance criteria for both and marks chunks 3 and 4 shipped.",
+    "The plan is <code>in-progress</code> at both the base and the head, so this change flips no status, and its new text leaves no question open. §7.4, which domain serves the installer, still reads as an open question, although chunk 4 shipped on <code>field.one</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "note": "\"Before you install\" now shows the report and lists each target's needs.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 49,
+       "text": "The example matches, byte for byte, the stderr of a macOS-mode release run with no Node, pnpm, CMake, or Homebrew in a sandbox."
+      },
+      {
+       "kind": "verify",
+       "line": 64,
+       "text": "What each target needs here matches the <code>require_tools</code> calls in <code>checkout_main</code> and <code>release_main</code>: <code>audiod</code> skips Node, curl, and tar, <code>cli</code> checks Node and pnpm, and <code>workers</code> checks Node alone."
+      },
+      {
+       "kind": "context",
+       "line": 73,
+       "text": "This bullet gives the same single pnpm step as the open finding at <code>install.sh:162</code>, so the fix there applies here too."
+      }
+     ]
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "§2.2 now says every check runs first; §3.4, the chunk 5 and 6 criteria, and §6 are new or updated.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 330,
+       "text": "§3.4 holds the design for both chunks. Chunk 6 asks before it runs <code>brew install</code>, reads the answer from <code>/dev/tty</code> because bash reads the script itself from stdin, and keeps <code>xcode-select --install</code> as a printed step because it returns before the tools are installed."
+      },
+      {
+       "kind": "context",
+       "line": 500,
+       "text": "The code meets both chunk 5 criteria on macOS. On Linux the first one, which says the printed commands install what is missing, fails in the two cases the open findings describe."
+      },
+      {
+       "kind": "context",
+       "line": 520,
+       "text": "§6 now records chunk 4 as shipped on <code>field.one</code>, but §7.4, which domain serves the installer, still reads as open. The question predates this change. <code>install.sh</code> and <code>docs/install.md</code> still name the <code>raw.githubusercontent.com</code> URL that <code>field.one</code> proxies, so no code depends on the domain."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
