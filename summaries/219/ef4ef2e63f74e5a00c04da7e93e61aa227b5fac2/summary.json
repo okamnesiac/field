@@ -32,7 +32,7 @@
    {
     "id": "review",
     "title": "Review so far",
-    "html": "<ul class=\"tight\"><li>One review, of <code>ef4ef2e</code>: changes requested, with two open P2 threads on <code>install.sh</code>, lines 983 and 956.</li><li>At that head, <code>pnpm typecheck</code>, <code>project check</code>, and <code>bash -n install.sh</code> passed, and the two focused test files passed 104 tests. <code>shellcheck</code> was not installed.</li><li>A sandbox with a temporary <code>HOME</code>, paths containing spaces, and decoys ran <code>field uninstall</code> through the shim, offline and online. It removed what Field made, kept every decoy, and exited 0.</li><li>CI: Linux passed. Windows failed one push test on a timeout, a known flake today.</li><li>The install plan stays <code>in-progress</code>. Its §7.4, on which domain serves the installer, is still open from before this change.</li></ul>"
+    "html": "<ul class=\"tight\"><li>Both full reviews of <code>ef4ef2e</code> request changes. Two P2 finding threads remain open: the shim for another data directory is deleted, and ACE-Step weights are misreported.</li><li>The gpt-6 review passes <code>pnpm typecheck</code>, <code>project check</code>, and <code>bash -n install.sh</code>. It independently reproduces the shim deletion with a temporary bin directory and confirms that the other installation survives without its launcher.</li><li>The install plan stays <code>in-progress</code>. Its earlier question about the installer domain remains open; this change introduces no new question.</li></ul>"
    }
   ]
  },
@@ -65,7 +65,7 @@
       {
        "kind": "verify",
        "line": 964,
-       "text": "Only entries that pass <code>is_field_version</code> or <code>is_field_download</code> are removed. In a sandbox, an <code>X.Y.Z</code> directory without the marker, a symlinked <code>X.Y.Z</code> and the directory it points at, a <code>.download-*</code> without <code>unpacked/</code>, and loose files all survived, and the data directory was kept with a row."
+       "text": "The removal loop calls the existing ownership tests before deleting version or download directories. The focused installer tests exercise foreign files and directories that must survive."
       },
       {
        "kind": "context",
@@ -85,7 +85,7 @@
       {
        "kind": "verify",
        "line": 1038,
-       "text": "<code>pnpm remove -g field</code> runs only when pnpm's global <code>field</code> resolves to this checkout. A sandbox checkout whose path contains a space was unlinked and left in place. The tests cover a link to another checkout, which stays."
+       "text": "The checkout uninstall calls <code>pnpm remove -g field</code> only when the resolved global link matches this checkout. The focused tests cover both its own link and another checkout’s link."
       }
      ]
     }
@@ -106,9 +106,9 @@
      "note": "Adds <code>uninstall()</code>: a Windows refusal, then <code>upgrade('uninstall', deps)</code>.",
      "checks": [
       {
-       "kind": "verify",
+       "kind": "context",
        "line": 144,
-       "text": "In a sandbox release install, running <code>field uninstall</code> through the shim removed the install and exited 0, though it was running from the version it removed. That held both with <code>FIELD_OFFLINE=1</code>, where bash runs the version's own <code>install.sh</code> while the target deletes it, and when downloading the installer from a <code>file://</code> <code>FIELD_RAW_URL</code>."
+       "text": "The earlier review exercised uninstall through a release shim both offline and with an installer downloaded through a local file URL. This command delegates to the same installer path that upgrade already uses."
       },
       {
        "kind": "context",
