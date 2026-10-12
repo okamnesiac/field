@@ -1,0 +1,663 @@
+diff --git a/docs/install.md b/docs/install.md
+index 55daaeb..f8357a3 100644
+--- a/docs/install.md
++++ b/docs/install.md
+@@ -41,26 +41,57 @@ pnpm add -g .
+ 
+ ## Before you install
+ 
+-Before it changes anything, the installer checks for the tools the
+-target needs, and stops with exit status 69 and a message naming the one
+-that is missing or too old. It does not look for git, a C++ compiler,
+-or the Linux development headers. When one is missing, the daemon build
+-fails and says so. A checkout's `all` has installed the CLI by then; a
+-release install has changed nothing.
+-
+-- **Node 24 or newer.** The version in `.nvmrc`.
+-- **pnpm.** `corepack enable pnpm` installs the version `package.json`
+-  names. A release builds with pnpm too. For a checkout, also run
+-  `pnpm setup` once, then open a new shell, so pnpm has a global bin
+-  directory on your PATH to link `field` into.
+-- **CMake 3.24 or newer and a C++20 compiler**, for `field-audiod`. On
+-  macOS, `brew install cmake` and Xcode's command line tools. On Linux,
+-  JUCE also needs the ALSA, X11, and freetype development headers;
+-  `.github/workflows/ci.yml` installs the packages it needs on Ubuntu.
++Before it changes anything, the installer checks for every tool the
++target needs. When any is missing or too old, it lists them all, prints
++the commands that install them, and stops with exit status 69:
++
++```console
++$ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++install.sh: this machine is missing what Field needs to build:
++
++  node-missing       Field needs Node 24 or newer
++  pnpm-missing       Field builds with pnpm
++  cmake-missing      building field-audiod needs CMake 3.24 or newer
++
++Install what is missing:
++
++  # Homebrew first, from https://brew.sh
++  brew install node pnpm cmake
++
++Then open a new shell and run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash again.
++```
++
++On macOS the commands use Homebrew. On Linux they use `apt-get` and the
++Debian and Ubuntu package names; on another distribution, install the
++same packages with its package manager. `all` needs everything below,
++`audiod` everything but Node and curl and tar, `cli` Node and pnpm, and
++`workers` Node alone.
++
++- **Node 24 or newer.** The version in `.nvmrc`. On Linux, install it
++  from [nodejs.org](https://nodejs.org/en/download), because Debian and
++  Ubuntu package an older one.
++- **pnpm.** On Linux, `corepack enable pnpm` installs the version
++  `package.json` names. Node 25 and newer ship without Corepack, so
++  where `corepack` is not on your PATH, the installer points at
++  [pnpm's installation page](https://pnpm.io/installation) instead.
++  For a checkout, also run `pnpm setup` once, then open a new shell, so
++  pnpm has a global bin directory on your PATH to link `field` into.
++- **CMake 3.24 or newer**, for `field-audiod`. Ubuntu 22.04 and Debian
++  11 package an older one, so where `apt-cache` says `apt-get` would
++  install one older than 3.24, the installer points at
++  [cmake.org](https://cmake.org/download/) instead of the `cmake`
++  package.
++- **A C++20 compiler, git, and make**, for `field-audiod`, whose build
++  clones JUCE with git and runs make, the build tool CMake uses unless
++  `CMAKE_GENERATOR` names another. On macOS, Xcode's command line tools
++  hold all three, and `xcode-select --install` installs them. On Linux,
++  `build-essential` holds the compiler and make.
++- **The ALSA, X11, and freetype development headers**, on Linux, which
++  JUCE builds against. The installer looks for them with `pkg-config`,
++  and the packages it names are the ones `.github/workflows/ci.yml`
++  installs on Ubuntu.
+ - **curl and tar**, for a release install, which downloads the release's
+   source.
+-- **git**, for a release install too, because the daemon build clones
+-  JUCE with it. A checkout has it already.
+ 
+ `field build` also needs [SuperCollider](https://supercollider.github.io/),
+ and `field generate` needs [uv](https://docs.astral.sh/uv/). The
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 9dbdf40..f4d3a88 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -80,11 +80,11 @@ and warning when the checkout is behind it. The installer never pulls.
+ 
+ Each prerequisite is checked before anything changes, and a missing one
+ stops the installer with exit status 69 and a message that names the
+-fix: Node 24 or newer, pnpm (`corepack enable pnpm`), a pnpm global bin
+-directory on PATH (`pnpm setup`), and CMake 3.24 or newer for `audiod`
+-and `all`. A C++ compiler and the Linux development headers are not
+-checked; the daemon build reports either one missing. An unknown target
+-exits 64.
++fix: Node 24 or newer, pnpm, a pnpm global bin directory on PATH
++(`pnpm setup`), and for `audiod` and `all` CMake 3.24 or newer, a C++
++compiler, git, and on Linux make and JUCE's development headers. Every
++check runs before the installer stops, so one run names all that is
++missing (§3.4). An unknown target exits 64.
+ 
+ ### 2.3 The CLI is a link to the checkout
+ 
+@@ -327,6 +327,44 @@ than redirects, so the command is one request to `field.one`. It needs
+ the repository to be public: `raw.githubusercontent.com` answers 404 for
+ a private one. The website and the README then lead with this command.
+ 
++### 3.4 Missing dependencies (chunks 5 and 6)
++
++A release builds from source, so a first install on a new machine needs
++a toolchain, and the one-line install is where most people meet that.
++Before chunk 5 the installer stopped at the first missing tool, one tool
++a run, and never checked for a compiler, git, or the Linux headers, so a
++machine without them failed minutes into compiling JUCE. field.one
++listed the requirements under the command instead, which read as a
++reason not to run it.
++
++**Chunk 5 names everything missing.** Every check the target needs runs
++before the installer stops, and the message lists each missing or old
++tool with the commands that install them all: `xcode-select --install`
++and one `brew install` on macOS, and one `sudo apt-get install` with the
++Debian and Ubuntu package names on Linux, plus a line for what no
++package covers, such as Node 24, which Debian and Ubuntu package too
++old. For pnpm on Linux that line is `corepack enable pnpm` only where
++`corepack` is on PATH, because Node 25 and newer ship without Corepack
++(nodejs/node#57617), and pnpm's installation page otherwise. A missing
++CMake gets the `cmake` package, unless `apt-cache` says apt-get would
++install one older than 3.24, as Ubuntu 22.04 and Debian 11 would. Then
++it gets the cmake.org line an old CMake gets, so the next run does not
++reject what the first one installed. It checks Xcode's command line
++tools on macOS through `xcode-select -p`, never by running
++`/usr/bin/c++` or `/usr/bin/git`, which open an install dialog when the
++tools are absent. On Linux it checks for a C++ compiler, git, make
++unless `CMAKE_GENERATOR` names another generator, and through
++`pkg-config` the modules of the headers `ci.yml` installs. It installs
++nothing itself.
++
++**Chunk 6 offers to install them.** On macOS with Homebrew, the
++installer asks whether to run the `brew install` it would print, and
++runs it on a yes, then carries on with the install. Piped from curl,
++bash reads the script from stdin, so the question reads its answer from
++`/dev/tty`, and with no terminal the installer prints the commands as
++chunk 5 does. `xcode-select --install` opens a dialog and returns before
++the tools are in place, so it stays a printed step. Not started.
++
+ ## 4 Why this design (DECIDED, 2026-10-11)
+ 
+ - **A bash installer, as Projector has.** A Node script cannot run
+@@ -467,13 +505,29 @@ Chunk 4:
+ - `curl -fsSL https://field.one/install.sh | bash` does what chunk 3's
+   first criterion says, and field.one leads with that command.
+ 
++Chunk 5:
++
++- On a machine missing several prerequisites, one run of any target
++  names every one its target needs, prints the commands that install
++  them for the platform, and exits 69 having changed nothing.
++- A missing compiler, git, or Linux header module stops the installer
++  before the daemon build rather than inside it.
++
++Chunk 6:
++
++- On macOS with Homebrew and a terminal, a run missing formulae asks to
++  install them, installs them on a yes, and goes on to install Field.
++- With no terminal, or on a no, it prints the commands as chunk 5 does.
++
+ ## 6 Chunks
+ 
+ 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
+ 2. **Releases.** §3.1. Shipped in #205.
+-3. **The release installer.** §3.2. This change.
+-4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
+-   chunk 3 released and a public repository.
++3. **The release installer.** §3.2. Shipped in #214.
++4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Shipped
++   in okamnesiac/audiofield#40.
++5. **Name everything missing.** §3.4. This change.
++6. **Offer to install it with Homebrew.** §3.4. Not started.
+ 
+ ## 7 Open questions
+ 
+@@ -545,11 +599,21 @@ in the release workflow with a warm cache lost to that cost, and the
+ price of the local build, a release that depends on one machine, is one
+ to pay only once binaries exist.
+ 
+-### 7.4 Which domain serves the installer
+-
+-`field.one` is the marketing site (`apps/field-one`), and the
+-repository's GitHub homepage says `field.amnes.ac`. This plan assumes
+-`field.one`, where the waitlist for source access already lives.
++### 7.4 Which domain serves the installer (DECIDED, 2026-10-11)
++
++**Decided: `field.one` serves it.** `field.one` is Field's marketing
++site (`apps/field-one` in `okamnesiac/audiofield`), where people looking
++for Field arrive, and it held the source-access waitlist that the
++install command replaced. Chunk 4 shipped it in
++okamnesiac/audiofield#40: the site rewrites `/install.sh` to the
++installer at `v0` (§3.3) and leads with
++`curl -fsSL https://field.one/install.sh | bash`. The alternative was
++`field.amnes.ac`, the repository's GitHub homepage, which serves the
++repository's Projector site of plans and reviews, a page for people
++working on Field rather than for people installing it.
++
++`install.sh` and `docs/install.md` name the `raw.githubusercontent.com`
++URL that `field.one` proxies, so no code depends on the domain.
+ 
+ ### 7.5 Worker environments across release versions (DECIDED, 2026-10-11)
+ 
+diff --git a/install.sh b/install.sh
+index d686297..efaa1cf 100755
+--- a/install.sh
++++ b/install.sh
+@@ -117,18 +117,159 @@ rerun() {
+   fi
+ }
+ 
+-require_node() {
++# --- What the build needs (install.md "Before you install") ---
++#
++# One run names everything the machine lacks before anything downloads or
++# builds, rather than one tool a run or a failure minutes into the
++# daemon's build.
++
++OS="$(uname -s)"
++NEEDS=""
++BREW=""
++APT=""
++STEPS=""
++
++# need LABEL WHAT [BREW [APT [STEP]]]: one missing tool and what supplies
++# it. BREW is a Homebrew formula, APT the Debian and Ubuntu packages, and
++# STEP what to do on this platform when neither applies, a command or a
++# line starting with #.
++need() {
++  NEEDS="$NEEDS$(printf '  %-18s %s' "$1" "$2")"$'\n'
++  if [ "$OS" = Darwin ] && [ -n "${3:-}" ]; then
++    BREW="$BREW $3"
++  elif [ "$OS" != Darwin ] && [ -n "${4:-}" ]; then
++    APT="$APT $4"
++  elif [ -n "${5:-}" ]; then
++    STEPS="$STEPS$5"$'\n'
++  fi
++}
++
++check_node() {
+   local version
+-  version="$(node --version 2>/dev/null)" ||
+-    die "Field needs Node $NODE_MAJOR or newer, and node is not on PATH" 69
++  if ! version="$(node --version 2>/dev/null)"; then
++    need node-missing "Field needs Node $NODE_MAJOR or newer" node "" "# Node $NODE_MAJOR or newer, from https://nodejs.org/en/download"
++    return 0
++  fi
+   version="${version#v}"
+   [ "${version%%.*}" -ge "$NODE_MAJOR" ] 2>/dev/null ||
+-    die "Field needs Node $NODE_MAJOR or newer, and node is $version" 69
++    need node-old "Field needs Node $NODE_MAJOR or newer, and node is $version" node "" "# Node $NODE_MAJOR or newer, from https://nodejs.org/en/download"
++}
++
++# Node 25 and newer ship without corepack, so `corepack enable pnpm` is the
++# step only where corepack is on PATH.
++check_pnpm() {
++  local step="# pnpm, from https://pnpm.io/installation"
++  command -v pnpm >/dev/null 2>&1 && return 0
++  if command -v corepack >/dev/null 2>&1; then step="corepack enable pnpm"; fi
++  need pnpm-missing "Field builds with pnpm" pnpm "" "$step"
++}
++
++# The CMake version apt-get would install, or nothing without apt-cache or
++# a candidate. LC_ALL=C, because apt-cache translates "Candidate".
++apt_cmake() {
++  local candidate
++  command -v apt-cache >/dev/null 2>&1 || return 0
++  candidate="$(LC_ALL=C apt-cache policy cmake 2>/dev/null | sed -n 's/^ *Candidate: *//p')" || return 0
++  candidate="${candidate#*:}"
++  case "$candidate" in [0-9]*) printf '%s' "${candidate%%-*}" ;; esac
++}
++
++# Ubuntu 22.04 packages CMake 3.22 and Debian 11 3.18, so where apt-get
++# would install one too old, a missing CMake gets the step an old one does.
++check_cmake() {
++  local version packaged=""
++  if ! version="$(cmake_version)"; then
++    [ "$OS" = Darwin ] || packaged="$(apt_cmake)"
++    if [ -n "$packaged" ] && ! cmake_new_enough "$packaged"; then
++      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and apt-get would install $packaged" "" "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
++    else
++      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer" cmake cmake
++    fi
++  elif ! cmake_new_enough "$version"; then
++    need cmake-old "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version" cmake "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
++  fi
++}
++
++# On macOS, Xcode's command line tools hold the compiler and git, and
++# /usr/bin/c++ and /usr/bin/git are stand-ins that offer to install them,
++# so the check asks xcode-select rather than running either.
++check_compiler() {
++  local dir
++  if [ "$OS" = Darwin ]; then
++    { dir="$(xcode-select -p 2>/dev/null)" && [ -d "$dir" ]; } ||
++      need xcode-missing "building field-audiod needs Xcode's command line tools, which hold the C++ compiler and git" "" "" "xcode-select --install"
++    return 0
++  fi
++  command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 ||
++    need compiler-missing "building field-audiod needs a C++20 compiler" "" build-essential
++  # build:native names no generator, so CMake takes CMAKE_GENERATOR's, or
++  # else Unix Makefiles, which runs make. A compiler installs without it.
++  [ -n "${CMAKE_GENERATOR:-}" ] || command -v make >/dev/null 2>&1 ||
++    need make-missing "building field-audiod runs make, CMake's default build tool on Linux" "" make
+ }
+ 
+-require_pnpm() {
+-  command -v pnpm >/dev/null 2>&1 ||
+-    die "Field builds with pnpm, which is not on PATH — run corepack enable pnpm, or see https://pnpm.io/installation" 69
++# CMake clones JUCE with git. On macOS, check_compiler covers it.
++check_git() {
++  [ "$OS" = Darwin ] || command -v git >/dev/null 2>&1 ||
++    need git-missing "building field-audiod clones JUCE with git" "" git
++}
++
++# JUCE's build helper links its GUI module whatever the daemon links, so a
++# console daemon still needs these headers on Linux. The packages are the
++# ones .github/workflows/ci.yml installs on Ubuntu, and each one installs
++# one of the pkg-config modules.
++HEADER_MODULES="alsa freetype2 fontconfig x11 xext xrandr xinerama xcursor xcomposite xrender glu"
++HEADER_PACKAGES="libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libxrender-dev libglu1-mesa-dev"
++
++check_headers() {
++  local module absent=""
++  [ "$OS" = Linux ] || return 0
++  if ! command -v pkg-config >/dev/null 2>&1; then
++    need pkg-config-missing "building field-audiod finds JUCE's libraries with pkg-config" "" pkg-config
++    need headers-unchecked "without pkg-config, the installer cannot look for the ALSA, X11, and freetype development headers JUCE needs" "" "$HEADER_PACKAGES"
++    return 0
++  fi
++  for module in $HEADER_MODULES; do
++    pkg-config --exists "$module" 2>/dev/null || absent="$absent $module"
++  done
++  [ -z "$absent" ] ||
++    need headers-missing "JUCE needs the ALSA, X11, and freetype development headers, and pkg-config finds no$absent" "" "$HEADER_PACKAGES"
++}
++
++check_fetch() {
++  command -v curl >/dev/null 2>&1 || need curl-missing "installing a release downloads it with curl" curl curl
++  command -v tar >/dev/null 2>&1 || need tar-missing "installing a release unpacks it with tar" "" tar "# tar"
++}
++
++require_tools() {
++  local check
++  for check in "$@"; do "check_$check"; done
++  [ -n "$NEEDS" ] || return 0
++  {
++    echo "install.sh: this machine is missing what Field needs to build:"
++    echo
++    printf '%s' "$NEEDS"
++    echo
++    echo "Install what is missing:"
++    echo
++    if [ "$OS" = Darwin ]; then
++      printf '%s' "$STEPS" | sed 's/^/  /'
++      if [ -n "$BREW" ]; then
++        command -v brew >/dev/null 2>&1 || echo "  # Homebrew first, from https://brew.sh"
++        echo "  brew install$BREW"
++      fi
++    else
++      if [ -n "$APT" ]; then
++        command -v apt-get >/dev/null 2>&1 ||
++          echo "  # These are the Debian and Ubuntu packages; install the same with your distribution's package manager"
++        echo "  sudo apt-get install -y$APT"
++      fi
++      printf '%s' "$STEPS" | sed 's/^/  /'
++    fi
++    echo
++    echo "Then open a new shell and run $(rerun "$TARGET") again."
++  } >&2
++  exit 69
+ }
+ 
+ # pnpm refuses to link into a global bin directory that is not on PATH, so
+@@ -154,14 +295,6 @@ cmake_new_enough() {
+     { [ "$major" -eq "$CMAKE_MAJOR" ] && [ "$minor" -ge "$CMAKE_MINOR" ]; } 2>/dev/null
+ }
+ 
+-require_cmake() {
+-  local version
+-  version="$(cmake_version)" ||
+-    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer — brew install cmake on macOS" 69
+-  cmake_new_enough "$version" ||
+-    die "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version — brew upgrade cmake on macOS, or see https://cmake.org/download/" 69
+-}
+-
+ install_cli() {
+   build_cli
+   link_cli
+@@ -619,11 +752,6 @@ version_older() {
+ 
+ is_release_shim() { [ -f "$1" ] && grep -qF "$SHIM_MARKER" "$1" 2>/dev/null; }
+ 
+-require_fetch_tools() {
+-  command -v curl >/dev/null 2>&1 || die "installing a release needs curl, which is not on PATH" 69
+-  command -v tar >/dev/null 2>&1 || die "installing a release needs tar, which is not on PATH" 69
+-}
+-
+ # The shim replaces only itself: a `field` someone else put in the bin
+ # directory stops the installer before anything changes. So does a bin
+ # directory it cannot write, because the shim is written after the switch.
+@@ -945,25 +1073,21 @@ release_main() {
+   release_init
+   case "$TARGET" in
+     all)
+-      require_node
+-      require_pnpm
+-      require_cmake
+-      require_fetch_tools
++      require_tools node pnpm compiler git cmake headers fetch
+       require_shim_free
+       install_release
+       ;;
+     # The other targets rebuild a piece of the installed version where it
+     # is, as they rebuild a checkout, and say whether a newer release is out.
+-    cli) require_node; require_pnpm; require_installed; build_cli; report_release "$(current_version)" ;;
++    cli) require_tools node pnpm; require_installed; build_cli; report_release "$(current_version)" ;;
+     audiod)
+-      require_pnpm
+-      require_cmake
++      require_tools pnpm compiler git cmake headers
+       require_installed
+       export FIELD_FETCHCONTENT_BASE_DIR="$FETCH_CACHE"
+       install_audiod
+       report_release "$(current_version)"
+       ;;
+-    workers) require_node; require_installed; install_workers; report_release "$(current_version)" ;;
++    workers) require_tools node; require_installed; install_workers; report_release "$(current_version)" ;;
+     status) show_release_status ;;
+   esac
+ }
+@@ -974,18 +1098,16 @@ checkout_main() {
+   # so a missing one stops it with nothing changed.
+   case "$TARGET" in
+     all)
+-      require_node
+-      require_pnpm
++      require_tools node pnpm compiler git cmake headers
+       require_global_bin
+-      require_cmake
+       install_cli
+       install_audiod
+       install_workers
+       report_checkout
+       ;;
+-    cli) require_node; require_pnpm; require_global_bin; install_cli; report_checkout ;;
+-    audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
+-    workers) require_node; install_workers; report_checkout ;;
++    cli) require_tools node pnpm; require_global_bin; install_cli; report_checkout ;;
++    audiod) require_tools pnpm compiler git cmake headers; install_audiod; report_checkout ;;
++    workers) require_tools node; install_workers; report_checkout ;;
+     status) show_status ;;
+   esac
+ }
+diff --git a/src/install.test.ts b/src/install.test.ts
+index 08522e9..6c60541 100644
+--- a/src/install.test.ts
++++ b/src/install.test.ts
+@@ -52,13 +52,14 @@ function which(tool: string): string | undefined {
+ }
+ 
+ const BASH = which('bash')!;
+-// curl is a stand-in too; tar and gzip unpack the stand-in releases.
++const UNAME = which('uname')!;
++// curl is a stand-in too, and so are uname and the compiler checks; tar
++// and gzip unpack the stand-in releases.
+ const TOOLS = [
+   'bash',
+   'git',
+   'node',
+   'dirname',
+-  'uname',
+   'sed',
+   'grep',
+   'cat',
+@@ -245,6 +246,23 @@ beforeEach(() => {
+   write(join(bin, 'pnpm'), PNPM, 0o755);
+   write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
+   write(join(bin, 'curl'), CURL, 0o755);
++  // The platform is the machine's unless FAKE_UNAME names another, so the
++  // macOS and Linux checks both run wherever the suite does. A compiler,
++  // make, and every header module are there unless a test removes them, or
++  // names the modules FAKE_NO_HEADERS leaves out.
++  write(
++    join(bin, 'uname'),
++    `#!${BASH}\nif [ -n "\${FAKE_UNAME:-}" ] && [ "\${1:-}" = -s ]; then echo "$FAKE_UNAME"; else exec ${UNAME} "$@"; fi\n`,
++    0o755,
++  );
++  write(join(bin, 'xcode-select'), `#!${BASH}\necho ${root}\n`, 0o755);
++  write(join(bin, 'c++'), `#!${BASH}\n`, 0o755);
++  write(join(bin, 'make'), `#!${BASH}\n`, 0o755);
++  write(
++    join(bin, 'pkg-config'),
++    `#!${BASH}\ncase " \${FAKE_NO_HEADERS:-} " in *" $2 "*) exit 1 ;; esac\n`,
++    0o755,
++  );
+   write(join(root, 'cli.js'), CLI);
+   write(join(root, 'release-cli.js'), RELEASE_CLI);
+   writeFileSync(log, '');
+@@ -444,11 +462,137 @@ posix('install.sh cli', () => {
+     expect(run.log.some((line) => line.includes('install'))).toBe(false);
+   });
+ 
+-  it('names corepack when pnpm is missing', () => {
++  it('names corepack on Linux when pnpm is missing and Node has corepack', () => {
+     rmSync(join(bin, 'pnpm'));
+-    const run = install('cli');
++    write(join(bin, 'corepack'), `#!${BASH}\n`, 0o755);
++    const run = install('cli', { FAKE_UNAME: 'Linux' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  corepack enable pnpm\n');
++  });
++
++  // Node 25 and newer ship without corepack, so naming it there sends the
++  // reader to a command that is not found.
++  it("names pnpm's installation page on Linux when Node has no corepack", () => {
++    rmSync(join(bin, 'pnpm'));
++    const run = install('cli', { FAKE_UNAME: 'Linux' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  # pnpm, from https://pnpm.io/installation\n');
++    expect(run.stderr).not.toContain('corepack');
++  });
++
++  it('names Homebrew on macOS when pnpm is missing', () => {
++    rmSync(join(bin, 'pnpm'));
++    const run = install('cli', { FAKE_UNAME: 'Darwin' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  brew install pnpm\n');
++  });
++
++  it('builds the CLI without the tools only the daemon needs', () => {
++    for (const tool of ['cmake', 'c++', 'make', 'xcode-select']) rmSync(join(bin, tool));
++    expect(install('cli').status).toBe(0);
++  });
++});
++
++posix('install.sh before it changes anything', () => {
++  it('names everything missing on macOS at once, and the commands that install it', () => {
++    for (const tool of ['node', 'pnpm', 'cmake', 'xcode-select']) rmSync(join(bin, tool));
++    const run = install(undefined, { FAKE_UNAME: 'Darwin' });
++    expect(run.status).toBe(69);
++    for (const label of ['node-missing', 'pnpm-missing', 'cmake-missing', 'xcode-missing']) {
++      expect(run.stderr).toContain(`  ${label} `);
++    }
++    // The command line tools first, because Homebrew needs them too.
++    expect(run.stderr).toContain(
++      '  xcode-select --install\n  # Homebrew first, from https://brew.sh\n  brew install node pnpm cmake\n',
++    );
++    expect(run.stderr).toContain(`Then open a new shell and run ~/checkout/install.sh all again.`);
++    expect(changes(run)).toEqual([]);
++  });
++
++  it('leaves Homebrew out of the steps when it is installed', () => {
++    rmSync(join(bin, 'cmake'));
++    write(join(bin, 'brew'), `#!${BASH}\n`, 0o755);
++    const run = install('audiod', { FAKE_UNAME: 'Darwin' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('Install what is missing:\n\n  brew install cmake\n\n');
++  });
++
++  it('names the Debian packages on Linux, and what no package covers', () => {
++    for (const tool of ['node', 'c++', 'git']) rmSync(join(bin, tool));
++    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
++    const run = install(undefined, { FAKE_UNAME: 'Linux', FAKE_NO_HEADERS: 'alsa x11' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  compiler-missing ');
++    expect(run.stderr).toContain('  git-missing ');
++    expect(run.stderr).toContain('pkg-config finds no alsa x11');
++    expect(run.stderr).toContain(
++      '  sudo apt-get install -y build-essential git libasound2-dev libfreetype-dev libfontconfig1-dev',
++    );
++    expect(run.stderr).toContain('  # Node 24 or newer, from https://nodejs.org/en/download\n');
++    expect(run.stderr).not.toContain("your distribution's package manager");
++    expect(changes(run)).toEqual([]);
++  });
++
++  it("says the Debian names are to translate on a Linux without apt-get", () => {
++    const run = install('audiod', { FAKE_UNAME: 'Linux', FAKE_NO_HEADERS: 'glu' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain("install the same with your distribution's package manager");
++    expect(run.stderr).toContain('libglu1-mesa-dev');
++  });
++
++  // build:native runs CMake's default generator, which on Linux is Unix
++  // Makefiles, and a compiler installed without build-essential brings no
++  // make.
++  it('names make on Linux when there is a compiler and no make', () => {
++    rmSync(join(bin, 'make'));
++    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
++    const run = install('audiod', { FAKE_UNAME: 'Linux' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  make-missing ');
++    expect(run.stderr).toContain('  sudo apt-get install -y make\n');
++    expect(changes(run)).toEqual([]);
++  });
++
++  it('needs no make when CMAKE_GENERATOR names another generator', () => {
++    rmSync(join(bin, 'make'));
++    expect(install('audiod', { FAKE_UNAME: 'Linux', CMAKE_GENERATOR: 'Ninja' }).status).toBe(0);
++  });
++
++  it('asks for the headers too when there is no pkg-config to look for them', () => {
++    rmSync(join(bin, 'pkg-config'));
++    const run = install('audiod', { FAKE_UNAME: 'Linux' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  pkg-config-missing ');
++    expect(run.stderr).toContain('  headers-unchecked ');
++    expect(run.stderr).toContain('apt-get install -y pkg-config libasound2-dev');
++  });
++
++  // Ubuntu 22.04 packages CMake 3.22 and Debian 11 3.18, so the cmake
++  // package there installs one the next run rejects as too old.
++  it('names cmake.org on Linux for a missing CMake when apt-get would install one too old', () => {
++    rmSync(join(bin, 'cmake'));
++    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
++    write(join(bin, 'apt-cache'), `#!${BASH}\nprintf 'cmake:\\n  Installed: (none)\\n  Candidate: 3.22.1-1ubuntu1\\n'\n`, 0o755);
++    const run = install('audiod', { FAKE_UNAME: 'Linux' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('needs CMake 3.24 or newer, and apt-get would install 3.22.1');
++    expect(run.stderr).toContain('  # CMake 3.24 or newer, from https://cmake.org/download/\n');
++    expect(run.stderr).not.toContain('apt-get install');
++  });
++
++  it('names the cmake package on Linux when apt-get would install a new enough one', () => {
++    rmSync(join(bin, 'cmake'));
++    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
++    write(join(bin, 'apt-cache'), `#!${BASH}\nprintf 'cmake:\\n  Installed: (none)\\n  Candidate: 3.28.3-1build7\\n'\n`, 0o755);
++    const run = install('audiod', { FAKE_UNAME: 'Linux' });
+     expect(run.status).toBe(69);
+-    expect(run.stderr).toContain('corepack enable pnpm');
++    expect(run.stderr).toContain('  sudo apt-get install -y cmake\n');
++    expect(run.stderr).not.toContain('cmake.org');
++  });
++
++  it('checks for no headers on macOS, where JUCE uses the system frameworks', () => {
++    rmSync(join(bin, 'pkg-config'));
++    expect(install('audiod', { FAKE_UNAME: 'Darwin' }).status).toBe(0);
+   });
+ });
+ 
+@@ -1047,6 +1191,19 @@ posix('install.sh installs a release', () => {
+     expect(run.stderr).toContain('FIELD_OFFLINE is set');
+   });
+ 
++  it('names curl and tar, and the download to run again, before it makes a directory', () => {
++    rmSync(join(bin, 'curl'));
++    rmSync(join(bin, 'tar'));
++    write(join(bin, 'apt-get'), `#!${BASH}\n`, 0o755);
++    const run = release(undefined, { FAKE_UNAME: 'Linux' });
++    expect(run.status).toBe(69);
++    expect(run.stderr).toContain('  sudo apt-get install -y curl tar\n');
++    expect(run.stderr).toContain(
++      'Then open a new shell and run curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash again.',
++    );
++    expect(existsSync(data)).toBe(false);
++  });
++
+   it('says how to put the bin directory on PATH when it is not', () => {
+     publish('0.2.0');
+     const run = release(undefined, { PATH: [join(pnpmHome, 'bin'), bin].join(delimiter), SHELL: '/bin/zsh' });
