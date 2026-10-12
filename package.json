@@ -1,6 +1,6 @@
 {
   "name": "field",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Git-native, agent-operable music production system",
   "license": "MIT",
   "type": "module",
