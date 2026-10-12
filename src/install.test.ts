@@ -53,11 +53,11 @@ function which(tool: string): string | undefined {
 
 const BASH = which('bash')!;
 const UNAME = which('uname')!;
-// curl is a stand-in too, and so are uname and the compiler checks; tar
-// and gzip unpack the stand-in releases.
+const GIT = which('git')!;
+// curl and git are stand-ins too, and so are uname and the compiler
+// checks; tar and gzip unpack the stand-in releases.
 const TOOLS = [
   'bash',
-  'git',
   'node',
   'dirname',
   'sed',
@@ -185,6 +185,23 @@ esac
 if [ -n "$out" ]; then cat "$path" > "$out"; else cat "$path"; fi
 `;
 
+// A stand-in git, which answers ls-remote for github.com from the
+// repositories under FAKE_SERVE/git, as the stand-in curl serves GitHub's
+// files, and runs the real git for everything else.
+const GIT_STANDIN = `#!${BASH}
+if [ "\${1:-}" = ls-remote ]; then
+  echo "git ls-remote $2" >> "$FAKE_LOG"
+  case "$2" in
+    https://github.com/*)
+      url="file://$FAKE_SERVE/git/\${2#https://github.com/}"
+      shift 2
+      set -- ls-remote "$url" "$@"
+      ;;
+  esac
+fi
+exec ${GIT} "$@"
+`;
+
 // The CLI a stand-in release builds. It logs which version ran it, and
 // keeps its worker environments in its own version directory, as the real
 // one keeps python/<worker>/.venv.
@@ -249,6 +266,7 @@ beforeEach(() => {
   write(join(bin, 'pnpm'), PNPM, 0o755);
   write(join(bin, 'cmake'), `#!${BASH}\necho "cmake version 3.30.2"\n`, 0o755);
   write(join(bin, 'curl'), CURL, 0o755);
+  write(join(bin, 'git'), GIT_STANDIN, 0o755);
   // The platform is the machine's unless FAKE_UNAME names another, so the
   // macOS and Linux checks both run wherever the suite does. A compiler,
   // make, and every header module are there unless a test removes them, or
@@ -351,10 +369,13 @@ interface Publish {
 }
 
 // Releases a version as the Release workflow does: package.json raised on
-// upstream's main and tagged vX.Y.Z, and the ref (v0) moved to it. The
-// stand-in curl serves the ref's package.json and installer from "raw",
-// and the tag's source archive, made as GitHub makes one, from "github".
-function publish(version: string, options: Publish = {}): void {
+// upstream's main and tagged vX.Y.Z, and the ref (v0) moved to it, as an
+// annotated tag unless the ref is upstream's branch. The stand-in git
+// serves upstream as the repository's git server, and the stand-in curl
+// serves package.json and the installer from "raw", at the commit and at
+// the ref, and the tag's source archive, made as GitHub makes one, from
+// "github". Returns the commit.
+function publish(version: string, options: Publish = {}): string {
   const slug = options.repo ?? 'okamnesiac/field';
   const ref = options.ref ?? 'v0';
   const manifest = `{\n  "name": "field",\n  "version": "${version}"\n}\n`;
@@ -362,12 +383,22 @@ function publish(version: string, options: Publish = {}): void {
   if (options.installer !== undefined) write(join(upstream, 'install.sh'), options.installer);
   git(upstream, 'commit', '--quiet', '-am', `release ${version}`);
   git(upstream, 'tag', `v${version}`);
-  write(join(serve, 'raw', slug, ref, 'package.json'), manifest);
-  write(join(serve, 'raw', slug, ref, 'install.sh'), readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
-  if (options.archive === false) return;
+  if (git(upstream, 'branch', '--list', ref) === '') git(upstream, 'tag', '-f', '-a', '-m', ref, ref);
+  const server = join(serve, 'git', `${slug}.git`);
+  if (!existsSync(server)) {
+    mkdirSync(dirname(server), { recursive: true });
+    symlinkSync(upstream, server);
+  }
+  const commit = git(upstream, 'rev-parse', 'HEAD');
+  for (const at of [commit, ref]) {
+    write(join(serve, 'raw', slug, at, 'package.json'), manifest);
+    write(join(serve, 'raw', slug, at, 'install.sh'), readFileSync(join(packageRoot, 'install.sh'), 'utf8'));
+  }
+  if (options.archive === false) return commit;
   const archive = join(serve, 'github', slug, 'archive', 'refs', 'tags', `v${version}.tar.gz`);
   mkdirSync(dirname(archive), { recursive: true });
   git(upstream, 'archive', '--format=tar.gz', `--prefix=${options.prefix ?? `field-${version}`}/`, '-o', archive, `v${version}`);
+  return commit;
 }
 
 // A release installer, the downloaded one unless named, with the release
@@ -907,13 +938,14 @@ posix('install.sh tells a checkout from a release', () => {
 
 posix('install.sh installs a release', () => {
   it('builds the version v0 names in a directory of its own, switches current to it, and links the shim', () => {
-    publish('0.2.0');
+    const commit = publish('0.2.0');
     const run = release();
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
     const version = join(data, '0.2.0');
     expect(changes(run)).toEqual([
-      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
+      'git ls-remote https://github.com/okamnesiac/field.git',
+      `curl https://raw.githubusercontent.com/okamnesiac/field/${commit}/package.json`,
       'curl https://github.com/okamnesiac/field/archive/refs/tags/v0.2.0.tar.gz',
       `pnpm --dir ${version} install --frozen-lockfile`,
       `pnpm --dir ${version} run build`,
@@ -1062,12 +1094,13 @@ posix('install.sh installs a release', () => {
   });
 
   it('downloads and builds nothing when the newest release is installed, and re-syncs its workers', () => {
-    publish('0.2.0');
+    const commit = publish('0.2.0');
     release();
     const run = release();
     expect(run.status).toBe(0);
     expect(changes(run)).toEqual([
-      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
+      'git ls-remote https://github.com/okamnesiac/field.git',
+      `curl https://raw.githubusercontent.com/okamnesiac/field/${commit}/package.json`,
       'field@0.2.0 setup --existing',
     ]);
     expect(rows(run.stdout).get('installed')).toBe('0.2.0 is installed');
@@ -1108,14 +1141,39 @@ posix('install.sh installs a release', () => {
     expect(run.log.some((line) => line.startsWith('pnpm'))).toBe(false);
   });
 
+  it('reads the version at the commit v0 names, past a stale copy at v0', () => {
+    publish('0.2.0');
+    release();
+    const commit = publish('0.3.0');
+    // raw.githubusercontent.com caches a file at a ref for up to five
+    // minutes, so just after a release v0 can still read as the last one.
+    write(join(serve, 'raw/okamnesiac/field/v0/package.json'), '{\n  "name": "field",\n  "version": "0.2.0"\n}\n');
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(run.log).toContain(`curl https://raw.githubusercontent.com/okamnesiac/field/${commit}/package.json`);
+    expect(rows(run.stdout).get('release')).toBe('okamnesiac/field v0 is at 0.3.0');
+    expect(current()).toBe('0.3.0');
+  });
+
+  it('reads the version at the ref when git cannot name its commit', () => {
+    publish('0.2.0');
+    rmSync(join(serve, 'git'), { recursive: true });
+    const run = release();
+    expect(run.status).toBe(0);
+    expect(run.log).toContain('git ls-remote https://github.com/okamnesiac/field.git');
+    expect(run.log).toContain('curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json');
+    expect(current()).toBe('0.2.0');
+  });
+
   it('follows the repository and ref it was installed from', () => {
     publish('0.2.0', { repo: 'someone/field', ref: 'main' });
     expect(release(undefined, { FIELD_REPO: 'someone/field', FIELD_REF: 'main' }).status).toBe(0);
     expect(readFileSync(join(data, 'release.conf'), 'utf8')).toContain('repo=someone/field\nref=main\n');
-    publish('0.3.0', { repo: 'someone/field', ref: 'main' });
+    const commit = publish('0.3.0', { repo: 'someone/field', ref: 'main' });
     const run = release();
     expect(run.status).toBe(0);
-    expect(run.log).toContain('curl https://raw.githubusercontent.com/someone/field/main/package.json');
+    expect(run.log).toContain('git ls-remote https://github.com/someone/field.git');
+    expect(run.log).toContain(`curl https://raw.githubusercontent.com/someone/field/${commit}/package.json`);
     expect(current()).toBe('0.3.0');
   });
 
@@ -1126,11 +1184,11 @@ posix('install.sh installs a release', () => {
   });
 
   it('sends GITHUB_TOKEN to GitHub in curl config, and never to a URL FIELD_RAW_URL names', () => {
-    publish('0.2.0');
+    const commit = publish('0.2.0');
     const run = release(undefined, { GITHUB_TOKEN: 'secret-token' });
     expect(run.status).toBe(0);
     const header = '[header = "Authorization: Bearer secret-token"]';
-    expect(run.log).toContain(`curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json ${header}`);
+    expect(run.log).toContain(`curl https://raw.githubusercontent.com/okamnesiac/field/${commit}/package.json ${header}`);
     expect(run.log).toContain(`curl https://github.com/okamnesiac/field/archive/refs/tags/v0.2.0.tar.gz ${header}`);
     publish('0.3.0');
     const elsewhere = release(undefined, {
@@ -1253,7 +1311,7 @@ posix('install.sh installs a release', () => {
 
 posix('install.sh release targets', () => {
   it('rebuild a piece of the installed version where it is', () => {
-    publish('0.2.0');
+    const commit = publish('0.2.0');
     release();
     const version = join(data, '0.2.0');
     rmSync(join(version, AUDIOD));
@@ -1261,7 +1319,8 @@ posix('install.sh release targets', () => {
     expect(audiod.status).toBe(0);
     expect(changes(audiod)).toEqual([
       `pnpm --dir ${version} run build:native`,
-      'curl https://raw.githubusercontent.com/okamnesiac/field/v0/package.json',
+      'git ls-remote https://github.com/okamnesiac/field.git',
+      `curl https://raw.githubusercontent.com/okamnesiac/field/${commit}/package.json`,
     ]);
     expect(readFileSync(join(version, 'native/audiod/build/fetchcontent'), 'utf8')).toBe(
       `${join(data, 'cache', 'fetchcontent')}\n`,
@@ -1312,9 +1371,9 @@ posix('install.sh status in a release install', () => {
   });
 
   it('says when the installed version is newer than the one its ref names', () => {
-    publish('0.3.0');
+    const commit = publish('0.3.0');
     release();
-    write(join(serve, 'raw/okamnesiac/field/v0/package.json'), '{\n  "version": "0.2.0"\n}\n');
+    write(join(serve, 'raw/okamnesiac/field', commit, 'package.json'), '{\n  "version": "0.2.0"\n}\n');
     expect(rows(release('status').stdout).get('release-ahead')).toBe('0.3.0 is installed, newer than 0.2.0 at v0');
   });
 

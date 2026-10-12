@@ -110,7 +110,12 @@ binaries, so the installer builds the release on your machine, the same
 way it builds a checkout. It runs these steps, and stops at the first
 one that fails:
 
-1. It reads the version from `package.json` at `v0`.
+1. It asks GitHub's git server which commit `v0` names, and reads the
+   version from `package.json` at that commit. A file read at `v0`
+   itself can be up to five minutes old, because
+   `raw.githubusercontent.com` caches it, and would name the release
+   before a new one. Without git, or when git cannot reach the
+   repository, the installer reads at `v0` instead.
 2. It downloads GitHub's source archive of that version's tag, such as
    `v0.2.0`, and unpacks it into `~/.local/share/field/0.2.0/`.
 3. It runs `pnpm install --frozen-lockfile`, `pnpm run build`,
@@ -179,15 +184,15 @@ changing anything.
 
 ### Upgrade a release
 
-`field upgrade` downloads the newest installer, `install.sh` at the ref
-the install recorded, and runs it. When `v0` names a newer version, that
+`field upgrade` downloads the newest installer, `install.sh` at the
+commit the ref the install recorded names now, and runs it. When `v0` names a newer version, that
 installs it as above. When it names the version you have, nothing
 downloads or builds: the installer builds any piece that is missing,
 re-syncs your workers, and rewrites the shim.
 
 ```console
 $ field upgrade
-+ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/6f28530dc4b06a162b38e66c14428754e070a25f/install.sh | bash
 release        okamnesiac/field v0 is at 0.3.0
 downloading    https://github.com/okamnesiac/field/archive/refs/tags/v0.3.0.tar.gz
 ...
@@ -245,8 +250,8 @@ following them:
 curl -fsSL https://raw.githubusercontent.com/you/field/main/install.sh | FIELD_REPO=you/field FIELD_REF=main bash
 ```
 
-The installer reads the version from `package.json` at `FIELD_REF` and
-downloads the archive of that version's tag, so the ref can be a branch,
+The installer reads the version from `package.json` at the commit
+`FIELD_REF` names and downloads the archive of that version's tag, so the ref can be a branch,
 `v0`, or an exact tag, `vX.Y.Z`, which pins the install to that
 release. Each `field upgrade` then repairs that release instead of
 moving to a newer one. To follow `v0` again, run
@@ -409,7 +414,7 @@ each piece of the installed version is built:
 
 ```console
 $ field upgrade status
-+ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash -s -- status
++ curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/6f28530dc4b06a162b38e66c14428754e070a25f/install.sh | bash -s -- status
 installed      0.3.0 in ~/.local/share/field/0.3.0
 release        okamnesiac/field v0 is at 0.3.0
 release-latest 0.3.0 is installed
@@ -444,7 +449,7 @@ worker-absent  field-aced is not set up — field setup aced sets it up
 | `FIELD_REPO`, `FIELD_REF` | The repository and ref a release install follows: `okamnesiac/field` and `v0` unless set. The installer records both in `release.conf`. |
 | `FIELD_DATA_DIR` | Where release installs live. The default is `$XDG_DATA_HOME/field` when `XDG_DATA_HOME` is an absolute path, and `~/.local/share/field` otherwise. |
 | `FIELD_BIN_DIR` | Where the release install's shim goes: `~/.local/bin` unless set. The installer records it in `release.conf`. |
-| `GITHUB_TOKEN` | Sent to GitHub's own hosts, and only over HTTPS, so a release install can follow a private fork. The installer passes it in curl's configuration on standard input, never on a command line. |
-| `FIELD_RAW_URL`, `FIELD_ARCHIVE_URL` | The bases the installer downloads `package.json`, `install.sh`, and the source archive from: `https://raw.githubusercontent.com` and `https://github.com` unless set. Tests point them at local files. |
+| `GITHUB_TOKEN` | Sent to GitHub's own hosts, and only over HTTPS, so a release install can follow a private fork. The installer passes it in curl's configuration on standard input, never on a command line. `git ls-remote` does not use it: git asks with your own git credentials, and without them the installer reads the private fork at the ref rather than at its commit. |
+| `FIELD_RAW_URL`, `FIELD_ARCHIVE_URL` | The bases the installer downloads `package.json`, `install.sh`, and the source archive from: `https://raw.githubusercontent.com` and `https://github.com` unless set. `git ls-remote` asks `<FIELD_ARCHIVE_URL>/<repo>.git` which commit the ref names. Tests point them at local files. |
 | `NO_COLOR` | Prints warning rows without color. The ⚠️ marker stays. |
 | `FIELD_AUDIOD` | Not read by the installer. `status` reports it, because `field` runs that binary instead of the one the installer builds. |
