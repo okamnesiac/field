@@ -1,9 +1,18 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatRemoteReport, formatVersionReport, remoteReport, versionReport, resolveIdentity } from './version.js';
+import {
+  formatRemoteReport,
+  formatVersionReport,
+  liveIdentity,
+  remoteReport,
+  versionReport,
+  resolveIdentity,
+} from './version.js';
 import { BUILD_CLI } from '../remedies.js';
 import { fileStore } from '../remote/credentials.js';
 import { git } from '../git.js';
@@ -247,6 +256,82 @@ describe('resolveIdentity', () => {
     );
     expect(resolved.checkoutCommit).toBeUndefined();
     expect(resolved.checkoutDirtyFiles).toBe(0);
+  });
+});
+
+describe('formatVersionReport for a release install', () => {
+  it('prints the version alone, with nothing about a checkout', () => {
+    // A release is built from GitHub's source archive, which carries no
+    // commit, and that is the install most people have.
+    const text = formatVersionReport(
+      {
+        cli: { version: '0.3.0' },
+        workerProtocol: 2,
+        daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
+      },
+      process.cwd(),
+    );
+    expect(text.split('\n')[0]).toBe('field 0.3.0');
+  });
+
+  it('still names the commit for a build from a checkout', () => {
+    const text = formatVersionReport(
+      {
+        cli: { version: '0.3.0', commit: 'aaaa111', branch: 'main' },
+        workerProtocol: 2,
+        daemons: [],
+        remote: { api: 'https://audiofield.io', source: 'default' },
+      },
+      process.cwd(),
+    );
+    expect(text.split('\n')[0]).toBe('field 0.3.0  (aaaa111 on main)');
+  });
+});
+
+describe('a release unpacked inside another repository', () => {
+  // A release has no .git of its own, and Git searches upward from where
+  // it is asked, so a release under a home directory kept in Git, or
+  // under a FIELD_DATA_DIR inside a project, can find someone else's
+  // commit.
+  const stampScript = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'stamp-build.mjs');
+
+  function commitIn(dir: string): string {
+    git(['init', '-q'], { cwd: dir });
+    git(
+      ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'outer'],
+      { cwd: dir },
+    );
+    return git(['rev-parse', 'HEAD'], { cwd: dir });
+  }
+
+  // The real script, run from a copy, because it finds the package root
+  // from its own location.
+  function stamp(packageDir: string): { commit?: string } {
+    mkdirSync(join(packageDir, 'scripts'), { recursive: true });
+    mkdirSync(join(packageDir, 'dist'), { recursive: true });
+    copyFileSync(stampScript, join(packageDir, 'scripts', 'stamp-build.mjs'));
+    const run = spawnSync(process.execPath, [join(packageDir, 'scripts', 'stamp-build.mjs')], { encoding: 'utf8' });
+    expect(run.status).toBe(0);
+    return JSON.parse(readFileSync(join(packageDir, 'dist', 'build-info.json'), 'utf8')) as { commit?: string };
+  }
+
+  it("neither stamps nor reads the outer repository's commit", () => {
+    commitIn(root);
+    const release = join(root, '.local', 'share', 'field', '0.3.0');
+    mkdirSync(release, { recursive: true });
+    expect(stamp(release)).toEqual({});
+    expect(liveIdentity(release)).toEqual({});
+  });
+
+  it('still names the commit of a clone, and of a worktree whose .git is a file', () => {
+    const head = commitIn(root);
+    expect(stamp(root).commit).toBe(head);
+    expect(liveIdentity(root).commit).toBe(head);
+    const worktree = join(root, 'worktree');
+    git(['worktree', 'add', '-q', '--detach', worktree], { cwd: root });
+    expect(stamp(worktree).commit).toBe(head);
+    expect(liveIdentity(worktree).commit).toBe(head);
   });
 });
 

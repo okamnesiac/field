@@ -53,6 +53,14 @@ const refusingRunner: GeneratorRunner = async (node) => {
   throw new Error(`rendered ${node.label.name}, which a warmed checkout must never do`);
 };
 
+// The setup below builds the source, commits it, pushes it to a bare
+// remote, and clones that, one git or git-lfs process after another,
+// and two of the three tests then pull. Process starts on the windows
+// CI runner stall now and then, and one stall pushed the hook past
+// vitest's 10 s hook default. Nothing here measures how fast pull is,
+// so the hook and every test get room to finish, as in clone.test.ts.
+const GIT_HEAVY_MS = 30_000;
+
 beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'field-pull-'));
   source = join(tmp, 'source');
@@ -95,14 +103,14 @@ beforeEach(async () => {
   // git-lfs is present, and no warm.
   work = join(tmp, 'work');
   git(['clone', '-q', ...LFS_FILTER_CONFIG.flatMap(([k, v]) => ['-c', `${k}=${v}`]), pathToFileURL(bare).href, work], { cwd: tmp });
-});
+}, GIT_HEAVY_MS);
 
 afterEach(async () => {
   await remote.close();
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('field pull', () => {
+describe('field pull', { timeout: GIT_HEAVY_MS }, () => {
   it('pulls, then warms the cache for HEAD so the next build renders nothing', async () => {
     expect(existsSync(join(work, '.field', 'cache'))).toBe(false);
     const out: string[] = [];

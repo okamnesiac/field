@@ -57,7 +57,7 @@ To see what you have, ask the version:
 
 ```console
 $ field --version
-field 0.1.0  (6a310a4 on docs/cli)
+field 0.3.0
 worker protocol 2
 remote        https://audiofield.io (default)  not logged in
 
@@ -67,8 +67,9 @@ daemons in .
   field-voiced  not running
 ```
 
-The first line is the CLI build and the commit it came from, and it says
-so when the checkout has moved on or carries uncommitted changes. The
+The first line is the CLI's version. A build from a checkout adds the
+commit it came from, as in `field 0.3.0  (6a310a4 on main)`, and says so
+when the checkout has moved on or carries uncommitted changes. The
 `remote` line names the remote this project talks to, where that URL
 came from, and whether you are logged in to it (see [Share a project
 through a remote](#share-a-project-through-a-remote)). The rest reports

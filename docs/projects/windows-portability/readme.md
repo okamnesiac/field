@@ -685,6 +685,19 @@ land as its own diff whenever.
   `install.sh` does, with the daemon under MSVC. install.md handed this
   item here rather than design it without a Windows machine to try it
   on. **Standalone**, and a design question before it is a port.
+- **The remote commands' tests time out on the windows runner**
+  (`commands/clone.test.ts`, `push.test.ts`, `pull.test.ts`): each
+  test's setup builds a project, commits it, and makes a bare remote,
+  one git or git-lfs process after another, before the test clones,
+  pushes, or pulls. On a windows run that passes, vitest reports 3 to
+  7 s for one of these tests, setup included, against a 5 s test
+  default and a 10 s hook default, so the runner's process-start
+  stalls tipped one over in six windows runs on 2026-10-11, on `main`
+  and on branches alike. #197 had given only `clone.test.ts`'s hook
+  room. **Done** (2026-10-11): all three files give their hook and
+  every test 30 s, as `release.test.ts` gives its git-heavy tests. The
+  slowest timed-out test reported 14.2 s, so a timeout there now means
+  a stall twice that long, or a hang.
 
 ### 7.3 The workers chunk, when it opens (§4 stands)
 

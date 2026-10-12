@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,9 +25,13 @@ const git = (args) => {
 
 // Full sha: git lengthens --short prefixes as a repo grows, so equal
 // objects can compare unequal as strings (Bugbot on #121). Display
-// shortening is the formatter's, at read time.
-const commit = git(['rev-parse', 'HEAD']);
-const status = git(['status', '--porcelain']);
+// shortening is the formatter's, at read time. Asked only of a package
+// root with its own .git, a directory in a clone and a file in a
+// worktree, as install.sh tells a checkout from a release: Git searches
+// upward, so a release unpacked inside another repository would stamp
+// that repository's commit.
+const commit = existsSync(join(root, '.git')) ? git(['rev-parse', 'HEAD']) : undefined;
+const status = commit === undefined ? undefined : git(['status', '--porcelain']);
 const info =
   commit === undefined
     ? {}
@@ -37,4 +41,4 @@ const info =
         dirtyFiles: status === undefined ? undefined : status.split('\n').filter((l) => l.trim()).length,
       };
 writeFileSync(stampPath, JSON.stringify(info, null, 2) + '\n');
-process.stdout.write(`stamped dist/build-info.json (${info.commit?.slice(0, 7) ?? 'not a git checkout'})\n`);
+process.stdout.write(`stamped dist/build-info.json${info.commit ? ` (${info.commit.slice(0, 7)})` : ''}\n`);
