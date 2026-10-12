@@ -1,0 +1,48 @@
+{
+ "version": 1,
+ "name": "Installer build message",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 227,
+  "title": "Shorten the building row to field-audiod, takes a while",
+  "head": "fc398da3b123b10e883b7e1172eabe176e2239a1",
+  "headRef": "install/short-build-rows",
+  "base": "04fde93f2dbc9e71d2b5e3b71f1107632f51651b",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "The installer compiles <code>field-audiod</code>, the process that plays audio, when its executable is absent. This change shortens the progress row to <code>building field-audiod, takes a while</code>, so an install or upgrade is easier to scan."
+  ],
+  "cards": []
+ },
+ "groups": [
+  {
+   "id": "build-message",
+   "title": "Keep the build announcement short",
+   "kicker": "Installer output and its regression assertion",
+   "intro": [
+    "The announcement uses one short message whether the downloaded audio library is cached or must be fetched. The executable check still suppresses the announcement when the daemon already exists."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "The installer prints the shorter progress message before compiling the audio daemon.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Tracing the executable guard and callers confirms the announcement condition and native build command are unchanged.",
+       "line": 434
+      }
+     ]
+    },
+    {
+     "path": "src/install.test.ts",
+     "note": "The installer test requires the exact short message."
+    }
+   ]
+  }
+ ]
+}
