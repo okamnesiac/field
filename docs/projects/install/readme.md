@@ -367,10 +367,12 @@ removes.
 - **`field.one/uninstall.sh`.** A static file in `apps/field-one/public`
   that runs `curl -fsSL https://field.one/install.sh | bash -s --
   uninstall`. It works when `field` itself no longer does, and keeps the
-  logic in the one installer, versioned and tested with it. It can
-  deploy only after a release whose installer has the target, because
-  older installers reject `uninstall` as an unknown target. The page
-  does not advertise it; the README and `docs/install.md` do.
+  logic in the one installer, versioned and tested with it. It shipped
+  in okamnesiac/audiofield#43 ahead of the release that carries the
+  target, so until that release it runs 0.3.0's installer, which
+  rejects `uninstall` with a usage error and exit status 64, changing
+  nothing. The page does not advertise it; the README and
+  `docs/install.md` do.
 
 ## 4 Why this design (DECIDED, 2026-10-11)
 
@@ -540,8 +542,8 @@ Uninstall:
 3. **The release installer.** §3.2. Shipped in #214.
 4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Shipped
    in okamnesiac/audiofield#40.
-5. **Uninstall.** §3.5. This change, with `field.one/uninstall.sh` in
-   okamnesiac/audiofield after it is released.
+5. **Uninstall.** §3.5. This change. `field.one/uninstall.sh` shipped
+   early, in okamnesiac/audiofield#43, and works once this is released.
 
 ## 7 Open questions
 
