@@ -599,11 +599,21 @@ in the release workflow with a warm cache lost to that cost, and the
 price of the local build, a release that depends on one machine, is one
 to pay only once binaries exist.
 
-### 7.4 Which domain serves the installer
+### 7.4 Which domain serves the installer (DECIDED, 2026-10-11)
 
-`field.one` is the marketing site (`apps/field-one`), and the
-repository's GitHub homepage says `field.amnes.ac`. This plan assumes
-`field.one`, where the waitlist for source access already lives.
+**Decided: `field.one` serves it.** `field.one` is Field's marketing
+site (`apps/field-one` in `okamnesiac/audiofield`), where people looking
+for Field arrive, and it held the source-access waitlist that the
+install command replaced. Chunk 4 shipped it in
+okamnesiac/audiofield#40: the site rewrites `/install.sh` to the
+installer at `v0` (§3.3) and leads with
+`curl -fsSL https://field.one/install.sh | bash`. The alternative was
+`field.amnes.ac`, the repository's GitHub homepage, which serves the
+repository's Projector site of plans and reviews, a page for people
+working on Field rather than for people installing it.
+
+`install.sh` and `docs/install.md` name the `raw.githubusercontent.com`
+URL that `field.one` proxies, so no code depends on the domain.
 
 ### 7.5 Worker environments across release versions (DECIDED, 2026-10-11)
 
