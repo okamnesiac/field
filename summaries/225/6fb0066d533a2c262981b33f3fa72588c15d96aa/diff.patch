@@ -1,0 +1,328 @@
+diff --git a/docs/keys.md b/docs/keys.md
+index 618ce2b..48965ac 100644
+--- a/docs/keys.md
++++ b/docs/keys.md
+@@ -12,10 +12,19 @@ message.
+ 
+ ```console
+ $ field keys
++  ┌───┬───┐   ┌───┬───┬───┐   ┌───┬───┐   ┌───┐
++  │ W │ E │   │ T │ Y │ U │   │ O │ P │   │ ] │
++┌─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┘
++│ A │ S │ D │ F │ G │ H │ J │ K │ L │ ; │ ' │
++└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
+ mod   0
+ Field Keys · musical · transpose 0 · velocity 100 · bend +0 · C4 E4 G4
+ ```
+ 
++The keyboard above the status line is the keys that play notes, and a
++key you hold lights up: here `A`, `D`, and `G`, in reverse video in the
++terminal.
++
+ Name an instrument and `field keys` plays it too, from the keyboard and
+ from every other MIDI source, and shows the knobs the instrument has:
+ 
+@@ -23,6 +32,11 @@ from every other MIDI source, and shows the knobs the instrument has:
+ $ cd examples/bloom
+ $ field keys juno
+ juno live at 48000 Hz on MacBook Pro Speakers
++  ┌───┬───┐   ┌───┬───┬───┐   ┌───┬───┐   ┌───┐
++  │ W │ E │   │ T │ Y │ U │   │ O │ P │   │ ] │
++┌─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┘
++│ A │ S │ D │ F │ G │ H │ J │ K │ L │ ; │ ' │
++└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
+ mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s
+ Field Keys · musical · transpose 0 · velocity 100 · bend +0 · D4
+ ```
+@@ -59,7 +73,15 @@ for, once, and a new process gets a new MIDI client.
+ 1. Run `field keys` in a supported terminal.
+ 2. In the application you want to play, choose `Field Keys` as the MIDI
+    input. In Logic, `Field Keys` appears with your other MIDI inputs.
+-3. Play. The status line shows the keymap, the transpose, the velocity,
++3. Play. Above the status line, `field keys` draws the keys that play
++   notes as keycaps, each with its key's letter, and lights each key in
++   reverse video while you hold it. The row above the home row sits
++   half a key to the left, so its keys fall between the home row's as a
++   piano's black keys do, and a key that plays nothing leaves a gap. It
++   draws the keyboard for a keymap whose notes are all on those two
++   rows, such as `musical`, and only on a terminal wide enough for it,
++   48 columns for `musical`; other keymaps go without it for now.
++   The status line shows the keymap, the transpose, the velocity,
+    the pitch bend when the keymap has keys that bend or the bend is
+    away from rest, and last the notes sounding, so playing changes only
+    the end of the line. The bend runs from `-1` to `+1`. It always
+@@ -566,7 +588,7 @@ $ field keys --print
+ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.
+ 
+ ·     1     2     3     4     5     6     7     8     9     0     -     ·
+-   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·
++   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     F#5   ·
+           C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5
+              T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·
+ 
+@@ -576,7 +598,7 @@ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row,
+ | Keys | What they do |
+ | --- | --- |
+ | `A S D F G H J K L ; '` | White keys, C4 up to F5 |
+-| `W E`, `T Y U`, `O P` | Black keys |
++| `W E`, `T Y U`, `O P`, `]` | Black keys, C#4 up to F#5 |
+ | `Z`, `X` | Transpose down or up an octave |
+ | `C`, `V` | Velocity down or up by 20, between 1 and 127 |
+ | `,`, `.` | Pitch bend fully down or up while held |
+@@ -587,8 +609,9 @@ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row,
+ | `Enter`, `Backspace`, `Esc` | Complete, edit, or cancel the value you are typing |
+ | `Ctrl-C` | Quit |
+ 
+-`musical` plays every note where Musical Typing does, and keeps its
+-octave, velocity, and sustain keys. Logic's guide describes `Tab` as
++`musical` plays every note where Musical Typing does, adds F#5 on `]`,
++the next black key after `'`, and keeps its octave, velocity, and
++sustain keys. Logic's guide describes `Tab` as
+ turning sustain on or off; this keymap holds sustain only while `Tab` is
+ down, as a pedal does. The bend moves to `,` and `.`, the keys that show
+ `<` and `>`, the modulation wheel is the knob `mod`, which the arrows
+diff --git a/keymaps/musical.yaml b/keymaps/musical.yaml
+index c1f19ea..2d46e38 100644
+--- a/keymaps/musical.yaml
++++ b/keymaps/musical.yaml
+@@ -21,6 +21,7 @@ notes:
+   KeyP: 15
+   Semicolon: 16
+   Quote: 17
++  BracketRight: 18
+ controls:
+   KeyZ: { transpose: -12 }
+   KeyX: { transpose: 12 }
+diff --git a/src/commands/keys.ts b/src/commands/keys.ts
+index 351f5b3..d885fde 100644
+--- a/src/commands/keys.ts
++++ b/src/commands/keys.ts
+@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { basename, join } from 'node:path';
+ import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
++import { keyboardLines } from '../keys/keyboard.js';
+ import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
+ import {
+   formatKnobValue,
+@@ -244,10 +245,10 @@ async function playRouted(
+   let reloadError: string | undefined;
+   const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
+ 
+-  // The instrument and the knobs each have a line of their own above the
++  // The instrument, the keyboard drawing, and the knobs sit above the
+   // status line, which changes with every key (keyboard-instrument.md
+-  // §2.4). They are drawn once, then redrawn in place only when they
+-  // change.
++  // §2.4). They are drawn once, then redrawn in place from the first line
++  // that changes.
+   const knobLine = new KnobLine();
+   let above: string[] = [];
+   const draw = (): void => {
+@@ -255,6 +256,7 @@ async function playRouted(
+     const width = Math.max(20, (tty.stdout.columns || 80) - 1);
+     const lines = [
+       ...(instrument !== undefined ? [instrumentText(instrument).slice(0, width)] : []),
++      ...(keyboardLines(session.keymap, session.heldPositions(), width) ?? []),
+       ...(session.bindsKnobs() ? [knobLine.text(session, width)] : []),
+     ];
+     const knobError = knobFiles.errors.values().next().value;
+diff --git a/src/keys/keyboard.test.ts b/src/keys/keyboard.test.ts
+new file mode 100644
+index 0000000..55613bf
+--- /dev/null
++++ b/src/keys/keyboard.test.ts
+@@ -0,0 +1,39 @@
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { builtinKeymapDir, loadKeymap, parseKeymap } from './keymap.js';
++import { keyboardLines } from './keyboard.js';
++
++const musical = loadKeymap(join(builtinKeymapDir(), 'musical.yaml'));
++const REVERSE = '\x1b[7m';
++const REVERSE_OFF = '\x1b[27m';
++
++describe('the keyboard drawing', () => {
++  it('draws musical as keycaps: the home row, and the row above it half a key to the left, with gaps where no note plays', () => {
++    expect(keyboardLines(musical, new Set(), 80)).toEqual([
++      '  ┌───┬───┐   ┌───┬───┬───┐   ┌───┬───┐   ┌───┐',
++      '  │ W │ E │   │ T │ Y │ U │   │ O │ P │   │ ] │',
++      '┌─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┘',
++      "│ A │ S │ D │ F │ G │ H │ J │ K │ L │ ; │ ' │",
++      '└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘',
++    ]);
++  });
++
++  it('lights each held key in reverse video, on both rows, and nothing else', () => {
++    const lines = keyboardLines(musical, new Set(['KeyA', 'KeyW', 'BracketRight', 'KeyZ']), 80)!;
++    expect(lines[1]).toBe(`  │${REVERSE} W ${REVERSE_OFF}│ E │   │ T │ Y │ U │   │ O │ P │   │${REVERSE} ] ${REVERSE_OFF}│`);
++    expect(lines[3]).toBe(`│${REVERSE} A ${REVERSE_OFF}│ S │ D │ F │ G │ H │ J │ K │ L │ ; │ ' │`);
++    expect([lines[0], lines[2], lines[4]].join('')).not.toContain(REVERSE);
++  });
++
++  it('draws nothing for a keymap with a note off those two rows, or on a terminal too narrow for it', () => {
++    expect(keyboardLines(loadKeymap(join(builtinKeymapDir(), 'tracker.yaml')), new Set(), 200)).toBeUndefined();
++    expect(keyboardLines(loadKeymap(join(builtinKeymapDir(), 'fourths.yaml')), new Set(), 200)).toBeUndefined();
++    expect(keyboardLines(musical, new Set(), 46)).toBeUndefined();
++    expect(keyboardLines(musical, new Set(), 47)).toHaveLength(5);
++  });
++
++  it('draws the keys a keymap of your own plays on those rows', () => {
++    const three = parseKeymap('name: three\nnotes: { KeyA: 0, KeyW: 1, KeyS: 2 }\n', 'three.yaml');
++    expect(keyboardLines(three, new Set(), 80)).toEqual(['  ┌───┐', '  │ W │', '┌─┴─┬─┴─┐', '│ A │ S │', '└───┴───┘']);
++  });
++});
+diff --git a/src/keys/keyboard.ts b/src/keys/keyboard.ts
+new file mode 100644
+index 0000000..940c25f
+--- /dev/null
++++ b/src/keys/keyboard.ts
+@@ -0,0 +1,86 @@
++import { NAMED_ROWS, type Keymap, type RowName } from '../schema/keymap.js';
++import { US_LABELS } from './position.js';
++
++const KEY_WIDTH = 4;
++// The top row sits half a key left of the home row, so each of its keys
++// falls between two home-row keys, as a piano's black keys do.
++const ROWS: readonly { name: RowName; offset: number }[] = [
++  { name: 'top', offset: -KEY_WIDTH / 2 },
++  { name: 'home', offset: 0 },
++];
++
++const REVERSE = '\x1b[7m';
++const REVERSE_OFF = '\x1b[27m';
++
++const UP = 1;
++const DOWN = 2;
++const LEFT = 4;
++const RIGHT = 8;
++const JUNCTIONS: Record<number, string> = {
++  [LEFT]: '─',
++  [RIGHT]: '─',
++  [LEFT | RIGHT]: '─',
++  [UP]: '│',
++  [DOWN]: '│',
++  [UP | DOWN]: '│',
++  [DOWN | RIGHT]: '┌',
++  [DOWN | LEFT]: '┐',
++  [UP | RIGHT]: '└',
++  [UP | LEFT]: '┘',
++  [LEFT | RIGHT | DOWN]: '┬',
++  [LEFT | RIGHT | UP]: '┴',
++  [UP | DOWN | RIGHT]: '├',
++  [UP | DOWN | LEFT]: '┤',
++  [UP | DOWN | LEFT | RIGHT]: '┼',
++};
++
++interface Cap {
++  position: string;
++  x: number; // the column of its left wall
++  y: number; // the line of its top wall
++}
++
++// The drawing's lines, or undefined when the keymap plays a note off these
++// two rows or the drawing is wider than `width`.
++export function keyboardLines(keymap: Keymap, held: ReadonlySet<string>, width: number): string[] | undefined {
++  const rows = new Set<string>(ROWS.flatMap(({ name }) => NAMED_ROWS[name]));
++  if ([...keymap.notes.keys()].some((position) => !rows.has(position))) return undefined;
++
++  const caps: Cap[] = ROWS.flatMap(({ name, offset }, row) =>
++    NAMED_ROWS[name].flatMap((position, column) =>
++      keymap.notes.has(position) ? [{ position, x: offset + column * KEY_WIDTH, y: row * 2 }] : [],
++    ),
++  );
++  if (caps.length === 0) return undefined;
++  const left = Math.min(...caps.map((cap) => cap.x));
++  for (const cap of caps) cap.x -= left;
++  const columns = Math.max(...caps.map((cap) => cap.x)) + KEY_WIDTH + 1;
++  if (columns > width) return undefined;
++
++  const lines = ROWS.length * 2 + 1;
++  const edges = Array.from({ length: lines }, () => new Array<number>(columns).fill(0));
++  const across = (y: number, x0: number, x1: number): void => {
++    for (let x = x0; x <= x1; x++) edges[y]![x]! |= (x > x0 ? LEFT : 0) | (x < x1 ? RIGHT : 0);
++  };
++  const down = (x: number, y0: number, y1: number): void => {
++    for (let y = y0; y <= y1; y++) edges[y]![x]! |= (y > y0 ? UP : 0) | (y < y1 ? DOWN : 0);
++  };
++  for (const { x, y } of caps) {
++    across(y, x, x + KEY_WIDTH);
++    across(y + 2, x, x + KEY_WIDTH);
++    down(x, y, y + 2);
++    down(x + KEY_WIDTH, y, y + 2);
++  }
++
++  const text = edges.map((line) => line.map((bits) => JUNCTIONS[bits] ?? ' '));
++  for (const { position, x, y } of caps) text[y + 1]![x + 2] = US_LABELS.get(position) ?? '?';
++  // A held key's face, the three columns between its walls, in reverse
++  // video.
++  return text.map((line, y) => {
++    const faces = new Set(caps.filter((cap) => cap.y + 1 === y && held.has(cap.position)).map((cap) => cap.x + 1));
++    return line
++      .map((character, x) => `${faces.has(x) ? REVERSE : ''}${character}${faces.has(x - (KEY_WIDTH - 2)) ? REVERSE_OFF : ''}`)
++      .join('')
++      .trimEnd();
++  });
++}
+diff --git a/src/keys/position.ts b/src/keys/position.ts
+index 6362ace..2db1391 100644
+--- a/src/keys/position.ts
++++ b/src/keys/position.ts
+@@ -29,6 +29,10 @@ const US_POSITIONS: Record<string, string> = {
+ for (const digit of '0123456789') US_POSITIONS[digit] = `Digit${digit}`;
+ for (const letter of 'abcdefghijklmnopqrstuvwxyz') US_POSITIONS[letter] = `Key${letter.toUpperCase()}`;
+ 
++export const US_LABELS: ReadonlyMap<string, string> = new Map(
++  Object.entries(US_POSITIONS).map(([character, position]) => [position, character.toUpperCase()]),
++);
++
+ // Enter, Backspace, and Escape act only on a typed value or say how to
+ // quit, so no keymap binds them (instrument-knobs.md §2.7).
+ const FUNCTIONAL_KEYS: Record<number, string> = { 9: 'Tab', 13: 'Enter', 27: 'Escape', 32: 'Space', 127: 'Backspace' };
+diff --git a/src/keys/print.test.ts b/src/keys/print.test.ts
+index 387b1aa..4819cae 100644
+--- a/src/keys/print.test.ts
++++ b/src/keys/print.test.ts
+@@ -18,7 +18,7 @@ describe('printing a keymap', () => {
+         "musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.",
+         '',
+         '·     1     2     3     4     5     6     7     8     9     0     -     ·',
+-        '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·',
++        '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     F#5   ·',
+         '          C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5',
+         '             T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·',
+         '',
+diff --git a/src/keys/session.ts b/src/keys/session.ts
+index 535b8d8..b33bfa3 100644
+--- a/src/keys/session.ts
++++ b/src/keys/session.ts
+@@ -268,6 +268,10 @@ export class KeysSession {
+     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a || 'type' in a));
+   }
+ 
++  heldPositions(): ReadonlySet<string> {
++    return new Set(this.held.keys());
++  }
++
+   soundingNotes(): string[] {
+     return [...this.holders.keys()].sort((a, b) => a - b).map((key) => noteName(key % 128));
+   }
+diff --git a/src/schema/keymap.test.ts b/src/schema/keymap.test.ts
+index d241892..84c2805 100644
+--- a/src/schema/keymap.test.ts
++++ b/src/schema/keymap.test.ts
+@@ -30,11 +30,12 @@ function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
+ }
+ 
+ describe('keymap schema', () => {
+-  it('accepts musical with its 18 notes and the defaults', () => {
++  it('accepts musical with its 19 notes and the defaults', () => {
+     const map = keymap(builtin('musical'));
+     expect(map.notes.get('KeyA')).toEqual([0]);
+     expect(map.notes.get('Quote')).toEqual([17]);
+-    expect(notesPlayed(map).size).toBe(18);
++    expect(notesPlayed(map).size).toBe(19);
++    expect(map.notes.get('BracketRight')).toEqual([18]);
+     expect(map.velocity).toBe(100);
+     expect(map.channel).toBe(1);
+     expect(map.controls.get('Tab')).toEqual({ cc: 64, value: 127, mode: 'hold' });
