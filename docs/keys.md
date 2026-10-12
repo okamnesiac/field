@@ -80,7 +80,7 @@ for, once, and a new process gets a new MIDI client.
    piano's black keys do, and a key that plays nothing leaves a gap. It
    draws the keyboard for a keymap whose notes are all on those two
    rows, such as `musical`, and only on a terminal wide enough for it,
-   47 columns for `musical`; other keymaps go without it for now.
+   48 columns for `musical`; other keymaps go without it for now.
    The status line shows the keymap, the transpose, the velocity,
    the pitch bend when the keymap has keys that bend or the bend is
    away from rest, and last the notes sounding, so playing changes only
