@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { curlRequest, packageRoot as upgradeRoot, upgrade } from './upgrade.js';
+import { curlRequest, packageRoot as upgradeRoot, uninstall, upgrade } from './upgrade.js';
 
 // `field upgrade` is a doorway to install.sh and nothing else
 // (install.md §2.5): it has to find the right installer, hand it the
@@ -46,6 +46,25 @@ describe('field upgrade', () => {
     expect(() => upgrade(undefined, { installer, platform: 'darwin', err: () => {} })).toThrow(
       `cannot upgrade: ${installer} does not exist`,
     );
+  });
+});
+
+// `field uninstall` is the installer's `uninstall` target, found and run as
+// `field upgrade` finds and runs the installer (install.md §3.5).
+describe('field uninstall', () => {
+  it('refuses on Windows, naming pnpm remove instead', () => {
+    const { installer } = standIn(scratch, 0);
+    expect(() => uninstall({ installer, platform: 'win32', err: () => {} })).toThrow(
+      'field uninstall runs install.sh, which does not support Windows yet — run pnpm remove -g field',
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')('runs the installer with the uninstall target and returns its exit status', () => {
+    const { installer, argsFile } = standIn(scratch, 2);
+    const lines: string[] = [];
+    expect(uninstall({ installer, err: (line) => lines.push(line) })).toBe(2);
+    expect(readFileSync(argsFile, 'utf8')).toBe('1:uninstall\n');
+    expect(lines).toEqual([`+ ${installer} uninstall`]);
   });
 });
 

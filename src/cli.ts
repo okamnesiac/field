@@ -286,6 +286,17 @@ program
     }
   });
 program
+  .command('uninstall')
+  .description("remove field: a release install's versions and shim, or a checkout's pnpm link (the checkout itself stays)")
+  .action(async () => {
+    try {
+      const { uninstall } = await import('./commands/upgrade.js');
+      process.exitCode = uninstall();
+    } catch (err) {
+      fail(err);
+    }
+  });
+program
   .command('generate <target>')
   .description('run a deliberate generator: fills a generative entry as <song>/<name> (a new name scaffolds a leaf track); variants land in songs/<song>/audio/<name>/')
   .option('--song <name>', 'retired — the song rides in the name (creek/lead-take)')

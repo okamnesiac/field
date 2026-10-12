@@ -50,8 +50,8 @@ releases nothing either.
 Node 24 runs it directly, with no `pnpm install`:
 
 ```sh
-node scripts/release.ts bump minor                 # raise the version, write it, print it
-node scripts/release.ts set 0.3.0                  # write an exact version instead
+node scripts/release.ts bump patch                 # raise the version, write it, print it
+node scripts/release.ts set 0.4.0                  # write an exact version instead
 node scripts/release.ts released                   # exit 0 if origin has main's version tagged, 3 if not
 node scripts/release.ts released --since abc1234   # also exit 0 if that version is not above abc1234's
 node scripts/release.ts tag                        # tag main's version, move v0, create the GitHub release

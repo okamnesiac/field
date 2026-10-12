@@ -92,7 +92,7 @@ runs `sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`.
 Install the newest release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+curl -fsSL https://field.one/install.sh | bash
 ```
 
 The installer downloads the release's source, builds it in
@@ -105,6 +105,7 @@ from anywhere:
 ```sh
 field upgrade            # installs the newest release
 field upgrade status     # what is installed, and what is out of date
+field uninstall          # removes it; curl -fsSL https://field.one/uninstall.sh | bash does too
 ```
 
 To work on Field itself, install a checkout instead. Run `pnpm setup`

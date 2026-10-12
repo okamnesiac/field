@@ -327,6 +327,42 @@ than redirects, so the command is one request to `field.one`. It needs
 the repository to be public: `raw.githubusercontent.com` answers 404 for
 a private one. The website and the README then lead with this command.
 
+### 3.5 Uninstall
+
+```sh
+field uninstall
+curl -fsSL https://field.one/uninstall.sh | bash
+```
+
+`install.sh` has an `uninstall` target, and `field uninstall` runs it the
+way `field upgrade` runs the installer: a checkout's own `install.sh`,
+or the newest release's. Nothing else decides what an uninstall
+removes.
+
+- **A release install.** The target removes the shim, but only when it
+  carries the installer's marker; every version and download that the
+  installer can show it made, by the same tests `prune` uses;
+  `current`; `release.conf`; and JUCE's download in
+  `cache/fetchcontent`. Then it removes the data directory if nothing
+  else is left in it. Anything else, in the data directory or in the bin
+  directory, stays, with a `kept` row. The shim goes first, so `field`
+  never runs a version half removed.
+- **The model weights stay.** The workers' weights live in the Hugging
+  Face cache (`HF_HOME`, or `~/.cache/huggingface`), which other tools
+  share, so when a worker was set up, the target names that directory
+  rather than removing it.
+- **A checkout install.** The target runs `pnpm remove -g field` when
+  pnpm's global `field` links this checkout, leaves a link to another
+  checkout alone, and never deletes the checkout, which someone cloned
+  and which may hold work in progress.
+- **`field.one/uninstall.sh`.** A static file in `apps/field-one/public`
+  that runs `curl -fsSL https://field.one/install.sh | bash -s --
+  uninstall`. It works when `field` itself no longer does, and keeps the
+  logic in the one installer, versioned and tested with it. It can
+  deploy only after a release whose installer has the target, because
+  older installers reject `uninstall` as an unknown target. The page
+  does not advertise it; the README and `docs/install.md` do.
+
 ## 4 Why this design (DECIDED, 2026-10-11)
 
 - **A bash installer, as Projector has.** A Node script cannot run
@@ -419,6 +455,15 @@ a private one. The website and the README then lead with this command.
   for a version whose `field upgrade` reads `FIELD_REF`, and 0.2.0's
   runs its own `install.sh` as a checkout's, so the installer refuses
   any version whose `install.sh` writes no shim.
+- **Uninstall is a target of the one installer** (§3.5, decided
+  2026-10-11). A separate `uninstall.sh` in this repository lost because
+  it would need its own copy of the data directory's resolution and of
+  the tests for what the installer made, and the two would drift. A
+  `field uninstall` that removes files from TypeScript lost for the same
+  reason, and because it cannot help when `field` itself no longer runs.
+  `field.one/uninstall.sh` is a static file that runs the installer's
+  target, so the curl path needs nothing of its own. Removing the
+  Hugging Face cache lost because other tools share it.
 
 ## 5 Acceptance criteria
 
@@ -467,13 +512,25 @@ Chunk 4:
 - `curl -fsSL https://field.one/install.sh | bash` does what chunk 3's
   first criterion says, and field.one leads with that command.
 
+Uninstall:
+
+- `field uninstall` in a release install removes the shim, every
+  version, `current`, `release.conf`, and the JUCE cache, then the data
+  directory, and leaves anything the installer did not make.
+- In a checkout install it removes pnpm's link to that checkout, and
+  never the checkout.
+- `curl -fsSL https://field.one/uninstall.sh | bash` does the same once
+  a release carries the target.
+
 ## 6 Chunks
 
 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
 2. **Releases.** §3.1. Shipped in #205.
-3. **The release installer.** §3.2. This change.
-4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
-   chunk 3 released and a public repository.
+3. **The release installer.** §3.2. Shipped in #214.
+4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Shipped
+   in okamnesiac/audiofield#40.
+5. **Uninstall.** §3.5. This change, with `field.one/uninstall.sh` in
+   okamnesiac/audiofield after it is released.
 
 ## 7 Open questions
 
@@ -822,6 +879,10 @@ building it found.
 
 ### 10.3 What is still owed
 
-- Release this change, then install it for real with `curl` from
-  `raw.githubusercontent.com` on a machine that has no checkout.
-- Chunk 4.
+- Nothing. 0.3.0 released this change (#216), and the first real
+  install, `curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash`
+  on a Mac into throwaway data and bin directories, took 255 s,
+  compiling JUCE from scratch. `field --version` printed `field 0.3.0`
+  and `field upgrade status` reported `release-latest 0.3.0 is
+  installed`. Chunk 4 shipped in okamnesiac/audiofield#40, and
+  `field.one/install.sh` serves the same installer.

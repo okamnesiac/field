@@ -65,6 +65,7 @@ const TOOLS = [
   'mkdir',
   'ln',
   'rm',
+  'rmdir',
   'chmod',
   'touch',
   'mv',
@@ -123,6 +124,8 @@ case "$1 \${2:-}" in
     ln -s "$3" "$FAKE_PNPM_HOME/global/field"
     printf '#!/bin/sh\\n' > "$FAKE_PNPM_HOME/bin/field"
     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
+  "remove -g")
+    rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
   "install --frozen-lockfile") ;;
   "run build")
     mkdir -p "$dir/dist"
@@ -1202,11 +1205,111 @@ posix('install.sh status in a release install', () => {
   });
 });
 
+// install.md §3.5: uninstall removes what the installer can show it made,
+// and nothing else.
+posix('install.sh uninstall', () => {
+  it('removes a release install: the shim, every version, current, release.conf, and the cache, then the data directory', () => {
+    publish('0.2.0');
+    release();
+    publish('0.3.0');
+    release();
+    write(join(data, 'cache', 'fetchcontent', 'juce-src', 'CMakeLists.txt'), '');
+    const run = release('uninstall');
+    expect(run.stderr).toBe('');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(existsSync(shim)).toBe(false);
+    expect(existsSync(data)).toBe(false);
+    expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
+    expect(run.stdout).toContain('removed        0.2.0\n');
+    expect(run.stdout).toContain('removed        0.3.0\n');
+    expect(run.stdout).toContain('removed        ~/.local/share/field\n');
+    expect(rows(run.stdout).get('uninstalled')).toBe('to install again: curl -fsSL https://field.one/install.sh | bash');
+  });
+
+  it('keeps what it did not put there: another field in the bin directory, and other things in the data directory', () => {
+    const others = ['3.11.4/bin/python3', '.download-9.9.9/notes', 'notes/todo'];
+    for (const path of others) write(join(data, path), '');
+    publish('0.2.0');
+    release();
+    write(shim, '#!/bin/sh\necho mine\n', 0o755);
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho mine\n');
+    for (const path of others) expect(existsSync(join(data, path))).toBe(true);
+    expect(existsSync(join(data, '0.2.0'))).toBe(false);
+    expect(existsSync(join(data, 'current'))).toBe(false);
+    expect(existsSync(join(data, 'release.conf'))).toBe(false);
+    expect(run.stdout).toContain("kept           ~/.local/bin/field, which is not Field's release shim\n");
+    expect(run.stdout).toContain('kept           ~/.local/share/field, which holds things Field did not put there\n');
+    expect(run.stdout).not.toContain('3.11.4');
+  });
+
+  it('leaves the model weights in the shared Hugging Face cache, and says where they are', () => {
+    publish('0.2.0');
+    release();
+    field('setup', 'aced');
+    const models = join(root, '.cache', 'huggingface', 'hub');
+    mkdirSync(models, { recursive: true });
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(existsSync(models)).toBe(true);
+    expect(rows(run.stdout).get('models-kept')).toBe(
+      "the model workers' weights stay in ~/.cache/huggingface, which other tools share — remove the models you no longer want from there",
+    );
+  });
+
+  it('says nothing about models when no worker was set up', () => {
+    publish('0.2.0');
+    release();
+    mkdirSync(join(root, '.cache', 'huggingface'), { recursive: true });
+    expect(rows(release('uninstall').stdout).has('models-kept')).toBe(false);
+  });
+
+  it("names a fork's installer as the way to install again", () => {
+    publish('0.2.0', { repo: 'someone/field', ref: 'main' });
+    release(undefined, { FIELD_REPO: 'someone/field', FIELD_REF: 'main' });
+    expect(rows(release('uninstall').stdout).get('uninstalled')).toBe(
+      'to install again: curl -fsSL https://raw.githubusercontent.com/someone/field/main/install.sh | bash',
+    );
+  });
+
+  it('says so, and changes nothing, when no release is installed', () => {
+    const run = release('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(rows(run.stdout).get('not-installed')).toBe('no release of Field is installed in ~/.local/share/field');
+  });
+
+  it("removes a checkout's pnpm link, and keeps the checkout", () => {
+    install('cli');
+    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(repo);
+    const run = install('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual(['pnpm remove -g field']);
+    expect(existsSync(join(pnpmHome, 'global', 'field'))).toBe(false);
+    expect(existsSync(join(repo, 'install.sh'))).toBe(true);
+    expect(existsSync(join(repo, 'dist'))).toBe(true);
+    expect(rows(run.stdout).get('unlinked')).toBe("pnpm's global field no longer links ~/checkout");
+  });
+
+  it('leaves a link to another checkout alone', () => {
+    const other = join(root, 'other');
+    mkdirSync(other);
+    linkTo(other);
+    const run = install('uninstall');
+    expect(run.status).toBe(0);
+    expect(changes(run)).toEqual([]);
+    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(other);
+    expect(run.stdout).toContain("pnpm's global field links ~/other, not this checkout");
+  });
+});
+
 posix('install.sh refuses', () => {
   it('an unknown target, as a usage error', () => {
     const run = install('everything');
     expect(run.status).toBe(64);
-    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status]');
+    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status|uninstall]');
     expect(existsSync(join(repo, 'dist'))).toBe(false);
   });
 });

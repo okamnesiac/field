@@ -131,6 +131,19 @@ export interface UpgradeDeps {
   platform?: NodeJS.Platform | undefined;
 }
 
+// `field uninstall`: the installer's `uninstall` target, run the way an
+// upgrade runs the installer (install.md §3.5). It removes a release
+// install's versions and shim, or a checkout's pnpm link, and never the
+// checkout itself.
+export function uninstall(deps: UpgradeDeps = {}): number {
+  if ((deps.platform ?? process.platform) === 'win32') {
+    throw new Error(
+      'field uninstall runs install.sh, which does not support Windows yet — run pnpm remove -g field, then delete the checkout if you no longer want it',
+    );
+  }
+  return upgrade('uninstall', deps);
+}
+
 export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): number {
   // install.sh is bash and builds with the POSIX toolchain, so on Windows
   // this would hand a script to whatever `bash` resolves to, which may be
