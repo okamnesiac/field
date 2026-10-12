@@ -30,11 +30,12 @@ function notesPlayed(map: ReturnType<typeof keymap>): Set<number> {
 }
 
 describe('keymap schema', () => {
-  it('accepts musical with its 18 notes and the defaults', () => {
+  it('accepts musical with its 19 notes and the defaults', () => {
     const map = keymap(builtin('musical'));
     expect(map.notes.get('KeyA')).toEqual([0]);
     expect(map.notes.get('Quote')).toEqual([17]);
-    expect(notesPlayed(map).size).toBe(18);
+    expect(notesPlayed(map).size).toBe(19);
+    expect(map.notes.get('BracketRight')).toEqual([18]);
     expect(map.velocity).toBe(100);
     expect(map.channel).toBe(1);
     expect(map.controls.get('Tab')).toEqual({ cc: 64, value: 127, mode: 'hold' });

@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { KeysHelper, SOURCE_NAME } from '../keys/helper.js';
+import { keyboardLines } from '../keys/keyboard.js';
 import { loadKeymap, resolveKeymapSource, watchKeymap, type KeymapSource } from '../keys/keymap.js';
 import {
   formatKnobValue,
@@ -244,10 +245,10 @@ async function playRouted(
   let reloadError: string | undefined;
   const instrument = instrumentState(armed, routing !== undefined, routed !== undefined && 'reason' in routed ? routed.reason : undefined);
 
-  // The instrument and the knobs each have a line of their own above the
+  // The instrument, the keyboard drawing, and the knobs sit above the
   // status line, which changes with every key (keyboard-instrument.md
-  // §2.4). They are drawn once, then redrawn in place only when they
-  // change.
+  // §2.4). They are drawn once, then redrawn in place from the first line
+  // that changes.
   const knobLine = new KnobLine();
   let above: string[] = [];
   const draw = (): void => {
@@ -255,6 +256,7 @@ async function playRouted(
     const width = Math.max(20, (tty.stdout.columns || 80) - 1);
     const lines = [
       ...(instrument !== undefined ? [instrumentText(instrument).slice(0, width)] : []),
+      ...(keyboardLines(session.keymap, session.heldPositions(), width) ?? []),
       ...(session.bindsKnobs() ? [knobLine.text(session, width)] : []),
     ];
     const knobError = knobFiles.errors.values().next().value;

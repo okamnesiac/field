@@ -268,6 +268,11 @@ export class KeysSession {
     return [...this.keymap.controls.values()].some((a) => a !== 'panic' && ('knob' in a || 'turn' in a || 'type' in a));
   }
 
+  // The keys held down that play notes, which the keyboard drawing lights.
+  heldPositions(): ReadonlySet<string> {
+    return new Set(this.held.keys());
+  }
+
   soundingNotes(): string[] {
     return [...this.holders.keys()].sort((a, b) => a - b).map((key) => noteName(key % 128));
   }

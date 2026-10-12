@@ -18,7 +18,7 @@ describe('printing a keymap', () => {
         "musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.",
         '',
         '·     1     2     3     4     5     6     7     8     9     0     -     ·',
-        '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·',
+        '   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     F#5   ·',
         '          C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5',
         '             T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·',
         '',
