@@ -674,7 +674,7 @@ posix('install.sh audiod and workers', () => {
     const run = install('audiod');
     expect(run.status).toBe(0);
     expect(run.log).toContain(`pnpm --dir ${repo} run build:native`);
-    expect(rows(run.stdout).get('building')).toContain('the first time');
+    expect(rows(run.stdout).get('building')).toBe('field-audiod, takes a while');
     expect(rows(run.stdout).get('built')).toBe(`~/checkout/${AUDIOD}`);
     // A rebuild is not announced as a first build.
     expect(rows(install('audiod').stdout).has('building')).toBe(false);
