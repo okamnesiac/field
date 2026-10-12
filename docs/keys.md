@@ -12,9 +12,18 @@ message.
 
 ```console
 $ field keys
+  ┌───┬───┐   ┌───┬───┬───┐   ┌───┬───┐   ┌───┐
+  │ W │ E │   │ T │ Y │ U │   │ O │ P │   │ ] │
+┌─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┘
+│ A │ S │ D │ F │ G │ H │ J │ K │ L │ ; │ ' │
+└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
 mod   0
 Field Keys · musical · transpose 0 · velocity 100 · bend +0 · C4 E4 G4
 ```
+
+The keyboard above the status line is the keys that play notes, and a
+key you hold lights up: here `A`, `D`, and `G`, in reverse video in the
+terminal.
 
 Name an instrument and `field keys` plays it too, from the keyboard and
 from every other MIDI source, and shows the knobs the instrument has:
@@ -23,6 +32,11 @@ from every other MIDI source, and shows the knobs the instrument has:
 $ cd examples/bloom
 $ field keys juno
 juno live at 48000 Hz on MacBook Pro Speakers
+  ┌───┬───┐   ┌───┬───┬───┐   ┌───┬───┐   ┌───┐
+  │ W │ E │   │ T │ Y │ U │   │ O │ P │   │ ] │
+┌─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┴─┬─┘
+│ A │ S │ D │ F │ G │ H │ J │ K │ L │ ; │ ' │
+└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
 mod   0  cutoff 2.00 kHz  res 0.300  attack  800 ms  release  1.50 s
 Field Keys · musical · transpose 0 · velocity 100 · bend +0 · D4
 ```
@@ -59,7 +73,15 @@ for, once, and a new process gets a new MIDI client.
 1. Run `field keys` in a supported terminal.
 2. In the application you want to play, choose `Field Keys` as the MIDI
    input. In Logic, `Field Keys` appears with your other MIDI inputs.
-3. Play. The status line shows the keymap, the transpose, the velocity,
+3. Play. Above the status line, `field keys` draws the keys that play
+   notes as keycaps, each with its key's letter, and lights each key in
+   reverse video while you hold it. The row above the home row sits
+   half a key to the left, so its keys fall between the home row's as a
+   piano's black keys do, and a key that plays nothing leaves a gap. It
+   draws the keyboard for a keymap whose notes are all on those two
+   rows, such as `musical`, and only on a terminal wide enough for it,
+   48 columns for `musical`; other keymaps go without it for now.
+   The status line shows the keymap, the transpose, the velocity,
    the pitch bend when the keymap has keys that bend or the bend is
    away from rest, and last the notes sounding, so playing changes only
    the end of the line. The bend runs from `-1` to `+1`. It always
@@ -566,7 +588,7 @@ $ field keys --print
 musical: Field's take on Logic Pro's Musical Typing. White keys on the home row, black keys above, the arrows choose and turn knobs, and the number row types a knob's value.
 
 ·     1     2     3     4     5     6     7     8     9     0     -     ·
-   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     ·     ·
+   cc64  ·     C#4   D#4   ·     F#4   G#4   A#4   ·     C#5   D#5   ·     F#5   ·
           C4    D4    E4    F4    G4    A4    B4    C5    D5    E5    F5
              T-12  T+12  V-20  V+20  ·     ·     ·     B-1   B+1   ·
 
@@ -576,7 +598,7 @@ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row,
 | Keys | What they do |
 | --- | --- |
 | `A S D F G H J K L ; '` | White keys, C4 up to F5 |
-| `W E`, `T Y U`, `O P` | Black keys |
+| `W E`, `T Y U`, `O P`, `]` | Black keys, C#4 up to F#5 |
 | `Z`, `X` | Transpose down or up an octave |
 | `C`, `V` | Velocity down or up by 20, between 1 and 127 |
 | `,`, `.` | Pitch bend fully down or up while held |
@@ -587,8 +609,9 @@ musical: Field's take on Logic Pro's Musical Typing. White keys on the home row,
 | `Enter`, `Backspace`, `Esc` | Complete, edit, or cancel the value you are typing |
 | `Ctrl-C` | Quit |
 
-`musical` plays every note where Musical Typing does, and keeps its
-octave, velocity, and sustain keys. Logic's guide describes `Tab` as
+`musical` plays every note where Musical Typing does, adds F#5 on `]`,
+the next black key after `'`, and keeps its octave, velocity, and
+sustain keys. Logic's guide describes `Tab` as
 turning sustain on or off; this keymap holds sustain only while `Tab` is
 down, as a pedal does. The bend moves to `,` and `.`, the keys that show
 `<` and `>`, the modulation wheel is the knob `mod`, which the arrows

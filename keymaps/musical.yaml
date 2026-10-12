@@ -21,6 +21,7 @@ notes:
   KeyP: 15
   Semicolon: 16
   Quote: 17
+  BracketRight: 18
 controls:
   KeyZ: { transpose: -12 }
   KeyX: { transpose: 12 }
