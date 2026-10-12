@@ -83,8 +83,12 @@ interface BuildIdentity {
   checkoutDirtyFiles?: number | undefined;
 }
 
-function liveIdentity(): BuildIdentity {
-  const git = (args: string[]): string | undefined => tryGit(args, packageRoot());
+export function liveIdentity(root: string = packageRoot()): BuildIdentity {
+  // Only a package root with its own .git, as scripts/stamp-build.mjs
+  // asks: Git searches upward, so a release unpacked inside another
+  // repository would report that repository's commit.
+  if (!existsSync(join(root, '.git'))) return {};
+  const git = (args: string[]): string | undefined => tryGit(args, root);
   // Full sha, compared exactly — --short lengthens as the repo grows,
   // so equal objects can compare unequal as strings (Bugbot on #121).
   const commit = git(['rev-parse', 'HEAD']);

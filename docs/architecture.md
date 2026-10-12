@@ -52,7 +52,11 @@ either stops legitimate work or trains you to expect red.
 stamps `dist/build-info.json` with the commit, branch, and dirty count
 at build time — cleared before `tsc`, written after everything
 succeeds, so a failed build leaves no stamp — and the dist artifact
-reads its stamp.
+reads its stamp. Both the stamp and the live read ask Git only when the
+package root has its own `.git`, a directory in a clone and a file in a
+worktree. A release, built from a source archive, has none, so it
+reports no commit even when it is unpacked inside another repository,
+whose commit Git would otherwise find by searching upward.
 
 When the checkout has moved since the build, the report says so beside
 the baked identity instead of impersonating it: a new HEAD prints
