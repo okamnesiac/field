@@ -11,11 +11,11 @@
 # Run from a checkout, it installs that checkout as it is. It never pulls;
 # `status` says how far the checkout is behind its upstream instead.
 # Without one -- piped from curl, or downloaded by `field upgrade` -- it
-# installs a release: the version package.json names at FIELD_REF (default
-# v0) in FIELD_REPO (default okamnesiac/field), from the source archive of
-# that version's tag, built in a directory of its own under
-# ~/.local/share/field and run through a shim in ~/.local/bin
-# (install.md §3.2).
+# installs a release: the version package.json names at the commit
+# FIELD_REF (default v0) names in FIELD_REPO (default okamnesiac/field),
+# from the source archive of that version's tag, built in a directory of
+# its own under ~/.local/share/field and run through a shim in
+# ~/.local/bin (install.md §3.2).
 
 set -euo pipefail
 
@@ -688,12 +688,36 @@ package_version() {
   printf '%s' "${version%%$'\n'*}"
 }
 
-# The version FIELD_REF names, from package.json there, which is how
-# Projector's installer learns the version it installs. The version becomes
-# a directory name, so anything but X.Y.Z is refused.
+# The commit FIELD_REF names, asked of the repository's git server, which
+# answers from the repository itself. raw.githubusercontent.com caches a
+# file at a tag or branch for up to five minutes, so package.json read at
+# v0 just after a release can name the release before it; a file read at
+# a commit never changes. A tag wins over a branch of the same name, and
+# an annotated tag gives the commit it points at. Nothing when git is
+# missing or cannot answer, as for a private fork it has no credentials
+# for, and the version is read at the ref as before.
+ref_commit() {
+  local refs name commit ref
+  command -v git >/dev/null 2>&1 || return 0
+  refs="$(GIT_TERMINAL_PROMPT=0 git ls-remote "$ARCHIVE_URL/$RELEASE_REPO.git" \
+    "refs/tags/$RELEASE_REF^{}" "refs/tags/$RELEASE_REF" "refs/heads/$RELEASE_REF" 2>/dev/null)" || return 0
+  for name in "refs/tags/$RELEASE_REF^{}" "refs/tags/$RELEASE_REF" "refs/heads/$RELEASE_REF"; do
+    while IFS=$'\t' read -r commit ref; do
+      [ "$ref" = "$name" ] && [ "${#commit}" -ge 40 ] || continue
+      case "$commit" in *[!0-9a-f]*) continue ;; esac
+      printf '%s' "$commit"
+      return 0
+    done <<<"$refs"
+  done
+}
+
+# The version FIELD_REF names, from package.json at the commit it names,
+# which is how Projector's installer learns the version it installs. The
+# version becomes a directory name, so anything but X.Y.Z is refused.
 release_version() {
-  local text version
-  text="$(fetch "$RAW_URL/$RELEASE_REPO/$RELEASE_REF/package.json")" || return 1
+  local text version at
+  at="$(ref_commit)"
+  text="$(fetch "$RAW_URL/$RELEASE_REPO/${at:-$RELEASE_REF}/package.json")" || return 1
   version="$(printf '%s\n' "$text" | package_version)"
   if ! is_version "$version"; then
     echo "install.sh: $RELEASE_REPO at $RELEASE_REF names version '$version', which is not X.Y.Z" >&2

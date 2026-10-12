@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -130,8 +131,38 @@ describe.skipIf(process.platform === 'win32')('field upgrade in a release instal
     );
   }
 
+  // The git server is a directory too, so the commit lookup never reaches
+  // GitHub, and finds nothing unless a test serves a repository there.
   function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-    return { PATH: process.env['PATH'], FIELD_RAW_URL: `file://${raw}`, UPGRADE_ARGS: argsFile, ...extra };
+    return {
+      PATH: process.env['PATH'],
+      HOME: scratch,
+      GIT_CONFIG_NOSYSTEM: '1',
+      FIELD_RAW_URL: `file://${raw}`,
+      FIELD_ARCHIVE_URL: `file://${scratch}/git`,
+      UPGRADE_ARGS: argsFile,
+      ...extra,
+    };
+  }
+
+  // A repository for the git server, with `ref` an annotated tag on its
+  // one commit, as the Release workflow moves v0, and that commit's id.
+  function serveRepository(repo: string, ref: string): string {
+    const dir = join(scratch, 'git', `${repo}.git`);
+    mkdirSync(dir, { recursive: true });
+    const git = (...args: string[]): string => {
+      const result = spawnSync(
+        'git',
+        ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args],
+        { cwd: dir, encoding: 'utf8', env: env() },
+      );
+      if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
+      return result.stdout.trim();
+    };
+    git('init', '--quiet');
+    git('commit', '--quiet', '--allow-empty', '-m', 'release');
+    git('tag', '-a', '-m', ref, ref);
+    return git('rev-parse', 'HEAD');
   }
 
   it('downloads the installer at the recorded ref and runs it with the same target', () => {
@@ -140,6 +171,14 @@ describe.skipIf(process.platform === 'win32')('field upgrade in a release instal
     expect(status).toBe(4);
     expect(readFileSync(argsFile, 'utf8')).toBe(`1:status\n${realpathSync(data)}\n`);
     expect(lines).toEqual([`+ curl -fsSL file://${raw}/someone/field/v9/install.sh | bash -s -- status`]);
+  });
+
+  it('downloads the installer at the commit the ref names, past a stale copy at the ref', () => {
+    const commit = serveRepository('someone/field', 'v9');
+    serveInstaller('someone/field', commit, 6);
+    const lines: string[] = [];
+    expect(upgrade('status', { root: join(data, '0.2.0'), env: env(), err: (line) => lines.push(line) })).toBe(6);
+    expect(lines).toEqual([`+ curl -fsSL file://${raw}/someone/field/${commit}/install.sh | bash -s -- status`]);
   });
 
   it('runs from the version current links to, as the shim runs it', () => {

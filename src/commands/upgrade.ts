@@ -11,9 +11,10 @@ import { fileURLToPath } from 'node:url';
 //
 // - A checkout runs the install.sh beside the package this file was loaded
 //   from, which for a linked checkout is the checkout itself.
-// - A release install downloads the newest installer, install.sh at the ref
-//   its install recorded in the repository it recorded, and runs that
-//   (install.md §3.2), as Projector's `project upgrade` does. The copy
+// - A release install downloads the newest installer, install.sh at the
+//   commit the ref its install recorded names now, in the repository it
+//   recorded, and runs that (install.md §3.2), as Projector's `project
+//   upgrade` does. The copy
 //   inside the installed version is as old as the version, so it runs only
 //   under FIELD_OFFLINE, when nothing newer can download.
 
@@ -22,6 +23,7 @@ export const DEFAULT_REF = 'v0';
 // install.sh's VERSION_PATTERN.
 const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const RAW_URL = 'https://raw.githubusercontent.com';
+const ARCHIVE_URL = 'https://github.com';
 
 // Two levels up from src/commands/ and from dist/commands/ alike.
 export function packageRoot(): string {
@@ -78,9 +80,33 @@ export function releaseSource(root: string, env: NodeJS.ProcessEnv): ReleaseSour
   };
 }
 
-export function installerUrl(source: ReleaseSource, env: NodeJS.ProcessEnv): string {
+// The commit the ref names, asked of the repository's git server as
+// install.sh's ref_commit asks it. raw.githubusercontent.com caches a file
+// at a tag or branch for up to five minutes, so the installer at v0 just
+// after a release can be the release before it's; a file at a commit
+// never changes. A tag wins over a branch of the same name, and an
+// annotated tag gives the commit it points at. Undefined when git is
+// missing or cannot answer, and the installer downloads at the ref.
+export function refCommit(source: ReleaseSource, env: NodeJS.ProcessEnv): string | undefined {
+  const base = (env['FIELD_ARCHIVE_URL'] || ARCHIVE_URL).replace(/\/+$/, '');
+  const names = [`refs/tags/${source.ref}^{}`, `refs/tags/${source.ref}`, `refs/heads/${source.ref}`];
+  const result = spawnSync('git', ['ls-remote', `${base}/${source.repo}.git`, ...names], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    env: { ...env, GIT_TERMINAL_PROMPT: '0' },
+  });
+  if (result.error || result.status !== 0) return undefined;
+  const commits = new Map<string, string>();
+  for (const line of result.stdout.split('\n')) {
+    const [commit, name] = line.split('\t');
+    if (commit !== undefined && name !== undefined && /^[0-9a-f]{40,}$/.test(commit)) commits.set(name, commit);
+  }
+  return names.map((name) => commits.get(name)).find((commit) => commit !== undefined);
+}
+
+export function installerUrl(source: ReleaseSource, env: NodeJS.ProcessEnv, commit?: string): string {
   const base = (env['FIELD_RAW_URL'] || RAW_URL).replace(/\/+$/, '');
-  return `${base}/${source.repo}/${source.ref}/install.sh`;
+  return `${base}/${source.repo}/${commit ?? source.ref}/install.sh`;
 }
 
 const GITHUB_HOSTS = new Set(['github.com', 'raw.githubusercontent.com', 'api.github.com', 'codeload.github.com']);
@@ -176,7 +202,6 @@ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): num
   };
   if (deps.installer !== undefined || isCheckout(root)) return runHere(deps.installer ?? join(root, 'install.sh'), env);
   const source = releaseSource(root, env);
-  const url = installerUrl(source, env);
   // The installer reads the data directory from FIELD_DATA_DIR, so one
   // installed somewhere other than the default upgrades in place.
   const childEnv: NodeJS.ProcessEnv = { ...env };
@@ -185,6 +210,7 @@ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): num
   // newest one, which cannot download. FIELD_OFFLINE keeps it from
   // downloading anything either (install.md §3.2).
   if (env['FIELD_OFFLINE']) return runHere(join(root, 'install.sh'), childEnv);
+  const url = installerUrl(source, env, refCommit(source, env));
   const scratch = mkdtempSync(join(tmpdir(), 'field-upgrade-'));
   try {
     const script = join(scratch, 'install.sh');

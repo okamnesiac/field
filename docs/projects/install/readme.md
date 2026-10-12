@@ -222,10 +222,12 @@ move with what each process does, so a release leaves them alone.
 Without a checkout, `install.sh` installs a release by building it.
 `docs/install.md` describes it for users; this is the design.
 
-1. It reads the version from `package.json` at `FIELD_REF` (default
-   `v0`) in `FIELD_REPO` (default `okamnesiac/field`), which is how
-   Projector's installer learns the version it is installing, and
-   accepts only `X.Y.Z`.
+1. It asks GitHub's git server, with `git ls-remote`, which commit
+   `FIELD_REF` (default `v0`) names in `FIELD_REPO` (default
+   `okamnesiac/field`), and reads the version from `package.json` at
+   that commit, which is how Projector's installer learns the version
+   it is installing. It accepts only `X.Y.Z`. When git cannot answer, it
+   reads `package.json` at the ref instead (§10.1).
 2. It downloads GitHub's source archive of the immutable tag for that
    version, `vX.Y.Z` rather than `v0`, checks that the archive holds one
    top-level directory whatever its name, that its `package.json`
@@ -290,9 +292,10 @@ compiles JUCE's modules again as part of `field-audiod` (§10.1).
 apart by the same test as the installer. In a release install it reads
 `release.conf` beside the real path of its package root, with
 `FIELD_REPO` and `FIELD_REF` ahead of the record and the defaults last.
-It downloads `install.sh` at that ref from
-`raw.githubusercontent.com`, prints `+ curl -fsSL <url> | bash -s --
-<target>`, and runs it with `FIELD_DATA_DIR` set. It never asks
+It downloads `install.sh` from `raw.githubusercontent.com` at the
+commit that ref names, found as the installer finds it, prints `+ curl
+-fsSL <url> | bash -s -- <target>`, and runs it with `FIELD_DATA_DIR`
+set. It never asks
 `field.one`, which serves only the upstream's `v0`, and a fork must
 upgrade from the fork. Under `FIELD_OFFLINE` it downloads nothing, and
 runs the installed version's own `install.sh` instead.
@@ -916,6 +919,21 @@ building it found.
 - **The first install's clone of JUCE is the slow step.** CMake clones
   JUCE with `--depth 1 --no-single-branch`, which fetches every branch's
   tip, and it took minutes here.
+- **The ref is read at its commit, because raw caches it.**
+  `raw.githubusercontent.com` serves a file at a tag or branch with
+  `cache-control: max-age=300`. A minute after 0.3.1's release moved
+  `v0`, `field upgrade` still read 0.3.0 from `v0/package.json`, a
+  cache hit, while the same file at `v0.3.1` read 0.3.1. Both the
+  installer and `field upgrade` now ask GitHub's git server with `git
+  ls-remote` which commit the ref names, which it answers from the
+  repository, and read at that commit, whose files never change. They
+  name `refs/tags/<ref>^{}` too, because `v0` is an annotated tag and
+  `refs/tags/v0` alone names the tag object rather than its commit. When
+  git is missing or cannot answer, as for a private fork it has no
+  credentials for, they read at the ref as before. Projector's installer
+  never meets the lag when it installs: it hands pipx
+  `archive/v0.tar.gz`, which `github.com` resolves on each request, and
+  reads its manifest from raw only to compare versions in `status`.
 
 ### 10.2 What was verified, and how
 
