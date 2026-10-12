@@ -1,0 +1,105 @@
+{
+ "version": 1,
+ "name": "Current release lookup",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 222,
+  "title": "Read the release at the commit v0 names, past raw's five-minute cache",
+  "head": "7fa7c428d3cfb07795bd04ec254cae9fa0cb3a01",
+  "headRef": "install/resolve-ref",
+  "base": "5a55b8ab247844f14aa35df8aadd56296b443984",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field installs a release by building its source in a version directory, then switches the command to that directory. An upgrade first downloads the installer and asks which version to build.",
+   "GitHub caches files read through a moving tag such as <code>v0</code> for up to five minutes. This change resolves the tag or branch to a commit through GitHub’s git server, then downloads the installer and manifest at that immutable commit.",
+   "If git is missing or the repository lookup fails, the download uses the recorded ref as before. The source archive remains the exact version tag, and the install record keeps the moving ref for future upgrades."
+  ],
+  "cards": [
+   {
+    "id": "lookup",
+    "title": "Which commit wins",
+    "html": "<ol><li>An annotated tag’s target commit.</li><li>A lightweight tag’s commit.</li><li>A branch’s commit.</li><li>The original ref when git cannot resolve any of these.</li></ol>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "lookup",
+   "title": "Read release files at a commit",
+   "kicker": "Resolve the moving ref before either download",
+   "intro": [
+    "A ref is a tag or branch name. Both download paths ask <code>git ls-remote</code> which commit that name points to. An annotated tag has a separate tag object, so the lookup prefers its peeled target, the commit containing the files.",
+    "The installer uses the result for <code>package.json</code>, which supplies the version directory and exact archive tag. The CLI uses it for <code>install.sh</code>, so an upgrade runs the current installer. Neither passes <code>GITHUB_TOKEN</code> on git’s command line."
+   ],
+   "checks": [
+    {
+     "kind": "context",
+     "text": "The git lookup uses the archive base URL. Git credentials control access to private repositories; curl retains its separate token handling."
+    }
+   ],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "Resolve the release ref before reading its version, retaining the ref when git fails.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Read the tag, branch, hexadecimal commit checks, and fallback alongside the release version validation. The archive download still names the validated exact version tag."
+      }
+     ]
+    },
+    {
+     "path": "src/commands/upgrade.ts",
+     "note": "Download the installer at the resolved commit while keeping checkout and offline behavior.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Traced upgrade and uninstall callers. Checkout and offline paths return before the new lookup; downloaded installers receive the same target and install directory."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Exercise fresh and stale release files",
+   "kicker": "Local git repositories stand in for GitHub",
+   "intro": [
+    "The tests serve git refs from temporary repositories and raw files from the disk. The moving tag can deliberately serve an old file while its commit serves the new one, reproducing the cache lag without contacting GitHub."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/install.test.ts",
+     "note": "Give the installer tests a git server, then assert commit downloads and the ref fallback."
+    },
+    {
+     "path": "src/commands/upgrade.test.ts",
+     "note": "Serve an annotated tag and confirm the CLI runs the installer at its target commit."
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Describe the lookup and fallback",
+   "kicker": "Keep the user instructions and install design aligned",
+   "intro": [
+    "The install documentation explains why a commit URL avoids stale files, how private forks use credentials, and how mirrors choose the git server. The project plan records the same release and upgrade behavior."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "note": "Update the release steps, example URLs, and download configuration."
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "Update the implementation design and record the raw-cache constraint."
+    }
+   ]
+  }
+ ]
+}
