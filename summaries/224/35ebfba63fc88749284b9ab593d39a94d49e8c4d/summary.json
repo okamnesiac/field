@@ -1,0 +1,99 @@
+{
+ "version": 1,
+ "name": "Quiet installer builds",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 224,
+  "title": "Fit an install on one screen: build output goes to a log, shown in a dimmed window",
+  "head": "35ebfba63fc88749284b9ab593d39a94d49e8c4d",
+  "headRef": "install/quiet-build",
+  "base": "83b91539ff3f0b75cea3e4908d8b733b938e0f34",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field’s installer builds the command-line tool, user interface, audio daemon, and worker environments. Compiler and package-manager output can bury its status rows. This change captures that output in one temporary log and displays a short, temporary window while a command runs.",
+   "Successful targets remove the log. A failed command prints its own final 20 lines and keeps the complete log. <code>FIELD_VERBOSE=1</code> restores streaming output and makes no log. The temporary window replaces non-ASCII characters with <code>?</code> to keep every displayed character one column wide; the log retains the original output."
+  ],
+  "cards": [
+   {
+    "id": "review",
+    "title": "Review result",
+    "html": "<p>The head is clean. The earlier wide-character finding is fixed: the command and output are converted to printable ASCII before truncation. Terminal reproductions in UTF-8 and C locales stayed within a 20-column width and preserved the original characters in the log. All 131 focused installer and upgrade tests passed, including the new pseudo-terminal test.</p>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "output",
+   "title": "Build output stays in a temporary window",
+   "kicker": "One wrapper captures output and reports failures",
+   "intro": [
+    "Each build or setup command now goes through <code>step</code>, which captures both output streams in a private temporary file. Commands keep their exit status and read no interactive input.",
+    "A terminal shows the command and its last five output lines. The window redraws in place and erases itself after the command. Redirected output shows only the installer’s own rows, while a failure prints the end of the failed command and the log path."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "Adds command logging, terminal redraw, failure reporting, and cleanup, then wraps the existing build and setup commands.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 123,
+       "text": "Verified the wide-character fix in UTF-8 and C locales: the command and output contain only printable ASCII, each line stays under the 20-column limit, and the log retains the original CJK text."
+      },
+      {
+       "kind": "verify",
+       "line": 143,
+       "text": "The focused installer tests verify that failure output names the failed native build and retains its log. Successful targets remove logs, and verbose mode streams output without creating one."
+      },
+      {
+       "kind": "context",
+       "line": 1362,
+       "text": "Cleanup runs after the target succeeds. An earlier failure exits before cleanup, retaining the log for diagnosis."
+      }
+     ]
+    },
+    {
+     "path": "src/install.test.ts",
+     "note": "Checks quiet output, failure diagnostics, verbose mode, and the terminal window with CJK output.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 745,
+       "text": "Ran all 131 installer and upgrade tests successfully, including this script(1) pseudo-terminal test. It checks printable ASCII, a width below 24 columns, final erase, and log cleanup."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "Installer output is part of the install contract",
+   "kicker": "The reference and plan describe the new output modes",
+   "intro": [
+    "The install reference explains where command output goes, what a failure prints, and how to restore streaming output. The project plan records the same behavior for checkout and release installs."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "note": "Documents the temporary window, ASCII replacement, retained failure logs, and FIELD_VERBOSE."
+    },
+    {
+     "path": "docs/projects/install/readme.md",
+     "note": "Records the quiet-output design in section 2.8.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 180,
+       "text": "This addition changes the output design of the existing install project. It does not change the plan’s readiness status or introduce an unanswered design question."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

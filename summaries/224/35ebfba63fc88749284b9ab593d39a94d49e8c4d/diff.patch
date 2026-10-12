@@ -1,0 +1,399 @@
+diff --git a/docs/install.md b/docs/install.md
+index d9e2f5a..091d87a 100644
+--- a/docs/install.md
++++ b/docs/install.md
+@@ -369,6 +369,35 @@ no longer want it.
+ field uninstall
+ ```
+ 
++## What the installer prints
++
++The installer prints one row for each thing it does, such as
++`downloading`, `built`, and `switched`, so an install fits on one
++screen. The output of the commands it runs, such as `pnpm install` and
++the compiler, goes to a log file in `$TMPDIR` instead. In a terminal,
++the command that is running and its last five lines show dimmed below
++the rows as they arrive, and disappear when the command finishes. The
++window shows each character outside ASCII as `?`, so no line is wider
++than the terminal; the log keeps them as they were.
++
++When a command fails, the installer prints the end of that command's
++output and where the whole log is, and keeps the log:
++
++```console
++install.sh: pnpm --dir ~/.local/share/field/0.3.2 run build:native exited with status 1. The end of its output:
++
++  ...
++
++The whole log is in /var/folders/5d/2spqnw8d17sf5/T/field-install.Xa81Qz
++```
++
++When the installer succeeds, it removes the log. To see every line as it
++arrives instead, set `FIELD_VERBOSE`:
++
++```sh
++FIELD_VERBOSE=1 field upgrade
++```
++
+ ## Read the status
+ 
+ `field upgrade status` prints one row per fact. A row marked ⚠️ needs
+@@ -447,6 +476,7 @@ worker-absent  field-aced is not set up — field setup aced sets it up
+ | --- | --- |
+ | `FIELD_OFFLINE=1` | In a checkout, skips the fetch and compares the checkout against the last fetch of its upstream. In a release install, `field upgrade` runs the installed version's own `install.sh` instead of downloading the newest one, `status` compares nothing, and `all` refuses, because it has nothing to download from. |
+ | `FIELD_REPO`, `FIELD_REF` | The repository and ref a release install follows: `okamnesiac/field` and `v0` unless set. The installer records both in `release.conf`. |
++| `FIELD_VERBOSE=1` | Prints every line the installer's commands print, as it arrives, instead of the dimmed five-line window, and keeps no log. |
+ | `FIELD_DATA_DIR` | Where release installs live. The default is `$XDG_DATA_HOME/field` when `XDG_DATA_HOME` is an absolute path, and `~/.local/share/field` otherwise. |
+ | `FIELD_BIN_DIR` | Where the release install's shim goes: `~/.local/bin` unless set. The installer records it in `release.conf`. |
+ | `GITHUB_TOKEN` | Sent to GitHub's own hosts, and only over HTTPS, so a release install can follow a private fork. The installer passes it in curl's configuration on standard input, never on a command line. `git ls-remote` does not use it: git asks with your own git credentials, and without them the installer reads the private fork at the ref rather than at its commit. |
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 7fb317f..490f5d7 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -177,6 +177,33 @@ checkout instead, because `field upgrade` refuses there (§7.6).
+ | `docs/cli.md` | The install section, `field upgrade`, and the new `field setup` options. |
+ | `README.md`, `examples/bloom/README.md` | Lead with `./install.sh`. |
+ 
++### 2.8 Output fits on one screen
++
++An install prints its rows and nothing else that stays on screen. Until
++2026-10-12 every build step streamed its output, and the upgrade to
++0.3.1 printed screen after screen of it, almost all compiler warnings
++from JUCE's modules, HarfBuzz, and the VST3 SDK. `field-audiod` links
++`juce::juce_recommended_warning_flags`, and JUCE compiles its modules
++inside the target, so the strict warnings meant for Field's code hit
++JUCE's too.
++
++Each command a target runs to build, link, or set up, which `step` in
++`install.sh` wraps, writes its output to one log per run, made with
++`mktemp` in `$TMPDIR`. On a terminal, the command and its last five
++lines show dimmed under the rows as they arrive, redrawn in place and
++cut short of the terminal's width so no line wraps, and erased when the
++command ends, as Docker shows a build. The redraw moves up one row per
++line, so a line that wrapped would leave output behind. Bash cannot
++measure a character's width, so each line drawn is ASCII: a character
++outside it, such as CJK, which a terminal draws two columns wide, shows
++as `?`, and control characters are dropped. The width comes from `stty
++size`, then `COLUMNS`, then 80. Off a terminal, such as in a log
++or CI, nothing shows. A command that fails prints the end of its own
++output and the log's path, and the log stays. A target that succeeds
++removes it. `FIELD_VERBOSE=1` streams every line instead, and makes no
++log. The rows a target prints, such as `building`, `built`, and
++`switched`, are unchanged.
++
+ ## 3 Releases and the one-line install
+ 
+ These are chunks 2 to 4. They are designed far enough to show that
+diff --git a/install.sh b/install.sh
+index 4090c39..70da3a2 100755
+--- a/install.sh
++++ b/install.sh
+@@ -63,6 +63,87 @@ warn_row() {
+   fi
+ }
+ 
++# Build output: install.md §2.8.
++STEP_LINES=5
++LOG=""
++
++# Standard input is /dev/null: piped from curl, it is the script.
++step() {
++  local status=0 dir start
++  if [ -n "${FIELD_VERBOSE:-}" ]; then
++    "$@" </dev/null
++    return
++  fi
++  if [ -z "$LOG" ]; then
++    dir="${TMPDIR:-/tmp}"
++    LOG="$(mktemp "${dir%/}/field-install.XXXXXX")" || die "could not make a log file in ${dir%/}"
++  fi
++  start="$(sed -n '$=' "$LOG")"
++  printf '$ %s\n' "$*" >>"$LOG"
++  if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then
++    "$@" </dev/null 2>&1 | step_window "$(step_title "$@")" || status=$?
++  else
++    "$@" </dev/null >>"$LOG" 2>&1 || status=$?
++  fi
++  [ "$status" -eq 0 ] || step_failed "$(step_title "$@")" "$status" "$((${start:-0} + 2))"
++  return "$status"
++}
++
++step_title() {
++  local arg title=""
++  for arg in "$@"; do title="$title${title:+ }$(tilde "$arg")"; done
++  printf '%s' "$title"
++}
++
++terminal_width() {
++  local size
++  size="$(stty size </dev/tty 2>/dev/null)" || size=""
++  size="${size##* }"
++  case "$size" in "" | 0 | *[!0-9]*) size="${COLUMNS:-80}" ;; esac
++  case "$size" in "" | *[!0-9]*) size=80 ;; esac
++  [ "$size" -ge 20 ] || size=20
++  printf '%s' "$size"
++}
++
++# Every line drawn is ASCII without control characters, so its length is
++# the columns it takes, and cutting it short of the terminal's width means
++# it never wraps: the redraw moves up one row per line. A character that
++# may be two columns wide, such as CJK, shows as ?.
++step_window() {
++  local title="$1" width line drawn=0 n=0 i dim="" plain=""
++  local lines=()
++  width=$(($(terminal_width) - 5))
++  title="${title//[^[:ascii:]]/?}"
++  title="${title//[[:cntrl:]]/}"
++  [ -n "${NO_COLOR:-}" ] || { dim=$'\033[2m'; plain=$'\033[0m'; }
++  while IFS= read -r line || [ -n "$line" ]; do
++    printf '%s\n' "$line" >&3
++    # A progress bar's last state follows its last carriage return.
++    line="${line##*$'\r'}"
++    line="${line//$'\t'/  }"
++    line="${line//[^[:ascii:]]/?}"
++    line="${line//[[:cntrl:]]/}"
++    if [ "$n" -lt "$STEP_LINES" ]; then n=$((n + 1)); else lines=("${lines[@]:1}"); fi
++    lines[n - 1]="$line"
++    [ "$drawn" -eq 0 ] || printf '\033[%dA' "$drawn"
++    printf '\r\033[2K%s  $ %s%s\n' "$dim" "${title:0:width}" "$plain"
++    for ((i = 0; i < n; i++)); do
++      printf '\r\033[2K%s  %s%s\n' "$dim" "${lines[i]:0:width}" "$plain"
++    done
++    drawn=$((n + 1))
++  done 3>>"$LOG"
++  [ "$drawn" -eq 0 ] || printf '\033[%dA\r\033[J' "$drawn"
++}
++
++# $3 is the line of LOG where the failed step's own output begins.
++step_failed() {
++  {
++    printf 'install.sh: %s exited with status %s. The end of its output:\n\n' "$1" "$2"
++    sed -n "$3,\$p" "$LOG" | tail -n 20 | sed 's/^/  /'
++    printf '\nThe whole log is in %s\n' "$LOG"
++  } >&2
++}
++
+ commits() {
+   if [ "$1" -eq 1 ]; then printf '1 commit'; else printf '%s commits' "$1"; fi
+ }
+@@ -307,13 +388,13 @@ build_cli() {
+   # --frozen-lockfile, because an installer has no business rewriting the
+   # checkout's lockfile; a checkout whose package.json moved ahead of it
+   # gets pnpm's own error saying so.
+-  pnpm --dir "$REPO" install --frozen-lockfile
++  step pnpm --dir "$REPO" install --frozen-lockfile
+   # `pnpm install` builds the CLI through `prepare` only when it installed
+   # something, so both builds run here, every time: a checkout edited
+   # without a commit is as stale as one that moved. The UI builds with the
+   # CLI because it bundles code from src/.
+-  pnpm --dir "$REPO" run build
+-  pnpm --dir "$REPO" run build:ui
++  step pnpm --dir "$REPO" run build
++  step pnpm --dir "$REPO" run build:ui
+ }
+ 
+ # pnpm links the checkout rather than copying it, so a later build takes
+@@ -322,7 +403,7 @@ build_cli() {
+ link_cli() {
+   local found
+   if [ "$LINKED" != "$REPO" ]; then
+-    pnpm add -g "$REPO"
++    step pnpm add -g "$REPO"
+     [ -z "$LINKED" ] || row moved "field $(tilde "$LINKED") -> $(tilde "$REPO")"
+     refresh_linked
+   fi
+@@ -357,7 +438,7 @@ install_audiod() {
+       row building "field-audiod for the first time: CMake fetches JUCE and compiles it, which takes several minutes"
+     fi
+   fi
+-  if ! pnpm --dir "$REPO" run build:native; then
++  if ! step pnpm --dir "$REPO" run build:native; then
+     [ "$(uname -s)" != Linux ] ||
+       echo "install.sh: on Linux, JUCE needs the ALSA, X11, and freetype development headers; .github/workflows/ci.yml installs the packages it needs on Ubuntu" >&2
+     exit 1
+@@ -376,7 +457,7 @@ install_audiod() {
+ install_workers() {
+   [ -f "$REPO/dist/cli.js" ] ||
+     die "the field CLI sets up worker environments, and it is not built — run $(rerun cli) first" 69
+-  node "$REPO/dist/cli.js" setup --existing
++  step node "$REPO/dist/cli.js" setup --existing
+ }
+ 
+ report_checkout_row() {
+@@ -897,7 +978,7 @@ setup_workers_again() {
+       continue
+     fi
+     row setting-up "$name in $INSTALLING, as it was in $old"
+-    node "$REPO/dist/cli.js" setup "$name" </dev/null
++    step node "$REPO/dist/cli.js" setup "$name"
+   done <<EOF
+ $list
+ EOF
+@@ -1237,7 +1318,7 @@ release_main() {
+ # environments: it is a clone someone made, and may hold work in progress.
+ uninstall_checkout() {
+   if [ -n "$LINKED" ] && [ "$LINKED" = "$CHECKOUT" ]; then
+-    pnpm remove -g field
++    step pnpm remove -g field
+     row unlinked "pnpm's global field no longer links $(tilde "$CHECKOUT")"
+   elif [ -n "$LINKED" ]; then
+     row kept "pnpm's global field links $(tilde "$LINKED"), not this checkout — run the install.sh there with uninstall to remove it"
+@@ -1280,6 +1361,7 @@ main() {
+     *) die "usage: install.sh [all|cli|audiod|workers|status|uninstall]" 64 ;;
+   esac
+   if [ -n "$CHECKOUT" ]; then checkout_main; else release_main; fi
++  [ -z "$LOG" ] || rm -f "$LOG"
+ }
+ 
+ main "$@"
+diff --git a/src/install.test.ts b/src/install.test.ts
+index 3adb0f9..948c209 100644
+--- a/src/install.test.ts
++++ b/src/install.test.ts
+@@ -7,6 +7,7 @@ import {
+   existsSync,
+   mkdirSync,
+   mkdtempSync,
++  readdirSync,
+   readFileSync,
+   readlinkSync,
+   realpathSync,
+@@ -73,6 +74,8 @@ const TOOLS = [
+   'readlink',
+   'tar',
+   'gzip',
++  'mktemp',
++  'tail',
+ ];
+ 
+ let root: string;
+@@ -127,7 +130,7 @@ case "$1 \${2:-}" in
+     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
+   "remove -g")
+     rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
+-  "install --frozen-lockfile") ;;
++  "install --frozen-lockfile") echo "Packages: +122"; echo "依存関係を解決しています、依存関係を解決しています" ;;
+   "run build")
+     mkdir -p "$dir/dist"
+     node "$dir/scripts/stamp-build.mjs" > /dev/null
+@@ -137,7 +140,7 @@ case "$1 \${2:-}" in
+     mkdir -p "$dir/ui/dist"
+     printf '<!doctype html>\\n' > "$dir/ui/dist/index.html" ;;
+   "run build:native")
+-    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || exit 2
++    [ -z "\${FAKE_NATIVE_FAILS:-}" ] || { echo "cmake: JUCE did not compile" >&2; exit 2; }
+     # Where native/audiod/CMakeLists.txt would have FetchContent put JUCE.
+     mkdir -p "$dir/native/audiod/build"
+     printf '%s\\n' "\${FIELD_FETCHCONTENT_BASE_DIR:-unset}" > "$dir/native/audiod/build/fetchcontent"
+@@ -259,6 +262,7 @@ beforeEach(() => {
+   git(root, 'clone', '--quiet', upstream, repo);
+ 
+   mkdirSync(bin);
++  mkdirSync(join(root, 'tmp'));
+   for (const tool of TOOLS) {
+     const path = which(tool);
+     if (path !== undefined) symlinkSync(path, join(bin, tool));
+@@ -325,6 +329,7 @@ function install(target?: string, env: Record<string, string> = {}, script = joi
+       FAKE_LOG: log,
+       FAKE_PNPM_HOME: pnpmHome,
+       FAKE_CLI: join(root, 'cli.js'),
++      TMPDIR: join(root, 'tmp'),
+       ...env,
+     },
+   });
+@@ -336,6 +341,40 @@ function install(target?: string, env: Record<string, string> = {}, script = joi
+   };
+ }
+ 
++// The installer in a pseudo-terminal, through script(1), whose arguments
++// differ between macOS and util-linux. Its output is the terminal's.
++const SCRIPT = which('script');
++function inTerminal(target: string, env: Record<string, string> = {}): Run {
++  if (SCRIPT === undefined) throw new Error('these tests need script(1) on PATH');
++  writeFileSync(log, '');
++  const command = [BASH, join(repo, 'install.sh'), target];
++  const args =
++    process.platform === 'darwin'
++      ? ['-q', '/dev/null', ...command]
++      : ['-qec', command.map((arg) => `'${arg.replace(/'/g, `'\\''`)}'`).join(' '), '/dev/null'];
++  const result = spawnSync(SCRIPT, args, {
++    encoding: 'utf8',
++    stdio: ['ignore', 'pipe', 'pipe'],
++    env: {
++      PATH: [join(pnpmHome, 'bin'), bin].join(delimiter),
++      HOME: root,
++      GIT_CONFIG_NOSYSTEM: '1',
++      FAKE_LOG: log,
++      FAKE_PNPM_HOME: pnpmHome,
++      FAKE_CLI: join(root, 'cli.js'),
++      TMPDIR: join(root, 'tmp'),
++      TERM: 'xterm',
++      ...env,
++    },
++  });
++  return {
++    status: result.status,
++    stdout: result.stdout.replace(/\r\n/g, '\n'),
++    stderr: result.stderr,
++    log: readFileSync(log, 'utf8').split('\n').filter(Boolean),
++  };
++}
++
+ // The rows of a status, keyed by label, the warning marker dropped.
+ function rows(stdout: string): Map<string, string> {
+   const map = new Map<string, string>();
+@@ -681,6 +720,54 @@ posix('install.sh audiod and workers', () => {
+     expect(rows(run.stdout).has('built')).toBe(false);
+   });
+ 
++  it('keeps build output off the screen, and removes its log once the target succeeds', () => {
++    const run = install('cli');
++    expect(run.status).toBe(0);
++    expect(run.stdout).not.toContain('Packages: +122');
++    expect(rows(run.stdout).has('linked')).toBe(true);
++    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
++  });
++
++  it("prints the end of a failed step's output, and keeps the log", () => {
++    const run = install('audiod', { FAKE_NATIVE_FAILS: '1' });
++    expect(run.status).toBe(1);
++    expect(run.stderr).toContain(
++      'install.sh: pnpm --dir ~/checkout run build:native exited with status 2. The end of its output:\n\n  cmake: JUCE did not compile\n',
++    );
++    const logs = readdirSync(join(root, 'tmp'));
++    expect(logs).toHaveLength(1);
++    expect(run.stderr).toContain(`The whole log is in ${join(root, 'tmp', logs[0]!)}\n`);
++    expect(readFileSync(join(root, 'tmp', logs[0]!), 'utf8')).toBe(
++      `$ pnpm --dir ${repo} run build:native\ncmake: JUCE did not compile\n`,
++    );
++  });
++
++  it('draws build output in a dimmed window no wider than the terminal, and erases it', () => {
++    const run = inTerminal('cli', { COLUMNS: '24' });
++    expect(run.status).toBe(0);
++    // Each line the window draws: the escape that clears the row and
++    // dims, the text, and the escape that resets.
++    const drawn = [...run.stdout.matchAll(/\x1b\[2K\x1b\[2m(.*?)\x1b\[0m/g)].map((match) => match[1]!);
++    expect(drawn).toContain('  Packages: +122');
++    expect(drawn).toContain(`  ${'?'.repeat(19)}`);
++    for (const line of drawn) {
++      expect(line).toMatch(/^[\x20-\x7e]*$/);
++      expect(line.length).toBeLessThan(24);
++    }
++    // Erased, so nothing of the build is left among the rows after it.
++    const after = run.stdout.slice(run.stdout.lastIndexOf('\x1b[J'));
++    expect(after).not.toContain('Packages');
++    expect(rows(after.slice('\x1b[J'.length)).has('linked')).toBe(true);
++    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
++  });
++
++  it('shows every line of build output with FIELD_VERBOSE', () => {
++    const run = install('cli', { FIELD_VERBOSE: '1' });
++    expect(run.status).toBe(0);
++    expect(run.stdout).toContain('Packages: +122\n');
++    expect(readdirSync(join(root, 'tmp'))).toEqual([]);
++  });
++
+   it('re-syncs workers through the CLI, which knows which are set up', () => {
+     install('cli');
+     const run = install('workers');
