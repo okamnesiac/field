@@ -64,12 +64,13 @@ const refusingRunner: GeneratorRunner = async (node) => {
 };
 
 // The setup below builds the source, commits it, clones it bare, and
-// pushes its LFS objects, one git or git-lfs process after another. On
-// the windows CI runner it takes 2 to 3 s, but a process start there
-// stalls now and then, and one stall pushed it past vitest's 10 s hook
-// default. Nothing here measures how fast clone is, so the hook gets
-// room to finish.
-const SETUP_TIMEOUT_MS = 30_000;
+// pushes its LFS objects, one git or git-lfs process after another, and
+// several tests then clone that remote. On the windows CI runner the
+// setup takes 2 to 3 s, but a process start there stalls now and then:
+// one stall pushed the hook past vitest's 10 s hook default, and others
+// pushed a clone past its 5 s test default. Nothing here measures how
+// fast clone is, so the hook and every test get room to finish.
+const GIT_HEAVY_MS = 30_000;
 
 beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'field-clone-'));
@@ -126,7 +127,7 @@ beforeEach(async () => {
       entry.outputs.map((o) => readFileSync(join(source, '.field', 'cache', 'cas', o.sha256))),
     );
   }
-}, SETUP_TIMEOUT_MS);
+}, GIT_HEAVY_MS);
 
 afterEach(async () => {
   await remote.close();
@@ -150,7 +151,7 @@ const options = (overrides: Partial<Parameters<typeof clone>[0]> = {}) => {
   };
 };
 
-describe('field clone', () => {
+describe('field clone', { timeout: GIT_HEAVY_MS }, () => {
   it('refuses without git-lfs, before touching the network or the disk', async () => {
     const { opts } = options({ lfsAvailable: () => false });
     await expect(clone(opts)).rejects.toThrow(/git-lfs is required/);

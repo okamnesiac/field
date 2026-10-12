@@ -55,6 +55,14 @@ function commit(message: string): void {
   });
 }
 
+// The setup below builds the source and commits it, and several tests
+// then push it, git and git-lfs together, to a bare remote. Process
+// starts on the windows CI runner stall now and then, and those stalls
+// kept a push running past vitest's 5 s test default. Nothing here
+// measures how fast push is, so the hook and every test get room to
+// finish, as in clone.test.ts.
+const GIT_HEAVY_MS = 30_000;
+
 beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'field-push-'));
   source = join(tmp, 'source');
@@ -89,7 +97,7 @@ beforeEach(async () => {
 
   remote = await fakeRemote();
   remote.addProject('howlo/chemicals', { clone_url: pathToFileURL(bare).href, default_branch: branch, visibility: 'public' });
-});
+}, GIT_HEAVY_MS);
 
 afterEach(async () => {
   await remote.close();
@@ -112,7 +120,7 @@ const options = (overrides: Partial<Parameters<typeof push>[0]> = {}) => {
   };
 };
 
-describe('field push', () => {
+describe('field push', { timeout: GIT_HEAVY_MS }, () => {
   it('pushes, then offers every entry beneath main for HEAD, uploading only what the remote lacks', async () => {
     const { opts, out } = options();
     const result = await push(opts);
