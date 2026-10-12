@@ -131,17 +131,17 @@ BREW=""
 APT=""
 STEPS=""
 
-# need LABEL WHAT BREW APT STEP: one missing tool and what supplies it.
-# BREW is a Homebrew formula, APT the Debian and Ubuntu packages, and STEP
-# what to do on this platform when neither applies, a command or a line
-# starting with #.
+# need LABEL WHAT [BREW [APT [STEP]]]: one missing tool and what supplies
+# it. BREW is a Homebrew formula, APT the Debian and Ubuntu packages, and
+# STEP what to do on this platform when neither applies, a command or a
+# line starting with #.
 need() {
   NEEDS="$NEEDS$(printf '  %-18s %s' "$1" "$2")"$'\n'
-  if [ "$OS" = Darwin ] && [ -n "$3" ]; then
+  if [ "$OS" = Darwin ] && [ -n "${3:-}" ]; then
     BREW="$BREW $3"
-  elif [ "$OS" != Darwin ] && [ -n "$4" ]; then
+  elif [ "$OS" != Darwin ] && [ -n "${4:-}" ]; then
     APT="$APT $4"
-  elif [ -n "$5" ]; then
+  elif [ -n "${5:-}" ]; then
     STEPS="$STEPS$5"$'\n'
   fi
 }
@@ -185,7 +185,7 @@ check_cmake() {
     if [ -n "$packaged" ] && ! cmake_new_enough "$packaged"; then
       need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and apt-get would install $packaged" "" "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
     else
-      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer" cmake cmake ""
+      need cmake-missing "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer" cmake cmake
     fi
   elif ! cmake_new_enough "$version"; then
     need cmake-old "building field-audiod needs CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, and cmake is $version" cmake "" "# CMake $CMAKE_MAJOR.$CMAKE_MINOR or newer, from https://cmake.org/download/"
@@ -203,7 +203,7 @@ check_compiler() {
     return 0
   fi
   command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 ||
-    need compiler-missing "building field-audiod needs a C++20 compiler" "" build-essential "# a C++20 compiler, such as g++ 10 or newer"
+    need compiler-missing "building field-audiod needs a C++20 compiler" "" build-essential
   # build:native names no generator, so CMake takes CMAKE_GENERATOR's, or
   # else Unix Makefiles, which runs make. A compiler installs without it.
   [ -n "${CMAKE_GENERATOR:-}" ] || command -v make >/dev/null 2>&1 ||
@@ -213,7 +213,7 @@ check_compiler() {
 # CMake clones JUCE with git. On macOS, check_compiler covers it.
 check_git() {
   [ "$OS" = Darwin ] || command -v git >/dev/null 2>&1 ||
-    need git-missing "building field-audiod clones JUCE with git" "" git "# git"
+    need git-missing "building field-audiod clones JUCE with git" "" git
 }
 
 # JUCE's build helper links its GUI module whatever the daemon links, so a
@@ -227,20 +227,20 @@ check_headers() {
   local module absent=""
   [ "$OS" = Linux ] || return 0
   if ! command -v pkg-config >/dev/null 2>&1; then
-    need pkg-config-missing "building field-audiod finds JUCE's libraries with pkg-config" "" pkg-config "# pkg-config"
-    need headers-unchecked "without pkg-config, the installer cannot look for the ALSA, X11, and freetype development headers JUCE needs" "" "$HEADER_PACKAGES" "# the ALSA, X11, and freetype development headers"
+    need pkg-config-missing "building field-audiod finds JUCE's libraries with pkg-config" "" pkg-config
+    need headers-unchecked "without pkg-config, the installer cannot look for the ALSA, X11, and freetype development headers JUCE needs" "" "$HEADER_PACKAGES"
     return 0
   fi
   for module in $HEADER_MODULES; do
     pkg-config --exists "$module" 2>/dev/null || absent="$absent $module"
   done
   [ -z "$absent" ] ||
-    need headers-missing "JUCE needs the ALSA, X11, and freetype development headers, and pkg-config finds no$absent" "" "$HEADER_PACKAGES" "# the development headers for$absent"
+    need headers-missing "JUCE needs the ALSA, X11, and freetype development headers, and pkg-config finds no$absent" "" "$HEADER_PACKAGES"
 }
 
 # A release install downloads its source and unpacks it.
 check_fetch() {
-  command -v curl >/dev/null 2>&1 || need curl-missing "installing a release downloads it with curl" curl curl "# curl"
+  command -v curl >/dev/null 2>&1 || need curl-missing "installing a release downloads it with curl" curl curl
   command -v tar >/dev/null 2>&1 || need tar-missing "installing a release unpacks it with tar" "" tar "# tar"
 }
 
