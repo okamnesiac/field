@@ -1,0 +1,119 @@
+{
+ "version": 1,
+ "name": "Keyboard drawing",
+ "project": "keyboard-instrument",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 225,
+  "title": "Draw musical's keys as a keyboard in field keys, and light each one while it is held",
+  "head": "af0210c998074acc25c6b31a6647a0394b358ba5",
+  "headRef": "keys/keyboard-drawing",
+  "base": "83b91539ff3f0b75cea3e4908d8b733b938e0f34",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "<code>field keys</code> lets you play notes from your computer keyboard. This change shows the note keys above the status line and lights each key while you hold it, so you can see a chord without reading note names.",
+   "The drawing supports keymaps confined to the home row and the row above it. Other layouts remain playable without a drawing. <code>musical</code> also gains F#5 on <code>]</code>."
+  ],
+  "cards": [
+   {
+    "id": "validation",
+    "title": "Review checks",
+    "html": "<ul><li>209 focused tests pass; 16 native or daemon tests skip because the scratch checkout has no native build.</li><li>Type checking and project-plan validation pass.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "mapping",
+   "title": "The note layout gains its last black key",
+   "kicker": "The built-in mapping and printed guide agree",
+   "intro": [
+    "A keymap maps physical keyboard positions to MIDI notes. <code>musical</code> adds the next semitone after F5 to <code>BracketRight</code>, the physical <code>]</code> key. The schema and printed-guide tests pin that mapping."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "keymaps/musical.yaml",
+     "note": "Adds offset 18, F#5 at the default base.",
+     "checks": []
+    },
+    {
+     "path": "src/schema/keymap.test.ts",
+     "note": "Checks the nineteenth note and its physical key.",
+     "checks": []
+    },
+    {
+     "path": "src/keys/print.test.ts",
+     "note": "Updates the printed note diagram.",
+     "checks": []
+    }
+   ]
+  },
+  {
+   "id": "drawing",
+   "title": "Held positions become lit keycaps",
+   "kicker": "The renderer builds a five-line character grid",
+   "intro": [
+    "The session exposes the physical positions whose notes are held. The renderer lays out their keycaps and selects box characters from the lines that meet at each cell. Reverse video surrounds the three characters inside each held key, leaving its border unchanged.",
+    "The drawing declines a keymap with notes outside the supported rows or a drawing wider than the available space. US labels name physical positions, consistent with keymap bindings under other keyboard layouts."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/keys/position.ts",
+     "note": "Exports US labels for physical key positions.",
+     "checks": []
+    },
+    {
+     "path": "src/keys/session.ts",
+     "note": "Returns a copy of held note positions.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "Traced note press, release, panic, and focus loss: held positions follow the existing note lifecycle without exposing the mutable map."
+      }
+     ]
+    },
+    {
+     "path": "src/keys/keyboard.ts",
+     "note": "Builds and highlights the keycap drawing.",
+     "checks": []
+    },
+    {
+     "path": "src/keys/keyboard.test.ts",
+     "note": "Pins borders, held faces, custom mappings, and width limits.",
+     "checks": [
+      {
+       "kind": "verify",
+       "text": "All four renderer tests pass, including both held rows and the 46/47-column boundary."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "terminal",
+   "title": "The terminal redraw includes the keyboard",
+   "kicker": "The drawing sits above the knobs and status",
+   "intro": [
+    "The command inserts the drawing between the instrument line and the knob line. Its existing redraw function compares each line and rewrites from the first difference, so a key press refreshes the changed key face and the lines below it.",
+    "The user guide shows the new screen and describes the supported layouts and added note."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/keys.ts",
+     "note": "Feeds the current keymap, held positions, and usable width into the drawing.",
+     "checks": []
+    },
+    {
+     "path": "docs/keys.md",
+     "note": "Shows the keyboard and documents F#5 on the final black key.",
+     "checks": []
+    }
+   ]
+  }
+ ]
+}
