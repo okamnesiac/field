@@ -1,0 +1,181 @@
+{
+ "version": 1,
+ "name": "Field uninstall",
+ "project": "install",
+ "pr": {
+  "repo": "okamnesiac/field",
+  "number": 219,
+  "title": "Add field uninstall: the installer's uninstall target removes what the installer made (install.md §3.5)",
+  "head": "9b9357d8d39da39080c2f62f89e719b276d6332a",
+  "headRef": "install/uninstall",
+  "base": "6f28530dc4b06a162b38e66c14428754e070a25f",
+  "baseRef": "main"
+ },
+ "overview": {
+  "summary": [
+   "Field installs in one of two ways. A <b>release install</b> is what <code>curl -fsSL https://field.one/install.sh | bash</code> makes: the installer, <code>install.sh</code>, downloads a release's source into a directory of its own under <code>~/.local/share/field</code>, builds it there, and puts a two-line script, the <b>shim</b>, at <code>~/.local/bin/field</code> to run it. A <b>checkout install</b> is a clone that pnpm's global <code>field</code> links to. Before this change, removing a release install meant an <code>rm -rf</code> from the docs, and removing a checkout install meant knowing to run <code>pnpm remove -g field</code>.",
+   "This change adds an <code>uninstall</code> target to <code>install.sh</code>, and a <code>field uninstall</code> command that runs it the way <code>field upgrade</code> runs the installer. In a release install, the target removes only what the installer can show it made, by the same tests the installer already uses to prune old versions, and it keeps everything else with a <code>kept</code> row. In a checkout install, it removes pnpm's link only when that link points at this checkout, and it never deletes the checkout.",
+   "The new head fixes both earlier findings. A release shim is removed only when it points at the data directory being removed; another installation’s shim stays with a row naming its directory. Model-weight output now names ACE-Step’s own directory and Chatterbox’s Hugging Face cache separately, for the workers that were set up.",
+   "The field.one uninstaller has shipped in okamnesiac/audiofield#43. Until a release carries this target, it runs 0.3.0’s installer, which rejects <code>uninstall</code> with exit status 64 and changes nothing."
+  ],
+  "cards": [
+   {
+    "id": "terms",
+    "title": "Terms on this page",
+    "html": "<ul class=\"tight\"><li><b>Data directory</b> (<code>DATA_DIR</code>): where release installs live. It is <code>FIELD_DATA_DIR</code> when set, otherwise <code>$XDG_DATA_HOME/field</code> or <code>~/.local/share/field</code>.</li><li><b>Bin directory</b> (<code>BIN_DIR</code>): where the shim goes. It is <code>FIELD_BIN_DIR</code>, then what <code>release.conf</code> recorded, then <code>~/.local/bin</code>.</li><li><b>Version</b>: a directory named <code>X.Y.Z</code> holding one built release. The installer counts it as its own only when it is a real directory, not a symlink, whose <code>install.sh</code> carries <code>SHIM_MARKER</code>, the comment line every shim starts with.</li><li><b>Download</b>: <code>.download-X.Y.Z</code>, the staging directory a release unpacks in, counted only when it holds <code>unpacked/</code>.</li><li><b><code>current</code></b>: the symlink naming the version the shim runs.</li><li><b><code>release.conf</code></b>: the repository, ref, and bin directory the install follows.</li><li><b>Fetch cache</b>: <code>cache/fetchcontent</code>, JUCE's download, which every version's daemon build shares.</li><li><b><code>prune</code></b>: the installer step that removes old versions after an upgrade, using the same two tests.</li></ul>"
+   },
+   {
+    "id": "what-goes",
+    "title": "What a release uninstall removes",
+    "html": "<div class=\"tblwrap\"><table class=\"tbl\"><thead><tr><th>Thing</th><th>Removed when</th><th>Otherwise</th></tr></thead><tbody><tr><td>Shim, <code>$BIN_DIR/field</code></td><td>It carries <code>SHIM_MARKER</code> and runs this data directory</td><td class=\"r\"><code>kept</code> row</td></tr><tr><td><code>X.Y.Z</code> directories</td><td>They pass the version test</td><td class=\"r\">Left silently</td></tr><tr><td><code>.download-*</code></td><td>They pass the download test</td><td class=\"r\">Left silently</td></tr><tr><td><code>current</code></td><td>It is a symlink</td><td class=\"r\">Left</td></tr><tr><td><code>release.conf</code>, fetch cache</td><td>Always</td><td class=\"r\">&mdash;</td></tr><tr><td>The data directory</td><td>Nothing else is left in it</td><td class=\"r\"><code>kept</code> row</td></tr><tr><td>Model weights, uv's cache, <code>~/.field</code></td><td>Never</td><td class=\"r\">Each worker’s weights directory named</td></tr></tbody></table></div>"
+   },
+   {
+    "id": "review",
+    "title": "Review so far",
+    "html": "<ul class=\"tight\"><li>The review of <code>ef4ef2e</code> requested changes on two P2 findings. Both are fixed and their resolved threads are verified at <code>9b9357d</code>. The full gpt-6 review at this head is clean, with no open finding thread.</li><li>The new installer cases cover another installation’s shim, an unreadable exec line, a data-directory alias with a quoted path, per-worker weight rows, and cache overrides.</li><li><code>pnpm typecheck</code>, all 110 focused tests, <code>project check</code>, and <code>bash -n install.sh</code> pass.</li><li>The install plan stays <code>in-progress</code>. Its earlier domain question predates this change.</li></ul>"
+   }
+  ]
+ },
+ "groups": [
+  {
+   "id": "target",
+   "title": "The installer's uninstall target",
+   "kicker": "install.sh learns to remove what it installed, and nothing else",
+   "intro": [
+    "<code>install.sh</code> already had five targets: <code>all</code>, <code>cli</code>, <code>audiod</code>, <code>workers</code>, and <code>status</code>. It runs each one in one of two modes. When the script sits in a git work tree beside <code>src/cli.ts</code>, it is a <b>checkout</b> installer. Otherwise, piped from curl or downloaded by <code>field upgrade</code>, it is a <b>release</b> installer. This group adds <code>uninstall</code> to both modes.",
+    "In release mode, <code>uninstall_release</code> has to work in a data directory that may hold other things, because <code>FIELD_DATA_DIR</code> can point anywhere. So it removes a directory only when the installer can show it made it. A version is a real <code>X.Y.Z</code> directory whose <code>install.sh</code> carries <code>SHIM_MARKER</code>. A download is <code>.download-X.Y.Z</code> with <code>unpacked/</code> inside. Both tests are the ones <code>prune</code> uses after an upgrade. The shim is removed only when its quoted exec path identifies this data directory; directory aliases compare by file identity. Another install’s shim is kept with its data directory named. The owned shim goes first, so <code>field</code> never runs a version that is half removed. The target then removes <code>current</code>, <code>release.conf</code>, and JUCE's download, and removes the data directory only if it is empty.",
+    "In checkout mode, <code>uninstall_checkout</code> runs <code>pnpm remove -g field</code> only when pnpm's global <code>field</code> links this checkout, and it always leaves the checkout itself."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "install.sh",
+     "note": "Adds release and checkout uninstall targets, checks the data directory a release shim runs, and reports each worker’s own weights directory.",
+     "checks": [
+      {
+       "kind": "verify",
+       "line": 1010,
+       "text": "<code>shim_runs_here</code> reads the quoted path without evaluating it and checks text equality or directory identity. The focused tests cover a different install, an unreadable exec line, and a quoted path through a directory alias."
+      },
+      {
+       "kind": "verify",
+       "line": 1019,
+       "text": "Version and download removals still use the installer’s existing ownership tests; foreign files survive in the focused tests."
+      },
+      {
+       "kind": "verify",
+       "line": 1029,
+       "text": "ACE-Step’s row uses <code>FIELD_ACE_MODELS</code> or <code>~/.field/models/acestep</code>, matching <code>models_root</code>. The tests confirm its weights remain and only configured workers receive rows."
+      },
+      {
+       "kind": "verify",
+       "line": 1033,
+       "text": "Chatterbox’s row respects <code>HF_HUB_CACHE</code> ahead of <code>HF_HOME</code>. The override test confirms both workers’ output names their configured directories."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "command",
+   "title": "field uninstall, the command",
+   "kicker": "A doorway to the installer's target, found the way field upgrade finds it",
+   "intro": [
+    "<code>field upgrade</code> already runs the right installer for the install it runs from. A checkout runs its own <code>install.sh</code>. A release install downloads the newest installer for the repository and ref in <code>release.conf</code> into a temporary directory, and tells it where the data directory is with <code>FIELD_DATA_DIR</code>. With <code>FIELD_OFFLINE</code> set, a release install runs the installed version's own copy instead.",
+    "<code>uninstall()</code> refuses on Windows with a message naming <code>pnpm remove -g field</code>, then calls <code>upgrade('uninstall')</code>, so the command shares all of that. Its exit status is the installer's."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/commands/upgrade.ts",
+     "note": "Adds <code>uninstall()</code>: a Windows refusal, then <code>upgrade('uninstall', deps)</code>.",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 144,
+       "text": "The earlier review exercised uninstall through a release shim both offline and with an installer downloaded through a local file URL. This command delegates to the same installer path that upgrade already uses."
+      },
+      {
+       "kind": "context",
+       "line": 144,
+       "text": "Errors raised inside <code>upgrade()</code> still say <code>cannot upgrade: …</code> when you ran <code>field uninstall</code>, such as a failed download. The review lists this as a suggestion."
+      }
+     ]
+    },
+    {
+     "path": "src/cli.ts",
+     "note": "Registers <code>field uninstall</code> and sets <code>process.exitCode</code> to what the installer returned."
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "title": "Tests",
+   "kicker": "The real installer under bash against stand-ins, and the command's handoff",
+   "intro": [
+    "<code>src/install.test.ts</code> runs the real <code>install.sh</code> with bash, against a temporary <code>HOME</code> and a <code>PATH</code> that holds only stand-ins for pnpm, cmake, curl, and the field CLI, plus links to ordinary tools. Nothing installed on the machine can answer in their place. This change adds <code>rmdir</code> to those tools, a <code>remove -g</code> branch to the pnpm stand-in, and an <code>install.sh uninstall</code> block that also covers the two ownership and cache-location fixes.",
+    "<code>src/commands/upgrade.test.ts</code> checks that <code>field uninstall</code> hands a stand-in installer the <code>uninstall</code> target and returns its exit status, and that it refuses on Windows."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "src/install.test.ts"
+    },
+    {
+     "path": "src/commands/upgrade.test.ts"
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "title": "The plan: §3.5 and its decision",
+   "kicker": "The install plan records the uninstall design and why a separate script lost",
+   "intro": [
+    "The install plan gains §3.5, \"Uninstall\", with what the target removes and keeps in each mode, and how <code>field.one/uninstall.sh</code> will run it. §4 records the decision that uninstall is a target of the one installer. A separate <code>uninstall.sh</code> in this repository, and a TypeScript-only <code>field uninstall</code>, lost because each would need its own copy of the data directory's resolution and of the ownership tests. §5 adds criteria, §6 marks chunks 3 and 4 shipped and adds this one as chunk 5, and §10.3 records the first real install from GitHub. The updated §3.5 names both workers’ weight directories and requires a shim to run this data directory. It also records that the field.one uninstaller shipped before the release.",
+    "The plan stays <code>in-progress</code>, and this change opens no question. §7.4, on which domain serves the installer, is still open from before this change, although chunk 4 shipped <code>field.one</code>."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/projects/install/readme.md",
+     "checks": []
+    }
+   ]
+  },
+  {
+   "id": "docs",
+   "title": "User docs",
+   "kicker": "Uninstall instructions, and field.one as the install URL",
+   "intro": [
+    "<code>docs/install.md</code> replaces the manual <code>rm -rf</code> and <code>pnpm remove -g field</code> with <code>field uninstall</code>, and adds the target to both target tables. The README, <code>docs/install.md</code>, and <code>docs/cli.md</code> lead with <code>curl -fsSL https://field.one/install.sh | bash</code>. <code>docs/release.md</code>'s example bumps <code>patch</code>, since releases are patch bumps from here on."
+   ],
+   "checks": [],
+   "files": [
+    {
+     "path": "docs/install.md",
+     "checks": [
+      {
+       "kind": "context",
+       "line": 249,
+       "text": "Curl uninstall needs the same <code>FIELD_DATA_DIR</code> used for installation. Without it, the installer keeps a shim for a different data directory and tells you which one."
+      },
+      {
+       "kind": "context",
+       "line": 257,
+       "text": "The output preserves both model caches. ACE-Step’s directory is shared by Field installs; Chatterbox uses a Hugging Face cache shared by other tools."
+      }
+     ]
+    },
+    {
+     "path": "README.md"
+    },
+    {
+     "path": "docs/cli.md"
+    },
+    {
+     "path": "docs/release.md"
+    }
+   ]
+  }
+ ]
+}

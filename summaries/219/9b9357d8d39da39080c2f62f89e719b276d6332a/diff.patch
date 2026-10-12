@@ -1,0 +1,850 @@
+diff --git a/README.md b/README.md
+index 69ac9cf..5eac72b 100644
+--- a/README.md
++++ b/README.md
+@@ -92,7 +92,7 @@ runs `sclang` from your PATH, the macOS app bundle, or `FIELD_SCLANG`.
+ Install the newest release:
+ 
+ ```sh
+-curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++curl -fsSL https://field.one/install.sh | bash
+ ```
+ 
+ The installer downloads the release's source, builds it in
+@@ -105,6 +105,7 @@ from anywhere:
+ ```sh
+ field upgrade            # installs the newest release
+ field upgrade status     # what is installed, and what is out of date
++field uninstall          # removes it; curl -fsSL https://field.one/uninstall.sh | bash does too
+ ```
+ 
+ To work on Field itself, install a checkout instead. Run `pnpm setup`
+diff --git a/docs/cli.md b/docs/cli.md
+index 37d4804..01381fd 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -23,7 +23,7 @@ never npm or yarn — and CMake with a C++ compiler. Install the newest
+ release:
+ 
+ ```sh
+-curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++curl -fsSL https://field.one/install.sh | bash
+ ```
+ 
+ The installer builds the release from source in
+@@ -697,6 +697,7 @@ amended. Porting the rest is tracked there and in
+ | `field plugins scan\|list\|pin` | the hosted plugin inventory |
+ | `field setup [worker]` | set up generation worker environments; `--check` reports, `--existing` re-syncs |
+ | `field upgrade [target]` | run the installer from anywhere: a checkout's own `install.sh`, or the newest release's, with `all`, `cli`, `audiod`, `workers`, or `status` |
++| `field uninstall` | remove field: a release install's versions and shim, or a checkout's pnpm link, leaving the checkout itself |
+ | `field generate <song>/<name>` | run a deliberate generator |
+ | `field choose <song>/<name> --variant <n>` | repoint which generated take plays |
+ | `field choose <song>/<name> --take <name>` | repoint which recorded take plays |
+diff --git a/docs/install.md b/docs/install.md
+index 55daaeb..8b4b180 100644
+--- a/docs/install.md
++++ b/docs/install.md
+@@ -11,9 +11,14 @@ is out of date.
+ To install the newest release, pipe the installer to bash:
+ 
+ ```sh
+-curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
++curl -fsSL https://field.one/install.sh | bash
+ ```
+ 
++field.one serves `install.sh` from the `v0` tag, so this is the same
++installer as
++`https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh`, which
++`field upgrade` downloads.
++
+ To install a checkout, clone it and run the installer in it:
+ 
+ ```sh
+@@ -177,10 +182,11 @@ the release `v0` names again.
+ Each version keeps its worker environments in its own
+ `python/<worker>/.venv`, so an upgrade sets up again, in the new version,
+ each worker you set up in the old one, before it switches. The model
+-weights live in the Hugging Face cache and the packages in uv's cache,
+-so nothing large downloads again. A worker whose uv is gone is skipped
+-with a `worker-skipped` row that names the fix, because it could not run
+-in the old version either.
++weights live outside every version, ACE-Step's in
++`~/.field/models/acestep` and Chatterbox's in the Hugging Face cache,
++and the packages live in uv's cache, so nothing large downloads again.
++A worker whose uv is gone is skipped with a `worker-skipped` row that
++names the fix, because it could not run in the old version either.
+ 
+ ### What each target does in a release install
+ 
+@@ -191,6 +197,7 @@ in the old version either.
+ | `audiod` | Rebuilds `field-audiod` and FieldOut of the installed version where it is. |
+ | `workers` | Runs the installed version's `field setup --existing`. |
+ | `status` | Reports what is installed, changing nothing. |
++| `uninstall` | Removes the install, as [Remove a release install](#remove-a-release-install) describes. `field uninstall` runs it. |
+ 
+ `cli`, `audiod`, and `workers` repair the installed version rather than
+ move it, as they rebuild a checkout without pulling, so a command the
+@@ -223,9 +230,41 @@ repository and check out its tag.
+ ### Remove a release install
+ 
+ ```sh
+-rm -rf ~/.local/share/field ~/.local/bin/field
++field uninstall
++```
++
++If `field` itself no longer runs, use the uninstaller field.one serves,
++which runs the newest installer's `uninstall` target:
++
++```sh
++curl -fsSL https://field.one/uninstall.sh | bash
+ ```
+ 
++Either way it removes the shim, every version and download the installer
++made, `current`, `release.conf`, and JUCE's download, then the data
++directory if nothing else is left in it. It leaves anything it did not
++put there, in the data directory or in the bin directory, and says so.
++
++The uninstall removes the shim only when it runs the data directory
++being uninstalled. If you installed with `FIELD_DATA_DIR`, set it again
++when you uninstall with curl. `field uninstall` finds the directory
++itself. Without `FIELD_DATA_DIR`, the curl uninstall looks in the
++default data directory, and it keeps a shim that runs another one, with
++a `kept` row that names that directory.
++
++The model workers' weights stay. For each worker you set up, the
++uninstall prints a `models-kept` row that names the directory its
++weights are in:
++
++- **ACE-Step**, for `field-aced`: about 10 GB in
++  `~/.field/models/acestep`, or in `FIELD_ACE_MODELS` when you set it.
++  Every Field install on the machine uses that directory, checkouts
++  included, so delete it only once none of them needs the weights.
++- **Chatterbox**, for `field-voiced`: about 2 GB in the Hugging Face
++  cache, `~/.cache/huggingface` unless `HF_HOME` or `HF_HUB_CACHE` moves
++  it. Other tools share that cache, so remove only
++  `hub/models--ResembleAI--chatterbox` from it.
++
+ ## Install from a checkout
+ 
+ `./install.sh [target]` and `field upgrade [target]` take one target.
+@@ -238,9 +277,10 @@ With none, they run `all`.
+ | `workers` | `field setup --existing`, which re-syncs each worker environment you set up with `field setup` and sets up no new one. |
+ | `all` | `cli`, then `audiod`, then `workers`. |
+ | `status` | Reports what is installed, changing nothing. |
++| `uninstall` | `pnpm remove -g field` when pnpm's global `field` links this checkout, as [Remove a checkout install](#remove-a-checkout-install) describes. `field uninstall` runs it. |
+ 
+-Each target except `status` ends by fetching the checkout's upstream
+-and warning if the checkout is behind it.
++Each target except `status` and `uninstall` ends by fetching the
++checkout's upstream and warning if the checkout is behind it.
+ 
+ The installer installs the checkout as it is. It never pulls, and it
+ never switches branches, because the checkout may hold work in progress.
+@@ -283,10 +323,14 @@ syncing the field-aced environment (uv)…
+ 
+ ### Remove a checkout install
+ 
+-Unlink pnpm's global `field`. The checkout stays where it is.
++`field uninstall`, or `./install.sh uninstall` in the checkout, runs
++`pnpm remove -g field` when pnpm's global `field` links this checkout,
++and leaves a link to another checkout alone. The checkout stays where it
++is, with its builds and worker environments; delete it yourself if you
++no longer want it.
+ 
+ ```sh
+-pnpm remove -g field
++field uninstall
+ ```
+ 
+ ## Read the status
+diff --git a/docs/projects/install/readme.md b/docs/projects/install/readme.md
+index 9dbdf40..a5ee3ee 100644
+--- a/docs/projects/install/readme.md
++++ b/docs/projects/install/readme.md
+@@ -327,6 +327,53 @@ than redirects, so the command is one request to `field.one`. It needs
+ the repository to be public: `raw.githubusercontent.com` answers 404 for
+ a private one. The website and the README then lead with this command.
+ 
++### 3.5 Uninstall
++
++```sh
++field uninstall
++curl -fsSL https://field.one/uninstall.sh | bash
++```
++
++`install.sh` has an `uninstall` target, and `field uninstall` runs it the
++way `field upgrade` runs the installer: a checkout's own `install.sh`,
++or the newest release's. Nothing else decides what an uninstall
++removes.
++
++- **A release install.** The target removes the shim, but only when it
++  carries the installer's marker and runs this data directory's
++  `current`; every version and download that the installer can show it
++  made, by the same tests `prune` uses; `current`; `release.conf`; and
++  JUCE's download in `cache/fetchcontent`. Then it removes the data
++  directory if nothing else is left in it. Anything else, in the data
++  directory or in the bin directory, stays, with a `kept` row. The shim
++  goes first, so `field` never runs a version half removed.
++- **A shim that runs another data directory stays.** It is the one
++  record of where that install lives, so its `kept` row names the
++  directory and says to uninstall again with `FIELD_DATA_DIR` set to
++  it. The shim's exec line holds the path it was installed through, and
++  `field uninstall` names the data directory by its real path, so the
++  two compare as files when their text differs.
++- **The model weights stay.** field-aced keeps ACE-Step's in
++  `FIELD_ACE_MODELS`, or `~/.field/models/acestep`, which every Field
++  install on the machine uses (`models_root` in `python/aced`).
++  field-voiced's Chatterbox keeps its weights in the Hugging Face cache
++  (`HF_HUB_CACHE`, `HF_HOME`, or `~/.cache/huggingface`), which other
++  tools share. For each worker that was set up, the target names the
++  directory its weights are in rather than removing it.
++- **A checkout install.** The target runs `pnpm remove -g field` when
++  pnpm's global `field` links this checkout, leaves a link to another
++  checkout alone, and never deletes the checkout, which someone cloned
++  and which may hold work in progress.
++- **`field.one/uninstall.sh`.** A static file in `apps/field-one/public`
++  that runs `curl -fsSL https://field.one/install.sh | bash -s --
++  uninstall`. It works when `field` itself no longer does, and keeps the
++  logic in the one installer, versioned and tested with it. It shipped
++  in okamnesiac/audiofield#43 ahead of the release that carries the
++  target, so until that release it runs 0.3.0's installer, which
++  rejects `uninstall` with a usage error and exit status 64, changing
++  nothing. The page does not advertise it; the README and
++  `docs/install.md` do.
++
+ ## 4 Why this design (DECIDED, 2026-10-11)
+ 
+ - **A bash installer, as Projector has.** A Node script cannot run
+@@ -419,6 +466,17 @@ a private one. The website and the README then lead with this command.
+   for a version whose `field upgrade` reads `FIELD_REF`, and 0.2.0's
+   runs its own `install.sh` as a checkout's, so the installer refuses
+   any version whose `install.sh` writes no shim.
++- **Uninstall is a target of the one installer** (§3.5, decided
++  2026-10-11). A separate `uninstall.sh` in this repository lost because
++  it would need its own copy of the data directory's resolution and of
++  the tests for what the installer made, and the two would drift. A
++  `field uninstall` that removes files from TypeScript lost for the same
++  reason, and because it cannot help when `field` itself no longer runs.
++  `field.one/uninstall.sh` is a static file that runs the installer's
++  target, so the curl path needs nothing of its own. Removing the model
++  weights lost: other tools share the Hugging Face cache, and every
++  Field install on the machine, checkouts included, shares ACE-Step's
++  directory.
+ 
+ ## 5 Acceptance criteria
+ 
+@@ -467,13 +525,25 @@ Chunk 4:
+ - `curl -fsSL https://field.one/install.sh | bash` does what chunk 3's
+   first criterion says, and field.one leads with that command.
+ 
++Uninstall:
++
++- `field uninstall` in a release install removes the shim, every
++  version, `current`, `release.conf`, and the JUCE cache, then the data
++  directory, and leaves anything the installer did not make.
++- In a checkout install it removes pnpm's link to that checkout, and
++  never the checkout.
++- `curl -fsSL https://field.one/uninstall.sh | bash` does the same once
++  a release carries the target.
++
+ ## 6 Chunks
+ 
+ 1. **The checkout installer and `field upgrade`.** §2. Shipped in #185.
+ 2. **Releases.** §3.1. Shipped in #205.
+-3. **The release installer.** §3.2. This change.
+-4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Needs
+-   chunk 3 released and a public repository.
++3. **The release installer.** §3.2. Shipped in #214.
++4. **The one-line install.** §3.3, in `okamnesiac/audiofield`. Shipped
++   in okamnesiac/audiofield#40.
++5. **Uninstall.** §3.5. This change. `field.one/uninstall.sh` shipped
++   early, in okamnesiac/audiofield#43, and works once this is released.
+ 
+ ## 7 Open questions
+ 
+@@ -562,15 +632,16 @@ version.
+ before it switches to it.** The old version's `field setup --check`
+ says which workers are set up; the new version's `field setup <name>`
+ sets up each one. Nothing large downloads again: the model weights live
+-in the Hugging Face cache and the packages in uv's cache. A worker whose
+-uv is gone is skipped with a `worker-skipped` row, because it could not
+-run in the old version either, and any other failure stops the upgrade
+-with the old version still current. The alternative, pointing
+-`UV_PROJECT_ENVIRONMENT` at a directory outside the version, lost
+-because `workerScriptInstalled` in `src/workers/client.ts` looks for
+-each worker's console script in `python/<worker>/.venv`, and one
+-environment shared across versions would hold the old version's
+-packages while the new one ran.
++outside every version, ACE-Step's in `~/.field/models/acestep` and
++Chatterbox's in the Hugging Face cache, and the packages live in uv's
++cache. A worker whose uv is gone is skipped with a `worker-skipped` row,
++because it could not run in the old version either, and any other
++failure stops the upgrade with the old version still current. The
++alternative, pointing `UV_PROJECT_ENVIRONMENT` at a directory outside
++the version, lost because `workerScriptInstalled` in
++`src/workers/client.ts` looks for each worker's console script in
++`python/<worker>/.venv`, and one environment shared across versions
++would hold the old version's packages while the new one ran.
+ 
+ ### 7.6 Windows (DECIDED, 2026-10-11)
+ 
+@@ -822,6 +893,10 @@ building it found.
+ 
+ ### 10.3 What is still owed
+ 
+-- Release this change, then install it for real with `curl` from
+-  `raw.githubusercontent.com` on a machine that has no checkout.
+-- Chunk 4.
++- Nothing. 0.3.0 released this change (#216), and the first real
++  install, `curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash`
++  on a Mac into throwaway data and bin directories, took 255 s,
++  compiling JUCE from scratch. `field --version` printed `field 0.3.0`
++  and `field upgrade status` reported `release-latest 0.3.0 is
++  installed`. Chunk 4 shipped in okamnesiac/audiofield#40, and
++  `field.one/install.sh` serves the same installer.
+diff --git a/docs/release.md b/docs/release.md
+index be68a4b..93858df 100644
+--- a/docs/release.md
++++ b/docs/release.md
+@@ -50,8 +50,8 @@ releases nothing either.
+ Node 24 runs it directly, with no `pnpm install`:
+ 
+ ```sh
+-node scripts/release.ts bump minor                 # raise the version, write it, print it
+-node scripts/release.ts set 0.3.0                  # write an exact version instead
++node scripts/release.ts bump patch                 # raise the version, write it, print it
++node scripts/release.ts set 0.4.0                  # write an exact version instead
+ node scripts/release.ts released                   # exit 0 if origin has main's version tagged, 3 if not
+ node scripts/release.ts released --since abc1234   # also exit 0 if that version is not above abc1234's
+ node scripts/release.ts tag                        # tag main's version, move v0, create the GitHub release
+diff --git a/install.sh b/install.sh
+index d686297..d65dca4 100755
+--- a/install.sh
++++ b/install.sh
+@@ -3,9 +3,10 @@
+ # Install Field: the `field` command, the audio daemon field-audiod, and
+ # the model-worker environments you have already set up.
+ #
+-#   curl -fsSL https://raw.githubusercontent.com/okamnesiac/field/v0/install.sh | bash
+-#   ./install.sh [all|cli|audiod|workers|status]      from a checkout
+-#   field upgrade [all|cli|audiod|workers|status]     the same, from anywhere
++#   curl -fsSL https://field.one/install.sh | bash
++#   ./install.sh [all|cli|audiod|workers|status|uninstall]   from a checkout
++#   field upgrade [all|cli|audiod|workers|status]            the same, from anywhere
++#   field uninstall                                          ./install.sh uninstall, from anywhere
+ #
+ # Run from a checkout, it installs that checkout as it is. It never pulls;
+ # `status` says how far the checkout is behind its upstream instead.
+@@ -619,6 +620,29 @@ version_older() {
+ 
+ is_release_shim() { [ -f "$1" ] && grep -qF "$SHIM_MARKER" "$1" 2>/dev/null; }
+ 
++# The data directory a release shim runs: the path write_shim quoted on its
++# exec line, less /current/dist/cli.js, or nothing when the line is not in
++# that shape.
++shim_data_dir() {
++  local path quote="'\\''" tick="'" tail="/current/dist/cli.js' \"\$@\""
++  path="$(sed -n 's/^exec node //p' "$1")"
++  path="${path%%$'\n'*}"
++  case "$path" in "$tick"*"$tail") ;; *) return 0 ;; esac
++  path="${path#"$tick"}"
++  path="${path%"$tail"}"
++  printf '%s' "${path//"$quote"/$tick}"
++}
++
++# True when the shim runs this data directory's current. `field uninstall`
++# names the data directory by its real path, and the shim by the path it
++# was installed through, so the two compare as files when they differ.
++shim_runs_here() {
++  local dir
++  is_release_shim "$1" || return 1
++  dir="$(shim_data_dir "$1")"
++  [ -n "$dir" ] && { [ "$dir" = "$DATA_DIR" ] || [ "$dir" -ef "$DATA_DIR" ]; }
++}
++
+ require_fetch_tools() {
+   command -v curl >/dev/null 2>&1 || die "installing a release needs curl, which is not on PATH" 69
+   command -v tar >/dev/null 2>&1 || die "installing a release needs tar, which is not on PATH" 69
+@@ -706,10 +730,10 @@ workers_set_up_in() {
+ # A worker's environment lives in python/<worker>/.venv inside the version,
+ # so each worker set up in the version being replaced is set up again in
+ # the new one, with the new one's CLI, before the switch (install.md §7.5).
+-# Its weights are in the Hugging Face cache and its packages in uv's, so
+-# nothing large downloads again. One whose uv is gone could not run in the
+-# old version either, so it is skipped with a row rather than failing the
+-# upgrade.
++# Its weights are outside the version, where ace_models and
++# huggingface_cache say, and its packages in uv's cache, so nothing large
++# downloads again. One whose uv is gone could not run in the old version
++# either, so it is skipped with a row rather than failing the upgrade.
+ setup_workers_again() {
+   local old="$1" list label name
+   list="$(workers_set_up_in "$DATA_DIR/$old")"
+@@ -929,6 +953,97 @@ install_release() {
+   report_shim
+ }
+ 
++# Where the model workers' weights live, which an uninstall names rather
++# than removes. field-aced downloads ACE-Step's into a directory of Field's
++# own that every install on the machine uses (models_root in python/aced).
++# field-voiced's Chatterbox downloads into the Hugging Face cache, which
++# other tools share.
++ace_models() { printf '%s' "${FIELD_ACE_MODELS:-$HOME/.field/models/acestep}"; }
++
++huggingface_cache() {
++  if [ -n "${HF_HUB_CACHE:-}" ]; then
++    printf '%s' "$HF_HUB_CACHE"
++  elif [ -n "${HF_HOME:-}" ]; then
++    printf '%s' "$HF_HOME"
++  else
++    printf '%s/huggingface' "${XDG_CACHE_HOME:-$HOME/.cache}"
++  fi
++}
++
++# The row for a `field` in the bin directory that the uninstall leaves. A
++# release shim that runs another data directory is the one record of where
++# that install lives, so the row names it.
++keep_shim() {
++  local other
++  if is_release_shim "$1"; then
++    other="$(shim_data_dir "$1")"
++    if [ -n "$other" ]; then
++      row kept "$(tilde "$1"), which runs the install in $(tilde "$other") — to remove that install, uninstall again with FIELD_DATA_DIR=$(tilde "$other")"
++    else
++      row kept "$(tilde "$1"), which does not run $(tilde "$DATA_DIR/current")"
++    fi
++  elif [ -e "$1" ] || [ -L "$1" ]; then
++    row kept "$(tilde "$1"), which is not Field's release shim"
++  fi
++}
++
++# Removes a release install (install.md §3.5): the shim, when it is the
++# installer's and runs this data directory, every version and download the
++# installer can show it made, `current`, release.conf, and JUCE's download,
++# then the data directory if nothing else is left in it. FIELD_DATA_DIR can
++# name a directory that holds other things, so those stay, as does any
++# other `field` in the bin directory. The shim goes first, so `field` never
++# runs a version half removed.
++uninstall_release() {
++  local shim="$BIN_DIR/field" entry name aced="" voiced="" models
++  if [ -z "$(current_version)" ] && [ -z "$(kept_versions "")" ] && ! shim_runs_here "$shim"; then
++    row not-installed "no release of Field is installed in $(tilde "$DATA_DIR")"
++    ! is_release_shim "$shim" || keep_shim "$shim"
++    return 0
++  fi
++  if shim_runs_here "$shim"; then
++    rm -f "$shim"
++    row removed "$(tilde "$shim")"
++  else
++    keep_shim "$shim"
++  fi
++  for entry in "$DATA_DIR"/* "$DATA_DIR"/.download-*; do
++    name="${entry##*/}"
++    if is_field_version "$entry"; then
++      [ ! -d "$entry/python/aced/.venv" ] || aced=1
++      [ ! -d "$entry/python/voiced/.venv" ] || voiced=1
++      rm -rf "$entry"
++      row removed "$name"
++    elif is_field_download "$entry"; then
++      rm -rf "$entry"
++    fi
++  done
++  if [ -L "$DATA_DIR/current" ]; then rm -f "$DATA_DIR/current"; fi
++  rm -f "$RECORD"
++  rm -rf "$FETCH_CACHE"
++  rmdir "$DATA_DIR/cache" 2>/dev/null || true
++  if rmdir "$DATA_DIR" 2>/dev/null; then
++    row removed "$(tilde "$DATA_DIR")"
++  elif [ -d "$DATA_DIR" ]; then
++    row kept "$(tilde "$DATA_DIR"), which holds things Field did not put there"
++  fi
++  models="$(ace_models)"
++  if [ -n "$aced" ] && [ -d "$models" ]; then
++    row models-kept "ACE-Step's weights stay in $(tilde "$models"), which every Field install on this machine uses — delete it once none of them needs the weights"
++  fi
++  models="$(huggingface_cache)"
++  if [ -n "$voiced" ] && [ -d "$models" ]; then
++    row models-kept "Chatterbox's weights stay in the Hugging Face cache, $(tilde "$models"), which other tools share — remove the models you no longer want from there"
++  fi
++  # release_init read release.conf before it went, so a fork's install
++  # names the fork's installer.
++  if [ "$RELEASE_REPO/$RELEASE_REF" = "$DEFAULT_REPO/$DEFAULT_REF" ]; then
++    row uninstalled "to install again: curl -fsSL https://field.one/install.sh | bash"
++  else
++    row uninstalled "to install again: curl -fsSL $RAW_URL/$RELEASE_REPO/$RELEASE_REF/install.sh | bash"
++  fi
++}
++
+ # A Windows installer belongs to windows-portability.md (install.md §7.6),
+ # so a Windows shell such as Git Bash stops here, as `field upgrade` stops
+ # on Windows, rather than trying a release install nobody has run there.
+@@ -965,9 +1080,25 @@ release_main() {
+       ;;
+     workers) require_node; require_installed; install_workers; report_release "$(current_version)" ;;
+     status) show_release_status ;;
++    uninstall) uninstall_release ;;
+   esac
+ }
+ 
++# A checkout install is pnpm's global link to the checkout, so uninstalling
++# it removes that link. The checkout stays, with its builds and worker
++# environments: it is a clone someone made, and may hold work in progress.
++uninstall_checkout() {
++  if [ -n "$LINKED" ] && [ "$LINKED" = "$CHECKOUT" ]; then
++    pnpm remove -g field
++    row unlinked "pnpm's global field no longer links $(tilde "$CHECKOUT")"
++  elif [ -n "$LINKED" ]; then
++    row kept "pnpm's global field links $(tilde "$LINKED"), not this checkout — run the install.sh there with uninstall to remove it"
++  else
++    row not-installed "pnpm links no field"
++  fi
++  row kept "$(tilde "$CHECKOUT"), the checkout itself, with its builds and worker environments — delete it yourself if you no longer want it"
++}
++
+ checkout_main() {
+   refresh_linked
+   # Each target checks every prerequisite it needs before its first command,
+@@ -987,6 +1118,7 @@ checkout_main() {
+     audiod) require_pnpm; require_cmake; install_audiod; report_checkout ;;
+     workers) require_node; install_workers; report_checkout ;;
+     status) show_status ;;
++    uninstall) uninstall_checkout ;;
+   esac
+ }
+ 
+@@ -995,11 +1127,11 @@ checkout_main() {
+ # short runs nothing, and no command can read the rest of the script as
+ # its input.
+ main() {
+-  [ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status]" 64
++  [ $# -le 1 ] || die "usage: install.sh [all|cli|audiod|workers|status|uninstall]" 64
+   TARGET="${1:-all}"
+   case "$TARGET" in
+-    all | cli | audiod | workers | status) ;;
+-    *) die "usage: install.sh [all|cli|audiod|workers|status]" 64 ;;
++    all | cli | audiod | workers | status | uninstall) ;;
++    *) die "usage: install.sh [all|cli|audiod|workers|status|uninstall]" 64 ;;
+   esac
+   if [ -n "$CHECKOUT" ]; then checkout_main; else release_main; fi
+ }
+diff --git a/src/cli.ts b/src/cli.ts
+index f1a8bda..e657fbf 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -285,6 +285,17 @@ program
+       fail(err);
+     }
+   });
++program
++  .command('uninstall')
++  .description("remove field: a release install's versions and shim, or a checkout's pnpm link (the checkout itself stays)")
++  .action(async () => {
++    try {
++      const { uninstall } = await import('./commands/upgrade.js');
++      process.exitCode = uninstall();
++    } catch (err) {
++      fail(err);
++    }
++  });
+ program
+   .command('generate <target>')
+   .description('run a deliberate generator: fills a generative entry as <song>/<name> (a new name scaffolds a leaf track); variants land in songs/<song>/audio/<name>/')
+diff --git a/src/commands/upgrade.test.ts b/src/commands/upgrade.test.ts
+index 54e3890..163bd84 100644
+--- a/src/commands/upgrade.test.ts
++++ b/src/commands/upgrade.test.ts
+@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
+ import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+-import { curlRequest, packageRoot as upgradeRoot, upgrade } from './upgrade.js';
++import { curlRequest, packageRoot as upgradeRoot, uninstall, upgrade } from './upgrade.js';
+ 
+ // `field upgrade` is a doorway to install.sh and nothing else
+ // (install.md §2.5): it has to find the right installer, hand it the
+@@ -49,6 +49,25 @@ describe('field upgrade', () => {
+   });
+ });
+ 
++// `field uninstall` is the installer's `uninstall` target, found and run as
++// `field upgrade` finds and runs the installer (install.md §3.5).
++describe('field uninstall', () => {
++  it('refuses on Windows, naming pnpm remove instead', () => {
++    const { installer } = standIn(scratch, 0);
++    expect(() => uninstall({ installer, platform: 'win32', err: () => {} })).toThrow(
++      'field uninstall runs install.sh, which does not support Windows yet — run pnpm remove -g field',
++    );
++  });
++
++  it.skipIf(process.platform === 'win32')('runs the installer with the uninstall target and returns its exit status', () => {
++    const { installer, argsFile } = standIn(scratch, 2);
++    const lines: string[] = [];
++    expect(uninstall({ installer, err: (line) => lines.push(line) })).toBe(2);
++    expect(readFileSync(argsFile, 'utf8')).toBe('1:uninstall\n');
++    expect(lines).toEqual([`+ ${installer} uninstall`]);
++  });
++});
++
+ // These hand a real bash the stand-in, which Windows does not reliably have.
+ describe.skipIf(process.platform === 'win32')('field upgrade runs the installer', () => {
+   it('hands the installer its target and returns its exit status', () => {
+diff --git a/src/commands/upgrade.ts b/src/commands/upgrade.ts
+index 5804949..9bcaa8e 100644
+--- a/src/commands/upgrade.ts
++++ b/src/commands/upgrade.ts
+@@ -131,6 +131,19 @@ export interface UpgradeDeps {
+   platform?: NodeJS.Platform | undefined;
+ }
+ 
++// `field uninstall`: the installer's `uninstall` target, run the way an
++// upgrade runs the installer (install.md §3.5). It removes a release
++// install's versions and shim, or a checkout's pnpm link, and never the
++// checkout itself.
++export function uninstall(deps: UpgradeDeps = {}): number {
++  if ((deps.platform ?? process.platform) === 'win32') {
++    throw new Error(
++      'field uninstall runs install.sh, which does not support Windows yet — run pnpm remove -g field, then delete the checkout if you no longer want it',
++    );
++  }
++  return upgrade('uninstall', deps);
++}
++
+ export function upgrade(target: string | undefined, deps: UpgradeDeps = {}): number {
+   // install.sh is bash and builds with the POSIX toolchain, so on Windows
+   // this would hand a script to whatever `bash` resolves to, which may be
+diff --git a/src/install.test.ts b/src/install.test.ts
+index 08522e9..c85b807 100644
+--- a/src/install.test.ts
++++ b/src/install.test.ts
+@@ -65,6 +65,7 @@ const TOOLS = [
+   'mkdir',
+   'ln',
+   'rm',
++  'rmdir',
+   'chmod',
+   'touch',
+   'mv',
+@@ -123,6 +124,8 @@ case "$1 \${2:-}" in
+     ln -s "$3" "$FAKE_PNPM_HOME/global/field"
+     printf '#!/bin/sh\\n' > "$FAKE_PNPM_HOME/bin/field"
+     chmod +x "$FAKE_PNPM_HOME/bin/field" ;;
++  "remove -g")
++    rm -f "$FAKE_PNPM_HOME/global/field" "$FAKE_PNPM_HOME/bin/field" ;;
+   "install --frozen-lockfile") ;;
+   "run build")
+     mkdir -p "$dir/dist"
+@@ -1202,11 +1205,213 @@ posix('install.sh status in a release install', () => {
+   });
+ });
+ 
++// install.md §3.5: uninstall removes what the installer can show it made,
++// and nothing else.
++posix('install.sh uninstall', () => {
++  it('removes a release install: the shim, every version, current, release.conf, and the cache, then the data directory', () => {
++    publish('0.2.0');
++    release();
++    publish('0.3.0');
++    release();
++    write(join(data, 'cache', 'fetchcontent', 'juce-src', 'CMakeLists.txt'), '');
++    const run = release('uninstall');
++    expect(run.stderr).toBe('');
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual([]);
++    expect(existsSync(shim)).toBe(false);
++    expect(existsSync(data)).toBe(false);
++    expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
++    expect(run.stdout).toContain('removed        0.2.0\n');
++    expect(run.stdout).toContain('removed        0.3.0\n');
++    expect(run.stdout).toContain('removed        ~/.local/share/field\n');
++    expect(rows(run.stdout).get('uninstalled')).toBe('to install again: curl -fsSL https://field.one/install.sh | bash');
++  });
++
++  it('keeps what it did not put there: another field in the bin directory, and other things in the data directory', () => {
++    const others = ['3.11.4/bin/python3', '.download-9.9.9/notes', 'notes/todo'];
++    for (const path of others) write(join(data, path), '');
++    publish('0.2.0');
++    release();
++    write(shim, '#!/bin/sh\necho mine\n', 0o755);
++    const run = release('uninstall');
++    expect(run.status).toBe(0);
++    expect(readFileSync(shim, 'utf8')).toBe('#!/bin/sh\necho mine\n');
++    for (const path of others) expect(existsSync(join(data, path))).toBe(true);
++    expect(existsSync(join(data, '0.2.0'))).toBe(false);
++    expect(existsSync(join(data, 'current'))).toBe(false);
++    expect(existsSync(join(data, 'release.conf'))).toBe(false);
++    expect(run.stdout).toContain("kept           ~/.local/bin/field, which is not Field's release shim\n");
++    expect(run.stdout).toContain('kept           ~/.local/share/field, which holds things Field did not put there\n');
++    expect(run.stdout).not.toContain('3.11.4');
++  });
++
++  // The shim is the one record of where its install lives, so the
++  // uninstall of another data directory leaves it to name that one.
++  it('keeps a shim that runs another data directory, and names that directory', () => {
++    publish('0.2.0');
++    const custom = join(root, 'custom');
++    release(undefined, { FIELD_DATA_DIR: custom });
++    const run = release('uninstall');
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual([]);
++    expect(field('--version').stdout).toBe('0.2.0\n');
++    expect(rows(run.stdout).get('not-installed')).toBe('no release of Field is installed in ~/.local/share/field');
++    expect(rows(run.stdout).get('kept')).toBe(
++      '~/.local/bin/field, which runs the install in ~/custom — to remove that install, uninstall again with FIELD_DATA_DIR=~/custom',
++    );
++    expect(release('uninstall', { FIELD_DATA_DIR: custom }).status).toBe(0);
++    expect(existsSync(shim)).toBe(false);
++    expect(existsSync(custom)).toBe(false);
++  });
++
++  it('removes its own versions, and keeps the shim another install wrote over its own', () => {
++    publish('0.2.0');
++    release();
++    const custom = join(root, 'custom');
++    release(undefined, { FIELD_DATA_DIR: custom });
++    const run = release('uninstall');
++    expect(run.status).toBe(0);
++    expect(existsSync(data)).toBe(false);
++    expect(field('--version').stdout).toBe('0.2.0\n');
++    expect(current(custom)).toBe('0.2.0');
++    expect(rows(run.stdout).get('kept')).toBe(
++      '~/.local/bin/field, which runs the install in ~/custom — to remove that install, uninstall again with FIELD_DATA_DIR=~/custom',
++    );
++  });
++
++  it('keeps a shim whose exec line it cannot read', () => {
++    publish('0.2.0');
++    release();
++    const text = readFileSync(shim, 'utf8').replace(/^exec node .*$/m, 'exec node "$HOME/elsewhere/cli.js" "$@"');
++    write(shim, text, 0o755);
++    const run = release('uninstall');
++    expect(run.status).toBe(0);
++    expect(readFileSync(shim, 'utf8')).toBe(text);
++    expect(existsSync(data)).toBe(false);
++    expect(rows(run.stdout).get('kept')).toBe('~/.local/bin/field, which does not run ~/.local/share/field/current');
++  });
++
++  // `field uninstall` hands the installer the data directory's real path,
++  // and the shim has the path it was installed through, quoted.
++  it('removes the shim it wrote through a link to the data directory, whose path needs quoting', () => {
++    publish('0.2.0');
++    mkdirSync(join(root, 'real'));
++    symlinkSync(join(root, 'real'), join(root, 'link'));
++    release(undefined, { FIELD_DATA_DIR: join(root, 'link', "a user's data") });
++    const run = release('uninstall', { FIELD_DATA_DIR: join(root, 'real', "a user's data") });
++    expect(run.status).toBe(0);
++    expect(existsSync(shim)).toBe(false);
++    expect(existsSync(join(root, 'real', "a user's data"))).toBe(false);
++    expect(run.stdout).toContain('removed        ~/.local/bin/field\n');
++  });
++
++  // field-aced downloads ACE-Step's weights into a directory of Field's own
++  // (models_root in python/aced), and Chatterbox's go to the Hugging Face
++  // cache, so each worker set up names the directory its weights are in.
++  const ACE_ROW =
++    "ACE-Step's weights stay in ~/.field/models/acestep, which every Field install on this machine uses — delete it once none of them needs the weights";
++  const CHATTERBOX_ROW =
++    "Chatterbox's weights stay in the Hugging Face cache, ~/.cache/huggingface, which other tools share — remove the models you no longer want from there";
++
++  function weights(): { ace: string; huggingface: string } {
++    const ace = join(root, '.field', 'models', 'acestep', 'checkpoints');
++    const huggingface = join(root, '.cache', 'huggingface', 'hub');
++    mkdirSync(ace, { recursive: true });
++    mkdirSync(huggingface, { recursive: true });
++    return { ace, huggingface };
++  }
++
++  it("leaves each worker's model weights where the worker keeps them, and says where", () => {
++    publish('0.2.0');
++    release();
++    field('setup', 'aced');
++    field('setup', 'voiced');
++    const { ace, huggingface } = weights();
++    const run = release('uninstall');
++    expect(run.status).toBe(0);
++    expect(existsSync(ace)).toBe(true);
++    expect(existsSync(huggingface)).toBe(true);
++    expect(run.stdout).toContain(`models-kept    ${ACE_ROW}\n`);
++    expect(run.stdout).toContain(`models-kept    ${CHATTERBOX_ROW}\n`);
++  });
++
++  it('names only the weights of the workers that were set up', () => {
++    publish('0.2.0');
++    release();
++    field('setup', 'aced');
++    weights();
++    const run = release('uninstall');
++    expect(run.stdout).toContain(`models-kept    ${ACE_ROW}\n`);
++    expect(run.stdout).not.toContain('Chatterbox');
++  });
++
++  it('names the directories FIELD_ACE_MODELS and HF_HUB_CACHE move the weights to', () => {
++    publish('0.2.0');
++    release();
++    field('setup', 'aced');
++    field('setup', 'voiced');
++    mkdirSync(join(root, 'ace'));
++    mkdirSync(join(root, 'hub'));
++    const run = release('uninstall', {
++      FIELD_ACE_MODELS: join(root, 'ace'),
++      HF_HOME: join(root, 'hf'),
++      HF_HUB_CACHE: join(root, 'hub'),
++    });
++    expect(run.stdout).toContain("ACE-Step's weights stay in ~/ace,");
++    expect(run.stdout).toContain("Chatterbox's weights stay in the Hugging Face cache, ~/hub,");
++  });
++
++  it('says nothing about models when no worker was set up', () => {
++    publish('0.2.0');
++    release();
++    weights();
++    expect(rows(release('uninstall').stdout).has('models-kept')).toBe(false);
++  });
++
++  it("names a fork's installer as the way to install again", () => {
++    publish('0.2.0', { repo: 'someone/field', ref: 'main' });
++    release(undefined, { FIELD_REPO: 'someone/field', FIELD_REF: 'main' });
++    expect(rows(release('uninstall').stdout).get('uninstalled')).toBe(
++      'to install again: curl -fsSL https://raw.githubusercontent.com/someone/field/main/install.sh | bash',
++    );
++  });
++
++  it('says so, and changes nothing, when no release is installed', () => {
++    const run = release('uninstall');
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual([]);
++    expect(rows(run.stdout).get('not-installed')).toBe('no release of Field is installed in ~/.local/share/field');
++  });
++
++  it("removes a checkout's pnpm link, and keeps the checkout", () => {
++    install('cli');
++    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(repo);
++    const run = install('uninstall');
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual(['pnpm remove -g field']);
++    expect(existsSync(join(pnpmHome, 'global', 'field'))).toBe(false);
++    expect(existsSync(join(repo, 'install.sh'))).toBe(true);
++    expect(existsSync(join(repo, 'dist'))).toBe(true);
++    expect(rows(run.stdout).get('unlinked')).toBe("pnpm's global field no longer links ~/checkout");
++  });
++
++  it('leaves a link to another checkout alone', () => {
++    const other = join(root, 'other');
++    mkdirSync(other);
++    linkTo(other);
++    const run = install('uninstall');
++    expect(run.status).toBe(0);
++    expect(changes(run)).toEqual([]);
++    expect(readlinkSync(join(pnpmHome, 'global', 'field'))).toBe(other);
++    expect(run.stdout).toContain("pnpm's global field links ~/other, not this checkout");
++  });
++});
++
+ posix('install.sh refuses', () => {
+   it('an unknown target, as a usage error', () => {
+     const run = install('everything');
+     expect(run.status).toBe(64);
+-    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status]');
++    expect(run.stderr).toContain('usage: install.sh [all|cli|audiod|workers|status|uninstall]');
+     expect(existsSync(join(repo, 'dist'))).toBe(false);
+   });
+ });
